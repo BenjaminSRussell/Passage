@@ -86,7 +86,7 @@ export function MessageDetailPage() {
       </Card>
       <p className={styles.note}>
         {m.piiMasked
-          ? "Party names are shown as *** because you do not hold EDI_PII_VIEW. The raw payload, masked the same way, is on the interchange."
+          ? "Party names are shown as *** because you do not hold edi.pii.view. The raw payload, masked the same way, is on the interchange."
           : "The raw payload is on the interchange."}
       </p>
     </div>

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ALL, describeProblem, listLegalEntities, type LegalEntity, type Problem, type Scope } from "./api/client";
 
 const STORAGE_KEY = "passage.org.legalEntity";
-const ALL_SCOPE_DUTY = "org.switcher.all_scope";
+const ALL_SCOPE_DUTY = "org.switcher.all-scope";
 const REFERENCE_WRITE_DUTY = "org.reference.write";
 const LEGAL_ENTITY_WRITE_DUTY = "org.legal-entity.write";
 const FISCAL_CALENDAR_WRITE_DUTY = "org.fiscal-calendar.write";

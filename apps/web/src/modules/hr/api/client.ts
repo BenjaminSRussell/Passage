@@ -214,7 +214,7 @@ export function getWorker(workerId: string, signal?: AbortSignal): Promise<Worke
   return send<WorkerDetail>(`/workers/${id(workerId)}`, {}, signal);
 }
 
-/** Unmasked PII (HcmPIIRead); the reason is recorded in the audit log. */
+/** Unmasked PII (hr.pii.read); the reason is recorded in the audit log. */
 export function revealPII(workerId: string, reason: string): Promise<PIIView> {
   return send<PIIView>(`/workers/${id(workerId)}/pii${query({ reason: reason.trim() })}`);
 }

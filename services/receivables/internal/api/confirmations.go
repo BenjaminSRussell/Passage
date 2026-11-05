@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	dutyConfirmation    = "BalanceConfirmationRun"
+	dutyConfirmation    = "receivables.balance-confirmation.run"
 	maxReminderDays     = 60
 	maxReplyComment     = 500
 	defaultReminderDays = 14
@@ -26,7 +26,7 @@ const (
 var defaultConfirmThreshold = decimal.NewFromInt(10000)
 
 // confirmationRoutes mounts balance confirmations (FR-30.20). Runs and replies
-// need BalanceConfirmationRun; reads need ARView, which auditors hold.
+// need receivables.balance-confirmation.run; reads need receivables.view, which auditors hold.
 func (a *API) confirmationRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyConfirmation)).Post("/balance-confirmations", a.createConfirmationRun)
 	r.With(authz.RequireDuty(dutyView)).Get("/balance-confirmations", a.listConfirmationRuns)

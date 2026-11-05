@@ -48,7 +48,7 @@ describe("decision routes", () => {
   function post(path: string, body: unknown, headers: Record<string, string> = {}) {
     return fetch(`${base}${path}`, {
       method: "POST",
-      headers: { "X-Passage-Tenant": TENANT, "X-Passage-User": "alice", "X-Passage-Legal-Entity": `${OTHER_LE},${LE.toUpperCase()}`, "X-Passage-Duties": "engineering.eco.approve,QM_CAPA_MAINTAIN", ...headers },
+      headers: { "X-Passage-Tenant": TENANT, "X-Passage-User": "alice", "X-Passage-Legal-Entity": `${OTHER_LE},${LE.toUpperCase()}`, "X-Passage-Duties": "engineering.eco.approve,quality.capa.maintain", ...headers },
       body: JSON.stringify(body),
     });
   }
@@ -68,7 +68,7 @@ describe("decision routes", () => {
     ["no tenant", { "X-Passage-Tenant": "" }, 401],
     ["no user", { "X-Passage-User": "" }, 401],
     ["a service token", { "X-Passage-Service-Token": "x.y" }, 401],
-    ["no approve duty", { "X-Passage-Duties": "QM_CAPA_MAINTAIN" }, 403],
+    ["no approve duty", { "X-Passage-Duties": "quality.capa.maintain" }, 403],
     ["the creator", { "X-Passage-User": "rita" }, 403],
     ["another tenant", { "X-Passage-Tenant": OTHER_TENANT }, 404],
     ["a legal entity outside the user's scope", { "X-Passage-Legal-Entity": OTHER_LE }, 403],

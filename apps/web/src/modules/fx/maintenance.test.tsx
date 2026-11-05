@@ -279,7 +279,7 @@ describe("rate entry page", () => {
     await user.click(screen.getByRole("button", { name: "Save rate" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("You do not have permission");
-    expect(alert.textContent).toContain("Maintain exchange rates");
+    expect(alert.textContent).toContain("fx.rate.maintain");
   });
 
   it("retries a conflicting save with the same idempotency key, and a new one after an edit", async () => {
@@ -416,7 +416,7 @@ describe("rate types page", () => {
     renderAt("/fx/rate-types");
     const alert = await screen.findByText("You do not have permission");
     expect(alert).toBeInTheDocument();
-    expect(screen.getByText(/View exchange rates/)).toBeInTheDocument();
+    expect(screen.getByText(/fx.rate.view/)).toBeInTheDocument();
   });
 
   it("shows a generic error when the list fails", async () => {
@@ -480,7 +480,7 @@ describe("rate types page", () => {
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
     const alert = await screen.findByText("You do not have permission");
     expect(alert).toBeInTheDocument();
-    expect(screen.getByText(/Maintain exchange rates/)).toBeInTheDocument();
+    expect(screen.getByText(/fx.rate.maintain/)).toBeInTheDocument();
   });
 
   it("shows the server's rejection when no field owns it", async () => {
@@ -717,13 +717,13 @@ describe("import now", () => {
     expect(screen.getByText(/from 2026-03-01T09:00:00Z/)).toBeInTheDocument();
   });
 
-  it("names the Administer exchange rates duty on a 403", async () => {
+  it("names the fx.rate.administer duty on a 403", async () => {
     answer({ importRun: json(403, { code: "AUTH-0003", detail: "duty missing" }) });
     const user = userEvent.setup();
     renderAt("/fx/rate-types");
     await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
     await user.click(await screen.findByRole("button", { name: "Import now" }));
-    expect(await screen.findByText(/Administer exchange rates/)).toBeInTheDocument();
+    expect(await screen.findByText(/fx.rate.administer/)).toBeInTheDocument();
     expect(screen.queryByText("Import finished")).not.toBeInTheDocument();
   });
 

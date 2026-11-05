@@ -21,7 +21,7 @@ import (
 const (
 	Timeout         = 3 * time.Second
 	audience        = "party"
-	dutyBankReveal  = "party.vendor_bank.reveal"
+	dutyBankReveal  = "party.vendor-bank.reveal"
 	revealPath      = "/v1/party/vendors/%s/bank-accounts:reveal"
 	maxResponseSize = 1 << 20
 )

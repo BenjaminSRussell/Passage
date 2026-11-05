@@ -95,7 +95,7 @@ func TestRateLookupToken_RefusesForgedExpiredMisaddressedAndReplayedTokens(t *te
 		"other target": ledgerToken,
 	}
 	for name, token := range tokens {
-		rec := r.call(http.MethodGet, rateLookupPath, token, map[string]string{tenant.HeaderTenant: testkit.TenantID(1), tenant.HeaderDuties: "View exchange rates"})
+		rec := r.call(http.MethodGet, rateLookupPath, token, map[string]string{tenant.HeaderTenant: testkit.TenantID(1), tenant.HeaderDuties: "fx.rate.view"})
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s: %d, want 401 even with user duty headers", name, rec.Code)
 		}

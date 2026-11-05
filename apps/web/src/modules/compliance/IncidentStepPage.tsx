@@ -83,7 +83,7 @@ const columns: DataTableColumn<IncidentClock>[] = [
 
 /**
  * Security incident step (PRD §9.48.6 Security incidents, duty
- * SecurityIncidentManage): check the next lifecycle step of an incident and,
+ * compliance.security-incident.manage): check the next lifecycle step of an incident and,
  * for a personal-data breach, whether its notification clocks allow it
  * (FR-48.29, BR-48.18). Incidents are not recorded yet.
  */

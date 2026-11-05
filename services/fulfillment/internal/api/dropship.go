@@ -18,19 +18,19 @@ import (
 
 // dutyVendorConfirm is the duty of the vendor's ship confirmation. Section
 // 5.28.5 names it PurchasingConfirm; the seeded purchasing duty for confirming
-// purchase orders is PurchaseOrderConfirm (naming is unified under #210).
-const dutyVendorConfirm = "PurchaseOrderConfirm"
+// purchase orders is procurement.purchase-order.confirm (naming is unified under #210).
+const dutyVendorConfirm = "procurement.purchase-order.confirm"
 
 // routesDropShip mounts the drop-ship flow (FR-28.7). Creating and cancelling
-// need WarehouseRelease; the vendor confirmation is a purchasing act that books
+// need fulfillment.warehouse.release; the vendor confirmation is a purchasing act that books
 // the cost, so it needs the purchasing confirmation duty (section 5.28.5).
 func (a *API) routesDropShip(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/drop-ships", a.createDropShip)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/drop-ships", a.listDropShips)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/drop-ships/{id}", a.getDropShip)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Post("/v1/fulfillment/drop-ships", a.createDropShip)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/drop-ships", a.listDropShips)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/drop-ships/{id}", a.getDropShip)
 	r.With(authz.RequireDuty(dutyVendorConfirm)).Post("/v1/fulfillment/drop-ships/{id}:confirm", a.confirmDropShip)
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/drop-ships/{id}:cancel", a.cancelDropShip)
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/drop-ships/{id}:close-remainder", a.closeDropShipRemainder)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Post("/v1/fulfillment/drop-ships/{id}:cancel", a.cancelDropShip)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Post("/v1/fulfillment/drop-ships/{id}:close-remainder", a.closeDropShipRemainder)
 }
 
 const maxVendorShipmentRef = 64

@@ -133,15 +133,15 @@ func TestRoleAndDutyCatalogue(t *testing.T) {
 				t.Fatalf("service-only filter returned %+v", d)
 			}
 		}
-		matched := decode[pageOf[dutySummaryRow]](t, f.do(c, http.MethodGet, "/v1/authz/duties?q=vendors", nil), http.StatusOK)
+		matched := decode[pageOf[dutySummaryRow]](t, f.do(c, http.MethodGet, "/v1/authz/duties?q=party.vendor", nil), http.StatusOK)
 		if len(matched.Items) < 2 {
-			t.Fatalf("q=vendors matched %+v", matched.Items)
+			t.Fatalf("q=party.vendor matched %+v", matched.Items)
 		}
 	})
 
-	t.Run("duty detail lists granted routes and decodes spaces", func(t *testing.T) {
-		d := decode[dutyDetailRow](t, f.do(c, http.MethodGet, "/v1/authz/duties/"+url.PathEscape("Maintain security roles"), nil), http.StatusOK)
-		if d.Name != "Maintain security roles" || len(d.Permissions) != 4 || d.Permissions[0].Resource != "/v1/authz/roles{,/**}" {
+	t.Run("duty detail lists granted routes", func(t *testing.T) {
+		d := decode[dutyDetailRow](t, f.do(c, http.MethodGet, "/v1/authz/duties/"+url.PathEscape("identity.security-role.maintain"), nil), http.StatusOK)
+		if d.Name != "identity.security-role.maintain" || len(d.Permissions) != 4 || d.Permissions[0].Resource != "/v1/authz/roles{,/**}" {
 			t.Fatalf("detail = %+v", d)
 		}
 		all := decode[pageOf[dutySummaryRow]](t, f.do(c, http.MethodGet, "/v1/authz/duties", nil), http.StatusOK)
@@ -175,8 +175,8 @@ func TestRoleAndDutyCatalogue(t *testing.T) {
 				t.Fatalf("role = %+v", r)
 			}
 		}
-		role := decode[roleDetailRow](t, f.do(c, http.MethodGet, "/v1/authz/roles/"+url.PathEscape("View vendors"), nil), http.StatusOK)
-		if role.Name != "View vendors" || len(role.Duties) != 1 || len(role.Duties[0].Permissions) == 0 {
+		role := decode[roleDetailRow](t, f.do(c, http.MethodGet, "/v1/authz/roles/"+url.PathEscape("party.vendor.view"), nil), http.StatusOK)
+		if role.Name != "party.vendor.view" || len(role.Duties) != 1 || len(role.Duties[0].Permissions) == 0 {
 			t.Fatalf("role detail = %+v", role)
 		}
 		wantProblem(t, f.do(c, http.MethodGet, "/v1/authz/roles/fx.rate.lookup", nil), http.StatusNotFound, "IDN-ROLE-NOT-FOUND")
@@ -184,8 +184,8 @@ func TestRoleAndDutyCatalogue(t *testing.T) {
 	})
 
 	t.Run("the q filter narrows roles", func(t *testing.T) {
-		roles := decode[pageOf[roleSummaryRow]](t, f.do(c, http.MethodGet, "/v1/authz/roles?q=view+vendors", nil), http.StatusOK)
-		if len(roles.Items) != 1 || roles.Items[0].Name != "View vendors" {
+		roles := decode[pageOf[roleSummaryRow]](t, f.do(c, http.MethodGet, "/v1/authz/roles?q=party.vendor.view", nil), http.StatusOK)
+		if len(roles.Items) != 1 || roles.Items[0].Name != "party.vendor.view" {
 			t.Fatalf("q filter = %+v", roles.Items)
 		}
 	})
@@ -193,7 +193,7 @@ func TestRoleAndDutyCatalogue(t *testing.T) {
 	t.Run("filters validate and the duty is required", func(t *testing.T) {
 		wantProblem(t, f.do(c, http.MethodGet, "/v1/authz/duties?serviceOnly=maybe", nil), http.StatusBadRequest, "COM-0001")
 		wantProblem(t, f.do(c, http.MethodGet, "/v1/authz/roles?q="+strings.Repeat("x", 101), nil), http.StatusBadRequest, "COM-0001")
-		for _, path := range []string{"/v1/authz/roles", "/v1/authz/roles/View%20vendors", "/v1/authz/duties", "/v1/authz/duties/View%20vendors"} {
+		for _, path := range []string{"/v1/authz/roles", "/v1/authz/roles/party.vendor.view", "/v1/authz/duties", "/v1/authz/duties/party.vendor.view"} {
 			wantProblem(t, f.do(f.adminOf(f.tenantA, dutyUsers), http.MethodGet, path, nil), http.StatusForbidden, "AUTH-0003")
 			wantProblem(t, f.do(caller{user: "u", duties: []string{dutyRoles}}, http.MethodGet, path, nil), http.StatusUnauthorized, "AUTH-0001")
 		}

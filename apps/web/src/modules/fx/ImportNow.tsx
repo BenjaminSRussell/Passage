@@ -4,7 +4,7 @@ import { FxApiError, IMPORT_PROVIDERS, importNow, type ImportRun, type RateType 
 import { ApiFailure } from "./formSupport";
 import styles from "./pages.module.css";
 
-const DUTY = "Administer exchange rates";
+const DUTY = "fx.rate.administer";
 
 const STILL_RUNNING = { title: "Import still running", message: "An import for this day is still running. Try again shortly.", tone: "warning" } as const;
 

@@ -93,7 +93,7 @@ type planDTO struct {
 	// and how many steps took one (FR-49.6).
 	RehearsalPlanID  string `json:"rehearsalPlanId,omitempty"`
 	RehearsalCarried int    `json:"rehearsalCarried"`
-	// PendingRollback is the first approval of a rollback, waiting for a second, different CutoverManager.
+	// PendingRollback is the first approval of a rollback, waiting for a second, different migration.cutover.manage.
 	PendingRollback *pendingRollbackDTO `json:"pendingRollback,omitempty"`
 	// Rekeying is set once the plan is rolled back: the lines exported for re-keying (FR-49.9).
 	Rekeying *rekeyingDTO `json:"rekeying,omitempty"`
@@ -340,7 +340,7 @@ type rollbackRequest struct {
 	Version  int          `json:"version,omitempty"`
 }
 
-// pendingRollbackDTO is the first approval of a rollback, waiting for a second CutoverManager.
+// pendingRollbackDTO is the first approval of a rollback, waiting for a second migration.cutover.manage.
 type pendingRollbackDTO struct {
 	Approver   string    `json:"approver"`
 	ApprovedAt time.Time `json:"approvedAt"`

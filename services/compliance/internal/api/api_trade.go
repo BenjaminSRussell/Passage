@@ -18,8 +18,8 @@ import (
 
 // Trade compliance duties (PRD §9.48.5 and §9.48.15).
 const (
-	DutyTradeView    = "TradeComplianceView"
-	DutyTradeOfficer = "TradeComplianceOfficer"
+	DutyTradeView    = "compliance.trade-screening.view"
+	DutyTradeOfficer = "compliance.trade-screening.decide"
 )
 
 const (
@@ -202,7 +202,7 @@ func (a *API) decideHit(w http.ResponseWriter, r *http.Request) {
 
 // exportCheck determines the license requirement of a delivery (FR-48.20,
 // BR-48.16). Releasing an embargoed delivery with a license reference needs
-// TradeComplianceOfficer; nothing is stored yet.
+// compliance.trade-screening.decide; nothing is stored yet.
 func (a *API) exportCheck(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return

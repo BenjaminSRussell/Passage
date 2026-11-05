@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	dutyRead       = "View exchange rates"
-	dutyWrite      = "Maintain exchange rates"
-	dutyAdmin      = "Administer exchange rates"
+	dutyRead       = "fx.rate.view"
+	dutyWrite      = "fx.rate.maintain"
+	dutyAdmin      = "fx.rate.administer"
 	dutyRateLookup = "fx.rate.lookup"
 	readyTimeout   = 500 * time.Millisecond
 )

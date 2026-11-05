@@ -22,7 +22,7 @@ import {
   type Errors,
 } from "./support";
 
-const DUTY = "Maintain security roles";
+const DUTY = "identity.security-role.maintain";
 const ASSIGN_FIELDS = ["userId", "role", "legalEntityId", "validFrom", "validTo", "reason"] as const;
 const REASON_MAX = 500;
 
@@ -208,7 +208,7 @@ export function RoleAssignmentsPage() {
             <FormField id="as-user" label="User to assign" hint="The user's UUID." error={errors.userId}>
               {(c) => <Input {...c} value={values.userId} onChange={(e) => changeAssign({ userId: e.target.value })} invalid={Boolean(errors.userId)} autoComplete="off" />}
             </FormField>
-            <FormField id="as-role" label="Role to assign" hint="The name of a duty, for example Maintain security roles." error={errors.role}>
+            <FormField id="as-role" label="Role to assign" hint="The name of a duty, for example identity.security-role.maintain." error={errors.role}>
               {(c) => <Input {...c} value={values.role} onChange={(e) => changeAssign({ role: e.target.value })} invalid={Boolean(errors.role)} />}
             </FormField>
             <FormField

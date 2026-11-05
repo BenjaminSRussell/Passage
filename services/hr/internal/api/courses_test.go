@@ -14,7 +14,7 @@ func sp(v string) *string                                { return &v }
 func hasField(fields map[string]string, key string) bool { _, ok := fields[key]; return ok }
 
 // TestCourseRoutesRequireTheirDuty: every course route answers 403 without
-// its duty, and an employee with only EssLearning cannot run the catalog,
+// its duty, and an employee with only hr.learning.self cannot run the catalog,
 // schedule sessions, read the attendance list, record completion or approve.
 func TestCourseRoutesRequireTheirDuty(t *testing.T) {
 	id := testkit.TenantID(9)

@@ -150,13 +150,13 @@ func TestRFQRoutes_EnforceDuties(t *testing.T) {
 		c      call
 		status int
 	}{
-		{"create needs RFQMaintain", call{method: "POST", path: "/v1/procurement/rfqs", duties: rfqAwardDuty, body: `{}`, headers: idem("k")}, 403},
-		{"replies need RFQMaintain", call{method: "POST", path: rfqPath("/replies"), duties: rfqAwardDuty, body: `{}`, headers: idem("k")}, 403},
-		{"send needs RFQMaintain", call{method: "POST", path: rfqPath(":send"), duties: rfqAwardDuty, body: `{"vendorIds":["` + rfqVendorA + `"]}`, headers: rfqActionHeaders}, 403},
-		{"award needs RFQAward", call{method: "POST", path: rfqPath(":award"), duties: rfqMaintainDuty, body: award, headers: rfqActionHeaders}, 403},
-		{"award with RFQAward", call{method: "POST", path: rfqPath(":award"), duties: rfqAwardDuty, body: award, headers: rfqActionHeaders}, 200},
-		{"read with RFQAward", call{method: "GET", path: rfqPath(""), duties: rfqAwardDuty}, 200},
-		{"compare with RFQMaintain", call{method: "GET", path: rfqPath("/compare"), duties: rfqMaintainDuty}, 200},
+		{"create needs procurement.rfq.maintain", call{method: "POST", path: "/v1/procurement/rfqs", duties: rfqAwardDuty, body: `{}`, headers: idem("k")}, 403},
+		{"replies need procurement.rfq.maintain", call{method: "POST", path: rfqPath("/replies"), duties: rfqAwardDuty, body: `{}`, headers: idem("k")}, 403},
+		{"send needs procurement.rfq.maintain", call{method: "POST", path: rfqPath(":send"), duties: rfqAwardDuty, body: `{"vendorIds":["` + rfqVendorA + `"]}`, headers: rfqActionHeaders}, 403},
+		{"award needs procurement.rfq.award", call{method: "POST", path: rfqPath(":award"), duties: rfqMaintainDuty, body: award, headers: rfqActionHeaders}, 403},
+		{"award with procurement.rfq.award", call{method: "POST", path: rfqPath(":award"), duties: rfqAwardDuty, body: award, headers: rfqActionHeaders}, 200},
+		{"read with procurement.rfq.award", call{method: "GET", path: rfqPath(""), duties: rfqAwardDuty}, 200},
+		{"compare with procurement.rfq.maintain", call{method: "GET", path: rfqPath("/compare"), duties: rfqMaintainDuty}, 200},
 		{"list needs an RFQ duty", call{method: "GET", path: "/v1/procurement/rfqs", duties: []string{dutyPurchaseOrderMaintain}}, 403},
 	}
 	for _, tc := range tests {

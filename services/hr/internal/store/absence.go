@@ -281,7 +281,7 @@ func absWorkerUser(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (*
 }
 
 // absCheckOwn refuses an employee-only caller acting on another worker's
-// absence (EssAbsence is own data, 8.42.17).
+// absence (hr.absence.self is own data, 8.42.17).
 func absCheckOwn(ownOnly bool, callerUserID string, workerUser *string) error {
 	if !ownOnly {
 		return nil

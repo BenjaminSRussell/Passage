@@ -94,7 +94,7 @@ type ExportItem struct {
 
 // ExportCheckInput is the input of EvaluateExport. Destination is ISO 3166 alpha-2;
 // Region is ISO 3166-2 (for example UA-43); Mode is BLOCK, WARN or OFF.
-// OfficerReleaseLicenseRef is set when a TradeComplianceOfficer releases an
+// OfficerReleaseLicenseRef is set when a compliance.trade-screening.decide holder releases an
 // embargoed delivery with a license reference (BR-48.16).
 type ExportCheckInput struct {
 	Destination              string        `json:"destination"`

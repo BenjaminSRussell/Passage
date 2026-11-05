@@ -382,8 +382,8 @@ func (a *API) changeModelServiceSpec(w http.ResponseWriter, r *http.Request) {
 }
 
 // registerServiceRoutes mounts the FR-17.23 routes under /v1/procurement. The specification of a
-// line is written with PurchaseOrderMaintain and read with PurchaseOrderInquire or the lookup
-// duty (receiving's), models are set up with ProcurementPolicyMaintain like charge codes.
+// line is written with procurement.purchase-order.maintain and read with procurement.purchase-order.inquire or the lookup
+// duty (receiving's), models are set up with procurement.policy.maintain like charge codes.
 func (a *API) registerServiceRoutes(r chi.Router) {
 	maintain := r.With(authz.RequireDuty(dutyPurchaseOrderMaintain))
 	lookup := r.With(authz.RequireAnyDuty(dutyPurchaseOrderInquire, dutyPurchaseOrderLookup))

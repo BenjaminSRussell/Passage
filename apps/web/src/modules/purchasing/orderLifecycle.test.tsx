@@ -139,9 +139,9 @@ describe("purchase order lifecycle actions", () => {
     renderAt(`/purchasing/purchase-orders/${PO_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Confirm and send" }));
     expect(await screen.findByText(/Someone else changed this order.*PRC-PO-009/)).toBeInTheDocument();
-    answer = problem(403, "AUTH-0003", "missing duty PurchaseOrderConfirm");
+    answer = problem(403, "AUTH-0003", "missing duty procurement.purchase-order.confirm");
     fireEvent.click(screen.getByRole("button", { name: "Confirm and send" }));
-    expect(await screen.findByText("missing duty PurchaseOrderConfirm (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty procurement.purchase-order.confirm (AUTH-0003)")).toBeInTheDocument();
   });
 });
 

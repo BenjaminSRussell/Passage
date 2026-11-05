@@ -114,8 +114,8 @@ func TestAPI_DispatchFlow(t *testing.T) {
 	}
 }
 
-// Validation of the request bodies, and the duties: reading needs SvcInquire, writing
-// technicians and assignments needs SvcDispatch.
+// Validation of the request bodies, and the duties: reading needs fieldservice.inquire, writing
+// technicians and assignments needs fieldservice.technician.dispatch.
 func TestAPI_DispatchValidationAndDuties(t *testing.T) {
 	h, ctx := dbRouter(t)
 	bad := call(t, h, ctx, http.MethodPost, "/v1/service/technicians", `{"code":"a","name":"","legalEntityId":"x","territoryIds":[],"skills":["not ok!"],`+
@@ -142,7 +142,7 @@ func TestAPI_DispatchValidationAndDuties(t *testing.T) {
 		t.Fatalf("bad active filter: %d", rec.Code)
 	}
 
-	// A principal with only SvcInquire reads but cannot dispatch.
+	// A principal with only fieldservice.inquire reads but cannot dispatch.
 	h2, ctx2 := dbRouter(t)
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
@@ -154,9 +154,9 @@ func TestAPI_DispatchValidationAndDuties(t *testing.T) {
 	})
 	r.Mount("/", h2)
 	if rec := call(t, r, ctx2, http.MethodPost, "/v1/service/dispatch/publish", `{}`, map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("publish without SvcDispatch: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("publish without fieldservice.technician.dispatch: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := call(t, r, ctx2, http.MethodGet, "/v1/service/technicians", "", nil); rec.Code != http.StatusOK {
-		t.Fatalf("list with SvcInquire: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("list with fieldservice.inquire: %d %s", rec.Code, rec.Body.String())
 	}
 }

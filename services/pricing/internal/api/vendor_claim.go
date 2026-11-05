@@ -18,7 +18,7 @@ import (
 const (
 	vendorClaimsPath  = "/v1/pricing/rebates/vendor-claims"
 	claimPreviewPath  = rebateAgreementsPath + "/{id}/claim-preview"
-	dutyClaimApprove  = "pricing.rebate.claim.approve"
+	dutyClaimApprove  = "pricing.rebate-claim.approve"
 	timestampLayout   = time.RFC3339
 	claimPeriodDetail = "must be a period such as 2027-03, 2027-Q1 or 2027"
 )

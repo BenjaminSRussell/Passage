@@ -46,7 +46,7 @@ lakehouse, dbt models and Cube semantic layer live in `../../data/`.
   both copies and returns `ANA-0110`; a match is VERIFIED and writes
   `dev.passage.archive.partition.moved.v1`), drops, and restores.
   `GET /v1/archive/partitions[/{id}]` and `POST /v1/archive/partitions/{id}/restore`
-  (30 days, idempotent by partition id) are served to `ArchiveAdmin`.
+  (30 days, idempotent by partition id) are served to `analytics.archive.admin`.
 - **Report schedules (FR-46.10).** Five-field time-zone aware cron with `L`,
   destinations (e-mail, SFTP, in-app inbox), `POST /v1/analytics/schedules` with
   `Idempotency-Key` (24 h replay, `ANA-0114` on reuse with another body), list
@@ -98,8 +98,8 @@ on the existing endpoints:
   The every-minute job that calls `DispatchDue` for each tenant and the PDF/XLSX
   renderers and destination adapters are later slices.
 - **Catalog lineage (FR-46.12).** `lineage_edge` (source feeds target),
-  `POST /v1/catalog/lineage/edges` (CatalogSteward, idempotent by edge) and
-  `GET /v1/catalog/lineage/{asset_fqn}?depth=` (CatalogView), which walks the
+  `POST /v1/catalog/lineage/edges` (analytics.catalog.steward, idempotent by edge) and
+  `GET /v1/catalog/lineage/{asset_fqn}?depth=` (analytics.catalog.view), which walks the
   edges both ways in SQL and returns each asset with its distance in hops.
 - **Web.** Dashboard list, detail and editor; export log and export request;
   deliveries on the schedule detail; lineage view with an add-edge form.
@@ -145,8 +145,8 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true HTTP_ADDR=:8080 go run ./cmd/a
 ```
 
 Requests need the gateway headers `X-Passage-Tenant`, `X-Passage-Duties`
-(`AnalyticsView`, `FinanceView`, `CatalogSteward`, `CatalogView`,
-`AnalyticsAuthor`, `AnalyticsExport`, `ArchiveAdmin`) and optionally `X-Passage-Legal-Entity`.
+(`analytics.view`, `analytics.finance.view`, `analytics.catalog.steward`, `analytics.catalog.view`,
+`analytics.author`, `analytics.export`, `analytics.archive.admin`) and optionally `X-Passage-Legal-Entity`.
 
 ## Test
 

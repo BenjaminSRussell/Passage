@@ -10,9 +10,9 @@ import { DropShipStatusBadge } from "./DropShipsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-/** Section 5.28.5: the vendor confirmation is a purchasing duty (seeded as PurchaseOrderConfirm). */
-const DUTY_CONFIRM = "PurchaseOrderConfirm";
-const DUTY_RELEASE = "WarehouseRelease";
+/** Section 5.28.5: the vendor confirmation is a purchasing duty (seeded as procurement.purchase-order.confirm). */
+const DUTY_CONFIRM = "procurement.purchase-order.confirm";
+const DUTY_RELEASE = "fulfillment.warehouse.release";
 
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
 

@@ -20,9 +20,9 @@ import (
 
 // Knowledge duties follow the PRD names (8.45.17).
 const (
-	dutyKbRead    = "KbRead"
-	dutyKbAuthor  = "KbAuthor"
-	dutyKbPublish = "KbPublish"
+	dutyKbRead    = "fieldservice.knowledge-article.read"
+	dutyKbAuthor  = "fieldservice.knowledge-article.author"
+	dutyKbPublish = "fieldservice.knowledge-article.publish"
 )
 
 const (

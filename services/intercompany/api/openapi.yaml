@@ -33,7 +33,7 @@ paths:
     post:
       operationId: previewIntercompanyJournal
       summary: Derive the balanced due-to / due-from journal for one intercompany line (BR-40.4, AC-40.4)
-      x-passage-duty: IntercompanyPost
+      x-passage-duty: intercompany.post
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -66,7 +66,7 @@ paths:
     post:
       operationId: classifyReconciliationItems
       summary: Classify IC balance pairs as Matched, Timing or Mismatch (FR-40.6, BR-40.5)
-      x-passage-duty: IntercompanyReconcile
+      x-passage-duty: intercompany.reconcile
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -93,7 +93,7 @@ paths:
     post:
       operationId: previewIntercompanyCharge
       summary: Price an IC charge by the transfer price effective on its date and derive its Journal-mode legs (FR-40.13, BR-40.12, AC-40.11)
-      x-passage-duty: IntercompanyPost
+      x-passage-duty: intercompany.post
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -126,7 +126,7 @@ paths:
     post:
       operationId: previewCentralizedPayment
       summary: Derive the paying and owning entities' legs of one pay- or receive-on-behalf payment (FR-40.12, AC-40.10)
-      x-passage-duty: IntercompanyConfigure
+      x-passage-duty: intercompany.configure
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -159,7 +159,7 @@ paths:
     post:
       operationId: sequencePlanningGroup
       summary: Run order of a planning group (buyers before suppliers), IC demand dates and stale suppliers (FR-40.15, BR-40.13, AC-40.16)
-      x-passage-duty: IntercompanyPlan
+      x-passage-duty: intercompany.plan
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -192,7 +192,7 @@ paths:
     post:
       operationId: previewDeliveryChain
       summary: Validate a direct delivery chain and list what the seller's packing slip posts in the buyer entity in one saga (FR-40.3, AC-40.3)
-      x-passage-duty: IntercompanyView
+      x-passage-duty: intercompany.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -225,7 +225,7 @@ paths:
     post:
       operationId: exportTransferPricingEvidence
       summary: Render the transfer-pricing evidence file for one entity pair and period as CSV (FR-40.4)
-      x-passage-duty: IntercompanyView
+      x-passage-duty: intercompany.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -260,7 +260,7 @@ paths:
     post:
       operationId: previewCentralizedPaymentReversal
       summary: Derive the reversal of a centralized payment returned by the bank, in both entities under the original pair id (BR-40.11)
-      x-passage-duty: IntercompanyConfigure
+      x-passage-duty: intercompany.configure
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -293,7 +293,7 @@ paths:
     get:
       operationId: listIntercompanyPartners
       summary: List the tenant's trading-partner pairings, ordered by id (FR-40.1)
-      x-passage-duty: IntercompanyView
+      x-passage-duty: intercompany.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -322,7 +322,7 @@ paths:
         the ic.partnerPolicy defaults: active, auto-create on, auto-confirm and
         auto-post off, PriceList pricing, tolerance price 0.5 % and date 2 days.
         Publishes dev.passage.interco.partner.created.v1 through the outbox.
-      x-passage-duty: IntercompanyConfigure
+      x-passage-duty: intercompany.configure
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -366,7 +366,7 @@ paths:
     get:
       operationId: getIntercompanyPartner
       summary: Read one pairing with its current policy version
-      x-passage-duty: IntercompanyView
+      x-passage-duty: intercompany.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -397,7 +397,7 @@ paths:
         The direction (seller and buyer entity) never changes. A patch that
         changes nothing returns the pairing at its current version. Publishes
         dev.passage.interco.partner.updated.v1 through the outbox.
-      x-passage-duty: IntercompanyConfigure
+      x-passage-duty: intercompany.configure
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -458,7 +458,7 @@ paths:
         date (category Item; rows are sent with the request until transfer
         prices are stored). The unit price keeps full precision; the extended
         amount is rounded once to the currency minor unit. Nothing is stored.
-      x-passage-duty: IntercompanyView
+      x-passage-duty: intercompany.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -503,7 +503,7 @@ paths:
         price tolerance (percent of the old price) and the date by its date
         tolerance in days, both inclusive. Nothing is stored; routing the
         mirror PO to the wave-17 workflow comes with the mirror saga.
-      x-passage-duty: IntercompanyView
+      x-passage-duty: intercompany.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'

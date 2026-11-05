@@ -80,8 +80,8 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":  {"inventory.ownership-change.read"},
 		"party":      {"party.read"},
 		"org":        {"org.read"},
-		"tax":        {"Calculate tax", "tax.transaction.record"},
-		"compliance": {"compliance.legal_hold.check"},
+		"tax":        {"tax.tax.calculate", "tax.transaction.record"},
+		"compliance": {"compliance.legal-hold.check"},
 	},
 	"tax": {
 		"ledger": {"ledger.balance.read"},
@@ -89,8 +89,8 @@ var serviceGrants = map[string]map[string][]string{
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},
-		"tax":    {"Calculate withholding tax"},
-		"party":  {"party.vendor_bank.reveal"},
+		"tax":    {"tax.withholding.calculate"},
+		"party":  {"party.vendor-bank.reveal"},
 	},
 	"close": {
 		"ledger": {"ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"},
@@ -170,7 +170,7 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory": {"inventory.issue.claim"},
 	},
 	"hr": {
-		"compliance": {"compliance.legal_hold.check"},
+		"compliance": {"compliance.legal-hold.check"},
 		"numbering":  {"numbering.sequence.allocate"},
 	},
 	"product": {
@@ -183,7 +183,7 @@ var serviceGrants = map[string]map[string][]string{
 		"engineering": {"engineering.import.write", "engineering.import.read"},
 	},
 	"migration-factory": {
-		"receivables": {"receivables.import.write", "ARView"},
+		"receivables": {"receivables.import.write", "receivables.view"},
 		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
@@ -377,7 +377,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 
 var readDuties = map[string]struct{}{
 	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.account.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
-	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal_hold.check": {},
+	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal-hold.check": {},
 }
 
 func onlyReads(duties []string) bool {

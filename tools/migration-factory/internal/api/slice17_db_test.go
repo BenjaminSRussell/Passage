@@ -153,7 +153,7 @@ func compensationPostings() string {
 
 func rolledBackPlan(t *testing.T, h http.Handler) string {
 	t.Helper()
-	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager",
+	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage",
 		body: generateBody(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), 36), user: "manager"}))
 	if r := rollbackBoth(t, h, "/api/v1/cutover/plans/"+plan.PlanID+"/rollback", compensationPostings(), ""); r.Code != http.StatusOK {
 		t.Fatalf("rollback: %d %s", r.Code, r.Body)
@@ -163,7 +163,7 @@ func rolledBackPlan(t *testing.T, h http.Handler) string {
 
 func postComp(t *testing.T, h http.Handler, planID, body string) (compensationReportDTO, int, string) {
 	t.Helper()
-	r := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/" + planID + "/rollback/compensations", tenant: tenantA, duties: "CutoverManager",
+	r := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/" + planID + "/rollback/compensations", tenant: tenantA, duties: "migration.cutover.manage",
 		body: body, user: "manager", le: le1})
 	if r.Code != http.StatusOK {
 		return compensationReportDTO{}, r.Code, r.Body.String()
@@ -177,7 +177,7 @@ const usLedger = `{"ledgers":[{"entity":"USMF","legalEntityId":"` + le1 + `","le
 // the lines flipped; the reconciliation counts only these journals.
 func TestRollbackCompensation_PostsEachJournalOnceAndReconciles(t *testing.T) {
 	h, _, _, fake, _ := ledgerServer(t)
-	notRolled := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager",
+	notRolled := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage",
 		body: generateBody(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), 36), user: "manager"}))
 	if _, code, body := postComp(t, h, notRolled.PlanID, usLedger); code != http.StatusConflict {
 		t.Fatalf("a plan that is not rolled back: %d %s", code, body)
@@ -214,7 +214,7 @@ func TestRollbackCompensation_PostsEachJournalOnceAndReconciles(t *testing.T) {
 	if _, code, _ := postComp(t, h, planID, `{"ledgers":[{"entity":"USMF","legalEntityId":"`+le1+`","ledgerId":"L-OTHER"}]}`); code != http.StatusConflict {
 		t.Fatalf("re-pinning must be 409, got %d", code)
 	}
-	got := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + planID + "/rollback/compensations", tenant: tenantA, duties: "CutoverManager"})
+	got := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + planID + "/rollback/compensations", tenant: tenantA, duties: "migration.cutover.manage"})
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"reconciled":true`) || !strings.Contains(got.Body.String(), entries[1].ID) {
 		t.Fatalf("report: %d %s", got.Code, got.Body)
 	}
@@ -331,12 +331,12 @@ func (a *fakeAdapter) Resume(_ context.Context, company, entity string) error {
 // adapter's legacy changes made after the cutover are refused, and a flip back lets them flow.
 func TestCoexistence_EntityFlagRoutesAdapterRecords(t *testing.T) {
 	h, _, st, _, clk := ledgerServer(t)
-	list := do(t, h, request{method: "GET", path: "/api/v1/migration/coexistence?sourceSystem=AX2012&sourceCompany=USMF", tenant: tenantA, duties: "MigrationView"})
+	list := do(t, h, request{method: "GET", path: "/api/v1/migration/coexistence?sourceSystem=AX2012&sourceCompany=USMF", tenant: tenantA, duties: "migration.factory.view"})
 	if list.Code != http.StatusOK || strings.Count(list.Body.String(), `"mode":"LEGACY"`) != len(domain.CoexistEntities) {
 		t.Fatalf("defaults: %d %s", list.Code, list.Body)
 	}
 	put := func(mode string, version int) (coexistDTO, int) {
-		r := do(t, h, request{method: "PUT", path: "/api/v1/migration/coexistence/AX2012/USMF/customer", tenant: tenantA, duties: "CutoverManager",
+		r := do(t, h, request{method: "PUT", path: "/api/v1/migration/coexistence/AX2012/USMF/customer", tenant: tenantA, duties: "migration.cutover.manage",
 			body: fmt.Sprintf(`{"mode":%q,"expectedVersion":%d}`, mode, version), user: "manager"})
 		if r.Code != http.StatusOK {
 			return coexistDTO{}, r.Code

@@ -23,7 +23,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/numbering`.
 
 Contract: `api/openapi.yaml`. Event: `dev.passage.numbering.sequence.allocated.v1`. The legal-entity header is `X-Passage-Legal-Entity`.
 
-OPA duties `View number sequences` (GET) and `Maintain number sequences` (GET, POST) authorize `/v1/numbering` and its child paths.
+OPA duties `numbering.sequence.view` (GET) and `numbering.sequence.maintain` (GET, POST) authorize `/v1/numbering` and its child paths.
 
 ## Error codes
 

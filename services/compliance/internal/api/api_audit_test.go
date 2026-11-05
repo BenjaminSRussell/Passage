@@ -265,7 +265,7 @@ func TestPlanElevatedSession(t *testing.T) {
 func TestPlanElevatedSessionRefusals(t *testing.T) {
 	h := router(newAPI(&fakeStore{}, true))
 	me := ids.New()
-	self := ElevatedPlanRequest{Roles: []string{"SecurityAdmin"}, ReasonCode: "INCIDENT_RESPONSE", TicketRef: "INC-4411"}
+	self := ElevatedPlanRequest{Roles: []string{"compliance.security.admin"}, ReasonCode: "INCIDENT_RESPONSE", TicketRef: "INC-4411"}
 	// BR-48.19: naming yourself explicitly, in any case, is still a self-grant.
 	for _, target := range []string{"", strings.ToUpper(me)} {
 		body := self
@@ -281,7 +281,7 @@ func TestPlanElevatedSessionRefusals(t *testing.T) {
 	var plan ElevatedPlanResponse
 	decodeInto(t, rec.Body.Bytes(), &plan)
 	if rec.Code != http.StatusOK || plan.ApproverDuty != domain.ApproverPlatformAdmin {
-		t.Fatalf("a protected role for another user waits for a second PlatformAdmin: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("a protected role for another user waits for a second platform.global.admin: %d %s", rec.Code, rec.Body.String())
 	}
 
 	if rec := serve(t, h, planCall("", self)); rec.Code != http.StatusUnauthorized {

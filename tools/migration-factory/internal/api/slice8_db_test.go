@@ -15,7 +15,7 @@ func TestGeneratePlan_CarriesMeasuredRehearsalDurations(t *testing.T) {
 	h, admin := dbServer(t)
 	t0 := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	gen := func(body string) *httptest.ResponseRecorder {
-		return do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: body, user: "manager"})
+		return do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage", body: body, user: "manager"})
 	}
 	rehearsal := decode[planDTO](t, gen(generateBody(t0, 36)))
 	base := "/api/v1/cutover/plans/" + rehearsal.PlanID
@@ -25,7 +25,7 @@ func TestGeneratePlan_CarriesMeasuredRehearsalDurations(t *testing.T) {
 	}
 	complete := func(name, body string) {
 		t.Helper()
-		if c := do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/complete", base, seqOf[name]), tenant: tenantA, duties: "CutoverStepOwner", body: body, user: "owner"}); c.Code != http.StatusOK {
+		if c := do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/complete", base, seqOf[name]), tenant: tenantA, duties: "migration.cutover-step.execute", body: body, user: "owner"}); c.Code != http.StatusOK {
 			t.Fatalf("complete %s: %d %s", name, c.Code, c.Body)
 		}
 	}
@@ -44,7 +44,7 @@ func TestGeneratePlan_CarriesMeasuredRehearsalDurations(t *testing.T) {
 	if r := gen(strings.Replace(next, rehearsal.PlanID, "01a19c46-9e7c-72ce-83c7-aa23184b9838", 1)); r.Code != http.StatusNotFound {
 		t.Fatalf("unknown rehearsal plan: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantB, duties: "CutoverManager", body: next, user: "manager"}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantB, duties: "migration.cutover.manage", body: next, user: "manager"}); r.Code != http.StatusNotFound {
 		t.Fatalf("another tenant's rehearsal plan: %d %s", r.Code, r.Body)
 	}
 
@@ -63,7 +63,7 @@ func TestGeneratePlan_CarriesMeasuredRehearsalDurations(t *testing.T) {
 	if n := count(t, admin, `select rehearsal_carried from cutover_plan where plan_id = $1 and rehearsal_plan_id = $2`, plan.PlanID, rehearsal.PlanID); n != 2 {
 		t.Fatalf("stored link carried = %d", n)
 	}
-	if stored := decode[planDTO](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID, tenant: tenantA, duties: "CutoverManager"})); stored.RehearsalPlanID != rehearsal.PlanID || stored.RehearsalCarried != 2 {
+	if stored := decode[planDTO](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID, tenant: tenantA, duties: "migration.cutover.manage"})); stored.RehearsalPlanID != rehearsal.PlanID || stored.RehearsalCarried != 2 {
 		t.Fatalf("stored plan %+v", stored)
 	}
 
@@ -81,24 +81,24 @@ func TestGeneratePlan_CarriesMeasuredRehearsalDurations(t *testing.T) {
 }
 
 // CUT-1603, CUT-1605: a rollback approval belongs to the go/no-go decision round it was given in, like
-// a GO approval. A decision recorded in between voids it, so the next CutoverManager's request is a
+// a GO approval. A decision recorded in between voids it, so the next migration.cutover.manage's request is a
 // new first approval, not the confirmation of the stale one.
 func TestRollback_DecisionVoidsPendingApproval(t *testing.T) {
 	h, admin := dbServer(t)
-	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager",
+	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage",
 		body: generateBody(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), 36), user: "manager"}))
 	base := "/api/v1/cutover/plans/" + plan.PlanID
 	rollback := func(user string) *httptest.ResponseRecorder {
-		return do(t, h, request{method: "POST", path: base + "/rollback", tenant: tenantA, duties: "CutoverManager", body: `{}`, user: user})
+		return do(t, h, request{method: "POST", path: base + "/rollback", tenant: tenantA, duties: "migration.cutover.manage", body: `{}`, user: user})
 	}
 	get := func() planDTO {
-		return decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "CutoverManager", user: "viewer"}))
+		return decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "migration.cutover.manage", user: "viewer"}))
 	}
 
 	if r := rollback("alice"); r.Code != http.StatusAccepted {
 		t.Fatalf("alice approves: %d %s", r.Code, r.Body)
 	}
-	noGo := do(t, h, request{method: "POST", path: base + "/go-no-go", tenant: tenantA, duties: "CutoverManager",
+	noGo := do(t, h, request{method: "POST", path: base + "/go-no-go", tenant: tenantA, duties: "migration.cutover.manage",
 		body: `{"decision":"NO_GO","reason":"Bank smoke test failed"}`, user: "carol"})
 	if noGo.Code != http.StatusCreated {
 		t.Fatalf("no-go: %d %s", noGo.Code, noGo.Body)

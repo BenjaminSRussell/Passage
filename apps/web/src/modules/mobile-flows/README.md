@@ -102,8 +102,8 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   supervisor's own work; the PIN check is a `verifyPin` callback the mobile service will back)
   and `ClusterPanel` (BR-32.5: a cart of up to 8 works, one order's LP per position, MOB-0109 on
   a wrong position, complete or short only after the right position is scanned).
-- `module.ts`: registered as `mobile-flows`. The designer is gated by `WMS_MOBILE_ADMIN`, the
-  print pages by `WMS_PRINT`, and the conflict queue by `WMS_WORK_SUPERVISE`.
+- `module.ts`: registered as `mobile-flows`. The designer is gated by `warehouse.mobile-flow.admin`, the
+  print pages by `print.job.submit`, and the conflict queue by `warehouse.offline-conflict.resolve`.
 
 ## Run and test
 

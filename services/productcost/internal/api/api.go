@@ -32,11 +32,11 @@ import (
 const (
 	readyTimeout = 500 * time.Millisecond
 	// Duties from PRD section 7.39.17.
-	dutyView      = "CostingView"
-	dutyMaintain  = "CostingMaintain"
-	dutyCalculate = "CostingCalculate"
-	dutyActivate  = "CostingActivate"
-	dutySystem    = "CostingSystem"
+	dutyView      = "productcost.view"
+	dutyMaintain  = "productcost.maintain"
+	dutyCalculate = "productcost.calculate"
+	dutyActivate  = "productcost.activate"
+	dutySystem    = "productcost.variance.compute"
 	// dutyResolveAttempt lets an operator see and settle activation attempts
 	// past the ledger replay window (issue 435).
 	dutyResolveAttempt = "productcost.activation-attempt.resolve"

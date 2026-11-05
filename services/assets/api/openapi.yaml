@@ -48,7 +48,7 @@ paths:
     get:
       summary: Asset register, ordered by asset number
       operationId: listAssets
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/AssetStatus" } }
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
@@ -68,7 +68,7 @@ paths:
     post:
       summary: Create an asset in the register (status NotYetAcquired)
       operationId: createAsset
-      x-passage-duty: AssetMaintain
+      x-passage-duty: assets.asset.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -98,7 +98,7 @@ paths:
     get:
       summary: Read an asset with its books
       operationId: getAsset
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       parameters:
         - $ref: "#/components/parameters/AssetId"
       responses:
@@ -117,7 +117,7 @@ paths:
       summary: Attach a depreciation book; posts the acquisition transaction
       description: At most 10 books per asset (AST-0013). The asset moves from NotYetAcquired to Open.
       operationId: addAssetBook
-      x-passage-duty: AssetMaintain
+      x-passage-duty: assets.asset.maintain
       parameters:
         - $ref: "#/components/parameters/AssetId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -147,7 +147,7 @@ paths:
       summary: Projected depreciation schedule for one book (computed on read)
       description: A Sold or Scrapped book has no lines.
       operationId: getAssetSchedule
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       parameters:
         - $ref: "#/components/parameters/AssetId"
         - name: book
@@ -171,7 +171,7 @@ paths:
     get:
       summary: Every transaction on every book of the asset, oldest first
       operationId: listAssetTransactions
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       parameters:
         - $ref: "#/components/parameters/AssetId"
       responses:
@@ -201,7 +201,7 @@ paths:
         runs spread the new depreciable basis over the remaining periods
         (BR-37.4). Emits dev.passage.assets.asset.adjusted.v1.
       operationId: adjustAssetBook
-      x-passage-duty: AssetPostJournal
+      x-passage-duty: assets.journal.post
       parameters:
         - $ref: "#/components/parameters/AssetId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -230,7 +230,7 @@ paths:
     get:
       summary: Additions and components of the asset, oldest first
       operationId: listAssetAdditions
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       parameters:
         - $ref: "#/components/parameters/AssetId"
       responses:
@@ -257,7 +257,7 @@ paths:
         may be recorded before the asset is acquired. At most 500 additions per
         asset (AST-0020).
       operationId: addAssetAddition
-      x-passage-duty: AssetMaintain
+      x-passage-duty: assets.asset.maintain
       parameters:
         - $ref: "#/components/parameters/AssetId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -286,7 +286,7 @@ paths:
     get:
       summary: Insurance policies of the asset, ordered by coverage start
       operationId: listInsurancePolicies
-      x-passage-duty: AssetView or AssetInsuranceMaintain
+      x-passage-duty: assets.asset.view or assets.insurance.maintain
       parameters:
         - $ref: "#/components/parameters/AssetId"
       responses:
@@ -316,7 +316,7 @@ paths:
         sets underInsured with an AST-0532 warning. The base year must have an
         index value (AST-0015). Sold or Scrapped assets are refused (AST-0509).
       operationId: addInsurancePolicy
-      x-passage-duty: AssetInsuranceMaintain
+      x-passage-duty: assets.insurance.maintain
       parameters:
         - $ref: "#/components/parameters/AssetId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -347,7 +347,7 @@ paths:
     get:
       summary: Depreciation runs, newest first (without lines)
       operationId: listDepreciationRuns
-      x-passage-duty: AssetView or AssetDepreciate
+      x-passage-duty: assets.asset.view or assets.asset.depreciate
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - $ref: "#/components/parameters/After"
@@ -376,7 +376,7 @@ paths:
         and period is 409 AST-0502; a concurrent request for the same book and
         period is 409 AST-0504 (advisory lock, BR-37.9).
       operationId: proposeDepreciationRun
-      x-passage-duty: AssetDepreciate
+      x-passage-duty: assets.asset.depreciate
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -406,7 +406,7 @@ paths:
     get:
       summary: Read a run with its per-book lines
       operationId: getDepreciationRun
-      x-passage-duty: AssetView or AssetDepreciate
+      x-passage-duty: assets.asset.view or assets.asset.depreciate
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -432,7 +432,7 @@ paths:
         post a Depreciation transaction dated the period end. Posting twice is
         409 AST-0502. Emits dev.passage.assets.depreciation.posted.v1.
       operationId: postDepreciationRun
-      x-passage-duty: AssetPostJournal
+      x-passage-duty: assets.journal.post
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/IfMatch"
@@ -459,7 +459,7 @@ paths:
     get:
       summary: Insured-value index series of the tenant with their yearly values
       operationId: listIndexSeries
-      x-passage-duty: AssetView or AssetInsuranceMaintain
+      x-passage-duty: assets.asset.view or assets.insurance.maintain
       responses:
         "200":
           description: Series ordered by code
@@ -479,7 +479,7 @@ paths:
       summary: Create or replace an index series and upsert its yearly values
       description: Years not in the request keep their value. PUT is idempotent, so no Idempotency-Key is taken.
       operationId: putIndexSeries
-      x-passage-duty: AssetInsuranceMaintain
+      x-passage-duty: assets.insurance.maintain
       parameters:
         - name: code
           in: path
@@ -506,7 +506,7 @@ paths:
     get:
       summary: Capital appropriation requests ordered by number (without variants)
       operationId: listCapexRequests
-      x-passage-duty: AssetView or CapexRequestCreate or CapexRequestApprove
+      x-passage-duty: assets.asset.view or assets.capex-request.create or assets.capex-request.approve
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/CapexStatus" } }
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
@@ -527,7 +527,7 @@ paths:
       summary: Create a capex request in Draft with one to ten variants (FR-37.17)
       description: Numbers are unique per legal entity (409 AST-0023). Each variant's totalAmount is the sum of its amountsByYear.
       operationId: createCapexRequest
-      x-passage-duty: CapexRequestCreate
+      x-passage-duty: assets.capex-request.create
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -555,7 +555,7 @@ paths:
     get:
       summary: Read a capex request with its variants
       operationId: getCapexRequest
-      x-passage-duty: AssetView or CapexRequestCreate or CapexRequestApprove
+      x-passage-duty: assets.asset.view or assets.capex-request.create or assets.capex-request.approve
       parameters:
         - $ref: "#/components/parameters/CapexId"
       responses:
@@ -581,7 +581,7 @@ paths:
         AC-37.11). The approval itself runs in the wave-4 workflow (not yet
         wired). Any other status is 422 AST-0016. Requires If-Match.
       operationId: submitCapexRequest
-      x-passage-duty: CapexRequestCreate
+      x-passage-duty: assets.capex-request.create
       parameters:
         - $ref: "#/components/parameters/CapexId"
         - $ref: "#/components/parameters/IfMatch"
@@ -625,12 +625,12 @@ paths:
         year in the same transaction (FR-37.17, AC-37.11). The user who created or
         requested the request may not approve it (403 AST-0028). Which approver
         may act at which approval level is the wave-4 workflow's job (not yet
-        wired): any holder of CapexRequestApprove can decide.
+        wired): any holder of assets.capex-request.approve can decide.
         Every decision requires If-Match with the request's ETag, is recorded in
         the request's decision trail and returns the request with it. Any other
         status is 422 AST-0016.
       operationId: approveCapexRequest
-      x-passage-duty: CapexRequestApprove
+      x-passage-duty: assets.capex-request.approve
       parameters:
         - $ref: "#/components/parameters/CapexId"
         - $ref: "#/components/parameters/IfMatch"
@@ -673,7 +673,7 @@ paths:
         the request's decision trail and returns the request with it. Any other
         status is 422 AST-0016.
       operationId: rejectCapexRequest
-      x-passage-duty: CapexRequestApprove
+      x-passage-duty: assets.capex-request.approve
       parameters:
         - $ref: "#/components/parameters/CapexId"
         - $ref: "#/components/parameters/IfMatch"
@@ -717,7 +717,7 @@ paths:
         the request's decision trail and returns the request with it. Any other
         status is 422 AST-0016.
       operationId: postponeCapexRequest
-      x-passage-duty: CapexRequestApprove
+      x-passage-duty: assets.capex-request.approve
       parameters:
         - $ref: "#/components/parameters/CapexId"
         - $ref: "#/components/parameters/IfMatch"
@@ -760,7 +760,7 @@ paths:
         the request's decision trail and returns the request with it. Any other
         status is 422 AST-0016.
       operationId: reopenCapexRequest
-      x-passage-duty: CapexRequestCreate
+      x-passage-duty: assets.capex-request.create
       parameters:
         - $ref: "#/components/parameters/CapexId"
         - $ref: "#/components/parameters/IfMatch"
@@ -803,7 +803,7 @@ paths:
         the request's decision trail and returns the request with it. Any other
         status is 422 AST-0016.
       operationId: releaseCapexRequest
-      x-passage-duty: CapexRequestApprove
+      x-passage-duty: assets.capex-request.approve
       parameters:
         - $ref: "#/components/parameters/CapexId"
         - $ref: "#/components/parameters/IfMatch"
@@ -844,7 +844,7 @@ paths:
         the request's decision trail and returns the request with it. Any other
         status is 422 AST-0016.
       operationId: closeCapexRequest
-      x-passage-duty: CapexRequestApprove
+      x-passage-duty: assets.capex-request.approve
       parameters:
         - $ref: "#/components/parameters/CapexId"
         - $ref: "#/components/parameters/IfMatch"
@@ -881,7 +881,7 @@ paths:
     get:
       summary: Physical inventory count sessions, newest first (without lines)
       operationId: listCountSessions
-      x-passage-duty: AssetView or AssetCount
+      x-passage-duty: assets.asset.view or assets.asset.count
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - $ref: "#/components/parameters/After"
@@ -906,7 +906,7 @@ paths:
         barcode scanned more than once counts once and adds to duplicateCount.
         The register is not changed: a counter cannot adjust it (PRD 7.37.17).
       operationId: createCountSession
-      x-passage-duty: AssetCount
+      x-passage-duty: assets.asset.count
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -932,7 +932,7 @@ paths:
     get:
       summary: Read a count session with its lines and AST-0525 warnings
       operationId: getCountSession
-      x-passage-duty: AssetView or AssetCount
+      x-passage-duty: assets.asset.view or assets.asset.count
       parameters:
         - $ref: "#/components/parameters/CountSessionId"
       responses:
@@ -956,7 +956,7 @@ paths:
         under-insured flag (sum insured below 90% of the indexed value,
         AST-0532). expiringSoon marks cover that ends within 30 days of asOf.
       operationId: insuranceReport
-      x-passage-duty: AssetView or AssetInsuranceMaintain
+      x-passage-duty: assets.asset.view or assets.insurance.maintain
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: asOf, in: query, description: "Report date; default today (UTC)", schema: { type: string, format: date } }
@@ -989,7 +989,7 @@ paths:
         MidQuarter book when it does not. Nothing is switched or posted. Books
         in more than one currency are 422 AST-0029.
       operationId: midQuarterTest
-      x-passage-duty: AssetView or AssetDepreciate
+      x-passage-duty: assets.asset.view or assets.asset.depreciate
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: bookCode, in: query, required: true, schema: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" } }
@@ -1017,7 +1017,7 @@ paths:
         against the proceeds. 100% closes the asset and its books as Sold or
         Scrapped (BR-37.2). Requires If-Match with the asset ETag.
       operationId: disposeAsset
-      x-passage-duty: AssetDispose
+      x-passage-duty: assets.asset.dispose
       parameters:
         - $ref: "#/components/parameters/AssetId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1065,7 +1065,7 @@ paths:
         the response ETag is the source asset's new version. Publishes
         dev.passage.assets.asset.transferred.v1 or .split.v1.
       operationId: transferAsset
-      x-passage-duty: AssetMaintain
+      x-passage-duty: assets.asset.maintain
       parameters:
         - $ref: "#/components/parameters/AssetId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1103,7 +1103,7 @@ paths:
     get:
       summary: Transfers and splits the asset took part in, as source or target, oldest first
       operationId: listAssetTransfers
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       parameters:
         - $ref: "#/components/parameters/AssetId"
       responses:
@@ -1124,7 +1124,7 @@ paths:
     get:
       summary: Group assets ordered by code (without members)
       operationId: listGroupAssets
-      x-passage-duty: AssetView or AssetConfigure
+      x-passage-duty: assets.asset.view or assets.asset.configure
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - $ref: "#/components/parameters/After"
@@ -1151,7 +1151,7 @@ paths:
         the tax year; a depreciation run gives member books an AST-0035
         exception and no own charge.
       operationId: createGroupAsset
-      x-passage-duty: AssetConfigure
+      x-passage-duty: assets.asset.configure
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1183,7 +1183,7 @@ paths:
     get:
       summary: Read a group asset with its members and yearly schedule
       operationId: getGroupAsset
-      x-passage-duty: AssetView or AssetConfigure
+      x-passage-duty: assets.asset.view or assets.asset.configure
       parameters:
         - $ref: "#/components/parameters/GroupAssetId"
       responses:
@@ -1201,7 +1201,7 @@ paths:
     get:
       summary: Leases ordered by lease number (without schedules)
       operationId: listLeases
-      x-passage-duty: LeaseMaintain
+      x-passage-duty: assets.lease.maintain
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - $ref: "#/components/parameters/After"
@@ -1222,7 +1222,7 @@ paths:
         (IFRS 16.5-8) nothing is recognized: the liability and ROU asset are 0 and each period expenses its payment
         when posted. Publishes dev.passage.assets.lease.recognized.v1.
       operationId: createLease
-      x-passage-duty: LeaseMaintain
+      x-passage-duty: assets.lease.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1252,7 +1252,7 @@ paths:
     get:
       summary: Read a lease with its schedule
       operationId: getLease
-      x-passage-duty: LeaseMaintain
+      x-passage-duty: assets.lease.maintain
       parameters:
         - $ref: "#/components/parameters/LeaseId"
       responses:
@@ -1281,7 +1281,7 @@ paths:
         remeasured (AST-0027). Publishes dev.passage.assets.lease.remeasured.v1.
         Requires If-Match with the lease ETag.
       operationId: modifyLease
-      x-passage-duty: LeaseMaintain
+      x-passage-duty: assets.lease.maintain
       parameters:
         - $ref: "#/components/parameters/LeaseId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1332,7 +1332,7 @@ paths:
         A lease under a short-term or low-value election has nothing to derecognize and is refused (AST-0037).
         Requires If-Match with the lease ETag and an Idempotency-Key.
       operationId: terminateLease
-      x-passage-duty: LeaseMaintain
+      x-passage-duty: assets.lease.maintain
       parameters:
         - $ref: "#/components/parameters/LeaseId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1368,7 +1368,7 @@ paths:
     post:
       summary: Book lease recognition and schedule periods in the general ledger (D4d)
       operationId: postLeasesToGL
-      x-passage-duty: AssetPostJournal
+      x-passage-duty: assets.journal.post
       description: |
         Books the IFRS 16 journals of the leases of a legal entity (or of one lease) that are not in the general ledger yet and are dated on or
         before postThrough. The recognition journal is dated at commencement (debit the ROU asset, credit the lease liability); each schedule
@@ -1432,11 +1432,11 @@ paths:
     get:
       summary: Lease posting profile of a legal entity
       operationId: getLeasePostingProfile
-      x-passage-duty: LeaseMaintain
+      x-passage-duty: assets.lease.maintain
       description: |
         The accounts the lease journals of a legal entity use. With no profile the response is the built-in placeholder (ROU asset 1700,
         accumulated depreciation 1790, liability 2400, interest expense 7200, depreciation expense 6820, payment clearing 2110,
-        remeasurement gain 7120) with placeholder true, to be replaced by the accountant. AssetConfigure also reads it.
+        remeasurement gain 7120) with placeholder true, to be replaced by the accountant. assets.asset.configure also reads it.
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -1456,7 +1456,7 @@ paths:
     put:
       summary: Create or replace the lease posting profile
       operationId: saveLeasePostingProfile
-      x-passage-duty: AssetConfigure
+      x-passage-duty: assets.asset.configure
       description: Creates the profile (no If-Match) or replaces it (If-Match with the version) for a legal entity. Journals already booked keep their accounts.
       requestBody:
         required: true
@@ -1492,7 +1492,7 @@ paths:
     get:
       summary: Which journals of a lease are in the general ledger
       operationId: getLeasePostings
-      x-passage-duty: LeaseMaintain
+      x-passage-duty: assets.lease.maintain
       description: The ledger entry of the recognition journal and of every period of the schedule in force; null means not booked yet.
       parameters:
         - $ref: "#/components/parameters/LeaseId"
@@ -1527,7 +1527,7 @@ paths:
     post:
       summary: Book asset transactions and depreciation runs in the general ledger (D2j)
       operationId: postAssetsToGL
-      x-passage-duty: AssetPostJournal
+      x-passage-duty: assets.journal.post
       description: |
         Books the transactions of one book code and currency that are not in the general ledger yet: one entry per depreciation run (all its books)
         and one per other transaction (acquisition, adjustment, revaluation, impairment, disposal, transfer or split). Cost and accumulated depreciation
@@ -1584,7 +1584,7 @@ paths:
     get:
       summary: Reconcile the register to the general ledger (AC4)
       operationId: getAssetsGLReconciliation
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       description: |
         For one book code, per class cost and accumulated depreciation account: the register's balance (accumulated depreciation enters negative),
         the general ledger's balance of the account and the difference (GL minus register). unposted counts the transactions not booked yet.
@@ -1628,7 +1628,7 @@ paths:
     get:
       summary: Posting profiles of a legal entity and the placeholder default
       operationId: listAssetPostingProfiles
-      x-passage-duty: AssetView
+      x-passage-duty: assets.asset.view
       description: |
         The profiles by asset class (ALL is the wildcard) and the built-in placeholder that applies when a legal entity has none
         (cost 1500, accumulated depreciation 1590, depreciation expense 6800, impairment 6810, revaluation 3300, acquisition clearing 2190,
@@ -1653,7 +1653,7 @@ paths:
     put:
       summary: Create or replace a posting profile
       operationId: saveAssetPostingProfile
-      x-passage-duty: AssetConfigure
+      x-passage-duty: assets.asset.configure
       description: Creates the profile (no If-Match) or replaces it (If-Match with the version) for a legal entity and class.
       requestBody:
         required: true

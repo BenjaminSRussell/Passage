@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	allDuties = "MigrationRun,MigrationView,MigrationReview,CutoverManager,CutoverStepOwner"
+	allDuties = "migration.factory.run,migration.factory.view,migration.factory.review,migration.cutover.manage,migration.cutover-step.execute"
 	tenantA   = "00000000-0000-7000-8000-00000000000a"
 	tenantB   = "00000000-0000-7000-8000-00000000000b"
 	runsPath  = "/api/v1/migration/packs/open_items/runs"
@@ -207,7 +207,7 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		code   string
 		detail string
 	}{
-		{"pack run needs MigrationRun", request{method: "POST", path: runsPath, tenant: tenantA, duties: "MigrationView", body: openItemsBody(1)}, 403, "AUTH-0003", ""},
+		{"pack run needs migration.factory.run", request{method: "POST", path: runsPath, tenant: tenantA, duties: "migration.factory.view", body: openItemsBody(1)}, 403, "AUTH-0003", ""},
 		{"no tenant", request{method: "POST", path: runsPath, duties: allDuties, body: openItemsBody(1)}, 401, "", ""},
 		{"late cutoff MIG-1501", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: late}, 422, CodeInvalid, "MIG-1501"},
 		{"unknown pack", request{method: "POST", path: "/api/v1/migration/packs/nonsense/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
@@ -223,18 +223,18 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"run id not a UUID", request{method: "GET", path: "/api/v1/migration/runs/nope", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "UUID"},
 		{"list runs bad status", request{method: "GET", path: "/api/v1/migration/runs?status=DONE", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, ""},
 		{"list runs bad limit", request{method: "GET", path: "/api/v1/migration/runs?limit=500", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, ""},
-		{"list runs needs MigrationView", request{method: "GET", path: "/api/v1/migration/runs", tenant: tenantA, duties: "MigrationRun"}, 403, "AUTH-0003", ""},
-		{"generate needs CutoverManager", request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "MigrationRun", body: `{}`}, 403, "AUTH-0003", ""},
+		{"list runs needs migration.factory.view", request{method: "GET", path: "/api/v1/migration/runs", tenant: tenantA, duties: "migration.factory.run"}, 403, "AUTH-0003", ""},
+		{"generate needs migration.cutover.manage", request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.factory.run", body: `{}`}, 403, "AUTH-0003", ""},
 		{"generate without t0", request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: allDuties, body: `{"packs":["open_items"],"entities":["USMF"]}`}, 422, CodeInvalid, "t0"},
 		{"generate duplicate pack", request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: allDuties, body: `{"t0":"2027-01-01T00:00:00Z","packs":["open_items","open_items"],"entities":["USMF"]}`}, 422, CodeInvalid, "twice"},
 		{"generate abort offset out of range", request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: allDuties, body: `{"t0":"2027-01-01T00:00:00Z","packs":["open_items"],"entities":["USMF"],"abortOffsetHours":80}`}, 422, CodeInvalid, "12-72"},
-		{"complete needs CutoverStepOwner", request{method: "POST", path: planPath + "/steps/1/complete", tenant: tenantA, duties: "CutoverManager", body: `{}`}, 403, "AUTH-0003", ""},
+		{"complete needs migration.cutover-step.execute", request{method: "POST", path: planPath + "/steps/1/complete", tenant: tenantA, duties: "migration.cutover.manage", body: `{}`}, 403, "AUTH-0003", ""},
 		{"complete bad seq", request{method: "POST", path: planPath + "/steps/0/complete", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "positive"},
-		{"rollback needs CutoverManager", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: "CutoverStepOwner", body: `{}`}, 403, "AUTH-0003", ""},
+		{"rollback needs migration.cutover.manage", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: "migration.cutover-step.execute", body: `{}`}, 403, "AUTH-0003", ""},
 		{"long idempotency key", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{}`, key: strings.Repeat("k", 201)}, 422, CodeInvalid, "Idempotency-Key"},
 		// Slice 15: configured tolerances.
-		{"tolerance put needs MigrationReview", request{method: "PUT", path: tolPath, tenant: tenantA, duties: "MigrationRun,MigrationView", body: `{"pack":"open_items","total":"*","amount":"0"}`}, 403, "AUTH-0003", ""},
-		{"tolerance list needs MigrationView", request{method: "GET", path: tolPath, tenant: tenantA, duties: "MigrationReview"}, 403, "AUTH-0003", ""},
+		{"tolerance put needs migration.factory.review", request{method: "PUT", path: tolPath, tenant: tenantA, duties: "migration.factory.run,migration.factory.view", body: `{"pack":"open_items","total":"*","amount":"0"}`}, 403, "AUTH-0003", ""},
+		{"tolerance list needs migration.factory.view", request{method: "GET", path: tolPath, tenant: tenantA, duties: "migration.factory.review"}, 403, "AUTH-0003", ""},
 		{"tolerance unknown pack", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"nope","total":"*","amount":"0"}`}, 422, CodeUnsupported, ""},
 		{"tolerance bad amount", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"*","amount":"a lot","reason":"x"}`}, 422, CodeInvalid, "decimal"},
 		{"tolerance needs a reason", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"open_items.amount","amount":"0.05"}`}, 422, CodeInvalid, "reason"},
@@ -244,7 +244,7 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"tolerance on project_wip", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"project_wip","total":"*","amount":"1","reason":"x"}`}, 422, CodeInvalid, "no money totals"},
 		{"tolerance negative version", request{method: "PUT", path: tolPath, tenant: tenantA, duties: allDuties, body: `{"pack":"open_items","total":"*","amount":"1","reason":"x","version":-1}`}, 422, CodeInvalid, "version"},
 		// Slice 2: quarantine release, xref, parallel runs, project beginning balances.
-		{"release needs MigrationRun", request{method: "POST", path: runPath + "/quarantine/1/release", tenant: tenantA, duties: "MigrationView", body: `{}`}, 403, "AUTH-0003", ""},
+		{"release needs migration.factory.run", request{method: "POST", path: runPath + "/quarantine/1/release", tenant: tenantA, duties: "migration.factory.view", body: `{}`}, 403, "AUTH-0003", ""},
 		{"release bad record seq", request{method: "POST", path: runPath + "/quarantine/x/release", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "rec"},
 		{"release negative version", request{method: "POST", path: runPath + "/quarantine/1/release", tenant: tenantA, duties: allDuties, body: `{"version":-1}`}, 422, CodeInvalid, "version"},
 		{"release unknown field", request{method: "POST", path: runPath + "/quarantine/1/release", tenant: tenantA, duties: allDuties, body: `{"amount":"1"}`}, 400, "COM-0001", ""},
@@ -253,15 +253,15 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"xref without id", request{method: "GET", path: "/api/v1/migration/xref?system=AX2012&table=open_items", tenant: tenantA}, 422, CodeInvalid, "required"},
 		{"xref both directions", request{method: "GET", path: "/api/v1/migration/xref?system=AX2012&passageEntity=open_item&passageId=" + tenantB, tenant: tenantA}, 422, CodeInvalid, "either"},
 		{"xref passage id not a UUID", request{method: "GET", path: "/api/v1/migration/xref?passageEntity=open_item&passageId=7", tenant: tenantA}, 422, CodeInvalid, "UUID"},
-		{"parallel start needs MigrationRun", request{method: "POST", path: parallelPath, tenant: tenantA, duties: "MigrationReview", body: `{}`}, 403, "AUTH-0003", ""},
+		{"parallel start needs migration.factory.run", request{method: "POST", path: parallelPath, tenant: tenantA, duties: "migration.factory.review", body: `{}`}, 403, "AUTH-0003", ""},
 		{"parallel bad period", request{method: "POST", path: parallelPath, tenant: tenantA, duties: allDuties, body: `{"period":"2026-13","sourceSystem":"AX2012","revenue":"1","legacy":[{"area":"TB","key":"k","amount":"1"}]}`}, 422, CodeInvalid, "YYYY-MM"},
 		{"parallel bad area", request{method: "POST", path: parallelPath, tenant: tenantA, duties: allDuties, body: `{"period":"2026-11","sourceSystem":"AX2012","revenue":"1","legacy":[{"area":"GL","key":"k","amount":"1"}]}`}, 422, CodeInvalid, "area"},
 		{"parallel bad amount", request{method: "POST", path: parallelPath, tenant: tenantA, duties: allDuties, body: `{"period":"2026-11","sourceSystem":"AX2012","revenue":"1","passage":[{"area":"TB","key":"k","amount":"1e"}]}`}, 422, CodeInvalid, "decimal"},
 		{"parallel bad revenue", request{method: "POST", path: parallelPath, tenant: tenantA, duties: allDuties, body: `{"period":"2026-11","sourceSystem":"AX2012","revenue":"","legacy":[{"area":"TB","key":"k","amount":"1"}]}`}, 422, CodeInvalid, "revenue"},
 		{"parallel explained pct above 1", request{method: "POST", path: parallelPath, tenant: tenantA, duties: allDuties, body: `{"period":"2026-11","sourceSystem":"AX2012","revenue":"1","explainedMaxPct":"2","legacy":[{"area":"TB","key":"k","amount":"1"}]}`}, 422, CodeInvalid, "explainedMaxPct"},
 		{"parallel list bad state", request{method: "GET", path: parallelPath + "?state=DONE", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "state"},
-		{"parallel list needs MigrationView", request{method: "GET", path: parallelPath, tenant: tenantA, duties: "MigrationReview"}, 403, "AUTH-0003", ""},
-		{"explain needs MigrationReview", request{method: "POST", path: parallelPath + "/" + tenantB + "/variances/" + tenantB + "/explain", tenant: tenantA, duties: "MigrationRun,MigrationView", body: `{"reason":"x"}`}, 403, "AUTH-0003", ""},
+		{"parallel list needs migration.factory.view", request{method: "GET", path: parallelPath, tenant: tenantA, duties: "migration.factory.review"}, 403, "AUTH-0003", ""},
+		{"explain needs migration.factory.review", request{method: "POST", path: parallelPath + "/" + tenantB + "/variances/" + tenantB + "/explain", tenant: tenantA, duties: "migration.factory.run,migration.factory.view", body: `{"reason":"x"}`}, 403, "AUTH-0003", ""},
 		{"explain variance id not a UUID", request{method: "POST", path: parallelPath + "/" + tenantB + "/variances/v1/explain", tenant: tenantA, duties: allDuties, body: `{"reason":"x"}`}, 422, CodeInvalid, "UUID"},
 		{"sign-off run id not a UUID", request{method: "POST", path: parallelPath + "/p1/sign-off", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "UUID"},
 		{"project run without lines", request{method: "POST", path: "/api/v1/migration/packs/project_wip/runs", tenant: tenantA, duties: allDuties, body: `{"sourceSystem":"AX2012","sourceCompany":"USMF","cutoffTs":"2026-12-31T00:00:00Z","freezeTs":"2026-12-31T06:00:00Z","projects":[{"projectId":"P1","legacyTotals":[],"lines":[]}]}`}, 422, CodeInvalid, "at least one"},
@@ -269,24 +269,24 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"project run bad category", request{method: "POST", path: "/api/v1/migration/packs/project_wip/runs", tenant: tenantA, duties: allDuties, body: `{"sourceSystem":"AX2012","sourceCompany":"USMF","cutoffTs":"2026-12-31T00:00:00Z","freezeTs":"2026-12-31T06:00:00Z","projects":[{"projectId":"P1","legacyTotals":[],"lines":[{"legacyId":"L1","category":"TRAVEL","transactionDate":"2026-12-01","costAmount":"1","salesAmount":"1","currency":"USD","billingStatus":"BILLED"}]}]}`}, 422, CodeInvalid, "category"},
 		{"project run bad date", request{method: "POST", path: "/api/v1/migration/packs/project_wip/runs", tenant: tenantA, duties: allDuties, body: `{"sourceSystem":"AX2012","sourceCompany":"USMF","cutoffTs":"2026-12-31T00:00:00Z","freezeTs":"2026-12-31T06:00:00Z","projects":[{"projectId":"P1","legacyTotals":[],"lines":[{"legacyId":"L1","category":"HOUR","transactionDate":"01.12.2026","costAmount":"1","salesAmount":"1","currency":"USD","billingStatus":"BILLED"}]}]}`}, 422, CodeInvalid, "YYYY-MM-DD"},
 		{"project run late cutoff", request{method: "POST", path: "/api/v1/migration/packs/project_wip/runs", tenant: tenantA, duties: allDuties, body: `{"sourceSystem":"AX2012","sourceCompany":"USMF","cutoffTs":"2027-01-02T00:00:00Z","freezeTs":"2026-12-31T06:00:00Z","projects":[]}`}, 422, CodeInvalid, "MIG-1501"},
-		{"opening needs MigrationView", request{method: "GET", path: runPath + "/projects/P1/opening", tenant: tenantA, duties: "MigrationRun"}, 403, "AUTH-0003", ""},
+		{"opening needs migration.factory.view", request{method: "GET", path: runPath + "/projects/P1/opening", tenant: tenantA, duties: "migration.factory.run"}, 403, "AUTH-0003", ""},
 		// Slice 3: the rollback re-keying export.
 		{"rollback posting bad kind", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{"postings":[{"kind":"TRANSFER","entity":"USMF","documentRef":"JV-1","postedAt":"2027-01-02T00:00:00Z","account":"1100","currency":"USD","amount":"1"}]}`}, 422, CodeInvalid, "JOURNAL or DOCUMENT"},
 		{"rollback posting bad amount", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{"postings":[{"kind":"JOURNAL","entity":"USMF","documentRef":"JV-1","postedAt":"2027-01-02T00:00:00Z","account":"1100","currency":"USD","amount":"ten"}]}`}, 422, CodeInvalid, "not a decimal"},
 		{"rollback posting unknown field", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{"postings":[{"kind":"JOURNAL","debit":"1"}]}`}, 400, "COM-0001", ""},
-		{"rekeying file needs CutoverManager", request{method: "GET", path: planPath + "/rekeying/journals.csv", tenant: tenantA, duties: "MigrationView"}, 403, "AUTH-0003", ""},
+		{"rekeying file needs migration.cutover.manage", request{method: "GET", path: planPath + "/rekeying/journals.csv", tenant: tenantA, duties: "migration.factory.view"}, 403, "AUTH-0003", ""},
 		{"rekeying unknown file", request{method: "GET", path: planPath + "/rekeying/ledger.csv", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "journals.csv or documents.csv"},
 		{"rekeying plan id not a UUID", request{method: "GET", path: "/api/v1/cutover/plans/p1/rekeying/journals.csv", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "UUID"},
 		// Slice 4: step start, the pack catalog.
-		{"start needs CutoverStepOwner", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: "CutoverManager", body: `{}`}, 403, "AUTH-0003", ""},
+		{"start needs migration.cutover-step.execute", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: "migration.cutover.manage", body: `{}`}, 403, "AUTH-0003", ""},
 		{"start bad seq", request{method: "POST", path: planPath + "/steps/x/start", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "positive"},
 		{"start plan id not a UUID", request{method: "POST", path: "/api/v1/cutover/plans/p1/steps/1/start", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "UUID"},
 		{"start negative version", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: allDuties, body: `{"version":-1}`}, 422, CodeInvalid, "version"},
 		{"start unknown field", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: allDuties, body: `{"startedAt":"2027-01-01T00:00:00Z"}`}, 400, "COM-0001", ""},
-		{"catalog needs MigrationView", request{method: "GET", path: "/api/v1/migration/packs", tenant: tenantA, duties: "MigrationRun,CutoverManager"}, 403, "AUTH-0003", ""},
-		{"catalog needs a tenant", request{method: "GET", path: "/api/v1/migration/packs", duties: "MigrationView"}, 401, "", ""},
+		{"catalog needs migration.factory.view", request{method: "GET", path: "/api/v1/migration/packs", tenant: tenantA, duties: "migration.factory.run,migration.cutover.manage"}, 403, "AUTH-0003", ""},
+		{"catalog needs a tenant", request{method: "GET", path: "/api/v1/migration/packs", duties: "migration.factory.view"}, 401, "", ""},
 		// Slice 5: the gl_balances pack.
-		{"gl run needs MigrationRun", request{method: "POST", path: glPath, tenant: tenantA, duties: "MigrationView", body: glBody("USMF", "", cleanGL...)}, 403, "AUTH-0003", ""},
+		{"gl run needs migration.factory.run", request{method: "POST", path: glPath, tenant: tenantA, duties: "migration.factory.view", body: glBody("USMF", "", cleanGL...)}, 403, "AUTH-0003", ""},
 		{"gl run unbalanced extract", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "10"), glRec("B", "3000", "", "-9.99"))}, 422, CodeInvalid, "not balanced in USD"},
 		{"gl run without chart of accounts", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: strings.Replace(glBody("USMF", "", cleanGL...), `"accounts":["1100","2100","3000"]`, `"accounts":[" "]`, 1)}, 422, CodeInvalid, "chart of accounts"},
 		{"gl run without balances", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "")}, 422, CodeInvalid, "at least one balance"},

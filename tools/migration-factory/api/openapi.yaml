@@ -31,7 +31,7 @@ paths:
         Every pack covers AX2012, D365FO, SAPECC and S4HANA. `available` is true for the packs a
         run can be started for in this release (open_items and project_wip); the others return
         MIG-0005 from startPackRun. Reads no tenant data.
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       responses:
         "200":
           description: The catalog in FR-49.1 order.
@@ -107,7 +107,7 @@ paths:
         total is MISMATCH. The body is limited to 16 MiB. An open_items run with a `load` object
         stages its accepted records for POST /migration/runs/{id}/load; its import source may not
         be one another legacy (system, company) already loads under (409 MIG-1526).
-      x-passage-duty: MigrationRun
+      x-passage-duty: migration.factory.run
       parameters:
         - name: pack
           in: path
@@ -157,7 +157,7 @@ paths:
       summary: Configured control-total tolerances (FR-49.2, migration.tolerance.<pack>)
       description: |
         The tolerances set for the tenant. A control total without a row compares at 0.00.
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       responses:
         "200":
           description: Every configured tolerance, ordered by pack and total.
@@ -188,7 +188,7 @@ paths:
         with, also through quarantine releases. Pass the stored `version` to change an existing
         tolerance and omit it for a new one (409 MIG-0006 when stale or when another first
         configuration won). Writes dev.passage.migration.tolerance.configured.v1.
-      x-passage-duty: MigrationReview
+      x-passage-duty: migration.factory.review
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -251,7 +251,7 @@ paths:
     get:
       operationId: listPackRuns
       summary: Pack runs, newest first (inquiry "Pack runs", 9.49.14)
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - name: pack
           in: query
@@ -287,7 +287,7 @@ paths:
     get:
       operationId: getPackRun
       summary: A pack run with its control totals and quarantined records
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -307,7 +307,7 @@ paths:
     get:
       operationId: getControlTotals
       summary: Control totals and status for a pack run
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -366,7 +366,7 @@ paths:
         is refused (409 MIG-1525). Without RECEIVABLES_URL and a service signing key the answer is
         503 MIG-1520; a refused service token is 502 MIG-1521.
         Writes dev.passage.migration.pack.loaded.v1.
-      x-passage-duty: MigrationRun
+      x-passage-duty: migration.factory.run
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -399,7 +399,7 @@ paths:
         source, receivables as target). `rejects` lists up to 50 REJECTED rows and 50 NOT_AVAILABLE
         rows; page all rows with GET /migration/runs/{id}/target-rows. 409 MIG-1523 when the run
         was started without a load object.
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -423,7 +423,7 @@ paths:
     get:
       operationId: listTargetRows
       summary: Staged rows of a run's target load, by sequence
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: status
@@ -482,7 +482,7 @@ paths:
         onhand and open_orders runs take a release (MIG-0004 otherwise, MIG-0005 for other packs);
         a line quarantined before its whole line was kept (bank_balances and onhand before
         migration 0017, open_orders before migration 0018) is MIG-0004 and is re-extracted.
-      x-passage-duty: MigrationRun
+      x-passage-duty: migration.factory.run
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: rec
@@ -527,7 +527,7 @@ paths:
         Lines are every opening line Passage holds for the project in the run's (system,
         company), ordered by legacy id and paged with limit and after (a legacy id). Totals are
         the run's reconciliation of the project; status is OPENING_MISMATCH while any differs.
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: project
@@ -622,7 +622,7 @@ paths:
         variances and writes dev.passage.migration.parallelrun.diffed.v1. Idempotent by
         (period, sourceSystem): the same input returns the stored run with Idempotent-Replayed,
         other input for a stored period is MIG-0009. The body is limited to 16 MiB.
-      x-passage-duty: MigrationRun
+      x-passage-duty: migration.factory.run
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -654,7 +654,7 @@ paths:
     get:
       operationId: listParallelRuns
       summary: Parallel runs, newest first, without variances
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - name: state
           in: query
@@ -685,7 +685,7 @@ paths:
     get:
       operationId: getParallelRun
       summary: A parallel run with its variances (parallel-run variance report, 9.49.14)
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -709,7 +709,7 @@ paths:
         The reviewer must not be the user who started the run (MIG-001, 403 MIG-0008).
         Explaining again with the same reason returns the run with Idempotent-Replayed
         (idempotent by variance); another reason, or an EXPECTED variance, is MIG-0004.
-      x-passage-duty: MigrationReview
+      x-passage-duty: migration.factory.review
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: v
@@ -764,7 +764,7 @@ paths:
         Refused with MIG-1509 while any variance is unexplained, and when the explained amount
         exceeds explainedMaxPct percent of revenue. The reviewer must not be the user who
         started the run (MIG-001, 403 MIG-0008).
-      x-passage-duty: MigrationReview
+      x-passage-duty: migration.factory.review
       parameters:
         - $ref: "#/components/parameters/Id"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -803,7 +803,7 @@ paths:
     post:
       operationId: generateCutoverPlan
       summary: Generate and store the timed runbook from the timeline baseline (FR-49.6)
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -834,7 +834,7 @@ paths:
     get:
       operationId: listCutoverPlans
       summary: Cutover plans, newest first, with step counts (inquiry "Cutover runbook status")
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/After"
@@ -861,7 +861,7 @@ paths:
     get:
       operationId: getCutoverPlan
       summary: A cutover plan with its steps and the BR-49.9 abort state at the time of the response
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -888,7 +888,7 @@ paths:
         plan's steps cannot be started (MIG-0004). When `version` is given and the plan has moved
         on, the request is rejected with MIG-0006. No event is written; completion writes
         dev.passage.cutover.step.completed.v1.
-      x-passage-duty: CutoverStepOwner
+      x-passage-duty: migration.cutover-step.execute
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: seq
@@ -940,7 +940,7 @@ paths:
         it (MIG-0001). In a per-entity runbook a step waits for its prerequisites (CUT-1609, see
         expandByEntity). When `version` is given and the plan has moved on, the request is
         rejected with MIG-0006. A rolled-back plan's steps cannot be completed (MIG-0004).
-      x-passage-duty: CutoverStepOwner
+      x-passage-duty: migration.cutover-step.execute
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: seq
@@ -1002,7 +1002,7 @@ paths:
         it; a run started without a `load` object has no load to wait for, and the met item's detail names it (not loaded into receivables). The other twelve items are attested by the approvers: they show as the pending GO
         approval confirmed them (`pendingGo`), or UNCONFIRMED when there is none. `systemReady` is
         true when both items the factory evaluates are met and the plan is not rolled back. Reads only.
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -1026,7 +1026,7 @@ paths:
       description: |
         Approvers are the authenticated callers, never names in the request (CUT-1605). A NO_GO is
         recorded at once with the caller as its approver; it needs a reason. A GO needs two
-        different CutoverManagers: the first caller's GO is stored as their approval (202, with
+        different migration.cutover.manage holders: the first caller's GO is stored as their approval (202, with
         `pendingGo`), and a second, different caller's GO approves the same attestations (send none,
         or the same ones) and records the decision with both as approvers (201). The first approver
         cannot approve again (MIG-0004, CUT-1605); a NO_GO recorded in between voids a pending
@@ -1042,7 +1042,7 @@ paths:
         plan (a later decision is MIG-0004). Nothing can be decided on a rolled-back plan (MIG-0004).
         A decision is stored with its checklist and writes dev.passage.cutover.decision.recorded.v1;
         a decision or an approval moves the plan's version. `version` works as on step completion.
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1113,7 +1113,7 @@ paths:
                   plan:
                     $ref: "#/components/schemas/Plan"
         "202":
-          description: The caller's approval of a GO was stored; the GO is recorded when a second, different CutoverManager approves it.
+          description: The caller's approval of a GO was stored; the GO is recorded when a second, different migration.cutover.manage holder approves it.
           headers:
             Idempotent-Replayed:
               $ref: "#/components/headers/IdempotentReplayed"
@@ -1142,12 +1142,12 @@ paths:
   /api/v1/cutover/plans/{id}/rollback:
     post:
       operationId: rollbackCutoverPlan
-      summary: Approve the rollback; a second, different CutoverManager's approval executes it and exports the postings since T-0 for re-keying (FR-49.9, CUT-1603)
+      summary: Approve the rollback; a second, different migration.cutover.manage's approval executes it and exports the postings since T-0 for re-keying (FR-49.9, CUT-1603)
       description: |
         Approvers are the authenticated callers, never names in the body: the request has no
-        `approvers` field and one that sends it is refused (400). The first CutoverManager's request
+        `approvers` field and one that sends it is refused (400). The first migration.cutover.manage's request
         stores an approval and answers 202 with the plan and `pendingRollback`; it moves the plan's
-        version and writes no event. A second, different CutoverManager's request executes the rollback
+        version and writes no event. A second, different migration.cutover.manage's request executes the rollback
         with both of them as `approvers` (the first approver first). The same user twice is MIG-0004
         (CUT-1603); a service principal, or a call made with a service token, is refused (MIG-0001,
         CUT-1605); and the two steps are serialized under the plan row lock. An approval belongs to the
@@ -1160,7 +1160,7 @@ paths:
         stored with the plan and served by GET .../rekeying/{file}. Writes
         dev.passage.cutover.plan.rolledback.v1 with the line counts. `version` works as on step
         completion. The body may be up to 16 MiB.
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1191,7 +1191,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Plan"
         "202":
-          description: The first approval is stored and waits for a second, different CutoverManager; the plan carries `pendingRollback` and is not rolled back.
+          description: The first approval is stored and waits for a second, different migration.cutover.manage; the plan carries `pendingRollback` and is not rolled back.
           headers:
             Idempotent-Replayed:
               $ref: "#/components/headers/IdempotentReplayed"
@@ -1219,7 +1219,7 @@ paths:
         account, dimensions, currency, amount, text. Lines are ordered by entity, posting time and
         document. Amounts have 6 decimal places; times are RFC 3339 UTC. A plan that has not been
         rolled back has no files (MIG-0004).
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: file
@@ -1258,11 +1258,11 @@ paths:
         plan_version, open_items, waivers); `reconciliation.csv` the control totals of the latest run of
         every pack and entity of the plan (pack, company, run_id, run_status, started_at, total, key,
         source, target, delta, tolerance, status), a pack and entity with no run as one row with status
-        NO_RUN; it carries control totals, so it also needs MigrationView (403 otherwise). Times are RFC
+        NO_RUN; it carries control totals, so it also needs migration.factory.view (403 otherwise). Times are RFC
         3339 UTC and amounts have 6 decimals. Cells are quoted per RFC 4180, and a text cell that starts
         with =, +, -, @, a tab or a carriage return is prefixed with an apostrophe so a spreadsheet does not
         read it as a formula. The PDF records of 9.49.15 need e-signature (wave 48) and are not served.
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
         - name: file
@@ -1297,7 +1297,7 @@ paths:
         given) as a parallel run in REVIEW, idempotent by (period, system). A document the ledger
         refuses is listed in `rejected` and shows as TB variances; any other ledger failure is 502
         MIG-1533 and the replay can be repeated. Without a configured ledger the answer is 503 MIG-1530.
-      x-passage-duty: MigrationRun
+      x-passage-duty: migration.factory.run
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1364,7 +1364,7 @@ paths:
       operationId: listCoexistence
       summary: The entity-by-entity cutover flags of a legacy company (FR-49.7, D6)
       description: Every entity kind with its mode; a kind never set is LEGACY at version 0.
-      x-passage-duty: MigrationView
+      x-passage-duty: migration.factory.view
       parameters:
         - {name: sourceSystem, in: query, required: true, schema: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}}
         - {name: sourceCompany, in: query, required: true, schema: {type: string}}
@@ -1387,7 +1387,7 @@ paths:
         PASSAGE records the cutover time; from then the coexistence adapter's legacy changes of the
         kind made at or after it are refused (MIG-1510). LEGACY (a rollback) clears it. The write is
         against `expectedVersion` (MIG-0006); setting the current mode is MIG-0004.
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - {name: system, in: path, required: true, schema: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}}
         - {name: company, in: path, required: true, schema: {type: string}}
@@ -1428,7 +1428,7 @@ paths:
         doubling to 1 hour) and is parked after a rejection or 5 attempts; `retryParked` queues the
         parked ones again. Each journal is posted once under a fixed idempotency key. The plan must be
         rolled back (MIG-0004).
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
       requestBody:
@@ -1467,7 +1467,7 @@ paths:
     get:
       operationId: getRollbackCompensations
       summary: The compensating journals of a rolled-back plan and their reconciliation
-      x-passage-duty: CutoverManager
+      x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -2787,7 +2787,7 @@ components:
             type: string
     GoApproval:
       type: object
-      description: A CutoverManager's approval of a GO, waiting for a second, different approver (CUT-1605).
+      description: A migration.cutover.manage's approval of a GO, waiting for a second, different approver (CUT-1605).
       required: [round, approver, attestations, waivers, planVersion, approvedAt]
       properties:
         round:
@@ -2925,7 +2925,7 @@ components:
       properties:
         pendingRollback:
           type: object
-          description: The first approval of a rollback in the current go/no-go decision round, waiting for a second, different CutoverManager (CUT-1603). Absent when none, once rolled back, or when a decision recorded after it voided it.
+          description: The first approval of a rollback in the current go/no-go decision round, waiting for a second, different migration.cutover.manage (CUT-1603). Absent when none, once rolled back, or when a decision recorded after it voided it.
           required: [approver, approvedAt]
           properties:
             approver:

@@ -29,9 +29,9 @@ var labelKey = regexp.MustCompile(`^[\x21-\x7e]{1,64}$`)
 
 // routesCarrier mounts rate shopping, label purchase and the tracking pull through carrier-gateway (wave 28 D3).
 func (a *API) routesCarrier(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseShip")).Post("/v1/fulfillment/shipments/{id}:carrier-rates", a.carrierRates)
-	r.With(authz.RequireDuty("WarehouseShip")).Post("/v1/fulfillment/shipments/{id}:carrier-label", a.carrierLabel)
-	r.With(authz.RequireDuty("WarehouseShip")).Post("/v1/fulfillment/shipments/{id}:carrier-track", a.carrierTrack)
+	r.With(authz.RequireDuty("fulfillment.warehouse.ship")).Post("/v1/fulfillment/shipments/{id}:carrier-rates", a.carrierRates)
+	r.With(authz.RequireDuty("fulfillment.warehouse.ship")).Post("/v1/fulfillment/shipments/{id}:carrier-label", a.carrierLabel)
+	r.With(authz.RequireDuty("fulfillment.warehouse.ship")).Post("/v1/fulfillment/shipments/{id}:carrier-track", a.carrierTrack)
 }
 
 type carrierRatesRequest struct {

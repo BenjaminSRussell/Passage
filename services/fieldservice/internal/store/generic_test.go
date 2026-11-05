@@ -209,11 +209,11 @@ func TestStore_GenericCaseResolveCloseAndReopen(t *testing.T) {
 
 // AC-45.11 and BR-45.10: an HR case is hidden from a caller without the category's
 // duty (CASE-SEC-001 on read and write, absent from the list) and open to its owner
-// and duty holders; an unrestricted category is open to every CaseMaintain holder.
+// and duty holders; an unrestricted category is open to every fieldservice.case.maintain holder.
 func TestStore_GenericCaseCategorySecurity(t *testing.T) {
 	s, _ := newSliceStore(t, 43)
-	partner := userCtx(43, ids.New(), "HrCaseAccess", "CaseCreate")
-	collector := userCtx(43, ids.New(), "CollectionsAccess", "CaseCreate")
+	partner := userCtx(43, ids.New(), "HrCaseAccess", "fieldservice.case.create")
+	collector := userCtx(43, ids.New(), "CollectionsAccess", "fieldservice.case.create")
 	_, hrCat := hrSetup(t, s, partner, 14)
 	open, _, err := s.CreateCategory(partner, Category{Code: "INTERNAL", Name: "Internal", CategoryType: domain.CategoryInternal,
 		DefaultPriority: 4, ResolutionCodes: []string{}}, "", "")

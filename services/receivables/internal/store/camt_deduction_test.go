@@ -197,7 +197,7 @@ func TestDeduction_AC3013ShortPayMatchApprove(t *testing.T) {
 }
 
 // BR-30.12: the claim bounds approval, a split's children sum to the parent, the
-// write-off limit needs ARWriteOffApprove above it, and a denial re-bills.
+// write-off limit needs receivables.write-off.approve above it, and a denial re-bills.
 func TestDeduction_GuardsSplitWriteOffAndDeny(t *testing.T) {
 	s := setup(t)
 	ctx := tenantCtx(9)

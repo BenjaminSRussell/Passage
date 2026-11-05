@@ -74,7 +74,7 @@ func TestRecordRelease(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _ := newRouter(tc.store)
-			rec := doRelease(r, http.MethodPost, releasesPath, tc.body, "Maintain platform releases,Rollback environment", "")
+			rec := doRelease(r, http.MethodPost, releasesPath, tc.body, "platform.release.maintain,platform.environment.rollback", "")
 			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
@@ -98,7 +98,7 @@ func TestRollbackToPreRegistryDigestIsAcceptedAfterGoLive(t *testing.T) {
 	a.Register(r)
 	toRollback := func(b string) string { return strings.Replace(b, `"promote"`, `"rollback"`, 1) }
 	swapped := strings.NewReplacer(digestB, digestA, digestA, digestB)
-	duties := "Maintain platform releases,Rollback environment"
+	duties := "platform.release.maintain,platform.environment.rollback"
 	if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), duties, ""); rec.Code != http.StatusCreated {
 		t.Fatalf("go-live promote: %d %s", rec.Code, rec.Body.String())
 	}
@@ -114,7 +114,7 @@ func TestRollbackToPreRegistryDigestIsAcceptedAfterGoLive(t *testing.T) {
 func TestRecordReleaseForwardsIdempotencyKey(t *testing.T) {
 	f := &fakeStore{}
 	r, _ := newRouter(f)
-	if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "Maintain platform releases", "key-1"); rec.Code != http.StatusCreated {
+	if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "platform.release.maintain", "key-1"); rec.Code != http.StatusCreated {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 	if f.lastKey != "key-1" {
@@ -125,7 +125,7 @@ func TestRecordReleaseForwardsIdempotencyKey(t *testing.T) {
 func TestReplayedReleaseIsNotCountedAsRecorded(t *testing.T) {
 	r, a := newRouter(&fakeStore{})
 	for range 2 {
-		if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "Maintain platform releases", "key-1"); rec.Code != http.StatusCreated {
+		if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "platform.release.maintain", "key-1"); rec.Code != http.StatusCreated {
 			t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 		}
 	}
@@ -140,7 +140,7 @@ func TestReplayedReleaseIsNotCountedAsRecorded(t *testing.T) {
 
 func TestChainBreakIsCountedAndReplaysAreNot(t *testing.T) {
 	r, a := newRouter(&fakeStore{chainBreak: true})
-	if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "Maintain platform releases", ""); rec.Code != http.StatusCreated {
+	if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "platform.release.maintain", ""); rec.Code != http.StatusCreated {
 		t.Fatalf("a chain break is flagged, not refused: %d %s", rec.Code, rec.Body.String())
 	}
 	rec := httptest.NewRecorder()
@@ -169,7 +169,7 @@ func TestListReleasesFiltersAndValidates(t *testing.T) {
 		{"?service=a%27%3B--", http.StatusBadRequest, 0},
 	}
 	for _, tc := range tests {
-		rec := doRelease(r, http.MethodGet, releasesPath+tc.query, "", "View platform releases", "")
+		rec := doRelease(r, http.MethodGet, releasesPath+tc.query, "", "platform.release.view", "")
 		if rec.Code != tc.wantStatus {
 			t.Fatalf("%q: got %d %s; want %d", tc.query, rec.Code, rec.Body.String(), tc.wantStatus)
 		}
@@ -177,14 +177,14 @@ func TestListReleasesFiltersAndValidates(t *testing.T) {
 			t.Fatalf("%q: body %s; want %d releases", tc.query, rec.Body.String(), tc.wantCount)
 		}
 	}
-	if rec := doRelease(newRouterOnly(&fakeStore{}), http.MethodGet, releasesPath, "", "View platform releases", ""); !strings.HasPrefix(rec.Body.String(), "[]") {
+	if rec := doRelease(newRouterOnly(&fakeStore{}), http.MethodGet, releasesPath, "", "platform.release.view", ""); !strings.HasPrefix(rec.Body.String(), "[]") {
 		t.Fatalf("empty list must be an array, got %s", rec.Body.String())
 	}
 }
 
 func TestListReleasesUnknownCursorIs400(t *testing.T) {
 	r, _ := newRouter(&fakeStore{err: store.ErrUnknownCursor})
-	rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=00000000-0000-4000-8000-000000000009", "", "View platform releases", "")
+	rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=00000000-0000-4000-8000-000000000009", "", "platform.release.view", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
@@ -193,11 +193,11 @@ func TestListReleasesUnknownCursorIs400(t *testing.T) {
 func TestListReleasesCursor(t *testing.T) {
 	f := &fakeStore{nextCursor: "00000000-0000-4000-8000-000000000001"}
 	r, _ := newRouter(f)
-	rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=00000000-0000-4000-8000-000000000002", "", "View platform releases", "")
+	rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=00000000-0000-4000-8000-000000000002", "", "platform.release.view", "")
 	if rec.Code != http.StatusOK || rec.Header().Get("X-Next-Cursor") != f.nextCursor || f.lastAfter != "00000000-0000-4000-8000-000000000002" {
 		t.Fatalf("got %d header %q after %q", rec.Code, rec.Header().Get("X-Next-Cursor"), f.lastAfter)
 	}
-	if rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=not-an-id", "", "View platform releases", ""); rec.Code != http.StatusBadRequest {
+	if rec := doRelease(r, http.MethodGet, releasesPath+"?cursor=not-an-id", "", "platform.release.view", ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad cursor: %d", rec.Code)
 	}
 }
@@ -213,17 +213,17 @@ func TestReleasesRequireDuty(t *testing.T) {
 		wantStatus           int
 	}{
 		{"record without duty", http.MethodPost, "", releaseBody(nil), http.StatusForbidden},
-		{"record with view duty only", http.MethodPost, "View platform releases", releaseBody(nil), http.StatusForbidden},
+		{"record with view duty only", http.MethodPost, "platform.release.view", releaseBody(nil), http.StatusForbidden},
 		{"list without duty", http.MethodGet, "", "", http.StatusForbidden},
-		{"list with maintain duty only", http.MethodGet, "Maintain platform releases", "", http.StatusForbidden},
-		{"stage promote with maintain duty", http.MethodPost, "Maintain platform releases", releaseBody(nil), http.StatusCreated},
-		{"prod promote with maintain duty only", http.MethodPost, "Maintain platform releases", releaseBody(prod), http.StatusForbidden},
-		{"prod promote with approve duty", http.MethodPost, "Approve production promotion", releaseBody(prod), http.StatusCreated},
-		{"stage promote with approve duty only", http.MethodPost, "Approve production promotion", releaseBody(nil), http.StatusForbidden},
-		{"stage rollback with maintain duty only", http.MethodPost, "Maintain platform releases", releaseBody(rollback), http.StatusForbidden},
-		{"stage rollback with rollback duty", http.MethodPost, "Rollback environment", releaseBody(rollback), http.StatusCreated},
-		{"prod rollback with approve duty only", http.MethodPost, "Approve production promotion", releaseBody(func(b string) string { return rollback(prod(b)) }), http.StatusForbidden},
-		{"list with view duty", http.MethodGet, "View platform releases", "", http.StatusOK},
+		{"list with maintain duty only", http.MethodGet, "platform.release.maintain", "", http.StatusForbidden},
+		{"stage promote with maintain duty", http.MethodPost, "platform.release.maintain", releaseBody(nil), http.StatusCreated},
+		{"prod promote with maintain duty only", http.MethodPost, "platform.release.maintain", releaseBody(prod), http.StatusForbidden},
+		{"prod promote with approve duty", http.MethodPost, "platform.promotion.approve", releaseBody(prod), http.StatusCreated},
+		{"stage promote with approve duty only", http.MethodPost, "platform.promotion.approve", releaseBody(nil), http.StatusForbidden},
+		{"stage rollback with maintain duty only", http.MethodPost, "platform.release.maintain", releaseBody(rollback), http.StatusForbidden},
+		{"stage rollback with rollback duty", http.MethodPost, "platform.environment.rollback", releaseBody(rollback), http.StatusCreated},
+		{"prod rollback with approve duty only", http.MethodPost, "platform.promotion.approve", releaseBody(func(b string) string { return rollback(prod(b)) }), http.StatusForbidden},
+		{"list with view duty", http.MethodGet, "platform.release.view", "", http.StatusOK},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -240,8 +240,8 @@ func TestReleasesRequireDuty(t *testing.T) {
 }
 
 func TestRecordReleaseForbiddenNamesEveryAcceptedDuty(t *testing.T) {
-	rec := doRelease(newRouterOnly(&fakeStore{}), http.MethodPost, releasesPath, releaseBody(nil), "View platform releases", "")
-	for _, duty := range []string{"Maintain platform releases", "Approve production promotion", "Rollback environment"} {
+	rec := doRelease(newRouterOnly(&fakeStore{}), http.MethodPost, releasesPath, releaseBody(nil), "platform.release.view", "")
+	for _, duty := range []string{"platform.release.maintain", "platform.promotion.approve", "platform.environment.rollback"} {
 		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), duty) {
 			t.Fatalf("got %d %s; want 403 naming %q", rec.Code, rec.Body.String(), duty)
 		}
@@ -265,7 +265,7 @@ func TestRecordReleaseRestrictedToOperatorTenant(t *testing.T) {
 			api.New(f, tc.operator).Register(r)
 			req := httptest.NewRequest(http.MethodPost, releasesPath, strings.NewReader(releaseBody(nil)))
 			req.Header.Set("X-Passage-Tenant", testkit.TenantID(tc.tenantN))
-			req.Header.Set("X-Passage-Duties", "Maintain platform releases,Approve production promotion,Rollback environment")
+			req.Header.Set("X-Passage-Duties", "platform.release.maintain,platform.promotion.approve,platform.environment.rollback")
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
 			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), tc.wantBody) || len(f.releases) != 0 {
@@ -290,7 +290,7 @@ func TestListReleasesOpenToAnyTenantWithDuty(t *testing.T) {
 			api.New(&fakeStore{releases: []store.Release{{ID: "1", Actor: "operator-user"}}}, testkit.TenantID(1)).Register(r)
 			req := httptest.NewRequest(http.MethodGet, releasesPath, nil)
 			req.Header.Set("X-Passage-Tenant", testkit.TenantID(tc.tenantN))
-			req.Header.Set("X-Passage-Duties", "View platform releases")
+			req.Header.Set("X-Passage-Duties", "platform.release.view")
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "operator-user") != tc.wantActor {

@@ -14,8 +14,8 @@ const receiving: PassageModule = {
     { path: "/receiving/receipts/:id", element: createElement(ReceiptPage), handle: { title: "Receipt" } },
   ],
   nav: [
-    { label: "Receipts", to: "/receiving/receipts", duty: "ReceivingMaintain" },
-    { label: "Record arrival", to: "/receiving/receipts/new", duty: "ReceivingMaintain" },
+    { label: "Receipts", to: "/receiving/receipts", duty: "receiving.receipt.maintain" },
+    { label: "Record arrival", to: "/receiving/receipts/new", duty: "receiving.receipt.maintain" },
   ],
 };
 

@@ -7,7 +7,7 @@ import { readTool, writeTool } from "./fixtures.js";
 describe("validateToolDefinition", () => {
   const cases: Array<{ name: string; tool: ReturnType<typeof readTool>; want: string | null }> = [
     { name: "valid read tool", tool: readTool("passage.ap.invoice.list", "APInvoiceRead"), want: null },
-    { name: "valid three-segment tool", tool: readTool("passage.knowledge.search", "CopilotUse"), want: null },
+    { name: "valid three-segment tool", tool: readTool("passage.knowledge.search", "mcp.copilot.use"), want: null },
     { name: "bad name", tool: readTool("ap.invoice.list", "APInvoiceRead"), want: "must match" },
     { name: "missing duty", tool: readTool("passage.ap.invoice.list", ""), want: "x-passage-duty" },
     { name: "write tool without approval", tool: writeTool("passage.ap.invoice.post", "APInvoicePost", { approvalMode: "none" }), want: "write tools" },

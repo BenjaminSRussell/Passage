@@ -15,12 +15,12 @@ import (
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/domain"
 )
 
-// Audit and break-glass duties (PRD §9.48 duties). BreakGlassRequest stands for
+// Audit and break-glass duties (PRD §9.48 duties). compliance.break-glass.request stands for
 // "any user with an eligible role mapping" until the wave-2 role mapping exists.
 const (
-	DutyAuditPolicyRun    = "AuditPolicyRun"
-	DutyAuditCaseManage   = "AuditCaseManage"
-	DutyBreakGlassRequest = "BreakGlassRequest"
+	DutyAuditPolicyRun    = "compliance.audit-policy.run"
+	DutyAuditCaseManage   = "compliance.audit-case.manage"
+	DutyBreakGlassRequest = "compliance.break-glass.request"
 )
 
 const (

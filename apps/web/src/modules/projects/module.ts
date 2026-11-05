@@ -37,12 +37,12 @@ const projects: PassageModule = {
     { path: "/projects/:id/invoice-proposals/:proposalId", element: createElement(ProposalDetailPage), handle: { title: "Invoice proposal" } },
   ],
   nav: [
-    { label: "Overview", to: "/projects", duty: "ProjInquire" },
-    { label: "All projects", to: "/projects/list", duty: "ProjInquire" },
-    { label: "New project", to: "/projects/new", duty: "ProjMaintain" },
-    { label: "Project groups", to: "/projects/groups", duty: "ProjInquire" },
-    { label: "Posting profiles", to: "/projects/posting-profiles", duty: "ProjInquire" },
-    { label: "Project categories", to: "/projects/categories", duty: "ProjInquire" },
+    { label: "Overview", to: "/projects", duty: "projects.inquire" },
+    { label: "All projects", to: "/projects/list", duty: "projects.inquire" },
+    { label: "New project", to: "/projects/new", duty: "projects.maintain" },
+    { label: "Project groups", to: "/projects/groups", duty: "projects.inquire" },
+    { label: "Posting profiles", to: "/projects/posting-profiles", duty: "projects.inquire" },
+    { label: "Project categories", to: "/projects/categories", duty: "projects.inquire" },
   ],
 };
 

@@ -22,7 +22,7 @@ Slice 5 persists cash advances (request with the EXP-ADV-001 limit, the EXP-ADV-
 past-due block and the requisition link check, approve/reject, record the AP prepayment
 that paid it with `dev.passage.expense.cashadvance.paid.v1` in the outbox, record a cash
 return capped at the open balance with the status re-derived), travel requisitions
-(create with destinations and estimate lines, submit, approve/reject), MssApprove's
+(create with destinations and estimate lines, submit, approve/reject), hr.team.approve's
 own-items block on both decisions (EXP-SOD-001, by user id), and card feed imports (CSV
 and OFX into the cardholders' UNASSIGNED pools, quarantine of unreadable rows and unknown
 cards, one import per file hash with EXP-CARD-002). The tables have tenant and
@@ -34,7 +34,7 @@ Everything below is not built yet.
 |---|---|---|
 | Split lines, hotel itemization, editing a stored line in place, line project/WBS, city/country, card_txn_id, receipt_id, tax code, personal flag, attendee list (FR-43.11, 8.43.4) | later slice of PSG-43 | Slice 4 stores the line fields the policy engine reads; a line is corrected by deleting and re-adding it |
 | Return (SUBMITTED → RETURNED → DRAFT) and the approver chain on the report (8.43.7) | later slice of PSG-43 | `POST /v1/expense/reports/{id}/decide` (duty `expense.approve`) approves or rejects a SUBMITTED report with the submitter blocked (EXP-SOD-001, by user id); return and a multi-step approver chain need the wave-4 workflow (row below) |
-| Own-items scoping for EssExpense, read-all for ExpenseAuditor, MssApprove on own reports blocked (8.43.17) | later slice of PSG-43 | The principal carries no worker id yet (wave 2 identity, wave 42 worker); any holder of `expense.report.write` sees and changes every report, advance, requisition and card transaction in its tenant and legal-entity scope. The own-items block on advance and requisition decisions compares the requesting and deciding gateway user ids, not worker ids |
+| Own-items scoping for EssExpense, read-all for ExpenseAuditor, hr.team.approve on own reports blocked (8.43.17) | later slice of PSG-43 | The principal carries no worker id yet (wave 2 identity, wave 42 worker); any holder of `expense.report.write` sees and changes every report, advance, requisition and card transaction in its tenant and legal-entity scope. The own-items block on advance and requisition decisions compares the requesting and deciding gateway user ids, not worker ids |
 | Worker and legal entity checked against HR (wave 42) and org (wave 6) on report, advance, requisition and card import create; cardholder ids checked as workers | later slice of PSG-43 | Ids are validated as UUIDs and the legal entity against the caller's scope only |
 | Number sequences EXP-REP, EXP-ADV and EXP-TR per legal entity (8.43.13) | later slice of PSG-43 | Reports, advances and requisitions are identified by UUID |
 | Idempotency-Key expiry after 24 hours | later slice of PSG-43 | Keys are kept with their rows (report, line, advance, requisition, card import) or in `idempotency_keys` (submit and the advance and requisition custom methods) with no purge job |

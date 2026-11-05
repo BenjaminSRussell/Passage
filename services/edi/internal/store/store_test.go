@@ -43,7 +43,7 @@ func counting997(next func() (int64, error)) (string, error) {
 
 func TestCreatePartner_IdempotencyKey(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EDI_ADMIN")
+	ctx := testkit.Ctx(testkit.TenantID(1), "edi.admin")
 	st := New(pool, 30)
 	prof := domain.PartnerProfile{Name: "Demo distributor", ISA: domain.Party{Qualifier: "ZZ", ID: "DISTRIBUTOR"}, Environment: "TEST"}
 
@@ -74,7 +74,7 @@ func TestCreatePartner_IdempotencyKey(t *testing.T) {
 
 func TestPartners_ListAndGet(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EDI_ADMIN")
+	ctx := testkit.Ctx(testkit.TenantID(1), "edi.admin")
 	st := New(pool, 30)
 	a, _, err := st.CreatePartner(ctx, "k1", "h1", domain.PartnerProfile{Name: "Beta", ISA: domain.Party{Qualifier: "ZZ", ID: "B"}, Environment: "TEST"})
 	if err != nil {
@@ -103,7 +103,7 @@ func TestPartners_ListAndGet(t *testing.T) {
 func TestReceiveInterchange_DuplicateWindowAndGapFreeControls(t *testing.T) {
 	pool := migrated(t)
 	tid := testkit.TenantID(2)
-	ctx := testkit.Ctx(tid, "EDI_OPERATE")
+	ctx := testkit.Ctx(tid, "edi.operate")
 	st := New(pool, 30)
 	p, _, err := st.CreatePartner(ctx, "key-C", "h", profile("P1"))
 	if err != nil {
@@ -161,7 +161,7 @@ func TestReceiveInterchange_DuplicateWindowAndGapFreeControls(t *testing.T) {
 func TestReceiveInterchange_WritesMessagesAndEventInOneTransaction(t *testing.T) {
 	pool := migrated(t)
 	tid := testkit.TenantID(3)
-	ctx := testkit.Ctx(tid, "EDI_OPERATE")
+	ctx := testkit.Ctx(tid, "edi.operate")
 	st := New(pool, 30)
 	p, _, err := st.CreatePartner(ctx, "k", "h", profile("P3"))
 	if err != nil {
@@ -258,8 +258,8 @@ func TestRowLevelSecurity(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := New(app, 30)
-	one := testkit.Ctx(testkit.TenantID(1), "EDI_ADMIN")
-	two := testkit.Ctx(testkit.TenantID(2), "EDI_ADMIN")
+	one := testkit.Ctx(testkit.TenantID(1), "edi.admin")
+	two := testkit.Ctx(testkit.TenantID(2), "edi.admin")
 	p, _, err := st.CreatePartner(one, "k", "h", profile("SHARED"))
 	if err != nil {
 		t.Fatal(err)

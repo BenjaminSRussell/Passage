@@ -46,7 +46,7 @@ paths:
     get:
       operationId: listWorkers
       summary: List workers by personnel number (no PII)
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - name: q
           in: query
@@ -73,7 +73,7 @@ paths:
     post:
       operationId: createWorker
       summary: Create a worker and seal its PII into the vault
-      x-passage-duty: HcmWorkerMaintain
+      x-passage-duty: hr.worker.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -103,7 +103,7 @@ paths:
     get:
       operationId: getWorker
       summary: Get a worker with PII masked
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -119,7 +119,7 @@ paths:
     get:
       operationId: workerAsOf
       summary: Employments, primary position and manager as-of a date (FR-42.4, BR-42.1)
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - name: date
@@ -143,7 +143,7 @@ paths:
     get:
       operationId: revealPII
       summary: Unmasked PII, audited with a reason (FR-42.1, AC-42.7)
-      x-passage-duty: HcmPIIRead
+      x-passage-duty: hr.pii.read
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - name: reason
@@ -173,7 +173,7 @@ paths:
     get:
       operationId: listEmployments
       summary: Every employment of a worker, oldest first, with status as-of now
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -190,7 +190,7 @@ paths:
     post:
       operationId: createEmployment
       summary: Start an employment at a legal entity (FR-42.2, FR-42.23)
-      x-passage-duty: HcmWorkerMaintain
+      x-passage-duty: hr.worker.maintain
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -219,7 +219,7 @@ paths:
     get:
       operationId: listPositions
       summary: List positions by position number
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -237,7 +237,7 @@ paths:
     post:
       operationId: createPosition
       summary: Create a position with an FTE (FR-42.3)
-      x-passage-duty: HcmOrgMaintain
+      x-passage-duty: hr.org.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -263,7 +263,7 @@ paths:
     get:
       operationId: getPosition
       summary: A position with every assignment on it
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/PositionId"
       responses:
@@ -281,7 +281,7 @@ paths:
     post:
       operationId: createAssignment
       summary: Place a worker on a position; FTE and primary rules apply (FR-42.3)
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/PositionId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -310,7 +310,7 @@ paths:
     get:
       operationId: listAbsencePlans
       summary: List absence plans by code
-      x-passage-duty: EssAbsence
+      x-passage-duty: hr.absence.self
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -330,7 +330,7 @@ paths:
     post:
       operationId: createAbsencePlan
       summary: Create an absence plan with its accrual rule (FR-42.6, BR-42.3)
-      x-passage-duty: HcmAbsenceAdmin
+      x-passage-duty: hr.absence.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -364,7 +364,7 @@ paths:
     get:
       operationId: getAbsencePlan
       summary: An absence plan with its latest accrual periods, year ends and carry-over expiries
-      x-passage-duty: HcmAbsenceAdmin
+      x-passage-duty: hr.absence.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -389,7 +389,7 @@ paths:
         (plan, plan year, worker): a rerun closes only workers not yet closed.
         Accrual into the next plan year is refused (HCM-ABS-YEAR-OPEN) until
         the previous year is closed.
-      x-passage-duty: HcmAbsenceAdmin
+      x-passage-duty: hr.absence.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -429,7 +429,7 @@ paths:
     post:
       operationId: expireAbsenceCarryOver
       summary: Expire unused carry-over of one plan year once carryOverExpiryMonths have passed (BR-42.3)
-      x-passage-duty: HcmAbsenceAdmin
+      x-passage-duty: hr.absence.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -478,7 +478,7 @@ paths:
         credits nobody twice and needs no Idempotency-Key. Employments are read
         under the caller's legal-entity scope; a later run with another scope
         credits the remaining workers.
-      x-passage-duty: HcmAbsenceAdmin
+      x-passage-duty: hr.absence.admin
       requestBody:
         required: true
         content:
@@ -523,10 +523,10 @@ paths:
       operationId: listAbsenceRequests
       summary: Absence requests by start date, oldest first (the approval queue)
       description: |
-        A caller with only EssAbsence sees their own requests (the worker whose
-        sign-in user they are). With MssApprove the caller sees their own and
-        their direct reports' requests; HcmAbsenceAdmin sees the tenant's.
-      x-passage-duty: EssAbsence
+        A caller with only hr.absence.self sees their own requests (the worker whose
+        sign-in user they are). With hr.team.approve the caller sees their own and
+        their direct reports' requests; hr.absence.admin sees the tenant's.
+      x-passage-duty: hr.absence.self
       parameters:
         - name: status
           in: query
@@ -564,9 +564,9 @@ paths:
         day, or 24 hours, per calendar day) and the plan year (HCM-ABS-YEAR-SPAN,
         and HCM-ABS-YEAR-CLOSED once the year has had its year end).
         An overlap with a submitted request only warns (HCM-ABS-003). A caller
-        without HcmAbsenceAdmin requests only for their own worker
+        without hr.absence.admin requests only for their own worker
         (HCM-ABS-NOT-OWN).
-      x-passage-duty: EssAbsence
+      x-passage-duty: hr.absence.self
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -609,10 +609,10 @@ paths:
         CARRY_OVER first, and writes dev.passage.hr.absence.approved.v1 in the
         same transaction. Replaying the decision a request already has returns
         it unchanged. An approver cannot decide their own request
-        (HCM-ABS-SELF-APPROVAL, 403). A manager without HcmAbsenceAdmin can
+        (HCM-ABS-SELF-APPROVAL, 403). A manager without hr.absence.admin can
         decide only a direct report's request; any other request is 404
         HCM-ABS-REQ-NOT-FOUND.
-      x-passage-duty: MssApprove
+      x-passage-duty: hr.team.approve
       parameters:
         - $ref: "#/components/parameters/RequestId"
       requestBody:
@@ -652,7 +652,7 @@ paths:
     post:
       operationId: cancelAbsenceRequest
       summary: Withdraw a submitted request (an approved one cannot be cancelled yet)
-      x-passage-duty: EssAbsence
+      x-passage-duty: hr.absence.self
       parameters:
         - $ref: "#/components/parameters/RequestId"
       responses:
@@ -675,11 +675,11 @@ paths:
       operationId: getAbsenceBalances
       summary: A worker's balances per plan for the plan year containing asOf
       description: |
-        A caller with only EssAbsence reads their own worker (HCM-ABS-NOT-OWN
-        otherwise). With MssApprove the caller reads their own and their
+        A caller with only hr.absence.self reads their own worker (HCM-ABS-NOT-OWN
+        otherwise). With hr.team.approve the caller reads their own and their
         direct reports' (any other worker is 404 HCM-WRK-NOT-FOUND);
-        HcmAbsenceAdmin reads anyone's.
-      x-passage-duty: EssAbsence
+        hr.absence.admin reads anyone's.
+      x-passage-duty: hr.absence.self
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - name: asOf
@@ -708,7 +708,7 @@ paths:
     get:
       operationId: listBenefitPlans
       summary: List benefit plans by code, each with its options
-      x-passage-duty: EssBenefits
+      x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -732,7 +732,7 @@ paths:
         The eligibility rule is compiled before it is stored; a rule that does
         not parse is a 400 naming eligibilityRule. Rates take at most the
         currency's minor-unit places.
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -772,7 +772,7 @@ paths:
     get:
       operationId: getBenefitPlan
       summary: A benefit plan with its options
-      x-passage-duty: EssBenefits
+      x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/BenefitPlanId"
       responses:
@@ -799,7 +799,7 @@ paths:
         them is). A rule that reads a fact the worker lacks (fte without a
         position assignment, age, job.type) is not eligible and the reason
         says so. The read runs under the caller's legal-entity scope.
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       parameters:
         - $ref: "#/components/parameters/BenefitPlanId"
         - name: asOf
@@ -828,9 +828,9 @@ paths:
       operationId: recordLifeEvent
       summary: Record a life event, which opens a 30-day enrollment window from its date (8.42.5)
       description: |
-        A caller without HcmWorkerMaintain records only their own worker's
+        A caller without hr.worker.maintain records only their own worker's
         events (HCM-BEN-NOT-OWN otherwise).
-      x-passage-duty: EssBenefits
+      x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -876,9 +876,9 @@ paths:
         (HCM-BEN-003); and the worker must not hold an enrollment in the plan
         that overlaps it (HCM-BEN-004, end it first). The
         benefitenrollment.changed event (START) is written in the same
-        transaction. A caller without HcmWorkerMaintain enrolls only their own
+        transaction. A caller without hr.worker.maintain enrolls only their own
         worker (HCM-BEN-NOT-OWN).
-      x-passage-duty: EssBenefits
+      x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -926,7 +926,7 @@ paths:
         plans; other reasons end the day after lastDay. Ending again with the
         same values returns the enrollment unchanged; otherwise an ended
         enrollment is HCM-BEN-ENDED. The END event commits with the change.
-      x-passage-duty: HcmWorkerMaintain
+      x-passage-duty: hr.worker.maintain
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
       requestBody:
@@ -959,9 +959,9 @@ paths:
       operationId: getWorkerBenefits
       summary: A worker's enrollments (oldest first) and life events (newest first)
       description: |
-        A caller with only EssBenefits reads their own worker (HCM-BEN-NOT-OWN
-        otherwise); HcmWorkerInquire or HcmWorkerMaintain read anyone's.
-      x-passage-duty: EssBenefits
+        A caller with only hr.benefits.self reads their own worker (HCM-BEN-NOT-OWN
+        otherwise); hr.worker.inquire or hr.worker.maintain read anyone's.
+      x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -981,7 +981,7 @@ paths:
     get:
       operationId: listSkills
       summary: List the skill catalog by code (FR-42.10)
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -1001,7 +1001,7 @@ paths:
     post:
       operationId: createSkill
       summary: Add a skill to the catalog with its rating scale 1..scaleMax (FR-42.10)
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1048,7 +1048,7 @@ paths:
         (truncated is true when more matched). Give skills, certs or both. A
         skill code not in the catalog matches nobody. availableFrom is refused
         until availability exists (NOT-IMPLEMENTED.md).
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - name: skills
           in: query
@@ -1088,7 +1088,7 @@ paths:
     get:
       operationId: listWorkerSkills
       summary: A worker's skill profile, one current rating per skill
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -1113,7 +1113,7 @@ paths:
         retry cannot overwrite a newer rating. The same rating and date again
         changes nothing and publishes no event, so a retry is safe without an
         Idempotency-Key. A changed rating publishes workerskill.changed.
-      x-passage-duty: HcmWorkerMaintain
+      x-passage-duty: hr.worker.maintain
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       requestBody:
@@ -1157,7 +1157,7 @@ paths:
     get:
       operationId: listCertifications
       summary: A worker's certificates, newest first, with validity as-of a date (BR-42.8)
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - $ref: "#/components/parameters/AsOf"
@@ -1184,7 +1184,7 @@ paths:
         month's last day when the day does not exist), or neither for a
         certificate that never expires. Validity is [issuedOn, expiresOn).
         Publishes certification.issued.
-      x-passage-duty: HcmWorkerMaintain
+      x-passage-duty: hr.worker.maintain
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1231,7 +1231,7 @@ paths:
         Certificates valid on asOf that expire within withinDays after it,
         soonest first. A certificate already renewed (a later one of the same
         code for the worker that is valid longer) is left out.
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/AsOf"
         - name: withinDays
@@ -1265,7 +1265,7 @@ paths:
         comparison lists every requirement with the worker's rating (0 when
         not rated) and delta = actual - required; gaps lists only the rows
         with a negative delta.
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - name: positionId
@@ -1305,7 +1305,7 @@ paths:
     get:
       operationId: listSkillRequirements
       summary: A position's skill profile by skill code
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/PositionId"
       responses:
@@ -1325,7 +1325,7 @@ paths:
       operationId: setSkillRequirement
       summary: Set or replace the minimum rating a position needs in a skill (FR-42.18)
       description: Replaces an earlier minimum for the same skill, so a retry is safe without an Idempotency-Key.
-      x-passage-duty: HcmOrgMaintain
+      x-passage-duty: hr.org.maintain
       parameters:
         - $ref: "#/components/parameters/PositionId"
       requestBody:
@@ -1363,7 +1363,7 @@ paths:
     delete:
       operationId: removeSkillRequirement
       summary: Drop a skill from a position's profile
-      x-passage-duty: HcmOrgMaintain
+      x-passage-duty: hr.org.maintain
       parameters:
         - $ref: "#/components/parameters/PositionId"
         - name: skillCode
@@ -1388,7 +1388,7 @@ paths:
     get:
       operationId: listJobSkillRequirements
       summary: A job's skill profile by skill code
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/JobId"
       responses:
@@ -1408,7 +1408,7 @@ paths:
       operationId: setJobSkillRequirement
       summary: Set or replace the minimum rating a job needs in a skill (FR-42.18)
       description: Replaces an earlier minimum for the same skill, so a retry is safe without an Idempotency-Key.
-      x-passage-duty: HcmOrgMaintain
+      x-passage-duty: hr.org.maintain
       parameters:
         - $ref: "#/components/parameters/JobId"
       requestBody:
@@ -1442,7 +1442,7 @@ paths:
     delete:
       operationId: removeJobSkillRequirement
       summary: Drop a skill from a job's profile
-      x-passage-duty: HcmOrgMaintain
+      x-passage-duty: hr.org.maintain
       parameters:
         - $ref: "#/components/parameters/JobId"
         - name: skillCode
@@ -1464,7 +1464,7 @@ paths:
       operationId: jobSkillGaps
       summary: Skill gaps of every worker who holds the job on a date (FR-42.18)
       description: Workers whose primary position on asOf carries the job's code, at most 500 (truncated says more exist), each with only the unmet requirements.
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/JobId"
         - $ref: "#/components/parameters/AsOf"
@@ -1824,7 +1824,7 @@ paths:
     get:
       operationId: listCourses
       summary: List the course catalog by code, with each course's skill outcomes (FR-42.14)
-      x-passage-duty: EssLearning
+      x-passage-duty: hr.learning.self
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -1844,7 +1844,7 @@ paths:
     post:
       operationId: createCourse
       summary: Add a course with the skills a PASS awards and the certificate it issues (FR-42.14)
-      x-passage-duty: HcmLearningAdmin
+      x-passage-duty: hr.learning.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1894,7 +1894,7 @@ paths:
     get:
       operationId: getCourse
       summary: Get one course
-      x-passage-duty: EssLearning
+      x-passage-duty: hr.learning.self
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -1918,7 +1918,7 @@ paths:
     get:
       operationId: listCourseSessions
       summary: List a course's sessions by start, with seat counts (at most 500)
-      x-passage-duty: EssLearning
+      x-passage-duty: hr.learning.self
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -1941,7 +1941,7 @@ paths:
     post:
       operationId: createCourseSession
       summary: Schedule a session (dates, location or virtual link, instructor, capacity, waitlist, cost)
-      x-passage-duty: HcmLearningAdmin
+      x-passage-duty: hr.learning.admin
       parameters:
         - $ref: "#/components/parameters/CourseId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1992,7 +1992,7 @@ paths:
     get:
       operationId: getCourseSession
       summary: Get one session with its confirmed, waitlisted and requested counts
-      x-passage-duty: EssLearning
+      x-passage-duty: hr.learning.self
       parameters:
         - $ref: "#/components/parameters/SessionId"
       responses:
@@ -2016,7 +2016,7 @@ paths:
     get:
       operationId: listCourseRegistrations
       summary: The attendance list, in registration order (at most 500)
-      x-passage-duty: HcmLearningAdmin
+      x-passage-duty: hr.learning.admin
       parameters:
         - $ref: "#/components/parameters/SessionId"
       responses:
@@ -2044,9 +2044,9 @@ paths:
         gets it back with 200. A course without manager approval takes a seat
         now (CONFIRMED, else WAITLISTED, else HCM-CRS-001); with approval it
         waits as REQUESTED with the HCM-CRS-002 warning. An employee with only
-        EssLearning registers only themselves (HCM-CRS-NOT-OWN). Registration
+        hr.learning.self registers only themselves (HCM-CRS-NOT-OWN). Registration
         closes when the session ends.
-      x-passage-duty: EssLearning
+      x-passage-duty: hr.learning.self
       parameters:
         - $ref: "#/components/parameters/SessionId"
       requestBody:
@@ -2109,7 +2109,7 @@ paths:
         max(existing, course rating), issues the course certificate from the
         session end date for the course's validity months, and publishes
         course.completed in the same transaction. All lines apply or none.
-      x-passage-duty: HcmLearningAdmin
+      x-passage-duty: hr.learning.admin
       parameters:
         - $ref: "#/components/parameters/SessionId"
       requestBody:
@@ -2148,12 +2148,12 @@ paths:
       operationId: approveCourseRegistration
       summary: Approve a REQUESTED registration; it takes a seat or a waitlist place
       description: |
-        A manager with only MssApprove approves registrations of their direct
+        A manager with only hr.team.approve approves registrations of their direct
         reports; any other registration answers the same 404 as one that does
-        not exist. A caller who also holds HcmLearningAdmin approves tenant-wide.
+        not exist. A caller who also holds hr.learning.admin approves tenant-wide.
         HCM-ESS-001 (404) when no worker is linked to the caller's sign-in,
         HCM-ESS-002 (409) when more than one is.
-      x-passage-duty: MssApprove
+      x-passage-duty: hr.team.approve
       parameters:
         - $ref: "#/components/parameters/RegistrationId"
       responses:
@@ -2196,8 +2196,8 @@ paths:
       description: |
         Canceling again returns the registration unchanged. A registration
         with a recorded outcome cannot be canceled. An employee with only
-        EssLearning cancels only their own (HCM-CRS-NOT-OWN).
-      x-passage-duty: EssLearning
+        hr.learning.self cancels only their own (HCM-CRS-NOT-OWN).
+      x-passage-duty: hr.learning.self
       parameters:
         - $ref: "#/components/parameters/RegistrationId"
       responses:
@@ -2236,7 +2236,7 @@ paths:
         accepted, so the route cannot read another record. The read is audited
         like any masked PII read. HCM-ESS-001 (404) when no worker is linked,
         HCM-ESS-002 (409) when more than one is.
-      x-passage-duty: EssBase
+      x-passage-duty: hr.profile.self
       responses:
         "200":
           description: The caller's worker record
@@ -2262,7 +2262,7 @@ paths:
         positions skipped). Items carry no userId or partyPersonId.
         HCM-ESS-001 (404) when no worker is linked to the caller's sign-in,
         HCM-ESS-002 (409) when more than one is.
-      x-passage-duty: MssBase
+      x-passage-duty: hr.team.manage
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -2300,7 +2300,7 @@ paths:
         not exist, answers the same 404 HCM-WRK-NOT-FOUND. The record carries
         no userId or partyPersonId. HCM-ESS-001 (404) when no worker is linked
         to the caller's sign-in, HCM-ESS-002 (409) when more than one is.
-      x-passage-duty: MssBase
+      x-passage-duty: hr.team.manage
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -2330,7 +2330,7 @@ paths:
     post:
       operationId: reportIncident
       summary: Report an injury or illness incident (BR-42.11)
-      x-passage-duty: HcmIncidentReport
+      x-passage-duty: hr.incident.report
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2367,7 +2367,7 @@ paths:
     get:
       operationId: listIncidents
       summary: Page the register, newest case first; the worker of a privacy case is hidden
-      x-passage-duty: HcmIncidentAdmin
+      x-passage-duty: hr.incident.admin
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -2389,7 +2389,7 @@ paths:
     get:
       operationId: oshaExtract
       summary: OSHA 300 log, 300A summary and 301 detail for a year; privacy cases show 'Privacy case' for the name
-      x-passage-duty: HcmIncidentAdmin
+      x-passage-duty: hr.incident.admin
       parameters:
         - $ref: "#/components/parameters/Year"
         - $ref: "#/components/parameters/SiteId"
@@ -2410,7 +2410,7 @@ paths:
     get:
       operationId: getIncident
       summary: One incident with its opened medical details; the read is audited
-      x-passage-duty: HcmIncidentAdmin
+      x-passage-duty: hr.incident.admin
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
@@ -2436,7 +2436,7 @@ paths:
     post:
       operationId: advanceIncident
       summary: Move an incident to UNDER_REVIEW or CLOSED; the reporter cannot close it; a CLOSED incident is immutable
-      x-passage-duty: HcmIncidentAdmin
+      x-passage-duty: hr.incident.admin
       parameters:
         - $ref: "#/components/parameters/EntityId"
       requestBody:
@@ -2468,7 +2468,7 @@ paths:
     post:
       operationId: issueLoanedItem
       summary: Lend an item to a worker (FR-42.17)
-      x-passage-duty: HcmWorkerMaintain
+      x-passage-duty: hr.worker.maintain
       parameters:
         - $ref: "#/components/parameters/WorkerId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -2506,7 +2506,7 @@ paths:
     get:
       operationId: listWorkerLoans
       summary: A worker's loaned items
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -2526,7 +2526,7 @@ paths:
     get:
       operationId: outstandingLoans
       summary: Items still OUT, soonest due first
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/DueBy"
       responses:
@@ -2546,7 +2546,7 @@ paths:
     post:
       operationId: closeLoanedItem
       summary: Record an item RETURNED or LOST
-      x-passage-duty: HcmWorkerMaintain
+      x-passage-duty: hr.worker.maintain
       parameters:
         - $ref: "#/components/parameters/EntityId"
       requestBody:
@@ -2578,7 +2578,7 @@ paths:
     post:
       operationId: createChecklistTemplate
       summary: Define an onboarding, offboarding or transfer checklist (FR-42.19)
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2615,7 +2615,7 @@ paths:
     get:
       operationId: listChecklistTemplates
       summary: Checklist templates, optionally of one kind
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       parameters:
         - $ref: "#/components/parameters/TemplateKind"
       responses:
@@ -2635,7 +2635,7 @@ paths:
     post:
       operationId: startChecklist
       summary: Instantiate a template for a worker on an effective date (BR-42.12); starting it again returns the stored checklist
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       requestBody:
@@ -2672,7 +2672,7 @@ paths:
     get:
       operationId: listWorkerChecklists
       summary: A worker's checklists with their tasks
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -2692,7 +2692,7 @@ paths:
     get:
       operationId: getChecklist
       summary: One checklist with its tasks
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
@@ -2718,7 +2718,7 @@ paths:
     post:
       operationId: completeChecklist
       summary: "Complete a checklist: every task done or skipped and, offboarding, no item OUT (AC-42.15)"
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
@@ -2744,7 +2744,7 @@ paths:
     get:
       operationId: listOwnedTasks
       summary: Tasks owned by a worker, soonest due first
-      x-passage-duty: HcmWorkerInquire
+      x-passage-duty: hr.worker.inquire
       parameters:
         - $ref: "#/components/parameters/OwnerWorkerId"
         - $ref: "#/components/parameters/TaskStatus"
@@ -2765,7 +2765,7 @@ paths:
     post:
       operationId: finishTask
       summary: Mark a task DONE or SKIPPED; the loaned-items task is DONE only when nothing is OUT
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/EntityId"
       requestBody:
@@ -2797,7 +2797,7 @@ paths:
     post:
       operationId: createQuestionnaire
       summary: Design a questionnaire (FR-42.15)
-      x-passage-duty: HcmQuestionnaireAdmin
+      x-passage-duty: hr.questionnaire.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2834,7 +2834,7 @@ paths:
     get:
       operationId: listQuestionnaires
       summary: Questionnaires by code
-      x-passage-duty: HcmQuestionnaireAdmin
+      x-passage-duty: hr.questionnaire.admin
       responses:
         "200":
           description: OK
@@ -2852,7 +2852,7 @@ paths:
     get:
       operationId: getQuestionnaire
       summary: One questionnaire
-      x-passage-duty: HcmQuestionnaireAdmin
+      x-passage-duty: hr.questionnaire.admin
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
@@ -2878,7 +2878,7 @@ paths:
     post:
       operationId: createSchedule
       summary: Schedule a questionnaire to a CEL population; the invited count is snapshotted
-      x-passage-duty: HcmQuestionnaireAdmin
+      x-passage-duty: hr.questionnaire.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2916,7 +2916,7 @@ paths:
     get:
       operationId: openSchedules
       summary: Schedules open now
-      x-passage-duty: EssQuestionnaire
+      x-passage-duty: hr.questionnaire.self
       responses:
         "200":
           description: OK
@@ -2934,7 +2934,7 @@ paths:
     get:
       operationId: getSchedule
       summary: A schedule with the questionnaire to fill in
-      x-passage-duty: EssQuestionnaire
+      x-passage-duty: hr.questionnaire.self
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
@@ -2960,7 +2960,7 @@ paths:
     post:
       operationId: submitAnswers
       summary: Answer for yourself while the schedule is open
-      x-passage-duty: EssQuestionnaire
+      x-passage-duty: hr.questionnaire.self
       parameters:
         - $ref: "#/components/parameters/EntityId"
       requestBody:
@@ -2988,7 +2988,7 @@ paths:
     get:
       operationId: scheduleResults
       summary: Response rate and statistics by question and result group; by=department breaks down by department
-      x-passage-duty: HcmQuestionnaireAdmin
+      x-passage-duty: hr.questionnaire.admin
       parameters:
         - $ref: "#/components/parameters/EntityId"
         - $ref: "#/components/parameters/ResultsBy"
@@ -3019,7 +3019,7 @@ paths:
     post:
       operationId: createJob
       summary: Create a job with an optional pay range (FR-42.2)
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3068,7 +3068,7 @@ paths:
     get:
       operationId: listJobs
       summary: List jobs by code
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -3107,7 +3107,7 @@ paths:
     get:
       operationId: getJob
       summary: Get one job
-      x-passage-duty: HcmOrgInquire
+      x-passage-duty: hr.org.inquire
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -3145,7 +3145,7 @@ paths:
     post:
       operationId: createCompensationPlan
       summary: Create a compensation plan
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3194,7 +3194,7 @@ paths:
     get:
       operationId: listCompensationPlans
       summary: List compensation plans by code
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -3233,7 +3233,7 @@ paths:
     get:
       operationId: listWorkerCompensation
       summary: A worker's effective-dated fixed compensation
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -3271,7 +3271,7 @@ paths:
     post:
       operationId: submitPersonnelAction
       summary: Submit a hire, transfer, termination or compensation change; applied at once when effective today or earlier, otherwise pending up to 365 days ahead (FR-42.5, BR-42.2)
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3319,8 +3319,8 @@ paths:
                 $ref: "#/components/schemas/Problem"
     get:
       operationId: listPersonnelActions
-      summary: List personnel actions; compensation amounts are shown only with HcmCompAdmin
-      x-passage-duty: HcmActionMaintain
+      summary: List personnel actions; compensation amounts are shown only with hr.compensation.admin
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -3361,7 +3361,7 @@ paths:
     post:
       operationId: applyDuePersonnelActions
       summary: Apply pending actions whose effective date has arrived; a failing action is marked FAILED
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       responses:
         "200":
           description: Success
@@ -3397,7 +3397,7 @@ paths:
     get:
       operationId: getPersonnelAction
       summary: Get one personnel action
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -3435,7 +3435,7 @@ paths:
     post:
       operationId: withdrawPersonnelAction
       summary: Withdraw a pending action (applied rows are immutable)
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -3480,7 +3480,7 @@ paths:
         exactly one legal entity (422 HCM-LEGAL-ENTITY-REQUIRED) and an
         unreachable numbering service answers 503 HCM-NUMBERING-UNAVAILABLE.
         A supplied number is used as given.
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -3529,7 +3529,7 @@ paths:
     get:
       operationId: listRequisitions
       summary: List requisitions by number
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -3569,7 +3569,7 @@ paths:
     get:
       operationId: getRequisition
       summary: Get one requisition
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -3607,7 +3607,7 @@ paths:
     post:
       operationId: moveRequisition
       summary: Approve, open (vacancy check, BR-42.15) or cancel a requisition
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -3651,7 +3651,7 @@ paths:
     post:
       operationId: createCandidate
       summary: Add a candidate with recorded consent; contact data is sealed
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -3701,7 +3701,7 @@ paths:
     get:
       operationId: listCandidates
       summary: List a requisition's candidates (audited PII read)
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
         - $ref: "#/components/parameters/Limit"
@@ -3742,7 +3742,7 @@ paths:
     get:
       operationId: getCandidate
       summary: Get one candidate (audited PII read)
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -3780,7 +3780,7 @@ paths:
     post:
       operationId: moveCandidate
       summary: Move a candidate along the pipeline or reject
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -3824,7 +3824,7 @@ paths:
     post:
       operationId: createOffer
       summary: Create an offer for a candidate at the OFFER stage
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -3875,7 +3875,7 @@ paths:
     get:
       operationId: getOffer
       summary: Get one offer
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -3913,7 +3913,7 @@ paths:
     post:
       operationId: moveOffer
       summary: Send, accept, decline or withdraw an offer
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -3960,9 +3960,9 @@ paths:
       description: >-
         Give `workerId` for an existing worker, or `newWorker` (the POST /v1/hr/workers body; `legalName` defaults to
         the candidate's name) to create the worker in the same transaction, which also writes worker.created.
-        `newWorker` needs HcmWorkerMaintain (403 AUTH-0003); neither is 400, an erased candidate without a
+        `newWorker` needs hr.worker.maintain (403 AUTH-0003); neither is 400, an erased candidate without a
         `legalName` is 422 HCM-OFR-004, and a taken personnel number is 409 HCM-WRK-DUPLICATE.
-      x-passage-duty: HcmActionMaintain
+      x-passage-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -4006,7 +4006,7 @@ paths:
     post:
       operationId: grantConsent
       summary: Record a consent
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       requestBody:
         required: true
         content:
@@ -4047,7 +4047,7 @@ paths:
     get:
       operationId: listConsents
       summary: List a subject's consent records
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - {name: subjectType, in: query, required: true, schema: {type: string, enum: [CANDIDATE, WORKER]}}
         - {name: subjectId, in: query, required: true, schema: {type: string, format: uuid}}
@@ -4086,7 +4086,7 @@ paths:
     post:
       operationId: withdrawConsent
       summary: Withdraw a consent
-      x-passage-duty: HcmRecruitMaintain
+      x-passage-duty: hr.recruiting.maintain
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -4124,7 +4124,7 @@ paths:
     get:
       operationId: listRetentionPolicies
       summary: List retention policies
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       responses:
         "200":
           description: Success
@@ -4160,7 +4160,7 @@ paths:
     put:
       operationId: setRetentionPolicy
       summary: Set the retention months of a data class
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       parameters:
         - {name: dataClass, in: path, required: true, schema: {type: string, enum: [CANDIDATE]}}
       requestBody:
@@ -4204,7 +4204,7 @@ paths:
     post:
       operationId: purgeCandidates
       summary: Erase candidate data past retention or without consent
-      x-passage-duty: HcmSetupAdmin
+      x-passage-duty: hr.setup.admin
       responses:
         "200":
           description: Success
@@ -4240,7 +4240,7 @@ paths:
     post:
       operationId: createCompensationCycle
       summary: Create a compensation cycle with budgets and a guideline matrix (FR-42.22)
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -4289,7 +4289,7 @@ paths:
     get:
       operationId: listCompensationCycles
       summary: List compensation cycles
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -4328,7 +4328,7 @@ paths:
     get:
       operationId: getCompensationCycle
       summary: Get one cycle
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -4366,7 +4366,7 @@ paths:
     post:
       operationId: advanceCompensationCycle
       summary: Move a cycle to MANAGER_INPUT, APPROVAL or CANCELED
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -4410,7 +4410,7 @@ paths:
     post:
       operationId: applyCompensationCycle
       summary: Apply an approved cycle as one COMP_CHANGE action per submitted row
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -4453,7 +4453,7 @@ paths:
         submit any of its worksheets, and is neither the worker nor the proposing manager on any submitted row. The
         caller needs every legal entity (403 AUTH-0003). Approving again as the same user returns the cycle
         unchanged; another user after approval is 409 HCM-CMP-STATE. Writes compensationcycle.approved.
-      x-passage-duty: HcmCompApprove
+      x-passage-duty: hr.compensation.approve
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -4489,7 +4489,7 @@ paths:
     put:
       operationId: saveWorksheet
       summary: Save a manager's worksheet rows (draft)
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
         - {name: managerId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4533,7 +4533,7 @@ paths:
     get:
       operationId: getWorksheet
       summary: Read a manager's worksheet
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
         - {name: managerId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4572,7 +4572,7 @@ paths:
     post:
       operationId: submitWorksheet
       summary: Submit a worksheet; blocked over budget (HCM-CMP-002) or outside guideline without justification (HCM-CMP-001)
-      x-passage-duty: HcmCompAdmin
+      x-passage-duty: hr.compensation.admin
       parameters:
         - $ref: "#/components/parameters/PlanId"
         - {name: managerId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4616,7 +4616,7 @@ paths:
         worker who is not a direct report answers 404 HCM-WRK-NOT-FOUND and
         nothing is saved. HCM-ESS-001 (404) when no worker is linked, HCM-ESS-002
         (409) when more than one is.
-      x-passage-duty: MssApprove
+      x-passage-duty: hr.team.approve
       parameters:
         - $ref: "#/components/parameters/PlanId"
       requestBody:
@@ -4660,7 +4660,7 @@ paths:
       operationId: getMyWorksheet
       summary: Read the signed-in manager's worksheet; only their direct reports' rows
       description: A row whose worker no longer reports to the caller is not returned.
-      x-passage-duty: MssApprove
+      x-passage-duty: hr.team.approve
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:
@@ -4690,7 +4690,7 @@ paths:
     post:
       operationId: submitMyWorksheet
       summary: Submit the signed-in manager's worksheet; blocked over budget (HCM-CMP-002) or outside guideline without justification (HCM-CMP-001)
-      x-passage-duty: MssApprove
+      x-passage-duty: hr.team.approve
       parameters:
         - $ref: "#/components/parameters/PlanId"
       responses:

@@ -390,7 +390,7 @@ export type VersionType = "Standard" | "Planned" | "Simulation" | "Conversion";
 export type VersionStatus = "Open" | "Blocked" | "Active" | "Closed";
 export type FallbackPrinciple = "None" | "Active" | "SpecifiedVersion";
 
-/** Lifecycle actions under CostingMaintain; activation is separate (CostingActivate). */
+/** Lifecycle actions under productcost.maintain; activation is separate (productcost.activate). */
 export type VersionAction = "block" | "unblock" | "close";
 
 export type ConversionBlocker = "NegativeOnHand" | "InTransit" | "StartedOrders";
@@ -709,7 +709,7 @@ export function transitionStoredVersion(id: string, action: VersionAction, versi
   return call<StoredVersion>("POST", `/versions/${encodeURIComponent(id)}/transition`, { action, version }, { signal });
 }
 
-/** Activate a stored Open or Blocked version (CostingActivate; Simulation is refused, CST-0711). */
+/** Activate a stored Open or Blocked version (productcost.activate; Simulation is refused, CST-0711). */
 export function activateStoredVersion(id: string, version: number, signal?: AbortSignal): Promise<StoredVersion> {
   return call<StoredVersion>("POST", `/versions/${encodeURIComponent(id)}/activate`, { version }, { signal });
 }

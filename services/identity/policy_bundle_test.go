@@ -54,15 +54,15 @@ func newBundleFixture(t *testing.T, operator string) bundleFixture {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
-		`insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, 'Maintain users')`,
-		`insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, valid_from, valid_to) values ($1, gen_random_uuid(), $2, 'Maintain tenants', now() - interval '2 days', now() - interval '1 day')`,
-		`insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, legal_entity_id) values ($1, gen_random_uuid(), $2, 'Maintain legal entities', '` + legalA + `')`,
+		`insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, 'identity.user.maintain')`,
+		`insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, valid_from, valid_to) values ($1, gen_random_uuid(), $2, 'identity.tenant.maintain', now() - interval '2 days', now() - interval '1 day')`,
+		`insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, legal_entity_id) values ($1, gen_random_uuid(), $2, 'identity.legal-entity.maintain', '` + legalA + `')`,
 	} {
 		if _, err := admin.Exec(ctx, q, tenantA, userID); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := admin.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, 'Maintain legal entities')`, tenantB, userID); err != nil {
+	if _, err := admin.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, 'identity.legal-entity.maintain')`, tenantB, userID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -149,8 +149,8 @@ func TestCompiledBundleCarriesOnlyActiveTenantWideAssignmentsBySubject(t *testin
 		t.Fatalf("data.json: %v duties=%d", err, len(data.Duties))
 	}
 	want := map[string]map[string][]string{
-		f.tenantA: {"subject-" + f.tenantA: {"Maintain users"}},
-		f.tenantB: {"subject-" + f.tenantB: {"Maintain legal entities"}},
+		f.tenantA: {"subject-" + f.tenantA: {"identity.user.maintain"}},
+		f.tenantB: {"subject-" + f.tenantB: {"identity.legal-entity.maintain"}},
 	}
 	got, _ := json.Marshal(data.Assignments)
 	expected, _ := json.Marshal(want)
@@ -173,7 +173,7 @@ func TestRevisionChangesWhenAnAssignmentChanges(t *testing.T) {
 	if err != nil || again.Revision != before.Revision {
 		t.Fatalf("unchanged data must keep the revision: %v %q %q", err, before.Revision, again.Revision)
 	}
-	if _, err := f.admin.Exec(context.Background(), `update identity_role_assignments set valid_to = now() where tenant_id = $1 and role = 'Maintain users'`, f.tenantA); err != nil {
+	if _, err := f.admin.Exec(context.Background(), `update identity_role_assignments set valid_to = now() where tenant_id = $1 and role = 'identity.user.maintain'`, f.tenantA); err != nil {
 		t.Fatal(err)
 	}
 	after, err := f.compiler.Compile(context.Background())
@@ -256,7 +256,7 @@ func TestOPAAcceptsTheSignedBundleAndRejectsTampering(t *testing.T) {
 	}
 
 	files := untar(t, bundle.Archive)
-	files["data.json"] = bytes.Replace(files["data.json"], []byte(`"Maintain users"]`), []byte(`"Maintain users","Maintain tenants"]`), 1)
+	files["data.json"] = bytes.Replace(files["data.json"], []byte(`"identity.user.maintain"]`), []byte(`"identity.user.maintain","identity.tenant.maintain"]`), 1)
 	tampered := repack(t, files)
 	if out, err := opaEval(t, f, tampered, granted); err == nil {
 		t.Fatalf("a tampered bundle must fail signature verification: %s", out)

@@ -102,7 +102,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     expect(pageViolations(first.container)).toEqual([]);
     first.unmount();
 
-    api.handler = routes({ [key]: problem(403, "AUTH-0003", "missing duty HcmRecruitMaintain") });
+    api.handler = routes({ [key]: problem(403, "AUTH-0003", "missing duty hr.recruiting.maintain") });
     const second = renderAt(path);
     expect((await findAlert()).textContent).toContain("You don't have access to do this.");
     expect(pageViolations(second.container)).toEqual([]);
@@ -279,9 +279,9 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     expect(screen.queryByRole("button", { name: "Hire from offer" })).toBeNull();
   });
 
-  it("keeps Apply disabled and hides Approve without HcmCompApprove until the cycle is approved", async () => {
+  it("keeps Apply disabled and hides Approve without hr.compensation.approve until the cycle is approved", async () => {
     api.handler = routes({ [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle()) });
-    const { container } = renderAt(`/hr/compensation/cycles/${CYCLE}`, ["HcmCompAdmin"]);
+    const { container } = renderAt(`/hr/compensation/cycles/${CYCLE}`, ["hr.compensation.admin"]);
     const apply = await screen.findByRole("button", { name: "Apply cycle" });
     expect((apply as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole("button", { name: "Approve cycle" })).toBeNull();
@@ -299,7 +299,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
         return json(200, done());
       },
     });
-    renderAt(`/hr/compensation/cycles/${CYCLE}`, ["HcmCompAdmin", "HcmCompApprove"]);
+    renderAt(`/hr/compensation/cycles/${CYCLE}`, ["hr.compensation.admin", "hr.compensation.approve"]);
     fireEvent.click(await screen.findByRole("button", { name: "Approve cycle" }));
     expect(api.posts("/approve")).toHaveLength(0);
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve cycle" }));
@@ -317,20 +317,20 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
       [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle()),
       [`POST /api/v1/hr/compensation/cycles/${CYCLE}/approve`]: reply,
     });
-    renderAt(`/hr/compensation/cycles/${CYCLE}`, ["HcmCompApprove"]);
+    renderAt(`/hr/compensation/cycles/${CYCLE}`, ["hr.compensation.approve"]);
     fireEvent.click(await screen.findByRole("button", { name: "Approve cycle" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve cycle" }));
     expect((await findAlert()).textContent).toContain(text);
   });
 
-  it("creates the worker with the hire when the user holds HcmWorkerMaintain", async () => {
+  it("creates the worker with the hire when the user holds hr.worker.maintain", async () => {
     const hired = { id: id(70), actionType: "HIRE", workerId: id(2), effectiveDate: "2026-12-01", status: "PENDING", payload: {}, submittedBy: "u", submittedAt: "2026-10-31T10:00:00Z" };
     api.handler = routes({
       [`GET /api/v1/hr/offers/${OFFER}`]: json(200, offer()),
       [`POST /api/v1/hr/offers/${OFFER}/hire`]: json(201, hired),
       [`GET /api/v1/hr/actions/${id(70)}`]: json(200, hired),
     });
-    const { container } = renderAt(`/hr/offers/${OFFER}`, ["HcmActionMaintain", "HcmWorkerMaintain"]);
+    const { container } = renderAt(`/hr/offers/${OFFER}`, ["hr.action.maintain", "hr.worker.maintain"]);
     fireEvent.change(await screen.findByLabelText("Worker record"), { target: { value: "new" } });
     expect(screen.queryByLabelText("Worker id")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
@@ -350,9 +350,9 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     });
   });
 
-  it("offers no new-worker option without HcmWorkerMaintain", async () => {
+  it("offers no new-worker option without hr.worker.maintain", async () => {
     api.handler = routes({ [`GET /api/v1/hr/offers/${OFFER}`]: json(200, offer()) });
-    renderAt(`/hr/offers/${OFFER}`, ["HcmActionMaintain"]);
+    renderAt(`/hr/offers/${OFFER}`, ["hr.action.maintain"]);
     expect(await screen.findByLabelText("Worker id")).toBeTruthy();
     expect(screen.queryByLabelText("Worker record")).toBeNull();
   });

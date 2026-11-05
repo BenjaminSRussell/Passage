@@ -185,7 +185,7 @@ func (a *API) checkLoadDG(w http.ResponseWriter, r *http.Request) {
 // screenLoad screens the parties of a load through the ComplianceScreeningProvider
 // hook (FR-34.19, BR-34.17). A HOLD decision holds the load: the hold is stored
 // (or refreshed when one is open) and blocks tendering until a
-// TRADE_COMPLIANCE_RELEASE user releases it. CLEAR and WARN are returned, not
+// transport.screening-hold.release user releases it. CLEAR and WARN are returned, not
 // stored, and never clear an open hold.
 func (a *API) screenLoad(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {

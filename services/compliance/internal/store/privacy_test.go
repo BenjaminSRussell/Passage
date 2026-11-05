@@ -15,7 +15,7 @@ import (
 func TestSubjectRequest_ErasureUnderHoldLifecycle(t *testing.T) {
 	s, admin := migrated(t)
 	officer := ids.New()
-	ctx := as(ids.New(), officer, "PrivacyIntake", "PrivacyOfficer")
+	ctx := as(ids.New(), officer, "compliance.privacy-request.create", "compliance.privacy-request.process")
 
 	req, err := s.Intake(ctx, IntakeInput{Type: domain.RequestErasure, Regulation: domain.RegulationGDPR, SubjectRef: " party:42 "}, "k-intake", t0)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestSubjectRequest_ErasureUnderHoldLifecycle(t *testing.T) {
 // and is marked late.
 func TestSubjectRequest_LateCloseAndReject(t *testing.T) {
 	s, _ := migrated(t)
-	ctx := as(ids.New(), ids.New(), "PrivacyIntake", "PrivacyOfficer")
+	ctx := as(ids.New(), ids.New(), "compliance.privacy-request.create", "compliance.privacy-request.process")
 	req, err := s.Intake(ctx, IntakeInput{Type: domain.RequestAccess, Regulation: domain.RegulationCCPA, SubjectRef: "worker:9", ReceivedAt: t0, DeadlineDays: 20}, "k1", t0)
 	if err != nil || !req.DeadlineAt.Equal(t0.AddDate(0, 0, 20)) {
 		t.Fatalf("intake with a shorter override: %+v %v", req, err)
@@ -133,7 +133,7 @@ func TestSubjectRequest_LateCloseAndReject(t *testing.T) {
 
 func TestListRequests_DeadlineOrderFiltersPagesAndTenants(t *testing.T) {
 	s, _ := migrated(t)
-	ctx := as(ids.New(), ids.New(), "PrivacyIntake", "PrivacyOfficer")
+	ctx := as(ids.New(), ids.New(), "compliance.privacy-request.create", "compliance.privacy-request.process")
 	for i, typ := range []domain.PrivacyRequestType{domain.RequestAccess, domain.RequestErasure, domain.RequestAccess} {
 		if _, err := s.Intake(ctx, IntakeInput{Type: typ, Regulation: domain.RegulationGDPR, SubjectRef: "party:1", ReceivedAt: t0.AddDate(0, 0, -i)}, ids.New(), t0); err != nil {
 			t.Fatal(err)
@@ -154,7 +154,7 @@ func TestListRequests_DeadlineOrderFiltersPagesAndTenants(t *testing.T) {
 	if _, err := s.ListRequests(ctx, RequestFilter{Cursor: "not-a-cursor"}); code(err) != "COM-0002" {
 		t.Fatalf("bad cursor: %v", err)
 	}
-	other, err := s.ListRequests(as(ids.New(), ids.New(), "PrivacyOfficer"), RequestFilter{})
+	other, err := s.ListRequests(as(ids.New(), ids.New(), "compliance.privacy-request.process"), RequestFilter{})
 	if err != nil || len(other.Items) != 0 {
 		t.Fatalf("another tenant sees requests: %+v %v", other, err)
 	}

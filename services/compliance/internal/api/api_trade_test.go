@@ -268,7 +268,7 @@ func TestExportCheckEmbargoReleaseNeedsOfficer(t *testing.T) {
 	if !res.Embargo || !res.Blocked || res.Items[0].Code != domain.CodeEmbargo {
 		t.Fatalf("Crimea must be blocked with TRD-1002: %+v", res)
 	}
-	// BR-48.16: only a TradeComplianceOfficer with a license reference releases.
+	// BR-48.16: only a compliance.trade-screening.decide holder with a license reference releases.
 	rec = serve(t, h, call{method: http.MethodPost, path: "/v1/trade/export-checks", duties: []string{DutyTradeView}, body: exportBody("UA", "UA-43", "OFAC-GL-25")})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer released an embargoed delivery: %d %s", rec.Code, rec.Body)

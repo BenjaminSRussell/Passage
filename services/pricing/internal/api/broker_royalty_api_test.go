@@ -68,7 +68,7 @@ func TestBroker_AccrualCreditAndClaim(t *testing.T) {
 	}
 	// The accrual route stands in for the invoice.posted consumer and posts to the GL, so it
 	// takes the service-only duty: a person holding every rebate duty cannot feed a line.
-	humanDuties := "pricing.rebate.maintain,pricing.rebate.view,pricing.rebate.claim.approve"
+	humanDuties := "pricing.rebate.maintain,pricing.rebate.view,pricing.rebate-claim.approve"
 	if code, _ := call(t, h, http.MethodPost, "/v1/pricing/broker-contracts/"+id+"/accruals", humanDuties,
 		contractLineBody("INV-7/1", "2027-03-10", "100", "1", "")); code != http.StatusForbidden {
 		t.Fatalf("accrual with the rebate duties only = %d; want 403", code)

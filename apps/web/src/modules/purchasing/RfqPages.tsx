@@ -730,7 +730,7 @@ const SCORE_VALUES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 
 /**
  * The buyer's 1–10 score of one invited vendor per criterion (FR-17.19; duty
- * RFQAward). A criterion left unscored counts 0 in the weighted score.
+ * procurement.rfq.award). A criterion left unscored counts 0 in the weighted score.
  */
 function ScoreForm({ rfq, onScored }: { rfq: RFQ; onScored(rfq: RFQ, vendorId: string): void }) {
   const criteria = rfq.criteria ?? [];

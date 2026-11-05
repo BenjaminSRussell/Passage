@@ -135,7 +135,7 @@ describe("routes", () => {
     for (const path of ["/projects/categories", "/projects/:id/transactions", "/projects/:id/invoice-proposals", "/projects/:id/invoice-proposals/:proposalId"]) {
       expect(paths).toContain(path);
     }
-    expect(projects.nav).toContainEqual({ label: "Project categories", to: "/projects/categories", duty: "ProjInquire" });
+    expect(projects.nav).toContainEqual({ label: "Project categories", to: "/projects/categories", duty: "projects.inquire" });
   });
 });
 

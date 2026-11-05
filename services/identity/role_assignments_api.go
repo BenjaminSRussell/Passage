@@ -135,7 +135,7 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Role == dutyMaintainTenants && (a.operatorTenantID == "" || p.TenantID != a.operatorTenantID) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "Maintain tenants can only be granted in the operator tenant"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "identity.tenant.maintain can only be granted in the operator tenant"))
 		return
 	}
 

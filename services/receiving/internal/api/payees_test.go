@@ -57,7 +57,7 @@ func assertNoPII(t *testing.T, where, text string) {
 
 func (rg *rig) payee(t *testing.T, body string) string {
 	t.Helper()
-	got := decode[struct{ ID string }](t, rg.call(http.MethodPost, payeesPath, body, duty("VendorInvoicePost", rg.key())), http.StatusCreated)
+	got := decode[struct{ ID string }](t, rg.call(http.MethodPost, payeesPath, body, duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
 	return got.ID
 }
 
@@ -68,13 +68,13 @@ func invoiceWithPayee(number, receiptID, payeeID string) string {
 func TestOneTimePayee_CreateAnswersWithIdsOnlyAndLogsNothing(t *testing.T) {
 	logs := captureLogs(t)
 	rg := newRig(domain.PeriodOpen)
-	rec := rg.call(http.MethodPost, payeesPath, payeeJSON(nil), duty("VendorInvoicePost", rg.key()))
+	rec := rg.call(http.MethodPost, payeesPath, payeeJSON(nil), duty("receiving.vendor-invoice.post", rg.key()))
 	got := decode[map[string]any](t, rec, http.StatusCreated)
 	if len(got) != 4 || got["legalEntityId"] != legalEntityID || got["country"] != "DE" || got["id"] == "" || got["createdAt"] == "" {
 		t.Fatalf("response %v", got)
 	}
 	assertNoPII(t, "response", rec.Body.String())
-	replay := rg.call(http.MethodPost, payeesPath, payeeJSON(nil), duty("VendorInvoicePost", "key-1"))
+	replay := rg.call(http.MethodPost, payeesPath, payeeJSON(nil), duty("receiving.vendor-invoice.post", "key-1"))
 	if replay.Header().Get("Idempotent-Replayed") != "true" || replay.Body.String() != rec.Body.String() {
 		t.Fatalf("replay %d %s", replay.Code, replay.Body)
 	}
@@ -103,7 +103,7 @@ func TestOneTimePayee_RejectionsNeverEchoPayeeData(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := rg.call(http.MethodPost, payeesPath, tc.body, duty("VendorInvoicePost", rg.key()))
+			rec := rg.call(http.MethodPost, payeesPath, tc.body, duty("receiving.vendor-invoice.post", rg.key()))
 			problemCode(t, rec, tc.status, tc.code)
 			assertNoPII(t, "response", rec.Body.String())
 		})
@@ -113,11 +113,11 @@ func TestOneTimePayee_RejectionsNeverEchoPayeeData(t *testing.T) {
 
 func TestOneTimePayee_DutyUserAndScope(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
-	problemCode(t, rg.call(http.MethodPost, payeesPath, payeeJSON(nil), duty("ReceivingMaintain", rg.key())), http.StatusForbidden, "AUTH-0003")
-	noUser := duty("VendorInvoicePost", rg.key())
+	problemCode(t, rg.call(http.MethodPost, payeesPath, payeeJSON(nil), duty("receiving.receipt.maintain", rg.key())), http.StatusForbidden, "AUTH-0003")
+	noUser := duty("receiving.vendor-invoice.post", rg.key())
 	delete(noUser, "X-Passage-User")
 	problemCode(t, rg.call(http.MethodPost, payeesPath, payeeJSON(nil), noUser), http.StatusUnauthorized, "AUTH-0001")
-	problemCode(t, rg.call(http.MethodPost, payeesPath, payeeJSON(map[string]any{"legalEntityId": ledgerID}), duty("VendorInvoicePost", rg.key())), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, payeesPath, payeeJSON(map[string]any{"legalEntityId": ledgerID}), duty("receiving.vendor-invoice.post", rg.key())), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodPost, payeesPath, payeeJSON(nil), headers{"Idempotency-Key": "k"}), http.StatusUnauthorized, "AUTH-0001")
 }
 
@@ -132,7 +132,7 @@ func TestOneTimePayee_WithoutKeysIsA503NamingNoData(t *testing.T) {
 	a := api.New(keylessStore{memstore.New()}, api.Ports{Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{}})
 	router := httpx.NewRouter()
 	a.Register(router)
-	rec := doWith(router, http.MethodPost, payeesPath, payeeJSON(nil), duty("VendorInvoicePost", "k"))
+	rec := doWith(router, http.MethodPost, payeesPath, payeeJSON(nil), duty("receiving.vendor-invoice.post", "k"))
 	problemCode(t, rec, http.StatusServiceUnavailable, "RCV-CRY-001")
 	assertNoPII(t, "response", rec.Body.String())
 	assertNoPII(t, "logs", logs.String())
@@ -173,12 +173,12 @@ func TestInvoice_PayeeMustExistAndBelongToTheInvoiceEntity(t *testing.T) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 	elsewhere := decode[struct{ ID string }](t, rg.call(http.MethodPost, payeesPath, payeeJSON(map[string]any{"legalEntityId": ledgerID}),
-		duty("VendorInvoicePost", rg.key(), entityHeader, ledgerID)), http.StatusCreated)
+		duty("receiving.vendor-invoice.post", rg.key(), entityHeader, ledgerID)), http.StatusCreated)
 	// Outside the caller's legal-entity scope the payee is hidden (404), as under Postgres RLS (#335).
 	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceWithPayee("OT-1", r.ID, elsewhere.ID), rg.apPoster()), http.StatusNotFound, "RCV-NF-006")
 	// In scope but of another entity than the invoice: a validation error.
 	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceWithPayee("OT-1", r.ID, elsewhere.ID),
-		duty("VendorInvoicePost", rg.key(), entityHeader, legalEntityID+","+ledgerID)), http.StatusUnprocessableEntity, "RCV-VAL-001")
+		duty("receiving.vendor-invoice.post", rg.key(), entityHeader, legalEntityID+","+ledgerID)), http.StatusUnprocessableEntity, "RCV-VAL-001")
 }
 
 func TestInvoice_AuditHoldAndReleaseKeepThePayeeOnBothEvents(t *testing.T) {
@@ -186,7 +186,7 @@ func TestInvoice_AuditHoldAndReleaseKeepThePayeeOnBothEvents(t *testing.T) {
 	rg.sampleRate(t, "100")
 	r := rg.posted(t, "PS-1", 10, 4)
 	payeeID := rg.payee(t, payeeJSON(nil))
-	held := decode[auditedInvoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceWithPayee("OT-1", r.ID, payeeID), userDuty("VendorInvoicePost", rg.key(), "alice")), http.StatusCreated)
+	held := decode[auditedInvoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceWithPayee("OT-1", r.ID, payeeID), userDuty("receiving.vendor-invoice.post", rg.key(), "alice")), http.StatusCreated)
 	if held.Status != "AUDIT_BLOCKED" {
 		t.Fatalf("held %+v", held)
 	}

@@ -100,7 +100,7 @@ func TestPeppol50_BuildsEveryDemoInvoiceWithReferenceAmounts(t *testing.T) {
 	update := os.Getenv("EDI_PEPPOL50_UPDATE") == "1"
 	for i, doc := range fx.Documents {
 		name := fmt.Sprintf("%02d.xml", i+1)
-		rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", string(doc.Request), "EINV_OPERATE", nil)
+		rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", string(doc.Request), "edi.einvoice.operate", nil)
 		var res struct {
 			XML    string `json:"xml"`
 			Valid  bool   `json:"valid"`

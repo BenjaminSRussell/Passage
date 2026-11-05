@@ -38,7 +38,7 @@ type forecastView struct {
 }
 
 // registerForecasts mounts the forecast models of FR-41.20: reads need
-// ProjInquire, creating and replacing ProjPlan (§8.41.17).
+// projects.inquire, creating and replacing projects.plan (§8.41.17).
 func (a *API) registerForecasts(r chi.Router) {
 	r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/forecasts", a.listForecasts)
 	r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/forecasts", a.createForecast)

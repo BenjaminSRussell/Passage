@@ -105,7 +105,7 @@ func TestPostgres_CertificateGateAC3312(t *testing.T) {
 	if err != nil || len(recs) != 2 || recs[0].ID != saved.ID || domain.CertificateStatusOf(order.CertificateRequired, recs) != domain.CertReceivedOK {
 		t.Fatalf("certificates oldest first, latest decides: %+v %v", recs, err)
 	}
-	if theirs, _ := s.ListCertificates(testkit.Ctx(testkit.TenantID(2), "QM_VIEW"), order.ID); len(theirs) != 0 {
+	if theirs, _ := s.ListCertificates(testkit.Ctx(testkit.TenantID(2), "quality.view"), order.ID); len(theirs) != 0 {
 		t.Fatalf("another tenant must not see the certificates: %+v", theirs)
 	}
 	closed, _, err := s.PostUsageDecision(ctx, order.ID, order.Version, accept(40), "d-3")
@@ -211,7 +211,7 @@ func TestPostgres_PhysicalSamples(t *testing.T) {
 	if notYet, _ := s.ListSamples(ctx, SampleFilter{Status: domain.SampleDueForDisposal, AsOf: "2021-01-14", Limit: 10}); len(notYet) != 0 {
 		t.Fatalf("not due the day before its expiry: %+v", notYet)
 	}
-	if theirs, _ := s.ListSamples(testkit.Ctx(testkit.TenantID(2), "QM_VIEW"), SampleFilter{Limit: 10}); len(theirs) != 0 {
+	if theirs, _ := s.ListSamples(testkit.Ctx(testkit.TenantID(2), "quality.view"), SampleFilter{Limit: 10}); len(theirs) != 0 {
 		t.Fatalf("another tenant must not see the samples: %+v", theirs)
 	}
 }

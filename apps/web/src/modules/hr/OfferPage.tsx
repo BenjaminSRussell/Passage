@@ -18,7 +18,7 @@ const MOVES: Record<string, Array<{ to: OfferMove; label: string; done: string }
 };
 const WITHDRAWABLE: OfferStatus[] = ["DRAFT", "SENT", "ACCEPTED"];
 
-export const DUTY_WORKER_MAINTAIN = "HcmWorkerMaintain";
+export const DUTY_WORKER_MAINTAIN = "hr.worker.maintain";
 const PERSONNEL_NUMBER = /^[A-Z0-9][A-Z0-9-]{0,19}$/;
 
 export interface HireValues {

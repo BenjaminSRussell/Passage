@@ -27,10 +27,10 @@ import (
 
 const (
 	readyTimeout     = 500 * time.Millisecond
-	dutyView         = "ARView"
-	dutyPayment      = "ARPaymentPost"
+	dutyView         = "receivables.view"
+	dutyPayment      = "receivables.payment.post"
 	dutyRMACredit    = "ar.rmacredit.post"
-	dutyImport       = "ARImport"
+	dutyImport       = "receivables.payment-file.import"
 	maxLockboxBytes  = 3 << 20 // below httpx.Decode's 4 MiB body cap, leaving room for JSON escaping
 	validationDetail = "request failed validation"
 	idempotencyKey   = "Idempotency-Key"

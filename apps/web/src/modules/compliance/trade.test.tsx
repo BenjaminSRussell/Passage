@@ -125,9 +125,9 @@ describe("Screening hits", () => {
   });
 
   it("shows a load failure with a retry", async () => {
-    handler = () => problem(403, "AUTH-0003", "missing duty TradeComplianceView");
+    handler = () => problem(403, "AUTH-0003", "missing duty compliance.trade-screening.view");
     renderAt("/compliance/screening/hits");
-    expect((await findAlert()).textContent).toContain("missing duty TradeComplianceView (AUTH-0003)");
+    expect((await findAlert()).textContent).toContain("missing duty compliance.trade-screening.view (AUTH-0003)");
     handler = () => ({ status: 200, body: { items: [hit()] } });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Screening hits" })).toBeInTheDocument();
@@ -281,7 +281,7 @@ describe("Export license check", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check delivery" }));
     expect((await findStatus()).textContent).toBe("The destination is under embargo; the delivery is blocked (TRD-1002).");
 
-    handler = () => problem(403, "AUTH-0003", "missing duty TradeComplianceOfficer: only a trade compliance officer can release an embargoed delivery");
+    handler = () => problem(403, "AUTH-0003", "missing duty compliance.trade-screening.decide: only a trade compliance officer can release an embargoed delivery");
     fireEvent.change(screen.getByLabelText(/^Embargo release license reference/), { target: { value: "OFAC-GL-25" } });
     fireEvent.click(screen.getByRole("button", { name: "Check delivery" }));
     expect((await findAlert()).textContent).toContain("only a trade compliance officer can release an embargoed delivery (AUTH-0003)");

@@ -128,18 +128,18 @@ describe("raw payload viewer", () => {
     const st = within(tree).getByRole("list", { name: "Transaction set ST" });
     expect(within(st).getByText("BEG")).toBeInTheDocument();
     expect(screen.getByText("Personal data masked")).toBeInTheDocument();
-    expect(screen.getByText(/because you do not hold EDI_PII_VIEW/)).toBeInTheDocument();
+    expect(screen.getByText(/because you do not hold edi.pii.view/)).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("says personal data is shown to a user with EDI_PII_VIEW", async () => {
+  it("says personal data is shown to a user with edi.pii.view", async () => {
     handler = (url) => {
       if (url.pathname === `/api/v1/edi/interchanges/${IC_A}`) return json(200, interchange);
       if (url.pathname === `/api/v1/edi/interchanges/${IC_A}/payload`) return json(200, { ...maskedTree, piiMasked: false });
       return undefined;
     };
     renderAt(`/integration/interchanges/${IC_A}`);
-    expect(await screen.findByText(/because you hold EDI_PII_VIEW/)).toBeInTheDocument();
+    expect(await screen.findByText(/because you hold edi.pii.view/)).toBeInTheDocument();
     expect(screen.queryByText("Personal data masked")).not.toBeInTheDocument();
   });
 

@@ -59,7 +59,7 @@ const distributor = `{"name":"Demo distributor","isaQualifier":"ZZ","isaId":"DIS
 func TestPartnerAPI_CreateReplayReuseAndRead(t *testing.T) {
 	h := dbHandler(t)
 	key := map[string]string{"Idempotency-Key": "partner-1"}
-	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", key)
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", key)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
@@ -72,30 +72,30 @@ func TestPartnerAPI_CreateReplayReuseAndRead(t *testing.T) {
 	}
 
 	// Same key, same body with different spacing: replay with 200 and the same partner.
-	rec = do(t, h, http.MethodPost, "/edi/v1/partners", strings.ReplaceAll(distributor, ",", ", "), "EDI_ADMIN", key)
+	rec = do(t, h, http.MethodPost, "/edi/v1/partners", strings.ReplaceAll(distributor, ",", ", "), "edi.admin", key)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), created.ID) {
 		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
 	}
 	// Same key, different body: 422 idempotency_key_reuse.
-	rec = do(t, h, http.MethodPost, "/edi/v1/partners", strings.Replace(distributor, "Demo distributor", "Renamed", 1), "EDI_ADMIN", key)
+	rec = do(t, h, http.MethodPost, "/edi/v1/partners", strings.Replace(distributor, "Demo distributor", "Renamed", 1), "edi.admin", key)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeIdempotencyReuse {
 		t.Fatalf("reuse: %d %s", rec.Code, rec.Body.String())
 	}
 	// New key, same ISA identity: 409.
-	rec = do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "partner-2"})
+	rec = do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "partner-2"})
 	if rec.Code != http.StatusConflict || problemCode(t, rec) != CodePartnerExists {
 		t.Fatalf("duplicate identity: %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = do(t, h, http.MethodGet, "/edi/v1/partners/"+created.ID, "", "EDI_ADMIN", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/partners/"+created.ID, "", "edi.admin", nil)
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("get: %d %s etag=%q", rec.Code, rec.Body.String(), rec.Header().Get("ETag"))
 	}
-	rec = do(t, h, http.MethodGet, "/edi/v1/partners/not-a-uuid", "", "EDI_ADMIN", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/partners/not-a-uuid", "", "edi.admin", nil)
 	if rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
 		t.Fatalf("bad id: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodGet, "/edi/v1/partners?environment=TEST", "", "EDI_ADMIN", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/partners?environment=TEST", "", "edi.admin", nil)
 	var list struct {
 		Items []store.Partner `json:"items"`
 	}
@@ -108,19 +108,19 @@ func TestInboundAPI_ReceiveAcknowledgeAndRejectDuplicate(t *testing.T) {
 	h := dbHandler(t)
 	raw := sample850(t, "1") // sender ZZ/DISTRIBUTOR, usage T
 
-	rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "EDI_OPERATE", nil)
+	rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "edi.operate", nil)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeUnknownSender {
 		t.Fatalf("unknown sender: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"}); rec.Code != http.StatusCreated {
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "p"}); rec.Code != http.StatusCreated {
 		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
 	}
 	// The partner is in TEST; the default PROD environment does not resolve it.
-	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12", raw, "EDI_OPERATE", nil); rec.Code != http.StatusUnprocessableEntity {
+	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12", raw, "edi.operate", nil); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("PROD lookup must not find a TEST partner: %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "edi.operate", nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("receive: %d %s", rec.Code, rec.Body.String())
 	}
@@ -144,11 +144,11 @@ func TestInboundAPI_ReceiveAcknowledgeAndRejectDuplicate(t *testing.T) {
 	}
 
 	// AC-35.5: the same ISA13 again is refused and no second interchange appears.
-	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "edi.operate", nil)
 	if rec.Code != http.StatusConflict || problemCode(t, rec) != CodeDuplicateControl {
 		t.Fatalf("duplicate: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges", "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges", "", "edi.operate", nil)
 	var list struct {
 		Items []store.InterchangeSummary `json:"items"`
 	}
@@ -159,7 +159,7 @@ func TestInboundAPI_ReceiveAcknowledgeAndRejectDuplicate(t *testing.T) {
 		t.Fatalf("interchange summary: %+v", list.Items[0])
 	}
 
-	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID, "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID, "", "edi.operate", nil)
 	var detail store.InterchangeDetail
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
@@ -174,7 +174,7 @@ func TestInboundAPI_ReceiveAcknowledgeAndRejectDuplicate(t *testing.T) {
 
 func TestInterchangeAPI_ValidatesFiltersAndDuty(t *testing.T) {
 	h := dbHandler(t)
-	rec := do(t, h, http.MethodGet, "/edi/v1/interchanges?ackStatus=LOST&limit=500&partnerId=x", "", "EDI_OPERATE", nil)
+	rec := do(t, h, http.MethodGet, "/edi/v1/interchanges?ackStatus=LOST&limit=500&partnerId=x", "", "edi.operate", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 		t.Fatalf("filters: %d %s", rec.Code, rec.Body.String())
 	}
@@ -183,10 +183,10 @@ func TestInterchangeAPI_ValidatesFiltersAndDuty(t *testing.T) {
 			t.Errorf("missing field error %s: %s", field, rec.Body.String())
 		}
 	}
-	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges", "", "EDI_ADMIN", nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("EDI_ADMIN alone must not read the monitor: %d", rec.Code)
+	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges", "", "edi.admin", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("edi.admin alone must not read the monitor: %d", rec.Code)
 	}
-	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/0195f0a0-0000-7000-8000-0000000000aa", "", "EDI_OPERATE", nil); rec.Code != http.StatusNotFound {
+	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/0195f0a0-0000-7000-8000-0000000000aa", "", "edi.operate", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown interchange: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -201,19 +201,19 @@ const asnDocument = `{"shipmentId":"LOAD42-SHIP7","shipDate":"20261021","shipTim
 // ACKED with a message.acked event in the outbox.
 func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
 	h, pool := dbHandlerPool(t)
-	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"})
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "p"})
 	var partner store.Partner
 	if err := json.Unmarshal(rec.Body.Bytes(), &partner); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", sample850(t, "1"), "EDI_OPERATE", nil); rec.Code != http.StatusCreated {
+	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", sample850(t, "1"), "edi.operate", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("receive 850: %d %s", rec.Code, rec.Body.String())
 	}
 
 	path := "/edi/v1/partners/" + partner.ID + "/outbound"
 	body := `{"transactionSet":"856","document":` + asnDocument + `}`
 	key := map[string]string{"Idempotency-Key": "asn-1"}
-	rec = do(t, h, http.MethodPost, path, body, "EDI_OPERATE", key)
+	rec = do(t, h, http.MethodPost, path, body, "edi.operate", key)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("outbound: %d %s", rec.Code, rec.Body.String())
 	}
@@ -234,20 +234,20 @@ func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
 	}
 
 	// Replay returns the same interchange; another document under the key is refused.
-	rec = do(t, h, http.MethodPost, path, strings.ReplaceAll(body, ",", ", "), "EDI_OPERATE", key)
+	rec = do(t, h, http.MethodPost, path, strings.ReplaceAll(body, ",", ", "), "edi.operate", key)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), out.InterchangeID) {
 		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodPost, path, strings.Replace(body, "LOAD42-SHIP7", "LOAD43", 1), "EDI_OPERATE", key)
+	rec = do(t, h, http.MethodPost, path, strings.Replace(body, "LOAD42-SHIP7", "LOAD43", 1), "edi.operate", key)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeIdempotencyReuse {
 		t.Fatalf("reuse: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/0195f0a0-0000-7000-8000-0000000000aa/outbound", body, "EDI_OPERATE",
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/0195f0a0-0000-7000-8000-0000000000aa/outbound", body, "edi.operate",
 		map[string]string{"Idempotency-Key": "asn-2"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown partner: %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges?direction=OUT", "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges?direction=OUT", "", "edi.operate", nil)
 	var list struct {
 		Items []store.InterchangeSummary `json:"items"`
 	}
@@ -265,7 +265,7 @@ func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw997, "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw997, "edi.operate", nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("receive 997: %d %s", rec.Code, rec.Body.String())
 	}
@@ -277,7 +277,7 @@ func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
 		t.Fatalf("a 997 is matched and never acknowledged: %+v", got)
 	}
 
-	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+out.InterchangeID, "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+out.InterchangeID, "", "edi.operate", nil)
 	var detail store.InterchangeDetail
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
 		t.Fatal(err)
@@ -297,7 +297,7 @@ func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
 	stray, _ := domain.Ack997(sent, domain.Group{FunctionalID: "SH", Control: "99", Version: "004010"},
 		[]domain.TxOutcome{{SetID: "856", Control: "0001", Code: domain.AckAccepted}}, "000000078", "78", time.Now())
 	rawStray, _ := domain.Serialize(stray)
-	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", rawStray, "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", rawStray, "edi.operate", nil)
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("stray 997: %d %s", rec.Code, rec.Body.String())
 	}
@@ -311,12 +311,12 @@ func TestOutboundAPI_GenerateReplayAndMatchPartner997(t *testing.T) {
 // measures the partner's 997 latency on our 856.
 func TestMonitorAPI_ReprocessAndSLA(t *testing.T) {
 	h, pool := dbHandlerPool(t)
-	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"})
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "p"})
 	var partner store.Partner
 	if err := json.Unmarshal(rec.Body.Bytes(), &partner); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", sample850(t, "1"), "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", sample850(t, "1"), "edi.operate", nil)
 	var received receiveResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &received); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("receive: %d %s", rec.Code, rec.Body.String())
@@ -327,7 +327,7 @@ func TestMonitorAPI_ReprocessAndSLA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec = do(t, h, http.MethodGet, "/edi/v1/messages?status=FAILED&direction=IN&transactionSet=850&controlNumber=1", "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/messages?status=FAILED&direction=IN&transactionSet=850&controlNumber=1", "", "edi.operate", nil)
 	var page struct {
 		Items      []store.MessageRecord `json:"items"`
 		NextCursor string                `json:"nextCursor"`
@@ -340,21 +340,21 @@ func TestMonitorAPI_ReprocessAndSLA(t *testing.T) {
 	}
 
 	path := "/edi/v1/interchanges/" + received.InterchangeID + ":reprocess"
-	rec = do(t, h, http.MethodPost, path+"?dryRun=true", "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodPost, path+"?dryRun=true", "", "edi.operate", nil)
 	var res store.ReprocessResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK || !res.DryRun || res.Changed != 1 || res.Messages[0].Status != "MAPPED" {
 		t.Fatalf("dry run: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodGet, "/edi/v1/messages/"+msgID, "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/messages/"+msgID, "", "edi.operate", nil)
 	if !strings.Contains(rec.Body.String(), `"status":"FAILED"`) {
 		t.Fatalf("a dry run must not write: %s", rec.Body.String())
 	}
 
-	rec = do(t, h, http.MethodPost, path, "", "EDI_OPERATE", map[string]string{"Idempotency-Key": "rp-1"})
+	rec = do(t, h, http.MethodPost, path, "", "edi.operate", map[string]string{"Idempotency-Key": "rp-1"})
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK || res.DryRun || res.Changed != 1 {
 		t.Fatalf("reprocess: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodGet, "/edi/v1/messages/"+msgID, "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/messages/"+msgID, "", "edi.operate", nil)
 	var m store.MessageRecord
 	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil || m.Status != "MAPPED" || m.Error != "" || !strings.Contains(string(m.Canonical), "PO1234") {
 		t.Fatalf("message after reprocess: %d %s", rec.Code, rec.Body.String())
@@ -367,18 +367,18 @@ func TestMonitorAPI_ReprocessAndSLA(t *testing.T) {
 		ediev.MessageReceived, msgID).Scan(&mapped); err != nil || mapped != 2 {
 		t.Fatalf("message.received MAPPED events for the message = %d (receipt and reprocess), err=%v", mapped, err)
 	}
-	if rec := do(t, h, http.MethodGet, "/edi/v1/messages/0195f0a0-0000-7000-8000-0000000000aa", "", "EDI_OPERATE", nil); rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
+	if rec := do(t, h, http.MethodGet, "/edi/v1/messages/0195f0a0-0000-7000-8000-0000000000aa", "", "edi.operate", nil); rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
 		t.Fatalf("unknown message: %d %s", rec.Code, rec.Body.String())
 	}
 
 	// An outbound 856, answered by the partner's 997.
-	rec = do(t, h, http.MethodPost, "/edi/v1/partners/"+partner.ID+"/outbound", `{"transactionSet":"856","document":`+asnDocument+`}`, "EDI_OPERATE",
+	rec = do(t, h, http.MethodPost, "/edi/v1/partners/"+partner.ID+"/outbound", `{"transactionSet":"856","document":`+asnDocument+`}`, "edi.operate",
 		map[string]string{"Idempotency-Key": "asn-1"})
 	var out store.OutboundResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("outbound: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodPost, "/edi/v1/interchanges/"+out.InterchangeID+":reprocess", "", "EDI_OPERATE",
+	if rec := do(t, h, http.MethodPost, "/edi/v1/interchanges/"+out.InterchangeID+":reprocess", "", "edi.operate",
 		map[string]string{"Idempotency-Key": "rp-2"}); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeNotInbound {
 		t.Fatalf("outbound reprocess: %d %s", rec.Code, rec.Body.String())
 	}
@@ -395,11 +395,11 @@ func TestMonitorAPI_ReprocessAndSLA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw997, "EDI_OPERATE", nil); rec.Code != http.StatusCreated {
+	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw997, "edi.operate", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("receive 997: %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = do(t, h, http.MethodGet, "/edi/v1/partners/sla?days=7", "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/partners/sla?days=7", "", "edi.operate", nil)
 	var sla struct {
 		Days  int      `json:"days"`
 		Items []slaRow `json:"items"`
@@ -421,7 +421,7 @@ func receiveFixture(t *testing.T, h http.Handler, name string) receiveResponse {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", string(raw), "EDI_OPERATE", nil)
+	rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", string(raw), "edi.operate", nil)
 	var out receiveResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("receive %s: %d %s", name, rec.Code, rec.Body.String())
@@ -430,10 +430,10 @@ func receiveFixture(t *testing.T, h http.Handler, name string) receiveResponse {
 }
 
 // BR-35.12: the raw viewer and the canonical documents hide party names,
-// addresses and contacts from operators without EDI_PII_VIEW.
+// addresses and contacts from operators without edi.pii.view.
 func TestMonitorAPI_PayloadTreeAndPIIMasking(t *testing.T) {
 	h := dbHandler(t)
-	if rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"}); rec.Code != http.StatusCreated {
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "p"}); rec.Code != http.StatusCreated {
 		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
 	}
 	got := receiveFixture(t, h, "850-basic.x12")
@@ -442,7 +442,7 @@ func TestMonitorAPI_PayloadTreeAndPIIMasking(t *testing.T) {
 	}
 
 	var view payloadView
-	rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID+"/payload", "", "EDI_OPERATE", nil)
+	rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID+"/payload", "", "edi.operate", nil)
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("payload: %d %s", rec.Code, rec.Body.String())
 	}
@@ -457,28 +457,28 @@ func TestMonitorAPI_PayloadTreeAndPIIMasking(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "BEG*00") {
 		t.Fatal("the raw text must never be returned")
 	}
-	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID+"/payload", "", "EDI_OPERATE,EDI_PII_VIEW", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID+"/payload", "", "edi.operate,edi.pii.view", nil)
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil || view.PIIMasked || !strings.Contains(rec.Body.String(), "JANE BUYER") {
 		t.Fatalf("unmasked view: %d %s", rec.Code, rec.Body.String())
 	}
 
 	// The canonical order on the message and on the interchange detail.
 	msg := "/edi/v1/messages/" + got.Messages[0].MessageID
-	rec = do(t, h, http.MethodGet, msg, "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, msg, "", "edi.operate", nil)
 	if strings.Contains(rec.Body.String(), "ACME DC") || !strings.Contains(rec.Body.String(), `"shipToName":"***"`) ||
 		!strings.Contains(rec.Body.String(), `"piiMasked":true`) || !strings.Contains(rec.Body.String(), "PO-88001") {
 		t.Fatalf("masked message: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodGet, msg, "", "EDI_OPERATE,EDI_PII_VIEW", nil)
+	rec = do(t, h, http.MethodGet, msg, "", "edi.operate,edi.pii.view", nil)
 	if !strings.Contains(rec.Body.String(), `"shipToName":"ACME DC"`) || !strings.Contains(rec.Body.String(), `"piiMasked":false`) {
 		t.Fatalf("unmasked message: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID, "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID, "", "edi.operate", nil)
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "ACME DC") {
 		t.Fatalf("masked interchange detail: %d %s", rec.Code, rec.Body.String())
 	}
 
-	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+someID+"/payload", "", "EDI_OPERATE", nil); rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
+	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+someID+"/payload", "", "edi.operate", nil); rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
 		t.Fatalf("unknown interchange: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -487,7 +487,7 @@ func TestMonitorAPI_PayloadTreeAndPIIMasking(t *testing.T) {
 // interchanges are reported per item; the real run is idempotent.
 func TestMonitorAPI_BulkReprocess(t *testing.T) {
 	h, pool := dbHandlerPool(t)
-	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"})
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "p"})
 	var partner store.Partner
 	if err := json.Unmarshal(rec.Body.Bytes(), &partner); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
@@ -502,7 +502,7 @@ func TestMonitorAPI_BulkReprocess(t *testing.T) {
 	if _, err := pool.Exec(context.Background(), `update message set status = 'FAILED', error = 'EDI-0105: no item cross-reference', canonical = null where id = $1`, fixedMsg); err != nil {
 		t.Fatal(err)
 	}
-	rec = do(t, h, http.MethodPost, "/edi/v1/partners/"+partner.ID+"/outbound", `{"transactionSet":"856","document":`+asnDocument+`}`, "EDI_OPERATE",
+	rec = do(t, h, http.MethodPost, "/edi/v1/partners/"+partner.ID+"/outbound", `{"transactionSet":"856","document":`+asnDocument+`}`, "edi.operate",
 		map[string]string{"Idempotency-Key": "asn-1"})
 	var out store.OutboundResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
@@ -535,7 +535,7 @@ func TestMonitorAPI_BulkReprocess(t *testing.T) {
 		}
 	}
 
-	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess?dryRun=true", body, "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess?dryRun=true", body, "edi.operate", nil)
 	var res store.BulkReprocessResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("dry run: %d %s", rec.Code, rec.Body.String())
@@ -547,7 +547,7 @@ func TestMonitorAPI_BulkReprocess(t *testing.T) {
 	}
 
 	key := map[string]string{"Idempotency-Key": "bulk-1"}
-	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", body, "EDI_OPERATE", key)
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", body, "edi.operate", key)
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("run: %d %s", rec.Code, rec.Body.String())
 	}
@@ -557,7 +557,7 @@ func TestMonitorAPI_BulkReprocess(t *testing.T) {
 	}
 
 	// Replay returns the first result and publishes nothing more.
-	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", body, "EDI_OPERATE", key)
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", body, "edi.operate", key)
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
 	}
@@ -569,7 +569,7 @@ func TestMonitorAPI_BulkReprocess(t *testing.T) {
 	}
 
 	// The same key with another list is refused.
-	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", bulkBody(t, list[:2]), "EDI_OPERATE", key)
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", bulkBody(t, list[:2]), "edi.operate", key)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeIdempotencyReuse {
 		t.Fatalf("reuse: %d %s", rec.Code, rec.Body.String())
 	}

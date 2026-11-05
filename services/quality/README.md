@@ -90,7 +90,7 @@ Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 5.
   value outside its limits, is a deviation (a COC without values is a conformance
   statement). An out-of-specification receipt is RECEIVED_NOK and raises a MAJOR VENDOR
   NCR for the lot (`CERTIFICATE_NOK`) in the same transaction. A waiver needs
-  QM_USAGE_DECISION and a reason. The latest receipt of the required type, or a waiver,
+  quality.usage.decide and a reason. The latest receipt of the required type, or a waiver,
   sets `certificateStatus` (MISSING, RECEIVED_OK, RECEIVED_NOK, WAIVED, NOT_REQUIRED) on
   the order view. A decision that releases quantity (accept or accept with deviation)
   fails with QM-0125 unless the status is RECEIVED_OK or WAIVED; the store repeats the
@@ -170,47 +170,47 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 
 | Method | Path | Duty |
 |---|---|---|
-| POST | `/v1/quality/sampling-plans:size` | QM_VIEW |
-| GET | `/v1/quality/test-groups` | QM_VIEW |
-| GET | `/v1/quality/test-groups/{id}` | QM_VIEW |
-| POST | `/v1/quality/test-groups` | QM_SETUP_MAINTAIN |
-| GET | `/v1/quality/instruments?dueWithinDays=&limit=` | QM_VIEW |
-| POST | `/v1/quality/instruments` | QM_SETUP_MAINTAIN |
-| POST | `/v1/quality/instruments/{id}:calibrate` | QM_SETUP_MAINTAIN |
-| GET | `/v1/quality/associations` | QM_VIEW |
-| POST | `/v1/quality/associations` | QM_SETUP_MAINTAIN |
-| GET | `/v1/quality/quality-orders?status=&siteId=&limit=` | QM_VIEW |
-| POST | `/v1/quality/quality-orders` | QM_ORDER_MAINTAIN |
-| GET | `/v1/quality/quality-orders/{id}` | QM_VIEW |
-| POST | `/v1/quality/quality-orders/{id}/results` | QM_RESULTS_RECORD |
-| POST | `/v1/quality/quality-orders/{id}:usage-decision` | QM_USAGE_DECISION |
-| GET | `/v1/quality/quality-orders/{id}/certificates` | QM_VIEW |
-| POST | `/v1/quality/quality-orders/{id}/certificates` | QM_RESULTS_RECORD |
-| POST | `/v1/quality/quality-orders/{id}/certificates:waive` | QM_USAGE_DECISION |
-| GET | `/v1/quality/samples?qualityOrderId=&status=&limit=` | QM_VIEW |
-| POST | `/v1/quality/samples` | QM_RESULTS_RECORD |
-| GET | `/v1/quality/compliance-lists?limit=` | QM_VIEW |
-| POST | `/v1/quality/compliance-lists` | QM_COMPLIANCE_MAINTAIN |
-| GET | `/v1/quality/items/{id}/composition` | QM_VIEW |
-| POST | `/v1/quality/items/{id}/composition` | QM_COMPLIANCE_MAINTAIN |
-| POST | `/v1/quality/items/{id}:evaluate-compliance` | QM_VIEW |
-| GET | `/v1/quality/stability-studies?status=&itemId=&limit=` | QM_VIEW |
-| POST | `/v1/quality/stability-studies` | QM_STABILITY_MAINTAIN |
-| GET | `/v1/quality/stability-studies/{id}` | QM_VIEW |
-| POST | `/v1/quality/stability-studies/{id}:transition` | QM_STABILITY_MAINTAIN |
-| GET | `/v1/quality/receipt-checks?poLineId=&batch=&limit=` | QM_VIEW |
-| POST | `/v1/quality/receipt-checks` | QM_ORDER_MAINTAIN |
-| POST | `/v1/quality/coa:generate` | QM_COA |
-| GET | `/v1/quality/quality-orders/{id}/coas` | QM_VIEW |
-| GET | `/v1/quality/spc?itemId=&testId=&orders=` | QM_VIEW |
-| GET | `/v1/quality/nonconformances?status=&source=&severity=&qualityOrderId=&limit=` | QM_VIEW |
-| POST | `/v1/quality/nonconformances` | QM_NCR_MAINTAIN |
-| GET | `/v1/quality/nonconformances/{id}` | QM_VIEW, or `quality.capa.execute` |
-| POST | `/v1/quality/nonconformances/{id}:approve` | QM_NCR_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}:refuse` | QM_NCR_MAINTAIN |
-| POST | `/v1/quality/nonconformances/{id}/corrections` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
-| POST | `/v1/quality/nonconformances/{id}:complete-step` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
-| POST | `/v1/quality/nonconformances/{id}:check-effectiveness` | QM_CAPA_MAINTAIN, or the service-only `quality.capa.execute` that `workflow-ts` signs |
+| POST | `/v1/quality/sampling-plans:size` | quality.view |
+| GET | `/v1/quality/test-groups` | quality.view |
+| GET | `/v1/quality/test-groups/{id}` | quality.view |
+| POST | `/v1/quality/test-groups` | quality.setup.maintain |
+| GET | `/v1/quality/instruments?dueWithinDays=&limit=` | quality.view |
+| POST | `/v1/quality/instruments` | quality.setup.maintain |
+| POST | `/v1/quality/instruments/{id}:calibrate` | quality.setup.maintain |
+| GET | `/v1/quality/associations` | quality.view |
+| POST | `/v1/quality/associations` | quality.setup.maintain |
+| GET | `/v1/quality/quality-orders?status=&siteId=&limit=` | quality.view |
+| POST | `/v1/quality/quality-orders` | quality.order.maintain |
+| GET | `/v1/quality/quality-orders/{id}` | quality.view |
+| POST | `/v1/quality/quality-orders/{id}/results` | quality.result.record |
+| POST | `/v1/quality/quality-orders/{id}:usage-decision` | quality.usage.decide |
+| GET | `/v1/quality/quality-orders/{id}/certificates` | quality.view |
+| POST | `/v1/quality/quality-orders/{id}/certificates` | quality.result.record |
+| POST | `/v1/quality/quality-orders/{id}/certificates:waive` | quality.usage.decide |
+| GET | `/v1/quality/samples?qualityOrderId=&status=&limit=` | quality.view |
+| POST | `/v1/quality/samples` | quality.result.record |
+| GET | `/v1/quality/compliance-lists?limit=` | quality.view |
+| POST | `/v1/quality/compliance-lists` | quality.compliance.maintain |
+| GET | `/v1/quality/items/{id}/composition` | quality.view |
+| POST | `/v1/quality/items/{id}/composition` | quality.compliance.maintain |
+| POST | `/v1/quality/items/{id}:evaluate-compliance` | quality.view |
+| GET | `/v1/quality/stability-studies?status=&itemId=&limit=` | quality.view |
+| POST | `/v1/quality/stability-studies` | quality.stability.maintain |
+| GET | `/v1/quality/stability-studies/{id}` | quality.view |
+| POST | `/v1/quality/stability-studies/{id}:transition` | quality.stability.maintain |
+| GET | `/v1/quality/receipt-checks?poLineId=&batch=&limit=` | quality.view |
+| POST | `/v1/quality/receipt-checks` | quality.order.maintain |
+| POST | `/v1/quality/coa:generate` | quality.coa.generate |
+| GET | `/v1/quality/quality-orders/{id}/coas` | quality.view |
+| GET | `/v1/quality/spc?itemId=&testId=&orders=` | quality.view |
+| GET | `/v1/quality/nonconformances?status=&source=&severity=&qualityOrderId=&limit=` | quality.view |
+| POST | `/v1/quality/nonconformances` | quality.ncr.maintain |
+| GET | `/v1/quality/nonconformances/{id}` | quality.view, or `quality.capa.execute` |
+| POST | `/v1/quality/nonconformances/{id}:approve` | quality.ncr.maintain |
+| POST | `/v1/quality/nonconformances/{id}:refuse` | quality.ncr.maintain |
+| POST | `/v1/quality/nonconformances/{id}/corrections` | quality.capa.maintain, or the service-only `quality.capa.execute` that `workflow-ts` signs |
+| POST | `/v1/quality/nonconformances/{id}:complete-step` | quality.capa.maintain, or the service-only `quality.capa.execute` that `workflow-ts` signs |
+| POST | `/v1/quality/nonconformances/{id}:check-effectiveness` | quality.capa.maintain, or the service-only `quality.capa.execute` that `workflow-ts` signs |
 
 The PRD writes paths as `/quality/v1/...`; the service follows the repository
 convention `/v1/<context>/...`. Lists answer `{"items": [...]}` with `limit` 1 to 500

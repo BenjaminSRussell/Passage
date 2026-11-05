@@ -19,7 +19,7 @@ import (
 
 const (
 	testTenant = "00000000-0000-0000-0000-000000000001"
-	allDuties  = "QM_SETUP_MAINTAIN,QM_ORDER_MAINTAIN,QM_RESULTS_RECORD,QM_USAGE_DECISION,QM_VIEW"
+	allDuties  = "quality.setup.maintain,quality.order.maintain,quality.result.record,quality.usage.decide,quality.view"
 )
 
 // fakeStore is an in-memory store.Store for handler tests.
@@ -236,7 +236,7 @@ func newHandler(s store.Store) http.Handler {
 
 func TestSizeSample_AQLFixtureOverHTTP(t *testing.T) {
 	h := newHandler(newFake())
-	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/sampling-plans:size", body: `{"lotQty":"51","method":"AQL","aql":"2.5"}`, duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/sampling-plans:size", body: `{"lotQty":"51","method":"AQL","aql":"2.5"}`, duties: "quality.view"})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"sampleQty":"20"`) || !strings.Contains(rec.Body.String(), `"codeLetter":"E"`) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -244,9 +244,9 @@ func TestSizeSample_AQLFixtureOverHTTP(t *testing.T) {
 
 func TestDuties_AreEnforced(t *testing.T) {
 	h := newHandler(newFake())
-	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/test-groups", body: `{}`, duties: "QM_VIEW", key: "k"})
+	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/test-groups", body: `{}`, duties: "quality.view", key: "k"})
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("missing QM_SETUP_MAINTAIN: status %d", rec.Code)
+		t.Fatalf("missing quality.setup.maintain: status %d", rec.Code)
 	}
 	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/sampling-plans:size", body: `{}`})
 	if rec.Code != http.StatusForbidden {
@@ -492,7 +492,7 @@ func TestAssociation_DefaultsAndPlanValidation(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "samplingPlan.severity") {
 		t.Fatalf("tightened AQL plan: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/associations", duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/associations", duties: "quality.view"})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[`) {
 		t.Fatalf("list associations: %d %s", rec.Code, rec.Body.String())
 	}
@@ -516,7 +516,7 @@ func TestLists_FilterValidationAndDuty(t *testing.T) {
 	h := newHandler(f)
 	orderWithGroup(t, f, h, domain.StatusPending, 2)
 	orderWithGroup(t, f, h, domain.StatusClosed, 3)
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders?status=PENDING_DECISION", duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders?status=PENDING_DECISION", duties: "quality.view"})
 	var body struct {
 		Items []domain.Order `json:"items"`
 	}
@@ -524,12 +524,12 @@ func TestLists_FilterValidationAndDuty(t *testing.T) {
 		t.Fatalf("status filter: %d %s", rec.Code, rec.Body.String())
 	}
 	for _, q := range []string{"status=DONE", "siteId=x", "limit=0", "limit=501"} {
-		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders?" + q, duties: "QM_VIEW"}); rec.Code != http.StatusBadRequest {
+		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders?" + q, duties: "quality.view"}); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d", q, rec.Code)
 		}
 	}
-	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments", duties: "QM_RESULTS_RECORD"}); rec.Code != http.StatusForbidden {
-		t.Errorf("instruments without QM_VIEW: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments", duties: "quality.result.record"}); rec.Code != http.StatusForbidden {
+		t.Errorf("instruments without quality.view: %d", rec.Code)
 	}
 }
 
@@ -540,7 +540,7 @@ func TestInstrumentList_ShowsCalibrationStatus(t *testing.T) {
 	f.instruments["a"] = domain.Instrument{ID: "a", Code: "CAL-OK", DueAt: now.AddDate(0, 0, 60)}
 	f.instruments["b"] = domain.Instrument{ID: "b", Code: "CAL-SOON", DueAt: now.AddDate(0, 0, 3)}
 	f.instruments["c"] = domain.Instrument{ID: "c", Code: "CAL-LATE", DueAt: now.AddDate(0, 0, -1)}
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments", duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments", duties: "quality.view"})
 	var body struct {
 		Items []domain.Instrument `json:"items"`
 	}
@@ -564,19 +564,19 @@ func TestCalibrateInstrument_MovesDueDateAndRefusesFuture(t *testing.T) {
 	f.instruments[id] = domain.Instrument{ID: id, Code: "PH-01", CalibrationIntervalDays: 365, LastCalibratedAt: last, DueAt: last.AddDate(0, 0, 365)}
 	path := "/v1/quality/instruments/" + id + ":calibrate"
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{"calibratedAt":"` + at.Format(time.RFC3339) + `"}`, duties: "QM_SETUP_MAINTAIN"})
+	rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{"calibratedAt":"` + at.Format(time.RFC3339) + `"}`, duties: "quality.setup.maintain"})
 	if rec.Code != http.StatusOK || !f.instruments[id].DueAt.Equal(at.AddDate(0, 0, 365)) || !strings.Contains(rec.Body.String(), `"calibrationStatus":"IN_CALIBRATION"`) {
 		t.Fatalf("calibrate: %d %s", rec.Code, rec.Body.String())
 	}
 	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
-	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{"calibratedAt":"` + future + `"}`, duties: "QM_SETUP_MAINTAIN"}); rec.Code != http.StatusBadRequest {
+	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{"calibratedAt":"` + future + `"}`, duties: "quality.setup.maintain"}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("future calibration: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/instruments/" + ids.New() + ":calibrate", body: `{"calibratedAt":"` + at.Format(time.RFC3339) + `"}`, duties: "QM_SETUP_MAINTAIN"}); rec.Code != http.StatusNotFound {
+	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/instruments/" + ids.New() + ":calibrate", body: `{"calibratedAt":"` + at.Format(time.RFC3339) + `"}`, duties: "quality.setup.maintain"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown instrument: %d", rec.Code)
 	}
-	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{}`, duties: "QM_VIEW"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("calibration needs QM_SETUP_MAINTAIN: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{}`, duties: "quality.view"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("calibration needs quality.setup.maintain: %d", rec.Code)
 	}
 }
 
@@ -608,7 +608,7 @@ func TestOrderAndNCR_DimsAreBounded(t *testing.T) {
 		t.Fatalf("60-character batch: %d %s", rec.Code, rec.Body.String())
 	}
 	ncr := `{"source":"INTERNAL","itemId":"` + ids.New() + `","dims":{"batch":"` + strings.Repeat("B", 61) + `"},"qty":"1","uom":"EA","problemType":"DAMAGE","severity":"MINOR","description":"dented"}`
-	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/nonconformances", body: ncr, duties: "QM_NCR_MAINTAIN", key: ids.New()})
+	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/nonconformances", body: ncr, duties: "quality.ncr.maintain", key: ids.New()})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"dims"`) || len(f.ncrs) != 0 {
 		t.Fatalf("NCR with long batch: %d %s", rec.Code, rec.Body.String())
 	}

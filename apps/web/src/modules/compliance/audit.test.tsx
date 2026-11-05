@@ -244,7 +244,7 @@ describe("Break-glass access", () => {
     endsAt: "2026-11-02T10:00:00Z",
     reviewDueAt: "2026-11-05T10:00:00Z",
     needsApproval: true,
-    approverDuty: "BreakGlassApprove",
+    approverDuty: "compliance.break-glass.approve",
     requiresPostReview: false,
   };
 
@@ -263,7 +263,7 @@ describe("Break-glass access", () => {
   });
 
   it("describes each approval path", () => {
-    expect(approvalText({ ...plan, approverDuty: "PlatformAdmin" })).toBe("Waits for a second PlatformAdmin to approve (protected role).");
+    expect(approvalText({ ...plan, approverDuty: "platform.global.admin" })).toBe("Waits for a second platform.global.admin to approve (protected role).");
     expect(approvalText(plan as Parameters<typeof approvalText>[0])).toBe("Waits for a break-glass approver.");
     expect(approvalText({ ...plan, needsApproval: false, approverDuty: undefined, requiresPostReview: true })).toBe("Starts at once; a reviewer must sign off afterwards.");
   });
@@ -284,12 +284,12 @@ describe("Break-glass access", () => {
   });
 
   it("shows the self-grant refusal (BR-48.19)", async () => {
-    handler = () => problem(422, "SEC-0707", "break-glass cannot grant SecurityAdmin to yourself");
+    handler = () => problem(422, "SEC-0707", "break-glass cannot grant compliance.security.admin to yourself");
     renderAt("/compliance/break-glass");
-    fireEvent.change(screen.getByLabelText("Roles"), { target: { value: "SecurityAdmin" } });
+    fireEvent.change(screen.getByLabelText("Roles"), { target: { value: "compliance.security.admin" } });
     fireEvent.change(screen.getByLabelText("Ticket reference"), { target: { value: "INC-4411" } });
     fireEvent.click(screen.getByRole("button", { name: "Plan session" }));
-    expect((await findAlert()).textContent).toContain("cannot grant SecurityAdmin to yourself (SEC-0707)");
+    expect((await findAlert()).textContent).toContain("cannot grant compliance.security.admin to yourself (SEC-0707)");
     expect(screen.getByText("No session planned")).toBeInTheDocument();
   });
 

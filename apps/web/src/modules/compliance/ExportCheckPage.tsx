@@ -131,7 +131,7 @@ const columns: DataTableColumn<ExportLineDecision>[] = [
 const initial: ExportValues = { destination: "", region: "", items: "", licenses: "", releaseRef: "" };
 
 /**
- * Export compliance check (PRD §9.48.6, FR-48.20, duty TradeComplianceView):
+ * Export compliance check (PRD §9.48.6, FR-48.20, duty compliance.trade-screening.view):
  * the license determination of a delivery. An embargoed destination blocks
  * every line (TRD-1002); a line that needs a license blocks without a valid
  * one with quantity and value left (TRD-1003). Nothing is stored yet.

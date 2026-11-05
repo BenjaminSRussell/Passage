@@ -279,7 +279,7 @@ func TestListGateVisits_Filters(t *testing.T) {
 		}
 	}
 	if rec := do(t, h, http.MethodGet, base+"/gate/visits", "", api.DutyView); rec.Code != http.StatusForbidden {
-		t.Fatalf("gate log with TMS_VIEW only = %d, want 403 (driver PII)", rec.Code)
+		t.Fatalf("gate log with transport.view only = %d, want 403 (driver PII)", rec.Code)
 	}
 }
 

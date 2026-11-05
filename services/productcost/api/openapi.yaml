@@ -30,7 +30,7 @@ paths:
     post:
       summary: Roll one item and return its standard with the component split
       operationId: rollOne
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -49,7 +49,7 @@ paths:
     post:
       summary: Mass roll a set of items by topological level
       operationId: massRoll
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -68,7 +68,7 @@ paths:
     post:
       summary: Decompose the variance of an ended production order
       operationId: computeVariance
-      x-passage-duty: CostingSystem
+      x-passage-duty: productcost.variance.compute
       requestBody:
         required: true
         content:
@@ -88,7 +88,7 @@ paths:
     post:
       summary: Preview the on-hand revaluation of a standard cost activation
       operationId: previewActivation
-      x-passage-duty: CostingActivate
+      x-passage-duty: productcost.activate
       requestBody:
         required: true
         content:
@@ -107,7 +107,7 @@ paths:
     post:
       summary: Cost an item mixed from procurement alternatives (FR-39.14)
       operationId: mixedCost
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -127,7 +127,7 @@ paths:
     post:
       summary: Book the cost of goods sold of an issue by cost component (FR-39.15)
       operationId: cogsPosting
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -146,7 +146,7 @@ paths:
     post:
       summary: Book a purchase price variance by cost component (FR-39.7, FR-39.15)
       operationId: priceDifferencePosting
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -165,7 +165,7 @@ paths:
     post:
       summary: Cost a configured or make-to-order line and show its margin (FR-39.16)
       operationId: salesOrderEstimate
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -184,7 +184,7 @@ paths:
     post:
       summary: Compare a baseline run with a candidate run item by item (FR-39.10 what-if)
       operationId: compareRuns
-      x-passage-duty: CostingView
+      x-passage-duty: productcost.view
       requestBody:
         required: true
         content:
@@ -203,7 +203,7 @@ paths:
     post:
       summary: Reconcile inventory at standard to the GL per site (FR-39.11)
       operationId: reconcileStandard
-      x-passage-duty: CostingView
+      x-passage-duty: productcost.view
       requestBody:
         required: true
         content:
@@ -222,7 +222,7 @@ paths:
     post:
       operationId: transitionCostingVersion
       summary: Block, unblock or close a costing version (BR-39.2, FR-39.3); stateless, the caller supplies the current version
-      x-passage-duty: CostingMaintain
+      x-passage-duty: productcost.maintain
       requestBody:
         required: true
         content:
@@ -241,8 +241,8 @@ paths:
   /v1/product-costing/versions:activate:
     post:
       operationId: activateCostingVersion
-      summary: Move an Open or Blocked version to Active (BR-39.2); segregated from CostingMaintain. Stateless; no revaluation is posted
-      x-passage-duty: CostingActivate
+      summary: Move an Open or Blocked version to Active (BR-39.2); segregated from productcost.maintain. Stateless; no revaluation is posted
+      x-passage-duty: productcost.activate
       requestBody:
         required: true
         content:
@@ -262,7 +262,7 @@ paths:
     post:
       operationId: validateStandardCostConversion
       summary: Validate a standard cost conversion and preview its revaluation (FR-39.12); nothing is posted
-      x-passage-duty: CostingActivate
+      x-passage-duty: productcost.activate
       requestBody:
         required: true
         content:
@@ -281,7 +281,7 @@ paths:
     post:
       operationId: advanceStandardCostConversion
       summary: Record the next checklist step as done by the calling user (FR-39.12); stateless, the caller supplies the checklist so far
-      x-passage-duty: CostingActivate
+      x-passage-duty: productcost.activate
       requestBody:
         required: true
         content:
@@ -306,7 +306,7 @@ paths:
         the prices resolved from the selected costing version. Each line costs
         quantity × price; the costing sheet applies to the priced split. The
         PRD's Idempotency-Key arrives with stored estimates.
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -331,7 +331,7 @@ paths:
         (lineId, configHash) returns the current version unchanged (changed false).
         A new configuration hash supersedes the Pending and Frozen versions,
         appends a Pending version and warns CST-0751.
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -351,7 +351,7 @@ paths:
       operationId: freezeSalesOrderEstimate
       summary: Freeze the line's current estimate at confirmation (BR-39.14)
       description: Freezing a Frozen version returns it unchanged.
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       requestBody:
         required: true
         content:
@@ -371,7 +371,7 @@ paths:
     get:
       operationId: listCostComponents
       summary: List the tenant's cost components (at most 20), ordered by code (FR-39.1)
-      x-passage-duty: CostingView
+      x-passage-duty: productcost.view
       responses:
         "200":
           description: Components
@@ -388,7 +388,7 @@ paths:
     post:
       operationId: createCostComponent
       summary: Create a cost component of the split (FR-39.1); publishes dev.passage.costing.costcomponent.created.v1
-      x-passage-duty: CostingMaintain
+      x-passage-duty: productcost.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -414,7 +414,7 @@ paths:
     get:
       operationId: listCostGroups
       summary: List the tenant's cost groups (at most 50) with the component each maps to (FR-39.1)
-      x-passage-duty: CostingView
+      x-passage-duty: productcost.view
       responses:
         "200":
           description: Cost groups
@@ -431,7 +431,7 @@ paths:
     post:
       operationId: createCostGroup
       summary: Create a cost group mapped to a cost component (FR-39.1); publishes dev.passage.costing.costgroup.created.v1
-      x-passage-duty: CostingMaintain
+      x-passage-duty: productcost.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -457,7 +457,7 @@ paths:
     get:
       operationId: listCostingVersions
       summary: Page through the stored costing versions in the caller's legal-entity scope, in creation order (FR-39.3)
-      x-passage-duty: CostingView
+      x-passage-duty: productcost.view
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [Open, Blocked, Active, Closed] } }
@@ -482,7 +482,7 @@ paths:
     post:
       operationId: createCostingVersion
       summary: Create an Open costing version (FR-39.3); publishes dev.passage.costing.version.created.v1
-      x-passage-duty: CostingMaintain
+      x-passage-duty: productcost.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -508,7 +508,7 @@ paths:
     get:
       operationId: getCostingVersion
       summary: Read one stored costing version
-      x-passage-duty: CostingView
+      x-passage-duty: productcost.view
       parameters:
         - $ref: "#/components/parameters/VersionId"
       responses:
@@ -525,7 +525,7 @@ paths:
     post:
       operationId: transitionStoredCostingVersion
       summary: Block, unblock or close a stored version (BR-39.2) under its optimistic version; publishes dev.passage.costing.version.transitioned.v1
-      x-passage-duty: CostingMaintain
+      x-passage-duty: productcost.maintain
       parameters:
         - $ref: "#/components/parameters/VersionId"
       requestBody:
@@ -555,8 +555,8 @@ paths:
   /v1/product-costing/versions/{id}/activate:
     post:
       operationId: activateStoredCostingVersion
-      summary: Activate a stored Open or Blocked version (BR-39.2), segregated from CostingMaintain. Every version type except Simulation can be activated; a version that is not Standard, or has no stored calculations, only moves the status. A Standard version with stored calculations (and with dryRun or reversesActivationId) revalues every stored Legal-view position of the version against the inventory on-hand, posts the revaluation journal to the ledger accounts configured for the version's legal entity and activates (FR-39.6). The inventory site dimension must carry the productcost site id (a UUID)
-      x-passage-duty: CostingActivate
+      summary: Activate a stored Open or Blocked version (BR-39.2), segregated from productcost.maintain. Every version type except Simulation can be activated; a version that is not Standard, or has no stored calculations, only moves the status. A Standard version with stored calculations (and with dryRun or reversesActivationId) revalues every stored Legal-view position of the version against the inventory on-hand, posts the revaluation journal to the ledger accounts configured for the version's legal entity and activates (FR-39.6). The inventory site dimension must carry the productcost site id (a UUID)
+      x-passage-duty: productcost.activate
       parameters:
         - $ref: "#/components/parameters/VersionId"
         - name: Idempotency-Key
@@ -591,7 +591,7 @@ paths:
     post:
       operationId: rollStoredCostingVersion
       summary: Roll items at one site and store the results as Pending calculations of an Open version (FR-39.4). The BOM and route versions (and their ids) are read from the engineering service for the date; the request cannot send item structures, BOMs, routes or costing sheets. Purchased item prices and operation rates have no stored source yet, so they are the request's two price inputs; the user who rolled cannot activate the version (CST-0738). Each roll adds 1 to the version counter, so an activation that read the version before it is refused (CST-0714). Rolled items supersede their earlier Pending rows; an item that fails to roll stores nothing and is listed in errors
-      x-passage-duty: CostingCalculate
+      x-passage-duty: productcost.calculate
       parameters:
         - $ref: "#/components/parameters/VersionId"
         - name: Idempotency-Key
@@ -683,7 +683,7 @@ paths:
     get:
       operationId: getPostingAccounts
       summary: The ledger accounts a legal entity's activation journals post to
-      x-passage-duty: CostingView
+      x-passage-duty: productcost.view
       parameters:
         - $ref: "#/components/parameters/LegalEntityId"
       responses:
@@ -698,8 +698,8 @@ paths:
         "503": { $ref: "#/components/responses/Problem" }
     put:
       operationId: putPostingAccounts
-      summary: Set the ledger accounts a legal entity's activation journals post to (CostingMaintain); activation takes the accounts from here, never from its request
-      x-passage-duty: CostingMaintain
+      summary: Set the ledger accounts a legal entity's activation journals post to (productcost.maintain); activation takes the accounts from here, never from its request
+      x-passage-duty: productcost.maintain
       parameters:
         - $ref: "#/components/parameters/LegalEntityId"
       requestBody:

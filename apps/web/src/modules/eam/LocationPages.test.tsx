@@ -101,7 +101,7 @@ describe("location module wiring", () => {
   it("registers the plant structure, the new location form and the location detail, with a nav entry", () => {
     const paths = eam.routes.map((r) => r.path);
     for (const path of ["/eam/locations", "/eam/locations/new", "/eam/locations/:id"]) expect(paths).toContain(path);
-    expect(eam.nav.find((n) => n.to === "/eam/locations")).toMatchObject({ label: "Plant structure", duty: "EamInquire" });
+    expect(eam.nav.find((n) => n.to === "/eam/locations")).toMatchObject({ label: "Plant structure", duty: "eam.inquire" });
   });
 });
 

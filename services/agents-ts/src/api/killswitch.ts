@@ -2,9 +2,9 @@ import { type AgentEvent, type KillSwitchChangedData, killSwitchChangedEvent } f
 import { buildKillSwitchChange, type KillSwitchChange, type KillSwitchRegistry } from "../domain/killswitch.js";
 import { ApiError, asObject, isUuid, type Principal, requireDuty } from "./principal.js";
 
-/** Duty for a tenant kill (9.47.17 AgentAdmin) and for the global kill (PlatformAdmin, break-glass). */
-export const TENANT_KILL_DUTY = "AgentAdmin";
-export const GLOBAL_KILL_DUTY = "PlatformAdmin";
+/** Duty for a tenant kill (9.47.17 agents.admin) and for the global kill (platform.global.admin, break-glass). */
+export const TENANT_KILL_DUTY = "agents.admin";
+export const GLOBAL_KILL_DUTY = "platform.global.admin";
 
 /** Versions are strictly increasing; production backs this with a database sequence. */
 export interface KillSwitchVersionSource {
@@ -71,7 +71,7 @@ function resultOf(change: KillSwitchChange): KillSwitchResult {
 
 /**
  * Toggles a kill switch (AC-47.6, FR-47.12). A tenant admin may only toggle
- * their own tenant; the global switch needs PlatformAdmin.
+ * their own tenant; the global switch needs platform.global.admin.
  *
  * Idempotent by scope (9.47.5): asking for the state the switch is already in
  * returns its current toggle and publishes nothing. Otherwise the change is
@@ -138,7 +138,7 @@ function stateOf(change: KillSwitchChange | undefined): KillSwitchState {
 /**
  * `GET /api/v1/agents/kill-switch`: the caller's tenant switch and the global
  * switch as this worker sees them, for the agent administration screen
- * (9.47.6). Readable by AgentAdmin or PlatformAdmin.
+ * (9.47.6). Readable by agents.admin or platform.global.admin.
  */
 export function readKillSwitchStatus(principal: Principal, registry: KillSwitchRegistry): KillSwitchStatus {
   if (!principal.duties.has(TENANT_KILL_DUTY) && !principal.duties.has(GLOBAL_KILL_DUTY)) {

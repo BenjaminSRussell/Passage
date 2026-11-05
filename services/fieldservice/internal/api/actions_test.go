@@ -17,13 +17,13 @@ func actionBody(actions string) string {
 func TestRecordActions_RequiresTechnicianDuty(t *testing.T) {
 	h := newTestRouter()
 	path := "/v1/service/work-orders/" + uuid1 + "/actions"
-	for _, duty := range []string{"SvcWoMaintain", "SvcDispatch", "SvcInquire"} {
+	for _, duty := range []string{"fieldservice.work-order.maintain", "fieldservice.technician.dispatch", "fieldservice.inquire"} {
 		if rec := do(t, h, http.MethodPost, path, actionBody(""), nil, duty); rec.Code != http.StatusForbidden {
 			t.Errorf("%s: status %d, want 403", duty, rec.Code)
 		}
 	}
-	if rec := do(t, h, http.MethodGet, path, "", nil, "SvcTechnician"); rec.Code != http.StatusForbidden {
-		t.Errorf("reading the log with SvcTechnician only: status %d, want 403", rec.Code)
+	if rec := do(t, h, http.MethodGet, path, "", nil, "fieldservice.work-order.execute"); rec.Code != http.StatusForbidden {
+		t.Errorf("reading the log with fieldservice.work-order.execute only: status %d, want 403", rec.Code)
 	}
 }
 
@@ -46,7 +46,7 @@ func TestRecordActions_ValidatesEachAction(t *testing.T) {
 	for i := 0; i < len(cases); i++ {
 		all = append(all, cases["actions["+string(rune('0'+i))+"]"])
 	}
-	rec := do(t, h, http.MethodPost, path, actionBody(strings.Join(all, ",")), nil, "SvcTechnician")
+	rec := do(t, h, http.MethodPost, path, actionBody(strings.Join(all, ",")), nil, "fieldservice.work-order.execute")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -56,7 +56,7 @@ func TestRecordActions_ValidatesEachAction(t *testing.T) {
 			t.Errorf("errors %v lack %s", fields, key)
 		}
 	}
-	empty := do(t, h, http.MethodPost, path, actionBody(""), nil, "SvcTechnician")
+	empty := do(t, h, http.MethodPost, path, actionBody(""), nil, "fieldservice.work-order.execute")
 	if _, fields := problemOf(t, empty); fields["actions"] == "" {
 		t.Errorf("an empty batch: %v", fields)
 	}
@@ -65,7 +65,7 @@ func TestRecordActions_ValidatesEachAction(t *testing.T) {
 func TestTransition_RefusesSchedulingStatuses(t *testing.T) {
 	h := newTestRouter()
 	for _, to := range []string{"SCHEDULED", "DISPATCHED"} {
-		rec := do(t, h, http.MethodPost, "/v1/service/work-orders/"+uuid1+":transition", `{"to":"`+to+`"}`, map[string]string{"If-Match": `"1"`}, "SvcWoMaintain")
+		rec := do(t, h, http.MethodPost, "/v1/service/work-orders/"+uuid1+":transition", `{"to":"`+to+`"}`, map[string]string{"If-Match": `"1"`}, "fieldservice.work-order.maintain")
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d: %s", to, rec.Code, rec.Body.String())
 		}

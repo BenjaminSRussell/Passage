@@ -145,9 +145,9 @@ describe("module registration", () => {
     for (const p of ["/assets/depreciation-runs", "/assets/depreciation-runs/:id", "/assets/capex", "/assets/capex/new", "/assets/capex/:id", "/assets/index-series", "/assets/:id/adjust", "/assets/:id/additions/new", "/assets/:id/insurance/new"]) {
       expect(paths).toContain(p);
     }
-    expect(assets.nav.find((n) => n.to === "/assets/depreciation-runs")?.duty).toBe("AssetDepreciate");
-    expect(assets.nav.find((n) => n.to === "/assets/capex")?.duty).toBe("CapexRequestCreate");
-    expect(assets.nav.find((n) => n.to === "/assets/index-series")?.duty).toBe("AssetInsuranceMaintain");
+    expect(assets.nav.find((n) => n.to === "/assets/depreciation-runs")?.duty).toBe("assets.asset.depreciate");
+    expect(assets.nav.find((n) => n.to === "/assets/capex")?.duty).toBe("assets.capex-request.create");
+    expect(assets.nav.find((n) => n.to === "/assets/index-series")?.duty).toBe("assets.insurance.maintain");
   });
 
   it("parses year lines without floats", () => {

@@ -279,7 +279,7 @@ func TestPending_ACorrectionInLimboBlocksInvoicesOnThatReceipt(t *testing.T) {
 	}
 }
 
-func admin(key string) headers { return duty("ReceivingAdmin", key) }
+func admin(key string) headers { return duty("receiving.admin", key) }
 
 func resolvePath(key string) string {
 	return "/v1/receiving/pending-postings/" + url.PathEscape(key) + "/resolve"
@@ -298,7 +298,7 @@ func TestResolve_ReversesAnUnconfirmedPostingAndFreesTheReceipt(t *testing.T) {
 	if len(list.Items) != 1 || list.Items[0].Key != key {
 		t.Fatalf("pending list %+v", list)
 	}
-	problemCode(t, rg.call(http.MethodPost, resolvePath(key), "", duty("ReceivingPost", "k1")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, resolvePath(key), "", duty("receiving.receipt.post", "k1")), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodPost, resolvePath("nope"), "", admin("k2")), http.StatusNotFound, "RCV-NF-003")
 
 	rg.ledger.Err = errors.New("ledger unreachable")
@@ -420,7 +420,7 @@ func TestResolve_ACommandThatCommitsFirstLeavesNothingToReverse(t *testing.T) {
 	if len(rg.ledger.Reversed) != 0 {
 		t.Fatalf("a posting its command already completed was reversed: %v", rg.ledger.Reversed)
 	}
-	if got := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("ReceivingMaintain", "")), http.StatusOK); got.Lines[0].Qty != "3" {
+	if got := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("receiving.receipt.maintain", "")), http.StatusOK); got.Lines[0].Qty != "3" {
 		t.Fatalf("qty %s, want 3", got.Lines[0].Qty)
 	}
 }
@@ -448,7 +448,7 @@ func TestResolve_AResolveThatReversesWhileTheCommandIsInFlightFailsTheCommand(t 
 		}
 	}
 	problemCode(t, base.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), base.poster(r.Version)), http.StatusConflict, "RCV-IDM-001")
-	got := decode[receiptJSON](t, base.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("ReceivingMaintain", "")), http.StatusOK)
+	got := decode[receiptJSON](t, base.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("receiving.receipt.maintain", "")), http.StatusOK)
 	if got.Lines[0].Qty != "4" || got.Version != r.Version {
 		t.Fatalf("receipt qty %s version %d after the superseded command, want 4 and %d", got.Lines[0].Qty, got.Version, r.Version)
 	}
@@ -520,7 +520,7 @@ func assertClaimHeldThenLeaseTakeover(t *testing.T, rg *rig, broken *commitFails
 		t.Fatalf("claim after the unknown outcome: err=%v, want it still held", err)
 	}
 	problemCode(t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":correct", correction("-1"), rg.poster(r.Version)), http.StatusConflict, "RCV-IDM-001")
-	if got := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("ReceivingMaintain", "")), http.StatusOK); got.Lines[0].Qty != "4" || got.Version != r.Version {
+	if got := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("receiving.receipt.maintain", "")), http.StatusOK); got.Lines[0].Qty != "4" || got.Version != r.Version {
 		t.Fatalf("the repeated command committed: qty %s version %d", got.Lines[0].Qty, got.Version)
 	}
 	time.Sleep(10 * time.Millisecond)

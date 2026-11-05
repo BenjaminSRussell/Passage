@@ -96,14 +96,14 @@ func (f *fakeStore) SubmitCapexRequest(_ context.Context, id string, in store.Su
 	return store.CapexRequest{}, httpx.NewProblem(http.StatusNotFound, store.CodeCapexVariantNotFound, "no variant")
 }
 
-const insuranceDuties = "AssetView,AssetInsuranceMaintain"
+const insuranceDuties = "assets.asset.view,assets.insurance.maintain"
 
 func TestIndexSeries_PutValidatesAndLists(t *testing.T) {
 	f := newFake()
 	h := server(f)
 	body := `{"country":"US","classCode":"MACHINE","values":[{"year":2024,"value":"112.0"},{"year":2026,"value":"118.5"}]}`
-	if rec := call(h, http.MethodPut, "/v1/assets/index-series/US-MACH", body, "AssetView", false); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetInsuranceMaintain status = %d", rec.Code)
+	if rec := call(h, http.MethodPut, "/v1/assets/index-series/US-MACH", body, "assets.asset.view", false); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.insurance.maintain status = %d", rec.Code)
 	}
 	rec := call(h, http.MethodPut, "/v1/assets/index-series/US-MACH", body, insuranceDuties, false)
 	if rec.Code != http.StatusOK {
@@ -125,7 +125,7 @@ func TestIndexSeries_PutValidatesAndLists(t *testing.T) {
 			t.Errorf("%s: status %d body %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/index-series", "", "AssetInsuranceMaintain", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "US-MACH") {
+	if rec := call(h, http.MethodGet, "/v1/assets/index-series", "", "assets.insurance.maintain", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "US-MACH") {
 		t.Fatalf("list = %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -137,8 +137,8 @@ func TestInsurancePolicy_ValidationAndDefaults(t *testing.T) {
 	path := "/v1/assets/" + a.ID + "/insurance-policies"
 	body := `{"insurerPartyId":"` + ids.New() + `","policyNumber":" P-1 ","insuranceType":"Property","coverageFrom":"2026-01-01","coverageTo":"2026-12-31",
 		"currency":"USD","basis":"Replacement","baseValue":"100000.00","sumInsured":"95000.00","indexSeriesCode":"US-MACH","indexBaseYear":2024}`
-	if rec := call(h, http.MethodPost, path, body, "AssetView", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetInsuranceMaintain status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, path, body, "assets.asset.view", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.insurance.maintain status = %d", rec.Code)
 	}
 	if rec := call(h, http.MethodPost, path, body, insuranceDuties, false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("without Idempotency-Key status = %d", rec.Code)
@@ -169,12 +169,12 @@ func TestInsurancePolicy_ValidationAndDefaults(t *testing.T) {
 	if rec := call(h, http.MethodPost, "/v1/assets/"+ids.New()+"/insurance-policies", body, insuranceDuties, true); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown asset status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, path, "", "AssetView", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
+	if rec := call(h, http.MethodGet, path, "", "assets.asset.view", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Errorf("list = %d %s", rec.Code, rec.Body.String())
 	}
 }
 
-const capexDuties = "CapexRequestCreate"
+const capexDuties = "assets.capex-request.create"
 
 func TestCapex_CreateSubmitRoutesToCFO(t *testing.T) {
 	// AC-37.11: a USD 320,000.00 request routes to the CFO level on submit.
@@ -182,8 +182,8 @@ func TestCapex_CreateSubmitRoutesToCFO(t *testing.T) {
 	h := server(f)
 	body := `{"legalEntityId":"` + testLE + `","number":"CR-1","title":"New press line","requesterId":"plant.manager","currency":"USD",
 		"variants":[{"description":"Base","amountsByYear":{"2026":"200000.00","2027":"120000.00"},"inServiceDate":"2027-06-01","profileAssumption":"SL-120"}]}`
-	if rec := call(h, http.MethodPost, "/v1/assets/capex-requests", body, "AssetView", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without CapexRequestCreate status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, "/v1/assets/capex-requests", body, "assets.asset.view", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.capex-request.create status = %d", rec.Code)
 	}
 	rec := call(h, http.MethodPost, "/v1/assets/capex-requests", body, capexDuties, true)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
@@ -248,10 +248,10 @@ func TestCapex_CreateSubmitRoutesToCFO(t *testing.T) {
 	if rec := call(h, http.MethodGet, "/v1/assets/capex-requests/"+created.ID, "", capexDuties, false); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
 		t.Fatalf("get status = %d etag %q", rec.Code, rec.Header().Get("ETag"))
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/capex-requests?status=InApproval", "", "AssetView", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "CR-1") {
+	if rec := call(h, http.MethodGet, "/v1/assets/capex-requests?status=InApproval", "", "assets.asset.view", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "CR-1") {
 		t.Fatalf("list status = %d body %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/capex-requests?status=Done", "", "AssetView", false); rec.Code != http.StatusBadRequest {
+	if rec := call(h, http.MethodGet, "/v1/assets/capex-requests?status=Done", "", "assets.asset.view", false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown status filter = %d", rec.Code)
 	}
 	if rec := call(h, http.MethodGet, "/v1/assets/capex-requests/"+ids.New(), "", capexDuties, false); rec.Code != http.StatusNotFound {

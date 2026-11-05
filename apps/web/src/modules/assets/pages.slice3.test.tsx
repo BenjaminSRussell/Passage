@@ -118,8 +118,8 @@ describe("assets module, slice 3", () => {
       expect(paths).toContain(path);
     }
     expect(assets.nav).toEqual(expect.arrayContaining([
-      { label: "Count sessions", to: "/assets/count-sessions", duty: "AssetCount" },
-      { label: "Insurance report", to: "/assets/insurance-report", duty: "AssetView" },
+      { label: "Count sessions", to: "/assets/count-sessions", duty: "assets.asset.count" },
+      { label: "Insurance report", to: "/assets/insurance-report", duty: "assets.asset.view" },
     ]));
   });
 });
@@ -280,7 +280,7 @@ describe("count sessions", () => {
     const first = renderAt("/assets/count-sessions");
     expect(await screen.findByText("No count sessions yet")).toBeInTheDocument();
     first.unmount();
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty AssetView or AssetCount" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty assets.asset.view or assets.asset.count" } });
     renderAt("/assets/count-sessions");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("AUTH-0003");

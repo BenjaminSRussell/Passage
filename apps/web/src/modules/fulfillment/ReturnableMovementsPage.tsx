@@ -92,12 +92,12 @@ function validateAdjustment(v: Values): Record<string, string> {
 /**
  * The history behind the returnable packaging balances (FR-28.16): containers that
  * shipped, came back with a cancelled slip or a customer, and manual corrections.
- * Someone holding ReturnablePackagingMaintain can correct a balance here, with a reason;
+ * Someone holding fulfillment.returnable-packaging.maintain can correct a balance here, with a reason;
  * the service enforces the duty.
  */
 export function ReturnableMovementsPage() {
   const duties = usePrincipalDuties();
-  const canAdjust = holdsDuty(duties, "ReturnablePackagingMaintain");
+  const canAdjust = holdsDuty(duties, "fulfillment.returnable-packaging.maintain");
   const [fields, setFields] = useState<Filter>(noFilter);
   const [filter, setFilter] = useState<Filter>(noFilter);
   const [filterErrors, setFilterErrors] = useState<Record<string, string>>({});

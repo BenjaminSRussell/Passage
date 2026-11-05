@@ -32,7 +32,7 @@ Routes and nav are in `module.ts`; the shell discovers it through the registry.
 | `/hr/courses/:id` | Course detail: what a pass awards, the sessions with seats, waitlist and cost, and a schedule-session form (times in UTC) | `GET /courses/{id}`, `GET`/`POST /courses/{id}/sessions` |
 | `/hr/courses/sessions/:id` | Session: seat tiles, the attendance list in registration order with approve, decline and cancel, a register-worker form until the session ends (full and approval warnings shown), and attendance with pass or fail from the session start | `GET /courses/sessions/{id}`, `GET`/`POST /courses/sessions/{id}/registrations`, `POST /courses/registrations/{id}/approve`, `POST /courses/registrations/{id}/cancel`, `POST /courses/sessions/{id}/complete`, `GET /workers` |
 | `/hr/actions?status=` | Personnel actions with status filter | `GET /actions` |
-| `/hr/actions/new` | Submit a hire, transfer, termination or pay change (pay fields need `HcmCompAdmin`; a 403 is explained) | `POST /actions` |
+| `/hr/actions/new` | Submit a hire, transfer, termination or pay change (pay fields need `hr.compensation.admin`; a 403 is explained) | `POST /actions` |
 | `/hr/actions/:id` | Action detail; pay shown only when the service returned it; withdraw a pending action after a confirmation | `GET /actions/{id}`, `POST /actions/{id}/withdraw` |
 | `/hr/jobs`, `/hr/jobs/new`, `/hr/jobs/:id` | Job catalog with optional pay range (currency, minimum, maximum together) | `GET`/`POST /jobs`, `GET /jobs/{id}` |
 | `/hr/compensation/plans`, `/hr/compensation/plans/new` | Compensation plans (annual or hourly, one currency) | `GET`/`POST /compensation/plans` |
@@ -76,24 +76,24 @@ the route gate (it takes one duty); the service accepts either.
 
 ## Needs
 
-- Shell owner (wave 5): nav entries carry `HcmWorkerInquire`,
-  `HcmOrgInquire`, `HcmAbsenceAdmin`, `EssAbsence`, `HcmSetupAdmin` and `HcmLearningAdmin`; the shell filters by
+- Shell owner (wave 5): nav entries carry `hr.worker.inquire`,
+  `hr.org.inquire`, `hr.absence.admin`, `hr.absence.self`, `hr.setup.admin` and `hr.learning.admin`; the shell filters by
   duty once duties reach the client. Until then the absence screens show the
   service's 403 as an error.
 - Pickers for legal entity and department ids need the wave-6 org read
   contract; the forms take ids until then.
 - A "my absence" page for employees needs the signed-in user's worker id from
   the shell. The Absence card sits on the worker page, which needs
-  `HcmWorkerInquire`, so an employee with only `EssAbsence` sees their own
+  `hr.worker.inquire`, so an employee with only `hr.absence.self` sees their own
   requests in the queue (the service filters them) but their balances only
   once the ESS portal (`apps/ess`) or a "my absence" page exists.
 - The Benefits card sits on the worker page too, so an employee with only
-  `EssBenefits` enrolls through the API until a "my benefits" page or the
+  `hr.benefits.self` enrolls through the API until a "my benefits" page or the
   ESS portal exists (same need as "my absence").
 - The course screens are the learning administrator's. Employees browsing
-  the catalog and registering themselves (`EssLearning`), and a manager's
-  approval queue (`MssApprove`), need the signed-in user's worker id and the
+  the catalog and registering themselves (`hr.learning.self`), and a manager's
+  approval queue (`hr.team.approve`), need the signed-in user's worker id and the
   ESS/MSS pages; the session page's registrations list needs
-  `HcmLearningAdmin`.
+  `hr.learning.admin`.
 - Org chart, personnel actions, absence calendars and the ESS/MSS portals
   come with the later slices listed in `services/hr/NOT-IMPLEMENTED.md`.

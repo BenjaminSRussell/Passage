@@ -5,7 +5,7 @@ import { addMoney, money, nextStatuses } from "./format";
 import eam from "./module";
 
 describe("eam module", () => {
-  it("registers a list, a create form and a detail page per entity, gated by EamInquire", () => {
+  it("registers a list, a create form and a detail page per entity, gated by eam.inquire", () => {
     expect(eam.id).toBe("eam");
     const paths = eam.routes.map((r) => r.path);
     for (const path of [
@@ -25,7 +25,7 @@ describe("eam module", () => {
       expect(paths).toContain(path);
     }
     expect(eam.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
-    expect(eam.nav.every((n) => n.to.startsWith("/eam") && n.duty === "EamInquire")).toBe(true);
+    expect(eam.nav.every((n) => n.to.startsWith("/eam") && n.duty === "eam.inquire")).toBe(true);
     expect(loadModules().map((m) => m.id)).toContain("eam");
   });
 });

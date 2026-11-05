@@ -14,7 +14,7 @@ Slice 5 persists cash advances, travel requisitions and card feed imports
   the per-request maximum 2,000.00 (`EXP-ADV-001`), while the worker has a PAID or
   PARTIALLY_SETTLED advance still open after its due date (`EXP-ADV-002`; the due date
   itself is in time), and when the requisition belongs to another worker or legal
-  entity or is REJECTED or CLOSED (`EXP-ADV-004`). An approver (MssApprove) approves or
+  entity or is REJECTED or CLOSED (`EXP-ADV-004`). An approver (hr.team.approve) approves or
   rejects it; an expense administrator records the AP prepayment that paid it, which
   sets paid = amount, moves it to PAID and writes
   `dev.passage.expense.cashadvance.paid.v1` to the outbox in the same transaction, and
@@ -261,7 +261,7 @@ the ledger's own code (`EXP-GL-005` when it gave none).
 Duties: `expense.report.write` is the EssExpense duty for the reports and the previews
 (card matching is part of the ESS expense report screen, 8.43.6);
 `expense.card.import` is the ExpenseAdmin duty for card feeds (PRD 8.43.16 puts card
-import with ExpenseAdmin); `expense.approve` is MssApprove (advance and requisition
+import with ExpenseAdmin); `expense.approve` is hr.team.approve (advance and requisition
 decisions); `expense.advance.admin` is the ExpenseAdmin duty for recording the AP
 payment and cash returns of advances (8.43.17 "advance returns"). Requests, requisitions
 and the card pool use `expense.report.write`. `expense.gl.post` runs the reimbursement

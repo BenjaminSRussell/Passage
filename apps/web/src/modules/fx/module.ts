@@ -18,11 +18,11 @@ const fx: PassageModule = {
     { path: "/fx/rate-types", element: createElement(RateTypesPage), handle: { title: "Rate types" } },
   ],
   nav: [
-    { label: "Exchange rates", to: "/fx/rates", duty: "View exchange rates" },
-    { label: "Rate lookup", to: "/fx/lookup", duty: "View exchange rates" },
-    { label: "Convert an amount", to: "/fx/convert", duty: "View exchange rates" },
-    { label: "Enter a rate", to: "/fx/rate-entry", duty: "Maintain exchange rates" },
-    { label: "Rate types", to: "/fx/rate-types", duty: "Maintain exchange rates" },
+    { label: "Exchange rates", to: "/fx/rates", duty: "fx.rate.view" },
+    { label: "Rate lookup", to: "/fx/lookup", duty: "fx.rate.view" },
+    { label: "Convert an amount", to: "/fx/convert", duty: "fx.rate.view" },
+    { label: "Enter a rate", to: "/fx/rate-entry", duty: "fx.rate.maintain" },
+    { label: "Rate types", to: "/fx/rate-types", duty: "fx.rate.maintain" },
   ],
 };
 

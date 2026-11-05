@@ -111,7 +111,7 @@ func TestRequireOPAUsesExpectedHTTPStatuses(t *testing.T) {
 		wantDuty  string
 	}{
 		{name: "no principal", want: http.StatusUnauthorized},
-		{name: "denied", principal: true, opaStatus: http.StatusOK, opaBody: `{"result":{"allow":false,"duty_missing":"Maintain vendors"}}`, want: http.StatusForbidden, wantDuty: "Maintain vendors"},
+		{name: "denied", principal: true, opaStatus: http.StatusOK, opaBody: `{"result":{"allow":false,"duty_missing":"party.vendor.maintain"}}`, want: http.StatusForbidden, wantDuty: "party.vendor.maintain"},
 		{name: "opa unavailable", principal: true, opaStatus: http.StatusServiceUnavailable, opaBody: `{}`, want: http.StatusServiceUnavailable},
 	}
 	for _, tt := range tests {

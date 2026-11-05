@@ -23,7 +23,7 @@ export function validateDecision(decision: HitDecision | "", reason: string): { 
 /**
  * One screening hit (PRD §9.48.6 Screening workbench): the subject next to the
  * list entry it matched, and the clear or confirm decision for a
- * TradeComplianceOfficer. A false positive is not raised again for this list
+ * compliance.trade-screening.decide. A false positive is not raised again for this list
  * entry until the subject's name, address or country or the entry changes.
  */
 export function ScreeningHitPage() {

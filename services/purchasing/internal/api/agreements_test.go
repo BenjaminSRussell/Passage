@@ -82,7 +82,7 @@ func TestCreatePurchaseAgreement_DefaultsScopeAndDuty(t *testing.T) {
 	path := "/v1/procurement/agreements"
 
 	if rec := h.do(call{method: "POST", path: path, body: body, duties: []string{dutyPurchaseOrderMaintain}, headers: idem("a1")}); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AgreementMaintain: %d", rec.Code)
+		t.Fatalf("without procurement.agreement.maintain: %d", rec.Code)
 	}
 	if rec := h.do(call{method: "POST", path: path, body: body, duties: []string{dutyAgreementMaintain}}); problemCode(t, rec) != codeIdemRequired {
 		t.Fatalf("without a key: %d %s", rec.Code, rec.Body)

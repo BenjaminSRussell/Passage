@@ -55,7 +55,7 @@ const FORWARD: Record<string, { to: CycleMove; label: string; done: string }> = 
   MANAGER_INPUT: { to: "APPROVAL", label: "Send to approval", done: "The cycle is waiting for approval." },
 };
 
-export const DUTY_COMP_APPROVE = "HcmCompApprove";
+export const DUTY_COMP_APPROVE = "hr.compensation.approve";
 
 export function CompCycleDetailPage() {
   const { id = "" } = useParams();

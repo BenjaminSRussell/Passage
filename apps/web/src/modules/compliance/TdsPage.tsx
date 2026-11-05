@@ -68,7 +68,7 @@ export function formatInr(value: string): string {
 }
 
 /**
- * India TDS calculator (FR-48.27, LocalizationAdmin): the deduction on one
+ * India TDS calculator (FR-48.27, localization.admin): the deduction on one
  * payment to a resident deductee, before the payment is posted.
  */
 export function TdsPage() {

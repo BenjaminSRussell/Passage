@@ -101,6 +101,6 @@ func TestListOpenOrderLines(t *testing.T) {
 		t.Fatalf("other legal entity: %d", rec.Code)
 	}
 	if rec := h.do(call{method: "GET", path: "/v1/procurement/purchase-order-lines", duties: []string{dutyRequisitionCreate}}); rec.Code != http.StatusForbidden {
-		t.Fatalf("without PurchaseOrderInquire: %d", rec.Code)
+		t.Fatalf("without procurement.purchase-order.inquire: %d", rec.Code)
 	}
 }

@@ -175,7 +175,7 @@ func (a *API) getChangeOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 // decideChangeOrder returns the handler of one lifecycle move: submit
-// (ProjMaintain), approve or reject (ProjChangeOrderApprove). If-Match carries
+// (projects.maintain), approve or reject (projects.change-order.approve). If-Match carries
 // the change order version (428 when absent, 412 when stale). The optional
 // body attaches the customer approval reference on submit or approve.
 func (a *API) decideChangeOrder(to domain.ChangeOrderStatus) http.HandlerFunc {

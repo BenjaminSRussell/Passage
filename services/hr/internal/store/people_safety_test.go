@@ -145,11 +145,11 @@ func scenarioIncidents(t *testing.T, s *Postgres, ctx context.Context, tag strin
 	fix.SupersedesID = &away.ID
 	_, _, err = s.ReportIncident(ctx, fix, "")
 	requireCode(t, err, CodeCorrectionDuty)
-	_, _, err = s.ReportIncident(withDuty(ctx, "HcmIncidentAdmin"), fix, "")
+	_, _, err = s.ReportIncident(withDuty(ctx, "hr.incident.admin"), fix, "")
 	requireCode(t, err, CodeSelfCorrection)
-	_, _, err = s.ReportIncident(withDuty(admin, "HcmIncidentAdmin"), fix, "")
+	_, _, err = s.ReportIncident(withDuty(admin, "hr.incident.admin"), fix, "")
 	requireCode(t, err, CodeSelfCorrection)
-	lead := withDuty(asUser(ctx, "ehs-lead"), "HcmIncidentAdmin")
+	lead := withDuty(asUser(ctx, "ehs-lead"), "hr.incident.admin")
 	fix.SupersedesID = &open.ID
 	_, _, err = s.ReportIncident(lead, fix, "")
 	requireCode(t, err, domain.CodeIncidentState)

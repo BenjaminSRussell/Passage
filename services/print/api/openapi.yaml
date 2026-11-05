@@ -12,7 +12,7 @@ paths:
     get:
       operationId: listPrinters
       summary: List printers of the tenant
-      x-passage-duty: WMS_PRINT
+      x-passage-duty: print.job.submit
       responses:
         '200':
           description: Printers ordered by code
@@ -28,7 +28,7 @@ paths:
     post:
       operationId: createPrinter
       summary: Register a printer and its queue membership
-      x-passage-duty: WMS_PRINT_ADMIN
+      x-passage-duty: print.admin
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -54,7 +54,7 @@ paths:
     get:
       operationId: listRoutingRules
       summary: List document routing rules in resolution order
-      x-passage-duty: WMS_PRINT
+      x-passage-duty: print.job.submit
       responses:
         '200':
           description: Rules ordered by sequence
@@ -70,7 +70,7 @@ paths:
     post:
       operationId: createRoutingRule
       summary: Create a document routing rule
-      x-passage-duty: WMS_PRINT_ADMIN
+      x-passage-duty: print.admin
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -91,7 +91,7 @@ paths:
     get:
       operationId: listPrintJobs
       summary: Print job log, newest first (§6.32.14)
-      x-passage-duty: WMS_PRINT
+      x-passage-duty: print.job.submit
       parameters:
         - name: status
           in: query
@@ -122,7 +122,7 @@ paths:
       operationId: createPrintJob
       summary: Render a built-in template and print it on the first reachable ZPL device of the queue
       description: A job that no device accepts is recorded as FAILED with lastError MOB-0111 (unreachable), MOB-0112 (empty queue) or PRN-0007 (the label does not fit the media of any device in the queue) and returned with 201. Each ZPL label is sized at dispatch for the device that prints it (FR-32.13): the layout is scaled from 203 dpi to the device's dpi and ^PW/^LL are set from its media size; on 2X1_IN and 3X1_IN devices LP_LABEL, LOCATION_LABEL and ITEM_LABEL print a compact 1 in layout. A label whose fields or bar code width (with quiet zones) do not fit a device's media is not sent to it, and the next device in the queue is tried without retries. A documentType with no matching routing rule is refused with 422 MOB-0112 before anything is stored. A repeated key returns the stored job with Idempotent-Replayed true and prints nothing. reprintOf reuses the stored ZPL. ITEM_LABEL and GS1_CARTON_LABEL compose their GS1-128 element string (AI 00, 01, 10, 17, 21, 400, 420) from the data fields; a bad check digit, date, length or set-82 character is refused with 400 PRN-0001 before anything is stored.
-      x-passage-duty: WMS_PRINT
+      x-passage-duty: print.job.submit
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -150,7 +150,7 @@ paths:
       operationId: purgePrintJobs
       summary: Delete the tenant's finished job log rows older than the retention window (§6.32.19)
       description: Removes the tenant's PRINTED and FAILED jobs created before now minus PRINT_JOB_RETENTION_DAYS (default 30). QUEUED jobs are kept. The key is required but not stored; calling it again deletes nothing new. The service also runs this purge daily at 01:00 UTC for each tenant in PRINT_PURGE_TENANT_IDS.
-      x-passage-duty: WMS_PRINT_ADMIN
+      x-passage-duty: print.admin
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
@@ -167,7 +167,7 @@ paths:
       operationId: listPrinterStatus
       summary: Operational status of every printer of the tenant (§6.32.14)
       description: State is derived from the printer's most recent job (IDLE with no job, BUSY while QUEUED, READY when PRINTED, ERROR when FAILED). No device probe is made, so the state is what the service last observed.
-      x-passage-duty: WMS_PRINT
+      x-passage-duty: print.job.submit
       responses:
         '200':
           description: Printers ordered by code
@@ -184,7 +184,7 @@ paths:
     get:
       operationId: getPrintJob
       summary: Read a print job
-      x-passage-duty: WMS_PRINT
+      x-passage-duty: print.job.submit
       parameters:
         - name: id
           in: path

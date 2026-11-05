@@ -62,7 +62,7 @@ func callAs(a *api.API, leScoped bool, method, path, tenant, duties, key, body s
 	}
 	if duties != "" {
 		if !leScoped {
-			duties += ",org.switcher.all_scope,tenant.administer"
+			duties += ",org.switcher.all-scope,tenant.administer"
 			req.Header.Set("X-Passage-LegalEntity-Scope", "ALL")
 		} else {
 			req.Header.Set("X-Passage-Legal-Entity", "00000000-0000-0000-0000-0000000000e1")
@@ -193,7 +193,7 @@ func TestRuns_LegalEntityScopedCallersAreRefused(t *testing.T) {
 		{http.MethodGet, runsPath + "/" + started.ID + "/statements", api.DutyView, "", ""},
 	}
 	for _, c := range cases {
-		rec := callAs(a, true, c.method, c.path, tenantID, c.duty+",org.switcher.all_scope,tenant.administer", c.key, c.body)
+		rec := callAs(a, true, c.method, c.path, tenantID, c.duty+",org.switcher.all-scope,tenant.administer", c.key, c.body)
 		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "CNS-0923") {
 			t.Errorf("%s %s as a legal-entity caller = %d %s", c.method, c.path, rec.Code, rec.Body.String())
 		}

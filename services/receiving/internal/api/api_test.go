@@ -61,31 +61,31 @@ func TestEvaluate(t *testing.T) {
 		wantStatus int
 		wantBody   string
 	}{
-		{"matched with ppv posting", body(line), "MatchingPolicyMaintain", true, http.StatusOK, `"status":"MATCHED"`},
-		{"ppv amount rendered as money", body(line), "MatchingPolicyMaintain", true, http.StatusOK, `"amount":"15.00","currency":"USD"`},
-		{"unit echoed", body(line), "MatchingPolicyMaintain", true, http.StatusOK, `"unit":"EA"`},
-		{"custom policy turns price into variance", `{"policy":{"priceTolPct":0,"priceTolAbs":0},"currency":"USD","headerTotal":1015,"lines":[` + line + `]}`, "MatchingPolicyMaintain", true, http.StatusOK, `"status":"PRICE_VARIANCE"`},
+		{"matched with ppv posting", body(line), "receiving.matching-policy.maintain", true, http.StatusOK, `"status":"MATCHED"`},
+		{"ppv amount rendered as money", body(line), "receiving.matching-policy.maintain", true, http.StatusOK, `"amount":"15.00","currency":"USD"`},
+		{"unit echoed", body(line), "receiving.matching-policy.maintain", true, http.StatusOK, `"unit":"EA"`},
+		{"custom policy turns price into variance", `{"policy":{"priceTolPct":0,"priceTolAbs":0},"currency":"USD","headerTotal":1015,"lines":[` + line + `]}`, "receiving.matching-policy.maintain", true, http.StatusOK, `"status":"PRICE_VARIANCE"`},
 		{"no tenant", body(line), "", false, http.StatusUnauthorized, "AUTH-0001"},
-		{"tenant without duty", body(line), "APInquire", true, http.StatusForbidden, "AUTH-0003"},
-		{"decimal string quantity", body(`{"qty":"10","unitPrice":"101.5","poUnitPrice":"100","receiptState":"POSTED","receivedUninvoicedQty":"10"}`), "MatchingPolicyMaintain", true, http.StatusOK, `"status":"MATCHED"`},
-		{"exponent string", body(`{"qty":"1e3","unitPrice":1,"poUnitPrice":1}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"malformed json", `{`, "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"unknown field", `{"currency":"USD","extra":1}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"empty lines", `{"currency":"USD","headerTotal":0,"lines":[]}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, `"lines"`},
-		{"null lines", `{"currency":"USD","headerTotal":0,"lines":null}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, `"lines"`},
-		{"object for lines", `{"currency":"USD","headerTotal":0,"lines":{}}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"non-numeric string for quantity", body(`{"qty":"ten","unitPrice":1,"poUnitPrice":1}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"negative quantity", body(`{"qty":-1,"unitPrice":1,"poUnitPrice":1}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "lines[0].qty"},
-		{"zero quantity", body(`{"qty":0,"unitPrice":1,"poUnitPrice":1}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "lines[0].qty"},
-		{"missing price", body(`{"qty":1,"poUnitPrice":1}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "lines[0].unitPrice"},
-		{"NaN literal", body(`{"qty":NaN,"unitPrice":1,"poUnitPrice":1}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"exponent overflow", body(`{"qty":1,"unitPrice":1e999999999,"poUnitPrice":1}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"missing header total", `{"currency":"USD","lines":[` + line + `]}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, "headerTotal"},
-		{"bad currency", `{"currency":"usd","headerTotal":1,"lines":[` + line + `]}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, `"currency"`},
-		{"non-numeric string tolerance", `{"policy":{"priceTolPct":"2%"},"currency":"USD","headerTotal":1,"lines":[` + line + `]}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, "COM-0001"},
-		{"negative tolerance", `{"policy":{"qtyTolPct":-1},"currency":"USD","headerTotal":1,"lines":[` + line + `]}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, "policy.qtyTolPct"},
-		{"unknown match level", `{"policy":{"matchLevel":"FOUR_WAY"},"currency":"USD","headerTotal":1,"lines":[` + line + `]}`, "MatchingPolicyMaintain", true, http.StatusBadRequest, "policy.matchLevel"},
-		{"unknown receipt state", body(`{"qty":1,"unitPrice":1,"poUnitPrice":1,"receiptState":"DONE"}`), "MatchingPolicyMaintain", true, http.StatusBadRequest, "lines[0].receiptState"},
+		{"tenant without duty", body(line), "receiving.ap.inquire", true, http.StatusForbidden, "AUTH-0003"},
+		{"decimal string quantity", body(`{"qty":"10","unitPrice":"101.5","poUnitPrice":"100","receiptState":"POSTED","receivedUninvoicedQty":"10"}`), "receiving.matching-policy.maintain", true, http.StatusOK, `"status":"MATCHED"`},
+		{"exponent string", body(`{"qty":"1e3","unitPrice":1,"poUnitPrice":1}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"malformed json", `{`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"unknown field", `{"currency":"USD","extra":1}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"empty lines", `{"currency":"USD","headerTotal":0,"lines":[]}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, `"lines"`},
+		{"null lines", `{"currency":"USD","headerTotal":0,"lines":null}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, `"lines"`},
+		{"object for lines", `{"currency":"USD","headerTotal":0,"lines":{}}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"non-numeric string for quantity", body(`{"qty":"ten","unitPrice":1,"poUnitPrice":1}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"negative quantity", body(`{"qty":-1,"unitPrice":1,"poUnitPrice":1}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "lines[0].qty"},
+		{"zero quantity", body(`{"qty":0,"unitPrice":1,"poUnitPrice":1}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "lines[0].qty"},
+		{"missing price", body(`{"qty":1,"poUnitPrice":1}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "lines[0].unitPrice"},
+		{"NaN literal", body(`{"qty":NaN,"unitPrice":1,"poUnitPrice":1}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"exponent overflow", body(`{"qty":1,"unitPrice":1e999999999,"poUnitPrice":1}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"missing header total", `{"currency":"USD","lines":[` + line + `]}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, "headerTotal"},
+		{"bad currency", `{"currency":"usd","headerTotal":1,"lines":[` + line + `]}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, `"currency"`},
+		{"non-numeric string tolerance", `{"policy":{"priceTolPct":"2%"},"currency":"USD","headerTotal":1,"lines":[` + line + `]}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, "COM-0001"},
+		{"negative tolerance", `{"policy":{"qtyTolPct":-1},"currency":"USD","headerTotal":1,"lines":[` + line + `]}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, "policy.qtyTolPct"},
+		{"unknown match level", `{"policy":{"matchLevel":"FOUR_WAY"},"currency":"USD","headerTotal":1,"lines":[` + line + `]}`, "receiving.matching-policy.maintain", true, http.StatusBadRequest, "policy.matchLevel"},
+		{"unknown receipt state", body(`{"qty":1,"unitPrice":1,"poUnitPrice":1,"receiptState":"DONE"}`), "receiving.matching-policy.maintain", true, http.StatusBadRequest, "lines[0].receiptState"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,7 +101,7 @@ func TestEvaluate(t *testing.T) {
 func TestEvaluate_RejectsOverlongLineList(t *testing.T) {
 	r, _ := newRouter(memstore.New())
 	lines := strings.TrimSuffix(strings.Repeat(line+",", 501), ",")
-	rec := do(r, http.MethodPost, evaluatePath, body(lines), "MatchingPolicyMaintain", true)
+	rec := do(r, http.MethodPost, evaluatePath, body(lines), "receiving.matching-policy.maintain", true)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"lines"`) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
@@ -136,8 +136,8 @@ func TestProbes(t *testing.T) {
 func TestMetricsCountBusinessOperationsAndHTTP(t *testing.T) {
 	r, a := newRouter(memstore.New())
 	h := a.Instrument(r)
-	do(h, http.MethodPost, evaluatePath, body(line), "MatchingPolicyMaintain", true)
-	do(h, http.MethodPost, evaluatePath, `{`, "MatchingPolicyMaintain", true)
+	do(h, http.MethodPost, evaluatePath, body(line), "receiving.matching-policy.maintain", true)
+	do(h, http.MethodPost, evaluatePath, `{`, "receiving.matching-policy.maintain", true)
 	do(h, http.MethodPost, evaluatePath, body(line), "", false)
 	do(h, http.MethodGet, "/healthz", "", "", false)
 

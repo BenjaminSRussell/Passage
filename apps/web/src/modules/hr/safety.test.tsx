@@ -172,7 +172,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     const first = renderAt(`/hr/incidents/${INCIDENT}`);
     expect(await screen.findByText("We couldn't find this incident")).toBeTruthy();
     first.unmount();
-    api.handler = routes({ [`GET /api/v1/hr/incidents/${INCIDENT}`]: problem(403, "AUTH-0003", "missing duty HcmIncidentAdmin") });
+    api.handler = routes({ [`GET /api/v1/hr/incidents/${INCIDENT}`]: problem(403, "AUTH-0003", "missing duty hr.incident.admin") });
     renderAt(`/hr/incidents/${INCIDENT}`);
     expect((await findAlert()).textContent).toContain("You can't view this incident");
   });
@@ -239,7 +239,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
   });
 
   it("asks for a valid year and explains a forbidden extract", async () => {
-    api.handler = routes({ "GET /api/v1/hr/incidents/osha-extract": problem(403, "AUTH-0003", "missing duty HcmIncidentAdmin") });
+    api.handler = routes({ "GET /api/v1/hr/incidents/osha-extract": problem(403, "AUTH-0003", "missing duty hr.incident.admin") });
     renderAt("/hr/incidents/osha?year=20");
     expect(await screen.findByText("Enter a four-digit year.")).toBeTruthy();
     expect(await screen.findByText("You can't view this OSHA extract")).toBeTruthy();
@@ -334,7 +334,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
 
     api.handler = routes({
       [`GET /api/v1/hr/workers/${WORKER}/checklists`]: json(200, { items: [] }),
-      "GET /api/v1/hr/checklist-templates": problem(403, "AUTH-0003", "missing duty HcmSetupAdmin"),
+      "GET /api/v1/hr/checklist-templates": problem(403, "AUTH-0003", "missing duty hr.setup.admin"),
     });
     renderAt(`/hr/workers/${WORKER}/checklists`);
     expect(await screen.findByLabelText("Template id")).toBeTruthy();
@@ -372,11 +372,11 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
 
   it("gates the safety routes and nav by duty", () => {
     const duty = (path: string) => (hr.routes.find((r) => r.path === path)?.handle as { duty?: string }).duty;
-    expect(duty("/hr/incidents")).toBe("HcmIncidentAdmin");
-    expect(duty("/hr/incidents/osha")).toBe("HcmIncidentAdmin");
-    expect(duty("/hr/incidents/new")).toBe("HcmIncidentReport");
-    expect(duty("/hr/checklist-templates")).toBe("HcmSetupAdmin");
-    expect(hr.nav.find((n) => n.to === "/hr/incidents/new")?.duty).toBe("HcmIncidentReport");
-    expect(hr.nav.find((n) => n.to === "/hr/incidents")?.duty).toBe("HcmIncidentAdmin");
+    expect(duty("/hr/incidents")).toBe("hr.incident.admin");
+    expect(duty("/hr/incidents/osha")).toBe("hr.incident.admin");
+    expect(duty("/hr/incidents/new")).toBe("hr.incident.report");
+    expect(duty("/hr/checklist-templates")).toBe("hr.setup.admin");
+    expect(hr.nav.find((n) => n.to === "/hr/incidents/new")?.duty).toBe("hr.incident.report");
+    expect(hr.nav.find((n) => n.to === "/hr/incidents")?.duty).toBe("hr.incident.admin");
   });
 });

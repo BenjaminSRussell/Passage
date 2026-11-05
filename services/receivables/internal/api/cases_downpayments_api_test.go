@@ -133,13 +133,13 @@ func TestCreateCase_Validation(t *testing.T) {
 		status  int
 		field   string
 	}{
-		{"missing key", body(`,"currency":"USD"`), nil, "CollectionsMaintain", http.StatusBadRequest, "Idempotency-Key"},
-		{"without the duty", body(`,"currency":"USD"`), key, "ARView", http.StatusForbidden, ""},
-		{"unknown category", strings.Replace(body(`,"currency":"USD"`), "COLLECTION", "LEGAL", 1), key, "CollectionsMaintain", http.StatusBadRequest, "category"},
-		{"no currency and no item", body(""), key, "CollectionsMaintain", http.StatusBadRequest, "currency"},
-		{"bad priority", body(`,"currency":"USD","priority":"URGENT"`), key, "CollectionsMaintain", http.StatusBadRequest, "priority"},
-		{"negative attached amount", body(`,"currency":"USD","attachedAmount":"-1"`), key, "CollectionsMaintain", http.StatusBadRequest, "attachedAmount"},
-		{"item supplies the currency", body(`,"openItemId":"` + testItem + `"`), key, "CollectionsMaintain", http.StatusCreated, ""},
+		{"missing key", body(`,"currency":"USD"`), nil, "receivables.collection.maintain", http.StatusBadRequest, "Idempotency-Key"},
+		{"without the duty", body(`,"currency":"USD"`), key, "receivables.view", http.StatusForbidden, ""},
+		{"unknown category", strings.Replace(body(`,"currency":"USD"`), "COLLECTION", "LEGAL", 1), key, "receivables.collection.maintain", http.StatusBadRequest, "category"},
+		{"no currency and no item", body(""), key, "receivables.collection.maintain", http.StatusBadRequest, "currency"},
+		{"bad priority", body(`,"currency":"USD","priority":"URGENT"`), key, "receivables.collection.maintain", http.StatusBadRequest, "priority"},
+		{"negative attached amount", body(`,"currency":"USD","attachedAmount":"-1"`), key, "receivables.collection.maintain", http.StatusBadRequest, "attachedAmount"},
+		{"item supplies the currency", body(`,"openItemId":"` + testItem + `"`), key, "receivables.collection.maintain", http.StatusCreated, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -163,27 +163,27 @@ func TestCaseActions_IfMatchDutyAndBodies(t *testing.T) {
 	h := router(f)
 	base := "/v1/receivables/cases/" + testCase
 	match := map[string]string{"If-Match": `"3"`}
-	if rec := do(h, http.MethodPost, base+":close", "", "CollectionsMaintain", nil); rec.Code != http.StatusPreconditionRequired {
+	if rec := do(h, http.MethodPost, base+":close", "", "receivables.collection.maintain", nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("close without If-Match: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, base+":close", "", "ARView", match); rec.Code != http.StatusForbidden {
-		t.Fatalf("close without CollectionsMaintain: %d", rec.Code)
+	if rec := do(h, http.MethodPost, base+":close", "", "receivables.view", match); rec.Code != http.StatusForbidden {
+		t.Fatalf("close without receivables.collection.maintain: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, base+":assign", `{"owner":"  "}`, "CollectionsMaintain", match); rec.Code != http.StatusBadRequest {
+	if rec := do(h, http.MethodPost, base+":assign", `{"owner":"  "}`, "receivables.collection.maintain", match); rec.Code != http.StatusBadRequest {
 		t.Fatalf("assign to nobody: %d", rec.Code)
 	}
-	rec := do(h, http.MethodPost, base+":assign", `{"owner":"ben"}`, "CollectionsMaintain", match)
+	rec := do(h, http.MethodPost, base+":assign", `{"owner":"ben"}`, "receivables.collection.maintain", match)
 	if rec.Code != http.StatusOK || f.action != "assign" || f.owner != "ben" || f.version != 3 || rec.Header().Get("ETag") != `"4"` {
 		t.Fatalf("assign: %d %s owner %q version %d etag %q", rec.Code, f.action, f.owner, f.version, rec.Header().Get("ETag"))
 	}
 	// A close with no body is valid; a note is carried when given.
-	if rec := do(h, http.MethodPost, base+":close", "", "CollectionsMaintain", match); rec.Code != http.StatusOK || f.action != "close" || f.note != nil {
+	if rec := do(h, http.MethodPost, base+":close", "", "receivables.collection.maintain", match); rec.Code != http.StatusOK || f.action != "close" || f.note != nil {
 		t.Fatalf("close without body: %d note %v", rec.Code, f.note)
 	}
-	if rec := do(h, http.MethodPost, base+":close", `{"note":"paid in full"}`, "CollectionsMaintain", match); rec.Code != http.StatusOK || f.note == nil || *f.note != "paid in full" {
+	if rec := do(h, http.MethodPost, base+":close", `{"note":"paid in full"}`, "receivables.collection.maintain", match); rec.Code != http.StatusOK || f.note == nil || *f.note != "paid in full" {
 		t.Fatalf("close with note: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, base+":escalate", "", "CollectionsMaintain", match); rec.Code != http.StatusNotFound {
+	if rec := do(h, http.MethodPost, base+":escalate", "", "receivables.collection.maintain", match); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown action: %d", rec.Code)
 	}
 }
@@ -193,12 +193,12 @@ func TestConfirmationRun_DefaultsAndValidation(t *testing.T) {
 	h := router(f)
 	key := map[string]string{"Idempotency-Key": "bc-1"}
 	good := `{"legalEntityId":"` + testLE + `","asOfDate":"2027-03-31"}`
-	rec := do(h, http.MethodPost, "/v1/receivables/balance-confirmations", good, "BalanceConfirmationRun", key)
+	rec := do(h, http.MethodPost, "/v1/receivables/balance-confirmations", good, "receivables.balance-confirmation.run", key)
 	if rec.Code != http.StatusCreated || !f.run.Threshold.Equal(decimal.NewFromInt(10000)) || f.run.ReminderDays != 14 {
 		t.Fatalf("create: %d threshold %s reminder %d", rec.Code, f.run.Threshold, f.run.ReminderDays)
 	}
-	if rec := do(h, http.MethodPost, "/v1/receivables/balance-confirmations", good, "ARView", key); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without BalanceConfirmationRun: %d", rec.Code)
+	if rec := do(h, http.MethodPost, "/v1/receivables/balance-confirmations", good, "receivables.view", key); rec.Code != http.StatusForbidden {
+		t.Fatalf("create without receivables.balance-confirmation.run: %d", rec.Code)
 	}
 	for field, body := range map[string]string{
 		"asOfDate":     `{"legalEntityId":"` + testLE + `","asOfDate":"31/03/2027"}`,
@@ -206,7 +206,7 @@ func TestConfirmationRun_DefaultsAndValidation(t *testing.T) {
 		"sampleSize":   `{"legalEntityId":"` + testLE + `","asOfDate":"2027-03-31","sampleSize":0}`,
 		"reminderDays": `{"legalEntityId":"` + testLE + `","asOfDate":"2027-03-31","reminderDays":61}`,
 	} {
-		if rec := do(h, http.MethodPost, "/v1/receivables/balance-confirmations", body, "BalanceConfirmationRun", key); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), field) {
+		if rec := do(h, http.MethodPost, "/v1/receivables/balance-confirmations", body, "receivables.balance-confirmation.run", key); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), field) {
 			t.Errorf("%s: %d %s", field, rec.Code, rec.Body.String())
 		}
 	}
@@ -221,13 +221,13 @@ func TestConfirmationReply_ValidatesAndForwards(t *testing.T) {
 		duties string
 		status int
 	}{
-		{"agreed", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"AGREED"}`, "BalanceConfirmationRun", http.StatusOK},
-		{"disagreed with balance", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"DISAGREED","customerBalance":"9500.00","comment":"credit note missing"}`, "BalanceConfirmationRun", http.StatusOK},
-		{"disagreed without balance", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"DISAGREED"}`, "BalanceConfirmationRun", http.StatusBadRequest},
-		{"no reply is not a reply", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"NO_REPLY"}`, "BalanceConfirmationRun", http.StatusBadRequest},
-		{"bad confirmation id", base + ":reply", `{"confirmationId":"x","reply":"AGREED"}`, "BalanceConfirmationRun", http.StatusBadRequest},
-		{"without the duty", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"AGREED"}`, "ARView", http.StatusForbidden},
-		{"unknown action", base + ":remind", `{}`, "BalanceConfirmationRun", http.StatusNotFound},
+		{"agreed", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"AGREED"}`, "receivables.balance-confirmation.run", http.StatusOK},
+		{"disagreed with balance", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"DISAGREED","customerBalance":"9500.00","comment":"credit note missing"}`, "receivables.balance-confirmation.run", http.StatusOK},
+		{"disagreed without balance", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"DISAGREED"}`, "receivables.balance-confirmation.run", http.StatusBadRequest},
+		{"no reply is not a reply", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"NO_REPLY"}`, "receivables.balance-confirmation.run", http.StatusBadRequest},
+		{"bad confirmation id", base + ":reply", `{"confirmationId":"x","reply":"AGREED"}`, "receivables.balance-confirmation.run", http.StatusBadRequest},
+		{"without the duty", base + ":reply", `{"confirmationId":"` + testConf + `","reply":"AGREED"}`, "receivables.view", http.StatusForbidden},
+		{"unknown action", base + ":remind", `{}`, "receivables.balance-confirmation.run", http.StatusNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,16 +253,16 @@ func TestDownPaymentActions_DutiesPerAction(t *testing.T) {
 		duties string
 		status int
 	}{
-		{"receive needs ARPaymentPost", base + ":receive", "", "ARSettle", http.StatusForbidden},
-		{"receive with a date", base + ":receive", `{"receivedDate":"2027-03-02"}`, "ARPaymentPost", http.StatusOK},
-		{"receive with a bad date", base + ":receive", `{"receivedDate":"2 March"}`, "ARPaymentPost", http.StatusBadRequest},
-		{"clear needs ARSettle", base + ":clear", `{"openItemId":"` + testItem + `"}`, "ARPaymentPost", http.StatusForbidden},
-		{"clear the proposal", base + ":clear", `{"openItemId":"` + testItem + `"}`, "ARSettle", http.StatusOK},
-		{"clear a zero amount", base + ":clear", `{"openItemId":"` + testItem + `","amount":"0"}`, "ARSettle", http.StatusBadRequest},
-		{"clear without an item", base + ":clear", `{}`, "ARSettle", http.StatusBadRequest},
-		{"release needs ARRefund", base + ":release", "", "ARSettle", http.StatusForbidden},
-		{"release", base + ":release", "", "ARRefund", http.StatusOK},
-		{"unknown action", base + ":refund", "", "ARRefund", http.StatusNotFound},
+		{"receive needs receivables.payment.post", base + ":receive", "", "receivables.payment.settle", http.StatusForbidden},
+		{"receive with a date", base + ":receive", `{"receivedDate":"2027-03-02"}`, "receivables.payment.post", http.StatusOK},
+		{"receive with a bad date", base + ":receive", `{"receivedDate":"2 March"}`, "receivables.payment.post", http.StatusBadRequest},
+		{"clear needs receivables.payment.settle", base + ":clear", `{"openItemId":"` + testItem + `"}`, "receivables.payment.post", http.StatusForbidden},
+		{"clear the proposal", base + ":clear", `{"openItemId":"` + testItem + `"}`, "receivables.payment.settle", http.StatusOK},
+		{"clear a zero amount", base + ":clear", `{"openItemId":"` + testItem + `","amount":"0"}`, "receivables.payment.settle", http.StatusBadRequest},
+		{"clear without an item", base + ":clear", `{}`, "receivables.payment.settle", http.StatusBadRequest},
+		{"release needs receivables.payment.refund", base + ":release", "", "receivables.payment.settle", http.StatusForbidden},
+		{"release", base + ":release", "", "receivables.payment.refund", http.StatusOK},
+		{"unknown action", base + ":refund", "", "receivables.payment.refund", http.StatusNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,7 +282,7 @@ func TestDownPaymentActions_DutiesPerAction(t *testing.T) {
 			}
 		})
 	}
-	if rec := do(router(&slice3Fake{}), http.MethodPost, base+":release", "", "ARRefund", nil); rec.Code != http.StatusPreconditionRequired {
+	if rec := do(router(&slice3Fake{}), http.MethodPost, base+":release", "", "receivables.payment.refund", nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("release without If-Match: %d", rec.Code)
 	}
 }
@@ -291,7 +291,7 @@ func TestCreateDownPayment_Validation(t *testing.T) {
 	key := map[string]string{"Idempotency-Key": "dp-1"}
 	body := `{"legalEntityId":"` + testLE + `","customerId":"` + testCust + `","kind":"DOWN_PAYMENT","currency":"USD","amount":"2000.00"}`
 	h := router(&slice3Fake{})
-	if rec := do(h, http.MethodPost, "/v1/receivables/down-payments", body, "ARPaymentPost", key); rec.Code != http.StatusCreated {
+	if rec := do(h, http.MethodPost, "/v1/receivables/down-payments", body, "receivables.payment.post", key); rec.Code != http.StatusCreated {
 		t.Fatalf("valid: %d %s", rec.Code, rec.Body.String())
 	}
 	for field, bad := range map[string]string{
@@ -300,12 +300,12 @@ func TestCreateDownPayment_Validation(t *testing.T) {
 		"currency":     strings.Replace(body, `"USD"`, `"usd"`, 1),
 		"salesOrderId": strings.Replace(body, `"kind"`, `"salesOrderId":"SO-4000","kind"`, 1),
 	} {
-		if rec := do(h, http.MethodPost, "/v1/receivables/down-payments", bad, "ARPaymentPost", key); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), field) {
+		if rec := do(h, http.MethodPost, "/v1/receivables/down-payments", bad, "receivables.payment.post", key); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), field) {
 			t.Errorf("%s: %d %s", field, rec.Code, rec.Body.String())
 		}
 	}
-	if rec := do(h, http.MethodPost, "/v1/receivables/down-payments", body, "ARView", key); rec.Code != http.StatusForbidden {
-		t.Fatalf("without ARPaymentPost: %d", rec.Code)
+	if rec := do(h, http.MethodPost, "/v1/receivables/down-payments", body, "receivables.view", key); rec.Code != http.StatusForbidden {
+		t.Fatalf("without receivables.payment.post: %d", rec.Code)
 	}
 }
 
@@ -316,17 +316,17 @@ func TestSlice3Lists_ValidateFiltersAndNeedView(t *testing.T) {
 		duties string
 		status int
 	}{
-		{"/v1/receivables/cases?status=OPEN&category=DISPUTE", "ARView", http.StatusOK},
-		{"/v1/receivables/cases?status=PENDING", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/cases?customer=x", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/cases", "CollectionsMaintain", http.StatusForbidden},
-		{"/v1/receivables/cases/nope", "ARView", http.StatusNotFound},
-		{"/v1/receivables/balance-confirmations", "ARView", http.StatusOK},
-		{"/v1/receivables/balance-confirmations?limit=0", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/balance-confirmations/" + testRun + "/differences", "ARView", http.StatusOK},
-		{"/v1/receivables/balance-confirmations/nope/differences", "ARView", http.StatusNotFound},
-		{"/v1/receivables/down-payments?kind=SECURITY_DEPOSIT&status=RECEIVED", "ARView", http.StatusOK},
-		{"/v1/receivables/down-payments?status=OPEN", "ARView", http.StatusBadRequest},
+		{"/v1/receivables/cases?status=OPEN&category=DISPUTE", "receivables.view", http.StatusOK},
+		{"/v1/receivables/cases?status=PENDING", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/cases?customer=x", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/cases", "receivables.collection.maintain", http.StatusForbidden},
+		{"/v1/receivables/cases/nope", "receivables.view", http.StatusNotFound},
+		{"/v1/receivables/balance-confirmations", "receivables.view", http.StatusOK},
+		{"/v1/receivables/balance-confirmations?limit=0", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/balance-confirmations/" + testRun + "/differences", "receivables.view", http.StatusOK},
+		{"/v1/receivables/balance-confirmations/nope/differences", "receivables.view", http.StatusNotFound},
+		{"/v1/receivables/down-payments?kind=SECURITY_DEPOSIT&status=RECEIVED", "receivables.view", http.StatusOK},
+		{"/v1/receivables/down-payments?status=OPEN", "receivables.view", http.StatusBadRequest},
 		{"/v1/receivables/down-payments", "", http.StatusForbidden},
 	}
 	for _, tc := range tests {

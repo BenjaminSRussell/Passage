@@ -66,7 +66,7 @@ func TestCategories_PutCreatesRenamesAndKeepsType(t *testing.T) {
 	h := router(newFake())
 	setup := []string{DutySetup}
 	if rec := as(t, h, []string{DutyInquire}, http.MethodPut, "/v1/projects/categories/LABOR", `{"name":"Labour","txnType":"HOUR"}`, nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("put without ProjSetupAdmin: %d", rec.Code)
+		t.Fatalf("put without projects.setup.admin: %d", rec.Code)
 	}
 	rec := as(t, h, setup, http.MethodPut, "/v1/projects/categories/labor", `{"name":"","txnType":"PARTS"}`, nil)
 	if rec.Code != http.StatusBadRequest || len(fieldErrors(t, rec)) != 3 {
@@ -108,7 +108,7 @@ func TestTransactions_ValidateKeyDutyStageCategoryAndPrice(t *testing.T) {
 		t.Fatalf("missing key: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := do(t, h, inquirer, http.MethodPost, "/v1/projects/transactions", hourBody("ES-TM", "CHARGEABLE", "2026-09-10", "8"), key("k0")); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without ProjJournalMaintain: %d", rec.Code)
+		t.Fatalf("create without projects.journal.maintain: %d", rec.Code)
 	}
 	bad := `{"projectId":"es tm","txnType":"HOUR","categoryId":"LABOR","lineProperty":"MAYBE","txnDate":"10/09/2026",
 		"quantity":"1.2345","costPrice":"-1","salesPrice":"x","currency":"USD","itemId":"not-a-uuid"}`
@@ -176,7 +176,7 @@ func TestProposals_BuildApproveRemoveCancelAndFinishGate(t *testing.T) {
 	}
 	sept := `{"projectId":"ES-TM","from":"2026-09-01","to":"2026-09-30","txnTypes":["HOUR"]}`
 	if rec := do(t, h, inquirer, http.MethodPost, "/v1/projects/invoice-proposals", sept, key("p0")); rec.Code != http.StatusForbidden {
-		t.Fatalf("build without ProjBillingMaintain: %d", rec.Code)
+		t.Fatalf("build without projects.billing.maintain: %d", rec.Code)
 	}
 	if rec := build(`{"projectId":"ES-TM","from":"2026-09-30","to":"2026-09-01","txnTypes":["PARTS"]}`, "p1"); rec.Code != http.StatusBadRequest || fieldErrors(t, rec)["to"] == "" || fieldErrors(t, rec)["txnTypes"] == "" {
 		t.Fatalf("bad selection: %d %s", rec.Code, rec.Body.String())

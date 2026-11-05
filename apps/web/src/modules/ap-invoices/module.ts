@@ -12,8 +12,8 @@ const apInvoices: PassageModule = {
     { path: "/ap-invoices/post", element: createElement(PostInvoicePage), handle: { title: "Post vendor invoice" } },
   ],
   nav: [
-    { label: "GR/IR open items", to: "/ap-invoices/grir", duty: "APInquire" },
-    { label: "Post vendor invoice", to: "/ap-invoices/post", duty: "VendorInvoicePost" },
+    { label: "GR/IR open items", to: "/ap-invoices/grir", duty: "receiving.ap.inquire" },
+    { label: "Post vendor invoice", to: "/ap-invoices/post", duty: "receiving.vendor-invoice.post" },
   ],
 };
 

@@ -102,7 +102,7 @@ describe("sequence module wiring", () => {
   it("registers the sequence register, editor and detail, with a nav entry", () => {
     const paths = eam.routes.map((r) => r.path);
     for (const path of ["/eam/sequences", "/eam/sequences/new", "/eam/sequences/:id"]) expect(paths).toContain(path);
-    expect(eam.nav.find((n) => n.to === "/eam/sequences")).toMatchObject({ label: "Sequences", duty: "EamInquire" });
+    expect(eam.nav.find((n) => n.to === "/eam/sequences")).toMatchObject({ label: "Sequences", duty: "eam.inquire" });
   });
 });
 

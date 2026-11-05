@@ -27,7 +27,7 @@ paths:
     post:
       operationId: previewEliminations
       summary: Build the E1–E5 elimination entries for one parent and subsidiary pair, balanced per rule (AC-40.7)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -60,7 +60,7 @@ paths:
     post:
       operationId: previewTranslation
       summary: Translate a unit's net assets and net income under IAS 21 and derive the CTA with its NCI share (AC-40.6)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -87,7 +87,7 @@ paths:
     post:
       operationId: previewProfitInInventory
       summary: Unrealized profit in inventory per IC receipt layer by group cost, with the seller-margin fallback (FR-40.16, BR-40.7, AC-40.12)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -114,7 +114,7 @@ paths:
     post:
       operationId: previewEquityMethod
       summary: Share of profit, dividends and closing carrying amount of an associate under the equity method (FR-40.18, AC-40.14)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -141,7 +141,7 @@ paths:
     post:
       operationId: previewDivestiture
       summary: Deconsolidation gain or loss of a full divestiture with CTA recycled from OCI (FR-40.18)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -168,7 +168,7 @@ paths:
     post:
       operationId: previewIcDifferences
       summary: Two-sided IC elimination per partner pair with the difference to the IC difference account up to the threshold (BR-40.15)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -195,7 +195,7 @@ paths:
     post:
       operationId: previewValidations
       summary: Evaluate the seeded validation rules per unit and gate the group translation task (FR-40.20, AC-40.15)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -222,7 +222,7 @@ paths:
     post:
       operationId: previewDividends
       summary: E6 elimination of a dividend within the group, with the per-rule rounding line (FR-40.9, BR-40.9)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -255,7 +255,7 @@ paths:
     post:
       operationId: previewReclassificationRun
       summary: Dry run of ordered reclassification and regrouping rules at entity and group level (FR-40.17, BR-40.14, AC-40.13)
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -288,7 +288,7 @@ paths:
     post:
       operationId: previewGroupJournal
       summary: 'Check a top-side group journal: invariants, approval at the threshold and the periods it applies to (FR-40.19, BR-40.18)'
-      x-passage-duty: ConsolidationJournal
+      x-passage-duty: consolidation.journal.maintain
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -331,7 +331,7 @@ paths:
         stores what the engine produces. All run routes need all-entity scope
         (403 CNS-0923 for a legal-entity-scoped caller). Publishes
         dev.passage.consol.run.completed.v1 through the outbox.
-      x-passage-duty: ConsolidationRun
+      x-passage-duty: consolidation.run
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -373,7 +373,7 @@ paths:
     get:
       operationId: listConsolidationRuns
       summary: List the tenant's runs, newest first (FR-40.10)
-      x-passage-duty: ConsolidationView
+      x-passage-duty: consolidation.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -398,7 +398,7 @@ paths:
     get:
       operationId: getConsolidationRun
       summary: One run with its unit balances and eliminations (FR-40.11)
-      x-passage-duty: ConsolidationView
+      x-passage-duty: consolidation.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'
@@ -424,7 +424,7 @@ paths:
     get:
       operationId: getConsolidationRunStatements
       summary: The statements of one run (FR-40.11)
-      x-passage-duty: ConsolidationView
+      x-passage-duty: consolidation.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/DutiesHeader'

@@ -22,7 +22,7 @@ import (
 func TestCaseProcess_RejectsBrokenStages(t *testing.T) {
 	h := newTestRouter()
 	body := `{"code":"HR-PROC","name":"HR","stages":[{"code":"INTAKE","sequence":1},{"code":"INTAKE","sequence":3}]}`
-	rec := do(t, h, http.MethodPost, "/v1/case-processes", body, map[string]string{"Idempotency-Key": "p1"}, "CaseSetupAdmin")
+	rec := do(t, h, http.MethodPost, "/v1/case-processes", body, map[string]string{"Idempotency-Key": "p1"}, "fieldservice.case-setup.admin")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -34,7 +34,7 @@ func TestCaseProcess_RejectsBrokenStages(t *testing.T) {
 func TestCaseProcess_DutyRequired(t *testing.T) {
 	h := newTestRouter()
 	body := `{"code":"HR-PROC","name":"HR","stages":[{"code":"INTAKE","sequence":1}]}`
-	rec := do(t, h, http.MethodPost, "/v1/case-processes", body, map[string]string{"Idempotency-Key": "p2"}, "CaseMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/case-processes", body, map[string]string{"Idempotency-Key": "p2"}, "fieldservice.case.maintain")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -43,7 +43,7 @@ func TestCaseProcess_DutyRequired(t *testing.T) {
 func TestCaseCategory_Validation(t *testing.T) {
 	h := newTestRouter()
 	body := `{"code":"x","name":"","categoryType":"FINANCE","parentId":"nope","reopenWindowDays":400}`
-	rec := do(t, h, http.MethodPost, "/v1/case-categories", body, map[string]string{"Idempotency-Key": "c1"}, "CaseSetupAdmin")
+	rec := do(t, h, http.MethodPost, "/v1/case-categories", body, map[string]string{"Idempotency-Key": "c1"}, "fieldservice.case-setup.admin")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -58,7 +58,7 @@ func TestCaseCategory_Validation(t *testing.T) {
 func TestOpenGenericCase_Validation(t *testing.T) {
 	h := newTestRouter()
 	body := `{"categoryId":"nope","legalEntityId":"` + uuid1 + `","subject":"   ","priority":9}`
-	rec := do(t, h, http.MethodPost, "/v1/cases", body, map[string]string{"Idempotency-Key": "g1"}, "CaseCreate")
+	rec := do(t, h, http.MethodPost, "/v1/cases", body, map[string]string{"Idempotency-Key": "g1"}, "fieldservice.case.create")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -73,7 +73,7 @@ func TestOpenGenericCase_Validation(t *testing.T) {
 func TestOpenGenericCase_DutyRequired(t *testing.T) {
 	h := newTestRouter()
 	body := `{"categoryId":"` + uuid1 + `","legalEntityId":"` + uuid1 + `","subject":"hi","priority":2}`
-	rec := do(t, h, http.MethodPost, "/v1/cases", body, map[string]string{"Idempotency-Key": "g2"}, "CaseMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/cases", body, map[string]string{"Idempotency-Key": "g2"}, "fieldservice.case.maintain")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -82,7 +82,7 @@ func TestOpenGenericCase_DutyRequired(t *testing.T) {
 func TestAdvanceCaseStage_RequiresIfMatch(t *testing.T) {
 	h := newTestRouter()
 	body := `{"toStage":"INVESTIGATION"}`
-	rec := do(t, h, http.MethodPost, "/v1/cases/"+uuid1+"/stage", body, map[string]string{"Idempotency-Key": "s1"}, "CaseMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/cases/"+uuid1+"/stage", body, map[string]string{"Idempotency-Key": "s1"}, "fieldservice.case.maintain")
 	if rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -92,7 +92,7 @@ func TestTransitionCase_RejectsOpenTarget(t *testing.T) {
 	h := newTestRouter()
 	body := `{"to":"OPEN"}`
 	rec := do(t, h, http.MethodPost, "/v1/cases/"+uuid1+":transition", body,
-		map[string]string{"Idempotency-Key": "t1", "If-Match": "1"}, "CaseMaintain")
+		map[string]string{"Idempotency-Key": "t1", "If-Match": "1"}, "fieldservice.case.maintain")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -104,7 +104,7 @@ func TestTransitionCase_RejectsOpenTarget(t *testing.T) {
 func TestAssociateCase_Validation(t *testing.T) {
 	h := newTestRouter()
 	body := `{"entityType":"spaceship","entityId":"nope","role":"BOSS"}`
-	rec := do(t, h, http.MethodPost, "/v1/cases/"+uuid1+"/associations", body, map[string]string{"Idempotency-Key": "a1"}, "CaseMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/cases/"+uuid1+"/associations", body, map[string]string{"Idempotency-Key": "a1"}, "fieldservice.case.maintain")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -118,7 +118,7 @@ func TestAssociateCase_Validation(t *testing.T) {
 
 func TestListCases_RejectsUnknownStatus(t *testing.T) {
 	h := newTestRouter()
-	rec := do(t, h, http.MethodGet, "/v1/cases?status=PENDING", "", nil, "CaseMaintain")
+	rec := do(t, h, http.MethodGet, "/v1/cases?status=PENDING", "", nil, "fieldservice.case.maintain")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -130,17 +130,17 @@ func TestListCases_RejectsUnknownStatus(t *testing.T) {
 func TestAssociateCase_RefusesSelfAndResolutionOutsideResolve(t *testing.T) {
 	h := newTestRouter()
 	rec := do(t, h, http.MethodPost, "/v1/cases/"+uuid1+"/associations", `{"entityType":"case","entityId":"`+uuid1+`"}`,
-		map[string]string{"Idempotency-Key": "a2"}, "CaseMaintain")
+		map[string]string{"Idempotency-Key": "a2"}, "fieldservice.case.maintain")
 	if _, fields := problemOf(t, rec); rec.Code != http.StatusBadRequest || fields["entityId"] == "" {
 		t.Fatalf("self association: %d %v", rec.Code, fields)
 	}
 	rec = do(t, h, http.MethodPost, "/v1/cases/"+uuid1+":transition", `{"to":"CANCELED","resolutionCode":"FIXED"}`,
-		map[string]string{"Idempotency-Key": "t2", "If-Match": `"1"`}, "CaseMaintain")
+		map[string]string{"Idempotency-Key": "t2", "If-Match": `"1"`}, "fieldservice.case.maintain")
 	if _, fields := problemOf(t, rec); rec.Code != http.StatusBadRequest || fields["resolutionCode"] == "" {
 		t.Fatalf("resolution on cancel: %d %v", rec.Code, fields)
 	}
 	rec = do(t, h, http.MethodPost, "/v1/cases/"+uuid1+":reopen", `{"reason":"  "}`,
-		map[string]string{"Idempotency-Key": "r1", "If-Match": `"1"`}, "CaseMaintain")
+		map[string]string{"Idempotency-Key": "r1", "If-Match": `"1"`}, "fieldservice.case.maintain")
 	if _, fields := problemOf(t, rec); rec.Code != http.StatusBadRequest || fields["reason"] == "" {
 		t.Fatalf("reopen without a reason: %d %v", rec.Code, fields)
 	}
@@ -148,10 +148,10 @@ func TestAssociateCase_RefusesSelfAndResolutionOutsideResolve(t *testing.T) {
 
 func TestCaseSetupLists_AcceptAnyCaseDuty(t *testing.T) {
 	h := newTestRouter()
-	if rec := do(t, h, http.MethodGet, "/v1/case-categories", "", nil, "SvcInquire"); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodGet, "/v1/case-categories", "", nil, "fieldservice.inquire"); rec.Code != http.StatusForbidden {
 		t.Fatalf("categories without a case duty: %d", rec.Code)
 	}
-	if rec := do(t, h, http.MethodGet, "/v1/cases?entityType=invoice", "", nil, "CaseMaintain"); rec.Code != http.StatusBadRequest {
+	if rec := do(t, h, http.MethodGet, "/v1/cases?entityType=invoice", "", nil, "fieldservice.case.maintain"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("entityType without entityId: %d", rec.Code)
 	}
 }

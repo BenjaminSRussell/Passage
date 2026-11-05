@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	dutyCompAdmin       = "HcmCompAdmin"
-	dutyCompApprove     = "HcmCompApprove"
-	dutyRecruitMaintain = "HcmRecruitMaintain"
+	dutyCompAdmin       = "hr.compensation.admin"
+	dutyCompApprove     = "hr.compensation.approve"
+	dutyRecruitMaintain = "hr.recruiting.maintain"
 )
 
 var (

@@ -146,7 +146,7 @@ func (f *fakeStore) Ping(context.Context) error { return nil }
 
 const testLE = "00000000-0000-0000-0000-0000000000a1"
 
-const allDuties = "AssetView,AssetMaintain,AssetDispose,LeaseMaintain"
+const allDuties = "assets.asset.view,assets.asset.maintain,assets.asset.dispose,assets.lease.maintain"
 
 type req struct {
 	method, path, body, duties string
@@ -223,8 +223,8 @@ const midMonthBook = `{"bookCode":"IFRS","currency":"USD","method":"StraightLine
 func TestCreateAsset_DutyKeyTenantAndScope(t *testing.T) {
 	h := server(newFake())
 	body := `{"legalEntityId":"` + testLE + `","assetNumber":"FA-000001","name":"Press","classCode":"MACHINE","barcode":" BC-1 "}`
-	if rec := call(h, http.MethodPost, "/v1/assets", body, "AssetView", true); rec.Code != http.StatusForbidden {
-		t.Errorf("without AssetMaintain status = %d, want 403", rec.Code)
+	if rec := call(h, http.MethodPost, "/v1/assets", body, "assets.asset.view", true); rec.Code != http.StatusForbidden {
+		t.Errorf("without assets.asset.maintain status = %d, want 403", rec.Code)
 	}
 	if rec := call(h, http.MethodPost, "/v1/assets", body, allDuties, false); rec.Code != http.StatusBadRequest {
 		t.Errorf("without Idempotency-Key status = %d, want 400", rec.Code)
@@ -271,29 +271,29 @@ func TestListAssets_FiltersAndValidation(t *testing.T) {
 	f := newFake()
 	h := server(f)
 	createAsset(t, h)
-	rec := call(h, http.MethodGet, "/v1/assets?status=Open&limit=10", "", "AssetView", false)
+	rec := call(h, http.MethodGet, "/v1/assets?status=Open&limit=10", "", "assets.asset.view", false)
 	if rec.Code != http.StatusOK || f.lastFilter.Status != "Open" || f.lastFilter.Limit != 10 {
 		t.Fatalf("status %d filter %+v", rec.Code, f.lastFilter)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets", "", "AssetView", false); rec.Code != http.StatusOK || f.lastFilter.Limit != 50 {
+	if rec := call(h, http.MethodGet, "/v1/assets", "", "assets.asset.view", false); rec.Code != http.StatusOK || f.lastFilter.Limit != 50 {
 		t.Fatalf("default limit = %d", f.lastFilter.Limit)
 	}
-	bad := call(h, http.MethodGet, "/v1/assets?status=Gone&limit=500&after=x", "", "AssetView", false)
+	bad := call(h, http.MethodGet, "/v1/assets?status=Gone&limit=500&after=x", "", "assets.asset.view", false)
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("bad filters status = %d", bad.Code)
 	}
 	if p := problem(t, bad); p.Errors["status"] == "" || p.Errors["limit"] == "" || p.Errors["after"] == "" {
 		t.Errorf("errors = %v", p.Errors)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets", "", "LeaseMaintain", false); rec.Code != http.StatusForbidden {
-		t.Errorf("without AssetView status = %d", rec.Code)
+	if rec := call(h, http.MethodGet, "/v1/assets", "", "assets.lease.maintain", false); rec.Code != http.StatusForbidden {
+		t.Errorf("without assets.asset.view status = %d", rec.Code)
 	}
 }
 
 func TestGetAsset_IncludesBooksAndETag(t *testing.T) {
 	h := server(newFake())
 	assetID, bookID := addAsset(t, h, midMonthBook)
-	rec := call(h, http.MethodGet, "/v1/assets/"+assetID, "", "AssetView", false)
+	rec := call(h, http.MethodGet, "/v1/assets/"+assetID, "", "assets.asset.view", false)
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("status %d etag %q", rec.Code, rec.Header().Get("ETag"))
 	}
@@ -307,7 +307,7 @@ func TestGetAsset_IncludesBooksAndETag(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"inServiceDate":"2026-03-10"`) {
 		t.Errorf("in-service date is not a calendar date on the wire: %s", rec.Body.String())
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/not-a-uuid", "", "AssetView", false); rec.Code != http.StatusNotFound || problem(t, rec).Code != store.CodeAssetNotFound {
+	if rec := call(h, http.MethodGet, "/v1/assets/not-a-uuid", "", "assets.asset.view", false); rec.Code != http.StatusNotFound || problem(t, rec).Code != store.CodeAssetNotFound {
 		t.Errorf("malformed id status = %d", rec.Code)
 	}
 }
@@ -398,8 +398,8 @@ func TestDispose_PreconditionsAndHappyPath(t *testing.T) {
 	if rec := withMatch(body, `"2"`); rec.Code != http.StatusCreated {
 		t.Fatalf("second disposal: status %d", rec.Code)
 	}
-	if rec := call(h, http.MethodPost, path, body, "AssetMaintain", true); rec.Code != http.StatusForbidden {
-		t.Errorf("without AssetDispose status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, path, body, "assets.asset.maintain", true); rec.Code != http.StatusForbidden {
+		t.Errorf("without assets.asset.dispose status = %d", rec.Code)
 	}
 }
 
@@ -422,7 +422,7 @@ func TestLease_WorkedExampleListAndIBRRange(t *testing.T) {
 	if got := call(h, http.MethodGet, "/v1/leases/"+lease.ID, "", allDuties, false); got.Code != http.StatusOK {
 		t.Errorf("get lease status = %d", got.Code)
 	}
-	list := call(h, http.MethodGet, "/v1/leases", "", "LeaseMaintain", false)
+	list := call(h, http.MethodGet, "/v1/leases", "", "assets.lease.maintain", false)
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"leaseNumber":"L-1"`) || strings.Contains(list.Body.String(), `"schedule"`) {
 		t.Errorf("list = %d %s", list.Code, list.Body.String())
 	}
@@ -434,21 +434,21 @@ func TestLease_WorkedExampleListAndIBRRange(t *testing.T) {
 	if odd.Code != http.StatusUnprocessableEntity || problem(t, odd).Code != domain.CodeInvalidLease {
 		t.Fatalf("term 61 months annual: status %d body %s", odd.Code, odd.Body.String())
 	}
-	if rec := call(h, http.MethodGet, "/v1/leases/"+ids.New(), "", "LeaseMaintain", false); rec.Code != http.StatusNotFound {
+	if rec := call(h, http.MethodGet, "/v1/leases/"+ids.New(), "", "assets.lease.maintain", false); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown lease status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodPost, "/v1/leases", body, "AssetMaintain", true); rec.Code != http.StatusForbidden {
-		t.Errorf("without LeaseMaintain status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, "/v1/leases", body, "assets.asset.maintain", true); rec.Code != http.StatusForbidden {
+		t.Errorf("without assets.lease.maintain status = %d", rec.Code)
 	}
 }
 
 func TestTransactions_UnknownAsset(t *testing.T) {
 	h := server(newFake())
-	if rec := call(h, http.MethodGet, "/v1/assets/"+ids.New()+"/transactions", "", "AssetView", false); rec.Code != http.StatusNotFound {
+	if rec := call(h, http.MethodGet, "/v1/assets/"+ids.New()+"/transactions", "", "assets.asset.view", false); rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	a := createAsset(t, h)
-	rec := call(h, http.MethodGet, "/v1/assets/"+a.ID+"/transactions", "", "AssetView", false)
+	rec := call(h, http.MethodGet, "/v1/assets/"+a.ID+"/transactions", "", "assets.asset.view", false)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}

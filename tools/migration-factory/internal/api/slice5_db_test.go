@@ -86,7 +86,7 @@ func TestGLBalances_LoadReconcileAndRerunLoadsNothing(t *testing.T) {
 	}
 
 	// Another tenant sees none of it and may load the same extract for itself.
-	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "MigrationView"}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "migration.factory.view"}); r.Code != http.StatusNotFound {
 		t.Fatalf("other tenant reads the run: %d", r.Code)
 	}
 	if r := do(t, h, request{method: "POST", path: glPath, tenant: tenantB, duties: allDuties, body: glBody("USMF", "", cleanGL...)}); r.Code != http.StatusCreated || decode[runDetailDTO](t, r).RecordsLoaded != 3 {
@@ -132,7 +132,7 @@ func TestGLBalances_UnbalancedRefusedAndUnknownAccountQuarantined(t *testing.T) 
 	if !mismatched["gl_balances.balance"] || !mismatched["gl_balances.trial_balance"] {
 		t.Fatalf("the held-back balance must show on its total and the trial balance: %+v", run.ControlTotals)
 	}
-	stored := decode[runDetailDTO](t, do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "MigrationView"}))
+	stored := decode[runDetailDTO](t, do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "migration.factory.view"}))
 	if len(stored.Quarantined) != 1 || stored.Quarantined[0].Dimensions != "USMF-900" || len(stored.ControlTotals) != len(run.ControlTotals) {
 		t.Fatalf("stored run %+v", stored)
 	}

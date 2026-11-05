@@ -314,7 +314,7 @@ func (r *rehearsal) loadOpenItems() {
 				r.t.Fatalf("%s release %d: %d %s", label, i+1, rel.Code, truncate(rel.Body.String()))
 			}
 		}
-		got := decode[runDetailDTO](r.t, do(r.t, r.h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "MigrationView"}))
+		got := decode[runDetailDTO](r.t, do(r.t, r.h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "migration.factory.view"}))
 		if got.Status != "RECONCILED" || got.RecordsLoaded != x.OpenItems.Records || got.RecordsQuarantined != 0 {
 			r.t.Fatalf("%s after release: %+v", label, got.runDTO)
 		}
@@ -460,7 +460,7 @@ func TestWave49_SyntheticYearCutoverRehearsal(t *testing.T) {
 
 			// AC-49.6: schedule the stored steps from T-0 in runbook order, each starting at its offset
 			// or when the step before it ends, whichever is later.
-			stored := decode[planDTO](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID, tenant: tenantA, duties: "CutoverManager"}))
+			stored := decode[planDTO](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID, tenant: tenantA, duties: "migration.cutover.manage"}))
 			end, window := 0, -1
 			for _, s := range stored.Steps {
 				if s.OffsetMin < 0 || s.OffsetMin > openAccess {
@@ -507,7 +507,7 @@ func (r *rehearsal) rollback(planID string) {
 		name string
 		want [][]string
 	}{{"journals.csv", x.Journals}, {"documents.csv", x.Documents}} {
-		file := do(t, r.h, request{method: "GET", path: "/api/v1/cutover/plans/" + planID + "/rekeying/" + f.name, tenant: tenantA, duties: "CutoverManager"})
+		file := do(t, r.h, request{method: "GET", path: "/api/v1/cutover/plans/" + planID + "/rekeying/" + f.name, tenant: tenantA, duties: "migration.cutover.manage"})
 		if file.Code != http.StatusOK {
 			t.Fatalf("%s: %d", f.name, file.Code)
 		}

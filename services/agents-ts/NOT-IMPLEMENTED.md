@@ -21,7 +21,7 @@ signing checked against AWS SDK reference signatures, parity with Anthropic in
 `test/bedrock.test.ts`) and the five PRD agent definitions
 (`src/agents/catalog.ts`: AP coding, cash application, MRP triage, collections,
 anomaly), each with a prompt that treats document text as data, a model-visible
-tool list of reads and one propose/draft tool, and AgentInvoke plus its own
+tool list of reads and one propose/draft tool, and agents.invoke plus its own
 duties. Slice 5 adds the first HTTP surface (`src/api/`, tested over a real
 local server in `test/router.test.ts`): the kill switch toggle and status
 (`GET`/`POST /api/v1/agents/kill-switch`, AC-47.6; idempotent by scope, the

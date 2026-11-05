@@ -257,10 +257,10 @@ describe("Rate shop", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rate shop" }));
     expect(await screen.findByText("Enter the shipment id as a lower-case UUID.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
-    handler = () => json(403, { code: "AUTH-0003", detail: "missing duty TMS_RATE" });
+    handler = () => json(403, { code: "AUTH-0003", detail: "missing duty transport.rate-card.maintain" });
     fillShipment();
     fireEvent.click(screen.getByRole("button", { name: "Rate shop" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("missing duty TMS_RATE (AUTH-0003)"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("missing duty transport.rate-card.maintain (AUTH-0003)"));
   });
 });
 

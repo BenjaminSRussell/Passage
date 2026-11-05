@@ -44,7 +44,7 @@ func TestActivateForecast_NeedsPlanDutyIfMatchAndAKnownModel(t *testing.T) {
 	h := glRouter(nil)
 	path := "/v1/projects/P-1/forecasts/" + ids.New() + "/activate"
 	if rec := do(t, h, ctxFor(DutyInquire), http.MethodPost, path, "", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusForbidden {
-		t.Fatalf("without ProjPlan: %d", rec.Code)
+		t.Fatalf("without projects.plan: %d", rec.Code)
 	}
 	if rec := do(t, h, ctxFor(DutyPlan), http.MethodPost, path, "", nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("without If-Match: %d", rec.Code)
@@ -111,7 +111,7 @@ func TestGL_ReconciliationFormatsAmountsAndValidates(t *testing.T) {
 		t.Fatalf("bad periodTo: %d", rec.Code)
 	}
 	if rec := do(t, h, principalCtx(entity), http.MethodGet, "/v1/projects/gl-reconciliation?ledgerId="+ledger+"&currency=USD", "", nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("without ProjInquire: %d", rec.Code)
+		t.Fatalf("without projects.inquire: %d", rec.Code)
 	}
 	rec := do(t, h, principalCtx(entity, DutyInquire), http.MethodGet, "/v1/projects/gl-reconciliation?ledgerId="+ledger+"&currency=USD&periodTo=2026-10", "", nil)
 	var out glReconciliationOut

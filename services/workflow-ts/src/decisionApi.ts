@@ -16,7 +16,7 @@ import {
 import { inLegalEntityScope } from "./serviceToken.js";
 
 export const ECO_DECIDE_DUTY = "engineering.eco.approve";
-export const CAPA_DECIDE_DUTY = "QM_CAPA_MAINTAIN";
+export const CAPA_DECIDE_DUTY = "quality.capa.maintain";
 export const PARTY_DECIDE_DUTY = "party.approve";
 export const PARTY_MERGE_DECIDE_DUTY = "party.merge.approve";
 export const TENANT_ADMIN_DUTY = "tenant.administer";

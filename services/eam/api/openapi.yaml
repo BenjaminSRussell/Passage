@@ -26,13 +26,13 @@ paths:
     get:
       operationId: getWorkspace
       description: Asset management workspace tiles (8.44.6), counted at request time.
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       responses:
         "200": { description: tiles, content: { application/json: { schema: { $ref: "#/components/schemas/Workspace" } } } }
   /v1/eam/assets:
     get:
       operationId: listAssets
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
@@ -42,7 +42,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createAsset
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -54,7 +54,7 @@ paths:
   /v1/eam/assets/{id}:
     get:
       operationId: getAsset
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: asset, content: { application/json: { schema: { $ref: "#/components/schemas/AssetDetail" } } } }
@@ -62,7 +62,7 @@ paths:
   /v1/eam/assets/{id}/activate:
     post:
       operationId: activateAsset
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IfMatch" }]
       responses:
         "200": { description: active, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
@@ -72,7 +72,7 @@ paths:
   /v1/eam/assets/{id}/counters:
     post:
       operationId: createCounter
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -88,7 +88,7 @@ paths:
         Retires an asset (FR-44.2): ACTIVE to INACTIVE, INACTIVE or CREATED to DISPOSED. DISPOSED is final, and an
         asset with open work orders cannot be disposed (EAM-AST-001). Disposal removes the asset from its functional
         location (REMOVE in its location history). Use /activate to return an INACTIVE asset to ACTIVE.
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IfMatch" }]
       requestBody:
         required: true
@@ -103,7 +103,7 @@ paths:
     get:
       operationId: listCriticalityAssessments
       description: The asset's criticality assessments, newest version first.
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200":
@@ -118,7 +118,7 @@ paths:
         Records a new assessment version (FR-44.22). risk_score = max(consequences) x likelihood; criticality is 5 when
         risk >= 20 or SAFETY = 5, 4 when >= 15, 3 when >= 10, 2 when >= 5, else 1 (BR-44.15). The asset takes the new
         criticality and its version moves on; new CORRECTIVE orders default to priority 6 - criticality.
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -130,7 +130,7 @@ paths:
   /v1/eam/assets/{id}/warranties:
     get:
       operationId: listWarranties
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200":
@@ -144,7 +144,7 @@ paths:
       description: >-
         Records a vendor or manufacturer warranty (FR-44.17). Work orders created afterwards whose date (due date, or
         now) falls in [startsOn, endsOn) and whose job type is not excluded are flagged warrantyCovered (BR-44.14).
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -157,7 +157,7 @@ paths:
     get:
       operationId: listFaultCatalogs
       description: Every asset type that has a fault catalog, by type.
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       responses:
         "200":
           description: catalogs
@@ -167,7 +167,7 @@ paths:
   /v1/eam/fault-catalogs/{assetType}:
     get:
       operationId: getFaultCatalog
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/AssetType" }]
       responses:
         "200":
@@ -181,7 +181,7 @@ paths:
         Replaces the asset type's fault catalog (FR-44.16). If-Match carries the version read with GET, "0" when the
         type has no catalog yet. Codes match ^[A-Z0-9_]{1,20}$ and are unique per kind; every allowed combination
         uses listed symptom, area and type codes.
-      x-passage-duty: EamPlanAdmin
+      x-passage-duty: eam.plan.admin
       parameters: [{ $ref: "#/components/parameters/AssetType" }, { $ref: "#/components/parameters/IfMatch" }]
       requestBody:
         required: true
@@ -197,7 +197,7 @@ paths:
   /v1/eam/counters/{id}/rules:
     post:
       operationId: createRule
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -210,7 +210,7 @@ paths:
     get:
       operationId: listReadings
       description: The counter's latest readings, newest first (8.44.14 Measurement documents).
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/Limit" }]
       responses:
         "200":
@@ -225,7 +225,7 @@ paths:
         Replays with the same Idempotency-Key or messageId return the stored reading (200, Idempotent-Replayed: true).
         A cumulative reading must not be below the reading before it in time, nor above the reading after it, unless
         reset is set (EAM-CTR-001). The counter's average daily usage is recomputed over the last 30 days.
-      x-passage-duty: EamCounterRegister
+      x-passage-duty: eam.counter.register
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -237,7 +237,7 @@ paths:
   /v1/eam/plans:
     get:
       operationId: listPlans
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
@@ -247,7 +247,7 @@ paths:
     post:
       operationId: createPlan
       description: Creates a plan with its lines and schedules the lines at once (BR-44.1).
-      x-passage-duty: EamPlanAdmin
+      x-passage-duty: eam.plan.admin
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -260,13 +260,13 @@ paths:
     post:
       operationId: schedulePlans
       description: Nightly sweep over every active plan line. Idempotent by construction (one open work order per line).
-      x-passage-duty: EamPlanAdmin
+      x-passage-duty: eam.plan.admin
       responses:
         "200": { description: run, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleResult" } } } }
   /v1/eam/requests:
     get:
       operationId: listRequests
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
@@ -277,7 +277,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createRequest
-      x-passage-duty: EamRequestCreate
+      x-passage-duty: eam.request.create
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -288,7 +288,7 @@ paths:
   /v1/eam/requests/{id}/convert:
     post:
       operationId: convertRequest
-      x-passage-duty: EamPlanner
+      x-passage-duty: eam.work.plan
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         content: { application/json: { schema: { $ref: "#/components/schemas/ConvertIn" } } }
@@ -302,7 +302,7 @@ paths:
         Applies a triage action (FR-44.6): TRIAGE (from NEW or DEFERRED), DEFER (from NEW or TRIAGED) or REJECT (from
         NEW, TRIAGED or DEFERRED). CONVERTED and REJECTED requests are final (EAM-REQ-001). Repeating the action a
         request already reflects changes nothing; a note replaces the triage note.
-      x-passage-duty: EamPlanner
+      x-passage-duty: eam.work.plan
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -315,7 +315,7 @@ paths:
   /v1/eam/work-orders:
     get:
       operationId: listWorkOrders
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
         - { $ref: "#/components/parameters/Cursor" }
@@ -330,7 +330,7 @@ paths:
         The asset must be ACTIVE (EAM-AST-001). Without a priority, EMERGENCY gets 1, CORRECTIVE gets 6 - criticality
         (BR-44.15) and the other types 3. CAPITAL orders are rejected with EAM-WO-005 until a fixed asset or CIP
         project can be linked (wave 37).
-      x-passage-duty: EamPlanner
+      x-passage-duty: eam.work.plan
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -341,7 +341,7 @@ paths:
   /v1/eam/work-orders/{id}:
     get:
       operationId: getWorkOrder
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: work order, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderDetail" } } } }
@@ -355,7 +355,7 @@ paths:
         a covered cost above zero emits dev.passage.eam.warranty.claimable.v1 (BR-44.14). A ROUND order completes only
         when every stop is DONE or SKIPPED (EAM-RND-001), and cannot start while a stop's job type requires a permit to
         work (EAM-PMT-001).
-      x-passage-duty: EamPlanner | EamTechnician
+      x-passage-duty: eam.work.plan | eam.work-order.execute
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
       requestBody:
         required: true
@@ -369,7 +369,7 @@ paths:
   /v1/eam/work-orders/{id}/labor:
     post:
       operationId: recordLabor
-      x-passage-duty: EamTechnician
+      x-passage-duty: eam.work-order.execute
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -384,7 +384,7 @@ paths:
         Registers the fault on an open work order (FR-44.16). The symptom/area/type combination must be allowed for the
         asset's type and the cause and remedy must be catalog codes (EAM-FLT-002). A later registration supersedes the
         earlier one. CORRECTIVE and EMERGENCY orders cannot complete without one (EAM-FLT-001).
-      x-passage-duty: EamTechnician
+      x-passage-duty: eam.work-order.execute
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -401,7 +401,7 @@ paths:
         dev.passage.eam.downtime.recorded.v1 for wave-23 capacity. The window's whole minutes add to the order's
         downtime. resourceId defaults to the asset's production resource. Windows on one order must not overlap
         (EAM-DT-001). A completion's downtimeMinutes may not be below the recorded windows.
-      x-passage-duty: EamPlanner | EamTechnician
+      x-passage-duty: eam.work.plan | eam.work-order.execute
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -413,7 +413,7 @@ paths:
   /v1/eam/kpis:
     get:
       operationId: getKpis
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters:
         - { name: asset, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
@@ -424,7 +424,7 @@ paths:
   /v1/eam/permit-types:
     get:
       operationId: listPermitTypes
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       responses:
         "200":
           description: permit types by code
@@ -433,7 +433,7 @@ paths:
               schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/PermitType" } } } }
     post:
       operationId: upsertPermitType
-      x-passage-duty: EamSetupAdmin
+      x-passage-duty: eam.setup.admin
       description: Creates or replaces a permit type (FR-44.19). Saving the same definition again changes nothing.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -445,7 +445,7 @@ paths:
   /v1/eam/job-types/{jobType}/permits:
     get:
       operationId: getJobPermits
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: The permit types a job type requires before its work orders may start (BR-44.11); empty when none.
       parameters:
         - { name: jobType, in: path, required: true, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
@@ -454,7 +454,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     put:
       operationId: setJobPermits
-      x-passage-duty: EamSetupAdmin
+      x-passage-duty: eam.setup.admin
       description: Replaces the permit types a job type requires (BR-44.11). An empty list clears the requirement. Idempotent replace; no If-Match because the set is administered as a whole.
       parameters:
         - { name: jobType, in: path, required: true, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
@@ -468,7 +468,7 @@ paths:
   /v1/eam/assets/{id}/isolation-points:
     get:
       operationId: listIsolationPoints
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200":
@@ -479,7 +479,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createIsolationPoint
-      x-passage-duty: EamSetupAdmin
+      x-passage-duty: eam.setup.admin
       description: Adds an energy isolation point to the asset. The tag code is unique per asset (EAM-DUP-001).
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -493,7 +493,7 @@ paths:
   /v1/eam/permits:
     get:
       operationId: listPermits
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: Permit register (8.44.12), newest first.
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -506,7 +506,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     post:
       operationId: requestPermit
-      x-passage-duty: EamPlanner
+      x-passage-duty: eam.work.plan
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       description: >-
         Opens a REQUESTED permit for an open work order (EAM-PMT-006 otherwise). The validity window must fit the
@@ -523,7 +523,7 @@ paths:
   /v1/eam/permits/expire:
     post:
       operationId: expirePermits
-      x-passage-duty: EamPermitIssuer
+      x-passage-duty: eam.permit.issue
       description: >-
         The eam-permit-expiry job (8.44.20), run every 5 minutes: ISSUED permits past validTo move to SUSPENDED and are
         listed with EAM-PMT-004; workOrderInProgress flags jobs still running. Running it again suspends nothing more.
@@ -537,7 +537,7 @@ paths:
   /v1/eam/permits/{id}:
     get:
       operationId: getPermit
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: The permit with the asset's isolation points, its locks and its history. ETag is the permit version.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -546,7 +546,7 @@ paths:
   /v1/eam/permits/{id}/transition:
     post:
       operationId: transitionPermit
-      x-passage-duty: EamPermitIssuer
+      x-passage-duty: eam.permit.issue
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
       description: >-
         Approve, issue, suspend, close or cancel (BR-44.11). Approval needs an approver other than the requester
@@ -567,7 +567,7 @@ paths:
   /v1/eam/permits/{id}/locks:
     post:
       operationId: recordLock
-      x-passage-duty: EamTechnician
+      x-passage-duty: eam.work-order.execute
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       description: >-
         Applies, verifies (the zero-energy check) or removes the caller's own personal lock on an isolation point of
@@ -585,7 +585,7 @@ paths:
   /v1/eam/functional-locations:
     get:
       operationId: listFunctionalLocations
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: >-
         Functional locations (FR-44.1) in path order, so the plant structure reads top-down. site narrows to one site;
         under narrows to one location's subtree (the location included).
@@ -601,7 +601,7 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createFunctionalLocation
-      x-passage-duty: EamStructureMaintain
+      x-passage-duty: eam.structure.maintain
       description: >-
         Adds a root location of a site, or a child of a parent in the same site (EAM-FL-002). Depth is at most 12
         (EAM-FL-001); the path (codes joined by "/") is unique per site (EAM-DUP-001).
@@ -619,7 +619,7 @@ paths:
   /v1/eam/functional-locations/{id}:
     get:
       operationId: getFunctionalLocation
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: The location with its direct children and the assets installed at it.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -628,7 +628,7 @@ paths:
   /v1/eam/assets/{id}/location:
     post:
       operationId: placeAsset
-      x-passage-duty: EamStructureMaintain
+      x-passage-duty: eam.structure.maintain
       description: >-
         Installs, moves or removes (functionalLocationId null) the asset and appends the change to its location history
         (FR-44.2). The location must be in the asset's site and differ from the current one (EAM-FL-002); a DISPOSED
@@ -647,7 +647,7 @@ paths:
   /v1/eam/assets/{id}/location-history:
     get:
       operationId: listAssetLocationHistory
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: The asset's install, move and remove history, newest first.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -660,7 +660,7 @@ paths:
   /v1/eam/sequences:
     get:
       operationId: listSequences
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: Maintenance sequences (FR-44.15), newest first; asset narrows to one asset's sequences.
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -671,7 +671,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createSequence
-      x-passage-duty: EamPlanAdmin
+      x-passage-duty: eam.plan.admin
       description: >-
         Defines a maintenance sequence on one asset or one asset type, over a base interval in a time unit or on a
         counter of the asset. Steps need unique codes and hierarchies, multiples of 1 to 1000, and may include only
@@ -690,7 +690,7 @@ paths:
   /v1/eam/sequences/{id}:
     get:
       operationId: getSequence
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: sequence, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceSequence" } } } }
@@ -698,7 +698,7 @@ paths:
   /v1/eam/sequences/{id}/simulation:
     get:
       operationId: simulateSequence
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: The next occurrences after lastOccurrenceNumber with the steps BR-44.10 selects, generating nothing.
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -714,7 +714,7 @@ paths:
   /v1/eam/sequences/{id}/occurrences:
     get:
       operationId: listSequenceOccurrences
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: Generated occurrences, newest first.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -726,7 +726,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
     post:
       operationId: generateSequenceOccurrence
-      x-passage-duty: EamPlanAdmin
+      x-passage-duty: eam.plan.admin
       description: >-
         Generates occurrence lastOccurrenceNumber + 1 of an asset sequence (BR-44.10) and opens a PREVENTIVE work
         order (event workorder.created) for the selected step's job type; extra due steps are listed in jobTypes. The
@@ -746,7 +746,7 @@ paths:
   /v1/eam/rounds:
     get:
       operationId: listRounds
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: Maintenance rounds (FR-44.14), newest first, each with its stops.
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -756,7 +756,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createRound
-      x-passage-duty: EamPlanAdmin
+      x-passage-duty: eam.plan.admin
       description: >-
         Defines a round: 1 to 50 stops numbered 1..n in order, each an asset of the round's site with a job type code,
         a mandatory flag and the travel minutes from the previous stop (EAM-RND-003). A stop job type that requires a
@@ -776,7 +776,7 @@ paths:
   /v1/eam/rounds/{id}:
     get:
       operationId: getRound
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: round, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceRound" } } } }
@@ -784,7 +784,7 @@ paths:
   /v1/eam/rounds/{id}/work-orders:
     post:
       operationId: createRoundWorkOrder
-      x-passage-duty: EamPlanner
+      x-passage-duty: eam.work.plan
       description: >-
         Opens a ROUND work order for one extra occurrence of the round (ROUND plan lines generate the scheduled ones):
         booked on the first stop's asset, with every stop copied in stop order (BR-44.9), event workorder.created.
@@ -802,7 +802,7 @@ paths:
   /v1/eam/work-orders/{id}/stops/{seq}:
     post:
       operationId: recordStopOutcome
-      x-passage-duty: EamTechnician
+      x-passage-duty: eam.work-order.execute
       description: >-
         Records one stop of an IN_PROGRESS ROUND work order as DONE or SKIPPED, once (EAM-RND-002). SKIPPED needs a
         reason; a skipped mandatory stop raises a maintenance request with source ROUND for the stop's asset (event
@@ -824,7 +824,7 @@ paths:
   /v1/eam/work-orders/emergency-overdue:
     get:
       operationId: listEmergencyOverdue
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: >-
         Emergency regularization (BR-44.7): open priority 1 work orders that were never SCHEDULED or RELEASED and
         were created at least the window ago, oldest first, each with the warning EAM-WO-003.
@@ -845,7 +845,7 @@ paths:
   /v1/eam/assets/plan-reviews:
     get:
       operationId: listPlanReviews
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: >-
         Plan review reminder (BR-44.15): assets of criticality 4 or 5, not disposed, never assessed or last assessed
         12 months ago or more, most overdue first.
@@ -858,7 +858,7 @@ paths:
   /v1/eam/kpis/cost:
     get:
       operationId: getCostByAsset
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: Parts, labor and total cost of the work orders completed in [from, to), per asset and currency, highest first (FR-44.13).
       parameters:
         - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
@@ -880,7 +880,7 @@ paths:
   /v1/eam/kpis/backlog:
     get:
       operationId: getBacklog
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: Open work orders per priority with the overdue count and the oldest due date (FR-44.13), optionally on one site.
       parameters:
         - { name: site, in: query, schema: { type: string, format: uuid } }
@@ -894,7 +894,7 @@ paths:
   /v1/eam/assets/{id}/legal-entity:
     put:
       operationId: setAssetLegalEntity
-      x-passage-duty: EamAssetMaintain
+      x-passage-duty: eam.asset.maintain
       description: |
         Gives an asset without a legal entity the one named in the body, which must be in the caller's scope. Set once: the same entity again is a no-op and
         another entity is EAM-GL-005 (409). The asset's work orders without an entity take it too, so their cost can be booked. New assets take the creating
@@ -918,7 +918,7 @@ paths:
   /v1/eam/posting-profiles:
     get:
       operationId: listPostingProfiles
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: |
         The posting profiles of a legal entity (default the caller's) and the built-in placeholder profile that applies when a legal
         entity has none (accounts 6500, 6510, 1400 and 6590, to be replaced by the accountant).
@@ -938,7 +938,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     put:
       operationId: savePostingProfile
-      x-passage-duty: EamSetupAdmin
+      x-passage-duty: eam.setup.admin
       description: |
         Creates (no If-Match) or replaces (If-Match with the version) the profile of a legal entity and work order type; ALL is the
         wildcard. The response carries the new version as its ETag. Work order cost is booked as parts expense / parts offset and labor expense / labor offset.
@@ -956,7 +956,7 @@ paths:
   /v1/eam/gl-postings:
     post:
       operationId: postWorkOrderCostsToGL
-      x-passage-duty: EamGlPost
+      x-passage-duty: eam.gl.post
       description: |
         Books the parts and labor cost of completed and closed work orders of one currency (optionally one site or one work order) in the
         general ledger: one balanced entry per order for the cost not yet booked, keyed by order and booking number so a retry returns the same
@@ -1010,7 +1010,7 @@ paths:
   /v1/eam/gl-reconciliation:
     get:
       operationId: getGLReconciliation
-      x-passage-duty: EamInquire
+      x-passage-duty: eam.inquire
       description: |
         Per account the service booked on (up to periodTo, YYYY-MM): the net of its GL subledger, the general ledger's balance of the
         account and the difference (GL minus subledger). unbookedWorkOrders counts (and numbers the first 100 of) the entity's completed or closed orders whose cost

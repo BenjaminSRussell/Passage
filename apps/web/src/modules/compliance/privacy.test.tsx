@@ -143,9 +143,9 @@ describe("Privacy requests", () => {
   });
 
   it("shows a load failure with a retry", async () => {
-    handler = () => problem(403, "AUTH-0003", "missing duty PrivacyOfficer");
+    handler = () => problem(403, "AUTH-0003", "missing duty compliance.privacy-request.process");
     renderAt("/compliance/privacy/requests");
-    expect((await findAlert()).textContent).toContain("missing duty PrivacyOfficer (AUTH-0003)");
+    expect((await findAlert()).textContent).toContain("missing duty compliance.privacy-request.process (AUTH-0003)");
     handler = () => ({ status: 200, body: { items: [request()] } });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Privacy requests" })).toBeInTheDocument();

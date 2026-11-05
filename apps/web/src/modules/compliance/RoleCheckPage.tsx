@@ -59,7 +59,7 @@ const evalColumns: DataTableColumn<Conflict>[] = [
 ];
 
 /**
- * Role assignment check (PRD §9.48.6, SecurityAdmin): simulate an assignment
+ * Role assignment check (PRD §9.48.6, compliance.security.admin): simulate an assignment
  * before it is saved (FR-48.5, sod.block_high), or record an evaluation of a
  * user's current effective roles so conflicts reach the review queue.
  */

@@ -141,7 +141,7 @@ func TestSigningRequest_DecisionNeedsTheDutyIfMatchAndScope(t *testing.T) {
 	path := signingReqPath + "/" + id
 	hdr := map[string]string{"Idempotency-Key": "d1", "If-Match": `"3"`}
 	if rec := h.do(call{method: "POST", path: path + ":approve", user: userA, duties: []string{dutyPurchaseOrderConfirm}, headers: hdr}); rec.Code != 403 {
-		t.Errorf("without SigningLimitApprove: %d", rec.Code)
+		t.Errorf("without procurement.signing-limit.approve: %d", rec.Code)
 	}
 	if rec := h.do(call{method: "POST", path: path + ":approve", user: userA, duties: []string{dutySigningLimitApprove}, headers: idem("d1")}); rec.Code != 428 {
 		t.Errorf("without If-Match: %d", rec.Code)

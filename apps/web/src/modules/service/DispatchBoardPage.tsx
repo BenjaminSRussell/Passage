@@ -64,7 +64,7 @@ export function ruleLines(problem: Problem): string[] {
 const etagOf = (wo: WorkOrder) => `"${wo.version}"`;
 
 /** The duty the service enforces on assign, unassign and publish (and on technician changes). */
-export const DUTY_DISPATCH = "SvcDispatch";
+export const DUTY_DISPATCH = "fieldservice.technician.dispatch";
 
 /**
  * The dispatch board of one territory and day (PRD 8.45.6): technicians with their

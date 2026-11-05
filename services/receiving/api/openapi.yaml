@@ -9,7 +9,7 @@ paths:
   /v1/receiving/matching:evaluate:
     post:
       operationId: evaluateMatching
-      x-passage-duty: MatchingPolicyMaintain
+      x-passage-duty: receiving.matching-policy.maintain
       description: Pure policy tester. Evaluates an invoice against a matching policy without persisting anything; the Idempotency-Key header is accepted and has no effect because evaluation is side-effect free.
       parameters:
         - name: Idempotency-Key
@@ -37,7 +37,7 @@ paths:
   /v1/receiving/arrivals:
     post:
       operationId: createArrival
-      x-passage-duty: ReceivingMaintain
+      x-passage-duty: receiving.receipt.maintain
       description: Records a vendor delivery at the dock in state ARRIVED. PO line facts come in the body. A repeated Idempotency-Key with the same body replays the stored response.
       parameters:
         - name: Idempotency-Key
@@ -67,7 +67,7 @@ paths:
   /v1/receiving/receipts:
     post:
       operationId: createReceipt
-      x-passage-duty: ReceivingMaintain
+      x-passage-duty: receiving.receipt.maintain
       description: Direct receipt. Creates the receipt and registers it in one transaction (state REGISTERED, version 2) without a prior arrival.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -94,7 +94,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
     get:
       operationId: listReceipts
-      x-passage-duty: ReceivingMaintain
+      x-passage-duty: receiving.receipt.maintain
       description: Receipts newest first. Lines are omitted from list items; fetch one receipt for its lines. Page with nextCursor.
       parameters:
         - { name: vendorId, in: query, schema: { type: string, format: uuid } }
@@ -118,7 +118,7 @@ paths:
     get:
       operationId: getReceipt
       summary: Read one goods receipt
-      x-passage-duty: ReceivingMaintain
+      x-passage-duty: receiving.receipt.maintain
       parameters:
         - $ref: '#/components/parameters/ReceiptId'
       responses:
@@ -137,7 +137,7 @@ paths:
   /v1/receiving/receipts/{id}:register:
     post:
       operationId: registerReceipt
-      x-passage-duty: ReceivingMaintain
+      x-passage-duty: receiving.receipt.maintain
       description: Registers an ARRIVED receipt with received quantities, batch, serials and location. Needs If-Match.
       parameters:
         - $ref: '#/components/parameters/ReceiptId'
@@ -162,7 +162,7 @@ paths:
   /v1/receiving/receipts/{id}:post:
     post:
       operationId: postReceipt
-      x-passage-duty: ReceivingPost
+      x-passage-duty: receiving.receipt.post
       description: Posts a REGISTERED receipt (Dr inventory, Cr GR/IR through the ledger, idempotency key = receipt id), opens one GR/IR item per line and writes dev.passage.receiving.receipt.posted.v1 to the outbox in the same transaction. No body.
       parameters:
         - $ref: '#/components/parameters/ReceiptId'
@@ -182,7 +182,7 @@ paths:
   /v1/receiving/receipts/{id}:correct:
     post:
       operationId: correctReceipt
-      x-passage-duty: ReceivingPost
+      x-passage-duty: receiving.receipt.post
       description: Delta quantity correction of a POSTED receipt (FR-18.3). A line cannot go below its invoiced quantity or to zero (cancel instead), serial-tracked lines are refused. The receipt stays POSTED and its row version and correction sequence advance; dev.passage.receiving.receipt.corrected.v1 is written to the outbox.
       parameters:
         - $ref: '#/components/parameters/ReceiptId'
@@ -207,7 +207,7 @@ paths:
   /v1/receiving/receipts/{id}:cancel:
     post:
       operationId: cancelReceipt
-      x-passage-duty: ReceivingPost
+      x-passage-duty: receiving.receipt.post
       description: Cancels an ARRIVED, REGISTERED or POSTED receipt. A POSTED receipt is fully reversed in the ledger and its GR/IR items close at zero, and is refused once any line is invoiced. Serials recorded by a registered receipt are released. The optional body carries postingDate.
       requestBody:
         required: false
@@ -236,7 +236,7 @@ paths:
   /v1/receiving/grir:
     get:
       operationId: listGrir
-      x-passage-duty: APInquire
+      x-passage-duty: receiving.ap.inquire
       description: GR/IR open items newest first with per-currency open totals over the whole filter (not just the page).
       parameters:
         - { name: vendorId, in: query, schema: { type: string, format: uuid } }
@@ -258,7 +258,7 @@ paths:
   /v1/receiving/invoices:post:
     post:
       operationId: postVendorInvoice
-      x-passage-duty: VendorInvoicePost
+      x-passage-duty: receiving.vendor-invoice.post
       description: 'Posts a vendor invoice against GR/IR items. Checks the AP period, clears GR/IR pro rata (the last quantity clears the exact remainder), posts to the ledger, persists the invoice and writes dev.passage.payables.invoice.posted.v1 to the outbox. The invoice id derives from tenant, vendor and invoice number, so the ledger idempotency key is stable across retries. When the legal entity has a stochastic audit sample rate (PUT /v1/receiving/audit-policy), the invoice may be drawn for audit: it is stored with status AUDIT_BLOCKED, reserves its GR/IR quantity (so no other invoice, ERS run or plan settlement can take it), posts nothing to the ledger and writes dev.passage.payables.invoice.sampled.v1 instead, until an auditor calls :release-audit-block. Subsequent debits and credits against a blocked invoice are refused (AP-AUD-001).'
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -285,7 +285,7 @@ paths:
   /v1/receiving/one-time-payees:
     post:
       operationId: createOneTimePayee
-      x-passage-duty: VendorInvoicePost
+      x-passage-duty: receiving.vendor-invoice.post
       description: 'Records the document-level payee of a vendor invoice for the legal entity''s one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 and ISO 13616 per-country length, or ABA checksum, AP-BNK-001). With fieldcrypt keys the Idempotency-Key record stores an HMAC of the request under the tenant''s key, not a plain digest of the payee data. Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read. Erasure is a separate route (POST /v1/receiving/one-time-payees:erase); the optional subjectRef is the opaque data-subject id a compliance erasure command names.'
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -311,7 +311,7 @@ paths:
   /v1/receiving/invoice-captures:
     post:
       operationId: createInvoiceCapture
-      x-passage-duty: VendorInvoicePost
+      x-passage-duty: receiving.vendor-invoice.post
       description: >-
         Captures a vendor invoice document as a draft that posts nothing. format UBL parses a UBL 2.1 Invoice (a DOCTYPE is
         refused); format OCR hands the PDF or image to the document extractor chosen by OCR_PROVIDER (503 COM-0503 when
@@ -351,7 +351,7 @@ paths:
     get:
       operationId: getInvoiceCapture
       summary: Read one captured vendor invoice
-      x-passage-duty: APInquire
+      x-passage-duty: receiving.ap.inquire
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -368,7 +368,7 @@ paths:
   /v1/receiving/ers-self-bills/{id}:
     get:
       operationId: getErsSelfBill
-      x-passage-duty: APInquire
+      x-passage-duty: receiving.ap.inquire
       description: Returns the self-billing PDF issued to the vendor for a posted ERS invoice. The path id is the invoice id.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -386,7 +386,7 @@ paths:
   /v1/receiving/service-entry-sheets:
     post:
       operationId: createServiceEntrySheet
-      x-passage-duty: ServiceEntryMaintain
+      x-passage-duty: receiving.service-entry.maintain
       description: >-
         Enters a service entry sheet against lines of an APPROVED or CONFIRMED purchase order in the caller's legal entity: per
         line the service performed (description, quantity, unit price). The vendor and currency come from the purchase order and
@@ -419,7 +419,7 @@ paths:
     get:
       operationId: getServiceEntrySheet
       summary: Read one service entry sheet
-      x-passage-duty: ServiceEntryMaintain or ServiceEntryAccept
+      x-passage-duty: receiving.service-entry.maintain or receiving.service-entry.accept
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -436,7 +436,7 @@ paths:
   /v1/receiving/service-entry-sheets/{id}:accept:
     post:
       operationId: acceptServiceEntrySheet
-      x-passage-duty: ServiceEntryAccept
+      x-passage-duty: receiving.service-entry.accept
       description: >-
         Accepts a PENDING sheet. The user who entered the sheet cannot decide it (403 AP-SES-002). Posts Dr expense / Cr GR/IR
         through the ledger, opens GR/IR items on a synthetic POSTED service receipt (packing slip SES-{sheet id}) so ERS and
@@ -460,7 +460,7 @@ paths:
   /v1/receiving/service-entry-sheets/{id}:reject:
     post:
       operationId: rejectServiceEntrySheet
-      x-passage-duty: ServiceEntryAccept
+      x-passage-duty: receiving.service-entry.accept
       description: Rejects a PENDING sheet with a reason, which frees its amounts for the purchase order lines. Same segregation as accept.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -534,7 +534,7 @@ paths:
   /v1/receiving/invoice-adjustments:post:
     post:
       operationId: postInvoiceAdjustment
-      x-passage-duty: VendorInvoicePost
+      x-passage-duty: receiving.vendor-invoice.post
       description: >-
         Posts a subsequent debit (kind DEBIT, the vendor charges more) or a credit note (kind CREDIT, the vendor charges less)
         against a posted vendor invoice. The adjustment is value only: each line names a line of the original invoice and a
@@ -569,7 +569,7 @@ paths:
   /v1/receiving/plan-settlements:run:
     post:
       operationId: runPlanSettlement
-      x-passage-duty: VendorInvoicePost
+      x-passage-duty: receiving.vendor-invoice.post
       description: >-
         Settles the due rows of a purchase order's invoicing plans (purchasing GET .../invoicing-plans). A row is settled when its
         due date is on or before postingDate, it is OPEN in purchasing, its line is not cancelled, the plan has
@@ -577,7 +577,7 @@ paths:
         control for its amount and is recorded once per (order, line, row), so a repeated run settles nothing twice. Other due rows
         come back in skipped with a reason. At most 100 rows are settled per run (hasMore); a failure stops the run, rows already
         settled stay settled and a repeat continues. Rows stay OPEN in purchasing (it has no marking endpoint yet). The caller
-        needs the purchasing duty PurchaseOrderInquire. Writes dev.passage.payables.settlement.posted.v1 per row.
+        needs the purchasing duty procurement.purchase-order.inquire. Writes dev.passage.payables.settlement.posted.v1 per row.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -602,7 +602,7 @@ paths:
   /v1/receiving/consignment-settlements:run:
     post:
       operationId: runConsignmentSettlement
-      x-passage-duty: VendorInvoicePost
+      x-passage-duty: receiving.vendor-invoice.post
       description: >-
         Settles consumed consignment stock. Reads the legal entity's POSTED OWNERSHIP_CHANGE journals from inventory (GET
         /v1/inventory/journals and /{id}; the vendor is the owner dimension of the lines, the accrual account and amount come from
@@ -634,12 +634,12 @@ paths:
   /v1/receiving/invoices/{id}:release-audit-block:
     post:
       operationId: releaseInvoiceAuditBlock
-      x-passage-duty: InvoiceAuditRelease
+      x-passage-duty: receiving.invoice-audit.release
       description: >-
         Releases an invoice held by the stochastic audit block: checks the AP period for the invoice's posting date, posts the
         journal (the GR/IR clearings fixed when the invoice was drawn, so the entry equals the one a normal post would have made)
         under the invoice's own idempotency key, sets the status to POSTED, records the releasing user and time, and writes
-        dev.passage.payables.invoice.posted.v1. The duty is separate from VendorInvoicePost (segregation of duties), and the user
+        dev.passage.payables.invoice.posted.v1. The duty is separate from receiving.vendor-invoice.post (segregation of duties), and the user
         who posted the invoice cannot release it (AP-AUD-003). An ERS invoice whose self-billing parties lack an address, country or name in the master data stays blocked with 422 AP-ERS-005. The caller needs an authenticated user.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -670,7 +670,7 @@ paths:
   /v1/receiving/invoices/{id}:reject-audit-block:
     post:
       operationId: rejectInvoiceAuditBlock
-      x-passage-duty: InvoiceAuditRelease
+      x-passage-duty: receiving.invoice-audit.release
       description: >-
         Rejects an invoice held by the stochastic audit block. Nothing is posted; the GR/IR quantity and cleared amount the invoice
         reserved are freed, the status becomes AUDIT_REJECTED, and the rejecting user, time and reason are stored. The invoice number
@@ -705,7 +705,7 @@ paths:
   /v1/receiving/ers-settlements:run:
     post:
       operationId: runErsSettlement
-      x-passage-duty: VendorInvoicePost
+      x-passage-duty: receiving.vendor-invoice.post
       description: >-
         Evaluated receipt settlement (self-billing). Scans the OPEN GR/IR items (no quantity invoiced yet) of the vendor and/or
         purchase order, and for each POSTED receipt of an ERS-enabled vendor (PUT /v1/receiving/ers-vendors/{vendorId}) creates
@@ -742,7 +742,7 @@ paths:
   /v1/receiving/ers-vendors/{vendorId}:
     put:
       operationId: setErsVendor
-      x-passage-duty: MatchingPolicyMaintain
+      x-passage-duty: receiving.matching-policy.maintain
       description: Turns evaluated receipt settlement on or off for a vendor in a legal entity. Neither purchasing nor party carries an ERS flag, so receiving owns it. The change records the user. Absent means off.
       parameters:
         - name: vendorId
@@ -767,7 +767,7 @@ paths:
   /v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation:
     put:
       operationId: confirmErsPrice
-      x-passage-duty: ErsPriceConfirm
+      x-passage-duty: receiving.ers-price.confirm
       description: A buyer confirms the unit price an ERS run may settle a receipt line at when the PO price changed since receipt (BR-18.9, AP-ERS-001). unitPrice must equal the PO line's current net price (409 AP-ERS-002). The receipt must be POSTED and its vendor ERS-enabled (409 AP-ERS-003). The user who posted the receipt cannot confirm it (403 AP-ERS-004), and an ERS run by the confirming user skips the line (PRICE_CONFIRMED_BY_RUNNER). Each confirmation is kept in an insert-only history and published as erspriceconfirmation.confirmed.
       parameters:
         - name: id
@@ -809,7 +809,7 @@ paths:
   /v1/receiving/audit-policy:
     put:
       operationId: setAuditPolicy
-      x-passage-duty: MatchingPolicyMaintain
+      x-passage-duty: receiving.matching-policy.maintain
       description: Sets the stochastic audit sample rate of a legal entity, a percentage from 0 to 100 with at most two decimals (default 0, nothing is sampled). Each invoice posted afterwards (manual or ERS) is drawn from a seedable random source and blocked with that probability. The change records the user.
       requestBody:
         required: true
@@ -829,7 +829,7 @@ paths:
   /v1/receiving/pending-postings:
     get:
       operationId: listPendingPostings
-      x-passage-duty: ReceivingAdmin
+      x-passage-duty: receiving.admin
       description: Ledger postings this service recorded before calling the ledger and has not seen complete (oldest first, at most 200). A row stays open when the ledger call ended in an unknown outcome (timeout, transport error, 5xx) or the local commit failed after the ledger accepted the entry.
       responses:
         '200':
@@ -856,7 +856,7 @@ paths:
   /v1/receiving/pending-postings/{key}/resolve:
     post:
       operationId: resolvePendingPosting
-      x-passage-duty: ReceivingAdmin
+      x-passage-duty: receiving.admin
       description: Re-sends the stored journal to the ledger under its key. When the ledger returns an entry id (it had it, or accepts it now) that entry is reversed and the row is marked REVERSED, which frees the receipt and invoice it blocked; the user then repeats the command, which posts under a new ledger key generation. A definite ledger rejection marks the row REJECTED. Colons in the key may be sent as they are or percent-encoded.
       parameters:
         - { name: key, in: path, required: true, schema: { type: string } }

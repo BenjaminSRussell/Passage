@@ -6,7 +6,7 @@ same schema as the JSON path, and fails loudly when a stream ends before a
 terminal frame. The panel calls `askCopilot`, which offers both response types:
 it renders tokens as they arrive when the server streams, and reads the JSON
 body when it does not. Slice 5 adds the agent kill switch page
-(`KillSwitchPage.tsx`, `/copilot/kill-switch`, nav gated by AgentAdmin) on the
+(`KillSwitchPage.tsx`, `/copilot/kill-switch`, nav gated by agents.admin) on the
 agent runtime's new `GET`/`POST /api/v1/agents/kill-switch`.
 
 | Deliverable / criterion | Status | Reason |

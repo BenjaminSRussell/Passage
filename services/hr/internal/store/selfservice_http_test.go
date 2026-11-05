@@ -25,11 +25,11 @@ import (
 )
 
 const (
-	dutyEssBase      = "EssBase"
-	dutyMssBase      = "MssBase"
-	dutyEssAbsence   = "EssAbsence"
-	dutyMssApprove   = "MssApprove"
-	dutyAbsenceAdmin = "HcmAbsenceAdmin"
+	dutyEssBase      = "hr.profile.self"
+	dutyMssBase      = "hr.team.manage"
+	dutyEssAbsence   = "hr.absence.self"
+	dutyMssApprove   = "hr.team.approve"
+	dutyAbsenceAdmin = "hr.absence.admin"
 )
 
 func tid() string { return testkit.TenantID(1) }

@@ -34,7 +34,7 @@ func TestClient_CalculateInput(t *testing.T) {
 	got, err := c.CalculateInput(ctx, testkit.TenantID(9), domain.TaxDocument{
 		Country: "DE", Currency: "EUR", Date: "2026-11-03", Lines: []domain.TaxDocumentLine{{Ref: "1", Amount: decimal.RequireFromString("500")}},
 	})
-	if err != nil || got.Code != "VAT19" || !got.Amount.Equal(decimal.RequireFromString("95.00")) || sawDuty != "Calculate tax" {
+	if err != nil || got.Code != "VAT19" || !got.Amount.Equal(decimal.RequireFromString("95.00")) || sawDuty != "tax.tax.calculate" {
 		t.Fatalf("got %+v err %v duty %q", got, err, sawDuty)
 	}
 }

@@ -240,7 +240,7 @@ func TestPeriodResolution_AuditHeldInvoiceStoresTheResolvedPeriod(t *testing.T) 
 	rg.sampleRate(t, "100")
 	r := rg.posted(t, "PS-1", 100, 100)
 
-	rec := rg.call(http.MethodPost, invoicesPath, withoutPeriod(invoiceBody("INV-1", r.ID, 10, "")), userDuty("VendorInvoicePost", rg.key(), "poster"))
+	rec := rg.call(http.MethodPost, invoicesPath, withoutPeriod(invoiceBody("INV-1", r.ID, 10, "")), userDuty("receiving.vendor-invoice.post", rg.key(), "poster"))
 
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"status":"HELD"`) && !strings.Contains(rec.Body.String(), `"auditReason"`) || !strings.Contains(rec.Body.String(), `"fiscalPeriodId":"`+resolvedPeriodID+`"`) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())

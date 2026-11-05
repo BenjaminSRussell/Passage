@@ -57,7 +57,7 @@ func TestServiceGrantForTheFactoryIsSeeded(t *testing.T) {
 	if grant == nil {
 		t.Skip("handoff H-S8-1: platform/go/tenant serviceGrants has no \"migration-factory\" entry yet")
 	}
-	want := []string{"receivables.import.write", "ARView"}
+	want := []string{"receivables.import.write", "receivables.view"}
 	if len(grant) != len(want) {
 		t.Errorf("the grant for migration-factory -> receivables must hold exactly %v (least privilege), got %v", want, grant)
 	}

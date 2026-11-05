@@ -113,7 +113,7 @@ and `authz` until OPA is wired (wave 2 kernel).
   to the ledger cannot be remeasured (AST-0027). The response carries the
   AST-0516 info message.
 - Lease termination (slice 7, D4c): `POST /v1/leases/{id}/terminate`
-  (LeaseMaintain; If-Match and Idempotency-Key; `afterPeriod`, optional
+  (assets.lease.maintain; If-Match and Idempotency-Key; `afterPeriod`, optional
   `terminationPayment` and `reason`) ends an Active or Modified lease on the
   last day of period `afterPeriod` (1 up to the period before the last). The
   schedule after it is dropped; the liability at that point (the closing of
@@ -132,7 +132,7 @@ and `authz` until OPA is wired (wave 2 kernel).
   liability, Dr ROU accumulated depreciation, Cr ROU asset at cost, Cr payment
   clearing, and the gain (Cr) or loss (Dr) on the remeasurement gain account.
 - Lease ledger posting (slice 6, D4d): `POST /v1/leases/gl-postings`
-  (AssetPostJournal; legalEntityId, ledgerId, postThrough, optional leaseId)
+  (assets.journal.post; legalEntityId, ledgerId, postThrough, optional leaseId)
   books the recognition journal (Dr ROU asset, Cr lease liability, dated at
   commencement) and one journal per payment period that has ended by
   `postThrough`, dated on its last day (commencement + period x 12 /
@@ -150,7 +150,7 @@ and `authz` until OPA is wired (wave 2 kernel).
   and `lease_schedule_line.posted_journal_id` and `dev.passage.assets.lease.posted.v1`
   is written in the same transaction. `GET /v1/leases/{id}/gl-postings` shows
   which journals are booked. Accounts come from `PUT /v1/leases/posting-profile`
-  (AssetConfigure, If-Match to replace; GET by LeaseMaintain or AssetConfigure);
+  (assets.asset.configure, If-Match to replace; GET by assets.lease.maintain or assets.asset.configure);
   without one the placeholders apply and the booking is flagged
   `placeholderProfile`: ROU asset 1700, ROU accumulated depreciation 1790, lease
   liability 2400, interest expense 7200, depreciation expense 6820, payment
@@ -166,7 +166,7 @@ and `authz` until OPA is wired (wave 2 kernel).
   ROU depreciation at the end of each payment period, not monthly, and an
   advance payment is booked with its period's journal on the period's last
   day, not on its due date (see NOT-IMPLEMENTED.md D4d).
-- Count sessions (`POST /v1/assets/count-sessions`, duty AssetCount) classify
+- Count sessions (`POST /v1/assets/count-sessions`, duty assets.asset.count) classify
   the scans against the Open assets of the legal entity that carry a barcode:
   Found, Missing and Unknown (one AST-0525 warning each); a repeated scan
   counts once (`duplicateCount`). The register is not changed.
@@ -189,25 +189,25 @@ and `authz` until OPA is wired (wave 2 kernel).
   AC-37.11). Decisions are one route each under
   `POST /v1/assets/capex-requests/{id}/`: `approve`, `reject` and `postpone`
   (InApproval only), `release` (Approved) and `close` (Released) need
-  CapexRequestApprove; `reopen` (Postponed back to Draft, clearing the variant
-  and routing) is the requester's and needs CapexRequestCreate. Reject and
+  assets.capex-request.approve; `reopen` (Postponed back to Draft, clearing the variant
+  and routing) is the requester's and needs assets.capex-request.create. Reject and
   postpone need a `comment`. The user who created the request (`createdBy`)
   or is its `requesterId` may not approve, reject or postpone it (403
   AST-0028, PRD 7.37.17). Approve sets `approvedAmount` to the selected
   variant's total and writes `capexrequest.approved` in the same transaction.
   Every decision is recorded in `decisions` (who, when, from / to status,
   level, amount, comment). Routing a request to the approver of its level is
-  the wave-4 workflow (not yet wired): any CapexRequestApprove holder decides.
-- `GET /v1/assets/mid-quarter-test?legalEntityId=&bookCode=&year=` (AssetView
-  or AssetDepreciate) runs BR-37.5 on demand: the current cost of the code's
+  the wave-4 workflow (not yet wired): any assets.capex-request.approve holder decides.
+- `GET /v1/assets/mid-quarter-test?legalEntityId=&bookCode=&year=` (assets.asset.view
+  or assets.asset.depreciate) runs BR-37.5 on demand: the current cost of the code's
   books placed in service in the (calendar) year by quarter, without books
   fully disposed of in that year; more than 40% in Q4 applies mid-quarter
   (AST-0511 warning) and the books whose convention disagrees are listed. It
   switches and posts nothing.
-- Read duties: AssetView covers every GET (PRD 7.37.17) except leases; run,
+- Read duties: assets.asset.view covers every GET (PRD 7.37.17) except leases; run,
   insurance (including the report), capex and count-session reads also accept
-  AssetDepreciate, AssetInsuranceMaintain, CapexRequestCreate (or
-  CapexRequestApprove) and AssetCount respectively.
+  assets.asset.depreciate, assets.insurance.maintain, assets.capex-request.create (or
+  assets.capex-request.approve) and assets.asset.count respectively.
 - A disposal applies to every Open book of the asset (as SAP retirements post to
   all depreciation areas): each book records its own transaction with the
   disposed share of cost, accumulated depreciation and the impairment within
@@ -225,7 +225,7 @@ and `authz` until OPA is wired (wave 2 kernel).
   for declining balance. MidQuarter charges 10.5, 7.5, 4.5 or 1.5 months of
   the first year by in-service quarter (IRS Pub. 946 Tables A-2 to A-5, the
   5-year rows checked to the published rates).
-- Transfer and split (`POST /v1/assets/{id}/transfer`, AssetMaintain,
+- Transfer and split (`POST /v1/assets/{id}/transfer`, assets.asset.maintain,
   Idempotency-Key and If-Match with the asset ETag): every Open book of an
   Open asset moves. `kind: transfer` has one target taking 100%, optionally in
   another legal entity of the tenant (the caller needs that entity in scope);
@@ -244,8 +244,8 @@ and `authz` until OPA is wired (wave 2 kernel).
   a disposal, BR-37.6). One `asset.transferred` or `asset.split` event is
   written in the same transaction. `GET /v1/assets/{id}/transfers` lists the
   transfers an asset took part in as source or target.
-- Group assets (`POST /v1/assets/group-assets`, AssetConfigure; `GET` list and
-  read with AssetView or AssetConfigure): a group pools the books with one
+- Group assets (`POST /v1/assets/group-assets`, assets.asset.configure; `GET` list and
+  read with assets.asset.view or assets.asset.configure): a group pools the books with one
   book code of member assets of one legal entity, class and tax year, in one
   currency (AST-0031); a book belongs to one group asset (BR-37.11, 409
   AST-0535). The group has its own profile and depreciates from 1 January of

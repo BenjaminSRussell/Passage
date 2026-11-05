@@ -16,7 +16,7 @@ import (
 
 const (
 	rollPath  = "/v1/product-costing/versions/" + someID + "/roll"
-	calculate = "CostingCalculate"
+	calculate = "productcost.calculate"
 	rollLE    = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6e01"
 	parentID  = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6c01"
 	childID   = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6c02"
@@ -70,7 +70,7 @@ func TestRollStoredVersion_ReadsStructureFromEngineeringAndRefusesItInTheRequest
 	h := rollRouter(f, eng)
 	site := ids.New()
 	if rec := (call{http.MethodPost, rollPath, rollBody(site, ""), view, "k", ""}).do(h); rec.Code != http.StatusForbidden {
-		t.Fatalf("without CostingCalculate: %d", rec.Code)
+		t.Fatalf("without productcost.calculate: %d", rec.Code)
 	}
 	for name, c := range map[string]call{
 		"no key":        {http.MethodPost, rollPath, rollBody(site, ""), calculate, "", ""},

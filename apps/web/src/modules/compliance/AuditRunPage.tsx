@@ -211,7 +211,7 @@ const initial: AuditValues = {
 };
 
 /**
- * Audit rule run (PRD §9.48.6 Audit policies, duty AuditPolicyRun): runs one
+ * Audit rule run (PRD §9.48.6 Audit policies, duty compliance.audit-policy.run): runs one
  * audit rule over a document window and lists the violations it would create
  * (FR-48.14). Each violation key is fixed by policy, version and document, so
  * a rerun creates no new violations. Nothing is stored yet.

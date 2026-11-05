@@ -67,12 +67,12 @@ func TestCreateWorkerRejectsUnknownFieldsAndBadValues(t *testing.T) {
 }
 
 // TestRevealPIIRequiresDutyAndReason is AC-42.7's gate: the unmasked read needs
-// HcmPIIRead, and the reason must be at least ten characters (HCM-PII-001).
+// hr.pii.read, and the reason must be at least ten characters (HCM-PII-001).
 func TestRevealPIIRequiresDutyAndReason(t *testing.T) {
 	target := "/v1/hr/workers/" + testkit.TenantID(9) + "/pii?reason=" + strings.Repeat("x", 12)
 	rec := serve(t, tid(), http.MethodGet, target, "", dutyWorkerInquire)
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("without HcmPIIRead: status = %d, want 403", rec.Code)
+		t.Fatalf("without hr.pii.read: status = %d, want 403", rec.Code)
 	}
 
 	for _, reason := range []string{"", "short", "   nine chr"} {
@@ -202,7 +202,7 @@ func TestCreateEmploymentDateRules(t *testing.T) {
 	}
 	rec = serve(t, tid(), http.MethodPost, target, `{"legalEntityId":"`+le+`","employmentType":"FULL_TIME","hireDate":"2026-03-16"}`, dutyWorkerInquire)
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("without HcmWorkerMaintain: status = %d, want 403", rec.Code)
+		t.Fatalf("without hr.worker.maintain: status = %d, want 403", rec.Code)
 	}
 }
 
@@ -214,7 +214,7 @@ func TestCreateAssignmentValidatesShareAndDates(t *testing.T) {
 		t.Fatalf("zero share and empty range: status = %d body %s", rec.Code, rec.Body.String())
 	}
 	if rec := serve(t, tid(), http.MethodPost, target, body, dutyOrgMaintain); rec.Code != http.StatusForbidden {
-		t.Fatalf("without HcmActionMaintain: status = %d, want 403", rec.Code)
+		t.Fatalf("without hr.action.maintain: status = %d, want 403", rec.Code)
 	}
 }
 

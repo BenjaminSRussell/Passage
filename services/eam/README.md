@@ -152,7 +152,7 @@ NOT-IMPLEMENTED.md lists what the slices leave out and why.
 
 ## What slice 5 adds
 
-- **Rounds** (FR-44.14): `POST /rounds` (EamPlanAdmin) defines 1 to 50 stops numbered
+- **Rounds** (FR-44.14): `POST /rounds` (eam.plan.admin) defines 1 to 50 stops numbered
   1..n in order, each an asset of the round's site with a job type code, a mandatory
   flag and the travel minutes from the previous stop (EAM-RND-003; code unique,
   EAM-DUP-001). A stop job type that requires a permit to work is refused: a round
@@ -162,11 +162,11 @@ NOT-IMPLEMENTED.md lists what the slices leave out and why.
   time only. Each occurrence is one ROUND work order booked on the first stop's asset,
   with the stops copied in order (`work_order_stop`, one job per stop) and
   `workorder.created` in the same transaction. Completion resets the line once for the
-  whole round and reschedules it. `POST /rounds/{id}/work-orders` (EamPlanner) opens an
+  whole round and reschedules it. `POST /rounds/{id}/work-orders` (eam.work.plan) opens an
   extra occurrence outside the plan. Every stop asset must be ACTIVE (EAM-AST-001; the
   scheduler skips the line). ROUND orders are never warranty covered, and
   `POST /work-orders` still refuses the ROUND type.
-- **Stop outcomes** (BR-44.9): `POST /work-orders/{id}/stops/{seq}` (EamTechnician)
+- **Stop outcomes** (BR-44.9): `POST /work-orders/{id}/stops/{seq}` (eam.work-order.execute)
   records DONE or SKIPPED once, while the order is IN_PROGRESS (EAM-RND-002). SKIPPED
   needs a reason; a skipped mandatory stop raises a maintenance request with source
   ROUND for the stop's asset (`request.created`) in the same transaction. The order
@@ -259,18 +259,18 @@ row-level security test runs the store as that role.
 
 | Duty | Routes |
 |---|---|
-| EamAssetMaintain | assets, activate, lifecycle, criticality, warranties, counters, rules |
-| EamCounterRegister | readings |
-| EamPlanAdmin | plans, plans/schedule, fault catalogs (PUT), sequences and their occurrences (POST), rounds (POST) |
-| EamStructureMaintain | functional locations (POST), asset placement |
-| EamRequestCreate | requests |
-| EamPlanner | request convert and triage, work order create, round work orders, status and downtime (or EamTechnician) |
-| EamTechnician | status and downtime (or EamPlanner), labor, faults, round stop outcomes |
-| EamPlanner | permit request |
-| EamPermitIssuer | permit transitions (approve, issue, suspend, close, cancel), permit expiry run |
-| EamTechnician | personal LOTO lock actions |
-| EamSetupAdmin | permit types, job permit requirements (PUT), isolation points (POST) |
-| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis, permit types, job permit requirements, isolation points, permits, functional locations, location history, sequences, simulation, occurrences, rounds, emergency-overdue, plan reviews, cost and backlog KPIs |
+| eam.asset.maintain | assets, activate, lifecycle, criticality, warranties, counters, rules |
+| eam.counter.register | readings |
+| eam.plan.admin | plans, plans/schedule, fault catalogs (PUT), sequences and their occurrences (POST), rounds (POST) |
+| eam.structure.maintain | functional locations (POST), asset placement |
+| eam.request.create | requests |
+| eam.work.plan | request convert and triage, work order create, round work orders, status and downtime (or eam.work-order.execute) |
+| eam.work-order.execute | status and downtime (or eam.work.plan), labor, faults, round stop outcomes |
+| eam.work.plan | permit request |
+| eam.permit.issue | permit transitions (approve, issue, suspend, close, cancel), permit expiry run |
+| eam.work-order.execute | personal LOTO lock actions |
+| eam.setup.admin | permit types, job permit requirements (PUT), isolation points (POST) |
+| eam.inquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis, permit types, job permit requirements, isolation points, permits, functional locations, location history, sequences, simulation, occurrences, rounds, emergency-overdue, plan reviews, cost and backlog KPIs |
 
 ## Error codes
 

@@ -51,7 +51,7 @@ func TestIoTStream_BreachToRequestLatency(t *testing.T) {
 	srv := httptest.NewServer(New(store.New(pool), nil).Routes())
 	defer srv.Close()
 	client := srv.Client()
-	duties := "EamAssetMaintain,EamCounterRegister,EamInquire"
+	duties := "eam.asset.maintain,eam.counter.register,eam.inquire"
 	post := func(path, body, key string, extra map[string]string) (int, []byte) {
 		req, err := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader(body))
 		if err != nil {

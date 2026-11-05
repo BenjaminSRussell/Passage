@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	dutyDunning  = "DunningRun"
+	dutyDunning  = "receivables.dunning.run"
 	maxGraceDays = 60
 )
 

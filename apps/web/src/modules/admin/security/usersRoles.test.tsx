@@ -36,7 +36,7 @@ const user = (userId: string, displayName: string, status = "active") => ({
 const assignment = {
   assignmentId: "33333333-3333-4333-8333-333333333333",
   userId: U1,
-  role: "Maintain users",
+  role: "identity.user.maintain",
   validFrom: "2026-01-01T00:00:00Z",
   createdAt: "2026-01-01T00:00:00Z",
 };
@@ -104,9 +104,9 @@ describe("users page", () => {
   });
 
   it("shows the server reason with no retry on 403 and offers retry on 500", async () => {
-    server.handler = () => json(403, { code: "IAM-0403", detail: "needs Maintain users" });
+    server.handler = () => json(403, { code: "IAM-0403", detail: "needs identity.user.maintain" });
     const first = renderAt("/admin/security/users");
-    expect(await screen.findByText("needs Maintain users")).toBeInTheDocument();
+    expect(await screen.findByText("needs identity.user.maintain")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "boom" });
@@ -129,7 +129,7 @@ describe("user detail page", () => {
     const table = await screen.findByRole("table", {
       name: "User role assignments",
     });
-    expect(within(table).getByText("Maintain users")).toBeInTheDocument();
+    expect(within(table).getByText("identity.user.maintain")).toBeInTheDocument();
     expect(within(table).getByText("Tenant-wide")).toBeInTheDocument();
     expect(server.calls.find((c) => c.url.pathname === "/api/v1/authz/assignments")!.url.search).toBe(`?userId=${U1}&active=true`);
     expect(screen.getByRole("link", { name: "View effective permissions" })).toHaveAttribute("href", `/admin/security/permissions?userId=${U1}`);
@@ -149,10 +149,10 @@ describe("user detail page", () => {
         ? json(200, user(U1, "Ada"))
         : json(403, {
             code: "IAM-0403",
-            detail: "needs Maintain security roles",
+            detail: "needs identity.security-role.maintain",
           });
     renderAt(`/admin/security/users/${U1}`);
-    expect(await screen.findByText("needs Maintain security roles")).toBeInTheDocument();
+    expect(await screen.findByText("needs identity.security-role.maintain")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Ada" })).toBeInTheDocument();
   });
 });
@@ -163,7 +163,7 @@ describe("effective permissions deep link", () => {
       url.pathname === `/api/v1/identity/users/${U1}/effective-permissions`
         ? json(200, {
             userId: U1,
-            duties: ["Maintain users"],
+            duties: ["identity.user.maintain"],
             ignoredRoles: [],
             permissions: [],
           })
@@ -181,11 +181,11 @@ describe("effective permissions deep link", () => {
 });
 
 const roles = [
-  { name: "Maintain users", duties: ["Maintain users"] },
-  { name: "Maintain security roles", duties: ["Maintain security roles"] },
+  { name: "identity.user.maintain", duties: ["identity.user.maintain"] },
+  { name: "identity.security-role.maintain", duties: ["identity.security-role.maintain"] },
 ];
 const duties = [
-  { name: "Maintain users", serviceOnly: false, permissionCount: 3 },
+  { name: "identity.user.maintain", serviceOnly: false, permissionCount: 3 },
   { name: "Internal sync", serviceOnly: true, permissionCount: 1 },
 ];
 
@@ -203,8 +203,8 @@ describe("role catalogue page", () => {
       return undefined;
     };
     const { container } = renderAt("/admin/security/roles");
-    const roleLink = await within(await screen.findByRole("table", { name: "Roles" })).findByRole("link", { name: "Maintain security roles" });
-    expect(roleLink).toHaveAttribute("href", "/admin/security/roles/Maintain%20security%20roles");
+    const roleLink = await within(await screen.findByRole("table", { name: "Roles" })).findByRole("link", { name: "identity.security-role.maintain" });
+    expect(roleLink).toHaveAttribute("href", "/admin/security/roles/identity.security-role.maintain");
     expect(await within(await screen.findByRole("table", { name: "Duties" })).findByText("Service only")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Duty kind"), {
@@ -214,8 +214,8 @@ describe("role catalogue page", () => {
       target: { value: "users" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
-    await waitFor(() => expect(within(screen.getByRole("table", { name: "Roles" })).queryByText("Maintain security roles")).toBeNull());
-    await waitFor(() => expect(within(screen.getByRole("table", { name: "Duties" })).queryByText("Maintain users")).toBeNull());
+    await waitFor(() => expect(within(screen.getByRole("table", { name: "Roles" })).queryByText("identity.security-role.maintain")).toBeNull());
+    await waitFor(() => expect(within(screen.getByRole("table", { name: "Duties" })).queryByText("identity.user.maintain")).toBeNull());
     const last = server.calls.filter((c) => c.url.pathname === "/api/v1/authz/duties").at(-1)!;
     expect(last.url.search).toBe("?q=users&serviceOnly=true");
     expect(pageViolations(container)).toEqual([]);
@@ -238,9 +238,9 @@ describe("role catalogue page", () => {
     expect(await screen.findByText("No roles yet")).toBeInTheDocument();
     expect(await screen.findByText("No duties yet")).toBeInTheDocument();
     first.unmount();
-    server.handler = () => json(403, { code: "IAM-0403", detail: "needs Maintain security roles" });
+    server.handler = () => json(403, { code: "IAM-0403", detail: "needs identity.security-role.maintain" });
     const { container } = renderAt("/admin/security/roles");
-    expect((await screen.findAllByText("needs Maintain security roles")).length).toBe(2);
+    expect((await screen.findAllByText("needs identity.security-role.maintain")).length).toBe(2);
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
     expect(pageViolations(container)).toEqual([]);
   });
@@ -249,12 +249,12 @@ describe("role catalogue page", () => {
 describe("role detail page", () => {
   it("shows each duty with the routes it grants", async () => {
     server.handler = (url) =>
-      url.pathname === "/api/v1/authz/roles/Maintain%20users"
+      url.pathname === "/api/v1/authz/roles/identity.user.maintain"
         ? json(200, {
-            name: "Maintain users",
+            name: "identity.user.maintain",
             duties: [
               {
-                name: "Maintain users",
+                name: "identity.user.maintain",
                 serviceOnly: false,
                 permissions: [
                   {
@@ -266,9 +266,9 @@ describe("role detail page", () => {
             ],
           })
         : undefined;
-    const { container } = renderAt("/admin/security/roles/Maintain%20users");
+    const { container } = renderAt("/admin/security/roles/identity.user.maintain");
     const table = await screen.findByRole("table", {
-      name: "Routes granted by Maintain users",
+      name: "Routes granted by identity.user.maintain",
     });
     expect(within(table).getByText("GET, POST")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);

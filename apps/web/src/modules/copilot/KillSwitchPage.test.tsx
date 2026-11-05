@@ -52,8 +52,8 @@ describe("kill switch client", () => {
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({ scope: "TENANT", tenantId: T1, active: true });
     const refused = async () =>
-      json({ type: "https://passage.dev/problems/AGT-0203", status: 403, code: "AGT-0203", detail: "you do not hold duty AgentAdmin" }, 403, "application/problem+json");
-    await expect(setKillSwitch({ scope: "GLOBAL", active: true }, refused)).rejects.toMatchObject({ status: 403, code: "AGT-0203", message: "you do not hold duty AgentAdmin" });
+      json({ type: "https://passage.dev/problems/AGT-0203", status: 403, code: "AGT-0203", detail: "you do not hold duty agents.admin" }, 403, "application/problem+json");
+    await expect(setKillSwitch({ scope: "GLOBAL", active: true }, refused)).rejects.toMatchObject({ status: 403, code: "AGT-0203", message: "you do not hold duty agents.admin" });
   });
 });
 
@@ -64,7 +64,7 @@ describe("KillSwitchPage", () => {
   });
 
   it("shows a running tenant with no history and no global control for a tenant admin", async () => {
-    render(<KillSwitchPage load={async () => off} duties={["AgentAdmin"]} />);
+    render(<KillSwitchPage load={async () => off} duties={["agents.admin"]} />);
     // The card is the heading's grandparent (Card: head > heading).
     const tenant = (await screen.findByRole("heading", { name: "Your tenant" })).parentElement?.parentElement as HTMLElement;
     expect(within(tenant).getByText("Running")).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe("KillSwitchPage", () => {
   it("halts the tenant only after confirmation, then shows the new state", async () => {
     const load = vi.fn().mockResolvedValueOnce(off).mockResolvedValueOnce(halted);
     const toggle = vi.fn(async () => result(true));
-    render(<KillSwitchPage load={load} toggle={toggle} duties={["AgentAdmin"]} />);
+    render(<KillSwitchPage load={load} toggle={toggle} duties={["agents.admin"]} />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Halt agent runs" }));
     const dialog = screen.getByRole("alertdialog", { name: "Halt all agent runs?" });
@@ -94,7 +94,7 @@ describe("KillSwitchPage", () => {
 
   it("cancelling the confirmation changes nothing", async () => {
     const toggle = vi.fn(async () => result(true));
-    render(<KillSwitchPage load={async () => off} toggle={toggle} duties={["AgentAdmin"]} />);
+    render(<KillSwitchPage load={async () => off} toggle={toggle} duties={["agents.admin"]} />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Halt agent runs" }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -104,20 +104,20 @@ describe("KillSwitchPage", () => {
 
   it("shows a refused toggle as an alert and keeps the page", async () => {
     const toggle = vi.fn(async () => {
-      throw new Error("I cannot do that: you do not hold duty AgentAdmin required by the tenant kill switch.");
+      throw new Error("I cannot do that: you do not hold duty agents.admin required by the tenant kill switch.");
     });
     render(<KillSwitchPage load={async () => off} toggle={toggle} duties={[]} />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Halt agent runs" }));
     await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Halt agent runs" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("you do not hold duty AgentAdmin"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("you do not hold duty agents.admin"));
     expect(screen.getByRole("button", { name: "Halt agent runs" })).toBeInTheDocument();
   });
 
   it("lets a platform operator use the global switch, and explains a tenant halted by it", async () => {
     const globalOn: KillSwitchStatus = { ...off, halted: true, global: { active: true, version: 5, changedAt: "2026-10-22T10:00:00Z" } };
     const toggle = vi.fn(async () => result(false, "GLOBAL"));
-    render(<KillSwitchPage load={async () => globalOn} toggle={toggle} duties={["PlatformAdmin"]} />);
+    render(<KillSwitchPage load={async () => globalOn} toggle={toggle} duties={["platform.global.admin"]} />);
     const user = userEvent.setup();
     expect(await screen.findByText("Halted by the global switch")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Resume all tenants" }));
@@ -127,13 +127,13 @@ describe("KillSwitchPage", () => {
   });
 
   it("warns that a runtime out of contact with the stream halts every run", async () => {
-    render(<KillSwitchPage load={async () => ({ ...off, halted: true, stale: true })} duties={["AgentAdmin"]} />);
+    render(<KillSwitchPage load={async () => ({ ...off, halted: true, stale: true })} duties={["agents.admin"]} />);
     expect(await screen.findByText("Runs are halted while the runtime reconnects")).toBeInTheDocument();
   });
 
   it("shows a load failure with a working Try again", async () => {
     const load = vi.fn().mockRejectedValueOnce(new Error("request failed with status 503")).mockResolvedValueOnce(off);
-    render(<KillSwitchPage load={load} duties={["AgentAdmin"]} />);
+    render(<KillSwitchPage load={load} duties={["agents.admin"]} />);
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("status 503"));
     await user.click(screen.getByRole("button", { name: "Try again" }));

@@ -70,14 +70,14 @@ func TestLegalEntitySetting_ReadSaveValidateAndDuty(t *testing.T) {
 		t.Fatalf("a supervisor without %s may not change cogs_at_shipment: %+v", store.DutyCogsPolicy, savedEntitySetting)
 	}
 	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "e-6",
-		"X-Passage-Duties": "WarehouseRelease," + store.DutyCogsPolicy}); rec.Code != http.StatusOK || !savedEntitySetting.CanChangeCogs {
+		"X-Passage-Duties": "fulfillment.warehouse.release," + store.DutyCogsPolicy}); rec.Code != http.StatusOK || !savedEntitySetting.CanChangeCogs {
 		t.Fatalf("save with the ledger setup duty: %d %+v", rec.Code, savedEntitySetting)
 	}
-	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "e-5", "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "e-5", "X-Passage-Duties": "fulfillment.warehouse.view"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer save: %d", rec.Code)
 	}
 	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "e-7", "X-Passage-Duties": store.DutyCogsPolicy}); rec.Code != http.StatusForbidden {
-		t.Fatalf("ledger setup alone (no WarehouseRelease) save: %d", rec.Code)
+		t.Fatalf("ledger setup alone (no fulfillment.warehouse.release) save: %d", rec.Code)
 	}
 }
 

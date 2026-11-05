@@ -53,7 +53,7 @@ func TestBankAccounts_RevealsWithOnlyTheRevealDutyAndNeverForwardsTheUser(t *tes
 		}
 	}
 	claims, err := verifier.Verify(got.Get(tenant.HeaderServiceToken))
-	if err != nil || claims.Aud != "party" || claims.Act != "u1" || claims.Le != entity || len(claims.Duties) != 1 || claims.Duties[0] != "party.vendor_bank.reveal" {
+	if err != nil || claims.Aud != "party" || claims.Act != "u1" || claims.Le != entity || len(claims.Duties) != 1 || claims.Duties[0] != "party.vendor-bank.reveal" {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 	iban, us := accounts[0].Creditor(), accounts[1].Creditor()

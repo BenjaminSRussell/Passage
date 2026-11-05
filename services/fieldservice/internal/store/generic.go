@@ -365,7 +365,7 @@ func categoryClocks(ctx context.Context, tx pgx.Tx, tenantID string, cat Categor
 
 // OpenGenericCase opens a case in a non-service category (FR-45.12). The caller
 // becomes the owner and must hold the category's access duty when it has one
-// (CaseCreate is category-scoped, BR-45.10). SERVICE and CUSTOMER_SERVICE open
+// (fieldservice.case.create is category-scoped, BR-45.10). SERVICE and CUSTOMER_SERVICE open
 // through /v1/service/cases (CASE-CAT-002); COLLECTIONS needs a customer
 // (CASE-CUS-001). The case starts at the first stage of the category's process.
 func (s *Postgres) OpenGenericCase(ctx context.Context, in OpenGenericInput, key, requestHash string) (GenericCase, bool, error) {

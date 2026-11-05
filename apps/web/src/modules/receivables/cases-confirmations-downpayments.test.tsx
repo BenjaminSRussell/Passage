@@ -116,7 +116,7 @@ describe("Collection cases", () => {
     const first = renderAt("/receivables/cases");
     expect(await screen.findByText("No cases")).toBeInTheDocument();
     first.unmount();
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ARView" });
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty receivables.view" });
     renderAt("/receivables/cases");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the cases");

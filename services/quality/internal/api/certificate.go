@@ -103,7 +103,7 @@ type waiverRequest struct {
 }
 
 // waiveCertificate waives the order's required certificate (FR-33.15 note). It
-// needs QM_USAGE_DECISION, the duty of the decision it unblocks, and a reason.
+// needs quality.usage.decide, the duty of the decision it unblocks, and a reason.
 func (a *API) waiveCertificate(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return

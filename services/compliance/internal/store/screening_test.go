@@ -35,7 +35,7 @@ func hitEvents(t *testing.T, admin *pgxpool.Pool, hits []ScreeningHit) int {
 func TestScreen_HitClearanceAndRecurrence(t *testing.T) {
 	s, admin := migrated(t)
 	tenantID := ids.New()
-	ctx := as(tenantID, ids.New(), "TradeComplianceOfficer")
+	ctx := as(tenantID, ids.New(), "compliance.trade-screening.decide")
 	party := domain.Subject{Type: domain.SubjectParty, ID: ids.New(), Name: "Volga Maritim Holdings", Country: "RU"}
 
 	first, err := s.Screen(ctx, party, sdn, domain.DefaultScreeningThreshold, t0)

@@ -273,7 +273,7 @@ func TestCutoverExports_ServeCSVFiles(t *testing.T) {
 		return do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID + "/export/" + file, tenant: tenantA, duties: duties})
 	}
 	read := func(file string) [][]string {
-		r := get(file, "CutoverManager,MigrationView")
+		r := get(file, "migration.cutover.manage,migration.factory.view")
 		if r.Code != http.StatusOK || !strings.HasPrefix(r.Header().Get("Content-Type"), "text/csv") ||
 			!strings.Contains(r.Header().Get("Content-Disposition"), "cutover-"+plan.PlanID+"-"+file) {
 			t.Fatalf("%s: %d %v %s", file, r.Code, r.Header(), r.Body)
@@ -317,20 +317,20 @@ func TestCutoverExports_ServeCSVFiles(t *testing.T) {
 		t.Fatalf("decision rows %v", rows)
 	}
 	// The duty, the file name and the plan are checked; another tenant's plan is not found.
-	if r := get("runbook.csv", "MigrationView"); r.Code != http.StatusForbidden {
+	if r := get("runbook.csv", "migration.factory.view"); r.Code != http.StatusForbidden {
 		t.Fatalf("without the cutover duty: %d", r.Code)
 	}
-	// The runbook files need the cutover duty only; the control totals of the reconciliation need MigrationView too.
-	if r := get("runbook.csv", "CutoverManager"); r.Code != http.StatusOK {
+	// The runbook files need the cutover duty only; the control totals of the reconciliation need migration.factory.view too.
+	if r := get("runbook.csv", "migration.cutover.manage"); r.Code != http.StatusOK {
 		t.Fatalf("runbook as a cutover manager: %d", r.Code)
 	}
-	if r := get("reconciliation.csv", "CutoverManager"); r.Code != http.StatusForbidden || !strings.Contains(r.Body.String(), "MigrationView") {
-		t.Fatalf("reconciliation without MigrationView: %d %s", r.Code, r.Body)
+	if r := get("reconciliation.csv", "migration.cutover.manage"); r.Code != http.StatusForbidden || !strings.Contains(r.Body.String(), "migration.factory.view") {
+		t.Fatalf("reconciliation without migration.factory.view: %d %s", r.Code, r.Body)
 	}
-	if r := get("secrets.csv", "CutoverManager"); r.Code != http.StatusUnprocessableEntity {
+	if r := get("secrets.csv", "migration.cutover.manage"); r.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("unknown file: %d", r.Code)
 	}
-	if r := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID + "/export/runbook.csv", tenant: tenantB, duties: "CutoverManager"}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID + "/export/runbook.csv", tenant: tenantB, duties: "migration.cutover.manage"}); r.Code != http.StatusNotFound {
 		t.Fatalf("other tenant: %d", r.Code)
 	}
 }

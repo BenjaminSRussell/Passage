@@ -77,7 +77,7 @@ func newSCIMFixtureTTL(t *testing.T, ttl time.Duration) *scimFixture {
 			http.Error(w, "down", http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"allow": in.Input.Subject.UserID == scimClient, "duty_missing": "Provision users via SCIM"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"allow": in.Input.Subject.UserID == scimClient, "duty_missing": "identity.user.provision"}})
 	}))
 	t.Cleanup(opa.Close)
 	verifiers, err := identity.NewTenantVerifiers(f.app, f.issuerBase, "passage-api", jwks.Client(), ttl)

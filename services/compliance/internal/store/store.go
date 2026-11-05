@@ -550,7 +550,7 @@ func (s *Postgres) Mitigate(ctx context.Context, id string, expected int, in Mit
 }
 
 // AcceptRisk records an accepted risk on an OPEN LOW or MEDIUM conflict with a
-// reason (BR-48.1). The SoDAdmin duty is enforced by the API.
+// reason (BR-48.1). The compliance.sod.admin duty is enforced by the API.
 func (s *Postgres) AcceptRisk(ctx context.Context, id string, expected int, reason string, now time.Time) (ConflictDetail, error) {
 	p, err := principal(ctx)
 	if err != nil {

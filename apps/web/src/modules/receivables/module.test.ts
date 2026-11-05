@@ -62,8 +62,8 @@ describe("receivables module", () => {
     const paths = new Set(receivables.routes.map((r) => r.path));
     expect(receivables.nav.every((n) => paths.has(n.to))).toBe(true);
     expect(receivables.routes.every((r) => typeof r.handle?.title === "string")).toBe(true);
-    expect(receivables.nav.find((n) => n.to === "/receivables")?.duty).toBe("ARView");
-    expect(receivables.nav.find((n) => n.to === "/receivables/payments/new")?.duty).toBe("ARPaymentPost");
+    expect(receivables.nav.find((n) => n.to === "/receivables")?.duty).toBe("receivables.view");
+    expect(receivables.nav.find((n) => n.to === "/receivables/payments/new")?.duty).toBe("receivables.payment.post");
   });
 });
 

@@ -75,12 +75,12 @@ func sheetLine(no int, qty, price string) map[string]any {
 }
 
 func (rg *rig) sheetAs(user, body string) *httpResult {
-	rec := rg.call(http.MethodPost, sheetsPath, body, duty("ServiceEntryMaintain", rg.key(), "X-Passage-User", user))
+	rec := rg.call(http.MethodPost, sheetsPath, body, duty("receiving.service-entry.maintain", rg.key(), "X-Passage-User", user))
 	return &httpResult{rec.Code, rec.Body.String()}
 }
 
 func (rg *rig) decideSheet(id, action, user, body string) *httpResult {
-	rec := rg.call(http.MethodPost, sheetsPath+"/"+id+":"+action, body, duty("ServiceEntryAccept", rg.key(), "X-Passage-User", user))
+	rec := rg.call(http.MethodPost, sheetsPath+"/"+id+":"+action, body, duty("receiving.service-entry.accept", rg.key(), "X-Passage-User", user))
 	return &httpResult{rec.Code, rec.Body.String()}
 }
 
@@ -138,14 +138,14 @@ func TestServiceSheet_CreateAcceptEmitsOneDecisionEvent(t *testing.T) {
 	}
 	assertDocumented(t, evts[0])
 	assertDocumented(t, evts[1])
-	byDecider := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryAccept", "", "X-Passage-User", "bob"))
+	byDecider := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("receiving.service-entry.accept", "", "X-Passage-User", "bob"))
 	if got := decode[sheetJSON](t, byDecider, http.StatusOK); got.ID != created.ID {
 		t.Fatalf("decider read %+v", got)
 	}
 	if r := rg.decideSheet(created.ID, "reject", "carol", `{"reason":"too late"}`); r.code != http.StatusConflict || !strings.Contains(r.body, "AP-SES-003") {
 		t.Fatalf("a decided sheet was decided again: %d %s", r.code, r.body)
 	}
-	read := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice"))
+	read := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("receiving.service-entry.maintain", "", "X-Passage-User", "alice"))
 	if got := decode[sheetJSON](t, read, http.StatusOK); got.Status != "ACCEPTED" {
 		t.Fatalf("read %+v", got)
 	}
@@ -193,10 +193,10 @@ func TestServiceSheet_RefusesBadInputs(t *testing.T) {
 	if r := newSheetRig(draft).sheetAs("alice", sheetBodyFor(sheetLine(1, "1", "1"))); r.code != http.StatusUnprocessableEntity || !strings.Contains(r.body, "RCV-PO-001") {
 		t.Errorf("unapproved order: %d %s", r.code, r.body)
 	}
-	if rec := rg.call(http.MethodPost, sheetsPath, sheetBodyFor(sheetLine(1, "1", "1")), duty("VendorInvoicePost", rg.key())); rec.Code != http.StatusForbidden {
+	if rec := rg.call(http.MethodPost, sheetsPath, sheetBodyFor(sheetLine(1, "1", "1")), duty("receiving.vendor-invoice.post", rg.key())); rec.Code != http.StatusForbidden {
 		t.Errorf("wrong duty: %d", rec.Code)
 	}
-	noUser := duty("ServiceEntryMaintain", rg.key())
+	noUser := duty("receiving.service-entry.maintain", rg.key())
 	delete(noUser, "X-Passage-User")
 	if rec := rg.call(http.MethodPost, sheetsPath, sheetBodyFor(sheetLine(1, "1", "1")), noUser); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no user: %d", rec.Code)
@@ -213,12 +213,12 @@ func TestServiceSheet_RejectNeedsAReasonAndReadsAreScoped(t *testing.T) {
 	if rejected.Status != "REJECTED" || rejected.RejectReason != "not performed" {
 		t.Fatalf("rejected %+v", rejected)
 	}
-	foreign := duty("ServiceEntryMaintain", "", "X-Passage-User", "alice", "X-Passage-Legal-Entity", "55555555-5555-4555-8555-555555555555")
+	foreign := duty("receiving.service-entry.maintain", "", "X-Passage-User", "alice", "X-Passage-Legal-Entity", "55555555-5555-4555-8555-555555555555")
 	if rec := rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", foreign); rec.Code != http.StatusForbidden {
 		t.Errorf("foreign read: %d", rec.Code)
 	}
 	missing := fmt.Sprintf("%s/%s", sheetsPath, "66666666-6666-4666-8666-666666666666")
-	if rec := rg.call(http.MethodGet, missing, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")); rec.Code != http.StatusNotFound {
+	if rec := rg.call(http.MethodGet, missing, "", duty("receiving.service-entry.maintain", "", "X-Passage-User", "alice")); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown sheet: %d", rec.Code)
 	}
 }
@@ -242,7 +242,7 @@ func TestServiceSheet_AcceptClosedPeriodPostsNothing(t *testing.T) {
 	if len(rg.ledger.Entries) != 0 {
 		t.Fatalf("ledger %+v", rg.ledger.Entries)
 	}
-	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")), http.StatusOK)
+	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("receiving.service-entry.maintain", "", "X-Passage-User", "alice")), http.StatusOK)
 	if read.Status != "PENDING" {
 		t.Fatalf("sheet moved off PENDING: %+v", read)
 	}
@@ -284,7 +284,7 @@ func TestServiceSheet_ManualInvoiceDifferenceGoesToExpenseToo(t *testing.T) {
 	rg := newSheetRig(servicePO())
 	created := parseSheet(t, rg.sheetAs("alice", sheetBodyFor(sheetLine(1, "4", "2.5"))), http.StatusCreated)
 	accepted := parseSheet(t, rg.decideSheet(created.ID, "accept", "bob", ""), http.StatusOK)
-	rec := rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-SES-1", accepted.ReceiptID, 4, ""), userDuty("VendorInvoicePost", rg.key(), "ap-clerk"))
+	rec := rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-SES-1", accepted.ReceiptID, 4, ""), userDuty("receiving.vendor-invoice.post", rg.key(), "ap-clerk"))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("manual invoice %d %s", rec.Code, rec.Body.String())
 	}
@@ -304,7 +304,7 @@ func TestServiceSheet_ReceiptCannotBeCorrectedOrCancelled(t *testing.T) {
 	if len(rg.ledger.Entries) != entries {
 		t.Fatalf("a refused command posted to the ledger: %+v", rg.ledger.Entries[entries:])
 	}
-	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("ServiceEntryMaintain", "", "X-Passage-User", "alice")), http.StatusOK)
+	read := decode[sheetJSON](t, rg.call(http.MethodGet, sheetsPath+"/"+created.ID, "", duty("receiving.service-entry.maintain", "", "X-Passage-User", "alice")), http.StatusOK)
 	if read.Status != "ACCEPTED" {
 		t.Fatalf("sheet %+v", read)
 	}

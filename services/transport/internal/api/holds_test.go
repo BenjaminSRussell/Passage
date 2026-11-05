@@ -75,14 +75,14 @@ func TestScreenLoad_HoldStoreFailureIsNotASilentClear(t *testing.T) {
 	}
 }
 
-// The release half of AC-34.16: a TRADE_COMPLIANCE_RELEASE user with a reason
+// The release half of AC-34.16: a transport.screening-hold.release user with a reason
 // releases the hold and the response shows user and reason.
 func TestReleaseScreeningHold_AC3416(t *testing.T) {
 	st := &fakeStore{hold: domain.ScreeningHold{ID: holdID, LoadID: loadID, Status: domain.HoldOpen, Version: 1,
 		Parties: []domain.PartyScreening{{Role: "SHIP_TO", Name: "Northwind", Status: domain.ScreenPotentialMatch}}}}
 	path := base + "/screening-holds/" + holdID + ":release"
 	if rec := do(t, router(st), http.MethodPost, path, `{"reason":"cleared"}`, api.DutyPlan); rec.Code != http.StatusForbidden {
-		t.Fatalf("release without TRADE_COMPLIANCE_RELEASE = %d", rec.Code)
+		t.Fatalf("release without transport.screening-hold.release = %d", rec.Code)
 	}
 	rec := do(t, router(st), http.MethodPost, path, `{"reason":"  "}`, api.DutyTradeRelease)
 	if rec.Code != http.StatusBadRequest || problem(t, rec).Errors["reason"] == "" {

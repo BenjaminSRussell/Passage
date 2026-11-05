@@ -319,7 +319,7 @@ func (a *API) storedMove(w http.ResponseWriter, r *http.Request, action string, 
 }
 
 // transitionStoredVersion blocks, unblocks or closes a stored version (BR-39.2,
-// duty CostingMaintain). Activation is its own route under CostingActivate.
+// duty productcost.maintain). Activation is its own route under productcost.activate.
 func (a *API) transitionStoredVersion(w http.ResponseWriter, r *http.Request) {
 	if !a.storeReady(w, r) {
 		return
@@ -332,7 +332,7 @@ func (a *API) transitionStoredVersion(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case domain.ActionBlock, domain.ActionUnblock, domain.ActionClose:
 	case domain.ActionActivate:
-		fields["action"] = "activate with POST /v1/product-costing/versions/{id}/activate (duty CostingActivate)"
+		fields["action"] = "activate with POST /v1/product-costing/versions/{id}/activate (duty productcost.activate)"
 	default:
 		fields["action"] = "must be block, unblock or close"
 	}
@@ -351,7 +351,7 @@ type storedActivateRequest struct {
 }
 
 // activateStoredVersion moves a stored Open or Blocked version to Active
-// (BR-39.2, duty CostingActivate). Simulation versions cannot (CST-0711). A
+// (BR-39.2, duty productcost.activate). Simulation versions cannot (CST-0711). A
 // Standard version with stored calculations revalues every one of its positions
 // against the inventory on-hand and posts the journal (activation.go); any other
 // version only moves the status, decided inside the store transaction.

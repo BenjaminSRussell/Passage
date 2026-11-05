@@ -120,8 +120,8 @@ describe("absence routes", () => {
     for (const path of ["/hr/absence/plans", "/hr/absence/plans/new", "/hr/absence/plans/:id", "/hr/absence/requests"]) {
       expect(paths).toContain(path);
     }
-    expect(hr.nav).toContainEqual({ label: "Absence plans", to: "/hr/absence/plans", duty: "HcmAbsenceAdmin" });
-    expect(hr.nav).toContainEqual({ label: "Absence requests", to: "/hr/absence/requests", duty: "EssAbsence" });
+    expect(hr.nav).toContainEqual({ label: "Absence plans", to: "/hr/absence/plans", duty: "hr.absence.admin" });
+    expect(hr.nav).toContainEqual({ label: "Absence requests", to: "/hr/absence/requests", duty: "hr.absence.self" });
   });
 });
 

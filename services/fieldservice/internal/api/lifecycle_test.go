@@ -90,8 +90,8 @@ func TestFollowUp_RequiresIfMatchAndIdempotencyKey(t *testing.T) {
 	}
 }
 
-// PRD 8.45.17: transitions and the monitor need SvcCaseMaintain, follow-ups
-// SvcWoMaintain and KPIs SvcInquire; reading duties are not enough.
+// PRD 8.45.17: transitions and the monitor need fieldservice.service-case.maintain, follow-ups
+// fieldservice.work-order.maintain and KPIs fieldservice.inquire; reading duties are not enough.
 func TestLifecycleRoutes_EnforceDuties(t *testing.T) {
 	h := newTestRouter()
 	for _, tc := range []struct{ method, path, duty string }{

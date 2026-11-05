@@ -299,14 +299,14 @@ describe("RFQ detail", () => {
   it("sends the override reason with a late award and shows a refused award's code", async () => {
     const fetchMock = stubFetch((url) => {
       if (url.includes("/compare")) return json(comparison);
-      if (url.endsWith(":award")) return problem(403, "AUTH-0003", "missing duty RFQAward");
+      if (url.endsWith(":award")) return problem(403, "AUTH-0003", "missing duty procurement.rfq.award");
       return json(open);
     });
     renderAt(`/purchasing/rfqs/${RFQ_ID}`);
     fireEvent.click(await screen.findByLabelText(/^Late, excluded from ranking/));
     fireEvent.change(screen.getByLabelText("Reason to award a late reply"), { target: { value: "Only vendor with stock" } });
     fireEvent.click(screen.getByRole("button", { name: "Award and create purchase orders" }));
-    expect(await screen.findByText(/missing duty RFQAward \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty procurement\.rfq\.award \(AUTH-0003\)/)).toBeInTheDocument();
     const [, init] = fetchMock.mock.calls.find(([u]) => String(u).endsWith(":award")) as [string, RequestInit];
     expect(body(init)).toEqual({ awards: [{ lineId: LINE_1, replyId: REPLY_C, overrideReason: "Only vendor with stock" }] });
   });

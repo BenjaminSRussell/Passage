@@ -14,7 +14,7 @@ import (
 
 const (
 	dutyApprove     = "party.approve"
-	dutyPolicyWrite = "party.approval_policy.write"
+	dutyPolicyWrite = "party.approval-policy.write"
 )
 
 type creditLimitRequest struct {

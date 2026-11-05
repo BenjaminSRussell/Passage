@@ -31,7 +31,7 @@ describe("service token verifier", () => {
     refused(transport.mint({ kid: "k2", duties: ["carrier.label.create"] }));
     refused(stranger.mint({ duties: ["carrier.rate.quote"] }));
     refused(fulfillment.mint({ duties: [] }));
-    refused(fulfillment.mint({ duties: ["org.switcher.all_scope"] }));
+    refused(fulfillment.mint({ duties: ["org.switcher.all-scope"] }));
   });
 
   it("refuses tokens for another audience, expired, too long-lived or from the future", () => {

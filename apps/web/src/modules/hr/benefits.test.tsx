@@ -134,7 +134,7 @@ describe("benefit routes", () => {
   it("registers the plan list, create form and detail, with the setup-admin nav entry", () => {
     const paths = hr.routes.map((r) => r.path);
     for (const path of ["/hr/benefits/plans", "/hr/benefits/plans/new", "/hr/benefits/plans/:id"]) expect(paths).toContain(path);
-    expect(hr.nav).toContainEqual({ label: "Benefit plans", to: "/hr/benefits/plans", duty: "HcmSetupAdmin" });
+    expect(hr.nav).toContainEqual({ label: "Benefit plans", to: "/hr/benefits/plans", duty: "hr.setup.admin" });
   });
 });
 
@@ -340,13 +340,13 @@ describe("benefit plan detail", () => {
     unmount();
 
     handler = (url) => {
-      if (url.pathname.endsWith("/simulate")) return json(403, { code: "AUTH-0003", detail: "missing duty HcmSetupAdmin" });
+      if (url.pathname.endsWith("/simulate")) return json(403, { code: "AUTH-0003", detail: "missing duty hr.setup.admin" });
       if (url.pathname === `/api/v1/hr/benefits/plans/${PLAN}`) return json(200, medical);
       return undefined;
     };
     renderAt(`/hr/benefits/plans/${PLAN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Simulate" }));
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty HcmSetupAdmin (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.setup.admin (AUTH-0003)"));
   });
 });
 

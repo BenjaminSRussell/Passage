@@ -44,7 +44,7 @@ func ackedEvents(t *testing.T, pool *pgxpool.Pool) int {
 
 func TestCreateOutbound_SharesTheGapFreeCounterAndRollsBack(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EDI_OPERATE")
+	ctx := testkit.Ctx(testkit.TenantID(1), "edi.operate")
 	st := New(pool, 30)
 	p, _, err := st.CreatePartner(ctx, "p", "h", profile("DIST"))
 	if err != nil {
@@ -86,7 +86,7 @@ func TestCreateOutbound_SharesTheGapFreeCounterAndRollsBack(t *testing.T) {
 
 func TestMatchAck_RejectionDuplicatesAndMismatches(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EDI_OPERATE")
+	ctx := testkit.Ctx(testkit.TenantID(1), "edi.operate")
 	st := New(pool, 30)
 	p, _, err := st.CreatePartner(ctx, "p", "h", profile("DIST"))
 	if err != nil {
@@ -142,7 +142,7 @@ func TestMatchAck_RejectionDuplicatesAndMismatches(t *testing.T) {
 	}
 
 	// Another tenant's 997 never reaches this tenant's interchanges.
-	other := testkit.Ctx(testkit.TenantID(2), "EDI_OPERATE")
+	other := testkit.Ctx(testkit.TenantID(2), "edi.operate")
 	q, _, err := st.CreatePartner(other, "p", "h", profile("DIST"))
 	if err != nil {
 		t.Fatal(err)

@@ -73,11 +73,11 @@ describe("personnel actions, jobs and compensation plans", () => {
     expect(await screen.findByText("We couldn't find this personnel action")).toBeTruthy();
     first.unmount();
 
-    api.handler = routes({ [`GET /api/v1/hr/jobs/${id(99)}`]: problem(403, "AUTH-0003", "missing duty HcmOrgInquire") });
+    api.handler = routes({ [`GET /api/v1/hr/jobs/${id(99)}`]: problem(403, "AUTH-0003", "missing duty hr.org.inquire") });
     renderAt(`/hr/jobs/${id(99)}`);
     const alert = await findAlert();
     expect(alert.textContent).toContain("You can't view this job");
-    expect(alert.textContent).toContain("You don't have access to do this. missing duty HcmOrgInquire (AUTH-0003)");
+    expect(alert.textContent).toContain("You don't have access to do this. missing duty hr.org.inquire (AUTH-0003)");
   });
 
   it("filters actions by status through the URL", async () => {
@@ -168,7 +168,7 @@ describe("personnel actions, jobs and compensation plans", () => {
   });
 
   it("says pay needs the compensation duty when the service answers 403", async () => {
-    api.handler = routes({ "POST /api/v1/hr/actions": problem(403, "AUTH-0003", "setting compensation needs the HcmCompAdmin duty") });
+    api.handler = routes({ "POST /api/v1/hr/actions": problem(403, "AUTH-0003", "setting compensation needs the hr.compensation.admin duty") });
     renderAt("/hr/actions/new");
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: "COMP_CHANGE" } });
     fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
@@ -179,7 +179,7 @@ describe("personnel actions, jobs and compensation plans", () => {
     fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "usd" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit action" }));
     const alert = await findAlert();
-    expect(alert.textContent).toContain("You don't have access to do this. setting compensation needs the HcmCompAdmin duty (AUTH-0003)");
+    expect(alert.textContent).toContain("You don't have access to do this. setting compensation needs the hr.compensation.admin duty (AUTH-0003)");
     expect(api.posts("/actions")[0]?.body).toMatchObject({ details: { compPlanId: PLAN, amount: "95000", currency: "USD" } });
   });
 
@@ -238,11 +238,11 @@ describe("personnel actions, jobs and compensation plans", () => {
 
   it("gates the personnel routes and nav by duty", () => {
     const duty = (path: string) => (hr.routes.find((r) => r.path === path)?.handle as { duty?: string }).duty;
-    expect(duty("/hr/actions")).toBe("HcmActionMaintain");
-    expect(duty("/hr/jobs")).toBe("HcmOrgInquire");
-    expect(duty("/hr/jobs/new")).toBe("HcmCompAdmin");
-    expect(duty("/hr/compensation/plans")).toBe("HcmCompAdmin");
-    expect(hr.nav.find((n) => n.to === "/hr/actions")?.duty).toBe("HcmActionMaintain");
-    expect(hr.nav.find((n) => n.to === "/hr/compensation/plans")?.duty).toBe("HcmCompAdmin");
+    expect(duty("/hr/actions")).toBe("hr.action.maintain");
+    expect(duty("/hr/jobs")).toBe("hr.org.inquire");
+    expect(duty("/hr/jobs/new")).toBe("hr.compensation.admin");
+    expect(duty("/hr/compensation/plans")).toBe("hr.compensation.admin");
+    expect(hr.nav.find((n) => n.to === "/hr/actions")?.duty).toBe("hr.action.maintain");
+    expect(hr.nav.find((n) => n.to === "/hr/compensation/plans")?.duty).toBe("hr.compensation.admin");
   });
 });

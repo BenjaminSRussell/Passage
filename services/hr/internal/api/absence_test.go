@@ -107,7 +107,7 @@ func TestCreateAbsenceRequestValidatesDatesAndQuantity(t *testing.T) {
 	}
 }
 
-// TestDecideAbsenceRequestNeedsDutyAndValidDecision: MssApprove gates the
+// TestDecideAbsenceRequestNeedsDutyAndValidDecision: hr.team.approve gates the
 // decision; only APPROVE or REJECT is accepted; a malformed id is a 404.
 func TestDecideAbsenceRequestNeedsDutyAndValidDecision(t *testing.T) {
 	target := "/v1/hr/absence/requests/" + testkit.TenantID(4) + "/decide"

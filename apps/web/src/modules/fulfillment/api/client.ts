@@ -772,7 +772,7 @@ export function getLegalEntitySetting(legalEntityId: string, signal?: AbortSigna
 
 /**
  * Sets the posting settings of a legal entity; version is the one read (0 when none is saved). Changing
- * cogsAtShipment needs the ledger setup duty (DUTY_COGS_POLICY) on top of WarehouseRelease.
+ * cogsAtShipment needs the ledger setup duty (DUTY_COGS_POLICY) on top of fulfillment.warehouse.release.
  */
 export function saveLegalEntitySetting(
   legalEntityId: string,
@@ -901,7 +901,7 @@ export function listReturnableMovements(filter: { customerId?: string; container
   return items<ReturnableMovement>(`/returnable-packaging/movements${query(filter)}`, signal);
 }
 
-/** Corrects a returnable balance by a signed whole number of containers, with a reason (ReturnablePackagingMaintain). */
+/** Corrects a returnable balance by a signed whole number of containers, with a reason (fulfillment.returnable-packaging.maintain). */
 export function adjustReturnable(
   input: { customerId: string; containerType: string; delta: string; reason: string; reference?: string },
   key: string,
@@ -1026,12 +1026,12 @@ export function createDropShip(input: DropShipInput, key: string): Promise<DropS
   return command<DropShip>("/drop-ships", input, key);
 }
 
-/** The vendor's ship confirmation of all or `qty` of the open quantity: books Dr 5000 / Cr 2110 at the PO cost (AC-28.5); final. Needs PurchaseOrderConfirm. */
+/** The vendor's ship confirmation of all or `qty` of the open quantity: books Dr 5000 / Cr 2110 at the PO cost (AC-28.5); final. Needs procurement.purchase-order.confirm. */
 export function confirmDropShip(id: string, version: number, input: { shippedOn: string; qty?: string; vendorShipmentRef?: string; postingDate?: string }, key: string): Promise<DropShip> {
   return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:confirm`, input, key, version);
 }
 
-/** The vendor will not ship the rest of a partly confirmed drop-ship: closes the open quantity without booking it. Needs WarehouseRelease. */
+/** The vendor will not ship the rest of a partly confirmed drop-ship: closes the open quantity without booking it. Needs fulfillment.warehouse.release. */
 export function closeDropShipRemainder(id: string, version: number, key: string): Promise<DropShip> {
   return command<DropShip>(`/drop-ships/${encodeURIComponent(id)}:close-remainder`, undefined, key, version);
 }
@@ -1073,7 +1073,7 @@ export function getException(id: string, signal?: AbortSignal): Promise<Warehous
   return send<WarehouseException>(`/exceptions/${encodeURIComponent(id)}`, {}, signal);
 }
 
-/** Closes an exception with the supervisor's note (WarehouseRelease); version is the one read. */
+/** Closes an exception with the supervisor's note (fulfillment.warehouse.release); version is the one read. */
 export function resolveException(id: string, version: number, note: string, key: string): Promise<WarehouseException> {
   return command<WarehouseException>(`/exceptions/${encodeURIComponent(id)}:resolve`, { note }, key, version);
 }

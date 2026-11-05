@@ -330,7 +330,7 @@ func (s *Postgres) DenyDeduction(ctx context.Context, id string, version int, re
 }
 
 // WriteOffDeduction writes a deduction off to 6110 within deduction_write_off_limit,
-// or above it when the caller holds ARWriteOffApprove (mayApprove). The event
+// or above it when the caller holds receivables.write-off.approve (mayApprove). The event
 // carries Dr 6110 / Cr 1200 until the ledger client posts it.
 func (s *Postgres) WriteOffDeduction(ctx context.Context, id string, version int, mayApprove bool, note *string) (Deduction, error) {
 	return s.resolveDeduction(ctx, id, version, "write-off", func(tx pgx.Tx, cur Deduction, tenantID string) (rcvevents.DeductionResolvedData, error) {

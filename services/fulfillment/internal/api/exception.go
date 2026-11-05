@@ -16,9 +16,9 @@ import (
 // routesException mounts the warehouse supervisor's exception list: cases fulfillment cannot
 // fix alone, such as a packing slip posted before sales cancelled the order remainder.
 func (a *API) routesException(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/exceptions", a.listExceptions)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/exceptions/{id}", a.getException)
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/exceptions/{id}:resolve", a.resolveException)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/exceptions", a.listExceptions)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/exceptions/{id}", a.getException)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Post("/v1/fulfillment/exceptions/{id}:resolve", a.resolveException)
 }
 
 func (a *API) listExceptions(w http.ResponseWriter, r *http.Request) {

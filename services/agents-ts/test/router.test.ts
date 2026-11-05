@@ -62,7 +62,7 @@ describe("agents HTTP surface", () => {
     "content-type": "application/json",
     "x-passage-tenant": T1,
     "x-passage-user": ADMIN,
-    "x-passage-duties": "AgentAdmin",
+    "x-passage-duties": "agents.admin",
   };
   const kill = (active: boolean, headers: Record<string, string> = admin) =>
     fetch(`${base}/api/v1/agents/kill-switch`, { method: "POST", headers, body: JSON.stringify({ scope: "TENANT", tenantId: T1, active }) });
@@ -93,7 +93,7 @@ describe("agents HTTP surface", () => {
       title: "Forbidden",
       status: 403,
       code: "AGT-0203",
-      detail: "I cannot do that: you do not hold duty AgentAdmin required by the tenant kill switch.",
+      detail: "I cannot do that: you do not hold duty agents.admin required by the tenant kill switch.",
       instance: "/api/v1/agents/kill-switch",
     });
   });

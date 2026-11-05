@@ -219,7 +219,7 @@ export function VersionsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Costing versions"
-        description="Standard, planned, simulation and conversion versions per legal entity. A version moves Open ⇄ Blocked, then Open or Blocked → Active, then Active → Closed; simulation versions never activate. Blocking, unblocking and closing need CostingMaintain; activating needs CostingActivate."
+        description="Standard, planned, simulation and conversion versions per legal entity. A version moves Open ⇄ Blocked, then Open or Blocked → Active, then Active → Closed; simulation versions never activate. Blocking, unblocking and closing need productcost.maintain; activating needs productcost.activate."
       />
       <Card title="New version" headingLevel={3}>
         <form className={styles.form} onSubmit={(e) => void submit(e)} noValidate aria-label="New costing version">

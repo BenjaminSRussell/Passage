@@ -31,8 +31,8 @@ func TestStudyTransition_IfMatchLifecycleAndTermination(t *testing.T) {
 		rec := call(h, reqSpec{method: http.MethodPost, path: path, body: body, duties: duties, ifMatch: ifMatch, user: "stab-1"})
 		return rec.Code, rec.Body.String() + "|etag=" + rec.Header().Get("ETag")
 	}
-	if code, _ := move(`{"to":"ACTIVE"}`, `"1"`, "QM_VIEW"); code != http.StatusForbidden {
-		t.Fatalf("QM_VIEW cannot change a study: %d", code)
+	if code, _ := move(`{"to":"ACTIVE"}`, `"1"`, "quality.view"); code != http.StatusForbidden {
+		t.Fatalf("quality.view cannot change a study: %d", code)
 	}
 	if code, _ := move(`{"to":"ACTIVE"}`, "", dutyStability); code != http.StatusPreconditionRequired {
 		t.Fatalf("no If-Match: %d", code)
@@ -101,8 +101,8 @@ func TestReceiptCheck_AC3314OverHTTP(t *testing.T) {
 		rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/receipt-checks", body: b, duties: duties, key: key, user: "rcv-1"})
 		return rec.Code, rec.Body.String()
 	}
-	if code, _ := check(body(line1, "B", "600"), "k1", "QM_VIEW"); code != http.StatusForbidden {
-		t.Fatalf("a check uses up cover, so it needs QM_ORDER_MAINTAIN: %d", code)
+	if code, _ := check(body(line1, "B", "600"), "k1", "quality.view"); code != http.StatusForbidden {
+		t.Fatalf("a check uses up cover, so it needs quality.order.maintain: %d", code)
 	}
 	if code, b := check(body(line1, "B", "600"), "", allDuties); code != http.StatusBadRequest || !strings.Contains(b, "Idempotency-Key") {
 		t.Fatalf("no key: %d %s", code, b)
@@ -135,11 +135,11 @@ func TestReceiptCheck_AC3314OverHTTP(t *testing.T) {
 		!strings.Contains(b, "poLineId") || !strings.Contains(b, "receivedQty") {
 		t.Fatalf("validation: %d %s", code, b)
 	}
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/receipt-checks?poLineId=" + po + "&batch=B", duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/receipt-checks?poLineId=" + po + "&batch=B", duties: "quality.view"})
 	if rec.Code != http.StatusOK || strings.Count(rec.Body.String(), `"receiptLineId"`) != 2 {
 		t.Fatalf("list by PO line and batch: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/receipt-checks?poLineId=nope", duties: "QM_VIEW"}); rec.Code != http.StatusBadRequest {
+	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/receipt-checks?poLineId=nope", duties: "quality.view"}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("a bad filter: %d", rec.Code)
 	}
 }
@@ -168,7 +168,7 @@ func TestCoA_RevisionChainsReplayAndRefusals(t *testing.T) {
 	}
 	batch := `{"qualityOrderId":"` + id + `"}`
 	if code, _ := gen(batch, "c1", allDuties); code != http.StatusForbidden {
-		t.Fatalf("issuing a CoA needs QM_COA: %d", code)
+		t.Fatalf("issuing a CoA needs quality.coa.generate: %d", code)
 	}
 	code, b := gen(batch, "c1", dutyCoA)
 	if code != http.StatusCreated || !strings.Contains(b, `"revision":1`) || !strings.Contains(b, `"signedBy":"qa-release"`) ||
@@ -208,11 +208,11 @@ func TestCoA_RevisionChainsReplayAndRefusals(t *testing.T) {
 	if code, b := gen(`{"qualityOrderId":"x","shipmentId":"y"}`, "c8", dutyCoA); code != http.StatusBadRequest || !strings.Contains(b, "shipmentId") {
 		t.Fatalf("validation: %d %s", code, b)
 	}
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + id + "/coas", duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + id + "/coas", duties: "quality.view"})
 	if rec.Code != http.StatusOK || strings.Count(rec.Body.String(), `"revision"`) != 3 {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + ids.New() + "/coas", duties: "QM_VIEW"}); rec.Code != http.StatusNotFound {
+	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + ids.New() + "/coas", duties: "quality.view"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("CoAs of an unknown order: %d", rec.Code)
 	}
 }
@@ -224,7 +224,7 @@ func TestInstruments_DueWithinDays(t *testing.T) {
 	f.instruments["b"] = domain.Instrument{ID: "b", Code: "SOON", DueAt: now.AddDate(0, 0, 10)}
 	f.instruments["c"] = domain.Instrument{ID: "c", Code: "LATER", DueAt: now.AddDate(0, 0, 40)}
 	h := newHandler(f)
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments?dueWithinDays=30", duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments?dueWithinDays=30", duties: "quality.view"})
 	body := rec.Body.String()
 	if rec.Code != http.StatusOK || !strings.Contains(body, "OVERDUE") || !strings.Contains(body, "SOON") || strings.Contains(body, "LATER") {
 		t.Fatalf("due within 30 days, overdue included: %d %s", rec.Code, body)
@@ -233,11 +233,11 @@ func TestInstruments_DueWithinDays(t *testing.T) {
 		t.Fatalf("the due list carries the calibration status: %s", body)
 	}
 	for _, bad := range []string{"-1", "x", "3651"} {
-		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments?dueWithinDays=" + bad, duties: "QM_VIEW"}); rec.Code != http.StatusBadRequest {
+		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments?dueWithinDays=" + bad, duties: "quality.view"}); rec.Code != http.StatusBadRequest {
 			t.Fatalf("dueWithinDays=%s: %d", bad, rec.Code)
 		}
 	}
-	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments", duties: "QM_VIEW"}); strings.Count(rec.Body.String(), `"code"`) != 3 {
+	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/instruments", duties: "quality.view"}); strings.Count(rec.Body.String(), `"code"`) != 3 {
 		t.Fatalf("without the filter every instrument is listed: %s", rec.Body.String())
 	}
 }

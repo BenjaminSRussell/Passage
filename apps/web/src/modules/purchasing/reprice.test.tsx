@@ -237,9 +237,9 @@ describe("price change run", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview price changes" }));
     expect(await screen.findByText("No price changes")).toBeInTheDocument();
     first.unmount();
-    stubFetch(() => problem(403, "AUTH-0003", "missing duty PurchaseOrderInquire"));
+    stubFetch(() => problem(403, "AUTH-0003", "missing duty procurement.purchase-order.inquire"));
     renderAt("/purchasing/reprice");
     fireEvent.click(screen.getByRole("button", { name: "Preview price changes" }));
-    expect(await screen.findByText("missing duty PurchaseOrderInquire (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty procurement.purchase-order.inquire (AUTH-0003)")).toBeInTheDocument();
   });
 });

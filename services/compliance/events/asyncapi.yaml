@@ -70,7 +70,7 @@ operations:
     summary: >-
       Screening opened a hit on a party or document at or above the tenant
       threshold (FR-48.19, AC-48.16). The subject stays blocked for order
-      release, shipment, PO send and payment until a TradeComplianceOfficer
+      release, shipment, PO send and payment until a compliance.trade-screening.decide
       clears or confirms the hit. Consumers - sales, procurement, payments.
     messages:
       - {$ref: "#/channels/screeningHit/messages/screeningHit"}

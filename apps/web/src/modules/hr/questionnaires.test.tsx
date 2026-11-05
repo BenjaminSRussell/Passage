@@ -260,7 +260,7 @@ describe("questionnaires", () => {
   it("lets a worker answer when their sign-in cannot read the worker record", async () => {
     api.handler = routes({
       [`GET /api/v1/hr/questionnaires/schedules/${SCHEDULE}`]: json(200, view()),
-      "GET /api/v1/hr/me": problem(403, "AUTH-0003", "missing duty EssBase"),
+      "GET /api/v1/hr/me": problem(403, "AUTH-0003", "missing duty hr.profile.self"),
       [`POST /api/v1/hr/questionnaires/schedules/${SCHEDULE}/answers`]: json(201, { status: "recorded" }),
     });
     renderAt(`/hr/my/questionnaires/${SCHEDULE}`);
@@ -344,10 +344,10 @@ describe("questionnaires", () => {
 
   it("gates the questionnaire routes and nav by duty", () => {
     const duty = (path: string) => (hr.routes.find((r) => r.path === path)?.handle as { duty?: string }).duty;
-    expect(duty("/hr/questionnaires")).toBe("HcmQuestionnaireAdmin");
-    expect(duty("/hr/questionnaires/schedules/:id/results")).toBe("HcmQuestionnaireAdmin");
-    expect(duty("/hr/my/questionnaires")).toBe("EssQuestionnaire");
-    expect(duty("/hr/my/questionnaires/:id")).toBe("EssQuestionnaire");
-    expect(hr.nav.find((n) => n.to === "/hr/my/questionnaires")?.duty).toBe("EssQuestionnaire");
+    expect(duty("/hr/questionnaires")).toBe("hr.questionnaire.admin");
+    expect(duty("/hr/questionnaires/schedules/:id/results")).toBe("hr.questionnaire.admin");
+    expect(duty("/hr/my/questionnaires")).toBe("hr.questionnaire.self");
+    expect(duty("/hr/my/questionnaires/:id")).toBe("hr.questionnaire.self");
+    expect(hr.nav.find((n) => n.to === "/hr/my/questionnaires")?.duty).toBe("hr.questionnaire.self");
   });
 });

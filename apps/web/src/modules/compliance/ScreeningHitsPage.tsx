@@ -18,7 +18,7 @@ const columns: DataTableColumn<ScreeningHit>[] = [
 ];
 
 /**
- * Screening workbench (PRD §9.48.6, duty TradeComplianceView): the hits that
+ * Screening workbench (PRD §9.48.6, duty compliance.trade-screening.view): the hits that
  * screening raised, filtered by state, list and subject type. Defaults to
  * OPEN, the queue a trade compliance officer clears or confirms.
  */

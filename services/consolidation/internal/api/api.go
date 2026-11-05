@@ -30,12 +30,12 @@ import (
 )
 
 // Duties from PRD section 7.40.5 and 7.40.17. The previews are the computing
-// steps of a consolidation run, so they need ConsolidationRun; the top-side
-// journal check needs ConsolidationJournal, the duty that posts group journals.
+// steps of a consolidation run, so they need consolidation.run; the top-side
+// journal check needs consolidation.journal.maintain, the duty that posts group journals.
 const (
-	DutyView    = "ConsolidationView"
-	DutyRun     = "ConsolidationRun"
-	DutyJournal = "ConsolidationJournal"
+	DutyView    = "consolidation.view"
+	DutyRun     = "consolidation.run"
+	DutyJournal = "consolidation.journal.maintain"
 )
 
 const validationDetail = "request failed validation"

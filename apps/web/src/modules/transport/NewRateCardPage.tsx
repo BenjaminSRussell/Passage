@@ -112,7 +112,7 @@ const initial: CardValues = {
   accessorials: [],
 };
 
-/** Create a carrier rate card (TMS_RATE_APPROVE). Overlapping validity is refused with TMS-0102. */
+/** Create a carrier rate card (transport.rate-card.approve). Overlapping validity is refused with TMS-0102. */
 export function NewRateCardPage() {
   const navigate = useNavigate();
   const [values, setValues] = useState<CardValues>(initial);

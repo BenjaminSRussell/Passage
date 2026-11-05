@@ -24,7 +24,7 @@ import (
 func scopedCtx(tenantID, scope string) context.Context {
 	duties := map[string]struct{}{}
 	if scope == "" {
-		duties["org.switcher.all_scope"] = struct{}{}
+		duties["org.switcher.all-scope"] = struct{}{}
 	}
 	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope, UserID: "u", Duties: duties})
 }

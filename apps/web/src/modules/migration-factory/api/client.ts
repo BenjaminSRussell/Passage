@@ -477,7 +477,7 @@ export interface CutoverPlan {
   rehearsalPlanId?: string;
   rehearsalCarried?: number;
   /**
-   * The first approval of a rollback in the current go/no-go round, waiting for a second, different CutoverManager
+   * The first approval of a rollback in the current go/no-go round, waiting for a second, different migration.cutover.manage
    * (CUT-1603). A go/no-go decision recorded after it voids it.
    */
   pendingRollback?: { approver: string; approvedAt: string };
@@ -537,7 +537,7 @@ export interface Readiness {
   decisions: GoNoGoDecision[];
   /** Packs of the plan that are staged and not posted; each keeps the packs item open unless waived. */
   stagedPacks: { pack: string; reason: string }[];
-  /** A CutoverManager's approval of a GO waiting for a second, different one; the checklist shows its attestations. */
+  /** A migration.cutover.manage's approval of a GO waiting for a second, different one; the checklist shows its attestations. */
   pendingGo?: GoApproval;
 }
 
@@ -793,7 +793,7 @@ export function completeStep(planId: string, seq: number, actualDurationMin: num
 }
 
 /**
- * POST /cutover/plans/{id}/rollback as the signed-in user. Needs two different CutoverManagers (CUT-1603): the first call
+ * POST /cutover/plans/{id}/rollback as the signed-in user. Needs two different migration.cutover.manage holders (CUT-1603): the first call
  * stores the caller's approval and returns the plan with pendingRollback (202), a second caller's call runs the rollback.
  * postings are the Passage postings since T-0 to export for re-keying; one the service rejects leaves the plan as it was.
  */
@@ -808,7 +808,7 @@ export function getReadiness(planId: string, signal?: AbortSignal): Promise<Read
 
 /**
  * POST /cutover/plans/{id}/go-no-go as the signed-in user. A NO_GO (with a reason) is recorded at once. A GO needs
- * every checklist item met (CUT-1607) and two different CutoverManagers (CUT-1605): the first call stores the caller's
+ * every checklist item met (CUT-1607) and two different migration.cutover.manage holders (CUT-1605): the first call stores the caller's
  * approval, a second caller's GO records it. The service re-evaluates the checklist when it stores the request.
  */
 export function recordDecision(planId: string, input: DecisionRequest, key: string = newKey()): Promise<DecisionResponse> {

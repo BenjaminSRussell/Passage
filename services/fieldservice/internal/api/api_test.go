@@ -59,16 +59,16 @@ func TestCreateCase_ValidationAndKey(t *testing.T) {
 		wantKey  string
 		wantFail string
 	}{
-		{"missing idempotency key", valid, nil, []string{"SvcCaseCreate"}, http.StatusBadRequest, "", "Idempotency-Key"},
+		{"missing idempotency key", valid, nil, []string{"fieldservice.service-case.create"}, http.StatusBadRequest, "", "Idempotency-Key"},
 		{"bad channel", `{"customerPartyId":"` + uuid1 + `","legalEntityId":"` + uuid1 + `","channel":"FAX","priority":2}`,
-			map[string]string{"Idempotency-Key": "k1"}, []string{"SvcCaseCreate"}, http.StatusBadRequest, "COM-0001", "channel"},
+			map[string]string{"Idempotency-Key": "k1"}, []string{"fieldservice.service-case.create"}, http.StatusBadRequest, "COM-0001", "channel"},
 		{"priority out of range", `{"customerPartyId":"` + uuid1 + `","legalEntityId":"` + uuid1 + `","channel":"PHONE","priority":5}`,
-			map[string]string{"Idempotency-Key": "k1"}, []string{"SvcCaseCreate"}, http.StatusBadRequest, "COM-0001", "priority"},
+			map[string]string{"Idempotency-Key": "k1"}, []string{"fieldservice.service-case.create"}, http.StatusBadRequest, "COM-0001", "priority"},
 		{"customer not a uuid", `{"customerPartyId":"nope","legalEntityId":"` + uuid1 + `","channel":"PHONE","priority":1}`,
-			map[string]string{"Idempotency-Key": "k1"}, []string{"SvcCaseCreate"}, http.StatusBadRequest, "COM-0001", "customerPartyId"},
+			map[string]string{"Idempotency-Key": "k1"}, []string{"fieldservice.service-case.create"}, http.StatusBadRequest, "COM-0001", "customerPartyId"},
 		{"duty missing", valid, map[string]string{"Idempotency-Key": "k1"}, nil, http.StatusForbidden, "AUTH-0003", ""},
 		{"unknown field rejected", `{"customerPartyId":"` + uuid1 + `","legalEntityId":"` + uuid1 + `","channel":"PHONE","priority":1,"x":1}`,
-			map[string]string{"Idempotency-Key": "k1"}, []string{"SvcCaseCreate"}, http.StatusBadRequest, "COM-0001", ""},
+			map[string]string{"Idempotency-Key": "k1"}, []string{"fieldservice.service-case.create"}, http.StatusBadRequest, "COM-0001", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestCreateAgreement_RejectsObjectAndCategoryTogether(t *testing.T) {
 	h := newTestRouter()
 	body := `{"customerPartyId":"` + uuid1 + `","legalEntityId":"` + uuid1 + `","validFrom":"2026-01-01","slaProfileId":"` + uuid1 +
 		`","billingModel":"PREPAID","priorityRank":1,"lines":[{"serviceObjectId":"` + uuid1 + `","categoryId":"` + uuid1 + `"}]}`
-	rec := do(t, h, http.MethodPost, "/v1/service/agreements", body, map[string]string{"Idempotency-Key": "a1"}, "SvcAgreementMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/service/agreements", body, map[string]string{"Idempotency-Key": "a1"}, "fieldservice.agreement.maintain")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -106,7 +106,7 @@ func TestCreateAgreement_ValidityOrderAndBillingModel(t *testing.T) {
 	h := newTestRouter()
 	body := `{"customerPartyId":"` + uuid1 + `","legalEntityId":"` + uuid1 + `","validFrom":"2026-06-01","validTo":"2026-01-01","slaProfileId":"` + uuid1 +
 		`","billingModel":"FREE","priorityRank":1,"lines":[{"partsCovered":true}]}`
-	rec := do(t, h, http.MethodPost, "/v1/service/agreements", body, map[string]string{"Idempotency-Key": "a2"}, "SvcAgreementMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/service/agreements", body, map[string]string{"Idempotency-Key": "a2"}, "fieldservice.agreement.maintain")
 	_, fields := problemOf(t, rec)
 	for _, f := range []string{"validTo", "billingModel"} {
 		if fields[f] == "" {
@@ -118,11 +118,11 @@ func TestCreateAgreement_ValidityOrderAndBillingModel(t *testing.T) {
 func TestWorkOrderActions_RequireIfMatch(t *testing.T) {
 	h := newTestRouter()
 	path := "/v1/service/work-orders/" + uuid1
-	rec := do(t, h, http.MethodPost, path+":post", "", map[string]string{"Idempotency-Key": "p1"}, "SvcBillingPost")
+	rec := do(t, h, http.MethodPost, path+":post", "", map[string]string{"Idempotency-Key": "p1"}, "fieldservice.billing.post")
 	if rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("post without If-Match: status %d", rec.Code)
 	}
-	rec = do(t, h, http.MethodPost, path+":transition", `{"to":"COMPLETED"}`, nil, "SvcWoMaintain")
+	rec = do(t, h, http.MethodPost, path+":transition", `{"to":"COMPLETED"}`, nil, "fieldservice.work-order.maintain")
 	if rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("transition without If-Match: status %d", rec.Code)
 	}
@@ -130,7 +130,7 @@ func TestWorkOrderActions_RequireIfMatch(t *testing.T) {
 
 func TestWorkOrderActions_RequireIdempotencyKeyOnPost(t *testing.T) {
 	h := newTestRouter()
-	rec := do(t, h, http.MethodPost, "/v1/service/work-orders/"+uuid1+":post", "", map[string]string{"If-Match": "1"}, "SvcBillingPost")
+	rec := do(t, h, http.MethodPost, "/v1/service/work-orders/"+uuid1+":post", "", map[string]string{"If-Match": "1"}, "fieldservice.billing.post")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("post without key: status %d", rec.Code)
 	}
@@ -139,7 +139,7 @@ func TestWorkOrderActions_RequireIdempotencyKeyOnPost(t *testing.T) {
 func TestTransition_RejectsStatusesNotRequestedByHand(t *testing.T) {
 	h := newTestRouter()
 	rec := do(t, h, http.MethodPost, "/v1/service/work-orders/"+uuid1+":transition", `{"to":"POSTED"}`,
-		map[string]string{"If-Match": "2"}, "SvcWoMaintain")
+		map[string]string{"If-Match": "2"}, "fieldservice.work-order.maintain")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -149,7 +149,7 @@ func TestCreateWorkOrder_ValidatesLinesAndCurrency(t *testing.T) {
 	h := newTestRouter()
 	body := `{"customerPartyId":"` + uuid1 + `","legalEntityId":"` + uuid1 + `","territoryId":"` + uuid1 +
 		`","estDurationMinutes":60,"currency":"us","lines":[{"kind":"PART","qty":"0","unitPrice":"1"}]}`
-	rec := do(t, h, http.MethodPost, "/v1/service/work-orders", body, map[string]string{"Idempotency-Key": "w1"}, "SvcWoMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/service/work-orders", body, map[string]string{"Idempotency-Key": "w1"}, "fieldservice.work-order.maintain")
 	_, fields := problemOf(t, rec)
 	if fields["currency"] == "" || fields["lines[0]"] == "" {
 		t.Fatalf("errors %v lack currency and lines[0]", fields)
@@ -160,7 +160,7 @@ func TestCreateSLAProfile_ValidatesTargetsAndHours(t *testing.T) {
 	h := newTestRouter()
 	body := `{"code":"GOLD","name":"Gold","timeZone":"America/Chicago","openMinute":1080,"closeMinute":480,` +
 		`"targets":[{"priority":1,"responseMinutes":60,"resolutionMinutes":30}]}`
-	rec := do(t, h, http.MethodPost, "/v1/service/sla-profiles", body, map[string]string{"Idempotency-Key": "s1"}, "SvcAgreementMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/service/sla-profiles", body, map[string]string{"Idempotency-Key": "s1"}, "fieldservice.agreement.maintain")
 	_, fields := problemOf(t, rec)
 	if fields["openMinute"] == "" || fields["targets"] == "" {
 		t.Fatalf("errors %v lack openMinute and targets", fields)
@@ -171,7 +171,7 @@ func TestCreateSLAProfile_RejectsMalformedHolidays(t *testing.T) {
 	h := newTestRouter()
 	body := `{"code":"GOLD","name":"Gold","timeZone":"America/Chicago","openMinute":480,"closeMinute":1080,"holidays":["2026-12-25","25/12/2026"],` +
 		`"targets":[{"priority":1,"responseMinutes":60,"resolutionMinutes":480}]}`
-	rec := do(t, h, http.MethodPost, "/v1/service/sla-profiles", body, map[string]string{"Idempotency-Key": "s2"}, "SvcAgreementMaintain")
+	rec := do(t, h, http.MethodPost, "/v1/service/sla-profiles", body, map[string]string{"Idempotency-Key": "s2"}, "fieldservice.agreement.maintain")
 	if _, fields := problemOf(t, rec); rec.Code != http.StatusBadRequest || fields["holidays"] == "" {
 		t.Fatalf("status %d errors %v, want holidays rejected", rec.Code, fields)
 	}
@@ -180,8 +180,8 @@ func TestCreateSLAProfile_RejectsMalformedHolidays(t *testing.T) {
 func TestLists_RequireInquireDuty(t *testing.T) {
 	h := newTestRouter()
 	for _, path := range []string{"/v1/service/sla-profiles", "/v1/service/agreements", "/v1/service/cases", "/v1/service/work-orders"} {
-		if rec := do(t, h, http.MethodGet, path, "", nil, "SvcCaseCreate"); rec.Code != http.StatusForbidden {
-			t.Errorf("GET %s without SvcInquire: status %d", path, rec.Code)
+		if rec := do(t, h, http.MethodGet, path, "", nil, "fieldservice.service-case.create"); rec.Code != http.StatusForbidden {
+			t.Errorf("GET %s without fieldservice.inquire: status %d", path, rec.Code)
 		}
 	}
 }

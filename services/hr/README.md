@@ -16,7 +16,7 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - **Workers** (FR-42.1): EMPLOYEE or CONTRACTOR, one wave-7 person party,
   personnel number, legal and preferred name. National ID and bank account are
   sealed with AES-256-GCM (`internal/domain/pii.go`) in `worker_pii`. Reads return
-  masked values (`***-**-6789`, `****5432`). The unmasked read needs `HcmPIIRead`
+  masked values (`***-**-6789`, `****5432`). The unmasked read needs `hr.pii.read`
   and a reason of at least 10 characters, and every read writes `audit_event`
   in the same transaction.
 - **Employments** (FR-42.2, FR-42.23): validity is a `[from, to)` range. The
@@ -82,10 +82,10 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   request can be cancelled. Every balance change locks the worker row first,
   so concurrent approvals, accruals and year ends cannot overspend or lose
   an update.
-- **Own data**: `EssAbsence` alone reads and requests only for the worker whose
-  sign-in user (`worker.userId`) the caller is; `MssApprove` or
-  `HcmAbsenceAdmin` read anyone's balances and requests, and
-  `HcmAbsenceAdmin` may request or cancel for anyone. An approver cannot
+- **Own data**: `hr.absence.self` alone reads and requests only for the worker whose
+  sign-in user (`worker.userId`) the caller is; `hr.team.approve` or
+  `hr.absence.admin` read anyone's balances and requests, and
+  `hr.absence.admin` may request or cancel for anyone. An approver cannot
   decide their own request (8.42.17).
 
 ## What slice 3 does (benefits)
@@ -123,9 +123,9 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   `dev.passage.hr.benefitenrollment.changed.v1` (START or END, with the rates,
   currency, pre-tax flag and deduction code payroll needs) in the same
   transaction. Enrollment and ending lock the rows they change.
-- **Own data**: `EssBenefits` alone enrolls, records life events and reads
-  benefits only for the caller's own worker; `HcmWorkerMaintain` acts for
-  anyone and `HcmWorkerInquire` reads anyone's.
+- **Own data**: `hr.benefits.self` alone enrolls, records life events and reads
+  benefits only for the caller's own worker; `hr.worker.maintain` acts for
+  anyone and `hr.worker.inquire` reads anyone's.
 
 ## What slice 4 does (skills)
 
@@ -179,9 +179,9 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   the seat count run under a lock on the session row, so concurrent
   registrations cannot overfill. A course that needs manager approval
   registers as REQUESTED with the HCM-CRS-002 warning and holds no seat;
-  `MssApprove` approves it into a seat or the waitlist (not their own:
+  `hr.team.approve` approves it into a seat or the waitlist (not their own:
   HCM-CRS-SELF-APPROVAL). Registration closes when the session ends. An
-  employee with only `EssLearning` registers and cancels only themselves.
+  employee with only `hr.learning.self` registers and cancels only themselves.
 - **Cancel**: cancels or declines; a canceled CONFIRMED seat promotes the
   oldest WAITLISTED registration. A worker who registers again after a
   cancel queues at the back.
@@ -198,7 +198,7 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 6 does (incidents, loans, checklists, questionnaires)
 
-- **Incident register** (FR-42.16, BR-42.11): `HcmIncidentReport` files an incident; the
+- **Incident register** (FR-42.16, BR-42.11): `hr.incident.report` files an incident; the
   case number is a per-tenant counter. `osha_recordable` defaults from the facts (death,
   days away, restricted days, medical treatment beyond first aid, loss of consciousness);
   overriding it either way needs `overrideReason` (HCM-INC-001). Description, witnesses,
@@ -206,7 +206,7 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   (`hr_incident.details`); reads by id open it and write an audit row; events carry no
   medical text. Status goes REPORTED, UNDER_REVIEW, CLOSED; the reporter cannot close
   (HCM-INC-SELF-CLOSE). A CLOSED incident is frozen by a trigger. A correction is a new
-  incident with `supersedesId`: it needs `HcmIncidentAdmin`, cannot be filed by the
+  incident with `supersedesId`: it needs `hr.incident.admin`, cannot be filed by the
   original's reporter or closer, and hides the original from the OSHA extract only once
   the correction is itself CLOSED (so a second administrator must close it). The override justification is sealed with the details, body parts are a fixed code list, the incident's legal entity must match the worker's employment on the incident date (HCM-INC-ENTITY), and events omit worker, type and outcome for a privacy case. Rows follow the
   legal-entity scope. The OSHA extract (`/incidents/osha-extract?year=&siteId=`) returns the
@@ -396,52 +396,52 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 
 | Method | Path | Duty |
 |---|---|---|
-| POST | `/v1/hr/workers` | HcmWorkerMaintain |
-| GET | `/v1/hr/workers?q=&limit=&cursor=` | HcmWorkerInquire |
-| GET | `/v1/hr/workers/{id}` | HcmWorkerInquire |
-| GET | `/v1/hr/workers/{id}/employments` | HcmWorkerInquire |
-| GET | `/v1/hr/workers/{id}/as-of?date=` | HcmWorkerInquire |
-| GET | `/v1/hr/workers/{id}/pii?reason=` | HcmPIIRead |
-| POST | `/v1/hr/workers/{id}/employments` | HcmWorkerMaintain |
-| POST | `/v1/hr/positions` | HcmOrgMaintain |
-| GET | `/v1/hr/positions?limit=&cursor=` | HcmOrgInquire |
-| GET | `/v1/hr/positions/{id}` | HcmOrgInquire |
-| POST | `/v1/hr/positions/{id}/assignments` | HcmActionMaintain |
-| POST | `/v1/hr/absence/plans` | HcmAbsenceAdmin |
-| GET | `/v1/hr/absence/plans?limit=&cursor=` | EssAbsence |
-| GET | `/v1/hr/absence/plans/{id}` | HcmAbsenceAdmin |
-| POST | `/v1/hr/absence/plans/{id}/year-end` | HcmAbsenceAdmin |
-| POST | `/v1/hr/absence/plans/{id}/carry-over-expiry` | HcmAbsenceAdmin |
-| POST | `/v1/hr/absence/accrue` | HcmAbsenceAdmin |
-| POST | `/v1/hr/absence/requests` | EssAbsence (own worker unless HcmAbsenceAdmin) |
-| GET | `/v1/hr/absence/requests?status=&workerId=&limit=&cursor=` | EssAbsence (own unless MssApprove or HcmAbsenceAdmin) |
-| POST | `/v1/hr/absence/requests/{id}/decide` | MssApprove |
-| POST | `/v1/hr/absence/requests/{id}/cancel` | EssAbsence (own unless HcmAbsenceAdmin) |
-| GET | `/v1/hr/workers/{id}/absence/balances?asOf=` | EssAbsence (own unless MssApprove or HcmAbsenceAdmin) |
-| POST | `/v1/hr/benefits/plans` | HcmSetupAdmin |
-| GET | `/v1/hr/benefits/plans?limit=&cursor=` | EssBenefits |
-| GET | `/v1/hr/benefits/plans/{id}` | EssBenefits |
-| GET | `/v1/hr/benefits/plans/{id}/simulate?asOf=` | HcmSetupAdmin |
-| POST | `/v1/hr/benefits/life-events` | EssBenefits (own worker unless HcmWorkerMaintain) |
-| POST | `/v1/hr/benefits/enrollments` | EssBenefits (own worker unless HcmWorkerMaintain) |
-| POST | `/v1/hr/benefits/enrollments/{id}/end` | HcmWorkerMaintain |
-| GET | `/v1/hr/workers/{id}/benefits` | EssBenefits (own unless HcmWorkerInquire or HcmWorkerMaintain) |
-| POST | `/v1/hr/skills` | HcmSetupAdmin |
-| GET | `/v1/hr/skills?limit=&cursor=` | HcmWorkerInquire |
-| GET | `/v1/hr/skills/search?skills=&minRating=&certs=&asOf=` | HcmOrgInquire |
-| POST | `/v1/hr/workers/{id}/skills` | HcmWorkerMaintain |
-| GET | `/v1/hr/workers/{id}/skills` | HcmWorkerInquire |
-| POST | `/v1/hr/workers/{id}/certifications` | HcmWorkerMaintain |
-| GET | `/v1/hr/workers/{id}/certifications?asOf=` | HcmWorkerInquire |
-| GET | `/v1/hr/certifications/expiring?withinDays=&asOf=&limit=&cursor=` | HcmWorkerInquire |
-| GET | `/v1/hr/workers/{id}/skill-gap?positionId=` or `?jobId=` (exactly one) | HcmOrgInquire |
-| GET | `/v1/hr/positions/{id}/skill-requirements` | HcmOrgInquire |
-| POST | `/v1/hr/positions/{id}/skill-requirements` | HcmOrgMaintain |
-| DELETE | `/v1/hr/positions/{id}/skill-requirements/{skillCode}` | HcmOrgMaintain |
-| GET | `/v1/hr/jobs/{id}/skill-requirements` | HcmOrgInquire |
-| POST | `/v1/hr/jobs/{id}/skill-requirements` | HcmOrgMaintain |
-| DELETE | `/v1/hr/jobs/{id}/skill-requirements/{skillCode}` | HcmOrgMaintain |
-| GET | `/v1/hr/jobs/{id}/skill-gaps?asOf=` | HcmOrgInquire |
+| POST | `/v1/hr/workers` | hr.worker.maintain |
+| GET | `/v1/hr/workers?q=&limit=&cursor=` | hr.worker.inquire |
+| GET | `/v1/hr/workers/{id}` | hr.worker.inquire |
+| GET | `/v1/hr/workers/{id}/employments` | hr.worker.inquire |
+| GET | `/v1/hr/workers/{id}/as-of?date=` | hr.worker.inquire |
+| GET | `/v1/hr/workers/{id}/pii?reason=` | hr.pii.read |
+| POST | `/v1/hr/workers/{id}/employments` | hr.worker.maintain |
+| POST | `/v1/hr/positions` | hr.org.maintain |
+| GET | `/v1/hr/positions?limit=&cursor=` | hr.org.inquire |
+| GET | `/v1/hr/positions/{id}` | hr.org.inquire |
+| POST | `/v1/hr/positions/{id}/assignments` | hr.action.maintain |
+| POST | `/v1/hr/absence/plans` | hr.absence.admin |
+| GET | `/v1/hr/absence/plans?limit=&cursor=` | hr.absence.self |
+| GET | `/v1/hr/absence/plans/{id}` | hr.absence.admin |
+| POST | `/v1/hr/absence/plans/{id}/year-end` | hr.absence.admin |
+| POST | `/v1/hr/absence/plans/{id}/carry-over-expiry` | hr.absence.admin |
+| POST | `/v1/hr/absence/accrue` | hr.absence.admin |
+| POST | `/v1/hr/absence/requests` | hr.absence.self (own worker unless hr.absence.admin) |
+| GET | `/v1/hr/absence/requests?status=&workerId=&limit=&cursor=` | hr.absence.self (own unless hr.team.approve or hr.absence.admin) |
+| POST | `/v1/hr/absence/requests/{id}/decide` | hr.team.approve |
+| POST | `/v1/hr/absence/requests/{id}/cancel` | hr.absence.self (own unless hr.absence.admin) |
+| GET | `/v1/hr/workers/{id}/absence/balances?asOf=` | hr.absence.self (own unless hr.team.approve or hr.absence.admin) |
+| POST | `/v1/hr/benefits/plans` | hr.setup.admin |
+| GET | `/v1/hr/benefits/plans?limit=&cursor=` | hr.benefits.self |
+| GET | `/v1/hr/benefits/plans/{id}` | hr.benefits.self |
+| GET | `/v1/hr/benefits/plans/{id}/simulate?asOf=` | hr.setup.admin |
+| POST | `/v1/hr/benefits/life-events` | hr.benefits.self (own worker unless hr.worker.maintain) |
+| POST | `/v1/hr/benefits/enrollments` | hr.benefits.self (own worker unless hr.worker.maintain) |
+| POST | `/v1/hr/benefits/enrollments/{id}/end` | hr.worker.maintain |
+| GET | `/v1/hr/workers/{id}/benefits` | hr.benefits.self (own unless hr.worker.inquire or hr.worker.maintain) |
+| POST | `/v1/hr/skills` | hr.setup.admin |
+| GET | `/v1/hr/skills?limit=&cursor=` | hr.worker.inquire |
+| GET | `/v1/hr/skills/search?skills=&minRating=&certs=&asOf=` | hr.org.inquire |
+| POST | `/v1/hr/workers/{id}/skills` | hr.worker.maintain |
+| GET | `/v1/hr/workers/{id}/skills` | hr.worker.inquire |
+| POST | `/v1/hr/workers/{id}/certifications` | hr.worker.maintain |
+| GET | `/v1/hr/workers/{id}/certifications?asOf=` | hr.worker.inquire |
+| GET | `/v1/hr/certifications/expiring?withinDays=&asOf=&limit=&cursor=` | hr.worker.inquire |
+| GET | `/v1/hr/workers/{id}/skill-gap?positionId=` or `?jobId=` (exactly one) | hr.org.inquire |
+| GET | `/v1/hr/positions/{id}/skill-requirements` | hr.org.inquire |
+| POST | `/v1/hr/positions/{id}/skill-requirements` | hr.org.maintain |
+| DELETE | `/v1/hr/positions/{id}/skill-requirements/{skillCode}` | hr.org.maintain |
+| GET | `/v1/hr/jobs/{id}/skill-requirements` | hr.org.inquire |
+| POST | `/v1/hr/jobs/{id}/skill-requirements` | hr.org.maintain |
+| DELETE | `/v1/hr/jobs/{id}/skill-requirements/{skillCode}` | hr.org.maintain |
+| GET | `/v1/hr/jobs/{id}/skill-gaps?asOf=` | hr.org.inquire |
 | POST / GET | `/v1/hr/workers/{id}/goals` | hr.performance.manage (or .admin) |
 | POST | `/v1/hr/goals/{id}/progress` | hr.performance.manage (or .admin) |
 | POST / GET | `/v1/hr/workers/{id}/reviews` | hr.performance.manage (or .admin) |
@@ -450,39 +450,39 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | GET | `/v1/hr/me/goals`, `/v1/hr/me/reviews` | hr.performance.self |
 | POST | `/v1/hr/me/goals/{id}/progress` | hr.performance.self |
 | POST | `/v1/hr/me/reviews/{id}/self-assessment` | hr.performance.self |
-| POST | `/v1/hr/courses` | HcmLearningAdmin |
-| GET | `/v1/hr/courses?limit=&cursor=` | EssLearning |
-| GET | `/v1/hr/courses/{id}` | EssLearning |
-| POST | `/v1/hr/courses/{id}/sessions` | HcmLearningAdmin |
-| GET | `/v1/hr/courses/{id}/sessions` | EssLearning |
-| GET | `/v1/hr/courses/sessions/{id}` | EssLearning |
-| GET | `/v1/hr/courses/sessions/{id}/registrations` | HcmLearningAdmin |
-| POST | `/v1/hr/courses/sessions/{id}/registrations` | EssLearning (own worker unless HcmLearningAdmin or MssApprove) |
-| POST | `/v1/hr/courses/sessions/{id}/complete` | HcmLearningAdmin |
-| POST | `/v1/hr/courses/registrations/{id}/approve` | MssApprove |
-| POST | `/v1/hr/courses/registrations/{id}/cancel` | EssLearning (own unless HcmLearningAdmin or MssApprove) |
-| POST | `/v1/hr/incidents` | HcmIncidentReport (HcmIncidentAdmin to correct) |
-| GET | `/v1/hr/incidents?status=&limit=&cursor=` | HcmIncidentAdmin |
-| GET | `/v1/hr/incidents/osha-extract?year=&siteId=` | HcmIncidentAdmin |
-| GET | `/v1/hr/incidents/{id}` | HcmIncidentAdmin |
-| POST | `/v1/hr/incidents/{id}/status` | HcmIncidentAdmin |
-| POST | `/v1/hr/workers/{id}/loaned-items` | HcmWorkerMaintain |
-| GET | `/v1/hr/workers/{id}/loaned-items` | HcmWorkerInquire |
-| GET | `/v1/hr/loaned-items/outstanding?dueBy=` | HcmWorkerInquire |
-| POST | `/v1/hr/loaned-items/{id}/close` | HcmWorkerMaintain |
-| POST / GET | `/v1/hr/checklist-templates` | HcmSetupAdmin |
-| POST / GET | `/v1/hr/workers/{id}/checklists` | HcmActionMaintain / HcmWorkerInquire |
-| GET | `/v1/hr/checklists/{id}` | HcmWorkerInquire |
-| POST | `/v1/hr/checklists/{id}/complete` | HcmActionMaintain |
-| GET | `/v1/hr/tasks?ownerWorkerId=&status=` | HcmWorkerInquire |
-| POST | `/v1/hr/tasks/{id}/finish` | HcmActionMaintain |
-| POST / GET | `/v1/hr/questionnaires` | HcmQuestionnaireAdmin |
-| GET | `/v1/hr/questionnaires/{id}` | HcmQuestionnaireAdmin |
-| POST | `/v1/hr/questionnaires/schedules` | HcmQuestionnaireAdmin |
-| GET | `/v1/hr/questionnaires/schedules/open` | EssQuestionnaire |
-| GET | `/v1/hr/questionnaires/schedules/{id}` | EssQuestionnaire |
-| POST | `/v1/hr/questionnaires/schedules/{id}/answers` | EssQuestionnaire (own worker only) |
-| GET | `/v1/hr/questionnaires/schedules/{id}/results?by=department` | HcmQuestionnaireAdmin |
+| POST | `/v1/hr/courses` | hr.learning.admin |
+| GET | `/v1/hr/courses?limit=&cursor=` | hr.learning.self |
+| GET | `/v1/hr/courses/{id}` | hr.learning.self |
+| POST | `/v1/hr/courses/{id}/sessions` | hr.learning.admin |
+| GET | `/v1/hr/courses/{id}/sessions` | hr.learning.self |
+| GET | `/v1/hr/courses/sessions/{id}` | hr.learning.self |
+| GET | `/v1/hr/courses/sessions/{id}/registrations` | hr.learning.admin |
+| POST | `/v1/hr/courses/sessions/{id}/registrations` | hr.learning.self (own worker unless hr.learning.admin or hr.team.approve) |
+| POST | `/v1/hr/courses/sessions/{id}/complete` | hr.learning.admin |
+| POST | `/v1/hr/courses/registrations/{id}/approve` | hr.team.approve |
+| POST | `/v1/hr/courses/registrations/{id}/cancel` | hr.learning.self (own unless hr.learning.admin or hr.team.approve) |
+| POST | `/v1/hr/incidents` | hr.incident.report (hr.incident.admin to correct) |
+| GET | `/v1/hr/incidents?status=&limit=&cursor=` | hr.incident.admin |
+| GET | `/v1/hr/incidents/osha-extract?year=&siteId=` | hr.incident.admin |
+| GET | `/v1/hr/incidents/{id}` | hr.incident.admin |
+| POST | `/v1/hr/incidents/{id}/status` | hr.incident.admin |
+| POST | `/v1/hr/workers/{id}/loaned-items` | hr.worker.maintain |
+| GET | `/v1/hr/workers/{id}/loaned-items` | hr.worker.inquire |
+| GET | `/v1/hr/loaned-items/outstanding?dueBy=` | hr.worker.inquire |
+| POST | `/v1/hr/loaned-items/{id}/close` | hr.worker.maintain |
+| POST / GET | `/v1/hr/checklist-templates` | hr.setup.admin |
+| POST / GET | `/v1/hr/workers/{id}/checklists` | hr.action.maintain / hr.worker.inquire |
+| GET | `/v1/hr/checklists/{id}` | hr.worker.inquire |
+| POST | `/v1/hr/checklists/{id}/complete` | hr.action.maintain |
+| GET | `/v1/hr/tasks?ownerWorkerId=&status=` | hr.worker.inquire |
+| POST | `/v1/hr/tasks/{id}/finish` | hr.action.maintain |
+| POST / GET | `/v1/hr/questionnaires` | hr.questionnaire.admin |
+| GET | `/v1/hr/questionnaires/{id}` | hr.questionnaire.admin |
+| POST | `/v1/hr/questionnaires/schedules` | hr.questionnaire.admin |
+| GET | `/v1/hr/questionnaires/schedules/open` | hr.questionnaire.self |
+| GET | `/v1/hr/questionnaires/schedules/{id}` | hr.questionnaire.self |
+| POST | `/v1/hr/questionnaires/schedules/{id}/answers` | hr.questionnaire.self (own worker only) |
+| GET | `/v1/hr/questionnaires/schedules/{id}/results?by=department` | hr.questionnaire.admin |
 
 ## Error codes
 
@@ -520,7 +520,7 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-ABS-STATE` | 422 | The request's status does not allow this decision or cancellation |
 | `HCM-ABS-SELF-APPROVAL` | 403 | An approver tried to decide their own request |
 | `HCM-ABS-NOT-OWN` | 403 | An employee-only caller acted on another worker's absence |
-| `HCM-CMP-010` | 409 | The compensation cycle is applied before an `HcmCompApprove` user approved it |
+| `HCM-CMP-010` | 409 | The compensation cycle is applied before an `hr.compensation.approve` user approved it |
 | `HCM-CMP-SOD` | 403 | The cycle approver created the cycle, submitted one of its worksheets, or is the worker or proposing manager on a submitted row |
 | `HCM-OFR-004` | 422 | A hire from an offer has neither `workerId` nor `newWorker`, or the candidate was erased and `newWorker.legalName` is missing |
 | `HCM-BEN-001` | 422 | Enrollment outside the open window or the life event's 30 days |
@@ -556,7 +556,7 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-INC-001` | 422 | Overriding the recordable default needs a justification |
 | `HCM-INC-STATE` | 422 | Wrong status step, or correcting an incident that is not CLOSED |
 | `HCM-INC-SELF-CLOSE` | 403 | The reporter tried to close their own incident |
-| `HCM-INC-CORRECTION-DUTY` | 403 | A correction needs HcmIncidentAdmin |
+| `HCM-INC-CORRECTION-DUTY` | 403 | A correction needs hr.incident.admin |
 | `HCM-INC-SELF-CORRECT` | 403 | The reporter or closer tried to correct their own incident |
 | `HCM-INC-ENTITY` | 422 | The worker had no employment in that legal entity on the incident date |
 | `HCM-ENTITY-REQUIRED` / `HCM-ENTITY-MISMATCH` | 422 | A loan or checklist for a worker employed in several entities needs a valid `legalEntityId` |

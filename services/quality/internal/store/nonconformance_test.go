@@ -43,7 +43,7 @@ func TestPostgres_NonconformanceAnd8D(t *testing.T) {
 	if list, _ := s.ListNonconformances(ctx, NCRFilter{Source: domain.SourceVendor, Limit: 10}); len(list) != 0 {
 		t.Fatalf("vendor filter: %+v", list)
 	}
-	if _, err := s.GetNonconformance(testkit.Ctx(testkit.TenantID(2), "QM_VIEW"), created.ID); problemStatus(err) != http.StatusNotFound {
+	if _, err := s.GetNonconformance(testkit.Ctx(testkit.TenantID(2), "quality.view"), created.ID); problemStatus(err) != http.StatusNotFound {
 		t.Fatalf("another tenant must not see the NCR: %v", err)
 	}
 

@@ -213,7 +213,7 @@ func TestTravelRoutesAnswer503WithoutAStore(t *testing.T) {
 	}
 }
 
-// Decisions need MssApprove, payment and returns ExpenseAdmin, import the card duty;
+// Decisions need hr.team.approve, payment and returns ExpenseAdmin, import the card duty;
 // the EssExpense duty alone is refused on each.
 func TestTravelRoutesEnforceTheirDuties(t *testing.T) {
 	h := travelRouter(newFakeTravel())

@@ -53,7 +53,7 @@ func TestAssignWave_ValidationKeyVersionAndDuty(t *testing.T) {
 		t.Fatalf("bad id: status = %d, want 404", rec.Code)
 	}
 	h2 := hdr("a-403")
-	h2["X-Passage-Duties"] = "WarehousePick"
+	h2["X-Passage-Duties"] = "fulfillment.warehouse.pick"
 	if rec := do(t, h, http.MethodPost, path, `{"picker":"anna"}`, h2); rec.Code != http.StatusForbidden {
 		t.Fatalf("picker duty: status = %d, want 403", rec.Code)
 	}
@@ -73,7 +73,7 @@ func TestCloseWave_KeyVersionAndDuty(t *testing.T) {
 	if rec.Code != http.StatusOK || fs.closedVersion != 3 || fs.lastIdem.Key != "c-ok" {
 		t.Fatalf("status = %d version = %d body = %s", rec.Code, fs.closedVersion, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodPost, path, ``, map[string]string{"Idempotency-Key": "c-403", "If-Match": `"3"`, "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPost, path, ``, map[string]string{"Idempotency-Key": "c-403", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.view"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer: status = %d, want 403", rec.Code)
 	}
 }

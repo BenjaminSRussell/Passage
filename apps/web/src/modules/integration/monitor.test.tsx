@@ -97,10 +97,10 @@ const outbound: MonitorMessage = {
 };
 
 describe("message monitor", () => {
-  it("is registered behind EDI_OPERATE with the SLA dashboard", () => {
+  it("is registered behind edi.operate with the SLA dashboard", () => {
     const nav = Object.fromEntries(integration.nav.map((n) => [n.to, n.duty]));
-    expect(nav["/integration/messages"]).toBe("EDI_OPERATE");
-    expect(nav["/integration/partner-sla"]).toBe("EDI_OPERATE");
+    expect(nav["/integration/messages"]).toBe("edi.operate");
+    expect(nav["/integration/partner-sla"]).toBe("edi.operate");
     const paths = integration.routes.map((r) => r.path);
     expect(paths).toEqual(expect.arrayContaining(["/integration/messages", "/integration/messages/:id", "/integration/partner-sla"]));
   });
@@ -160,12 +160,12 @@ describe("message monitor", () => {
     let fail = true;
     handler = (url) => {
       if (url.pathname === "/api/v1/edi/partners") return json(200, { items: [] });
-      if (url.pathname === "/api/v1/edi/messages") return fail ? json(403, { code: "COM-0403", detail: "duty EDI_OPERATE required" }) : json(200, { items: [failed] });
+      if (url.pathname === "/api/v1/edi/messages") return fail ? json(403, { code: "COM-0403", detail: "duty edi.operate required" }) : json(200, { items: [failed] });
       return undefined;
     };
     renderAt("/integration/messages");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("duty EDI_OPERATE required (COM-0403)");
+    expect(alert).toHaveTextContent("duty edi.operate required (COM-0403)");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Messages" })).toBeInTheDocument();

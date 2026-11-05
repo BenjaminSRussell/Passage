@@ -18,8 +18,8 @@ func TestTradeProfile_UpsertAsAppRoleAndTenantIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := New(app, 30)
-	a := testkit.Ctx(testkit.TenantID(1), "EDI_ADMIN")
-	b := testkit.Ctx(testkit.TenantID(2), "EDI_ADMIN")
+	a := testkit.Ctx(testkit.TenantID(1), "edi.admin")
+	b := testkit.Ctx(testkit.TenantID(2), "edi.admin")
 	p, _, err := st.CreatePartner(a, "k", "h", profile("TRADE"))
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestTradeProfile_UpsertAsAppRoleAndTenantIsolated(t *testing.T) {
 		t.Fatalf("another tenant must not write the profile of a partner it cannot see: %v", err)
 	}
 	other := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: "00000000-0000-0000-0000-0000000000e2",
-		UserID: "user-e2", Duties: map[string]struct{}{"EDI_ADMIN": {}}})
+		UserID: "user-e2", Duties: map[string]struct{}{"edi.admin": {}}})
 	if _, err := st.GetTradeProfile(other, p.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a caller of another legal entity must not read the profile: %v", err)
 	}

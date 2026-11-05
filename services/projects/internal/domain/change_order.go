@@ -21,7 +21,7 @@ const (
 	// CodeChangeOrderState: the lifecycle does not allow the move.
 	CodeChangeOrderState = "PROJ-CO-003"
 	// CodeSelfApproval: the creator of a change order cannot approve, reject or
-	// apply it (§8.41.17 SoD between ProjMaintain and ProjChangeOrderApprove).
+	// apply it (§8.41.17 SoD between projects.maintain and projects.change-order.approve).
 	CodeSelfApproval = "PROJ-CO-004"
 	// CodeNoBaseline: applying needs a current BASELINE plan version to copy.
 	CodeNoBaseline = "PROJ-CO-005"

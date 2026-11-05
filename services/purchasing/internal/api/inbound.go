@@ -23,7 +23,7 @@ func (a *API) registerInboundRoutes(r chi.Router) {
 	r.Post("/inbound-changes/{id}", a.inboundChangeAction)
 }
 
-// inboundChangeAction handles POST /inbound-changes/{id}:acknowledge|:retry. Both need PurchaseOrderMaintain,
+// inboundChangeAction handles POST /inbound-changes/{id}:acknowledge|:retry. Both need procurement.purchase-order.maintain,
 // the duty of editing the order by hand, and the change's legal entity in the caller's scope. A retry runs
 // the request again as the caller, through the change management path.
 func (a *API) inboundChangeAction(w http.ResponseWriter, r *http.Request) {

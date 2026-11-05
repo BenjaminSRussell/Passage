@@ -113,7 +113,7 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true HTTP_ADDR=:8080 go run ./cmd/m
 To load open items into receivables also set `RECEIVABLES_URL=http://receivables:8080`,
 `PASSAGE_SERVICE_NAME=migration-factory` and `PASSAGE_SERVICE_SIGNING_KEY` (base64 32-byte Ed25519
 seed; or `PASSAGE_SERVICE_SIGNING_KEY_FILE`). The receivables service must trust the matching public
-key for `migration-factory` and the grant table must hold `receivables.import.write` and `ARView`
+key for `migration-factory` and the grant table must hold `receivables.import.write` and `receivables.view`
 for it (NOT-IMPLEMENTED.md, H-S8-1 and H-S8-2). An address without a key, or a key for another service
 name, stops the start; neither set starts the service with the load step answering 503.
 
@@ -145,21 +145,21 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 
 | Route | Duty |
 |---|---|
-| `GET /api/v1/migration/packs` | `MigrationView` |
-| `POST /api/v1/migration/packs/{pack}/runs` | `MigrationRun` |
-| `GET /api/v1/migration/runs` | `MigrationView` |
-| `GET /api/v1/migration/runs/{id}` | `MigrationView` |
-| `GET /api/v1/migration/runs/{id}/control-totals` | `MigrationView` |
-| `POST /api/v1/migration/runs/{id}/load` | `MigrationRun` |
-| `GET /api/v1/migration/runs/{id}/target-load` | `MigrationView` |
-| `GET /api/v1/migration/runs/{id}/target-rows` | `MigrationView` |
-| `POST /api/v1/cutover/plans/generate` | `CutoverManager` |
-| `GET /api/v1/cutover/plans` | `CutoverManager` |
-| `GET /api/v1/cutover/plans/{id}` | `CutoverManager` |
-| `POST /api/v1/cutover/plans/{id}/steps/{seq}/start` | `CutoverStepOwner` |
-| `POST /api/v1/cutover/plans/{id}/steps/{seq}/complete` | `CutoverStepOwner` |
-| `POST /api/v1/cutover/plans/{id}/rollback` | `CutoverManager` (two different callers approve; the second runs it) |
-| `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `CutoverManager` |
+| `GET /api/v1/migration/packs` | `migration.factory.view` |
+| `POST /api/v1/migration/packs/{pack}/runs` | `migration.factory.run` |
+| `GET /api/v1/migration/runs` | `migration.factory.view` |
+| `GET /api/v1/migration/runs/{id}` | `migration.factory.view` |
+| `GET /api/v1/migration/runs/{id}/control-totals` | `migration.factory.view` |
+| `POST /api/v1/migration/runs/{id}/load` | `migration.factory.run` |
+| `GET /api/v1/migration/runs/{id}/target-load` | `migration.factory.view` |
+| `GET /api/v1/migration/runs/{id}/target-rows` | `migration.factory.view` |
+| `POST /api/v1/cutover/plans/generate` | `migration.cutover.manage` |
+| `GET /api/v1/cutover/plans` | `migration.cutover.manage` |
+| `GET /api/v1/cutover/plans/{id}` | `migration.cutover.manage` |
+| `POST /api/v1/cutover/plans/{id}/steps/{seq}/start` | `migration.cutover-step.execute` |
+| `POST /api/v1/cutover/plans/{id}/steps/{seq}/complete` | `migration.cutover-step.execute` |
+| `POST /api/v1/cutover/plans/{id}/rollback` | `migration.cutover.manage` (two different callers approve; the second runs it) |
+| `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `migration.cutover.manage` |
 
 Duties are checked by the kernel's local `DutyPolicy`. The OPA decision point replaces it later
 (see NOT-IMPLEMENTED.md). Every POST accepts an optional `Idempotency-Key`; plan commands accept

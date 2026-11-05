@@ -28,7 +28,7 @@ const tol = (id: string, productId: string | null, customerId: string | null, pc
   updatedAt: "2026-11-01T08:00:00Z",
 });
 
-const MAINTAINER = ["WarehouseView", "PackingRuleMaintain"];
+const MAINTAINER = ["fulfillment.warehouse.view", "fulfillment.packing-rule.maintain"];
 
 describe("tolerance helpers (BR-28.7)", () => {
   it("picks the most specific scope and computes the ceiling exactly", () => {
@@ -116,11 +116,11 @@ describe("over-delivery tolerances page", () => {
     expect(await screen.findByText(/Someone else changed this tolerance/)).toBeInTheDocument();
     unmount();
 
-    renderAt("/fulfillment/delivery-tolerances", ["WarehouseView"]);
+    renderAt("/fulfillment/delivery-tolerances", ["fulfillment.warehouse.view"]);
     const table = await findTable({ name: "Over-delivery tolerances" });
     expect(within(table).getByText("All customers")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save tolerance" })).not.toBeInTheDocument();
-    expect(screen.getByText(/needs the PackingRuleMaintain duty/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the fulfillment.packing-rule.maintain duty/)).toBeInTheDocument();
   });
 
   it("shows the empty state and the error with retry", async () => {

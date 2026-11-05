@@ -8,8 +8,8 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-/** Saving a tolerance needs this duty (the service enforces it); reading needs WarehouseView. */
-const DUTY_SAVE = "PackingRuleMaintain";
+/** Saving a tolerance needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
+const DUTY_SAVE = "fulfillment.packing-rule.maintain";
 
 const columns: DataTableColumn<DeliveryTolerance>[] = [
   { key: "productId", header: "Product", mono: true, render: (row) => (row.productId ? shortId(row.productId) : "All products") },
@@ -149,7 +149,7 @@ export function DeliveryTolerancesPage() {
           </form>
         </Card>
       ) : (
-        <p className={styles.note}>Changing a tolerance needs the PackingRuleMaintain duty.</p>
+        <p className={styles.note}>Changing a tolerance needs the fulfillment.packing-rule.maintain duty.</p>
       )}
     </div>
   );

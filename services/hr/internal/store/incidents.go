@@ -24,7 +24,7 @@ const (
 	CodeIncidentEntity    = "HCM-INC-ENTITY"
 	CodeSelfCorrection    = "HCM-INC-SELF-CORRECT"
 
-	dutyIncidentAdmin = "HcmIncidentAdmin"
+	dutyIncidentAdmin = "hr.incident.admin"
 
 	fieldIncidentDetails = "hr_incident.details"
 	maxOSHALines         = 5000
@@ -150,7 +150,7 @@ func (s *Postgres) ReportIncident(ctx context.Context, in IncidentInput, idempot
 		return Incident{}, false, crsProblem(rerr, http.StatusUnprocessableEntity)
 	}
 	if in.SupersedesID != nil && !p.HasDuty(dutyIncidentAdmin) {
-		return Incident{}, false, problem(http.StatusForbidden, CodeCorrectionDuty, "correcting a closed incident needs the HcmIncidentAdmin duty")
+		return Incident{}, false, problem(http.StatusForbidden, CodeCorrectionDuty, "correcting a closed incident needs the hr.incident.admin duty")
 	}
 	var key *string
 	if idempotencyKey != "" {

@@ -32,11 +32,11 @@ import (
 
 // Duties from PRD section 7.40.17.
 const (
-	DutyView      = "IntercompanyView"
-	DutyConfigure = "IntercompanyConfigure"
-	DutyPost      = "IntercompanyPost"
-	DutyReconcile = "IntercompanyReconcile"
-	DutyPlan      = "IntercompanyPlan"
+	DutyView      = "intercompany.view"
+	DutyConfigure = "intercompany.configure"
+	DutyPost      = "intercompany.post"
+	DutyReconcile = "intercompany.reconcile"
+	DutyPlan      = "intercompany.plan"
 )
 
 const (

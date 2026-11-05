@@ -17,8 +17,8 @@ import (
 )
 
 // dutyCatalogMaintain creates catalogs, changes their entries and publishes or retires
-// them (FR-17.18, PRD 3.17.17). Reading catalogs also needs PurchaseOrderInquire.
-const dutyCatalogMaintain = "CatalogMaintain"
+// them (FR-17.18, PRD 3.17.17). Reading catalogs also needs procurement.purchase-order.inquire.
+const dutyCatalogMaintain = "procurement.catalog.maintain"
 
 // maxImageURL bounds an entry image reference; images live in the object store.
 const maxImageURL = 2000

@@ -111,16 +111,16 @@ const maxClockSkew = 5 * time.Minute
 
 // actingFor checks that the caller may record actions for technician t: the caller is the
 // technician's worker (the principal's user id is the worker id), or office staff holding
-// SvcWoMaintain keying in a device's actions; they may already move the order by hand.
+// fieldservice.work-order.maintain keying in a device's actions; they may already move the order by hand.
 func actingFor(ctx context.Context, t Technician) error {
 	p := caller(ctx)
 	if t.WorkerID != nil && p.UserID != "" && strings.EqualFold(*t.WorkerID, p.UserID) {
 		return nil
 	}
-	if p.HasDuty("SvcWoMaintain") {
+	if p.HasDuty("fieldservice.work-order.maintain") {
 		return nil
 	}
-	return httpx.NewProblem(http.StatusForbidden, domain.CodeActionTechnician, "actions can be recorded only by the technician's own worker or by office staff with SvcWoMaintain")
+	return httpx.NewProblem(http.StatusForbidden, domain.CodeActionTechnician, "actions can be recorded only by the technician's own worker or by office staff with fieldservice.work-order.maintain")
 }
 
 // mergeState is what decide needs beyond the work order: the consumed quantity per PART

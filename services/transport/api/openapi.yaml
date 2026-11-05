@@ -24,7 +24,7 @@ paths:
       operationId: createRateCard
       summary: Create an effective-dated rate card
       description: Rejected with TMS-0102 when it shares a day with a card of the same carrier, service and basis (BR-34.10).
-      x-passage-duty: TMS_RATE_APPROVE
+      x-passage-duty: transport.rate-card.approve
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -45,7 +45,7 @@ paths:
     get:
       operationId: listRateCards
       summary: List rate cards, optionally filtered by carrier and service
-      x-passage-duty: TMS_RATE
+      x-passage-duty: transport.rate-card.maintain
       parameters:
         - name: carrierId
           in: query
@@ -81,7 +81,7 @@ paths:
         `TMS_RATING_CACHE_MIN` minutes (rating_cache_min, default 10, 0 turns
         the cache off, FR-34.4); saving a rate card drops the tenant's cached
         results on the replica that saved it.
-      x-passage-duty: TMS_RATE
+      x-passage-duty: transport.rate-card.maintain
       parameters:
         - name: id
           in: path
@@ -109,7 +109,7 @@ paths:
     post:
       operationId: createFreightBill
       summary: Create a freight bill with expected charges for a load
-      x-passage-duty: TMS_RECONCILE
+      x-passage-duty: transport.freight-bill.reconcile
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -130,7 +130,7 @@ paths:
     get:
       operationId: listFreightBills
       summary: List freight bills, newest first (at most 500)
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - name: matchStatus
           in: query
@@ -157,7 +157,7 @@ paths:
     get:
       operationId: getFreightBill
       summary: Get a freight bill with its carrier invoice and line comparison
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - name: id
           in: path
@@ -183,7 +183,7 @@ paths:
         invoice for the invoiced amount) and the ledger (accrual reversal,
         variance to 5250). Any other state is 422 TMS-0117. If-Match must carry
         the bill version (428 without it, 412 conflict_version when stale).
-      x-passage-duty: TMS_RECONCILE_APPROVE
+      x-passage-duty: transport.freight-bill.approve
       parameters:
         - $ref: '#/components/parameters/BillId'
         - $ref: '#/components/parameters/IfMatch'
@@ -214,7 +214,7 @@ paths:
         Only a VARIANCE bill can be disputed; it becomes DISPUTED and stays so
         until it is approved. A `reason` is required. Other states are 422
         TMS-0117. If-Match must carry the bill version.
-      x-passage-duty: TMS_RECONCILE
+      x-passage-duty: transport.freight-bill.reconcile
       parameters:
         - $ref: '#/components/parameters/BillId'
         - $ref: '#/components/parameters/IfMatch'
@@ -248,7 +248,7 @@ paths:
         be the carrier's, in the same currency (TMS-0112), and not already
         invoiced (TMS-0111). An invoice with no freight bill is stored as
         UNEXPECTED_INVOICE (TMS-0109) and never auto-approved.
-      x-passage-duty: TMS_RECONCILE
+      x-passage-duty: transport.freight-bill.reconcile
       requestBody:
         required: true
         content:
@@ -269,7 +269,7 @@ paths:
     get:
       operationId: listCarrierInvoices
       summary: List carrier invoices, newest first (at most 500)
-      x-passage-duty: TMS_RECONCILE
+      x-passage-duty: transport.freight-bill.reconcile
       parameters:
         - name: matchStatus
           in: query
@@ -297,7 +297,7 @@ paths:
     get:
       operationId: getCarrierInvoice
       summary: Get a carrier invoice
-      x-passage-duty: TMS_RECONCILE
+      x-passage-duty: transport.freight-bill.reconcile
       parameters:
         - name: id
           in: path
@@ -322,7 +322,7 @@ paths:
         exceeds the capacity in weight, volume or pallets; a shipment that does
         not fit opens another load. A shipment larger than an empty load is 422
         TMS-0115; a shipment already on a load is 409 TMS-0116.
-      x-passage-duty: TMS_PLAN
+      x-passage-duty: transport.load.plan
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -351,7 +351,7 @@ paths:
     get:
       operationId: listLoads
       summary: List loads, newest first (at most 500); loads by status
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - name: status
           in: query
@@ -376,7 +376,7 @@ paths:
     get:
       operationId: getLoad
       summary: Get a load with its DG checks, newest first
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - $ref: '#/components/parameters/LoadId'
       responses:
@@ -397,7 +397,7 @@ paths:
         ADR-7.5.2) or a regulated load without a 24-hour emergency phone; WARN
         for ADR 1.1.3.6 points above 1,000 (TMS-0131), transport category 0 and
         limited-quantity marking. Returns the DG shipping-paper lines.
-      x-passage-duty: TMS_PLAN
+      x-passage-duty: transport.load.plan
       parameters:
         - $ref: '#/components/parameters/LoadId'
       requestBody:
@@ -429,7 +429,7 @@ paths:
         again while held refreshes its party results) and names it in
         `holdId`; the hold blocks tendering until it is released. CLEAR and
         WARN are not stored and never clear an open hold.
-      x-passage-duty: TMS_PLAN
+      x-passage-duty: transport.load.plan
       parameters:
         - $ref: '#/components/parameters/LoadId'
       requestBody:
@@ -456,7 +456,7 @@ paths:
         and open a goods-in-transit order (TMS-0121); DAP, DPU and DDP transfer at
         the destination receipt with no goods-in-transit order. Case is ignored.
         Any other rule is 400 COM-0001.
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - name: incoterm
           in: path
@@ -484,7 +484,7 @@ paths:
         latest dangerous-goods check is FAIL is refused with 422 TMS-0130 and no
         tender is sent (AC-34.13); so is a load with an OPEN screening hold, with
         422 TMS-0133 (BR-34.17, AC-34.16).
-      x-passage-duty: TMS_TENDER
+      x-passage-duty: transport.load.tender
       parameters:
         - name: id
           in: path
@@ -512,7 +512,7 @@ paths:
     get:
       operationId: listTenders
       summary: List tenders, newest first (at most 500); the tender board
-      x-passage-duty: TMS_TENDER
+      x-passage-duty: transport.load.tender
       parameters:
         - name: status
           in: query
@@ -544,7 +544,7 @@ paths:
         attempt. At most 500 tenders per call. Only tenders in the caller's legal
         entities expire, so the sweep must run as an all-entity principal. A Temporal TenderWorkflow timer
         will drive the same rule; until then a scheduler or the tender board calls this.
-      x-passage-duty: TMS_TENDER
+      x-passage-duty: transport.load.tender
       responses:
         '200':
           description: The tenders the sweep advanced
@@ -561,7 +561,7 @@ paths:
     get:
       operationId: getTender
       summary: Get a tender with its cascade attempts
-      x-passage-duty: TMS_TENDER
+      x-passage-duty: transport.load.tender
       parameters:
         - name: id
           in: path
@@ -586,7 +586,7 @@ paths:
         saved); a carrier the tender is not waiting on is 409 TMS-0113. A
         decline offers the load to the next carrier. The same carrier repeating
         its last response gets the tender back unchanged (natural idempotency).
-      x-passage-duty: TMS_CARRIER_RESPOND
+      x-passage-duty: transport.tender.respond
       parameters:
         - name: id
           in: path
@@ -622,7 +622,7 @@ paths:
         `Idempotent-Replayed: true`; a different report under the same source and
         ref is 422 idempotency_key_reuse. Supported codes: X3 arrived at pickup,
         AF departed with the freight, X1 arrived at delivery, D1 delivered.
-      x-passage-duty: TMS_TRACK_INGEST
+      x-passage-duty: transport.tracking-event.ingest
       requestBody:
         required: true
         content:
@@ -648,7 +648,7 @@ paths:
     get:
       operationId: listTrackingEvents
       summary: Tracking events; with loadId that load's events in occurred_at order, else the newest 500 received
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - name: loadId
           in: query
@@ -670,7 +670,7 @@ paths:
     get:
       operationId: getLoadTracking
       summary: Tracking timeline of a load with the projected stop states (BR-34.9)
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - name: id
           in: path
@@ -693,7 +693,7 @@ paths:
         Container numbers are checked with the ISO 6346 check digit (BR-34.12);
         a failure is 422 TMS-0124 with the container in `errors`. The voyage
         starts ESTIMATED; status and allocations sent by the client are ignored.
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -714,7 +714,7 @@ paths:
     get:
       operationId: listVoyages
       summary: List voyages, newest first (at most 500), without their documents
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - name: status
           in: query
@@ -736,7 +736,7 @@ paths:
     get:
       operationId: getVoyage
       summary: Get a voyage with its documents and, once posted, its allocations
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - name: id
           in: path
@@ -761,7 +761,7 @@ paths:
         allocations sum to the cost total exactly. Publishes
         dev.passage.tms.landedcost.posted.v1. A POSTED voyage is returned
         unchanged with 200, so a retry is safe.
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - name: id
           in: path
@@ -789,7 +789,7 @@ paths:
         the voyage is 422 TMS-0119 with `errors.receiptLines`, and a line
         already on another order is 409 TMS-0119. Each line carries its share
         of every voyage cost line as allocated under BR-34.6.
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -812,7 +812,7 @@ paths:
     get:
       operationId: listGoodsInTransit
       summary: List goods-in-transit orders, newest first (at most 500)
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - name: voyageId
           in: query
@@ -837,7 +837,7 @@ paths:
     get:
       operationId: getGoodsInTransit
       summary: Get a goods-in-transit order
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - $ref: '#/components/parameters/GoodsInTransitId'
       responses:
@@ -861,7 +861,7 @@ paths:
         forwarder reported (default now; not in the future). An order already
         IN_TRANSIT is returned unchanged with 200 and nothing is published, so
         a retry is safe.
-      x-passage-duty: TMS_LANDED_COST
+      x-passage-duty: transport.landed-cost.maintain
       parameters:
         - $ref: '#/components/parameters/GoodsInTransitId'
       requestBody:
@@ -895,7 +895,7 @@ paths:
         and may be earlier for a paper fallback entered later. A trailer
         already in the site's yard is 409 TMS-0118. Writes the CHECK_IN row of
         the gate log and publishes dev.passage.tms.gate.checkedin.v1.
-      x-passage-duty: TMS_GATE
+      x-passage-duty: transport.gate.operate
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -927,7 +927,7 @@ paths:
         (TMS-0126 when it accrues, AC-34.11). A visit already checked out is
         409 TMS-0118, unless the request repeats the check-out's
         Idempotency-Key and body, which returns the visit.
-      x-passage-duty: TMS_GATE
+      x-passage-duty: transport.gate.operate
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -958,7 +958,7 @@ paths:
     get:
       operationId: listGateVisits
       summary: Gate log, newest check-in first (at most 500)
-      x-passage-duty: TMS_GATE
+      x-passage-duty: transport.gate.operate
       parameters:
         - name: siteId
           in: query
@@ -990,7 +990,7 @@ paths:
     get:
       operationId: getGateVisit
       summary: A gate visit with its append-only gate log
-      x-passage-duty: TMS_GATE
+      x-passage-duty: transport.gate.operate
       parameters:
         - $ref: '#/components/parameters/VisitId'
       responses:
@@ -1015,7 +1015,7 @@ paths:
       description: |
         Allowed while the visit is IN_YARD (409 TMS-0118 after check-out). A
         later seal replaces an earlier one; the gate log keeps each as SEALED.
-      x-passage-duty: TMS_GATE
+      x-passage-duty: transport.gate.operate
       parameters:
         - $ref: '#/components/parameters/VisitId'
       requestBody:
@@ -1042,7 +1042,7 @@ paths:
     get:
       operationId: listScreeningHolds
       summary: Screening holds inquiry, newest first (§6.34.14)
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - name: status
           in: query
@@ -1067,7 +1067,7 @@ paths:
     get:
       operationId: getScreeningHold
       summary: One screening hold with its party results and release
-      x-passage-duty: TMS_VIEW
+      x-passage-duty: transport.view
       parameters:
         - $ref: '#/components/parameters/HoldId'
       responses:
@@ -1090,7 +1090,7 @@ paths:
         another user or for another reason is 409 TMS-0122; the same release
         again returns the hold unchanged. Tendering proceeds once no hold is
         OPEN.
-      x-passage-duty: TRADE_COMPLIANCE_RELEASE
+      x-passage-duty: transport.screening-hold.release
       parameters:
         - $ref: '#/components/parameters/HoldId'
       requestBody:
@@ -1127,7 +1127,7 @@ paths:
         silently. An optimizer that is not configured, fails, or answers with a
         reply that loses a stop is 503 TMS-0123 and nothing is stored. The call
         is synchronous, so `timeLimitS` is 5 to 25 (default 20).
-      x-passage-duty: TMS_PLAN
+      x-passage-duty: transport.load.plan
       requestBody:
         required: true
         content:
@@ -1152,7 +1152,7 @@ paths:
     get:
       operationId: listRoutePlans
       summary: Route plans, newest first, without their request and routes
-      x-passage-duty: TMS_PLAN
+      x-passage-duty: transport.load.plan
       responses:
         '200':
           description: At most 500 plans
@@ -1169,7 +1169,7 @@ paths:
     get:
       operationId: getRoutePlan
       summary: One route plan with its request and routes
-      x-passage-duty: TMS_PLAN
+      x-passage-duty: transport.load.plan
       parameters:
         - name: id
           in: path
@@ -1197,7 +1197,7 @@ paths:
         axle-weight estimate. Pallets that do not fit are listed in `unplaced`.
         The plan is returned, not stored. A reply that loses a pallet or stacks
         on a non-stackable one is 503 TMS-0123.
-      x-passage-duty: TMS_PLAN
+      x-passage-duty: transport.load.plan
       requestBody:
         required: true
         content:

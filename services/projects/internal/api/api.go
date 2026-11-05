@@ -39,13 +39,13 @@ const (
 
 // Duties (PRD §8.41.17) guarding the routes.
 const (
-	DutyMaintain = "ProjMaintain"
-	DutyManage   = "ProjManage"
-	DutyInquire  = "ProjInquire"
-	DutyPlan     = "ProjPlan"
-	DutySetup    = "ProjSetupAdmin"
+	DutyMaintain = "projects.maintain"
+	DutyManage   = "projects.manage"
+	DutyInquire  = "projects.inquire"
+	DutyPlan     = "projects.plan"
+	DutySetup    = "projects.setup.admin"
 	// DutyChangeOrderApprove guards approve, reject and apply of change orders.
-	DutyChangeOrderApprove = "ProjChangeOrderApprove"
+	DutyChangeOrderApprove = "projects.change-order.approve"
 )
 
 // API holds the HTTP handlers and their store.

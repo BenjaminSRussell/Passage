@@ -27,8 +27,8 @@ func TestServicePrincipal(t *testing.T) {
 	if p.UserID != "service:receiving-ers" || p.TenantID != spTenant || p.LegalEntityID != spEntity || p.Service != "" {
 		t.Fatalf("principal = %+v", p)
 	}
-	if len(p.Duties) != 1 || !p.HasDuty("VendorInvoicePost") || p.HasDuty(tenant.DutyAllScope) || tenant.IsTenantAdmin(p) {
-		t.Fatalf("duties = %v, want only VendorInvoicePost", p.Duties)
+	if len(p.Duties) != 1 || !p.HasDuty("receiving.vendor-invoice.post") || p.HasDuty(tenant.DutyAllScope) || tenant.IsTenantAdmin(p) {
+		t.Fatalf("duties = %v, want only receiving.vendor-invoice.post", p.Duties)
 	}
 	if tenantOnly, err := tenant.ServicePrincipal("receiving-ers", spTenant, ""); err != nil || tenantOnly.LegalEntityID != "" {
 		t.Fatalf("tenant-only principal = %+v, %v", tenantOnly, err)

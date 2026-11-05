@@ -259,8 +259,8 @@ func TestRespondTender_ExpiredPassesThrough(t *testing.T) {
 	}
 }
 
-// TestTenderRoutes_Duties: tendering is TMS_TENDER, responding is the carrier's
-// TMS_CARRIER_RESPOND, and neither duty grants the other.
+// TestTenderRoutes_Duties: tendering is transport.load.tender, responding is the carrier's
+// transport.tender.respond, and neither duty grants the other.
 func TestTenderRoutes_Duties(t *testing.T) {
 	h := router(&fakeStore{})
 	cases := []struct{ method, path, duty string }{

@@ -54,7 +54,7 @@ type readinessDTO struct {
 	// StagedPacks are the plan's packs that are staged in the factory and not posted to their ledger:
 	// each keeps packs_reconciled open unless both approvers of a GO waive it.
 	StagedPacks []stagedPackDTO `json:"stagedPacks"`
-	// PendingGo is the first approval of a GO waiting for a second, different CutoverManager; nil when none.
+	// PendingGo is the first approval of a GO waiting for a second, different migration.cutover.manage; nil when none.
 	PendingGo *domain.GoApproval `json:"pendingGo,omitempty"`
 }
 

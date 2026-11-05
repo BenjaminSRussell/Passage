@@ -59,7 +59,7 @@ func applyVersion(w http.ResponseWriter, r *http.Request, v domain.Version, acti
 }
 
 // transitionVersion blocks, unblocks or closes a version (BR-39.2, duty
-// CostingMaintain). Activation is a separate route under CostingActivate,
+// productcost.maintain). Activation is a separate route under productcost.activate,
 // because the two duties are segregated (section 7.39.17).
 func (a *API) transitionVersion(w http.ResponseWriter, r *http.Request) {
 	if !guard(w, r) {
@@ -73,7 +73,7 @@ func (a *API) transitionVersion(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case domain.ActionBlock, domain.ActionUnblock, domain.ActionClose:
 	case domain.ActionActivate:
-		fields["action"] = "activate with POST /v1/product-costing/versions:activate (duty CostingActivate)"
+		fields["action"] = "activate with POST /v1/product-costing/versions:activate (duty productcost.activate)"
 	default:
 		fields["action"] = "must be block, unblock or close"
 	}
@@ -81,7 +81,7 @@ func (a *API) transitionVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 // activateVersion moves an Open or Blocked version to Active (BR-39.2, duty
-// CostingActivate). Simulation versions cannot activate (CST-0711).
+// productcost.activate). Simulation versions cannot activate (CST-0711).
 func (a *API) activateVersion(w http.ResponseWriter, r *http.Request) {
 	if !guard(w, r) {
 		return

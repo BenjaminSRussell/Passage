@@ -135,7 +135,7 @@ func TestDeliveredNotInvoiced_Validation(t *testing.T) {
 
 func TestDeliveredNotInvoiced_NeedsWarehouseView(t *testing.T) {
 	rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, "/v1/fulfillment/delivered-not-invoiced?legalEntityId="+ids.New(), "",
-		map[string]string{"X-Passage-Duties": "WarehousePick"})
+		map[string]string{"X-Passage-Duties": "fulfillment.warehouse.pick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}

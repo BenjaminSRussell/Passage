@@ -416,6 +416,6 @@ describe("certificates of analysis on a closed order", () => {
 describe("slice 5 registration", () => {
   it("registers the receiving page with a duty-gated nav entry", () => {
     expect(quality.routes.map((r) => r.path)).toContain("/quality/receiving");
-    expect(quality.nav.find((n) => n.to === "/quality/receiving")?.duty).toBe("QM_VIEW");
+    expect(quality.nav.find((n) => n.to === "/quality/receiving")?.duty).toBe("quality.view");
   });
 });

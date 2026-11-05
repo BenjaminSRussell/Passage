@@ -14,9 +14,9 @@ import (
 	"github.com/BenjaminSRussell/passage/services/assets/internal/store"
 )
 
-// DutyConfigure covers group assets (PRD 7.37.17 AssetConfigure: classes, book
+// DutyConfigure covers group assets (PRD 7.37.17 assets.asset.configure: classes, book
 // definitions, profiles, posting profiles, group assets).
-const DutyConfigure = "AssetConfigure"
+const DutyConfigure = "assets.asset.configure"
 
 type transferPartRequest struct {
 	AssetNumber   string  `json:"assetNumber"`
@@ -169,7 +169,7 @@ type groupAssetRequest struct {
 }
 
 // createGroupAsset pools member assets into a group asset on one tax book
-// (FR-37.16, duty AssetConfigure).
+// (FR-37.16, duty assets.asset.configure).
 func (a *API) createGroupAsset(w http.ResponseWriter, r *http.Request) {
 	key, ok := requireKey(w, r)
 	if !ok {

@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	dutySetupAdmin  = "HcmSetupAdmin"
-	dutyEssBenefits = "EssBenefits"
+	dutySetupAdmin  = "hr.setup.admin"
+	dutyEssBenefits = "hr.benefits.self"
 
 	benMaxOptions  = 20
 	benMaxWaiting  = 365
@@ -79,7 +79,7 @@ func blankToNil(s *string) *string {
 	return &v
 }
 
-// createBenefitPlan is POST /v1/hr/benefits/plans (HcmSetupAdmin).
+// createBenefitPlan is POST /v1/hr/benefits/plans (hr.setup.admin).
 func (a *API) createBenefitPlan(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -195,7 +195,7 @@ func benefitOptions(in []benefitOptionRequest, currency string, fields map[strin
 	return out
 }
 
-// listBenefitPlans is GET /v1/hr/benefits/plans (EssBenefits): every employee
+// listBenefitPlans is GET /v1/hr/benefits/plans (hr.benefits.self): every employee
 // browses the plans before enrolling.
 func (a *API) listBenefitPlans(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
@@ -215,7 +215,7 @@ func (a *API) listBenefitPlans(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, listResponse[store.BenefitPlan]{Items: page.Items, NextCursor: cursor(page.NextAfter)})
 }
 
-// getBenefitPlan is GET /v1/hr/benefits/plans/{id} (EssBenefits).
+// getBenefitPlan is GET /v1/hr/benefits/plans/{id} (hr.benefits.self).
 func (a *API) getBenefitPlan(w http.ResponseWriter, r *http.Request, planID string) {
 	plan, err := a.store.GetBenefitPlan(r.Context(), planID)
 	if err != nil {
@@ -227,7 +227,7 @@ func (a *API) getBenefitPlan(w http.ResponseWriter, r *http.Request, planID stri
 }
 
 // simulateBenefitPlan is GET /v1/hr/benefits/plans/{id}/simulate?asOf=
-// (HcmSetupAdmin). It evaluates the plan for the whole workforce, exactly as
+// (hr.setup.admin). It evaluates the plan for the whole workforce, exactly as
 // enrollment would, and writes nothing.
 func (a *API) simulateBenefitPlan(w http.ResponseWriter, r *http.Request, planID string) {
 	asOf, ok := parseDate(r.URL.Query().Get("asOf"))
@@ -253,11 +253,11 @@ type lifeEventRequest struct {
 }
 
 // benOwnOnly is true for a caller who may act only on their own benefits:
-// HcmWorkerMaintain (the HR administrator) acts for any worker.
+// hr.worker.maintain (the HR administrator) acts for any worker.
 func benOwnOnly(r *http.Request) bool { return !caller(r).HasDuty(dutyWorkerMaintain) }
 
-// createLifeEvent is POST /v1/hr/benefits/life-events (EssBenefits). An
-// employee records their own; HcmWorkerMaintain records anyone's.
+// createLifeEvent is POST /v1/hr/benefits/life-events (hr.benefits.self). An
+// employee records their own; hr.worker.maintain records anyone's.
 func (a *API) createLifeEvent(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -305,8 +305,8 @@ type enrollmentRequest struct {
 	DependentCount *int    `json:"dependentCount"`
 }
 
-// createBenefitEnrollment is POST /v1/hr/benefits/enrollments (EssBenefits).
-// An employee enrolls themselves; HcmWorkerMaintain enrolls anyone.
+// createBenefitEnrollment is POST /v1/hr/benefits/enrollments (hr.benefits.self).
+// An employee enrolls themselves; hr.worker.maintain enrolls anyone.
 // Idempotency-Key replays return the stored enrollment with 200.
 func (a *API) createBenefitEnrollment(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
@@ -374,7 +374,7 @@ type endEnrollmentRequest struct {
 }
 
 // endBenefitEnrollment is POST /v1/hr/benefits/enrollments/{id}/end
-// (HcmWorkerMaintain). A TERMINATION keeps coverage to the end of the month of
+// (hr.worker.maintain). A TERMINATION keeps coverage to the end of the month of
 // lastDay (BR-42.6). Repeating the same end returns it unchanged.
 func (a *API) endBenefitEnrollment(w http.ResponseWriter, r *http.Request, enrollmentID string) {
 	var req endEnrollmentRequest
@@ -406,9 +406,9 @@ func (a *API) endBenefitEnrollment(w http.ResponseWriter, r *http.Request, enrol
 	httpx.JSON(w, http.StatusOK, enr)
 }
 
-// workerBenefits is GET /v1/hr/workers/{id}/benefits (EssBenefits): the
+// workerBenefits is GET /v1/hr/workers/{id}/benefits (hr.benefits.self): the
 // worker's enrollments and life events. An employee reads their own;
-// HcmWorkerInquire or HcmWorkerMaintain reads anyone's.
+// hr.worker.inquire or hr.worker.maintain reads anyone's.
 func (a *API) workerBenefits(w http.ResponseWriter, r *http.Request, workerID string) {
 	ownOnly := benOwnOnly(r) && !caller(r).HasDuty(dutyWorkerInquire)
 	out, err := a.store.ListWorkerBenefits(r.Context(), workerID, ownOnly)

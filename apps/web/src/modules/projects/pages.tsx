@@ -238,7 +238,7 @@ export function moveText(from: Stage, to: Stage): string {
   return `Move to ${stageLabel[to]}`;
 }
 
-/** Project detail (PRD §8.41.6): header fields and stage moves gated by ProjManage on the service. */
+/** Project detail (PRD §8.41.6): header fields and stage moves gated by projects.manage on the service. */
 export function ProjectDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getProject(id, signal), id);

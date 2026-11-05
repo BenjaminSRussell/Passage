@@ -200,7 +200,7 @@ func TestDutiesAreEnforced(t *testing.T) {
 		{http.MethodPost, "/v1/trade/export-checks", DutyTradeView},
 	} {
 		// A neighbouring duty is not enough.
-		rec := serve(t, h, call{method: tc.method, path: tc.path, duties: []string{"ComplianceView"}})
+		rec := serve(t, h, call{method: tc.method, path: tc.path, duties: []string{"compliance.view"}})
 		if rec.Code != http.StatusForbidden || problemCode(t, rec) != "AUTH-0003" {
 			t.Errorf("%s %s without %s: %d", tc.method, tc.path, tc.duty, rec.Code)
 		}

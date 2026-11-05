@@ -18,15 +18,15 @@ import (
 )
 
 const (
-	dutyDeduction       = "DeductionMaintain"
-	dutyWriteOffApprove = "ARWriteOffApprove"
+	dutyDeduction       = "receivables.deduction.maintain"
+	dutyWriteOffApprove = "receivables.write-off.approve"
 	maxReasonCode       = 60
 	maxDecisionNote     = 1000
 	maxSplitParts       = 20
 )
 
-// deductionRoutes mounts the deductions workbench (FR-30.17). Reads need ARView;
-// recording and every workbench move need DeductionMaintain (§5.30.17).
+// deductionRoutes mounts the deductions workbench (FR-30.17). Reads need receivables.view;
+// recording and every workbench move need receivables.deduction.maintain (§5.30.17).
 func (a *API) deductionRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyDeduction)).Post("/deductions", a.createDeduction)
 	r.With(authz.RequireDuty(dutyView)).Get("/deductions", a.listDeductions)
@@ -157,8 +157,8 @@ type deductionActionRequest struct {
 }
 
 // deductionAction handles POST /deductions/{id}:match|approve|deny|split|write-off.
-// Every move needs DeductionMaintain and If-Match; a write-off above
-// deduction_write_off_limit also needs ARWriteOffApprove.
+// Every move needs receivables.deduction.maintain and If-Match; a write-off above
+// deduction_write_off_limit also needs receivables.write-off.approve.
 func (a *API) deductionAction(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return

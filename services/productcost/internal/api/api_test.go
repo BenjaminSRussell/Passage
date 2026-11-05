@@ -13,7 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 )
 
-const allDuties = "CostingView,CostingCalculate,CostingActivate,CostingSystem"
+const allDuties = "productcost.view,productcost.calculate,productcost.activate,productcost.variance.compute"
 
 // workedItems is the FR-39.4 example as the API receives it.
 const workedItems = `[
@@ -60,14 +60,14 @@ func TestAuth_TenantAndDutiesAreRequired(t *testing.T) {
 	if rec := do(r, http.MethodPost, "/v1/product-costing/rolls", `{}`, "", false); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no tenant: %d", rec.Code)
 	}
-	if rec := do(r, http.MethodPost, "/v1/product-costing/activations:preview", `{}`, "CostingCalculate", true); rec.Code != http.StatusForbidden {
-		t.Errorf("activation without CostingActivate: %d", rec.Code)
+	if rec := do(r, http.MethodPost, "/v1/product-costing/activations:preview", `{}`, "productcost.calculate", true); rec.Code != http.StatusForbidden {
+		t.Errorf("activation without productcost.activate: %d", rec.Code)
 	}
 	if rec := do(r, http.MethodPost, "/v1/product-costing/rolls", `{}`, "", true); rec.Code != http.StatusForbidden {
-		t.Errorf("roll without CostingCalculate: %d", rec.Code)
+		t.Errorf("roll without productcost.calculate: %d", rec.Code)
 	}
-	if rec := do(r, http.MethodPost, "/v1/product-costing/variances/compute", `{}`, "CostingCalculate,CostingActivate", true); rec.Code != http.StatusForbidden {
-		t.Errorf("variance compute without CostingSystem: %d", rec.Code)
+	if rec := do(r, http.MethodPost, "/v1/product-costing/variances/compute", `{}`, "productcost.calculate,productcost.activate", true); rec.Code != http.StatusForbidden {
+		t.Errorf("variance compute without productcost.variance.compute: %d", rec.Code)
 	}
 }
 

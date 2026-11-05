@@ -16,8 +16,8 @@ import (
 
 // Duties and limits of slice 2 (FR-33.11, FR-33.13, FR-33.16).
 const (
-	dutyCompliance = "QM_COMPLIANCE_MAINTAIN"
-	dutyStability  = "QM_STABILITY_MAINTAIN"
+	dutyCompliance = "quality.compliance.maintain"
+	dutyStability  = "quality.stability.maintain"
 	// defaultSPCOrders and maxSPCOrders bound the quality orders (chart points)
 	// one SPC chart reads; the control limits always use the last 25.
 	defaultSPCOrders = 50

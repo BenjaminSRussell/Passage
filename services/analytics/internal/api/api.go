@@ -20,8 +20,8 @@ import (
 
 // Duties from §9.46.17.
 const (
-	DutyView    = "AnalyticsView"
-	DutyFinance = "FinanceView"
+	DutyView    = "analytics.view"
+	DutyFinance = "analytics.finance.view"
 )
 
 // CodeBadRequest is raised by the HTTP layer for malformed input. Domain codes

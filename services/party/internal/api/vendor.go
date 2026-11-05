@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	dutyBankWrite  = "party.vendor_bank.write"
-	dutyBankReveal = "party.vendor_bank.reveal"
+	dutyBankWrite  = "party.vendor-bank.write"
+	dutyBankReveal = "party.vendor-bank.reveal"
 )
 
 func (a *API) WithVendors(vendors store.VendorStore) *API {

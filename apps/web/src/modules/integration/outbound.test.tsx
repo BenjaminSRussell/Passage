@@ -79,9 +79,9 @@ const result: OutboundResult = {
 const partnersOnly: Handler = (url) => (url.pathname === "/api/v1/edi/partners" ? json(200, { items: [partner] }) : undefined);
 
 describe("send EDI document", () => {
-  it("is registered behind EDI_OPERATE and reachable from the nav", () => {
+  it("is registered behind edi.operate and reachable from the nav", () => {
     const nav = integration.nav.find((n) => n.to === "/integration/interchanges/outbound");
-    expect(nav?.duty).toBe("EDI_OPERATE");
+    expect(nav?.duty).toBe("edi.operate");
     expect(integration.routes.map((r) => r.path)).toContain("/integration/interchanges/outbound");
   });
 

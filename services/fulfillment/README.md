@@ -123,28 +123,28 @@ and `npx tsc --noEmit` in `apps/web`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`, a line with an active drop-ship as `drop_ship`; a line whose remainder sales cancelled is released only up to the quantity it keeps (`order_line_kept`) and skipped as `order_remainder_cancelled` when nothing is left; runs per warehouse are serialised |
-| GET | `/v1/fulfillment/shipments` | WarehouseView | Delivery monitor; filters `status`, `warehouseId`, `orderId`, `limit` (1 to 500, default 100) |
-| GET | `/v1/fulfillment/shipments/{id}` | WarehouseView | ETag carries the version |
-| POST | `/v1/fulfillment/shipments/{id}:confirm-pick` | WarehousePick | Idempotency-Key, If-Match; above plan only within the over-delivery tolerance (FUL-0004 with none, FUL-0005 above it) and never beyond what the order line keeps after sales cancelled the remainder (FUL-0066) |
-| POST | `/v1/fulfillment/shipments/{id}/containers` | WarehousePack | Packs and closes a container with an SSCC; Idempotency-Key, If-Match |
-| POST | `/v1/fulfillment/shipments/{id}:post-packing-slip` | PackingSlipPost | Slip, journal, containers SHIPPED and outbox in one transaction; Idempotency-Key, If-Match |
-| GET | `/v1/fulfillment/packing-slips` | WarehouseView | Packing slip journal; filters `shipmentId`, `orderId`, `status`, `limit` |
-| GET | `/v1/fulfillment/packing-slips/{id}` | WarehouseView | Slip with lines and journal |
-| POST | `/v1/fulfillment/packing-slips/{id}:cancel` | PackingSlipPost | Reversing slip with mirror lines, journal and packaging fee lines; takes returnable containers back off the customer's balance; Idempotency-Key |
+| POST | `/v1/fulfillment/releases:run` | fulfillment.warehouse.release | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`, a line with an active drop-ship as `drop_ship`; a line whose remainder sales cancelled is released only up to the quantity it keeps (`order_line_kept`) and skipped as `order_remainder_cancelled` when nothing is left; runs per warehouse are serialised |
+| GET | `/v1/fulfillment/shipments` | fulfillment.warehouse.view | Delivery monitor; filters `status`, `warehouseId`, `orderId`, `limit` (1 to 500, default 100) |
+| GET | `/v1/fulfillment/shipments/{id}` | fulfillment.warehouse.view | ETag carries the version |
+| POST | `/v1/fulfillment/shipments/{id}:confirm-pick` | fulfillment.warehouse.pick | Idempotency-Key, If-Match; above plan only within the over-delivery tolerance (FUL-0004 with none, FUL-0005 above it) and never beyond what the order line keeps after sales cancelled the remainder (FUL-0066) |
+| POST | `/v1/fulfillment/shipments/{id}/containers` | fulfillment.warehouse.pack | Packs and closes a container with an SSCC; Idempotency-Key, If-Match |
+| POST | `/v1/fulfillment/shipments/{id}:post-packing-slip` | fulfillment.packing-slip.post | Slip, journal, containers SHIPPED and outbox in one transaction; Idempotency-Key, If-Match |
+| GET | `/v1/fulfillment/packing-slips` | fulfillment.warehouse.view | Packing slip journal; filters `shipmentId`, `orderId`, `status`, `limit` |
+| GET | `/v1/fulfillment/packing-slips/{id}` | fulfillment.warehouse.view | Slip with lines and journal |
+| POST | `/v1/fulfillment/packing-slips/{id}:cancel` | fulfillment.packing-slip.post | Reversing slip with mirror lines, journal and packaging fee lines; takes returnable containers back off the customer's balance; Idempotency-Key |
 
 ## Endpoints (slice 2)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET / POST | `/v1/fulfillment/container-types` | WarehouseView / PackingRuleMaintain | Code, tare, returnable, packaging material; POST replaces by code |
-| GET / POST | `/v1/fulfillment/packing-rules` | WarehouseView / PackingRuleMaintain | Per product and optional customer; POST replaces the rule of that scope and keeps its id; unknown container type is FUL-0050 (422) |
-| GET / POST | `/v1/fulfillment/product-packaging` | WarehouseView / PackingRuleMaintain | kg of a material per product unit |
-| POST | `/v1/fulfillment/shipments/{id}:auto-pack` | WarehousePack | Idempotency-Key, If-Match; optional `unitWeights` per line; FUL-0012 warnings, FUL-0013 |
-| GET / POST | `/v1/fulfillment/packaging-fee-rates` | PackagingFeeMaintain | Rate per kg per country and material, valid from a date |
-| GET | `/v1/fulfillment/packaging-report` | PackagingFeeMaintain | `countryCode`, `period` (YYYY-MM), optional `legalEntityId`; net of reversals |
-| GET | `/v1/fulfillment/returnable-packaging` | WarehouseView | Balances, optional `customerId` |
-| POST | `/v1/fulfillment/returnable-packaging:return` | WarehouseReceive | Standalone return receipt, whole containers; FUL-0015 below zero |
+| GET / POST | `/v1/fulfillment/container-types` | fulfillment.warehouse.view / fulfillment.packing-rule.maintain | Code, tare, returnable, packaging material; POST replaces by code |
+| GET / POST | `/v1/fulfillment/packing-rules` | fulfillment.warehouse.view / fulfillment.packing-rule.maintain | Per product and optional customer; POST replaces the rule of that scope and keeps its id; unknown container type is FUL-0050 (422) |
+| GET / POST | `/v1/fulfillment/product-packaging` | fulfillment.warehouse.view / fulfillment.packing-rule.maintain | kg of a material per product unit |
+| POST | `/v1/fulfillment/shipments/{id}:auto-pack` | fulfillment.warehouse.pack | Idempotency-Key, If-Match; optional `unitWeights` per line; FUL-0012 warnings, FUL-0013 |
+| GET / POST | `/v1/fulfillment/packaging-fee-rates` | fulfillment.packaging-fee.maintain | Rate per kg per country and material, valid from a date |
+| GET | `/v1/fulfillment/packaging-report` | fulfillment.packaging-fee.maintain | `countryCode`, `period` (YYYY-MM), optional `legalEntityId`; net of reversals |
+| GET | `/v1/fulfillment/returnable-packaging` | fulfillment.warehouse.view | Balances, optional `customerId` |
+| POST | `/v1/fulfillment/returnable-packaging:return` | fulfillment.warehouse.receive | Standalone return receipt, whole containers; FUL-0015 below zero |
 
 The post takes an optional `countryCode` (ship-to); with it, the slip carries
 the packaging fee lines and a shipped material without a rate is FUL-0014.
@@ -153,15 +153,15 @@ the packaging fee lines and a shipped material without a rate is FUL-0014.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/shipments/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; nothing shipped and no container (BR-28.6) |
-| POST | `/v1/fulfillment/waves:preview` | WarehouseRelease | Read-only workbench preview; filter, `groupBy`, `maxLines` (200), `maxOrders` (50) |
-| POST | `/v1/fulfillment/waves` | WarehouseRelease | Idempotency-Key; creates the waves, shipments to PICKING; FUL-0016 message; FUL-0053 when stale |
-| GET | `/v1/fulfillment/waves`, `/waves/{id}` | WarehouseView | Waves newest first (`warehouseId`, `status`, `picker`, `unassigned`, `limit`); one wave with its shipments, lines and picker |
-| POST | `/v1/fulfillment/waves/{id}:assign` | WarehouseRelease | Idempotency-Key, If-Match (wave version); body `picker`; assigns or reassigns an OPEN wave; `wave.assigned` |
-| POST | `/v1/fulfillment/waves/{id}:close` | WarehouseRelease | Idempotency-Key, If-Match (wave version); closes when every line is picked or on a cancelled shipment, else FUL-0055; `wave.closed`; a CLOSED wave refuses `:confirm-pick` (FUL-0001) |
-| GET | `/v1/fulfillment/shipments/{id}/tracking` | WarehouseView | Tracking events, newest first |
-| POST | `/v1/fulfillment/shipments/{id}/tracking` | WarehouseShip | One event per provider event key (201, or 200 `created: false`); DELIVERED moves SHIPPED to DELIVERED |
-| GET | `/v1/fulfillment/shipments/{id}/containers/{cid}/label` | WarehouseView | GS1-128 SSCC label as ZPL (`application/zpl`) |
+| POST | `/v1/fulfillment/shipments/{id}:cancel` | fulfillment.warehouse.release | Idempotency-Key, If-Match; nothing shipped and no container (BR-28.6) |
+| POST | `/v1/fulfillment/waves:preview` | fulfillment.warehouse.release | Read-only workbench preview; filter, `groupBy`, `maxLines` (200), `maxOrders` (50) |
+| POST | `/v1/fulfillment/waves` | fulfillment.warehouse.release | Idempotency-Key; creates the waves, shipments to PICKING; FUL-0016 message; FUL-0053 when stale |
+| GET | `/v1/fulfillment/waves`, `/waves/{id}` | fulfillment.warehouse.view | Waves newest first (`warehouseId`, `status`, `picker`, `unassigned`, `limit`); one wave with its shipments, lines and picker |
+| POST | `/v1/fulfillment/waves/{id}:assign` | fulfillment.warehouse.release | Idempotency-Key, If-Match (wave version); body `picker`; assigns or reassigns an OPEN wave; `wave.assigned` |
+| POST | `/v1/fulfillment/waves/{id}:close` | fulfillment.warehouse.release | Idempotency-Key, If-Match (wave version); closes when every line is picked or on a cancelled shipment, else FUL-0055; `wave.closed`; a CLOSED wave refuses `:confirm-pick` (FUL-0001) |
+| GET | `/v1/fulfillment/shipments/{id}/tracking` | fulfillment.warehouse.view | Tracking events, newest first |
+| POST | `/v1/fulfillment/shipments/{id}/tracking` | fulfillment.warehouse.ship | One event per provider event key (201, or 200 `created: false`); DELIVERED moves SHIPPED to DELIVERED |
+| GET | `/v1/fulfillment/shipments/{id}/containers/{cid}/label` | fulfillment.warehouse.view | GS1-128 SSCC label as ZPL (`application/zpl`) |
 
 Release lines take an optional `carrierCode` (one per order) and `zone`. The
 post takes `asnEnabled` to publish `asn.issued`. Confirm-pick also works on a
@@ -172,15 +172,15 @@ not be below what is packed (FUL-0031).
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/v1/fulfillment/delivered-not-invoiced` | WarehouseView | `legalEntityId` (required), `customerId`, `asOf` (default today), `limit`; open 1405 per currency (`totals`, `lineCount`) and the slips with days outstanding |
-| GET | `/v1/fulfillment/sscc-register` | WarehouseView | `companyPrefix`, `customerId`, `from`, `to` (issue dates, UTC), `limit`, `cursor`; issued SSCCs in SSCC order with container, shipment, slip, `issuedAt` and `noReuseUntil` (BR-28.5), `nextCursor` when more exist |
+| GET | `/v1/fulfillment/delivered-not-invoiced` | fulfillment.warehouse.view | `legalEntityId` (required), `customerId`, `asOf` (default today), `limit`; open 1405 per currency (`totals`, `lineCount`) and the slips with days outstanding |
+| GET | `/v1/fulfillment/sscc-register` | fulfillment.warehouse.view | `companyPrefix`, `customerId`, `from`, `to` (issue dates, UTC), `limit`, `cursor`; issued SSCCs in SSCC order with container, shipment, slip, `issuedAt` and `noReuseUntil` (BR-28.5), `nextCursor` when more exist |
 
 ## Endpoints (slice 6)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/v1/fulfillment/backorders` | WarehouseView | Short picks and backorders (FR-28.2): `warehouseId`, `status` (`open` default, `all`), `from`, `to` (first short-pick date, UTC), `limit`, `cursor`; each line with `qtyRemainder` (planned - picked) and `open`, newest short pick first |
-| GET | `/v1/fulfillment/returnable-packaging/aging` | WarehouseView | Returnable aging (FR-28.16): `customerId`, `chargeDays` (30 to 365, default 90), `chargeDue=true`, `limit`; every balance above zero with `oldestOutstandingDate`, `daysOutstanding` (FIFO from the slip posting dates, as of today UTC) and `chargeDue` (older than `chargeDays`); `count` and `chargeDueCount` cover all, `items` the oldest `limit` |
+| GET | `/v1/fulfillment/backorders` | fulfillment.warehouse.view | Short picks and backorders (FR-28.2): `warehouseId`, `status` (`open` default, `all`), `from`, `to` (first short-pick date, UTC), `limit`, `cursor`; each line with `qtyRemainder` (planned - picked) and `open`, newest short pick first |
+| GET | `/v1/fulfillment/returnable-packaging/aging` | fulfillment.warehouse.view | Returnable aging (FR-28.16): `customerId`, `chargeDays` (30 to 365, default 90), `chargeDue=true`, `limit`; every balance above zero with `oldestOutstandingDate`, `daysOutstanding` (FIFO from the slip posting dates, as of today UTC) and `chargeDue` (older than `chargeDays`); `count` and `chargeDueCount` cover all, `items` the oldest `limit` |
 
 A pick confirmation that leaves a line below plan stamps the line's first
 short-pick time (migration 0005); the remainder is the backorder until a re-pick
@@ -190,8 +190,8 @@ reaches plan or the shipment is cancelled.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/shipments/{id}:nest-containers` | WarehousePack | Idempotency-Key, If-Match; body `containerType`, `containerIds` (1 to 200); puts CLOSED free cartons of a PICKED or PACKED shipment on a new pallet with its own SSCC (FR-28.3); 201 with `container` and `shipment`; FUL-0056 when a carton is not CLOSED, is on a pallet or is a pallet; `container.nested` |
-| POST | `/v1/fulfillment/shipments/{id}/containers/{cid}:unnest` | WarehousePack | Idempotency-Key, If-Match; dissolves a CLOSED pallet, its cartons stay packed and the pallet SSCC is never reissued; FUL-0056 when the container is not a pallet; `container.unnested` |
+| POST | `/v1/fulfillment/shipments/{id}:nest-containers` | fulfillment.warehouse.pack | Idempotency-Key, If-Match; body `containerType`, `containerIds` (1 to 200); puts CLOSED free cartons of a PICKED or PACKED shipment on a new pallet with its own SSCC (FR-28.3); 201 with `container` and `shipment`; FUL-0056 when a carton is not CLOSED, is on a pallet or is a pallet; `container.nested` |
+| POST | `/v1/fulfillment/shipments/{id}/containers/{cid}:unnest` | fulfillment.warehouse.pack | Idempotency-Key, If-Match; dissolves a CLOSED pallet, its cartons stay packed and the pallet SSCC is never reissued; FUL-0056 when the container is not a pallet; `container.unnested` |
 
 A container returns `parentContainerId` (its pallet) and `childContainerIds`
 (the cartons on a pallet). A carton on a pallet, or a pallet, cannot be unpacked
@@ -202,12 +202,12 @@ the ASN gives each carton its `parent_sscc`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/v1/fulfillment/warehouse-settings` | WarehouseView | The short pick action (FR-28.8) of every warehouse the caller sees shipments or a saved setting for, with its `legalEntityId`; REMAINDER_BACKORDER (the default) at version 0 when none is saved |
-| GET | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseView | One warehouse; ETag carries the version (0 when none is saved) |
-| PUT | `/v1/fulfillment/warehouse-settings/{warehouseId}` | WarehouseRelease | Idempotency-Key, If-Match (0 when none is saved); body `shortPickAction` (KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER) and `legalEntityId`; FUL-0057 when the warehouse belongs to another legal entity; `warehousesetting.changed` |
-| GET | `/v1/fulfillment/delivery-tolerances` | WarehouseView | Over-delivery tolerances (BR-28.7), most specific scope first; filters `productId`, `customerId`, `limit` |
-| PUT | `/v1/fulfillment/delivery-tolerances` | PackingRuleMaintain | Idempotency-Key, If-Match (0 for a new scope); body `productId`, `customerId` (either may be null), `overdeliveryPct` (0 to 100, 4 decimals); `deliverytolerance.changed` |
-| POST | `/v1/fulfillment/shipments/{id}:backorder-remainder` | WarehouseRelease | Idempotency-Key, If-Match; optional `plannedShipDate`; the rules of `:close-remainder`, and the closed quantity moves to a new RELEASED shipment (`backorderOfId`); `shipment.closed` with `backorder_shipment_id`, then `shipment.released` with `backorder_of` |
+| GET | `/v1/fulfillment/warehouse-settings` | fulfillment.warehouse.view | The short pick action (FR-28.8) of every warehouse the caller sees shipments or a saved setting for, with its `legalEntityId`; REMAINDER_BACKORDER (the default) at version 0 when none is saved |
+| GET | `/v1/fulfillment/warehouse-settings/{warehouseId}` | fulfillment.warehouse.view | One warehouse; ETag carries the version (0 when none is saved) |
+| PUT | `/v1/fulfillment/warehouse-settings/{warehouseId}` | fulfillment.warehouse.release | Idempotency-Key, If-Match (0 when none is saved); body `shortPickAction` (KEEP_OPEN, CANCEL_REMAINDER, REMAINDER_BACKORDER) and `legalEntityId`; FUL-0057 when the warehouse belongs to another legal entity; `warehousesetting.changed` |
+| GET | `/v1/fulfillment/delivery-tolerances` | fulfillment.warehouse.view | Over-delivery tolerances (BR-28.7), most specific scope first; filters `productId`, `customerId`, `limit` |
+| PUT | `/v1/fulfillment/delivery-tolerances` | fulfillment.packing-rule.maintain | Idempotency-Key, If-Match (0 for a new scope); body `productId`, `customerId` (either may be null), `overdeliveryPct` (0 to 100, 4 decimals); `deliverytolerance.changed` |
+| POST | `/v1/fulfillment/shipments/{id}:backorder-remainder` | fulfillment.warehouse.release | Idempotency-Key, If-Match; optional `plannedShipDate`; the rules of `:close-remainder`, and the closed quantity moves to a new RELEASED shipment (`backorderOfId`); `shipment.closed` with `backorder_shipment_id`, then `shipment.released` with `backorder_of` |
 
 The setting is per warehouse and scoped by its legal entity. When a packing slip
 posts and leaves the shipment PARTIALLY_SHIPPED, the action runs in the same
@@ -219,9 +219,9 @@ the post response names it (`remainderAction`, `backorderShipmentId`).
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/v1/fulfillment/legal-entity-settings` | WarehouseView | The posting defaults of every legal entity the caller sees shipments or a saved setting for; both flags false at version 0 when none is saved |
-| GET | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | WarehouseView | One legal entity; ETag carries the version (0 when none is saved) |
-| PUT | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | WarehouseRelease (+ `ledger.setup.write` to change `cogsAtShipment`) | Idempotency-Key, If-Match (0 when none is saved); body `cogsAtShipment` and `asnEnabled`, both required; FUL-0058 outside the caller's legal-entity scope; 403 AUTH-0003 for a `cogsAtShipment` change without `ledger.setup.write`; `legalentitysetting.changed` |
+| GET | `/v1/fulfillment/legal-entity-settings` | fulfillment.warehouse.view | The posting defaults of every legal entity the caller sees shipments or a saved setting for; both flags false at version 0 when none is saved |
+| GET | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | fulfillment.warehouse.view | One legal entity; ETag carries the version (0 when none is saved) |
+| PUT | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | fulfillment.warehouse.release (+ `ledger.setup.write` to change `cogsAtShipment`) | Idempotency-Key, If-Match (0 when none is saved); body `cogsAtShipment` and `asnEnabled`, both required; FUL-0058 outside the caller's legal-entity scope; 403 AUTH-0003 for a `cogsAtShipment` change without `ledger.setup.write`; `legalentitysetting.changed` |
 
 `cogs_at_shipment` and `asn_enabled` (section 5.28.13) are per legal entity.
 `cogs_at_shipment` is the COGS posting policy (BR-28.1): every
@@ -229,7 +229,7 @@ the post response names it (`remainderAction`, `backorderShipmentId`).
 saved), and a request that names the other value is refused with FUL-0059, so a
 poster cannot book one slip on another COGS timing. Changing it is an accounting
 policy change and needs the ledger setup duty `ledger.setup.write` on top of
-`WarehouseRelease`. `asn_enabled` is only the default of the ASN output: a
+`fulfillment.warehouse.release`. `asn_enabled` is only the default of the ASN output: a
 request that omits `asnEnabled` takes it, one that names it keeps its own value.
 
 Idempotency: a key is stored per tenant with a fingerprint of the method, path
@@ -244,11 +244,11 @@ with a stable `code`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/drop-ships` | WarehouseRelease | Idempotency-Key; links an order line to its purchase order line at the PO cost (`unitCost` positive, `currency`); one active drop-ship per order line (FUL-0061); a line on a warehouse shipment that is not cancelled is refused (FUL-0062), and a qty above what the line keeps after sales cancelled the remainder (FUL-0066); `dropship.created` |
-| GET | `/v1/fulfillment/drop-ships` | WarehouseView | Newest first; filters `status` (OPEN, CONFIRMED, CANCELLED), `orderId`, `vendorId`, `limit` |
-| GET | `/v1/fulfillment/drop-ships/{id}` | WarehouseView | One drop-ship with its journal; ETag carries the version |
-| POST | `/v1/fulfillment/drop-ships/{id}:confirm` | PurchaseOrderConfirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; a confirmed total above what the line keeps after sales cancelled the remainder is refused (FUL-0066); `dropship.confirmed` carries the journal; final |
-| POST | `/v1/fulfillment/drop-ships/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; only an OPEN drop-ship (a CONFIRMED one is refused with FUL-0001); `dropship.cancelled` |
+| POST | `/v1/fulfillment/drop-ships` | fulfillment.warehouse.release | Idempotency-Key; links an order line to its purchase order line at the PO cost (`unitCost` positive, `currency`); one active drop-ship per order line (FUL-0061); a line on a warehouse shipment that is not cancelled is refused (FUL-0062), and a qty above what the line keeps after sales cancelled the remainder (FUL-0066); `dropship.created` |
+| GET | `/v1/fulfillment/drop-ships` | fulfillment.warehouse.view | Newest first; filters `status` (OPEN, CONFIRMED, CANCELLED), `orderId`, `vendorId`, `limit` |
+| GET | `/v1/fulfillment/drop-ships/{id}` | fulfillment.warehouse.view | One drop-ship with its journal; ETag carries the version |
+| POST | `/v1/fulfillment/drop-ships/{id}:confirm` | procurement.purchase-order.confirm | Idempotency-Key, If-Match; body `shippedOn`, optional `vendorShipmentRef`, `postingDate`; books Dr 5000 / Cr 2110 at the PO cost with no inventory transaction; a confirmed total above what the line keeps after sales cancelled the remainder is refused (FUL-0066); `dropship.confirmed` carries the journal; final |
+| POST | `/v1/fulfillment/drop-ships/{id}:cancel` | fulfillment.warehouse.release | Idempotency-Key, If-Match; only an OPEN drop-ship (a CONFIRMED one is refused with FUL-0001); `dropship.cancelled` |
 
 ## Endpoints (carrier-gateway, #482)
 
@@ -259,9 +259,9 @@ because a shipment stores no addresses or dimensions.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/fulfillment/shipments/{id}:carrier-rates` | WarehouseShip | Optional `carriers`, `services`; rates cheapest first and per-carrier `failures` |
-| POST | `/v1/fulfillment/shipments/{id}:carrier-label` | WarehouseShip | Idempotency-Key (1 to 64 visible ASCII); `service`, optional `carrier` (default: the shipment's) and `reference` (default: the shipment number). A retry returns the same label (200). The label is recorded as a LABELLED tracking event |
-| POST | `/v1/fulfillment/shipments/{id}:carrier-track` | WarehouseShip | Optional `carrier`, `trackingNumber` (default: the newest tracked one); records each new carrier event once (`recorded`) |
+| POST | `/v1/fulfillment/shipments/{id}:carrier-rates` | fulfillment.warehouse.ship | Optional `carriers`, `services`; rates cheapest first and per-carrier `failures` |
+| POST | `/v1/fulfillment/shipments/{id}:carrier-label` | fulfillment.warehouse.ship | Idempotency-Key (1 to 64 visible ASCII); `service`, optional `carrier` (default: the shipment's) and `reference` (default: the shipment number). A retry returns the same label (200). The label is recorded as a LABELLED tracking event |
+| POST | `/v1/fulfillment/shipments/{id}:carrier-track` | fulfillment.warehouse.ship | Optional `carrier`, `trackingNumber` (default: the newest tracked one); records each new carrier event once (`recorded`) |
 
 Carrier errors: FUL-0071 means carrier-gateway refused (its code is in the detail; 404 or 422, and a 400 passes its
 field errors through). FUL-0072 means it refused the call (502) or is unavailable (503, retry). FUL-0073 means the

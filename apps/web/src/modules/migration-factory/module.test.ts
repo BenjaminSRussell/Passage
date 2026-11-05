@@ -50,12 +50,12 @@ describe("migration-factory module", () => {
 
   it("guards the navigation with the duties the service enforces", () => {
     expect(migrationFactory.nav).toEqual([
-      { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },
-      { label: "Pack catalog", to: "/migration-factory/packs", duty: "MigrationView" },
-      { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "MigrationView" },
-      { label: "Tolerances", to: "/migration-factory/tolerances", duty: "MigrationView" },
+      { label: "Pack runs", to: "/migration-factory", duty: "migration.factory.view" },
+      { label: "Pack catalog", to: "/migration-factory/packs", duty: "migration.factory.view" },
+      { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "migration.factory.view" },
+      { label: "Tolerances", to: "/migration-factory/tolerances", duty: "migration.factory.view" },
       { label: "Legacy reference", to: "/migration-factory/xref" },
-      { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "CutoverManager" },
+      { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "migration.cutover.manage" },
     ]);
   });
 

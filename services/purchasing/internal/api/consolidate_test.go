@@ -162,7 +162,7 @@ func TestConsolidate_Rejections(t *testing.T) {
 	}
 	h := newHarness(t)
 	if rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions:consolidate", duties: []string{dutyPurchaseOrderInquire}, body: `{"lines":[]}`, headers: idem("k")}); rec.Code != http.StatusForbidden {
-		t.Fatalf("without PurchaseOrderMaintain: %d", rec.Code)
+		t.Fatalf("without procurement.purchase-order.maintain: %d", rec.Code)
 	}
 }
 

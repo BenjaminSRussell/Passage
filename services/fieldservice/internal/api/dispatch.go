@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	dutyDispatch = "SvcDispatch"
+	dutyDispatch = "fieldservice.technician.dispatch"
 
 	maxSkills        = 30
 	maxTechSkills    = 40

@@ -141,6 +141,6 @@ describe("self service", () => {
         .filter((r) => r.path?.startsWith("/hr/my/"))
         .every((r) => (r.handle as { duty?: string }).duty),
     ).toBe(true);
-    expect(hr.nav.find((n) => n.to === "/hr/my/team")?.duty).toBe("MssBase");
+    expect(hr.nav.find((n) => n.to === "/hr/my/team")?.duty).toBe("hr.team.manage");
   });
 });

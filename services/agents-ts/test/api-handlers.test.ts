@@ -44,10 +44,10 @@ function recorder() {
 
 describe("principalFromHeaders", () => {
   it("reads tenant, user and comma-separated duties, lowercasing the ids", () => {
-    const p = principalFromHeaders({ "x-passage-tenant": T1.toUpperCase(), "x-passage-user": ADMIN, "x-passage-duties": "AgentAdmin, AgentView," });
+    const p = principalFromHeaders({ "x-passage-tenant": T1.toUpperCase(), "x-passage-user": ADMIN, "x-passage-duties": "agents.admin, agents.view," });
     expect(p.tenantId).toBe(T1);
     expect(p.userId).toBe(ADMIN);
-    expect([...p.duties].sort()).toEqual(["AgentAdmin", "AgentView"]);
+    expect([...p.duties].sort()).toEqual(["agents.admin", "agents.view"]);
   });
 
   it.each([
@@ -80,7 +80,7 @@ describe("handleKillSwitchCommand (AC-47.6)", () => {
     const registry = new KillSwitchRegistry(() => 0);
     const out$ = recorder();
     const out = await handleKillSwitchCommand({
-      principal: principal(ADMIN, T1, ["AgentAdmin"]),
+      principal: principal(ADMIN, T1, ["agents.admin"]),
       body: { scope: "TENANT", tenantId: T1, active: true },
       registry,
       versions: seq(),
@@ -105,7 +105,7 @@ describe("handleKillSwitchCommand (AC-47.6)", () => {
     const versions = seq();
     const call = (active: boolean) =>
       handleKillSwitchCommand({
-        principal: principal(ADMIN, T1, ["AgentAdmin"]),
+        principal: principal(ADMIN, T1, ["agents.admin"]),
         body: { scope: "TENANT", tenantId: T1, active },
         registry,
         versions,
@@ -126,7 +126,7 @@ describe("handleKillSwitchCommand (AC-47.6)", () => {
     const registry = new KillSwitchRegistry(() => 0);
     const err = await thrown(() =>
       handleKillSwitchCommand({
-        principal: principal(ADMIN, T1, ["AgentAdmin"]),
+        principal: principal(ADMIN, T1, ["agents.admin"]),
         body: { scope: "TENANT", tenantId: T1, active: true },
         registry,
         versions: seq(),
@@ -146,7 +146,7 @@ describe("handleKillSwitchCommand (AC-47.6)", () => {
     const out$ = recorder();
     const err = await thrown(() =>
       handleKillSwitchCommand({
-        principal: principal(ADMIN, T1, ["AgentAdmin"]),
+        principal: principal(ADMIN, T1, ["agents.admin"]),
         body: { scope: "TENANT", tenantId: T2, active: true },
         registry,
         versions: seq(),
@@ -159,10 +159,10 @@ describe("handleKillSwitchCommand (AC-47.6)", () => {
     expect(out$.events).toEqual([]);
   });
 
-  it("the global switch needs PlatformAdmin, not AgentAdmin (403 AGT-0203)", async () => {
+  it("the global switch needs platform.global.admin, not agents.admin (403 AGT-0203)", async () => {
     const err = await thrown(() =>
       handleKillSwitchCommand({
-        principal: principal(ADMIN, T1, ["AgentAdmin"]),
+        principal: principal(ADMIN, T1, ["agents.admin"]),
         body: { scope: "GLOBAL", active: true },
         registry: new KillSwitchRegistry(() => 0),
         versions: seq(),
@@ -197,7 +197,7 @@ describe("handleKillSwitchCommand (AC-47.6)", () => {
     const worker = new KillSwitchRegistry(() => t);
     const out$ = recorder();
     await handleKillSwitchCommand({
-      principal: principal(ADMIN, T1, ["PlatformAdmin"]),
+      principal: principal(ADMIN, T1, ["platform.global.admin"]),
       body: { scope: "GLOBAL", active: true },
       registry: operator,
       versions: seq(),
@@ -217,32 +217,32 @@ describe("readKillSwitchStatus", () => {
   it("shows the caller's tenant switch with its author and the global switch without one", async () => {
     const registry = new KillSwitchRegistry(() => 0);
     await handleKillSwitchCommand({
-      principal: principal(ADMIN, T1, ["AgentAdmin"]),
+      principal: principal(ADMIN, T1, ["agents.admin"]),
       body: { scope: "TENANT", tenantId: T1, active: true },
       registry,
       versions: seq(),
       publish: recorder().publish,
       now: () => NOW,
     });
-    expect(readKillSwitchStatus(principal(ADMIN, T1, ["AgentAdmin"]), registry)).toEqual({
+    expect(readKillSwitchStatus(principal(ADMIN, T1, ["agents.admin"]), registry)).toEqual({
       tenantId: T1,
       halted: true,
       stale: false,
       tenant: { active: true, version: 1, changedAt: NOW.toISOString(), byUser: ADMIN },
       global: { active: false, version: null, changedAt: null },
     });
-    expect(readKillSwitchStatus(principal(ADMIN, T2, ["PlatformAdmin"]), registry)).toMatchObject({ tenantId: T2, halted: false, tenant: { active: false, byUser: null } });
+    expect(readKillSwitchStatus(principal(ADMIN, T2, ["platform.global.admin"]), registry)).toMatchObject({ tenantId: T2, halted: false, tenant: { active: false, byUser: null } });
   });
 
   it("reports a worker that lost the stream as halted and stale (fail-closed)", () => {
     let t = 0;
     const registry = new KillSwitchRegistry(() => t);
     t += KILL_PROPAGATION_MS + 1;
-    expect(readKillSwitchStatus(principal(ADMIN, T1, ["AgentAdmin"]), registry)).toMatchObject({ halted: true, stale: true });
+    expect(readKillSwitchStatus(principal(ADMIN, T1, ["agents.admin"]), registry)).toMatchObject({ halted: true, stale: true });
   });
 
-  it("needs AgentAdmin or PlatformAdmin", async () => {
-    expect(await thrown(() => readKillSwitchStatus(principal(CLERK, T1, ["AgentView"]), new KillSwitchRegistry(() => 0)))).toMatchObject({
+  it("needs agents.admin or platform.global.admin", async () => {
+    expect(await thrown(() => readKillSwitchStatus(principal(CLERK, T1, ["agents.view"]), new KillSwitchRegistry(() => 0)))).toMatchObject({
       status: 403,
       code: "AGT-0203",
     });

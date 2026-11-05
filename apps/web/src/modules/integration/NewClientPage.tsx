@@ -23,7 +23,7 @@ import { ProblemAlert } from "./parts";
 export interface ClientValues {
   clientId: string;
   name: string;
-  /** One duty name per line (or comma separated); names may contain spaces, such as "Maintain users". */
+  /** One duty name per line (or comma separated), such as "identity.user.maintain". */
   scopes: string;
   quotaPerMin: string;
   burst: string;
@@ -36,7 +36,7 @@ type Errors = Partial<Record<keyof ClientValues, string>>;
 export const EMPTY_CLIENT: ClientValues = { clientId: "", name: "", scopes: "", quotaPerMin: String(DEFAULT_QUOTA_PER_MIN), burst: String(DEFAULT_BURST), sandboxTenantId: "", ownerContact: "" };
 
 const CLIENT_ID = /^[a-z0-9][a-z0-9._-]{2,63}$/;
-/** A duty name in any catalogue style (sales.order.read, VendorInvoicePost, Maintain users); mirrors the hub. */
+/** A duty-shaped name (sales.order.read); as permissive as the hub, which still accepts pre-#210 styles. */
 const SCOPE = /^[A-Za-z](?:[A-Za-z0-9 ._-]{0,98}[A-Za-z0-9._-])?$/;
 
 export function parseScopes(text: string): string[] {

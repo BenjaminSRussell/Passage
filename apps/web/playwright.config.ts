@@ -9,9 +9,9 @@ const E2E_DUTIES = [
   "audit.read",
   "batch.read",
   "engineering.read",
-  "Maintain legal entities",
-  "Maintain security roles",
-  "Maintain tax codes",
+  "identity.legal-entity.maintain",
+  "identity.security-role.maintain",
+  "tax.code.maintain",
   "metadata.read",
   "notify.write",
   "numbering.write",
@@ -23,11 +23,11 @@ const E2E_DUTIES = [
   "shopfloor.kiosk.login",
   "shopfloor.view",
   "tenant.administer",
-  "View effective permissions",
+  "identity.effective-permission.view",
   "workflow.approve",
   "workflow.read",
   "workflow.write",
-  "WMS_MOBILE_ADMIN",
+  "warehouse.mobile-flow.admin",
 ].join(",");
 
 export default defineConfig({

@@ -40,7 +40,7 @@ func outboxCount(t *testing.T, pool *pgxpool.Pool, typ string) int {
 
 func TestListMessages_FiltersAndKeysetPages(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(11), "EDI_OPERATE")
+	ctx := testkit.Ctx(testkit.TenantID(11), "edi.operate")
 	st := New(pool, 30)
 	p, _, err := st.CreatePartner(ctx, "k", "h", profile("MON"))
 	if err != nil {
@@ -116,7 +116,7 @@ func TestListMessages_FiltersAndKeysetPages(t *testing.T) {
 
 func TestReprocessInterchange(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(13), "EDI_OPERATE")
+	ctx := testkit.Ctx(testkit.TenantID(13), "edi.operate")
 	st := New(pool, 30)
 	p, _, err := st.CreatePartner(ctx, "k", "h", profile("RP"))
 	if err != nil {
@@ -253,7 +253,7 @@ func TestReprocessInterchange(t *testing.T) {
 
 func TestPartnerSLAs(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(14), "EDI_OPERATE")
+	ctx := testkit.Ctx(testkit.TenantID(14), "edi.operate")
 	st := New(pool, 30)
 	busy, _, err := st.CreatePartner(ctx, "k1", "h1", profile("BUSY"))
 	if err != nil {

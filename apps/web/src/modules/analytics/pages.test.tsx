@@ -103,15 +103,15 @@ describe("analytics module", () => {
     expect(analytics.routes.every((r) => r.path?.startsWith("/analytics"))).toBe(true);
     expect(analytics.nav.every((n) => n.to.startsWith("/analytics"))).toBe(true);
     expect(Object.fromEntries(analytics.nav.map((n) => [n.to, n.duty]))).toEqual({
-      "/analytics/metrics": "AnalyticsView",
-      "/analytics/dashboards": "AnalyticsView",
-      "/analytics/explorer": "AnalyticsView",
-      "/analytics/exports": "AnalyticsExport",
-      "/analytics/reconciliation": "FinanceView",
-      "/analytics/data-quality": "CatalogSteward",
-      "/analytics/schedules": "AnalyticsAuthor",
-      "/analytics/lineage": "CatalogView",
-      "/analytics/archive": "ArchiveAdmin",
+      "/analytics/metrics": "analytics.view",
+      "/analytics/dashboards": "analytics.view",
+      "/analytics/explorer": "analytics.view",
+      "/analytics/exports": "analytics.export",
+      "/analytics/reconciliation": "analytics.finance.view",
+      "/analytics/data-quality": "analytics.catalog.steward",
+      "/analytics/schedules": "analytics.author",
+      "/analytics/lineage": "analytics.catalog.view",
+      "/analytics/archive": "analytics.archive.admin",
     });
     // Every nav entry resolves to a route.
     for (const n of analytics.nav) expect(analytics.routes.some((r) => r.path === n.to)).toBe(true);
@@ -147,10 +147,10 @@ describe("governed metrics list", () => {
 
   it("shows the problem code and retries", async () => {
     let attempt = 0;
-    handler = () => (++attempt === 1 ? { status: 403, body: { code: "AUTH-0003", detail: "missing duty AnalyticsView" } } : { status: 200, body: catalog });
+    handler = () => (++attempt === 1 ? { status: 403, body: { code: "AUTH-0003", detail: "missing duty analytics.view" } } : { status: 200, body: catalog });
     renderAt("/analytics");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty AnalyticsView (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty analytics.view (AUTH-0003)");
     fireEvent.click(within(alert.closest("div") as HTMLElement).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "revenue" })).toBeInTheDocument();
   });
@@ -325,10 +325,10 @@ describe("metric reconciliation", () => {
     expect(calls.length).toBe(before);
   });
 
-  it("shows the problem when the caller lacks FinanceView", async () => {
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty FinanceView" } });
+  it("shows the problem when the caller lacks analytics.finance.view", async () => {
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty analytics.finance.view" } });
     renderAt("/analytics/reconciliation");
-    expect(await findAlert()).toHaveTextContent("missing duty FinanceView (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.finance.view (AUTH-0003)");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });

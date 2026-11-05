@@ -37,12 +37,12 @@ const (
 	maxPageSize      = 200
 
 	// Duties follow the PRD names (8.45.17); OPA maps them to privileges.
-	dutyAgreement    = "SvcAgreementMaintain"
-	dutyCaseCreate   = "SvcCaseCreate"
-	dutyCaseMaintain = "SvcCaseMaintain"
-	dutyWorkOrder    = "SvcWoMaintain"
-	dutyBilling      = "SvcBillingPost"
-	dutyInquire      = "SvcInquire"
+	dutyAgreement    = "fieldservice.agreement.maintain"
+	dutyCaseCreate   = "fieldservice.service-case.create"
+	dutyCaseMaintain = "fieldservice.service-case.maintain"
+	dutyWorkOrder    = "fieldservice.work-order.maintain"
+	dutyBilling      = "fieldservice.billing.post"
+	dutyInquire      = "fieldservice.inquire"
 )
 
 var (

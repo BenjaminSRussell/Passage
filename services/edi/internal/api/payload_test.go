@@ -25,8 +25,8 @@ func TestPayloadAndBulkRoutes_RequireOperateDuty(t *testing.T) {
 		{http.MethodGet, "/edi/v1/interchanges/" + someID + "/payload", ""},
 		{http.MethodPost, "/edi/v1/interchanges:reprocess?dryRun=true", `{"interchangeIds":["` + someID + `"]}`},
 	} {
-		// EDI_PII_VIEW only unmasks; it does not open the monitor on its own.
-		if rec := call(t, tc.method, tc.path, tc.body, "EDI_PII_VIEW,EDI_ADMIN", nil); rec.Code != http.StatusForbidden {
+		// edi.pii.view only unmasks; it does not open the monitor on its own.
+		if rec := call(t, tc.method, tc.path, tc.body, "edi.pii.view,edi.admin", nil); rec.Code != http.StatusForbidden {
 			t.Errorf("%s %s: %d, want 403", tc.method, tc.path, rec.Code)
 		}
 	}
@@ -34,7 +34,7 @@ func TestPayloadAndBulkRoutes_RequireOperateDuty(t *testing.T) {
 
 func TestGetPayload_MalformedIDIsNotFound(t *testing.T) {
 	// The nil store proves the id is checked before any lookup.
-	rec := call(t, http.MethodGet, "/edi/v1/interchanges/not-an-id/payload", "", "EDI_OPERATE", nil)
+	rec := call(t, http.MethodGet, "/edi/v1/interchanges/not-an-id/payload", "", "edi.operate", nil)
 	if rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -62,7 +62,7 @@ func TestBulkReprocess_RejectsBeforeTheStore(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := call(t, http.MethodPost, "/edi/v1/interchanges:reprocess"+tc.path, tc.body, "EDI_OPERATE", tc.headers)
+			rec := call(t, http.MethodPost, "/edi/v1/interchanges:reprocess"+tc.path, tc.body, "edi.operate", tc.headers)
 			if rec.Code != http.StatusBadRequest || problemCode(t, rec) != tc.code {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}

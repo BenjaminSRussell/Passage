@@ -220,7 +220,7 @@ func TestSizeSample_Z14TablesOverHTTP(t *testing.T) {
 		{`{"lotQty":"35001","method":"AQL","aql":"1.0","inspectionLevel":"S-4"}`, `"codeLetter":"J","sampleQty":"80","acceptNo":2,"rejectNo":3`},
 		{`{"lotQty":"50","method":"AQL","aql":"2.5"}`, `"codeLetter":"D","sampleQty":"5","acceptNo":0,"rejectNo":1`},
 	} {
-		rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/sampling-plans:size", body: c.body, duties: "QM_VIEW"})
+		rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/sampling-plans:size", body: c.body, duties: "quality.view"})
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), c.want) {
 			t.Errorf("%s: %d %s, want %s", c.body, rec.Code, rec.Body.String(), c.want)
 		}

@@ -14,7 +14,7 @@ import (
 
 func TestReprocessInterchanges(t *testing.T) {
 	pool := migrated(t)
-	ctx := testkit.Ctx(testkit.TenantID(14), "EDI_OPERATE")
+	ctx := testkit.Ctx(testkit.TenantID(14), "edi.operate")
 	st := New(pool, 30)
 	p, _, err := st.CreatePartner(ctx, "k", "h", profile("BULK"))
 	if err != nil {

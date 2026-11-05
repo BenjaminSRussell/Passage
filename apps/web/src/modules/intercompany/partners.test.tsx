@@ -75,11 +75,11 @@ const bodyRows = (table: HTMLElement) => within(table).getAllByRole("row").slice
 const cells = (row: HTMLElement) => within(row).getAllByRole("cell").map((c) => c.textContent);
 
 describe("module registration", () => {
-  it("routes the partner list, create form and detail page and links the list with IntercompanyView", () => {
+  it("routes the partner list, create form and detail page and links the list with intercompany.view", () => {
     expect(intercompany.routes.map((r) => r.path)).toEqual(
       expect.arrayContaining(["/intercompany/partners", "/intercompany/partners/new", "/intercompany/partners/:id"]),
     );
-    expect(intercompany.nav).toContainEqual({ label: "Trading partners", to: "/intercompany/partners", duty: "IntercompanyView" });
+    expect(intercompany.nav).toContainEqual({ label: "Trading partners", to: "/intercompany/partners", duty: "intercompany.view" });
   });
 });
 

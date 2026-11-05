@@ -2,7 +2,7 @@
 
 Six role-based tracks. Each track lists the audience, the duties it covers (PRD 9.50.17), the modules it
 uses, hands-on labs, and the assessment that must be passed before access is granted. Tracks are
-sequenced: a learner takes Track 1 before any other track, and PlatformAdmin and ReleaseManager learners
+sequenced: a learner takes Track 1 before any other track, and platform.global.admin and ReleaseManager learners
 pass Track 5 before Track 6.
 
 Assessment rule: a practical lab is passed only when the learner completes it in the sandbox tier, with
@@ -16,7 +16,7 @@ supplement, never the pass criterion for a duty that changes data.
 | 3 | Tenant administrator | customer administrators | TenantAdmin | 2 days |
 | 4 | Implementer | partner and internal implementers | migration, localization, cutover | 5 days |
 | 5 | SRE and on-call | operations, on-call responders | OnCallResponder, PlatformView | 3 days |
-| 6 | Platform operator and release | platform operators, release managers, commercial operations | PlatformAdmin, ReleaseManager, LicenseIssuer, StatusPagePublisher, CutoverDecisionOwner | 4 days |
+| 6 | Platform operator and release | platform operators, release managers, commercial operations | platform.global.admin, ReleaseManager, LicenseIssuer, StatusPagePublisher, CutoverDecisionOwner | 4 days |
 
 ---
 
@@ -160,13 +160,13 @@ against the runbook steps.
 
 ## Track 6: Platform operator and release (4 days)
 
-**Audience:** platform operators with PlatformAdmin, ReleaseManager, LicenseIssuer, StatusPagePublisher,
+**Audience:** platform operators with platform.global.admin, ReleaseManager, LicenseIssuer, StatusPagePublisher,
 or CutoverDecisionOwner duties. The track teaches these duties together, but the grants still follow
-9.50.17: LicenseIssuer and PlatformAdmin are a HIGH conflict, so passing the track never grants both to
+9.50.17: LicenseIssuer and platform.global.admin are a HIGH conflict, so passing the track never grants both to
 one person, and each learner is assessed only for the duties they will hold.
 
 **Covers**
-- Two-person rules: failover needs two distinct PlatformAdmin confirmations within the window
+- Two-person rules: failover needs two distinct platform.global.admin holder confirmations within the window
   (OPS-1702); tenant decommission needs a second approver; no operator posts business documents
   (OPS-001 HIGH conflict).
 - Failover and fail-back: the procedure, the RTO and RPO targets, the lag gate (`FAILOVER_MAX_LAG_S`) and

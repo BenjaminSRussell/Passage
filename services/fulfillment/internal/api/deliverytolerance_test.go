@@ -50,7 +50,7 @@ func TestDeliveryTolerance_ListSaveValidateAndDuty(t *testing.T) {
 	}
 	body := `{"productId":"` + product + `","customerId":"` + customer + `","overdeliveryPct":"2.5"}`
 	hdr := func(ifMatch, key string) map[string]string {
-		m := map[string]string{"X-Passage-Duties": "WarehouseView,PackingRuleMaintain"}
+		m := map[string]string{"X-Passage-Duties": "fulfillment.warehouse.view,fulfillment.packing-rule.maintain"}
 		if ifMatch != "" {
 			m["If-Match"] = ifMatch
 		}
@@ -97,10 +97,10 @@ func TestDeliveryTolerance_ListSaveValidateAndDuty(t *testing.T) {
 	if rec := do(t, h, http.MethodPut, path, `{"overdeliveryPct":"0"}`, hdr(`"2"`, "t-4")); rec.Code != http.StatusOK || savedTol.in.ProductID != nil || savedTol.in.CustomerID != nil {
 		t.Fatalf("general: %d %+v", rec.Code, savedTol)
 	}
-	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "t-5", "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "t-5", "X-Passage-Duties": "fulfillment.warehouse.view"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer save: %d", rec.Code)
 	}
-	if rec := do(t, h, http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "fulfillment.warehouse.pick"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("picker read: %d", rec.Code)
 	}
 }

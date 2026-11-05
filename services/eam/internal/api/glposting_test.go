@@ -20,7 +20,7 @@ import (
 
 const (
 	apiEntity  = "00000000-0000-0000-0000-0000000000e1"
-	glDuties   = "EamAssetMaintain,EamPlanner,EamTechnician,EamInquire,EamSetupAdmin,EamGlPost"
+	glDuties   = "eam.asset.maintain,eam.work.plan,eam.work-order.execute,eam.inquire,eam.setup.admin,eam.gl.post"
 	apiTenant  = 61
 	otherEntID = "00000000-0000-0000-0000-0000000000e2"
 )
@@ -39,17 +39,17 @@ func TestGL_ValidationAndAuthorizationBeforeTheStore(t *testing.T) {
 		name, method, path, body, duties string
 		status                           int
 	}{
-		{"post needs the GL post duty", http.MethodPost, "/v1/eam/gl-postings", `{}`, "EamInquire", http.StatusForbidden},
-		{"the planner duty cannot book", http.MethodPost, "/v1/eam/gl-postings", `{}`, "EamPlanner", http.StatusForbidden},
-		{"profile needs the setup duty", http.MethodPut, "/v1/eam/posting-profiles", `{}`, "EamPlanner", http.StatusForbidden},
-		{"post without a ledger", http.MethodPost, "/v1/eam/gl-postings", `{"currency":"USD"}`, "EamGlPost", http.StatusBadRequest},
-		{"post with a bad currency", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"usd"}`, "EamGlPost", http.StatusBadRequest},
-		{"post for another legal entity", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","legalEntityId":"` + otherEntID + `"}`, "EamGlPost", http.StatusBadRequest},
-		{"post with a bad site", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","siteId":"x"}`, "EamGlPost", http.StatusBadRequest},
-		{"profile with a bad type", http.MethodPut, "/v1/eam/posting-profiles", `{"workOrderType":"NOPE","partsExpenseAccount":"1","laborExpenseAccount":"1","partsOffsetAccount":"1","laborOffsetAccount":"1"}`, "EamSetupAdmin", http.StatusBadRequest},
-		{"profile with a bad account", http.MethodPut, "/v1/eam/posting-profiles", `{"partsExpenseAccount":"a b","laborExpenseAccount":"1","partsOffsetAccount":"1","laborOffsetAccount":"1"}`, "EamSetupAdmin", http.StatusBadRequest},
-		{"reconciliation needs a period as YYYY-MM", http.MethodGet, "/v1/eam/gl-reconciliation?ledgerId=" + ledgerID + "&currency=USD&periodTo=2026-13", ``, "EamInquire", http.StatusBadRequest},
-		{"reconciliation needs a currency", http.MethodGet, "/v1/eam/gl-reconciliation?ledgerId=" + ledgerID, ``, "EamInquire", http.StatusBadRequest},
+		{"post needs the GL post duty", http.MethodPost, "/v1/eam/gl-postings", `{}`, "eam.inquire", http.StatusForbidden},
+		{"the planner duty cannot book", http.MethodPost, "/v1/eam/gl-postings", `{}`, "eam.work.plan", http.StatusForbidden},
+		{"profile needs the setup duty", http.MethodPut, "/v1/eam/posting-profiles", `{}`, "eam.work.plan", http.StatusForbidden},
+		{"post without a ledger", http.MethodPost, "/v1/eam/gl-postings", `{"currency":"USD"}`, "eam.gl.post", http.StatusBadRequest},
+		{"post with a bad currency", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"usd"}`, "eam.gl.post", http.StatusBadRequest},
+		{"post for another legal entity", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","legalEntityId":"` + otherEntID + `"}`, "eam.gl.post", http.StatusBadRequest},
+		{"post with a bad site", http.MethodPost, "/v1/eam/gl-postings", `{"ledgerId":"` + ledgerID + `","currency":"USD","siteId":"x"}`, "eam.gl.post", http.StatusBadRequest},
+		{"profile with a bad type", http.MethodPut, "/v1/eam/posting-profiles", `{"workOrderType":"NOPE","partsExpenseAccount":"1","laborExpenseAccount":"1","partsOffsetAccount":"1","laborOffsetAccount":"1"}`, "eam.setup.admin", http.StatusBadRequest},
+		{"profile with a bad account", http.MethodPut, "/v1/eam/posting-profiles", `{"partsExpenseAccount":"a b","laborExpenseAccount":"1","partsOffsetAccount":"1","laborOffsetAccount":"1"}`, "eam.setup.admin", http.StatusBadRequest},
+		{"reconciliation needs a period as YYYY-MM", http.MethodGet, "/v1/eam/gl-reconciliation?ledgerId=" + ledgerID + "&currency=USD&periodTo=2026-13", ``, "eam.inquire", http.StatusBadRequest},
+		{"reconciliation needs a currency", http.MethodGet, "/v1/eam/gl-reconciliation?ledgerId=" + ledgerID, ``, "eam.inquire", http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		if rec := call(t, h, c.method, c.path, c.body, glHeaders(c.duties)); rec.Code != c.status {

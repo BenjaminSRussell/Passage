@@ -84,10 +84,10 @@ describe("dashboards", () => {
     first.unmount();
 
     let attempt = 0;
-    server.handler = () => (++attempt === 1 ? json(403, { code: "AUTH-0003", detail: "missing duty AnalyticsView" }) : json(200, { items: [finance] }));
+    server.handler = () => (++attempt === 1 ? json(403, { code: "AUTH-0003", detail: "missing duty analytics.view" }) : json(200, { items: [finance] }));
     render("/analytics/dashboards");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty AnalyticsView (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty analytics.view (AUTH-0003)");
     fireEvent.click(within(alert.closest("div") as HTMLElement).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Finance overview")).toBeInTheDocument();
   });
@@ -318,14 +318,14 @@ describe("export log", () => {
     expect(Object.fromEntries(server.calls[1].url.searchParams)).toEqual({ user: job.requestedBy, format: "XLSX", from: "2026-10-28", to: "2026-10-28" });
   });
 
-  it("shows the empty state and the problem when the caller lacks AnalyticsExport", async () => {
+  it("shows the empty state and the problem when the caller lacks analytics.export", async () => {
     server.handler = () => json(200, { items: [] });
     const first = render("/analytics/exports");
     expect(within(await findTable({ name: "Export log" })).getByText("No exports found")).toBeInTheDocument();
     first.unmount();
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty AnalyticsExport" });
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty analytics.export" });
     render("/analytics/exports");
-    expect(await findAlert()).toHaveTextContent("missing duty AnalyticsExport (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.export (AUTH-0003)");
   });
 });
 
@@ -463,12 +463,12 @@ describe("lineage", () => {
 
   it("shows the problem when the caller may not record edges", async () => {
     server.handler = (_url, init) =>
-      init.method === "POST" ? json(403, { code: "AUTH-0003", detail: "missing duty CatalogSteward" }) : json(200, { asset: "core.vendor", depth: 20, upstream: [], downstream: [] });
+      init.method === "POST" ? json(403, { code: "AUTH-0003", detail: "missing duty analytics.catalog.steward" }) : json(200, { asset: "core.vendor", depth: 20, upstream: [], downstream: [] });
     render("/analytics/lineage?asset=core.vendor");
     await findTable({ name: "Upstream of core.vendor" });
     fireEvent.change(screen.getByLabelText(/^Source asset/), { target: { value: "raw.vendor.vendor" } });
     fireEvent.change(screen.getByLabelText(/^Target asset/), { target: { value: "core.vendor" } });
     fireEvent.click(screen.getByRole("button", { name: "Record edge" }));
-    expect(await findAlert()).toHaveTextContent("missing duty CatalogSteward (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.catalog.steward (AUTH-0003)");
   });
 });

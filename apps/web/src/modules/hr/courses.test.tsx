@@ -133,7 +133,7 @@ describe("course routes", () => {
   it("registers the catalog, create form, course and session pages, and the nav entry with its duty", () => {
     const paths = hr.routes.map((r) => r.path);
     for (const path of ["/hr/courses", "/hr/courses/new", "/hr/courses/:id", "/hr/courses/sessions/:id"]) expect(paths).toContain(path);
-    expect(hr.nav).toContainEqual({ label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" });
+    expect(hr.nav).toContainEqual({ label: "Courses", to: "/hr/courses", duty: "hr.learning.admin" });
   });
 });
 
@@ -154,9 +154,9 @@ describe("course catalog", () => {
     expect(await screen.findByText("No courses yet")).toBeInTheDocument();
     unmount();
 
-    handler = (url) => (url.pathname === "/api/v1/hr/courses" ? json(403, { code: "AUTH-0003", detail: "missing duty EssLearning" }) : undefined);
+    handler = (url) => (url.pathname === "/api/v1/hr/courses" ? json(403, { code: "AUTH-0003", detail: "missing duty hr.learning.self" }) : undefined);
     renderAt("/hr/courses");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty EssLearning (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.learning.self (AUTH-0003)"));
     const before = gets("/api/v1/hr/courses").length;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(gets("/api/v1/hr/courses").length).toBeGreaterThan(before));

@@ -147,7 +147,7 @@ func TestVendorRebate_ClaimLifecycle(t *testing.T) {
 		t.Fatalf("approval by the creator = %d %v; want 403 PRC-0046", code, out)
 	}
 	if code, out := approve(id, "u2", "pricing.rebate.maintain,pricing.rebate.view", 1); code != http.StatusForbidden {
-		t.Fatalf("approval without pricing.rebate.claim.approve = %d %v; want 403", code, out)
+		t.Fatalf("approval without pricing.rebate-claim.approve = %d %v; want 403", code, out)
 	}
 	if code, out := approve(id, "u2", allDuties, 3); code != http.StatusPreconditionFailed {
 		t.Fatalf("approval at a stale version = %d %v; want 412", code, out)

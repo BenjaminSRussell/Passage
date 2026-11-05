@@ -9,7 +9,7 @@ paths:
   /v1/fx/rate-types:
     get:
       operationId: listRateTypes
-      x-passage-duty: View exchange rates
+      x-passage-duty: fx.rate.view
       responses:
         '200':
           description: Rate types of the tenant, ordered by code.
@@ -23,7 +23,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     post:
       operationId: createRateType
-      x-passage-duty: Maintain exchange rates
+      x-passage-duty: fx.rate.maintain
       description: Creates a rate type. Create-only; an existing code is never overwritten. Use PUT to change an existing one.
       requestBody:
         required: true
@@ -49,7 +49,7 @@ paths:
         schema: { type: string }
     get:
       operationId: getRateType
-      x-passage-duty: View exchange rates
+      x-passage-duty: fx.rate.view
       responses:
         '200':
           description: The rate type.
@@ -62,7 +62,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     put:
       operationId: putRateType
-      x-passage-duty: Maintain exchange rates
+      x-passage-duty: fx.rate.maintain
       description: Replaces an existing rate type. Naturally idempotent, so it takes neither Idempotency-Key nor If-Match; rate types carry no version.
       requestBody:
         required: true
@@ -83,7 +83,7 @@ paths:
   /v1/fx/rates:
     post:
       operationId: publishRates
-      x-passage-duty: Maintain exchange rates
+      x-passage-duty: fx.rate.maintain
       description: Publishes up to 5000 manual rates in one transaction. A repeated Idempotency-Key with the same body replays the stored response; the same key with a different body is rejected. Rates are never updated in place, so the endpoint takes no If-Match; publishing a different value for an existing day supersedes the earlier version.
       parameters:
         - name: Idempotency-Key
@@ -111,7 +111,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: lookupRate
-      x-passage-duty: View exchange rates
+      x-passage-duty: fx.rate.view
       description: Resolves a rate for a type, pair and date - exact pair, then inverse when the type allows it, then triangulation through the optional via currency.
       parameters:
         - { name: type, in: query, required: true, schema: { type: string } }
@@ -133,7 +133,7 @@ paths:
   /v1/fx/rates/history:
     get:
       operationId: rateHistory
-      x-passage-duty: View exchange rates
+      x-passage-duty: fx.rate.view
       description: Every version stored for the pair, including superseded ones, ordered by valid_from then version.
       parameters:
         - { name: type, in: query, required: true, schema: { type: string } }
@@ -158,7 +158,7 @@ paths:
   /v1/fx/convert:
     post:
       operationId: convertAmounts
-      x-passage-duty: View exchange rates
+      x-passage-duty: fx.rate.view
       description: Stateless conversion of up to 100 amounts to one currency at the rate valid on the date, rounded once to the target currency's minor units. Side-effect free, so no Idempotency-Key.
       requestBody:
         required: true
@@ -181,7 +181,7 @@ paths:
       - { name: p, in: path, required: true, schema: { type: string, enum: [ecb, openexchangerates] } }
     post:
       operationId: importProviderRates
-      x-passage-duty: Administer exchange rates
+      x-passage-duty: fx.rate.administer
       description: Runs the provider import now for one rate type and day (default today, UTC), through the same importer as the schedule. Idempotent per provider, rate type and day; a day that already succeeded returns that run with alreadyDone true. A provider outage with a last-known rate returns degraded true. Providers without history (ecb) only import today (UTC); the response date is the valid-from date of the rates actually stored. If that cube predates the run day and it is before 18:00 UTC, the rates are stored, pending is true and the run stays retryable, so a later tick or call fetches the same day again; from 18:00 UTC the stale cube is final (weekend, holiday).
       requestBody:
         required: true

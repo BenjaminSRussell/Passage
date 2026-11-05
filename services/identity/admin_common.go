@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	dutyMaintainTenants       = "Maintain tenants"
-	dutyMaintainLegalEntities = "Maintain legal entities"
-	dutyMaintainSecurityRoles = "Maintain security roles"
+	dutyMaintainTenants       = "identity.tenant.maintain"
+	dutyMaintainLegalEntities = "identity.legal-entity.maintain"
+	dutyMaintainSecurityRoles = "identity.security-role.maintain"
 
 	codeForbidden = "AUTH-0003"
 

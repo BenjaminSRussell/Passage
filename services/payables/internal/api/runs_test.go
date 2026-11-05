@@ -586,8 +586,8 @@ func TestPaymentRun_GenerateFileRevealsBankDetailsFromPartyWithASignedTokenAndSt
 	verifier := tenant.NewServiceVerifier("party", map[string]ed25519.PublicKey{"payables": f.verify})
 	for _, token := range tokens {
 		claims, err := verifier.Verify(token)
-		if err != nil || claims.Aud != "party" || claims.Le != entityA || len(claims.Duties) != 1 || claims.Duties[0] != "party.vendor_bank.reveal" {
-			t.Fatalf("claims %+v err %v: the reveal needs a service token carrying only party.vendor_bank.reveal", claims, err)
+		if err != nil || claims.Aud != "party" || claims.Le != entityA || len(claims.Duties) != 1 || claims.Duties[0] != "party.vendor-bank.reveal" {
+			t.Fatalf("claims %+v err %v: the reveal needs a service token carrying only party.vendor-bank.reveal", claims, err)
 		}
 	}
 	for _, view := range []string{

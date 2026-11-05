@@ -15,22 +15,22 @@ describe("compliance module", () => {
   it("gates nav by the PRD duties", () => {
     expect(compliance.nav.every((n) => n.to.startsWith("/compliance"))).toBe(true);
     const duty = (to: string) => compliance.nav.find((n) => n.to === to)?.duty;
-    expect(duty("/compliance/sod/conflicts")).toBe("SoDReview");
-    expect(duty("/compliance/sod/check")).toBe("SecurityAdmin");
-    expect(duty("/compliance/packs")).toBe("LocalizationAdmin");
-    expect(duty("/compliance/incidents/breach-clocks")).toBe("SecurityIncidentManage");
-    expect(duty("/compliance/tds")).toBe("LocalizationAdmin");
-    expect(duty("/compliance/audit/run")).toBe("AuditPolicyRun");
-    expect(duty("/compliance/audit/cases")).toBe("AuditCaseManage");
-    expect(duty("/compliance/break-glass")).toBe("BreakGlassRequest");
-    expect(duty("/compliance/screening/hits")).toBe("TradeComplianceView");
-    expect(duty("/compliance/screening/check")).toBe("TradeComplianceView");
-    expect(duty("/compliance/export-checks")).toBe("TradeComplianceView");
-    expect(duty("/compliance/privacy/requests")).toBe("PrivacyOfficer");
-    expect(duty("/compliance/privacy/requests/new")).toBe("PrivacyIntake");
-    expect(duty("/compliance/campaigns")).toBe("SoDAdmin");
-    expect(duty("/compliance/incidents/step")).toBe("SecurityIncidentManage");
-    expect(duty("/compliance/export-policy")).toBe("ComplianceView");
+    expect(duty("/compliance/sod/conflicts")).toBe("compliance.sod.review");
+    expect(duty("/compliance/sod/check")).toBe("compliance.security.admin");
+    expect(duty("/compliance/packs")).toBe("localization.admin");
+    expect(duty("/compliance/incidents/breach-clocks")).toBe("compliance.security-incident.manage");
+    expect(duty("/compliance/tds")).toBe("localization.admin");
+    expect(duty("/compliance/audit/run")).toBe("compliance.audit-policy.run");
+    expect(duty("/compliance/audit/cases")).toBe("compliance.audit-case.manage");
+    expect(duty("/compliance/break-glass")).toBe("compliance.break-glass.request");
+    expect(duty("/compliance/screening/hits")).toBe("compliance.trade-screening.view");
+    expect(duty("/compliance/screening/check")).toBe("compliance.trade-screening.view");
+    expect(duty("/compliance/export-checks")).toBe("compliance.trade-screening.view");
+    expect(duty("/compliance/privacy/requests")).toBe("compliance.privacy-request.process");
+    expect(duty("/compliance/privacy/requests/new")).toBe("compliance.privacy-request.create");
+    expect(duty("/compliance/campaigns")).toBe("compliance.sod.admin");
+    expect(duty("/compliance/incidents/step")).toBe("compliance.security-incident.manage");
+    expect(duty("/compliance/export-policy")).toBe("compliance.view");
   });
 
   it("is auto-discovered by the registry", () => {

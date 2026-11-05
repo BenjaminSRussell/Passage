@@ -30,11 +30,11 @@ import (
 
 const (
 	readyTimeout       = 500 * time.Millisecond
-	dutyMatchingPolicy = "MatchingPolicyMaintain"
-	dutyReceiving      = "ReceivingMaintain"
-	dutyReceivingPost  = "ReceivingPost"
-	dutyInvoicePost    = "VendorInvoicePost"
-	dutyAPInquire      = "APInquire"
+	dutyMatchingPolicy = "receiving.matching-policy.maintain"
+	dutyReceiving      = "receiving.receipt.maintain"
+	dutyReceivingPost  = "receiving.receipt.post"
+	dutyInvoicePost    = "receiving.vendor-invoice.post"
+	dutyAPInquire      = "receiving.ap.inquire"
 	maxLines           = 500
 	maxMagnitude       = 1e12
 	maxExponent        = 12

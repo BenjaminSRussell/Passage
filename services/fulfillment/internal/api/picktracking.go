@@ -17,7 +17,7 @@ import (
 // routesTracking mounts the batch, serial and location capture of a line
 // (BR-28.10).
 func (a *API) routesTracking(r chi.Router) {
-	r.With(authz.RequireDuty("WarehousePick")).Post("/v1/fulfillment/shipments/{id}/lines/{lid}:capture-tracking", a.captureTracking)
+	r.With(authz.RequireDuty("fulfillment.warehouse.pick")).Post("/v1/fulfillment/shipments/{id}/lines/{lid}:capture-tracking", a.captureTracking)
 }
 
 type trackingEntryDTO struct {

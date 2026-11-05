@@ -44,7 +44,7 @@ export function toPlanInput(v: BreakGlassValues): { input?: ElevatedPlanInput; e
 
 /** How the planned session gets switched on. */
 export function approvalText(plan: ElevatedPlan): string {
-  if (plan.approverDuty === "PlatformAdmin") return "Waits for a second PlatformAdmin to approve (protected role).";
+  if (plan.approverDuty === "platform.global.admin") return "Waits for a second platform.global.admin to approve (protected role).";
   if (plan.needsApproval) return "Waits for a break-glass approver.";
   return "Starts at once; a reviewer must sign off afterwards.";
 }
@@ -52,8 +52,8 @@ export function approvalText(plan: ElevatedPlan): string {
 /**
  * Break-glass access (PRD §9.48.6 Break-glass sessions): plan an emergency
  * elevated session for yourself or another user (FR-48.23). The tenant sets
- * the length cap and whether sessions self-activate; SecurityAdmin and
- * PlatformAdmin can never be granted to yourself (BR-48.19). No session is
+ * the length cap and whether sessions self-activate; compliance.security.admin and
+ * platform.global.admin can never be granted to yourself (BR-48.19). No session is
  * opened and no token issued yet.
  */
 export function BreakGlassPage() {

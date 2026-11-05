@@ -176,7 +176,7 @@ func TestLedgerMayMintOnlyTheFxRateLookupForFx(t *testing.T) {
 	if _, err := signer.MintDuties("fx", p, "", []string{"fx.rate.lookup"}); err != nil {
 		t.Fatalf("ledger to fx rate lookup: %v", err)
 	}
-	if _, err := signer.MintDuties("fx", p, "", []string{"Maintain exchange rates"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+	if _, err := signer.MintDuties("fx", p, "", []string{"fx.rate.maintain"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
 		t.Fatalf("ledger must not publish rates: %v", err)
 	}
 }
@@ -476,7 +476,7 @@ func TestAllScopeUserGetsOnlyReadLookupTokensForAnExplicitEntity(t *testing.T) {
 		{receiving, "purchasing", "procurement.purchase-order.lookup", false},
 		{receiving, "inventory", "inventory.ownership-change.read", true},
 		{payables, "fx", "fx.rate.lookup", true},
-		{hr, "compliance", "compliance.legal_hold.check", true},
+		{hr, "compliance", "compliance.legal-hold.check", true},
 	} {
 		if _, err := read.signer.MintDuties(read.aud, allScope, other, []string{read.duty}); err != nil {
 			t.Errorf("%s: an ALL-scope read token may name any entity: %v", read.duty, err)
@@ -647,7 +647,7 @@ func TestTypeScriptMintedWorkflowTokenVerifies(t *testing.T) {
 
 func TestMintDutiesCarriesOnlyTheIntersectionWithTheGrant(t *testing.T) {
 	f := newFixture(t)
-	token, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.entry.post", "ledger.account.write", "org.switcher.all_scope"})
+	token, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.entry.post", "ledger.account.write", "org.switcher.all-scope"})
 	if err != nil {
 		t.Fatal(err)
 	}

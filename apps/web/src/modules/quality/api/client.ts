@@ -277,7 +277,7 @@ export function newKey(): string {
   return crypto.randomUUID();
 }
 
-/** Computes the sample draw for a lot without side effects (QM_VIEW). */
+/** Computes the sample draw for a lot without side effects (quality.view). */
 export function sizeSample(lotQty: string, plan: SamplingPlan): Promise<SampleDraw> {
   return post<SampleDraw>("/sampling-plans:size", { lotQty, ...plan });
 }
@@ -290,12 +290,12 @@ export function getTestGroup(id: string, signal?: AbortSignal): Promise<TestGrou
   return send<TestGroup>(`/test-groups/${encodeURIComponent(id)}`, {}, signal);
 }
 
-/** Creates the next version of a test group code (QM_SETUP_MAINTAIN). */
+/** Creates the next version of a test group code (quality.setup.maintain). */
 export function createTestGroup(input: NewTestGroup, key: string = newKey()): Promise<TestGroup> {
   return post<TestGroup>("/test-groups", input, { "Idempotency-Key": key });
 }
 
-/** Instruments, soonest due first; dueWithinDays keeps those due within that many days, overdue included (QM_VIEW). */
+/** Instruments, soonest due first; dueWithinDays keeps those due within that many days, overdue included (quality.view). */
 export function listInstruments(signal?: AbortSignal, dueWithinDays?: number): Promise<Instrument[]> {
   return items<Instrument>(`/instruments${query({ dueWithinDays: dueWithinDays === undefined ? undefined : String(dueWithinDays) })}`, signal);
 }
@@ -321,7 +321,7 @@ export function listOrders(filter: { status?: OrderStatus | ""; siteId?: string 
   return items<Order>(`/quality-orders${query({ status: filter.status, siteId: filter.siteId })}`, signal);
 }
 
-/** Reads a quality order with its test group, results, evaluation and decision (QM_VIEW). */
+/** Reads a quality order with its test group, results, evaluation and decision (quality.view). */
 export function getOrder(id: string, signal?: AbortSignal): Promise<OrderView> {
   return send<OrderView>(`/quality-orders/${encodeURIComponent(id)}`, {}, signal);
 }
@@ -418,7 +418,7 @@ export function listComplianceLists(signal?: AbortSignal): Promise<ComplianceLis
   return items<ComplianceList>("/compliance-lists", signal);
 }
 
-/** Creates the next version of a list code (QM_COMPLIANCE_MAINTAIN). */
+/** Creates the next version of a list code (quality.compliance.maintain). */
 export function createComplianceList(input: NewComplianceList, key: string = newKey()): Promise<ComplianceList> {
   return post<ComplianceList>("/compliance-lists", input, { "Idempotency-Key": key });
 }
@@ -427,7 +427,7 @@ export function getComposition(itemId: string, signal?: AbortSignal): Promise<Co
   return send<Composition>(`/items/${encodeURIComponent(itemId)}/composition`, {}, signal);
 }
 
-/** Saves the next version of an item's composition (QM_COMPLIANCE_MAINTAIN). */
+/** Saves the next version of an item's composition (quality.compliance.maintain). */
 export function saveComposition(itemId: string, input: NewComposition, key: string = newKey()): Promise<Composition> {
   return post<Composition>(`/items/${encodeURIComponent(itemId)}/composition`, input, { "Idempotency-Key": key });
 }
@@ -483,14 +483,14 @@ export function getStudy(id: string, signal?: AbortSignal): Promise<Study> {
   return send<Study>(`/stability-studies/${encodeURIComponent(id)}`, {}, signal);
 }
 
-/** Plans a study and generates its pull schedule (QM_STABILITY_MAINTAIN). */
+/** Plans a study and generates its pull schedule (quality.stability.maintain). */
 export function createStudy(input: NewStudy, key: string = newKey()): Promise<Study> {
   return post<Study>("/stability-studies", input, { "Idempotency-Key": key });
 }
 
 export type StudyTarget = Exclude<StudyStatus, "PLANNED">;
 
-/** Moves a study on (FR-33.16); version is its ETag from the last read, and TERMINATED needs a reason (QM_STABILITY_MAINTAIN). */
+/** Moves a study on (FR-33.16); version is its ETag from the last read, and TERMINATED needs a reason (quality.stability.maintain). */
 export function transitionStudy(id: string, version: number, to: StudyTarget, reason?: string): Promise<Study> {
   return post<Study>(`/stability-studies/${encodeURIComponent(id)}:transition`, reason ? { to, reason } : { to }, { "If-Match": `"${version}"` });
 }
@@ -535,7 +535,7 @@ export interface SpcResult {
   pChart?: PChart;
 }
 
-/** The SPC chart of one item and test (QM_VIEW); chart NONE when no results exist yet. */
+/** The SPC chart of one item and test (quality.view); chart NONE when no results exist yet. */
 export function getSpc(itemId: string, testId: string, signal?: AbortSignal): Promise<SpcResult> {
   return send<SpcResult>(`/spc${query({ itemId, testId })}`, {}, signal);
 }
@@ -620,12 +620,12 @@ export function listNonconformances(filter: NcrFilter, signal?: AbortSignal): Pr
   );
 }
 
-/** One NCR with its 8D correction (QM_VIEW); version is its ETag. */
+/** One NCR with its 8D correction (quality.view); version is its ETag. */
 export function getNonconformance(id: string, signal?: AbortSignal): Promise<Nonconformance> {
   return send<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}`, {}, signal);
 }
 
-/** Raises an NCR in NEW (QM_NCR_MAINTAIN). */
+/** Raises an NCR in NEW (quality.ncr.maintain). */
 export function createNonconformance(input: NewNonconformance, key: string = newKey()): Promise<Nonconformance> {
   return post<Nonconformance>("/nonconformances", input, { "Idempotency-Key": key });
 }
@@ -642,7 +642,7 @@ export function refuseNonconformance(id: string, version: number, reason: string
   return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}:refuse`, { reason }, ifMatch(version));
 }
 
-/** Starts the 8D of an approved NCR (QM_CAPA_MAINTAIN). */
+/** Starts the 8D of an approved NCR (quality.capa.maintain). */
 export function startCorrection(id: string, version: number, effectivenessCheckDays: number, key: string = newKey()): Promise<Nonconformance> {
   return post<Nonconformance>(`/nonconformances/${encodeURIComponent(id)}/corrections`, { effectivenessCheckDays }, { ...ifMatch(version), "Idempotency-Key": key });
 }
@@ -691,12 +691,12 @@ export interface CertificateList {
   items: CertificateRecord[];
 }
 
-/** An order's certificate receipts and waivers, oldest first, with its gate status (QM_VIEW). */
+/** An order's certificate receipts and waivers, oldest first, with its gate status (quality.view). */
 export function listCertificates(orderId: string, signal?: AbortSignal): Promise<CertificateList> {
   return send<CertificateList>(`/quality-orders/${encodeURIComponent(orderId)}/certificates`, {}, signal);
 }
 
-/** Records a certificate receipt, checked against the order's test group (QM_RESULTS_RECORD). */
+/** Records a certificate receipt, checked against the order's test group (quality.result.record). */
 export function recordCertificate(
   orderId: string,
   input: NewCertificate,
@@ -705,7 +705,7 @@ export function recordCertificate(
   return post(`/quality-orders/${encodeURIComponent(orderId)}/certificates`, input, { "Idempotency-Key": key });
 }
 
-/** Waives the order's required certificate with a reason (QM_USAGE_DECISION). */
+/** Waives the order's required certificate with a reason (quality.usage.decide). */
 export function waiveCertificate(orderId: string, reason: string, key: string = newKey()): Promise<CertificateRecord & { certificateStatus: CertificateStatus }> {
   return post(`/quality-orders/${encodeURIComponent(orderId)}/certificates:waive`, { reason }, { "Idempotency-Key": key });
 }
@@ -747,7 +747,7 @@ export function listSamples(filter: { qualityOrderId?: string; status?: SampleSt
   return items<Sample>(`/samples${query({ qualityOrderId: filter.qualityOrderId, status: filter.status })}`, signal);
 }
 
-/** Registers a physical sample of a quality order (QM_RESULTS_RECORD). */
+/** Registers a physical sample of a quality order (quality.result.record). */
 export function registerSample(input: NewSample, key: string = newKey()): Promise<Sample> {
   return post<Sample>("/samples", input, { "Idempotency-Key": key });
 }
@@ -782,7 +782,7 @@ export function listReceiptChecks(filter: { poLineId?: string; batch?: string },
   return items<ReceiptCheck>(`/receipt-checks${query({ poLineId: filter.poLineId, batch: filter.batch })}`, signal);
 }
 
-/** Checks a receipt line against accepted source inspection; it uses up the covered quantity (QM_ORDER_MAINTAIN). */
+/** Checks a receipt line against accepted source inspection; it uses up the covered quantity (quality.order.maintain). */
 export function checkReceipt(input: NewReceiptCheck, key: string = newKey()): Promise<ReceiptCheck> {
   return post<ReceiptCheck>("/receipt-checks", input, { "Idempotency-Key": key });
 }
@@ -842,12 +842,12 @@ export interface NewCoA {
   reason?: string;
 }
 
-/** Every CoA revision of an order, the batch chain first (QM_VIEW). */
+/** Every CoA revision of an order, the batch chain first (quality.view). */
 export function listCoAs(orderId: string, signal?: AbortSignal): Promise<CoA[]> {
   return items<CoA>(`/quality-orders/${encodeURIComponent(orderId)}/coas`, signal);
 }
 
-/** Issues the next CoA revision of a closed order whose decision released quantity (QM_COA). */
+/** Issues the next CoA revision of a closed order whose decision released quantity (quality.coa.generate). */
 export function generateCoA(input: NewCoA, key: string = newKey()): Promise<CoA> {
   return post<CoA>("/coa:generate", input, { "Idempotency-Key": key });
 }

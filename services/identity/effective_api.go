@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	dutyViewEffectivePermissions = "View effective permissions"
-	dutyMaintainUsers            = "Maintain users"
+	dutyViewEffectivePermissions = "identity.effective-permission.view"
+	dutyMaintainUsers            = "identity.user.maintain"
 	codeInvalid                  = "COM-0001"
 	codeUserNotFound             = "IDN-USER-NOT-FOUND"
 )

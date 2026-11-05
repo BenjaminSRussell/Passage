@@ -115,7 +115,7 @@ describe("SSCC register", () => {
   it("shows a load error with a retry", async () => {
     let fail = true;
     server.handler = (url) =>
-      url.pathname !== PATH ? undefined : fail ? json(403, { code: "COM-0403", detail: "missing duty WarehouseView" }) : json(200, { items: [row("006141410123456789")] });
+      url.pathname !== PATH ? undefined : fail ? json(403, { code: "COM-0403", detail: "missing duty fulfillment.warehouse.view" }) : json(200, { items: [row("006141410123456789")] });
     renderAt("/fulfillment/sscc-register");
     const alert = await findAlert();
     expect(alert.textContent).toContain("Could not load the SSCC register");

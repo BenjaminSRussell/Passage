@@ -1279,7 +1279,7 @@ paths:
       description: >
         Checks the body version (412 conflict_version), requires OPEN (409 PRC-0031) and refuses the
         user who created the claim (403 PRC-0046). Writes vendorrebateclaim.approved.
-      x-passage-duty: pricing.rebate.claim.approve
+      x-passage-duty: pricing.rebate-claim.approve
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1726,7 +1726,7 @@ paths:
       summary: Approve an OPEN broker or royalty claim for settlement through w19 AP (duty VendorRebateClaimApprove).
       description: >
         Checks the body version (412 conflict_version), requires OPEN (409 PRC-0031) and refuses the user who created the claim and a caller without a user identity (403 PRC-0046). Writes contractclaim.approved.
-      x-passage-duty: pricing.rebate.claim.approve
+      x-passage-duty: pricing.rebate-claim.approve
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - $ref: "#/components/parameters/IdempotencyKey"

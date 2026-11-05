@@ -40,9 +40,9 @@ func (d dispatchFixture) as(user string, duties ...string) context.Context {
 	return tenant.With(context.Background(), p)
 }
 
-// device is the technician's own device: its worker id and SvcTechnician.
+// device is the technician's own device: its worker id and fieldservice.work-order.execute.
 func (d dispatchFixture) device(tech Technician) context.Context {
-	return d.as(*tech.WorkerID, "SvcTechnician")
+	return d.as(*tech.WorkerID, "fieldservice.work-order.execute")
 }
 
 // dispatched returns a DISPATCHED work order with the given lines, assigned to a new
@@ -265,7 +265,7 @@ func TestStore_TransitionBypassClosed(t *testing.T) {
 	}
 }
 
-// Only the technician's own worker, or office staff with SvcWoMaintain, may record actions
+// Only the technician's own worker, or office staff with fieldservice.work-order.maintain, may record actions
 // for a technician; claiming another technician's id in the body is refused outright.
 func TestStore_ActionsAreBoundToTheTechniciansWorker(t *testing.T) {
 	d := newDispatch(t, 21)
@@ -273,8 +273,8 @@ func TestStore_ActionsAreBoundToTheTechniciansWorker(t *testing.T) {
 	other := d.worker(t, "BN2")
 	for name, ctx := range map[string]context.Context{
 		"another technician's device":  d.device(other),
-		"a user with no worker":        d.as(ids.New(), "SvcTechnician"),
-		"the technician's id, no user": d.as("", "SvcTechnician"),
+		"a user with no worker":        d.as(ids.New(), "fieldservice.work-order.execute"),
+		"the technician's id, no user": d.as("", "fieldservice.work-order.execute"),
 	} {
 		_, err := d.s.RecordActions(ctx, wo.ID, tech.ID, []ActionInput{act(domain.ActTravelStart, 1)}, time.Now())
 		var problem *httpx.Problem
@@ -286,7 +286,7 @@ func TestStore_ActionsAreBoundToTheTechniciansWorker(t *testing.T) {
 	if err != nil || len(log) != 0 {
 		t.Fatalf("a refused batch left %d actions: %v", len(log), err)
 	}
-	office := d.as(ids.New(), "SvcTechnician", "SvcWoMaintain")
+	office := d.as(ids.New(), "fieldservice.work-order.execute", "fieldservice.work-order.maintain")
 	res, err := d.s.RecordActions(office, wo.ID, tech.ID, []ActionInput{act(domain.ActTravelStart, 1)}, time.Now())
 	if err != nil || res.Applied != 1 || res.WorkOrder.Status != "TRAVELING" {
 		t.Fatalf("office entry %+v %v", res, err)

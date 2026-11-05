@@ -62,9 +62,9 @@ func TestSlice2_DutiesEnforced(t *testing.T) {
 		{http.MethodPost, "/v1/analytics/schedules"},
 	}
 	for _, c := range cases {
-		// AnalyticsView alone opens none of them.
+		// analytics.view alone opens none of them.
 		if rec := do(t, h, c.method, c.path, "{}", viewer); rec.Code != http.StatusForbidden {
-			t.Errorf("%s %s with AnalyticsView: status %d, want 403", c.method, c.path, rec.Code)
+			t.Errorf("%s %s with analytics.view: status %d, want 403", c.method, c.path, rec.Code)
 		}
 	}
 	// Archive restore is not opened by the catalog steward duty, and vice versa.

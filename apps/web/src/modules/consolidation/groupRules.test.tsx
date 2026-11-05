@@ -299,11 +299,11 @@ describe("unit validation page", () => {
   });
 
   it("shows a refusal in an alert", async () => {
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty ConsolidationRun" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty consolidation.run" } });
     renderAt("/consolidation/validation");
     fireEvent.click(screen.getByRole("button", { name: "Validate units" }));
     await waitFor(() => expect(screen.getByText("The units were not validated")).toBeInTheDocument());
-    expect(screen.getByText("The units were not validated").closest("[role=alert]")).toHaveTextContent("missing duty ConsolidationRun (AUTH-0003)");
+    expect(screen.getByText("The units were not validated").closest("[role=alert]")).toHaveTextContent("missing duty consolidation.run (AUTH-0003)");
     expect(screen.queryByRole("table", { name: "Validate tasks" })).not.toBeInTheDocument();
   });
 });

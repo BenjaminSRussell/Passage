@@ -6,7 +6,7 @@ import { createLegalEntity, listLegalEntities, type LegalEntity } from "./api";
 import styles from "./security.module.css";
 import { ApiFailure, canRetry, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields, type Errors } from "./support";
 
-const DUTY = "Maintain legal entities";
+const DUTY = "identity.legal-entity.maintain";
 const FIELDS = ["code", "displayName"] as const;
 const CODE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 const NAME_MAX = 200;

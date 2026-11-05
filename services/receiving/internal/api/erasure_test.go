@@ -65,7 +65,7 @@ func erase(rg *rig, body string) *struct {
 func TestEraseOneTimePayees_NeedsItsOwnDutyAndAScopedLegalEntity(t *testing.T) {
 	rg := erasureRig(t, &domain.FakeLegalHolds{})
 	body := fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID)
-	if rec := rg.call(http.MethodPost, erasePath, body, duty("VendorInvoicePost", rg.key())); rec.Code != http.StatusForbidden {
+	if rec := rg.call(http.MethodPost, erasePath, body, duty("receiving.vendor-invoice.post", rg.key())); rec.Code != http.StatusForbidden {
 		t.Fatalf("invoice poster must not erase: %d", rec.Code)
 	}
 	if got := erase(rg, fmt.Sprintf(`{"legalEntityId":%q}`, ids.New())); got.Code != http.StatusForbidden || got.Body["code"] != "AUTH-0003" {

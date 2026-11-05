@@ -27,24 +27,24 @@ var (
 
 // routesPacking mounts the packing configuration, auto-pack, packaging fee and
 // returnable packaging endpoints (FR-28.14 to FR-28.16). Duties follow section
-// 5.28.17: PackingRuleMaintain for container types, rules and packaging
-// materials; PackagingFeeMaintain for rates and the statement; WarehouseReceive
+// 5.28.17: fulfillment.packing-rule.maintain for container types, rules and packaging
+// materials; fulfillment.packaging-fee.maintain for rates and the statement; fulfillment.warehouse.receive
 // for return receipts.
 func (a *API) routesPacking(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/container-types", a.listContainerTypes)
-	r.With(authz.RequireDuty("PackingRuleMaintain")).Post("/v1/fulfillment/container-types", a.saveContainerType)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/packing-rules", a.listPackingRules)
-	r.With(authz.RequireDuty("PackingRuleMaintain")).Post("/v1/fulfillment/packing-rules", a.savePackingRule)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/product-packaging", a.listProductPackaging)
-	r.With(authz.RequireDuty("PackingRuleMaintain")).Post("/v1/fulfillment/product-packaging", a.saveProductPackaging)
-	r.With(authz.RequireDuty("WarehousePack")).Post("/v1/fulfillment/shipments/{id}:auto-pack", a.autoPack)
-	r.With(authz.RequireDuty("PackagingFeeMaintain")).Get("/v1/fulfillment/packaging-fee-rates", a.listFeeRates)
-	r.With(authz.RequireDuty("PackagingFeeMaintain")).Post("/v1/fulfillment/packaging-fee-rates", a.saveFeeRate)
-	r.With(authz.RequireDuty("PackagingFeeMaintain")).Get("/v1/fulfillment/packaging-report", a.packagingReport)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/returnable-packaging", a.listReturnableBalances)
-	r.With(authz.RequireDuty("WarehouseReceive")).Post("/v1/fulfillment/returnable-packaging:return", a.returnPackaging)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/returnable-packaging/movements", a.listReturnableMovements)
-	r.With(authz.RequireDuty("ReturnablePackagingMaintain")).Post("/v1/fulfillment/returnable-packaging:adjust", a.adjustReturnable)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/container-types", a.listContainerTypes)
+	r.With(authz.RequireDuty("fulfillment.packing-rule.maintain")).Post("/v1/fulfillment/container-types", a.saveContainerType)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/packing-rules", a.listPackingRules)
+	r.With(authz.RequireDuty("fulfillment.packing-rule.maintain")).Post("/v1/fulfillment/packing-rules", a.savePackingRule)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/product-packaging", a.listProductPackaging)
+	r.With(authz.RequireDuty("fulfillment.packing-rule.maintain")).Post("/v1/fulfillment/product-packaging", a.saveProductPackaging)
+	r.With(authz.RequireDuty("fulfillment.warehouse.pack")).Post("/v1/fulfillment/shipments/{id}:auto-pack", a.autoPack)
+	r.With(authz.RequireDuty("fulfillment.packaging-fee.maintain")).Get("/v1/fulfillment/packaging-fee-rates", a.listFeeRates)
+	r.With(authz.RequireDuty("fulfillment.packaging-fee.maintain")).Post("/v1/fulfillment/packaging-fee-rates", a.saveFeeRate)
+	r.With(authz.RequireDuty("fulfillment.packaging-fee.maintain")).Get("/v1/fulfillment/packaging-report", a.packagingReport)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/returnable-packaging", a.listReturnableBalances)
+	r.With(authz.RequireDuty("fulfillment.warehouse.receive")).Post("/v1/fulfillment/returnable-packaging:return", a.returnPackaging)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/returnable-packaging/movements", a.listReturnableMovements)
+	r.With(authz.RequireDuty("fulfillment.returnable-packaging.maintain")).Post("/v1/fulfillment/returnable-packaging:adjust", a.adjustReturnable)
 }
 
 // ---- DTOs -------------------------------------------------------------------
@@ -455,8 +455,8 @@ func (a *API) listReturnableMovements(w http.ResponseWriter, r *http.Request) {
 }
 
 // adjustReturnable answers POST /v1/fulfillment/returnable-packaging:adjust, a manual
-// correction of a balance (ReturnablePackagingMaintain). Section 5.28.17 lists
-// WarehouseReceive as its segregation-of-duties conflict, not as a second duty the
+// correction of a balance (fulfillment.returnable-packaging.maintain). Section 5.28.17 lists
+// fulfillment.warehouse.receive as its segregation-of-duties conflict, not as a second duty the
 // caller needs: the conflict is a role-level rule of the compliance service.
 func (a *API) adjustReturnable(w http.ResponseWriter, r *http.Request) {
 	var req adjustRequest

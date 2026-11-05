@@ -33,11 +33,11 @@ func (s *Server) exportFile(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, invalid("file must be one of runbook.csv, rollback-plan.csv, go-no-go.csv, decisions.csv, reconciliation.csv"))
 		return
 	}
-	// The reconciliation carries the runs' control totals, which are read under MigrationView (9.49.17), not
+	// The reconciliation carries the runs' control totals, which are read under migration.factory.view (9.49.17), not
 	// part of the runbook screen a cutover manager sees: it needs both duties.
 	if name == domain.ExportReconciliation {
 		if p, ok := tenant.FromContext(r.Context()); !ok || !p.HasDuty(DutyMigrationView) {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "reconciliation.csv carries control totals: it needs MigrationView as well as CutoverManager"))
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "reconciliation.csv carries control totals: it needs migration.factory.view as well as migration.cutover.manage"))
 			return
 		}
 	}

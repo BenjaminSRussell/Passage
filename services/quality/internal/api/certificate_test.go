@@ -44,7 +44,7 @@ func TestCertificateGate_AC3312OverHTTP(t *testing.T) {
 	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/quality-orders/" + order.ID + "/results", body: results, duties: allDuties, key: ids.New()}); rec.Code != http.StatusCreated {
 		t.Fatalf("results: %d %s", rec.Code, rec.Body.String())
 	}
-	view := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + order.ID, duties: "QM_VIEW"})
+	view := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + order.ID, duties: "quality.view"})
 	if !strings.Contains(view.Body.String(), `"certificateStatus":"MISSING"`) {
 		t.Fatalf("the order view shows the gate: %s", view.Body.String())
 	}
@@ -59,8 +59,8 @@ func TestCertificateGate_AC3312OverHTTP(t *testing.T) {
 
 	path := "/v1/quality/quality-orders/" + order.ID + "/certificates"
 	cert := `{"type":"EN10204_31","documentRef":"EDI-4711","values":{"` + testID + `":{"outcome":"` + outcomeID + `"}}}`
-	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: cert, duties: "QM_VIEW", key: "c-1"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("recording a certificate needs QM_RESULTS_RECORD: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: cert, duties: "quality.view", key: "c-1"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("recording a certificate needs quality.result.record: %d", rec.Code)
 	}
 	rec = call(h, reqSpec{method: http.MethodPost, path: path, body: cert, duties: allDuties, key: "c-1"})
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"inSpec":true`) || !strings.Contains(rec.Body.String(), `"certificateStatus":"RECEIVED_OK"`) {
@@ -99,7 +99,7 @@ func TestCertificate_OutOfSpecRaisesVendorNCR(t *testing.T) {
 		f.certNCRs[0].ProblemType != domain.ProblemCertificateNOK || !f.certNCRs[0].Qty.Equal(decimal.NewFromInt(5)) || f.certNCRs[0].CreatedBy != "qa-1" {
 		t.Fatalf("the VENDOR NCR for the lot: %+v", f.certNCRs)
 	}
-	listed := call(h, reqSpec{method: http.MethodGet, path: path, duties: "QM_VIEW"})
+	listed := call(h, reqSpec{method: http.MethodGet, path: path, duties: "quality.view"})
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"required":"COA"`) || !strings.Contains(listed.Body.String(), `"certificateStatus":"RECEIVED_NOK"`) {
 		t.Fatalf("certificate list: %d %s", listed.Code, listed.Body.String())
 	}
@@ -113,12 +113,12 @@ func TestCertificate_OutOfSpecRaisesVendorNCR(t *testing.T) {
 	if reuse.Code != http.StatusUnprocessableEntity || !strings.Contains(reuse.Body.String(), "idempotency_key_reuse") {
 		t.Fatalf("a key from another order: %d %s", reuse.Code, reuse.Body.String())
 	}
-	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + ids.New() + "/certificates", duties: "QM_VIEW"}); rec.Code != http.StatusNotFound {
+	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/quality-orders/" + ids.New() + "/certificates", duties: "quality.view"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown order: %d", rec.Code)
 	}
 }
 
-// TestCertificateWaiver covers the waiver: it needs QM_USAGE_DECISION and a
+// TestCertificateWaiver covers the waiver: it needs quality.usage.decide and a
 // reason, an order with nothing to waive answers 409 QM-0180, and a waived order
 // can be accepted.
 func TestCertificateWaiver(t *testing.T) {
@@ -126,8 +126,8 @@ func TestCertificateWaiver(t *testing.T) {
 	h := newHandler(f)
 	orderID := seedPending(t, f, h, "10", true)
 	path := "/v1/quality/quality-orders/" + orderID + "/certificates:waive"
-	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{"reason":"audit"}`, duties: "QM_RESULTS_RECORD,QM_VIEW", key: "w-0"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("a waiver needs QM_USAGE_DECISION: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{"reason":"audit"}`, duties: "quality.result.record,quality.view", key: "w-0"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("a waiver needs quality.usage.decide: %d", rec.Code)
 	}
 	if rec := call(h, reqSpec{method: http.MethodPost, path: path, body: `{"reason":"audit"}`, duties: allDuties, key: "w-1"}); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "QM-0180") {
 		t.Fatalf("nothing to waive: %d %s", rec.Code, rec.Body.String())
@@ -187,8 +187,8 @@ func TestSamples_RegisterAndList(t *testing.T) {
 		rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/samples", body: body, duties: duties, key: key, user: "qa-1"})
 		return rec.Code, rec.Body.String()
 	}
-	if code, _ := post(`{"qualityOrderId":"`+orderID+`","kind":"PRIMARY","quantity":"1"}`, "s-0", "QM_VIEW"); code != http.StatusForbidden {
-		t.Fatalf("registering a sample needs QM_RESULTS_RECORD: %d", code)
+	if code, _ := post(`{"qualityOrderId":"`+orderID+`","kind":"PRIMARY","quantity":"1"}`, "s-0", "quality.view"); code != http.StatusForbidden {
+		t.Fatalf("registering a sample needs quality.result.record: %d", code)
 	}
 	code, body := post(`{"qualityOrderId":"`+orderID+`","kind":"RESERVE","quantity":"0.5"}`, "s-1", allDuties)
 	if code != http.StatusBadRequest || !strings.Contains(body, "batchExpiresOn") {
@@ -214,16 +214,16 @@ func TestSamples_RegisterAndList(t *testing.T) {
 		t.Fatalf("unknown order: %d", code)
 	}
 
-	due := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/samples?status=DUE_FOR_DISPOSAL", duties: "QM_VIEW"})
+	due := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/samples?status=DUE_FOR_DISPOSAL", duties: "quality.view"})
 	items := decode[list[domain.Sample]](t, due.Body.Bytes()).Items
 	if due.Code != http.StatusOK || len(items) != 1 || items[0].ID != reserve.ID || items[0].Status != domain.SampleDueForDisposal {
 		t.Fatalf("due for disposal: %d %s", due.Code, due.Body.String())
 	}
-	all := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/samples?qualityOrderId=" + orderID, duties: "QM_VIEW"})
+	all := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/samples?qualityOrderId=" + orderID, duties: "quality.view"})
 	if n := len(decode[list[domain.Sample]](t, all.Body.Bytes()).Items); n != 2 {
 		t.Fatalf("the order's samples: %d", n)
 	}
-	if bad := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/samples?status=EXPIRED&qualityOrderId=x", duties: "QM_VIEW"}); bad.Code != http.StatusBadRequest ||
+	if bad := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/samples?status=EXPIRED&qualityOrderId=x", duties: "quality.view"}); bad.Code != http.StatusBadRequest ||
 		!strings.Contains(bad.Body.String(), "status") || !strings.Contains(bad.Body.String(), "qualityOrderId") {
 		t.Fatalf("bad filters: %d %s", bad.Code, bad.Body.String())
 	}

@@ -21,7 +21,7 @@ import (
 const (
 	Timeout         = 3 * time.Second
 	audience        = "tax"
-	dutyWithholding = "Calculate withholding tax"
+	dutyWithholding = "tax.withholding.calculate"
 	withholdingPath = "/v1/tax/withholding/calculate"
 	maxResponseSize = 1 << 20
 )

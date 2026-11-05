@@ -56,8 +56,8 @@ describe("module registration", () => {
     expect(intercompany.routes.map((r) => r.path)).toEqual(expect.arrayContaining(["/intercompany/chains", "/intercompany/transfer-pricing"]));
     expect(intercompany.nav).toEqual(
       expect.arrayContaining([
-        { label: "Direct delivery chains", to: "/intercompany/chains", duty: "IntercompanyView" },
-        { label: "Transfer-pricing evidence", to: "/intercompany/transfer-pricing", duty: "IntercompanyView" },
+        { label: "Direct delivery chains", to: "/intercompany/chains", duty: "intercompany.view" },
+        { label: "Transfer-pricing evidence", to: "/intercompany/transfer-pricing", duty: "intercompany.view" },
       ]),
     );
     renderAt("/intercompany");

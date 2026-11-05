@@ -30,11 +30,11 @@ import (
 
 // Duties checked on the routes (9.49.17).
 const (
-	DutyMigrationRun    = "MigrationRun"
-	DutyMigrationView   = "MigrationView"
-	DutyMigrationReview = "MigrationReview"
-	DutyCutoverManager  = "CutoverManager"
-	DutyStepOwner       = "CutoverStepOwner"
+	DutyMigrationRun    = "migration.factory.run"
+	DutyMigrationView   = "migration.factory.view"
+	DutyMigrationReview = "migration.factory.review"
+	DutyCutoverManager  = "migration.cutover.manage"
+	DutyStepOwner       = "migration.cutover-step.execute"
 )
 
 // Problem codes raised by this service. Rule violations carry the MIG-/CUT- message code in detail.

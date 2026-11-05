@@ -35,11 +35,11 @@ const admin: PassageModule = {
     { label: "Import / export", to: "/admin/import" },
     { label: "Documents", to: "/admin/documents" },
     { label: "Standard texts", to: "/admin/texts" },
-    { label: "Effective permissions", to: "/admin/security/permissions", duty: "View effective permissions" },
-    { label: "Role assignments", to: "/admin/security/assignments", duty: "Maintain security roles" },
-    { label: "Legal entities", to: "/admin/security/legal-entities", duty: "Maintain legal entities" },
-    { label: "Users", to: "/admin/security/users", duty: "Maintain users" },
-    { label: "Role catalogue", to: "/admin/security/roles", duty: "Maintain security roles" },
+    { label: "Effective permissions", to: "/admin/security/permissions", duty: "identity.effective-permission.view" },
+    { label: "Role assignments", to: "/admin/security/assignments", duty: "identity.security-role.maintain" },
+    { label: "Legal entities", to: "/admin/security/legal-entities", duty: "identity.legal-entity.maintain" },
+    { label: "Users", to: "/admin/security/users", duty: "identity.user.maintain" },
+    { label: "Role catalogue", to: "/admin/security/roles", duty: "identity.security-role.maintain" },
   ],
 };
 

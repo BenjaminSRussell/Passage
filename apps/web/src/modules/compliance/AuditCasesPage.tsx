@@ -123,7 +123,7 @@ const draftColumns: DataTableColumn<CaseDraft>[] = [
 ];
 
 /**
- * Audit cases (PRD §9.48.6, duty AuditCaseManage): group violations into
+ * Audit cases (PRD §9.48.6, duty compliance.audit-case.manage): group violations into
  * cases, one per vendor for duplicate payments and one per policy otherwise,
  * and check a case action against the status machine (FR-48.15). Nothing is
  * saved until the audit case store exists.

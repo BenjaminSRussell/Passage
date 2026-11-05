@@ -3,7 +3,7 @@
 // totals are read from GET /v1/receivables/open-item-imports. The factory signs as its own service
 // (PASSAGE_SERVICE_NAME=migration-factory, its own key, never the migration service's) and acts as the existing
 // service:migration-loader principal in the run's legal entity. Each token carries one duty of the grant: the
-// batch only receivables.import.write, the totals read only ARView. Every attempt carries a freshly signed token
+// batch only receivables.import.write, the totals read only receivables.view. Every attempt carries a freshly signed token
 // (a token id is single use).
 package target
 
@@ -35,7 +35,7 @@ const (
 
 	audReceivables = "receivables"
 	dutyImport     = "receivables.import.write"
-	dutyRead       = "ARView"
+	dutyRead       = "receivables.view"
 
 	defaultAttempts = 5
 	defaultBackoff  = time.Second

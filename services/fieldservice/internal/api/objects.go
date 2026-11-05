@@ -18,7 +18,7 @@ import (
 // dutyObject guards installed-base writes (FR-45.1). The PRD duty table
 // (8.45.17) names no installed-base duty; NOT-IMPLEMENTED.md hands the mapping
 // to the policy owner.
-const dutyObject = "SvcObjectMaintain"
+const dutyObject = "fieldservice.service-object.maintain"
 
 const (
 	maxSerial          = 100

@@ -70,7 +70,7 @@ func TestWithholding_SendsTheCodeInlineWithASignedTokenAndParsesTheAmount(t *tes
 		}
 	}
 	claims, err := verifier.Verify(got.Get(tenant.HeaderServiceToken))
-	if err != nil || claims.Aud != "tax" || claims.Le != entity || len(claims.Duties) != 1 || claims.Duties[0] != "Calculate withholding tax" {
+	if err != nil || claims.Aud != "tax" || claims.Le != entity || len(claims.Duties) != 1 || claims.Duties[0] != "tax.withholding.calculate" {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

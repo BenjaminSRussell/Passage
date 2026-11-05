@@ -18,7 +18,7 @@ const entityID = "00000000-0000-0000-0000-0000000000e1"
 func principalContext() context.Context {
 	return tenant.With(context.Background(), tenant.Principal{
 		TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: entityID, UserID: "user-1",
-		Duties: map[string]struct{}{"HcmRecruitMaintain": {}},
+		Duties: map[string]struct{}{"hr.recruiting.maintain": {}},
 	})
 }
 
@@ -53,7 +53,7 @@ func TestNext_SignedSendsOnlyTheAllocateDuty(t *testing.T) {
 		t.Fatalf("request %s %s headers %v", got.Method, got.URL.Path, got.Header)
 	}
 	claims, err := tenant.NewServiceVerifier("numbering", map[string]ed25519.PublicKey{"hr": pub}).Verify(got.Header.Get(tenant.HeaderServiceToken))
-	if err != nil || claims.Le != entityID || claims.Act != "user-1" || !claims.Principal().HasDuty("numbering.sequence.allocate") || claims.Principal().HasDuty("numbering.write") || claims.Principal().HasDuty("HcmRecruitMaintain") {
+	if err != nil || claims.Le != entityID || claims.Act != "user-1" || !claims.Principal().HasDuty("numbering.sequence.allocate") || claims.Principal().HasDuty("numbering.write") || claims.Principal().HasDuty("hr.recruiting.maintain") {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

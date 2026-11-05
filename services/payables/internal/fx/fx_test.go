@@ -22,7 +22,7 @@ var day = time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
 func ctx() context.Context {
 	return tenant.With(context.Background(), tenant.Principal{
 		TenantID: testkit.TenantID(1), LegalEntityID: "00000000-0000-0000-0000-0000000000a1", UserID: "u1",
-		Duties: map[string]struct{}{"View exchange rates": {}},
+		Duties: map[string]struct{}{"fx.rate.view": {}},
 	})
 }
 
@@ -41,7 +41,7 @@ func TestRate_RequestAndParse(t *testing.T) {
 	if rate.String() != "1.0825" {
 		t.Fatalf("rate = %s", rate)
 	}
-	if gotPath != "/v1/fx/rates" || gotTenant != testkit.TenantID(1) || gotEntity != "00000000-0000-0000-0000-0000000000a1" || gotDuties != "View exchange rates" {
+	if gotPath != "/v1/fx/rates" || gotTenant != testkit.TenantID(1) || gotEntity != "00000000-0000-0000-0000-0000000000a1" || gotDuties != "fx.rate.view" {
 		t.Fatalf("path=%s tenant=%s entity=%s duties=%s", gotPath, gotTenant, gotEntity, gotDuties)
 	}
 	for _, want := range []string{"type=spot", "from=EUR", "to=USD", "date=2027-03-31"} {

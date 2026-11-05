@@ -116,7 +116,7 @@ func (a *API) getWorker(w http.ResponseWriter, r *http.Request, id string) {
 	httpx.JSON(w, http.StatusOK, workerDetail{Worker: worker, PII: pii})
 }
 
-// revealPII is FR-42.1's unmasked read. It needs HcmPIIRead and a reason of at
+// revealPII is FR-42.1's unmasked read. It needs hr.pii.read and a reason of at
 // least 10 characters, and the audit row is written in the same transaction as
 // the decryption, so a failed audit returns no value (8.42.17).
 func (a *API) revealPII(w http.ResponseWriter, r *http.Request, id string) {

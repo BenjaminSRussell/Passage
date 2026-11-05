@@ -106,7 +106,7 @@ describe("module registration, slice 5", () => {
   it("registers the transfer page and the group asset screens", () => {
     const paths = assets.routes.map((r) => r.path);
     expect(paths).toEqual(expect.arrayContaining(["/assets/:id/transfer", "/assets/group-assets", "/assets/group-assets/new", "/assets/group-assets/:id"]));
-    expect(assets.nav.find((n) => n.to === "/assets/group-assets")?.duty).toBe("AssetConfigure");
+    expect(assets.nav.find((n) => n.to === "/assets/group-assets")?.duty).toBe("assets.asset.configure");
   });
 });
 
@@ -377,9 +377,9 @@ describe("group assets", () => {
     const { unmount } = renderAt("/assets/group-assets");
     expect(await screen.findByText("No group assets yet")).toBeInTheDocument();
     unmount();
-    handler = () => ({ status: 403, body: { code: "AUTH-0002", detail: "missing duty AssetView or AssetConfigure" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0002", detail: "missing duty assets.asset.view or assets.asset.configure" } });
     renderAt("/assets/group-assets");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty AssetView or AssetConfigure (AUTH-0002)");
+    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty assets.asset.view or assets.asset.configure (AUTH-0002)");
   });
 
   it("picks open members of the class in the legal entity and creates the group", async () => {

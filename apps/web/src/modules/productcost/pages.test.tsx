@@ -68,21 +68,21 @@ describe("productcost module", () => {
     expect(loadModules().some((m) => m.id === "productcost")).toBe(true);
     expect(productcost.routes.every((r) => r.element != null && r.path?.startsWith("/productcost"))).toBe(true);
     expect(productcost.nav.map((n) => [n.to, n.duty])).toEqual([
-      ["/productcost", "CostingView"],
-      ["/productcost/roll", "CostingCalculate"],
-      ["/productcost/mixed-cost", "CostingCalculate"],
-      ["/productcost/sales-order-estimate", "CostingCalculate"],
-      ["/productcost/sales-order-versions", "CostingCalculate"],
-      ["/productcost/estimates", "CostingCalculate"],
-      ["/productcost/compare", "CostingView"],
-      ["/productcost/variances", "CostingSystem"],
-      ["/productcost/postings", "CostingCalculate"],
-      ["/productcost/reconciliation", "CostingView"],
-      ["/productcost/activation-preview", "CostingActivate"],
-      ["/productcost/cost-components", "CostingView"],
-      ["/productcost/cost-groups", "CostingView"],
-      ["/productcost/versions", "CostingView"],
-      ["/productcost/conversion", "CostingActivate"],
+      ["/productcost", "productcost.view"],
+      ["/productcost/roll", "productcost.calculate"],
+      ["/productcost/mixed-cost", "productcost.calculate"],
+      ["/productcost/sales-order-estimate", "productcost.calculate"],
+      ["/productcost/sales-order-versions", "productcost.calculate"],
+      ["/productcost/estimates", "productcost.calculate"],
+      ["/productcost/compare", "productcost.view"],
+      ["/productcost/variances", "productcost.variance.compute"],
+      ["/productcost/postings", "productcost.calculate"],
+      ["/productcost/reconciliation", "productcost.view"],
+      ["/productcost/activation-preview", "productcost.activate"],
+      ["/productcost/cost-components", "productcost.view"],
+      ["/productcost/cost-groups", "productcost.view"],
+      ["/productcost/versions", "productcost.view"],
+      ["/productcost/conversion", "productcost.activate"],
     ]);
     expect(productcost.routes.map((r) => r.path)).toEqual(productcost.nav.map((n) => n.to));
   });
@@ -346,13 +346,13 @@ describe("activation preview page", () => {
   });
 
   it("shows a refusal and keeps the entered positions", async () => {
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty CostingActivate" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty productcost.activate" } });
     renderAt("/productcost/activation-preview");
     fireEvent.change(screen.getByLabelText("New standard"), { target: { value: "11.00" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview revaluation" }));
     await waitFor(() => expect(screen.getByText("The preview was not computed")).toBeInTheDocument());
     expect(screen.getByText("The preview was not computed").closest("[role=alert]")).toHaveTextContent(
-      "missing duty CostingActivate (AUTH-0003)",
+      "missing duty productcost.activate (AUTH-0003)",
     );
     expect(screen.getByLabelText("New standard")).toHaveValue("11.00");
   });
@@ -708,10 +708,10 @@ describe("standard cost reconciliation page", () => {
   });
 
   it("shows a missing duty", async () => {
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty CostingView" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty productcost.view" } });
     renderAt("/productcost/reconciliation");
     fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
     const title = await screen.findByText("The reconciliation was not computed");
-    expect(title.closest("[role=alert]")).toHaveTextContent("missing duty CostingView (AUTH-0003)");
+    expect(title.closest("[role=alert]")).toHaveTextContent("missing duty productcost.view (AUTH-0003)");
   });
 });

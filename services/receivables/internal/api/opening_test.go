@@ -20,7 +20,7 @@ func openingBody(atomic string, rows ...string) string {
 
 func TestOpeningImport_NeedsTheImportDuty(t *testing.T) {
 	h := router(&fakeStore{})
-	for _, duties := range []string{"ARView", "ARImport", "party.import.write"} {
+	for _, duties := range []string{"receivables.view", "receivables.payment-file.import", "party.import.write"} {
 		rec := do(h, http.MethodPost, "/v1/receivables/open-items:batch", openingBody("false", openingRow("A", "INVOICE", "DEBIT")), duties, nil)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s: want 403, got %d", duties, rec.Code)
@@ -35,7 +35,7 @@ func TestOpeningImport_NeedsTheImportDuty(t *testing.T) {
 // The loader reads an open item back by id (receivables.import.read); its list and every other route stay closed.
 func TestOpenItemRead_ImportReadDuty(t *testing.T) {
 	h := router(&fakeStore{})
-	for _, duties := range []string{"receivables.import.read", "ARView"} {
+	for _, duties := range []string{"receivables.import.read", "receivables.view"} {
 		rec := do(h, http.MethodGet, "/v1/receivables/open-items/"+fakeOpenItemID, "", duties, nil)
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"documentNumber":"D-1"`) || rec.Header().Get("ETag") != `"2"` {
 			t.Fatalf("%s: %d %s", duties, rec.Code, rec.Body)
@@ -117,13 +117,13 @@ func TestOpeningImport_BatchFieldsAndScope(t *testing.T) {
 
 func TestOpenItems_ImportSourceFilter(t *testing.T) {
 	h := router(&fakeStore{})
-	if rec := do(h, http.MethodGet, "/v1/receivables/open-items?importSource=bad%20source", "", "ARView", nil); rec.Code != http.StatusBadRequest {
+	if rec := do(h, http.MethodGet, "/v1/receivables/open-items?importSource=bad%20source", "", "receivables.view", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("want 400, got %d", rec.Code)
 	}
-	if rec := do(h, http.MethodGet, "/v1/receivables/open-items?importSource=SAP-PRD", "", "ARView", nil); rec.Code != http.StatusOK {
+	if rec := do(h, http.MethodGet, "/v1/receivables/open-items?importSource=SAP-PRD", "", "receivables.view", nil); rec.Code != http.StatusOK {
 		t.Errorf("want 200, got %d", rec.Code)
 	}
-	if rec := do(h, http.MethodGet, "/v1/receivables/open-item-imports", "", "ARView", nil); rec.Code != http.StatusOK {
+	if rec := do(h, http.MethodGet, "/v1/receivables/open-item-imports", "", "receivables.view", nil); rec.Code != http.StatusOK {
 		t.Errorf("imports: want 200, got %d", rec.Code)
 	}
 }

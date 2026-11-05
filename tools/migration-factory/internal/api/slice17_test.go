@@ -43,11 +43,11 @@ func TestSlice17_RefusedBeforeTheStore(t *testing.T) {
 	}{
 		{request{method: "POST", path: "/api/v1/migration/parallel-runs/replay", tenant: tenantA, duties: allDuties, body: `{}`}, http.StatusServiceUnavailable, CodeLedgerNotConfigured},
 		{request{method: "POST", path: plan, tenant: tenantA, duties: allDuties, body: `{}`}, http.StatusServiceUnavailable, CodeLedgerNotConfigured},
-		{request{method: "POST", path: "/api/v1/migration/parallel-runs/replay", tenant: tenantA, duties: "MigrationView", body: `{}`}, http.StatusForbidden, ""},
+		{request{method: "POST", path: "/api/v1/migration/parallel-runs/replay", tenant: tenantA, duties: "migration.factory.view", body: `{}`}, http.StatusForbidden, ""},
 		{request{method: "GET", path: "/api/v1/migration/coexistence?sourceSystem=AX2012", tenant: tenantA, duties: allDuties}, http.StatusUnprocessableEntity, CodeInvalid},
 		{request{method: "PUT", path: "/api/v1/migration/coexistence/AX2012/USMF/planet", tenant: tenantA, duties: allDuties, body: `{"mode":"PASSAGE"}`}, http.StatusUnprocessableEntity, CodeInvalid},
 		{request{method: "PUT", path: "/api/v1/migration/coexistence/AX2012/USMF/customer", tenant: tenantA, duties: allDuties, body: `{"mode":"BOTH"}`}, http.StatusUnprocessableEntity, CodeInvalid},
-		{request{method: "PUT", path: "/api/v1/migration/coexistence/AX2012/USMF/customer", tenant: tenantA, duties: "MigrationView", body: `{"mode":"PASSAGE"}`}, http.StatusForbidden, ""},
+		{request{method: "PUT", path: "/api/v1/migration/coexistence/AX2012/USMF/customer", tenant: tenantA, duties: "migration.factory.view", body: `{"mode":"PASSAGE"}`}, http.StatusForbidden, ""},
 		{request{method: "POST", path: "/api/v1/migration/packs/fixed_assets/runs", tenant: tenantA, duties: allDuties,
 			body: `{"sourceSystem":"AX2012","sourceCompany":"USMF","cutoffTs":"2026-12-31T00:00:00Z","freezeTs":"2026-12-31T06:00:00Z","master":[],"records":[{"legacyId":"A"}]}`}, http.StatusUnprocessableEntity, CodeInvalid},
 	}

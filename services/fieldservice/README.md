@@ -54,63 +54,63 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 
 | Method | Path | Duty |
 |---|---|---|
-| POST | `/v1/service/sla-profiles` | SvcAgreementMaintain |
-| GET | `/v1/service/sla-profiles`, `/v1/service/sla-profiles/{id}` | SvcInquire |
-| POST | `/v1/service/agreements` | SvcAgreementMaintain |
-| GET | `/v1/service/agreements` (`status`, `customerPartyId`), `/v1/service/agreements/{id}` (ETag) | SvcInquire |
-| POST | `/v1/service/agreements/{id}:transition` (activate, suspend, resume, cancel) | SvcAgreementMaintain (If-Match, optional Idempotency-Key) |
-| POST | `/v1/service/agreements:expire` (one expiry pass, `limit`) | SvcAgreementMaintain |
-| POST | `/v1/service/agreements/{id}/visits` | SvcAgreementMaintain (Idempotency-Key) |
-| GET | `/v1/service/agreements/{id}/visits`, `/v1/service/agreements/{id}/history` | SvcInquire |
-| POST | `/v1/service/cases` | SvcCaseCreate |
-| GET | `/v1/service/cases` (`status`, `slaState`, `customerPartyId`), `/v1/service/cases/{id}` | SvcInquire |
-| POST | `/v1/service/work-orders` | SvcWoMaintain |
-| GET | `/v1/service/work-orders` (`status`, `territoryId`, `caseId`, `customerPartyId`), `/v1/service/work-orders/{id}` | SvcInquire |
-| POST | `/v1/service/work-orders/{id}:transition` (not to SCHEDULED or DISPATCHED; completing needs the signature) | SvcWoMaintain (If-Match) |
-| POST | `/v1/service/work-orders/{id}:post` | SvcBillingPost (If-Match, Idempotency-Key) |
-| POST | `/v1/service/cases/{id}:transition` | SvcCaseMaintain (If-Match; Idempotency-Key optional) |
-| POST | `/v1/service/sla:scan` (`limit`, 1 to 5000, default 500) | SvcCaseMaintain |
-| POST | `/v1/service/work-orders/{id}:follow-up` | SvcWoMaintain (If-Match, Idempotency-Key) |
-| GET | `/v1/service/kpis` (`from`, `to`, `territory`) | SvcInquire |
-| POST | `/v1/service/service-objects` | SvcObjectMaintain (Idempotency-Key) |
-| POST | `/v1/service/service-objects:receive-shipment` | SvcObjectMaintain (idempotent per item and serial) |
-| GET | `/v1/service/service-objects` (`customerPartyId`, `itemId`, `serial`, `parentId`, `status`), `/v1/service/service-objects/{id}` | SvcInquire |
-| POST | `/v1/service/service-objects/{id}:install` | SvcObjectMaintain (If-Match) |
-| POST | `/v1/service/activities` | ActivityMaintain (Idempotency-Key) |
-| GET | `/v1/service/activities` (`owner`, or `entityType` with `entityId`; `status`), `/v1/service/activities/{id}` | ActivityMaintain |
-| GET | `/v1/service/activities:calendar` (same filter) | ActivityMaintain |
-| POST | `/v1/service/activities/{id}:complete`, `:cancel`, `:reschedule` | ActivityMaintain (If-Match) |
-| POST | `/v1/service/knowledge/articles` | KbAuthor (Idempotency-Key) |
-| GET | `/v1/service/knowledge/articles` (`status`, `lang`, `number`), `/v1/service/knowledge/articles/{id}` | KbRead |
-| GET | `/v1/service/knowledge/articles/search` (`q`, `itemId`, `incidentTypeId`, `assetTypeId`, `lang`, `limit` 1 to 20) | KbRead |
-| PUT | `/v1/service/knowledge/articles/{id}` | KbAuthor (If-Match) |
-| POST | `/v1/service/knowledge/articles/{id}:new-version`, `:submit` | KbAuthor (If-Match) |
-| POST | `/v1/service/knowledge/articles/{id}:publish`, `:reject`, `:retire` | KbPublish (If-Match) |
-| POST | `/v1/service/knowledge/articles/{id}:vote` | KbRead |
-| POST | `/v1/case-processes`, `/v1/case-categories` | CaseSetupAdmin (Idempotency-Key) |
-| GET | `/v1/case-processes`, `/v1/case-categories` | any of CaseMaintain, CaseCreate, CaseSetupAdmin |
-| POST | `/v1/cases` | CaseCreate (Idempotency-Key; and the category's access duty) |
-| GET | `/v1/cases` (`categoryId`, `status`, `stage`, `ownerId`, `entityType` with `entityId`), `/v1/cases/{id}` | CaseMaintain (and BR-45.10 access) |
-| POST | `/v1/cases/{id}/stage`, `/v1/cases/{id}:transition`, `/v1/cases/{id}:reopen` | CaseMaintain (If-Match, Idempotency-Key) |
-| POST | `/v1/cases/{id}/associations` | CaseMaintain (Idempotency-Key) |
-| POST | `/v1/service/supplier-claims` | SvcClaimMaintain (Idempotency-Key) |
-| GET | `/v1/service/supplier-claims` (`vendorPartyId`, `status`), `/v1/service/supplier-claims/{id}` | SvcClaimMaintain or SvcInquire |
-| POST | `/v1/service/supplier-claims/{id}:submit`, `/{id}/decision`, `/{id}:settle`, `/{id}:close` | SvcClaimMaintain (If-Match, Idempotency-Key) |
-| POST | `/v1/case-mailboxes` | CaseSetupAdmin (upsert by address) |
-| GET | `/v1/case-mailboxes` | any of CaseMaintain, CaseCreate, CaseSetupAdmin |
-| POST | `/v1/inbound-messages` | CaseCreate (idempotent per Message-ID; and the default category's access duty for a new case) |
-| GET | `/v1/inbound-messages` (`mailbox`, `caseId`, `route`) | CaseMaintain (and BR-45.10 access) |
+| POST | `/v1/service/sla-profiles` | fieldservice.agreement.maintain |
+| GET | `/v1/service/sla-profiles`, `/v1/service/sla-profiles/{id}` | fieldservice.inquire |
+| POST | `/v1/service/agreements` | fieldservice.agreement.maintain |
+| GET | `/v1/service/agreements` (`status`, `customerPartyId`), `/v1/service/agreements/{id}` (ETag) | fieldservice.inquire |
+| POST | `/v1/service/agreements/{id}:transition` (activate, suspend, resume, cancel) | fieldservice.agreement.maintain (If-Match, optional Idempotency-Key) |
+| POST | `/v1/service/agreements:expire` (one expiry pass, `limit`) | fieldservice.agreement.maintain |
+| POST | `/v1/service/agreements/{id}/visits` | fieldservice.agreement.maintain (Idempotency-Key) |
+| GET | `/v1/service/agreements/{id}/visits`, `/v1/service/agreements/{id}/history` | fieldservice.inquire |
+| POST | `/v1/service/cases` | fieldservice.service-case.create |
+| GET | `/v1/service/cases` (`status`, `slaState`, `customerPartyId`), `/v1/service/cases/{id}` | fieldservice.inquire |
+| POST | `/v1/service/work-orders` | fieldservice.work-order.maintain |
+| GET | `/v1/service/work-orders` (`status`, `territoryId`, `caseId`, `customerPartyId`), `/v1/service/work-orders/{id}` | fieldservice.inquire |
+| POST | `/v1/service/work-orders/{id}:transition` (not to SCHEDULED or DISPATCHED; completing needs the signature) | fieldservice.work-order.maintain (If-Match) |
+| POST | `/v1/service/work-orders/{id}:post` | fieldservice.billing.post (If-Match, Idempotency-Key) |
+| POST | `/v1/service/cases/{id}:transition` | fieldservice.service-case.maintain (If-Match; Idempotency-Key optional) |
+| POST | `/v1/service/sla:scan` (`limit`, 1 to 5000, default 500) | fieldservice.service-case.maintain |
+| POST | `/v1/service/work-orders/{id}:follow-up` | fieldservice.work-order.maintain (If-Match, Idempotency-Key) |
+| GET | `/v1/service/kpis` (`from`, `to`, `territory`) | fieldservice.inquire |
+| POST | `/v1/service/service-objects` | fieldservice.service-object.maintain (Idempotency-Key) |
+| POST | `/v1/service/service-objects:receive-shipment` | fieldservice.service-object.maintain (idempotent per item and serial) |
+| GET | `/v1/service/service-objects` (`customerPartyId`, `itemId`, `serial`, `parentId`, `status`), `/v1/service/service-objects/{id}` | fieldservice.inquire |
+| POST | `/v1/service/service-objects/{id}:install` | fieldservice.service-object.maintain (If-Match) |
+| POST | `/v1/service/activities` | fieldservice.activity.maintain (Idempotency-Key) |
+| GET | `/v1/service/activities` (`owner`, or `entityType` with `entityId`; `status`), `/v1/service/activities/{id}` | fieldservice.activity.maintain |
+| GET | `/v1/service/activities:calendar` (same filter) | fieldservice.activity.maintain |
+| POST | `/v1/service/activities/{id}:complete`, `:cancel`, `:reschedule` | fieldservice.activity.maintain (If-Match) |
+| POST | `/v1/service/knowledge/articles` | fieldservice.knowledge-article.author (Idempotency-Key) |
+| GET | `/v1/service/knowledge/articles` (`status`, `lang`, `number`), `/v1/service/knowledge/articles/{id}` | fieldservice.knowledge-article.read |
+| GET | `/v1/service/knowledge/articles/search` (`q`, `itemId`, `incidentTypeId`, `assetTypeId`, `lang`, `limit` 1 to 20) | fieldservice.knowledge-article.read |
+| PUT | `/v1/service/knowledge/articles/{id}` | fieldservice.knowledge-article.author (If-Match) |
+| POST | `/v1/service/knowledge/articles/{id}:new-version`, `:submit` | fieldservice.knowledge-article.author (If-Match) |
+| POST | `/v1/service/knowledge/articles/{id}:publish`, `:reject`, `:retire` | fieldservice.knowledge-article.publish (If-Match) |
+| POST | `/v1/service/knowledge/articles/{id}:vote` | fieldservice.knowledge-article.read |
+| POST | `/v1/case-processes`, `/v1/case-categories` | fieldservice.case-setup.admin (Idempotency-Key) |
+| GET | `/v1/case-processes`, `/v1/case-categories` | any of fieldservice.case.maintain, fieldservice.case.create, fieldservice.case-setup.admin |
+| POST | `/v1/cases` | fieldservice.case.create (Idempotency-Key; and the category's access duty) |
+| GET | `/v1/cases` (`categoryId`, `status`, `stage`, `ownerId`, `entityType` with `entityId`), `/v1/cases/{id}` | fieldservice.case.maintain (and BR-45.10 access) |
+| POST | `/v1/cases/{id}/stage`, `/v1/cases/{id}:transition`, `/v1/cases/{id}:reopen` | fieldservice.case.maintain (If-Match, Idempotency-Key) |
+| POST | `/v1/cases/{id}/associations` | fieldservice.case.maintain (Idempotency-Key) |
+| POST | `/v1/service/supplier-claims` | fieldservice.supplier-claim.maintain (Idempotency-Key) |
+| GET | `/v1/service/supplier-claims` (`vendorPartyId`, `status`), `/v1/service/supplier-claims/{id}` | fieldservice.supplier-claim.maintain or fieldservice.inquire |
+| POST | `/v1/service/supplier-claims/{id}:submit`, `/{id}/decision`, `/{id}:settle`, `/{id}:close` | fieldservice.supplier-claim.maintain (If-Match, Idempotency-Key) |
+| POST | `/v1/case-mailboxes` | fieldservice.case-setup.admin (upsert by address) |
+| GET | `/v1/case-mailboxes` | any of fieldservice.case.maintain, fieldservice.case.create, fieldservice.case-setup.admin |
+| POST | `/v1/inbound-messages` | fieldservice.case.create (idempotent per Message-ID; and the default category's access duty for a new case) |
+| GET | `/v1/inbound-messages` (`mailbox`, `caseId`, `route`) | fieldservice.case.maintain (and BR-45.10 access) |
 
-| POST | `/v1/service/technicians` | SvcDispatch (Idempotency-Key) |
-| GET | `/v1/service/technicians` (`territoryId`, `active`), `/v1/service/technicians/{id}` (ETag) | SvcInquire |
-| PUT | `/v1/service/technicians/{id}` | SvcDispatch (If-Match) |
-| PUT | `/v1/service/work-orders/{id}/scheduling` (skills, customer window, address, position, estimate; UNSCHEDULED orders) | SvcWoMaintain (If-Match) |
-| POST | `/v1/service/work-orders/{id}:assign`, `:unassign` | SvcDispatch (If-Match) |
-| GET | `/v1/service/dispatch/board` (`territoryId`, `date`, `timeZone`) | SvcInquire |
-| POST | `/v1/service/dispatch/publish` | SvcDispatch (Idempotency-Key) |
-| POST | `/v1/service/work-orders/{id}/actions` (a batch of the technician's offline actions; each action id idempotent) | SvcTechnician |
-| GET | `/v1/service/work-orders/{id}/actions` (the log in merge order) | SvcInquire |
-| GET | `/v1/service/dispatch/runs` (`territoryId`), `/v1/service/dispatch/runs/{id}` | SvcInquire |
+| POST | `/v1/service/technicians` | fieldservice.technician.dispatch (Idempotency-Key) |
+| GET | `/v1/service/technicians` (`territoryId`, `active`), `/v1/service/technicians/{id}` (ETag) | fieldservice.inquire |
+| PUT | `/v1/service/technicians/{id}` | fieldservice.technician.dispatch (If-Match) |
+| PUT | `/v1/service/work-orders/{id}/scheduling` (skills, customer window, address, position, estimate; UNSCHEDULED orders) | fieldservice.work-order.maintain (If-Match) |
+| POST | `/v1/service/work-orders/{id}:assign`, `:unassign` | fieldservice.technician.dispatch (If-Match) |
+| GET | `/v1/service/dispatch/board` (`territoryId`, `date`, `timeZone`) | fieldservice.inquire |
+| POST | `/v1/service/dispatch/publish` | fieldservice.technician.dispatch (Idempotency-Key) |
+| POST | `/v1/service/work-orders/{id}/actions` (a batch of the technician's offline actions; each action id idempotent) | fieldservice.work-order.execute |
+| GET | `/v1/service/work-orders/{id}/actions` (the log in merge order) | fieldservice.inquire |
+| GET | `/v1/service/dispatch/runs` (`territoryId`), `/v1/service/dispatch/runs/{id}` | fieldservice.inquire |
 Lists are newest first (activities: earliest due first, undated last) and page with `cursor` (the previous page's `nextCursor`)
 and `limit` (1 to 200, default 50); they see only the caller's legal entities.
 Work-order, case (service and generic), service-object and activity responses carry `ETag: "<version>"`, and
@@ -287,7 +287,7 @@ without `PASSAGE_TEST_DATABASE_URL`.
 - Access (BR-45.10): a category's `accessDuty` limits its cases to holders of that
   duty and the case owner (the user who opened it), for open, read, list and every
   change (`CASE-SEC-001`, 403); the list leaves inaccessible cases out. A category
-  without one is open to every CaseMaintain holder.
+  without one is open to every fieldservice.case.maintain holder.
 - Associations: any registry record type of `domain.AssociableTypes` with role
   SUBJECT or RELATED; associating the same record again replaces the role. The case
   version moves (the ETag changes), but the call needs no If-Match (PRD 8.45.5).
@@ -385,7 +385,7 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `SVC-SYNC-002` | action | REJECTED: the status move cannot follow the work order's state, or it is not worked from the device |
 | `SVC-SYNC-003` | action | REJECTED: the work order is not assigned to this technician |
 | `SVC-SYNC-004` | action | REJECTED: not a PART line of the work order, or the quantity would exceed the line |
-| `SVC-SYNC-003` | 403 | The caller is neither the technician's worker (user id = `workerId`) nor office staff with `SvcWoMaintain`; the whole batch is refused |
+| `SVC-SYNC-003` | 403 | The caller is neither the technician's worker (user id = `workerId`) nor office staff with `fieldservice.work-order.maintain`; the whole batch is refused |
 | `SVC-SYNC-005` | 422 | An action id was already used for another action (another work order, technician, kind, device time or payload) |
 | `SVC-SYNC-006` | action | REJECTED: the device time is more than 5 minutes before the work order was created (check the device clock) |
 | `SVC-DSP-009` | 422 | Nothing scheduled to dispatch on that territory-day (or an unreadable day) |

@@ -93,7 +93,7 @@ export function parseRecord(text: string): Record<string, string> {
 }
 
 /**
- * One subject request (PRD §9.48.6 Privacy requests, duty PrivacyOfficer):
+ * One subject request (PRD §9.48.6 Privacy requests, duty compliance.privacy-request.process):
  * its deadline, state and holds, the next step and, for an erasure, a preview
  * of what pseudonymization does to a record (BR-48.5).
  */

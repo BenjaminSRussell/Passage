@@ -77,7 +77,7 @@ export interface NewWorkerOnHire {
   legalName?: string;
 }
 
-/** Give workerId for an existing worker, or newWorker (needs HcmWorkerMaintain) to create one. */
+/** Give workerId for an existing worker, or newWorker (needs hr.worker.maintain) to create one. */
 export interface HireFromOffer {
   workerId?: string;
   newWorker?: NewWorkerOnHire;

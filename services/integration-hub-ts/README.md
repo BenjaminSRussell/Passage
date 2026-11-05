@@ -178,7 +178,7 @@ A rejected URL is "no response". `test/ssrf.test.ts` covers each range with a st
   counted per minute (`hub_client_usage`, `GET /v1/hub/clients/{id}/usage`). Duties:
   `hub.client.write` (register, change, revoke), `hub.client.consume` (service-only: never a
   person; no caller holds it until the edge quota check is built), reads under `hub.delivery.read`.
-  Scopes are duty names in any catalogue style. The client secret stays in Keycloak.
+  Scopes are duty names (dotted lower-case; older clients may hold pre-#210 styles). The client secret stays in Keycloak.
 - `src/catalog.ts` and the `/v1/hub/catalog` routes (FR-35.8): the API and event catalog the developer
   portal browses. `POST` publishes one version of an OpenAPI 3.x (kind `api`) or AsyncAPI 3.x (kind
   `event`) JSON document (at most 2 MiB and 64 levels deep, checked by an iterative walk before

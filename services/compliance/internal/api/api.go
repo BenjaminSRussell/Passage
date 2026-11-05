@@ -38,12 +38,12 @@ import (
 
 // Duties (PRD §9.48.5 and §9.48.6).
 const (
-	DutySoDReview     = "SoDReview"
-	DutySoDApprove    = "SoDApprove"
-	DutySoDAdmin      = "SoDAdmin"
-	DutySecurityAdmin = "SecurityAdmin"
+	DutySoDReview     = "compliance.sod.review"
+	DutySoDApprove    = "compliance.sod.approve"
+	DutySoDAdmin      = "compliance.sod.admin"
+	DutySecurityAdmin = "compliance.security.admin"
 	// DutyIncidentManage covers security incidents and breach clocks (PRD §9.48 duties).
-	DutyIncidentManage = "SecurityIncidentManage"
+	DutyIncidentManage = "compliance.security-incident.manage"
 )
 
 const (

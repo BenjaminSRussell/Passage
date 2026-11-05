@@ -66,7 +66,7 @@ const groupColumns: DataTableColumn<ProjectGroup>[] = [
   { key: "version", header: "Version", align: "end" },
 ];
 
-/** Project groups (FR-41.1): every project belongs to one; posting profiles key on it. Saving needs ProjSetupAdmin. */
+/** Project groups (FR-41.1): every project belongs to one; posting profiles key on it. Saving needs projects.setup.admin. */
 export function ProjectGroupsPage() {
   const state = useLoad((signal) => listGroups(signal), "groups");
   const [editing, setEditing] = useState<ProjectGroup | null>(null);

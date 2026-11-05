@@ -45,7 +45,7 @@ export function toIntakeInput(v: IntakeValues, now: Date = new Date()): { input?
 }
 
 /**
- * Record a subject request (PRD §9.48.5 intake, duty PrivacyIntake). The
+ * Record a subject request (PRD §9.48.5 intake, duty compliance.privacy-request.create). The
  * deadline is set from the regulation; the request then waits for a privacy
  * officer to verify the requester's identity.
  */

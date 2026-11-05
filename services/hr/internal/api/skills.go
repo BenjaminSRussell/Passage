@@ -58,7 +58,7 @@ type requirementRequest struct {
 	MinRating *int   `json:"minRating"`
 }
 
-// createSkill is POST /v1/hr/skills (HcmSetupAdmin).
+// createSkill is POST /v1/hr/skills (hr.setup.admin).
 func (a *API) createSkill(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -120,7 +120,7 @@ func (a *API) listSkills(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, listResponse[store.Skill]{Items: page.Items, NextCursor: cursor(page.NextAfter)})
 }
 
-// rateWorkerSkill is POST /v1/hr/workers/{id}/skills (HcmWorkerMaintain). It
+// rateWorkerSkill is POST /v1/hr/workers/{id}/skills (hr.worker.maintain). It
 // answers 200 with the stored rating whether or not it changed.
 func (a *API) rateWorkerSkill(w http.ResponseWriter, r *http.Request, workerID string) {
 	var req rateSkillRequest
@@ -170,7 +170,7 @@ func (a *API) listWorkerSkills(w http.ResponseWriter, r *http.Request, workerID 
 }
 
 // issueCertification is POST /v1/hr/workers/{id}/certifications
-// (HcmWorkerMaintain, BR-42.8). validityMonths is turned into expiresOn here.
+// (hr.worker.maintain, BR-42.8). validityMonths is turned into expiresOn here.
 func (a *API) issueCertification(w http.ResponseWriter, r *http.Request, workerID string) {
 	var req certificationRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -355,7 +355,7 @@ func (a *API) jobSkillGaps(w http.ResponseWriter, r *http.Request, jobID string)
 }
 
 // setJobRequirement is POST /v1/hr/jobs/{id}/skill-requirements
-// (HcmOrgMaintain). It sets or replaces one skill's minimum, so a retry is safe.
+// (hr.org.maintain). It sets or replaces one skill's minimum, so a retry is safe.
 func (a *API) setJobRequirement(w http.ResponseWriter, r *http.Request, jobID string) {
 	var req requirementRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -467,7 +467,7 @@ func (a *API) searchSkills(w http.ResponseWriter, r *http.Request) {
 }
 
 // setRequirement is POST /v1/hr/positions/{id}/skill-requirements
-// (HcmOrgMaintain). It sets or replaces one skill's minimum, so a retry is safe.
+// (hr.org.maintain). It sets or replaces one skill's minimum, so a retry is safe.
 func (a *API) setRequirement(w http.ResponseWriter, r *http.Request, positionID string) {
 	var req requirementRequest
 	if err := httpx.Decode(r, &req); err != nil {

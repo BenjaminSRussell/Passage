@@ -15,7 +15,7 @@ import (
 func TestCutoverStep_StartTimesAndMeasuresTheStep(t *testing.T) {
 	h, admin := dbServer(t)
 	t0 := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: generateBody(t0, 36), user: "manager"}))
+	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage", body: generateBody(t0, 36), user: "manager"}))
 	if len(plan.RollbackSteps) != 6 || plan.RollbackSteps[0].OffsetMin != 36*60 {
 		t.Fatalf("generated plan carries the rollback plan: %+v", plan.RollbackSteps)
 	}
@@ -25,7 +25,7 @@ func TestCutoverStep_StartTimesAndMeasuresTheStep(t *testing.T) {
 	}
 	base := "/api/v1/cutover/plans/" + plan.PlanID
 	step := func(action, name, body, key string) *httptest.ResponseRecorder {
-		return (do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/%s", base, seqOf[name], action), tenant: tenantA, duties: "CutoverStepOwner", body: body, key: key, user: "owner"}))
+		return (do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/%s", base, seqOf[name], action), tenant: tenantA, duties: "migration.cutover-step.execute", body: body, key: key, user: "owner"}))
 	}
 	load := "Load pack open_items"
 
@@ -38,7 +38,7 @@ func TestCutoverStep_StartTimesAndMeasuresTheStep(t *testing.T) {
 	if r := step("start", load, `{"version":7}`, ""); r.Code != http.StatusConflict || problemCode(t, r) != CodeVersion {
 		t.Fatalf("stale version: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/start", base, seqOf[load]), tenant: tenantB, duties: "CutoverStepOwner", body: `{}`}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/start", base, seqOf[load]), tenant: tenantB, duties: "migration.cutover-step.execute", body: `{}`}); r.Code != http.StatusNotFound {
 		t.Fatalf("another tenant cannot start the step: %d %s", r.Code, r.Body)
 	}
 
@@ -70,7 +70,7 @@ func TestCutoverStep_StartTimesAndMeasuresTheStep(t *testing.T) {
 	if _, err := admin.Exec(t.Context(), `update cutover_step set started_at = now() - interval '75 minutes' where plan_id = $1 and seq = $2`, plan.PlanID, seqOf[load]); err != nil {
 		t.Fatal(err)
 	}
-	got := decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "CutoverManager"}))
+	got := decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "migration.cutover.manage"}))
 	for _, s := range got.Steps {
 		if s.Name == load && (s.Tone != "red" || s.ElapsedMin == nil || *s.ElapsedMin < 75 || !strings.Contains(s.OverrunWarning, "CUT-1602")) {
 			t.Fatalf("stored running step past red: %+v", s)

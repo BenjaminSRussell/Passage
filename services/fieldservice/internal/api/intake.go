@@ -26,7 +26,7 @@ const (
 var emailAddress = regexp.MustCompile(`^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$`)
 
 func (a *API) registerIntake(r chi.Router) {
-	setupRead := authz.Require(anyDuty{dutyGenMaintain, dutyGenCreate, dutyCaseSetup}, "CaseMaintain, CaseCreate or CaseSetupAdmin", "")
+	setupRead := authz.Require(anyDuty{dutyGenMaintain, dutyGenCreate, dutyCaseSetup}, "fieldservice.case.maintain, fieldservice.case.create or fieldservice.case-setup.admin", "")
 	r.With(authz.RequireDuty(dutyCaseSetup)).Post("/v1/case-mailboxes", a.upsertMailbox)
 	r.With(setupRead).Get("/v1/case-mailboxes", a.listMailboxes)
 	r.With(authz.RequireDuty(dutyGenCreate)).Post("/v1/inbound-messages", a.ingestInbound)

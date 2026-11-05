@@ -28,7 +28,7 @@ paths:
   /v1/sod/rules:
     get:
       operationId: listSodRules
-      x-passage-duty: SoDReview
+      x-passage-duty: compliance.sod.review
       responses:
         "200":
           description: The FR-48.4 seed rules
@@ -46,7 +46,7 @@ paths:
   /v1/sod/simulate:
     post:
       operationId: simulateRoleAssignment
-      x-passage-duty: SecurityAdmin
+      x-passage-duty: compliance.security.admin
       description: >-
         Returns the conflicts a role assignment would introduce, before anything
         is saved. With sod.block_high the save is blocked (code SOD-1101) when the
@@ -83,7 +83,7 @@ paths:
   /v1/sod/evaluations:
     post:
       operationId: evaluateUserRoles
-      x-passage-duty: SecurityAdmin
+      x-passage-duty: compliance.security.admin
       description: >-
         Evaluates a user's effective roles after an assignment change (or from the
         nightly run) and records the outcome: new conflicts are stored OPEN and emit
@@ -118,7 +118,7 @@ paths:
   /v1/sod/conflicts:
     get:
       operationId: listSodConflicts
-      x-passage-duty: SoDReview
+      x-passage-duty: compliance.sod.review
       description: Conflicts, newest detection first. Lapsed mitigations are reopened before reading.
       parameters:
         - { name: state, in: query, schema: { type: string, enum: [OPEN, MITIGATED, RESOLVED, ACCEPTED_RISK] } }
@@ -146,7 +146,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getSodConflict
-      x-passage-duty: SoDReview
+      x-passage-duty: compliance.sod.review
       responses:
         "200":
           description: The conflict with its mitigation history
@@ -164,7 +164,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: mitigateSodConflict
-      x-passage-duty: SoDApprove
+      x-passage-duty: compliance.sod.approve
       description: >-
         Approves a compensating control for an OPEN conflict (FR-48.5, AC-48.4).
         The approver is the calling user and must not be the conflicted user; the
@@ -205,7 +205,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: acceptSodRisk
-      x-passage-duty: SoDAdmin
+      x-passage-duty: compliance.sod.admin
       description: Accepts the risk of an OPEN LOW or MEDIUM conflict with a reason (BR-48.1).
       parameters:
         - { name: If-Match, in: header, required: true, schema: { type: string } }
@@ -237,7 +237,7 @@ paths:
   /v1/security/incidents:breach-clocks:
     post:
       operationId: computeBreachClocks
-      x-passage-duty: SecurityIncidentManage
+      x-passage-duty: compliance.security-incident.manage
       description: >-
         Notification clocks for a confirmed personal-data breach (FR-48.29).
         Clocks start at awareAt, not at detection, and deadlines are UTC
@@ -281,7 +281,7 @@ paths:
   /v1/compliance/audit-policies:evaluate:
     post:
       operationId: evaluateAuditPolicy
-      x-passage-duty: AuditPolicyRun
+      x-passage-duty: compliance.audit-policy.run
       description: >-
         Runs one audit rule (FR-48.14) over a document window the caller
         selected and returns the findings. Every rule type is supported:
@@ -329,7 +329,7 @@ paths:
   /v1/compliance/audit-cases:group:
     post:
       operationId: groupViolationsIntoCases
-      x-passage-duty: AuditCaseManage
+      x-passage-duty: compliance.audit-case.manage
       description: >-
         Groups unassigned violations into audit case drafts (FR-48.15).
         DUPLICATE violations group per vendor (AC-48.13: one case per vendor);
@@ -364,7 +364,7 @@ paths:
   /v1/compliance/audit-cases:transition:
     post:
       operationId: transitionAuditCase
-      x-passage-duty: AuditCaseManage
+      x-passage-duty: compliance.audit-case.manage
       description: >-
         Applies one action of the audit case status machine (FR-48.15):
         OPEN -START_REVIEW-> IN_REVIEW -RESOLVE_NO_ISSUE|RESOLVE_ISSUE->
@@ -409,17 +409,17 @@ paths:
   /v1/security/elevated-sessions:plan:
     post:
       operationId: planElevatedSession
-      x-passage-duty: BreakGlassRequest
+      x-passage-duty: compliance.break-glass.request
       description: >-
         Validates a break-glass request of the calling user (X-Passage-User)
         and returns the session it would open (FR-48.23, BR-48.19): the window
         from the server time, capped by breakglass.max_minutes (tenant
         setting, 60 by default, never above 240), the approval path and the
         reviewer deadline breakglass.review_days business days after the end.
-        A protected role (SecurityAdmin, PlatformAdmin) can never be granted
+        A protected role (compliance.security.admin, platform.global.admin) can never be granted
         to yourself (SEC-0707) and, for another user, always waits for a
-        second PlatformAdmin. Otherwise breakglass.self_activate decides
-        between approval by a BreakGlassApprove holder and self-activation
+        second platform.global.admin. Otherwise breakglass.self_activate decides
+        between approval by a compliance.break-glass.approve holder and self-activation
         with mandatory post-review. No session is stored and no token issued.
       requestBody:
         required: true
@@ -451,7 +451,7 @@ paths:
   /v1/trade/screening/check:
     post:
       operationId: screenSubject
-      x-passage-duty: TradeComplianceView
+      x-passage-duty: compliance.trade-screening.view
       description: >-
         Screens a party or document on demand against the given list entries
         (FR-48.19) with normalized token-set matching and transliteration, at the
@@ -492,7 +492,7 @@ paths:
   /v1/trade/screening/hits:
     get:
       operationId: listScreeningHits
-      x-passage-duty: TradeComplianceView
+      x-passage-duty: compliance.trade-screening.view
       description: Screening hits, newest detection first (the screening workbench).
       parameters:
         - { name: state, in: query, schema: { type: string, enum: [OPEN, FALSE_POSITIVE, CONFIRMED] } }
@@ -520,7 +520,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getScreeningHit
-      x-passage-duty: TradeComplianceView
+      x-passage-duty: compliance.trade-screening.view
       responses:
         "200":
           description: The hit
@@ -538,7 +538,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: decideScreeningHit
-      x-passage-duty: TradeComplianceOfficer
+      x-passage-duty: compliance.trade-screening.decide
       description: >-
         Clears an OPEN hit as a false positive or confirms it, with a reason
         (FR-48.19). The decider is the calling user. A false positive becomes the
@@ -577,7 +577,7 @@ paths:
   /v1/trade/export-checks:
     post:
       operationId: checkExportLicenses
-      x-passage-duty: TradeComplianceView
+      x-passage-duty: compliance.trade-screening.view
       description: >-
         License determination for a delivery (FR-48.20, AC-48.17). A destination
         under comprehensive embargo blocks every line with TRD-1002 whatever the
@@ -587,7 +587,7 @@ paths:
         earlier lines of the same delivery, or it gets TRD-1003 (blocked under
         trade.license_check BLOCK, a warning under WARN, skipped under OFF).
         officerReleaseLicenseRef releases an embargoed delivery and requires
-        TradeComplianceOfficer (403 otherwise). Until the export_license store
+        compliance.trade-screening.decide (403 otherwise). Until the export_license store
         exists the caller supplies the licenses; nothing is stored.
       requestBody:
         required: true
@@ -616,7 +616,7 @@ paths:
   /v1/privacy/requests:
     post:
       operationId: intakeSubjectRequest
-      x-passage-duty: PrivacyIntake
+      x-passage-duty: compliance.privacy-request.create
       description: >-
         Takes in a GDPR or CCPA subject request in RECEIVED (FR-48.10). The
         deadline is receivedAt plus 30 days (GDPR) or 45 days (CCPA);
@@ -653,7 +653,7 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
     get:
       operationId: listSubjectRequests
-      x-passage-duty: PrivacyOfficer
+      x-passage-duty: compliance.privacy-request.process
       description: Subject requests, nearest deadline first (the privacy request list inquiry).
       parameters:
         - { name: state, in: query, schema: { $ref: "#/components/schemas/PrivacyState" } }
@@ -679,7 +679,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getSubjectRequest
-      x-passage-duty: PrivacyOfficer
+      x-passage-duty: compliance.privacy-request.process
       responses:
         "200":
           description: The request
@@ -697,7 +697,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: actOnSubjectRequest
-      x-passage-duty: PrivacyOfficer
+      x-passage-duty: compliance.privacy-request.process
       description: >-
         Moves a stored request one step: VERIFY (RECEIVED, two distinct matched
         attributes and the e-mail link, else PRV-1203), DISCOVER (VERIFIED; an
@@ -745,7 +745,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: previewErasure
-      x-passage-duty: PrivacyOfficer
+      x-passage-duty: compliance.privacy-request.process
       description: >-
         Shows what an ERASURE request does to one record of the subject
         (BR-48.5): name, address, email, phone, tax_id, bank_account and
@@ -783,7 +783,7 @@ paths:
   /v1/privacy/holds:
     post:
       operationId: placeLegalHold
-      x-passage-duty: compliance.legal_hold.place
+      x-passage-duty: compliance.legal-hold.place
       description: >-
         Places a legal hold (FR-48.11) on a subject, a data class, a record or a combination inside one legal
         entity in the caller's scope. A hold suspends erasure and retention purge for what it covers; every field
@@ -819,7 +819,7 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
     get:
       operationId: listLegalHolds
-      x-passage-duty: compliance.legal_hold.read
+      x-passage-duty: compliance.legal-hold.read
       description: Holds newest first, keyset-paginated; filter by state, legal entity, subject and data class.
       parameters:
         - { name: state, in: query, schema: { type: string, enum: [ACTIVE, RELEASED] } }
@@ -845,7 +845,7 @@ paths:
   /v1/privacy/holds:check:
     get:
       operationId: checkLegalHolds
-      x-passage-duty: compliance.legal_hold.check
+      x-passage-duty: compliance.legal-hold.check
       description: >-
         The hold check participants call before they erase or purge (FR-48.11). Answers whether an active hold in
         the legal entity covers the target: every field set on the hold must equal the target's, and a hold on a
@@ -874,7 +874,7 @@ paths:
   /v1/privacy/holds/{id}:
     get:
       operationId: getLegalHold
-      x-passage-duty: compliance.legal_hold.read
+      x-passage-duty: compliance.legal-hold.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -892,7 +892,7 @@ paths:
   /v1/privacy/holds/{id}/release:
     post:
       operationId: releaseLegalHold
-      x-passage-duty: compliance.legal_hold.release
+      x-passage-duty: compliance.legal-hold.release
       description: >-
         Releases an ACTIVE hold with a reason of at least 10 characters (If-Match required; stale is 412
         PRV-1223, an already released hold PRV-1222). Emits privacy.hold.released. The hold row is kept.
@@ -984,7 +984,7 @@ paths:
   /v1/privacy/retention:purge-check:
     post:
       operationId: checkRetentionPurge
-      x-passage-duty: PrivacyOfficer
+      x-passage-duty: compliance.privacy-request.process
       description: >-
         BR-48.6 for one record the monthly retention purge considers: a record
         under legal hold, in an open fiscal period or referenced by an open
@@ -1020,7 +1020,7 @@ paths:
   /v1/sod/campaigns:plan:
     post:
       operationId: planCertificationCampaign
-      x-passage-duty: SoDAdmin
+      x-passage-duty: compliance.sod.admin
       description: >-
         The close instant of an access certification campaign (FR-48.6):
         startsAt plus windowDays (0 takes the 14-day default; 3 to 60, else
@@ -1054,7 +1054,7 @@ paths:
   /v1/sod/campaigns:close:
     post:
       operationId: closeCertificationCampaign
-      x-passage-duty: SoDAdmin
+      x-passage-duty: compliance.sod.admin
       description: >-
         Campaign progress and, once closesAt has passed at the server time, the
         close of BR-48.9: explicit REVOKE decisions are revoked; an uncertified
@@ -1088,7 +1088,7 @@ paths:
   /v1/security/incidents:transition:
     post:
       operationId: checkIncidentStep
-      x-passage-duty: SecurityIncidentManage
+      x-passage-duty: compliance.security-incident.manage
       description: >-
         One step of the security incident lifecycle (FR-48.29): TRIAGE when
         opened (from empty), then CONTAINED, ERADICATED, RECOVERED and CLOSED,
@@ -1147,7 +1147,7 @@ paths:
   /v1/compliance/export-governance:evaluate:
     post:
       operationId: evaluateExportGovernance
-      x-passage-duty: ComplianceView
+      x-passage-duty: compliance.view
       description: >-
         The export policy decision for one download (FR-48.24). Defaults per
         classification: PII REASON and WATERMARK, FINANCIAL AUDIT, CONFIDENTIAL
@@ -1191,7 +1191,7 @@ paths:
   /v1/compliance/read-log:classify:
     post:
       operationId: classifyReadLog
-      x-passage-duty: ComplianceView
+      x-passage-duty: compliance.view
       description: >-
         Which fields of one read the read-log policy covers (FR-48.25). The rules
         are fixed server-side: national_id, bank_account, salary, health, i9_document and
@@ -1420,7 +1420,7 @@ components:
         endsAt: { type: string, format: date-time }
         reviewDueAt: { type: string, format: date-time, description: endsAt plus breakglass.review_days business days (Monday to Friday) }
         needsApproval: { type: boolean }
-        approverDuty: { type: string, enum: [BreakGlassApprove, PlatformAdmin], description: present when needsApproval }
+        approverDuty: { type: string, enum: [compliance.break-glass.approve, platform.global.admin], description: present when needsApproval }
         requiresPostReview: { type: boolean }
     BreachClock:
       type: object
@@ -1484,7 +1484,7 @@ components:
         state: { type: string, enum: [OPEN, MITIGATED, RESOLVED, ACCEPTED_RISK] }
         mitigationId: { type: string, format: uuid }
         expiresAt: { type: string, format: date-time, description: mitigation expiry, only while MITIGATED }
-        decidedBy: { type: string, description: approver of the latest mitigation or the SoDAdmin who accepted the risk }
+        decidedBy: { type: string, description: approver of the latest mitigation or the compliance.sod.admin holder who accepted the risk }
         decisionReason: { type: string }
         detectedAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time }

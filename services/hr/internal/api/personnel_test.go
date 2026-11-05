@@ -24,13 +24,13 @@ func TestActionsThatTouchPayNeedCompAdmin(t *testing.T) {
 	for name, body := range bodies {
 		rec := serve(t, tid(), http.MethodPost, "/v1/hr/actions", body, dutyActionMaintain)
 		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
-			t.Errorf("%s with only HcmActionMaintain: status %d body %s, want 403", name, rec.Code, rec.Body.String())
+			t.Errorf("%s with only hr.action.maintain: status %d body %s, want 403", name, rec.Code, rec.Body.String())
 		}
 	}
 	offerHire := `{"workerId":"` + worker + `","legalEntityId":"` + plan + `","employmentType":"FULL_TIME","compPlanId":"` + plan + `"}`
 	rec := serve(t, tid(), http.MethodPost, "/v1/hr/offers/"+employment+"/hire", offerHire, dutyActionMaintain)
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("hire with a comp plan and only HcmActionMaintain: status %d, want 403", rec.Code)
+		t.Errorf("hire with a comp plan and only hr.action.maintain: status %d, want 403", rec.Code)
 	}
 }
 

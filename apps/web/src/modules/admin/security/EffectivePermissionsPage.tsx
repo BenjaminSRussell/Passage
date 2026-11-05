@@ -6,9 +6,9 @@ import { fetchEffectivePermissions, SecurityApiError, UUID, type Permission } fr
 import styles from "./security.module.css";
 import { ApiFailure, canRetry, useFocusFirstInvalid, withoutFields, type Errors } from "./support";
 
-const DUTY = "View effective permissions";
+const DUTY = "identity.effective-permission.view";
 const SCOPE_NOTE =
-  'This report needs the "View effective permissions" or "Maintain users" duty and a legal-entity scope of all entities. A caller scoped to one entity cannot see tenant-wide assignments, so the report would be incomplete.';
+  'This report needs the "identity.effective-permission.view" or "identity.user.maintain" duty and a legal-entity scope of all entities. A caller scoped to one entity cannot see tenant-wide assignments, so the report would be incomplete.';
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
 interface Request {

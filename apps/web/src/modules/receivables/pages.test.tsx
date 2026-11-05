@@ -133,7 +133,7 @@ describe("Open items", () => {
     const first = renderAt("/receivables/open-items");
     expect(await screen.findByText("Items appear here once invoices post for the customer.")).toBeInTheDocument();
     first.unmount();
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ARView" });
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty receivables.view" });
     renderAt("/receivables/open-items");
     expect(await findAlert()).toHaveTextContent("AUTH-0003");
   });

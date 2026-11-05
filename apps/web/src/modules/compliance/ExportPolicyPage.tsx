@@ -33,7 +33,7 @@ export function decisionText(d: ExportDecision): string {
 }
 
 /**
- * Export policy check (FR-48.24, FR-48.25, duty ComplianceView): what the
+ * Export policy check (FR-48.24, FR-48.25, duty compliance.view): what the
  * policy for a data classification does to one download, and which fields of
  * a read are written to the read-access log. Nothing is logged yet; the
  * checks show the policy the API layer will apply.

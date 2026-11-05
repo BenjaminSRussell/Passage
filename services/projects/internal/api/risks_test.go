@@ -30,7 +30,7 @@ func TestRisks_CreateListScoreAndFilters(t *testing.T) {
 		t.Fatalf("missing key: %d", rec.Code)
 	}
 	if rec := as(t, h, []string{DutyInquire}, http.MethodPost, path, low, key("r0")); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without ProjPlan: %d", rec.Code)
+		t.Fatalf("create without projects.plan: %d", rec.Code)
 	}
 	bad := `{"kind":"RUMOUR","title":"","probability":0,"impact":6,"dueDate":"01/12/2026","ownerWorkerId":"bob","status":"CLOSED"}`
 	rec := as(t, h, []string{DutyPlan}, http.MethodPost, path, bad, key("r1"))

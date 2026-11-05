@@ -105,7 +105,7 @@ func (f *fakeStore) ListRuns(_ context.Context, _ store.RunFilter) (store.RunPag
 	return page, nil
 }
 
-const opsDuties = "AssetView,AssetMaintain,AssetDepreciate,AssetPostJournal"
+const opsDuties = "assets.asset.view,assets.asset.maintain,assets.asset.depreciate,assets.journal.post"
 
 func adjustBody(bookID, typ, amount string) string {
 	return `{"bookId":"` + bookID + `","type":"` + typ + `","transactionDate":"2026-06-30","amount":"` + amount + `"}`
@@ -116,8 +116,8 @@ func TestAdjust_DutyValidationAndCappedReversal(t *testing.T) {
 	h := server(f)
 	assetID, bookID := addAsset(t, h, midMonthBook)
 	path := "/v1/assets/" + assetID + "/transactions"
-	if rec := call(h, http.MethodPost, path, adjustBody(bookID, "Impairment", "500"), "AssetMaintain", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetPostJournal status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, path, adjustBody(bookID, "Impairment", "500"), "assets.asset.maintain", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.journal.post status = %d", rec.Code)
 	}
 	if rec := call(h, http.MethodPost, path, adjustBody(bookID, "Impairment", "500"), opsDuties, false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("without Idempotency-Key status = %d", rec.Code)
@@ -176,8 +176,8 @@ func TestAdditions_FinancialRulesAndList(t *testing.T) {
 	a := createAsset(t, h)
 	path := "/v1/assets/" + a.ID + "/additions"
 	financial := `{"type":"Improvement","description":" Coolant system ","addedDate":"2026-04-01","financial":true,"cost":"2000","currency":"USD","serialNumber":" SN-9 "}`
-	if rec := call(h, http.MethodPost, path, financial, "AssetView", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetMaintain status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, path, financial, "assets.asset.view", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.asset.maintain status = %d", rec.Code)
 	}
 	rec := call(h, http.MethodPost, path, financial, opsDuties, true)
 	if rec.Code != http.StatusCreated {
@@ -203,11 +203,11 @@ func TestAdditions_FinancialRulesAndList(t *testing.T) {
 			t.Errorf("%s: status %d body %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	list := call(h, http.MethodGet, path, "", "AssetView", false)
+	list := call(h, http.MethodGet, path, "", "assets.asset.view", false)
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"items":[]`) {
 		t.Fatalf("list = %d %s", list.Code, list.Body.String())
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/"+ids.New()+"/additions", "", "AssetView", false); rec.Code != http.StatusNotFound {
+	if rec := call(h, http.MethodGet, "/v1/assets/"+ids.New()+"/additions", "", "assets.asset.view", false); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown asset list status = %d", rec.Code)
 	}
 }
@@ -217,8 +217,8 @@ func TestRuns_ProposePostIfMatchAndDuties(t *testing.T) {
 	h := server(f)
 	le := testLE
 	body := `{"legalEntityId":"` + le + `","bookCode":"IFRS","period":"2026-03"}`
-	if rec := call(h, http.MethodPost, "/v1/assets/depreciation-runs", body, "AssetView,AssetPostJournal", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetDepreciate status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, "/v1/assets/depreciation-runs", body, "assets.asset.view,assets.journal.post", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.asset.depreciate status = %d", rec.Code)
 	}
 	bad := call(h, http.MethodPost, "/v1/assets/depreciation-runs", `{"legalEntityId":"x","bookCode":"ifrs","period":"2026-13"}`, opsDuties, true)
 	if bad.Code != http.StatusBadRequest {
@@ -253,8 +253,8 @@ func TestRuns_ProposePostIfMatchAndDuties(t *testing.T) {
 		}
 		return do(h, req{method: http.MethodPost, path: "/v1/assets/depreciation-runs/" + run.ID + "/post", duties: duties, headers: headers})
 	}
-	if rec := post("AssetDepreciate", `"1"`); rec.Code != http.StatusForbidden {
-		t.Fatalf("post without AssetPostJournal status = %d", rec.Code)
+	if rec := post("assets.asset.depreciate", `"1"`); rec.Code != http.StatusForbidden {
+		t.Fatalf("post without assets.journal.post status = %d", rec.Code)
 	}
 	if rec := post(opsDuties, ""); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("post without If-Match status = %d", rec.Code)
@@ -272,17 +272,17 @@ func TestRuns_ProposePostIfMatchAndDuties(t *testing.T) {
 		t.Fatalf("propose after post status = %d", rec.Code)
 	}
 
-	// Reads are open to AssetView or AssetDepreciate.
-	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs/"+run.ID, "", "AssetDepreciate", false); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
+	// Reads are open to assets.asset.view or assets.asset.depreciate.
+	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs/"+run.ID, "", "assets.asset.depreciate", false); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
 		t.Fatalf("get run status = %d etag %q", rec.Code, rec.Header().Get("ETag"))
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs", "", "AssetView", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), run.ID) {
+	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs", "", "assets.asset.view", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), run.ID) {
 		t.Fatalf("list runs status = %d body %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs", "", "LeaseMaintain", false); rec.Code != http.StatusForbidden {
+	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs", "", "assets.lease.maintain", false); rec.Code != http.StatusForbidden {
 		t.Fatalf("list runs without a read duty status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs/nope", "", "AssetView", false); rec.Code != http.StatusNotFound || problem(t, rec).Code != store.CodeRunNotFound {
+	if rec := call(h, http.MethodGet, "/v1/assets/depreciation-runs/nope", "", "assets.asset.view", false); rec.Code != http.StatusNotFound || problem(t, rec).Code != store.CodeRunNotFound {
 		t.Fatalf("malformed run id status = %d", rec.Code)
 	}
 }

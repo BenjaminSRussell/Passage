@@ -72,7 +72,7 @@ is not committed, so that check is opt-in. What stays open is in `NOT-IMPLEMENTE
 | Code | HTTP | Meaning |
 |---|---|---|
 | `AUTH-0001` | 401 | missing or malformed tenant |
-| `AUTH-0003` | 403 | missing duty `LocalizationAdmin` |
+| `AUTH-0003` | 403 | missing duty `localization.admin` |
 | `COM-0002` | 400 | request failed validation |
 | `LOC-0501` | 422 | fiscal calendar has open periods incompatible with the pack |
 | `LOC-0502` | 422 | retention below the statutory pack minimum |
@@ -89,7 +89,7 @@ is not committed, so that check is opt-in. What stays open is in `NOT-IMPLEMENTE
 
 PSG-48 slice 1 covers FR-48.1 (framework and validation), FR-48.2 (seven packs, metadata only) and the
 UK part of AC1. Slice 2 adds the India TDS calculation (part of FR-48.27, AC-48.21):
-`POST /v1/localization/in/tds:withhold` (duty `LocalizationAdmin`) for sections 194C, 194J, 194I, 194H and
+`POST /v1/localization/in/tds:withhold` (duty `localization.admin`) for sections 194C, 194J, 194I, 194H and
 194Q. Crossing an annual threshold also deducts on the year's earlier untaxed credits (`ytdPaid - ytdTaxed`);
 without a PAN the rate is the highest of the section rate, twice that rate and 20% (5% for 194Q) under
 206AA; a section 197 certificate lowers the rate only with a PAN; 194Q deducts on the excess over 50 lakh.

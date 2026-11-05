@@ -100,8 +100,8 @@ describe("round module wiring", () => {
   it("registers the round register, editor and detail and the KPI page, with nav entries", () => {
     const paths = eam.routes.map((r) => r.path);
     for (const path of ["/eam/rounds", "/eam/rounds/new", "/eam/rounds/:id", "/eam/kpis"]) expect(paths).toContain(path);
-    expect(eam.nav.find((n) => n.to === "/eam/rounds")).toMatchObject({ label: "Rounds", duty: "EamInquire" });
-    expect(eam.nav.find((n) => n.to === "/eam/kpis")).toMatchObject({ label: "KPIs", duty: "EamInquire" });
+    expect(eam.nav.find((n) => n.to === "/eam/rounds")).toMatchObject({ label: "Rounds", duty: "eam.inquire" });
+    expect(eam.nav.find((n) => n.to === "/eam/kpis")).toMatchObject({ label: "KPIs", duty: "eam.inquire" });
   });
 });
 

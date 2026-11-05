@@ -29,40 +29,40 @@ campaign, incident step and export policy screens.
 
 | Method and path | Duty | What |
 |---|---|---|
-| `GET /v1/sod/rules` | SoDReview | the seed rules |
-| `POST /v1/sod/simulate` | SecurityAdmin | conflicts an assignment would add; `blocked` with `SOD-1101` when the resulting roles hold a HIGH conflict the service has not recorded as MITIGATED (new or existing, AC-48.3) and `sod.block_high` is on |
-| `POST /v1/sod/evaluations` | SecurityAdmin | records the outcome for a user's effective roles: new conflicts OPEN (`sod.conflict.detected`), RESOLVED ones detected again reopened, conflicts no longer detected RESOLVED; repeating it changes nothing |
-| `GET /v1/sod/conflicts` | SoDReview | filter by state, severity, user, rule; keyset paging with `cursor` |
-| `GET /v1/sod/conflicts/{id}` | SoDReview | conflict with its mitigation history; `ETag` is the version |
-| `POST /v1/sod/conflicts/{id}/mitigations` | SoDApprove | `If-Match` and `Idempotency-Key` required; the caller is the approver; emits `sod.mitigation.approved` |
-| `POST /v1/sod/conflicts/{id}/accept-risk` | SoDAdmin | `If-Match` required; LOW and MEDIUM only |
-| `POST /v1/security/incidents:breach-clocks` | SecurityIncidentManage | slice 2, read-only: the notification clocks of a confirmed personal-data breach with their status at server time |
-| `POST /v1/compliance/audit-policies:evaluate` | AuditPolicyRun | slice 3, read-only: runs one audit rule over the document window in the body; findings keyed on (policy, version, document); `code: AUD-0701` when any document violates |
-| `POST /v1/compliance/audit-cases:group` | AuditCaseManage | slice 3, read-only: case drafts from violations (one per vendor for DUPLICATE, one per policy otherwise) |
-| `POST /v1/compliance/audit-cases:transition` | AuditCaseManage | slice 3, read-only: one action of the case status machine, judged at server time with `audit.case_archive_days` |
-| `POST /v1/security/elevated-sessions:plan` | BreakGlassRequest | slice 3, read-only: the break-glass session the calling user's request would open; no session is stored and no token issued |
-| `POST /v1/trade/screening/check` | TradeComplianceView | slice 4: screens a party or document against the list entries in the body at `screening.threshold`; new hits are stored OPEN and emit `trade.screening.hit`; answers the subject's blocking hits (OPEN and CONFIRMED) and `blocked` |
-| `GET /v1/trade/screening/hits` | TradeComplianceView | slice 4: filter by state, list, subject type and subject; keyset paging with `cursor` |
-| `GET /v1/trade/screening/hits/{id}` | TradeComplianceView | slice 4: one hit; `ETag` is the version |
-| `POST /v1/trade/screening/hits/{id}/decision` | TradeComplianceOfficer | slice 4: `If-Match` and `Idempotency-Key` required; `CLEAR_FALSE_POSITIVE` or `CONFIRM` with a reason; the caller is the decider |
-| `POST /v1/trade/export-checks` | TradeComplianceView | slice 4, read-only: license determination per delivery line; `officerReleaseLicenseRef` (embargo release) needs TradeComplianceOfficer |
-| `POST /v1/privacy/requests` | PrivacyIntake | slice 5: `Idempotency-Key` required; stores a subject request in RECEIVED with its deadline (GDPR 30, CCPA 45 days from `receivedAt`, shorter override only) |
-| `GET /v1/privacy/requests` | PrivacyOfficer | slice 5: filter by state and type, nearest deadline first; keyset paging with `cursor` |
-| `GET /v1/privacy/requests/{id}` | PrivacyOfficer | slice 5: one request; `ETag` is the version |
-| `POST /v1/privacy/requests/{id}/actions` | PrivacyOfficer | slice 5: `If-Match` required; VERIFY, DISCOVER, RELEASE_HOLD, APPROVE, DELIVER, CLOSE or REJECT on the stored state; CLOSE emits `privacy.request.completed` |
-| `POST /v1/privacy/requests/{id}/erasure-preview` | PrivacyOfficer | slice 5, read-only: the BR-48.5 pseudonymization of one record of the subject, refused under a legal hold |
-| `POST /v1/privacy/retention:purge-check` | PrivacyOfficer | slice 5, read-only: BR-48.6 skip reasons for one record |
-| `POST /v1/privacy/holds` | `compliance.legal_hold.place` | slice 6: `Idempotency-Key` required; places a legal hold on a subject, a data class, a record or a combination in one legal entity of the caller's scope; emits `privacy.hold.placed` |
-| `GET /v1/privacy/holds`, `GET /v1/privacy/holds/{id}` | `compliance.legal_hold.read` | slice 6: filter by state, legal entity, subject, data class; keyset paging; `ETag` is the version |
-| `POST /v1/privacy/holds/{id}/release` | `compliance.legal_hold.release` | slice 6: `If-Match` and a reason of 10+ characters; emits `privacy.hold.released`; the row is kept |
-| `GET /v1/privacy/holds:check` | `compliance.legal_hold.check` (service only) | slice 6: the hold check participants call, see "Legal holds" below |
+| `GET /v1/sod/rules` | compliance.sod.review | the seed rules |
+| `POST /v1/sod/simulate` | compliance.security.admin | conflicts an assignment would add; `blocked` with `SOD-1101` when the resulting roles hold a HIGH conflict the service has not recorded as MITIGATED (new or existing, AC-48.3) and `sod.block_high` is on |
+| `POST /v1/sod/evaluations` | compliance.security.admin | records the outcome for a user's effective roles: new conflicts OPEN (`sod.conflict.detected`), RESOLVED ones detected again reopened, conflicts no longer detected RESOLVED; repeating it changes nothing |
+| `GET /v1/sod/conflicts` | compliance.sod.review | filter by state, severity, user, rule; keyset paging with `cursor` |
+| `GET /v1/sod/conflicts/{id}` | compliance.sod.review | conflict with its mitigation history; `ETag` is the version |
+| `POST /v1/sod/conflicts/{id}/mitigations` | compliance.sod.approve | `If-Match` and `Idempotency-Key` required; the caller is the approver; emits `sod.mitigation.approved` |
+| `POST /v1/sod/conflicts/{id}/accept-risk` | compliance.sod.admin | `If-Match` required; LOW and MEDIUM only |
+| `POST /v1/security/incidents:breach-clocks` | compliance.security-incident.manage | slice 2, read-only: the notification clocks of a confirmed personal-data breach with their status at server time |
+| `POST /v1/compliance/audit-policies:evaluate` | compliance.audit-policy.run | slice 3, read-only: runs one audit rule over the document window in the body; findings keyed on (policy, version, document); `code: AUD-0701` when any document violates |
+| `POST /v1/compliance/audit-cases:group` | compliance.audit-case.manage | slice 3, read-only: case drafts from violations (one per vendor for DUPLICATE, one per policy otherwise) |
+| `POST /v1/compliance/audit-cases:transition` | compliance.audit-case.manage | slice 3, read-only: one action of the case status machine, judged at server time with `audit.case_archive_days` |
+| `POST /v1/security/elevated-sessions:plan` | compliance.break-glass.request | slice 3, read-only: the break-glass session the calling user's request would open; no session is stored and no token issued |
+| `POST /v1/trade/screening/check` | compliance.trade-screening.view | slice 4: screens a party or document against the list entries in the body at `screening.threshold`; new hits are stored OPEN and emit `trade.screening.hit`; answers the subject's blocking hits (OPEN and CONFIRMED) and `blocked` |
+| `GET /v1/trade/screening/hits` | compliance.trade-screening.view | slice 4: filter by state, list, subject type and subject; keyset paging with `cursor` |
+| `GET /v1/trade/screening/hits/{id}` | compliance.trade-screening.view | slice 4: one hit; `ETag` is the version |
+| `POST /v1/trade/screening/hits/{id}/decision` | compliance.trade-screening.decide | slice 4: `If-Match` and `Idempotency-Key` required; `CLEAR_FALSE_POSITIVE` or `CONFIRM` with a reason; the caller is the decider |
+| `POST /v1/trade/export-checks` | compliance.trade-screening.view | slice 4, read-only: license determination per delivery line; `officerReleaseLicenseRef` (embargo release) needs compliance.trade-screening.decide |
+| `POST /v1/privacy/requests` | compliance.privacy-request.create | slice 5: `Idempotency-Key` required; stores a subject request in RECEIVED with its deadline (GDPR 30, CCPA 45 days from `receivedAt`, shorter override only) |
+| `GET /v1/privacy/requests` | compliance.privacy-request.process | slice 5: filter by state and type, nearest deadline first; keyset paging with `cursor` |
+| `GET /v1/privacy/requests/{id}` | compliance.privacy-request.process | slice 5: one request; `ETag` is the version |
+| `POST /v1/privacy/requests/{id}/actions` | compliance.privacy-request.process | slice 5: `If-Match` required; VERIFY, DISCOVER, RELEASE_HOLD, APPROVE, DELIVER, CLOSE or REJECT on the stored state; CLOSE emits `privacy.request.completed` |
+| `POST /v1/privacy/requests/{id}/erasure-preview` | compliance.privacy-request.process | slice 5, read-only: the BR-48.5 pseudonymization of one record of the subject, refused under a legal hold |
+| `POST /v1/privacy/retention:purge-check` | compliance.privacy-request.process | slice 5, read-only: BR-48.6 skip reasons for one record |
+| `POST /v1/privacy/holds` | `compliance.legal-hold.place` | slice 6: `Idempotency-Key` required; places a legal hold on a subject, a data class, a record or a combination in one legal entity of the caller's scope; emits `privacy.hold.placed` |
+| `GET /v1/privacy/holds`, `GET /v1/privacy/holds/{id}` | `compliance.legal-hold.read` | slice 6: filter by state, legal entity, subject, data class; keyset paging; `ETag` is the version |
+| `POST /v1/privacy/holds/{id}/release` | `compliance.legal-hold.release` | slice 6: `If-Match` and a reason of 10+ characters; emits `privacy.hold.released`; the row is kept |
+| `GET /v1/privacy/holds:check` | `compliance.legal-hold.check` (service only) | slice 6: the hold check participants call, see "Legal holds" below |
 | `POST /v1/privacy/erasures` | `compliance.erasure.request` | slice 6: `Idempotency-Key` required; 422 `PRV-1201` and no event when a hold covers the subject, otherwise stores the command and emits `privacy.erasure.requested` |
 | `GET /v1/privacy/retention-policies` | `compliance.retention.read` | slice 6: the default retention per data class |
-| `POST /v1/sod/campaigns:plan` | SoDAdmin | slice 5, read-only: campaign close instant (14 days default, 3..60) |
-| `POST /v1/sod/campaigns:close` | SoDAdmin | slice 5, read-only: progress, and after `closesAt` the BR-48.9 revocations and flags |
-| `POST /v1/security/incidents:transition` | SecurityIncidentManage | slice 5, read-only: one incident lifecycle step with the breach clocks and closure rule |
-| `POST /v1/compliance/export-governance:evaluate` | ComplianceView | slice 5, read-only: the export policy decision for one download |
-| `POST /v1/compliance/read-log:classify` | ComplianceView | slice 5, read-only: which fields of a read the read-log policy covers |
+| `POST /v1/sod/campaigns:plan` | compliance.sod.admin | slice 5, read-only: campaign close instant (14 days default, 3..60) |
+| `POST /v1/sod/campaigns:close` | compliance.sod.admin | slice 5, read-only: progress, and after `closesAt` the BR-48.9 revocations and flags |
+| `POST /v1/security/incidents:transition` | compliance.security-incident.manage | slice 5, read-only: one incident lifecycle step with the breach clocks and closure rule |
+| `POST /v1/compliance/export-governance:evaluate` | compliance.view | slice 5, read-only: the export policy decision for one download |
+| `POST /v1/compliance/read-log:classify` | compliance.view | slice 5, read-only: which fields of a read the read-log policy covers |
 
 - Events (`events/asyncapi.yaml`): `dev.passage.sod.conflict.detected.v1`, `dev.passage.sod.mitigation.approved.v1`,
   `dev.passage.trade.screening.hit.v1` (slice 4, keyed by hit id, written with the hit),
@@ -104,9 +104,9 @@ Slice 3 domain rules (pure):
   otherwise, skipping violations already in a case.
 - `internal/domain/breakglass.go` (FR-48.23, BR-48.19): `PlanElevatedSession` checks the reason code and
   ticket, trims and de-duplicates roles, caps the length at `breakglass.max_minutes` (default 60, at most
-  240), refuses a protected role (SecurityAdmin, PlatformAdmin) for yourself (`SEC-0707`), routes a
-  protected role for another user to a second PlatformAdmin, and otherwise follows
-  `breakglass.self_activate` (BreakGlassApprove approval, or self-activation with mandatory post-review).
+  240), refuses a protected role (compliance.security.admin, platform.global.admin) for yourself (`SEC-0707`), routes a
+  protected role for another user to a second platform.global.admin, and otherwise follows
+  `breakglass.self_activate` (compliance.break-glass.approve approval, or self-activation with mandatory post-review).
   The review is due `breakglass.review_days` business days after the end; `ReviewOverdue` is the SEC-0708
   check.
 
@@ -129,7 +129,7 @@ Slice 4 (FR-48.19, FR-48.20):
   not flagged again until one of them changes. Decisions use `If-Match` and `Idempotency-Key`.
 - `internal/domain/export_control.go`: BR-48.16 comprehensive embargo (CU, IR, KP, SY and the regions
   UA-43 Crimea, UA-40 Sevastopol, UA-14 Donetsk, UA-09 Luhansk) blocks every line with `TRD-1002`, even
-  with license checks off, unless a TradeComplianceOfficer releases it with a license reference. Otherwise
+  with license checks off, unless a compliance.trade-screening.decide holder releases it with a license reference. Otherwise
   a line that the decision table says needs a license must find one for its regime, classification and
   destination, unexpired at server time, with quantity and value left after the earlier lines of the same
   delivery; if none, `TRD-1003` (blocked under `trade.license_check` BLOCK, a warning under WARN). The
@@ -205,7 +205,7 @@ Slice 6 (FR-48.11, FR-48.10, AC-48.7; `0006_legal_hold.sql`, `0007_service_token
   `holds:check` before they change anything, and must not erase when the check cannot be answered.
 - Hold check contract (for the HR candidate purge, #266, and any other participant):
   `GET /v1/privacy/holds:check?legalEntityId=&subjectRef=&dataClass=&recordRef=` answers `{"held": bool, "holdIds": [...]}`.
-  The caller signs a service token for audience `compliance` with the duty `compliance.legal_hold.check` (grant
+  The caller signs a service token for audience `compliance` with the duty `compliance.legal-hold.check` (grant
   `service_grants.<caller>.compliance` in `policies/authz/data.json`, mirrored in `platform/go/tenant`), the legal entity
   must be in the token's scope, and any non-200 or unparsable answer means held. HR would call it per candidate with
   `dataClass=CANDIDATE`, the candidate's `recordRef` and `subjectRef`, and keep the candidate when `held` is true.
@@ -287,7 +287,7 @@ document, the case machine never skips a state and no break-glass session exceed
 | `AUD-0713` | 422 | case action not allowed from the current status |
 | `AUD-0714` | 422 | resolution code missing or of the wrong kind; recovery amount negative or without currency |
 | `AUD-0715` | 422 | archive refused: the archive window has not passed since closing |
-| `SEC-0707` | 422 | break-glass cannot grant SecurityAdmin or PlatformAdmin to yourself (BR-48.19) |
+| `SEC-0707` | 422 | break-glass cannot grant compliance.security.admin or platform.global.admin to yourself (BR-48.19) |
 | `SEC-0708` | domain | break-glass session not reviewed within `breakglass.review_days` (`ReviewOverdue`; no endpoint yet) |
 | `SEC-0713` | 422 | break-glass request incomplete or out of range (reason, ticket, roles, minutes) |
 | `TRD-1002` | 200 (`code` per export check line) | destination under comprehensive embargo; delivery blocked (BR-48.16) |

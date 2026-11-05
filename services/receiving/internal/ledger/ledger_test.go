@@ -180,11 +180,11 @@ func TestPost_SendsHeadersAndBodyAndReturnsID(t *testing.T) {
 
 func TestPostForwardsTheCallersDutiesAndUser(t *testing.T) {
 	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"je-1"}`)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "le-1", UserID: "u-1", Duties: map[string]struct{}{"ReceivingPost": {}, "ledger.journal.post": {}}})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "le-1", UserID: "u-1", Duties: map[string]struct{}{"receiving.receipt.post": {}, "ledger.journal.post": {}}})
 	if _, err := client.Post(ctx, testEntry()); err != nil {
 		t.Fatal(err)
 	}
-	if got.Header.Get("X-Passage-Duties") != "ReceivingPost,ledger.journal.post" || got.Header.Get("X-Passage-User") != "u-1" || got.Header.Get("X-Passage-Legal-Entity") != "le-1" {
+	if got.Header.Get("X-Passage-Duties") != "ledger.journal.post,receiving.receipt.post" || got.Header.Get("X-Passage-User") != "u-1" || got.Header.Get("X-Passage-Legal-Entity") != "le-1" {
 		t.Fatalf("headers %v", got.Header)
 	}
 }
@@ -394,7 +394,7 @@ func TestSignedPostSendsServiceTokenInsteadOfUserDuties(t *testing.T) {
 	client.WithSigner(signer)
 	entry := testEntry()
 	entry.LegalEntityID = entity
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "00000000-0000-4000-8000-0000000000e2," + entity, UserID: "u-1", Duties: map[string]struct{}{"ReceivingPost": {}}})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "00000000-0000-4000-8000-0000000000e2," + entity, UserID: "u-1", Duties: map[string]struct{}{"receiving.receipt.post": {}}})
 	if _, err := client.Post(ctx, entry); err != nil {
 		t.Fatal(err)
 	}

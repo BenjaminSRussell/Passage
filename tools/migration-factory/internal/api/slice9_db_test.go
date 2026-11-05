@@ -87,7 +87,7 @@ func TestOnhand_LoadReconcileAndRerunLoadsNothing(t *testing.T) {
 	}
 
 	// Another tenant sees none of it and may load the same extract for itself.
-	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "MigrationView"}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "migration.factory.view"}); r.Code != http.StatusNotFound {
 		t.Fatalf("other tenant reads the run: %d", r.Code)
 	}
 	if r := do(t, h, request{method: "POST", path: onhandPath, tenant: tenantB, duties: allDuties, body: onhandBody("USMF", "", cleanOnhand...)}); r.Code != http.StatusCreated || decode[runDetailDTO](t, r).RecordsLoaded != 3 {

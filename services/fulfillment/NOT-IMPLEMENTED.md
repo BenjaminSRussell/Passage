@@ -51,7 +51,7 @@ customer filter, tenant isolation and the legal-entity scope. The web screen
 slip on its packing slip page.
 
 Slice 5 adds the SSCC register (section 5.28.14, BR-28.5):
-`GET /sscc-register` (`WarehouseView`) lists every issued SSCC in SSCC order
+`GET /sscc-register` (`fulfillment.warehouse.view`) lists every issued SSCC in SSCC order
 with its container type and status, shipment, order, customer, the packing slip
 it shipped on, the issue time and the no-reuse date (issue date + 12 months),
 filtered by GS1 company prefix, customer and issue-date range and paged with a
@@ -64,11 +64,11 @@ and opens the shipment of a row.
 Slice 6 adds the short picks and backorders report, returnable packaging aging
 and the `warehouse-sim-1k` run. A pick confirmation below plan stamps the
 line's first short-pick time (migration 0005); `GET /backorders`
-(`WarehouseView`, FR-28.2, section 5.28.14) lists those lines newest first with
+(`fulfillment.warehouse.view`, FR-28.2, section 5.28.14) lists those lines newest first with
 planned, picked, shipped and the remainder, open until a re-pick reaches plan
 or the shipment is cancelled, filtered by warehouse and short-pick date
 (`status=all` adds closed ones) and paged with a keyset cursor.
-`GET /returnable-packaging/aging` (`WarehouseView`, FR-28.16) ages every
+`GET /returnable-packaging/aging` (`fulfillment.warehouse.view`, FR-28.16) ages every
 balance above zero first in, first out from the posting dates of the slips
 that shipped its returnable containers and flags it `chargeDue` once older
 than `chargeDays` (default 90). The store test `TestWarehouseSim1k_ZeroInventoryMismatch`
@@ -81,7 +81,7 @@ them.
 
 Slice 7 closes the open remainder of a partially shipped shipment (FR-28.8,
 `short_pick_action` CANCEL_REMAINDER): `POST /shipments/{id}:close-remainder`
-(`WarehouseRelease`, `If-Match` and `Idempotency-Key`) is allowed once a slip has
+(`fulfillment.warehouse.release`, `If-Match` and `Idempotency-Key`) is allowed once a slip has
 shipped part of the quantity, while the shipment is PARTIALLY_SHIPPED or its
 remainder is being picked, and nothing is packed waiting to ship. Every line
 shrinks to what shipped (migration 0008 adds `qty_closed` and `closed_at`), the
@@ -99,7 +99,7 @@ Status is `later slice of PSG-28` (same service, next slice) or `handoff`
 (needs another wave, the kernel, or a path outside this wave's ownership).
 
 Slice 8 adds unpacking (BR-28.6): `POST /shipments/{id}/containers/{cid}:unpack`
-(`WarehousePack`, `If-Match` and `Idempotency-Key`) takes a CLOSED container apart
+(`fulfillment.warehouse.pack`, `If-Match` and `Idempotency-Key`) takes a CLOSED container apart
 while the shipment is PICKING, PICKED or PACKED. The container's packed quantities
 return to the unpacked pool, a PACKED shipment goes back to PICKED (repack, or
 cancel once it holds no container), the container row stays with status
@@ -116,7 +116,7 @@ containers and has an Unpack button per closed container with a confirmation; th
 SSCC register shows them as "Unpacked".
 
 Slice 9 adds wave-level pick confirmation and short pick reasons (FR-28.13,
-section 5.28.14). `POST /waves/{id}:confirm-pick` (`WarehousePick`,
+section 5.28.14). `POST /waves/{id}:confirm-pick` (`fulfillment.warehouse.pick`,
 `Idempotency-Key`) confirms the listed picks across all shipments of a wave in
 one transaction and, with `pickRest`, picks every other unconfirmed line in
 full; it writes one `pick.confirmed` per shipment carrying `wave_id`, refuses a
@@ -142,7 +142,7 @@ for a line is kept.
 Slice 10 adds batch, serial and location capture at pick (BR-28.10, FUL-0006).
 A release line may carry `trackingRequired` (the caller knows the product's tracking
 dimension group); it is stored on the shipment line (migration 0011). `POST
-/shipments/{id}/lines/{lid}:capture-tracking` (`WarehousePick`, `If-Match`,
+/shipments/{id}/lines/{lid}:capture-tracking` (`fulfillment.warehouse.pick`, `If-Match`,
 `Idempotency-Key`) replaces the unshipped batch, serial and location entries of a
 picked line in the new `pick_tracking` table (tenant and legal-entity policies,
 granted in the same migration). A serial is one unit and unique per product while
@@ -165,13 +165,13 @@ the partial shipment, the re-pick guard and the close of the remainder, and tena
 legal-entity isolation. The shipment detail has
 a "Batch and serial tracking" card (line chooser, entry rows with batch, serial,
 location and quantity, the covered quantity) and a "Batch / serial" column on the
-lines; the release form has a "Batch or serial tracked" checkbox per line. No new duty is introduced (`WarehousePick`), so there is nothing new for #313.
+lines; the release form has a "Batch or serial tracked" checkbox per line. No new duty is introduced (`fulfillment.warehouse.pick`), so there is nothing new for #313.
 The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 
 Slice 11 adds wave assignment and close (FR-28.13, section 5.28.6). Migration 0012
 gives `wave` a `picker`, `assigned_at`, `closed_at`, a `version` and the status
 CLOSED, and grants `passage_app` UPDATE on it (no new table).
-`POST /waves/{id}:assign` (`WarehouseRelease`, `If-Match` with the wave version,
+`POST /waves/{id}:assign` (`fulfillment.warehouse.release`, `If-Match` with the wave version,
 `Idempotency-Key`, body `picker`) gives an OPEN wave to a picker or hands it to
 another one; a CLOSED wave, or the picker it already has, is refused.
 `POST /waves/{id}:close` (same headers) closes an OPEN wave once every line of a
@@ -188,7 +188,7 @@ cancelled shipment, close with a short line, replay, and that a CLOSED wave is f
 API tests cover the validation, headers and duty. The wave detail has an "Assign the
 wave" card, a "Close wave" button with confirmation and a printable "Pick list" in
 zone order, and the waves list a status and picker filter. No new duty is introduced
-(`WarehouseRelease`), so there is nothing new for #313. The OpenAPI and AsyncAPI have
+(`fulfillment.warehouse.release`), so there is nothing new for #313. The OpenAPI and AsyncAPI have
 zero FAIL lines on the doc gates.
 
 Slice 16 adds partial vendor confirmations and closing the remainder of a drop-ship (FR-28.7). Migration 0018
@@ -201,7 +201,7 @@ would otherwise update no row and the new split check would refuse the migration
 (everything still open when left out, so existing callers are unchanged): it books Dr 5000 / Cr 2110 for that
 quantity at the PO cost, the drop-ship is PARTIALLY_CONFIRMED while quantity is open and CONFIRMED when none is.
 A quantity above the open quantity is refused with FUL-0063, a reused vendor shipment reference with FUL-0064.
-`POST /drop-ships/{id}:close-remainder` (`WarehouseRelease`, `If-Match`, `Idempotency-Key`) closes the open
+`POST /drop-ships/{id}:close-remainder` (`fulfillment.warehouse.release`, `If-Match`, `Idempotency-Key`) closes the open
 quantity of a PARTIALLY_CONFIRMED drop-ship without booking it (the drop-ship is CONFIRMED, `qtyClosed` is set);
 cancel is still OPEN only and says to close the remainder instead. `dropship.confirmed` is written once per vendor
 shipment with `confirmation_seq`, `confirmed_qty`, `qty_confirmed` and the journal of that confirmation only (the
@@ -220,7 +220,7 @@ Slice 17 adds the release and wave parameters per warehouse (section 5.28.13: `r
 `release_requires_full_atp`, `wave_max_lines`, `wave_max_orders`; FR-28.1, FR-28.13). Migration 0020 adds
 `warehouse_release_rule` (tenant and restrictive legal-entity policies; granted SELECT, INSERT, UPDATE to
 `passage_app`; range checks 0-30, 1-2000, 1-500). `GET /release-rules`, `GET` and `PUT /release-rules/{warehouseId}`
-(`WarehouseView`, `WarehouseRelease`; `If-Match` with the version, 0 for none; `Idempotency-Key`) read and save it.
+(`fulfillment.warehouse.view`, `fulfillment.warehouse.release`; `If-Match` with the version, 0 for none; `Idempotency-Key`) read and save it.
 A warehouse without a saved rule reads, at version 0, what a release run and the workbench apply to it: the
 service configuration for the horizon and the ATP rule (`RELEASE_HORIZON_DAYS`, `RELEASE_REQUIRES_FULL_ATP`; 2 days
 and full ATP unless configured) and 200 lines, 50 orders, so callers that name their own values, and warehouses
@@ -232,7 +232,7 @@ the previous values) goes through the outbox. `POST /releases:run` takes the sav
 and `waveMaxOrders` for a `maxLines` or `maxOrders` left out. Store tests (Postgres, as the application role:
 default, versioned save, replay, event, concurrent first saves, tenant and legal-entity isolation, agreement with
 the short pick setting, configured defaults, range checks), API and web tests cover it; `/fulfillment/release-rules`
-lists the rules (`WarehouseView`) and saves them (form shown to `WarehouseRelease` only). Built in review: the
+lists the rules (`fulfillment.warehouse.view`) and saves them (form shown to `fulfillment.warehouse.release` only). Built in review: the
 legal entity of a warehouse is now shared by its short pick setting and its release rule (neither can be saved
 under another one than the other), the unsaved rule reads the service configuration instead of fixed values, the
 first-save race is tested, and the web form keeps the saved version of a typed warehouse id. No new duty. The
@@ -336,19 +336,19 @@ exception names the latest posted slip and the surplus, and the remedy is a retu
 `PACKED_BEYOND_KEPT` (packed, unposted quantity above the kept quantity; unpack and put the goods back: unpacking a
 container re-applies the kept quantity, so the unpacked quantity above it is cut with `shipment.closed` and the kept
 quantity can be repacked and posted). One open
-exception exists per kind, order line and shipment. `GET /exceptions` and `GET /exceptions/{id}` are under `WarehouseView`,
-`POST /exceptions/{id}:resolve` (If-Match version, Idempotency-Key, a note of 1 to 500 characters) under `WarehouseRelease`;
+exception exists per kind, order line and shipment. `GET /exceptions` and `GET /exceptions/{id}` are under `fulfillment.warehouse.view`,
+`POST /exceptions/{id}:resolve` (If-Match version, Idempotency-Key, a note of 1 to 500 characters) under `fulfillment.warehouse.release`;
 `exception.raised.v1` and `exception.resolved.v1` are published through the outbox. Pick, pack, auto-pack and wave pick
 now refuse a held order with FUL-0001 (a wave pick of the rest skips a held order's shipment; a line of it named in the
 call fails the call); post already did. The web module gets the Exceptions list (open by default, status filter) and the
-exception detail with the advice per kind, links to the shipment and slip, and the resolve form (shown to `WarehouseRelease`
+exception detail with the advice per kind, links to the shipment and slip, and the resolve form (shown to `fulfillment.warehouse.release`
 only). The OpenAPI (60 operations) and the AsyncAPI (28 events) have zero FAIL lines on the doc gates.
 
 Handoffs and gaps from slice 20:
 
 | Item | Status | Reason |
 |---|---|---|
-| Authz seed: route rows in `policies/authz/data.json` for `/v1/fulfillment/exceptions` and `/v1/fulfillment/exceptions/*` (GET, `WarehouseView`) and `/v1/fulfillment/exceptions/*:resolve` (POST, `WarehouseRelease`). No new duty name and no new principal. | handoff for #313 (authz seed) | Both duties are already seeded; the web nav item is gated on `WarehouseView`. |
+| Authz seed: route rows in `policies/authz/data.json` for `/v1/fulfillment/exceptions` and `/v1/fulfillment/exceptions/*` (GET, `fulfillment.warehouse.view`) and `/v1/fulfillment/exceptions/*:resolve` (POST, `fulfillment.warehouse.release`). No new duty name and no new principal. | handoff for #313 (authz seed) | Both duties are already seeded; the web nav item is gated on `fulfillment.warehouse.view`. |
 | Inventory must consume `shipment.closed` with `reason` `order_remainder_cancelled` and `shipment.cancelled` as for a manual close or cancel (release the reservation of `qty`, put back `picked_unpacked`); sales must not cancel the order line again on that reason, and should show `exception.raised.v1` where it tracks order fulfilment problems. | handoff to inventory (wave 16) and sales (wave 27) | No consumer exists yet. |
 | Packed quantity beyond the kept quantity is not unpacked by the service | deviation | A container is a physical object with an SSCC; the supervisor unpacks it (`:unpack`), which cuts the unpacked quantity above the kept quantity. Until then the post is refused (FUL-0066). The exception is resolved by hand; it is not closed by the unpack. |
 | Unposted batch and serial entries of a cut line that cover more than stays picked are dropped as a whole | deviation | Capture is repeated for what stays picked; trimming entries by quantity would guess which serials stay. Entries that still fit are kept. |
@@ -392,11 +392,11 @@ Slice 22 keeps the history behind the returnable transport packaging balances an
 `passage_app`, append-only): every change of a balance writes one signed row with `balance_after`, so the rows of one customer
 and container type replay to the balance. `SHIPPED` and `SHIPMENT_CANCELLED` are written by the packing slip post and cancel
 in the same transaction and name the slip, `RETURNED` by the return receipt, `ADJUSTED` by the new
-`POST /v1/fulfillment/returnable-packaging:adjust` (`ReturnablePackagingMaintain`; section 5.28.17 lists `WarehouseReceive` as
+`POST /v1/fulfillment/returnable-packaging:adjust` (`fulfillment.returnable-packaging.maintain`; section 5.28.17 lists `fulfillment.warehouse.receive` as
 its segregation-of-duties conflict, so receiving returns does not let a caller correct a balance). The adjustment is a signed non-zero whole number with a mandatory
 3 to 200 character reason and an optional reference, creates the balance row when the customer has none (an opening balance),
 is refused with FUL-0015 below zero and with the new FUL-0069 for a container type that is unknown or not returnable, takes an
-Idempotency-Key and keeps who made it. `GET /v1/fulfillment/returnable-packaging/movements` (`WarehouseView`) lists the history
+Idempotency-Key and keeps who made it. `GET /v1/fulfillment/returnable-packaging/movements` (`fulfillment.warehouse.view`) lists the history
 newest first, filtered by customer, container type and kind. The return receipt now publishes
 `dev.passage.fulfillment.returnablepackaging.returned.v1` (qty negative) and the correction
 `dev.passage.fulfillment.returnablepackaging.adjusted.v1`, both through the outbox in the same transaction. Store tests against
@@ -405,7 +405,7 @@ two corrections, the filters, tenant isolation, the refusals writing nothing, th
 idempotent replay, and overlapping corrections and returns (including racing first corrections that create the balance row)
 whose history still replays step by step. Every writer locks the balance row before it appends the movement, and a movement
 is stamped with `clock_timestamp()` at the insert, so `created_at` order is the order the balance changed in. The web screen `/fulfillment/returnable-movements` lists the movements with filters, links a slip, and
-shows the "Correct a balance" form only to a caller holding `ReturnablePackagingMaintain` (the service enforces it); the returnable packaging
+shows the "Correct a balance" form only to a caller holding `fulfillment.returnable-packaging.maintain` (the service enforces it); the returnable packaging
 page links to it. Not built: the `rtp_tracking_enabled` and `rtp_charge_days` legal-entity settings (see the returnable row
 below), a correction that ages (a positive correction has no shipment, so it never becomes `chargeDue`), and history before
 this migration.
@@ -414,8 +414,8 @@ Handoffs and gaps from slice 22:
 
 | Item | Status | Reason |
 |---|---|---|
-| Authz seed: new duty `"ReturnablePackagingMaintain": {"permissions": [{"resource": "/v1/fulfillment/returnable-packaging:adjust", "methods": ["POST"]}]}` (section 5.28.17, "RTP balances adjustments", default role Logistics admin), and `{"resource": "/v1/fulfillment/returnable-packaging/movements", "methods": ["GET"]}` added to `WarehouseView`. | handoff for #313 (authz seed) | `policies/authz/data.json` is outside this wave's paths. Until it is seeded the correction and the movements list answer 403 at the gateway. The web nav item is gated on the seeded `WarehouseView`; the correction form needs the new duty in the principal's token. |
-| Segregation of duties: `ReturnablePackagingMaintain` conflicts with `WarehouseReceive` (section 5.28.17), so one person cannot both receive returned packaging and correct the balance it lowered. | handoff to compliance (wave 48, `sod_rule` seed, FR-48.4) | A role-level conflict is detected by the compliance rule set when roles are assigned; the service checks only that the caller holds `ReturnablePackagingMaintain`. |
+| Authz seed: new duty `"fulfillment.returnable-packaging.maintain": {"permissions": [{"resource": "/v1/fulfillment/returnable-packaging:adjust", "methods": ["POST"]}]}` (section 5.28.17, "RTP balances adjustments", default role Logistics admin), and `{"resource": "/v1/fulfillment/returnable-packaging/movements", "methods": ["GET"]}` added to `fulfillment.warehouse.view`. | handoff for #313 (authz seed) | `policies/authz/data.json` is outside this wave's paths. Until it is seeded the correction and the movements list answer 403 at the gateway. The web nav item is gated on the seeded `fulfillment.warehouse.view`; the correction form needs the new duty in the principal's token. |
+| Segregation of duties: `fulfillment.returnable-packaging.maintain` conflicts with `fulfillment.warehouse.receive` (section 5.28.17), so one person cannot both receive returned packaging and correct the balance it lowered. | handoff to compliance (wave 48, `sod_rule` seed, FR-48.4) | A role-level conflict is detected by the compliance rule set when roles are assigned; the service checks only that the caller holds `fulfillment.returnable-packaging.maintain`. |
 | Wave 30 (receivables) can read `returnablepackaging.returned.v1` and `.adjusted.v1` to credit packaging a customer sent back, and the movements to charge unreturned items. | handoff to receivables (wave 30) | Fulfillment does not call receivables. |
 | The `rtp_tracking_enabled` and `rtp_charge_days` settings stay unbuilt: balances are kept per tenant, not per legal entity, so a per-legal-entity setting has nothing to attach to; the caller still passes `chargeDays` (default 90) to the aging. | deviation | A legal-entity column on `returnable_packaging_balance` would change the key every post and return uses. |
 | Balances that existed before migration 0026 have no earlier movements; the first movement of such a balance shows `balance_after` after a change from a balance the history never saw. | deviation | There is no data to backfill from: only the balance was stored. |
@@ -425,8 +425,8 @@ Slice 23 builds the over-delivery tolerance (BR-28.7, FUL-0005, `overdelivery_pc
 `delivery_tolerance` (tenant RLS enabled and forced; SELECT, INSERT and UPDATE for `passage_app`; one row per product and customer
 scope, a missing product or customer meaning every one, unique per scope, with a version) and, on `shipment_line`,
 `over_tolerance_pct` with the check `qty_picked <= qty_planned * (1 + over_tolerance_pct / 100)` in place of
-`qty_picked <= qty_planned`. `GET /v1/fulfillment/delivery-tolerances` (`WarehouseView`, filters `productId`, `customerId`, `limit`) and
-`PUT /v1/fulfillment/delivery-tolerances` (`PackingRuleMaintain`; `If-Match` with the version read, 0 for a new scope;
+`qty_picked <= qty_planned`. `GET /v1/fulfillment/delivery-tolerances` (`fulfillment.warehouse.view`, filters `productId`, `customerId`, `limit`) and
+`PUT /v1/fulfillment/delivery-tolerances` (`fulfillment.packing-rule.maintain`; `If-Match` with the version read, 0 for a new scope;
 `Idempotency-Key`; body `productId`, `customerId`, `overdeliveryPct`, 0 to 100 with at most 4 decimals) keep them and write
 `dev.passage.fulfillment.deliverytolerance.changed.v1` with the value replaced. Confirm-pick (single shipment and wave) looks the
 tolerance up only for a quantity above plan: the most specific scope wins (product and customer, product, customer, general),
@@ -438,7 +438,7 @@ nothing to close (`PostTarget`, `CloseRemainder`, the remainder-cancel planner a
 remainder as 0; a remainder cut that leaves every line shipped completes the shipment even with an over-shipped line). When
 sales cancelled the remainder of the order line (`order_line_kept`, slice 20), a pick above plan is also refused with FUL-0066
 once the line would carry more than the order line keeps (its other live shipment lines count with the larger of planned and
-picked, an active drop-ship with its open quantity): the post would refuse it anyway (`checkKeptQty`). Web: `/fulfillment/delivery-tolerances` (list, edit, save with version; the form only for `PackingRuleMaintain`),
+picked, an active drop-ship with its open quantity): the post would refuse it anyway (`checkKeptQty`). Web: `/fulfillment/delivery-tolerances` (list, edit, save with version; the form only for `fulfillment.packing-rule.maintain`),
 the pick form on the shipment detail accepts a quantity within the ceiling of the saved tolerances and explains FUL-0004 and
 FUL-0005 before calling, and the lines table shows the excess over plan. Tests: domain, API, Postgres store (resolution order,
 version, replay, event, tenant isolation, pick to post to cancel of an over-shipped line, the database check) and web.
@@ -447,7 +447,7 @@ Handoffs and gaps from slice 23:
 
 | Item | Status | Reason |
 |---|---|---|
-| Authz seed: `PackingRuleMaintain` gains `{"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["PUT"]}` and `WarehouseView` gains `{"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["GET"]}` in `policies/authz/data.json`. No new duty: section 5.28.17 lists none for the tolerance, so it follows the other packing and delivery master data (Warehouse admin). | handoff for #313 (authz seed) | Policies are outside this wave's paths. Until seeded the routes answer 403 in a real deployment. |
+| Authz seed: `fulfillment.packing-rule.maintain` gains `{"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["PUT"]}` and `fulfillment.warehouse.view` gains `{"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["GET"]}` in `policies/authz/data.json`. No new duty: section 5.28.17 lists none for the tolerance, so it follows the other packing and delivery master data (Warehouse admin). | handoff for #313 (authz seed) | Policies are outside this wave's paths. Until seeded the routes answer 403 in a real deployment. |
 | Wave 27 (sales) holds its own `overdelivery_pct` for agreements (BR-27.9) and the order's shipped quantity; it must accept `qty` above the ordered quantity on `packingslip.posted.v1` (the line `qty` can now exceed the shipment line's planned quantity) and may read `deliverytolerance.changed.v1`. Billing (wave 29) invoices the shipped quantity. | handoff to sales (wave 27) and billing (wave 29) | Neither is read from here. Fulfillment does not know the order line's ordered quantity, only what each shipment line plans: the tolerance applies per shipment line, so an order line split over several shipments may exceed its ordered quantity by at most the tolerance overall. The order's quantity limits the pick only once sales cancelled the remainder (`order_line_kept`, FUL-0066). Billing proposes from the slip lines and does not compare them with the order (checked: `services/billing/internal/domain/shipment.go`). |
 | An over-pick confirmed before sales' `order.remaindercancelled.v1` arrives is not trimmed by the cut (the planner cuts the planned quantity, never the picked excess above it); once packed, the post is refused with FUL-0066 and the picker re-picks down to the kept quantity. | deviation | Trimming picked stock without a pick confirmation would leave inventory unaware of where the excess went. |
 | Inventory (wave 16) issues the `packingslip.posted.v1` quantity, so the unreserved excess is taken from on-hand; reservations only cover the planned quantity. | handoff to inventory (wave 16) | Reservations are owned by wave 16. |
@@ -474,7 +474,7 @@ Handoffs and gaps from slice 23:
 
 Slice 12 adds nested containers, pallet to carton (FR-28.3; `container.parent_container_id` of section 5.28.4).
 Migration 0013 gives `container` a `parent_container_id` (no new table, the
-existing grants cover it). `POST /shipments/{id}:nest-containers` (`WarehousePack`,
+existing grants cover it). `POST /shipments/{id}:nest-containers` (`fulfillment.warehouse.pack`,
 `If-Match`, `Idempotency-Key`, body `containerType` and `containerIds`) puts
 CLOSED cartons of a PICKED or PACKED shipment on a new pallet: the pallet is a
 container of its own with a fresh SSCC, takes tare, returnable flag and material
@@ -498,14 +498,14 @@ legal entity in org; tenant and restrictive legal-entity policies; granted SELEC
 `passage_app`) and `shipment.backorder_of_id` (a shipment holds at most one backorder).
 `GET /warehouse-settings` lists every warehouse the caller sees shipments or a saved setting for,
 with its `legalEntityId` (REMAINDER_BACKORDER, the default, at version 0 when none is saved); `GET` and
-`PUT /warehouse-settings/{warehouseId}` (`WarehouseView`, `WarehouseRelease`; `If-Match` with the
+`PUT /warehouse-settings/{warehouseId}` (`fulfillment.warehouse.view`, `fulfillment.warehouse.release`; `If-Match` with the
 version read, 0 for none; `Idempotency-Key`; body `shortPickAction` and `legalEntityId`) read and
 save it. A save under a legal entity other than the saved one or the one of the warehouse's
 shipments, or over a setting outside the caller's legal-entity scope, is refused with FUL-0057.
 `dev.passage.fulfillment.warehousesetting.changed.v1` (with `legal_entity_id` and
 `previous_short_pick_action`) goes through the outbox. The codes are KEEP_OPEN,
 CANCEL_REMAINDER and REMAINDER_BACKORDER (default since migration 0016, the PRD's; KEEP_OPEN is kept for the re-pick flow of
-slice 6). `POST /shipments/{id}:backorder-remainder` (`WarehouseRelease`, `If-Match`,
+slice 6). `POST /shipments/{id}:backorder-remainder` (`fulfillment.warehouse.release`, `If-Match`,
 `Idempotency-Key`, optional `plannedShipDate`) follows the rules of `:close-remainder` and moves the
 closed quantity to a new RELEASED shipment of the same order, customer, legal entity, warehouse and
 carrier (lines keep zone and tracking requirement); `Shipment` returns `backorderOfId` and
@@ -521,7 +521,7 @@ legal-entity isolation, the legal entity check, backorder lines, links and event
 three actions at post and a full post that triggers nothing) and web tests cover it. The shipment
 detail has a "Backorder remainder" button with a planned date and links between the two shipments,
 and `/fulfillment/warehouse-settings` lists and saves the action with the legal entity. No new duty
-is introduced (`WarehouseRelease`, `WarehouseView`), so there is nothing new for #313. The OpenAPI
+is introduced (`fulfillment.warehouse.release`, `fulfillment.warehouse.view`), so there is nothing new for #313. The OpenAPI
 and AsyncAPI have zero FAIL lines on the doc gates.
 
 Slice 14 adds the posting settings per legal entity (section 5.28.13: `cogs_at_shipment`, `asn_enabled`).
@@ -532,8 +532,8 @@ version 0, `<entity>setting.changed` with the previous values); the other legal-
 section 5.28.13 (`consolidation_enabled`, `gs1_company_prefix`, `packaging_fee_billable`, `rtp_*`,
 `dni_check_time`) belong on this table when they are built. `GET /legal-entity-settings` lists every
 legal entity the caller sees shipments or a saved setting for (both flags false at version 0 when none
-is saved), and `GET` and `PUT /legal-entity-settings/{legalEntityId}` (`WarehouseView`,
-`WarehouseRelease`; `If-Match` with the version read, 0 for none; `Idempotency-Key`; body
+is saved), and `GET` and `PUT /legal-entity-settings/{legalEntityId}` (`fulfillment.warehouse.view`,
+`fulfillment.warehouse.release`; `If-Match` with the version read, 0 for none; `Idempotency-Key`; body
 `cogsAtShipment` and `asnEnabled`, both required) read and save it. A save for a legal entity outside
 the caller's scope is refused with FUL-0058. `dev.passage.fulfillment.legalentitysetting.changed.v1`
 (with the previous values) goes through the outbox.
@@ -550,17 +550,17 @@ warehouse nobody configured now moves it to a backorder shipment, and a warehous
 re-pick flow saves KEEP_OPEN. Store tests show an unsaved warehouse backordering, and the existing
 re-pick tests save KEEP_OPEN explicitly. Drop-ship: migration 0017 adds `drop_ship` (tenant and
 restrictive legal-entity policies; granted SELECT, INSERT, UPDATE to `passage_app`; one active
-drop-ship per order line; a positive PO cost; gap-free `DS-` numbers per legal entity). `POST /drop-ships` (`WarehouseRelease`)
+drop-ship per order line; a positive PO cost; gap-free `DS-` numbers per legal entity). `POST /drop-ships` (`fulfillment.warehouse.release`)
 links an order line to its purchase order line at the PO cost (a line on a warehouse shipment is refused
 with FUL-0062, and release skips a drop-shipped line as `drop_ship`); `POST /drop-ships/{id}:confirm`
-(`PurchaseOrderConfirm`, `If-Match`, `Idempotency-Key`; body `shippedOn`, optional `vendorShipmentRef` and
-`postingDate`) books Dr 5000 / Cr 2110 and stores the journal; `:cancel` (`WarehouseRelease`) cancels an
-OPEN one; `GET` list (status, order, vendor) and read (`WarehouseView`). Events `dropship.created`,
+(`procurement.purchase-order.confirm`, `If-Match`, `Idempotency-Key`; body `shippedOn`, optional `vendorShipmentRef` and
+`postingDate`) books Dr 5000 / Cr 2110 and stores the journal; `:cancel` (`fulfillment.warehouse.release`) cancels an
+OPEN one; `GET` list (status, order, vendor) and read (`fulfillment.warehouse.view`). Events `dropship.created`,
 `dropship.confirmed` (carries the journal) and `dropship.cancelled` go through the outbox. Error codes
 FUL-0060 (not found), FUL-0061 (the order line already has an active drop-ship) and FUL-0062 (the
 order line is on a warehouse shipment). Web: `/fulfillment/drop-ships` (list by status with the
-create form for `WarehouseRelease`) and `/fulfillment/drop-ships/:id` (details, vendor confirmation
-for `PurchaseOrderConfirm`, journal, cancel for `WarehouseRelease`). No new duty name is introduced;
+create form for `fulfillment.warehouse.release`) and `/fulfillment/drop-ships/:id` (details, vendor confirmation
+for `procurement.purchase-order.confirm`, journal, cancel for `fulfillment.warehouse.release`). No new duty name is introduced;
 the routes still need their `data.json` resource entries (handoff row below).
 
 `cogs_at_shipment` is an accounting policy (BR-28.1: physical posting to 1405 or COGS at shipment), not
@@ -568,9 +568,9 @@ a per-slip choice. Every `:post-packing-slip` takes the policy of the shipment's
 post transaction (false, Dr 1405, when none is saved, which is what every post did before); a request
 that names the other value is refused with FUL-0059 (a request naming the same value posts, so existing
 callers that send `false` are unchanged). Changing the policy needs the ledger setup duty
-`ledger.setup.write` (already seeded, held by finance) on top of `WarehouseRelease`, checked in the
+`ledger.setup.write` (already seeded, held by finance) on top of `fulfillment.warehouse.release`, checked in the
 store against the saved value (403 AUTH-0003); a save that only changes `asn_enabled` needs
-`WarehouseRelease` alone. `asn_enabled` is the default of the ASN output: a post that omits `asnEnabled`
+`fulfillment.warehouse.release` alone. `asn_enabled` is the default of the ASN output: a post that omits `asnEnabled`
 takes it, one that names it keeps its own value (an operational choice, not a posting one).
 
 Store tests (Postgres, as the application role: default, versioned save, replay, event, tenant and
@@ -579,7 +579,7 @@ the FUL-0059 refusal), API tests and web tests cover it. The post form on the sh
 COGS policy as text (it is not editable and not sent) and previews the journal with it, and presets the
 ASN checkbox from the setting and sends the poster's choice; `/fulfillment/legal-entity-settings` lists
 and saves the settings, with the COGS checkbox disabled for a user without `ledger.setup.write`. No new
-duty is introduced (`WarehouseView`, `WarehouseRelease`, `ledger.setup.write` are all seeded), so there
+duty is introduced (`fulfillment.warehouse.view`, `fulfillment.warehouse.release`, `ledger.setup.write` are all seeded), so there
 is nothing new for #313. The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 
 ## Deliverables (PRD section 5.28 and ticket PSG-28)
@@ -596,7 +596,7 @@ is nothing new for #313. The OpenAPI and AsyncAPI have zero FAIL lines on the do
 | D1 | GS1-128 label rendering (PDF, ZPL) | partial | Built: `GET /shipments/{id}/containers/{cid}/label` renders ZPL with AI (00) and the SSCC after FNC1, after checking the check digit (FUL-0007), and the web shows it. Not built: the PDF label, the GTIN (01), batch (10), quantity (37), ship-to postal (420) and order reference fields of section 5.28.15, and label storage (`label_ref`); document rendering is wave 5 (docgen). |
 | D2 | Packing slip posting: inventory deduction and COGS journal | partial | Journal (both BR-28.1 stocked rows), `PS-` numbering gap-free per legal entity, containers marked SHIPPED, and the event are built. Inventory deduction is a handoff (see above). Ledger post is a handoff. |
 | D2 | Cancellation with mirror journal and reversal_of | built | A reversing slip carries negative quantities, costs and journal amounts; the shipment returns to PACKED and its containers to CLOSED; an INVOICED slip is refused with FUL-0010. Inventory mirror is a handoff. Billing (wave 29) sets INVOICED. |
-| D3 | Carrier abstraction (rate, label, manifest, track) with EasyPost/Shippo/file adapters | partial (#482) | Built in `services/carrier-gateway-ts`: the adapter interface, the deterministic sandbox carrier, rate shopping, labels and tracking. Built here: `internal/carrier`, the client that signs each call with only its duty (`carrier.rate.quote`, `carrier.label.create`, `carrier.tracking.read`) for the shipment's legal entity. Also built: `POST /shipments/{id}:carrier-rates`, `:carrier-label` and `:carrier-track` (WarehouseShip; `CARRIER_GATEWAY_URL`, chart `carrierGatewayUrl`; unset answers 503 FUL-0070). The label is recorded as a LABELLED tracking event, `label:<tracking number>`. Not built: the EasyPost/Shippo/file adapters, manifest, and void. The shipment stores no ship-from or ship-to address or parcel dimensions, so the caller sends them on each call. See `services/carrier-gateway-ts/NOT-IMPLEMENTED.md`. |
+| D3 | Carrier abstraction (rate, label, manifest, track) with EasyPost/Shippo/file adapters | partial (#482) | Built in `services/carrier-gateway-ts`: the adapter interface, the deterministic sandbox carrier, rate shopping, labels and tracking. Built here: `internal/carrier`, the client that signs each call with only its duty (`carrier.rate.quote`, `carrier.label.create`, `carrier.tracking.read`) for the shipment's legal entity. Also built: `POST /shipments/{id}:carrier-rates`, `:carrier-label` and `:carrier-track` (fulfillment.warehouse.ship; `CARRIER_GATEWAY_URL`, chart `carrierGatewayUrl`; unset answers 503 FUL-0070). The label is recorded as a LABELLED tracking event, `label:<tracking number>`. Not built: the EasyPost/Shippo/file adapters, manifest, and void. The shipment stores no ship-from or ship-to address or parcel dimensions, so the caller sends them on each call. See `services/carrier-gateway-ts/NOT-IMPLEMENTED.md`. |
 | D3 | ASN output (`dev.passage.fulfillment.asn.issued.v1`) | partial | Built: the post publishes `asn.issued` with the slip, the carrier and the containers of that slip with their SSCCs and order-line quantities when the request sets `asnEnabled` or, if it omits it, the legal entity's `asn_enabled` setting is on (slice 14; a request naming `asnEnabled` overrides the setting). Not built: the `fulfillment.asn` feature flag, the tracking number (no carrier label yet), the SSCC hierarchy (no nesting). EDI 856/DESADV mapping is wave 35. |
 | D4 | Drop-ship linked to PO, vendor confirm, COGS at PO cost (Dr 5000 / Cr 2110) | partial (slices 15, 16) | Built: `drop_ship` with its PO links, `POST /drop-ships`, list and read, `:confirm` (the vendor's ship confirmation, whole or in parts, books Dr 5000 / Cr 2110 at the PO cost, no inventory transaction), `:close-remainder` (slice 16) and `:cancel`, `dropship.created`, `.confirmed` (once per vendor shipment, with its journal), `.closed` and `.cancelled`, the web list, create form and detail with the confirmation. Built in review: an order line ships from stock or from the vendor, never both (FUL-0062 on create, `drop_ship` skip on release). Not built: reading the PO from purchasing (wave 17) so the cost and quantity come from it, the vendor-confirm webhook or EDI 856, a PS- packing slip for the confirmation (AC-28.5 says "a slip posts"), and the `dropship-30` fixture. See the slice 15 rows below. |
 | D4 | Partial shipments and delivery schedule lines | partial | Built: `PARTIALLY_SHIPPED` until every line has shipped its planned quantity, re-pick of the remainder, several slips per shipment with per-slip containers and returnables. Built in slice 7: closing the remainder by hand (`:close-remainder`, see above). Built in slice 13: moving the remainder to a new backorder shipment, by hand or by the warehouse setting. Not built: schedule lines (a shipment line is one order line; FR-28.8 schedule lines need wave 27 VBEP-style lines), and the order-level status (sales, wave 27, reads `packingslip.posted`). |
@@ -604,7 +604,7 @@ is nothing new for #313. The OpenAPI and AsyncAPI have zero FAIL lines on the do
 | D6 | Picking workbench (grouped waves with preview, saved filters, `WAVE_MAX_LINES`) | partial | Built (AC-28.10): filters by customer, carrier, pick zone and planned ship date range; group by customer, carrier, zone or product; waves of at most `maxLines` (default 200) lines and `maxOrders` (default 50) orders; a shipment is never split and a wave never mixes legal entities (BR-28.14); a read-only preview; one-action create; a line belongs to at most one wave (database key); FUL-0016 in the create response; FUL-0053 when a shipment left RELEASED after the preview; the screens. Not built: product group and order priority filters (need wave 8 groups and the wave 27 priority), saved filters per user, the `workbench_group_key_default`, `wave_max_lines` and `wave_max_orders` warehouse settings (defaults are constants, the request may override), and the weight column of the preview. The zone and product of a shipment are those of its first line, because a shipment is not split. Only RELEASED shipments are waved: the remainder of a partially shipped shipment is re-picked on the shipment, not through a wave. |
 | D6 | Packing instructions and auto-pack (`packing_rule`, BR-28.11) | partial | Built: container types, packing rules per product with an optional customer (the customer rule wins), `POST /shipments/{id}:auto-pack` filling containers most specific rule first and closing on quantity or max weight, FUL-0012 warnings for lines without a rule, FUL-0013 when one unit exceeds the max weight, manual repack, and the screens. Not built: rules per product group (needs wave 8 groups), nesting levels, the `auto_pack_enabled` warehouse setting, serial-tracked lines (the domain never splits a serial unit, but the store does not know which lines are serial-tracked until BR-28.10 tracking dimensions are built), and a one-click accept of a proposed plan (auto-pack packs directly; the result lists what it did). |
 | D7 | Packaging materials, packaging fee per kg and country, statistical packaging line | partial | Built: packaging material weight per product unit, container types with a material, country fee rates valid from a date, the fee per material (product packaging × shipped units, plus the tare of non-returnable containers of a material) rounded half-even per material, FUL-0014 when a shipped material has no rate, the mirror lines on cancel, the packaging report per country and month (optionally per legal entity) and the screens. Not built: material attributes (type, recyclable flag, unit) beyond the code; the billable SURCHARGE (handoff above); the authoritative DE/FR/ES rate tables, LUCID/CITEO exports and the period statement document (handoff to the country packs, wave 48); the monthly accrual job. |
-| D7 | Returnable transport packaging balances (`RTP_NEGATIVE`) | partial | Built: balance per (customer, container type) raised by returnable containers on post, lowered on cancel and by `POST /returnable-packaging:return`, refused below zero with FUL-0015, the balance list and the screen. Built in slice 6: the aging inquiry (`GET /returnable-packaging/aging`, days outstanding first in, first out, `chargeDue` after `chargeDays`) and its screen. Built in slice 22: the movement history, manual balance adjustments (`ReturnablePackagingMaintain`) and the `returned` and `adjusted` events. Not built: the nightly 03:00 aging job, the `rtp_charge_days` legal-entity setting (the caller passes `chargeDays`, default 90), the charge hook after `rtp_charge_days` (handoff to wave 30: it can read `chargeDue=true`), return receipts from wave 30 RMA lines (handoff to wave 30), and the `rtp_tracking_enabled` setting. |
+| D7 | Returnable transport packaging balances (`RTP_NEGATIVE`) | partial | Built: balance per (customer, container type) raised by returnable containers on post, lowered on cancel and by `POST /returnable-packaging:return`, refused below zero with FUL-0015, the balance list and the screen. Built in slice 6: the aging inquiry (`GET /returnable-packaging/aging`, days outstanding first in, first out, `chargeDue` after `chargeDays`) and its screen. Built in slice 22: the movement history, manual balance adjustments (`fulfillment.returnable-packaging.maintain`) and the `returned` and `adjusted` events. Not built: the nightly 03:00 aging job, the `rtp_charge_days` legal-entity setting (the caller passes `chargeDays`, default 90), the charge hook after `rtp_charge_days` (handoff to wave 30: it can read `chargeDue=true`), return receipts from wave 30 RMA lines (handoff to wave 30), and the `rtp_tracking_enabled` setting. |
 | Deploy | Fulfillment workspace (tiles, release board, packing station, shipment detail) | partial | Built: workspace tiles (released, picking, packed not shipped, partially shipped, shipped), release board with carrier and pick zone, picking workbench, pick waves and wave detail, shipments list, shipment detail with pick and remainder pick, auto-pack, pack, post (with ship-to country and ASN), cancel, tracking and the ZPL label, packing slip journal and detail with packaging fees, delivered-not-invoiced report, SSCC register, short picks and backorders, scan page, container types, packing rules, packaging materials, packaging fees and report, returnable packaging and its aging. Not built: the carrier exceptions tile, a DNI balance tile on the workspace (the balance is per legal entity, so the workspace links to the report instead), pick list print, packing-station scan-to-pack, bulk release on multi-select, per-warehouse layouts. They need the carrier, DNI and wave endpoints. |
 | Deploy | Mobile pick UI (basic PWA) in the demo warehouse | handoff to pwa-apps (owned elsewhere) | The PWA is outside this wave's owned paths. The GS1 parser (`apps/web/src/modules/fulfillment/gs1.ts`) can be reused. |
 | Deploy | Demo warehouse seed data | handoff to deployment (`deploy/`) | `deploy/` is not owned by this wave. |
@@ -658,9 +658,9 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 |---|---|---|
 | Endpoints `:rate`, `:label` (carrier label), `:manifest`, carrier webhook | partial (#482) | `:carrier-rates`, `:carrier-label` and `:carrier-track` are built. `:manifest` and the carrier webhook are not. |
 | Pick confirmation per wave (`/waves/{id}:confirm-pick`) | built (slice 9) | Confirms all shipments of a wave in one command with optional `pickRest`; directed pick work per line and pick-by-scan remain wave 31. |
-| `PackingSlipPost` cancel requires `If-Match` (convention) | deviation | A posted slip is immutable and has no version. Only Idempotency-Key is required. |
+| `fulfillment.packing-slip.post` cancel requires `If-Match` (convention) | deviation | A posted slip is immutable and has no version. Only Idempotency-Key is required. |
 | Idempotency keys are scoped per tenant and key, not per principal | deviation | The stored fingerprint covers the method, path and body, so a key reused on another resource is refused, not replayed. The table matches `dbx.IdempotencyDDL`. Records are not expired after 24 hours yet (no cleanup job). |
-| Duties on handlers (`x-passage-duty`) | built as route-level checks | OPA decision point is handled by the kernel `authz` package. Slice 2 uses `PackingRuleMaintain` (container types, packing rules, packaging materials), `PackagingFeeMaintain` (rates and report) and `WarehouseReceive` (return receipts); the config lists are `WarehouseView`. Slice 3 uses `WarehouseRelease` (workbench preview and create, shipment cancel), `WarehouseView` (waves, tracking list, container label) and `WarehouseShip` (recording a tracking event). Slice 4 uses `WarehouseView` for the DNI report (section 5.28.17: "GET shipments, tracking, DNI"); slices 5 and 6 use it for the SSCC register, the backorders report and returnable aging. The `CarrierAdmin` duty is not used yet (no carrier configuration endpoints); slice 22 uses `ReturnablePackagingMaintain` for balance corrections. Segregation of duties (WarehousePick with PackingSlipPost under `pick_post_separation`; PackingSlipPost with SalesOrderMaintain; ReturnablePackagingMaintain with WarehouseReceive; PackagingFeeMaintain with InvoiceMaintain) is not enforced. The web nav carries the duty per entry. |
+| Duties on handlers (`x-passage-duty`) | built as route-level checks | OPA decision point is handled by the kernel `authz` package. Slice 2 uses `fulfillment.packing-rule.maintain` (container types, packing rules, packaging materials), `fulfillment.packaging-fee.maintain` (rates and report) and `fulfillment.warehouse.receive` (return receipts); the config lists are `fulfillment.warehouse.view`. Slice 3 uses `fulfillment.warehouse.release` (workbench preview and create, shipment cancel), `fulfillment.warehouse.view` (waves, tracking list, container label) and `fulfillment.warehouse.ship` (recording a tracking event). Slice 4 uses `fulfillment.warehouse.view` for the DNI report (section 5.28.17: "GET shipments, tracking, DNI"); slices 5 and 6 use it for the SSCC register, the backorders report and returnable aging. The `CarrierAdmin` duty is not used yet (no carrier configuration endpoints); slice 22 uses `fulfillment.returnable-packaging.maintain` for balance corrections. Segregation of duties (fulfillment.warehouse.pick with fulfillment.packing-slip.post under `pick_post_separation`; fulfillment.packing-slip.post with SalesOrderMaintain; fulfillment.returnable-packaging.maintain with fulfillment.warehouse.receive; fulfillment.packaging-fee.maintain with InvoiceMaintain) is not enforced. The web nav carries the duty per entry. |
 | Returnable balances are kept per (customer, container type), not per (customer, packaging material) as FR-28.16 states | deviation | A returnable container type is the item the customer holds and returns (for example EUR-PALLET), and a return receipt names it. Two returnable types of one material keep separate balances. |
 | Cancelling a slip writes the mirror packaging fee lines in the month of the reversal, not the month of the original | deviation | It matches the reversing journal, which is dated on the cancel day, and leaves a reported month unchanged once filed. Within one month the report nets to zero. |
 | Cancelling a slip whose returnable containers the customer has already returned is refused with FUL-0015 | deviation | The balance would go negative (BR-28.13). Reverse the return first, or post a manual adjustment once adjustments exist. |
@@ -669,8 +669,8 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Health `/healthz`, `/readyz` | built | Kernel `httpx.NewRouter` default. |
 | Rate-limit and `X-Passage-Api-Build` headers | handoff to kernel `httpx` | |
 | Event type naming | deviation | Events use `dev.passage.fulfillment.packingslip.*` (the kernel accepts one segment per name part). The PRD uses `passage.fulfillment.packing-slip.*`, which is not a valid kernel type. |
-| Config `COGS_AT_SHIPMENT` per legal entity | built (slice 14) | `cogs_at_shipment` is a legal entity setting every post follows; a post naming the other value is FUL-0059. Changing it needs `ledger.setup.write` on top of `WarehouseRelease`. The PRD names no duty for section 5.28.13 parameters; `ledger.setup.write` is the existing ledger posting setup duty. The process-wide `COGS_AT_SHIPMENT=false` of section 5.28.10 is the default of an unsaved legal entity and is not an environment variable. The open question of section 5.28.12 (default `true` for migrated SAP entities) is for the migration factory (wave 49) to set per legal entity through this API. |
-| Route permissions for `/v1/fulfillment/legal-entity-settings` (GET under `WarehouseView`, `legal-entity-settings/*` GET under `WarehouseView` and PUT under `WarehouseRelease`) and slice 13's `/v1/fulfillment/warehouse-settings` (same pattern) in `policies/authz/data.json` | done (seeded in `policies/authz/data.json`) | `WarehouseView` carries GET `/v1/fulfillment/legal-entity-settings[/*]` and `/warehouse-settings[/*]`; `WarehouseRelease` carries PUT `/legal-entity-settings/*` and `/warehouse-settings/*` (and POST `/shipments/*:backorder-remainder`). |
+| Config `COGS_AT_SHIPMENT` per legal entity | built (slice 14) | `cogs_at_shipment` is a legal entity setting every post follows; a post naming the other value is FUL-0059. Changing it needs `ledger.setup.write` on top of `fulfillment.warehouse.release`. The PRD names no duty for section 5.28.13 parameters; `ledger.setup.write` is the existing ledger posting setup duty. The process-wide `COGS_AT_SHIPMENT=false` of section 5.28.10 is the default of an unsaved legal entity and is not an environment variable. The open question of section 5.28.12 (default `true` for migrated SAP entities) is for the migration factory (wave 49) to set per legal entity through this API. |
+| Route permissions for `/v1/fulfillment/legal-entity-settings` (GET under `fulfillment.warehouse.view`, `legal-entity-settings/*` GET under `fulfillment.warehouse.view` and PUT under `fulfillment.warehouse.release`) and slice 13's `/v1/fulfillment/warehouse-settings` (same pattern) in `policies/authz/data.json` | done (seeded in `policies/authz/data.json`) | `fulfillment.warehouse.view` carries GET `/v1/fulfillment/legal-entity-settings[/*]` and `/warehouse-settings[/*]`; `fulfillment.warehouse.release` carries PUT `/legal-entity-settings/*` and `/warehouse-settings/*` (and POST `/shipments/*:backorder-remainder`). |
 | Billing (wave 29) reading the COGS timing of each slip | handoff to billing (wave 29) | A legal entity may change its policy while slips are uninvoiced. Billing must decide what to reverse at invoice from each slip's own journal (1405 or 5000 lines, in `packingslip.posted`), never from the current setting. |
 | `GS1_COMPANY_PREFIX` per legal entity (BR-28.5) | deviation | Slice 1 has one prefix per process. It is not per legal entity. The serial counter is per tenant and prefix, gap-free, and a serial that no longer fits the prefix is refused. |
 | SSCC no reuse for 12 months (`sscc_no_reuse_months`) | deviation | `UNIQUE (tenant_id, sscc)` means an SSCC is never issued twice in a tenant, which is stricter than 12 months. The tenant setting `sscc_no_reuse_months` (12 to 60) is not stored: this service has no tenant settings yet, so the register's `noReuseUntil` always uses the default 12. |
@@ -679,7 +679,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Period check (FUL-0002), negative on-hand (FUL-0003) on post (the tracking dims check, FUL-0006, is built in slice 10; the tolerance, FUL-0005, in slice 23) | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
 | Consolidation (BR-28.8, FUL-0011, `consolidation_enabled`, flag `fulfillment.consolidation`) | later slice of PSG-28 | A shipment holds one order (`order_id`), has no delivery address, and the order's `ship_separately` flag is not read from sales (wave 27). Consolidating needs multi-order shipments, the address on the shipment and the flag, so the FUL-0011 check is not built until release can use it. |
 | Shipment cancel of a packed shipment | built (unpack first, slice 8) | `POST /shipments/{id}:cancel` (slice 3) cancels from OPEN to PACKED while nothing has shipped and the shipment holds no container. A shipment with containers cannot cancel (FUL-0021) until they are unpacked one by one (slice 8, `:unpack`). |
-| DNI report (FR-28.12) | built | `GET /delivered-not-invoiced` (`WarehouseView`) and the web screen. It is computed from the slip journals on read, not from a stored projection. |
+| DNI report (FR-28.12) | built | `GET /delivered-not-invoiced` (`fulfillment.warehouse.view`) and the web screen. It is computed from the slip journals on read, not from a stored projection. |
 | DNI daily reconciliation job (02:00, `dni_check_time`), the "GL 1405 diff" column and the DNI diff alert | handoff to ledger (wave 11) and later slice of PSG-28 | The diff needs the ledger's GL 1405 balance per legal entity; the ledger client is a kernel item not yet built. No scheduler is wired in this service. |
 | DNI report is per packing slip, not per slip line (section 5.28.14 lists "slip, line, qty, cost") | deviation | The 1405 balance is posted per slip; lines with quantities are on the packing slip detail the row opens. |
 | An INVOICED slip leaves the DNI report for every as-of date | deviation | Billing (wave 29) sets INVOICED and relieves 1405; this service does not record the invoice date, so a past as-of date cannot tell whether the slip was still open then. Cancellations are dated (the reversal's posting date) and are honoured exactly. |
@@ -695,7 +695,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Reporting: carrier exceptions and cost | later slice of PSG-28 | Needs carrier-gateway. Shipments list (with the PARTIALLY_SHIPPED filter), release board, pick waves, packing slip journal, delivered not invoiced, packaging weights per country and month, RTP balances and aging, the SSCC register and short picks and backorders are built. |
 | Short picks report: the "reason" column (section 5.28.14) | built (slice 9) | Reason codes (OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER) on pick confirmation, single shipment and wave, in the API and the web forms, and in the report. The code list is fixed in the service (a check constraint); a tenant-maintained reason list is not built. |
 | Wave screen: picker, reassign and print (section 5.28.6) | built (slice 11) | The wave detail assigns and reassigns the picker (`:assign`, version checked, `wave.assigned` carries the previous picker), closes the wave (`:close`, FUL-0055 while a line is left) and prints the pick list; the waves list shows status and picker and filters by both (`-` lists waves nobody has). |
-| Picker is free text (a user name or badge up to 64 characters), not a reference to a user or worker | deviation | The user directory is outside this service. Nothing checks that the picker exists or holds `WarehousePick`; the "my waves" view is the picker filter. A picker has no capacity limit and a wave can be reassigned any number of times while OPEN. |
+| Picker is free text (a user name or badge up to 64 characters), not a reference to a user or worker | deviation | The user directory is outside this service. Nothing checks that the picker exists or holds `fulfillment.warehouse.pick`; the "my waves" view is the picker filter. A picker has no capacity limit and a wave can be reassigned any number of times while OPEN. |
 | The short pick action is per warehouse (scoped by the warehouse's legal entity), and a warehouse is listed once it has a shipment or a saved setting | deviation; handoff to org (wave 6) | There is no warehouse master in this service (warehouses live in org). The caller names the legal entity on save and the service checks it only against the saved setting, the warehouse's release rule (slice 17) and its shipments, so a setting saved for a warehouse with none of them yet trusts the caller; reading the warehouse's legal entity from org (or its `warehouse` events) would close that. The settings screen also accepts a warehouse id typed in. |
 | The release rules are per warehouse (scoped by the warehouse's legal entity), and a warehouse is listed once it has a shipment, a short pick setting or a saved rule | deviation; handoff to org (wave 6) | As for the short pick action: there is no warehouse master here, so the caller names the legal entity on save and the service checks it against the warehouse's saved rule, short pick setting and shipments that the caller can see. A first save for a warehouse with none of them, or whose records are all in a legal entity outside the caller's scope, trusts the caller; reading the warehouse's legal entity from org would close that. |
 | A release rule that is saved replaces the service configuration (`RELEASE_HORIZON_DAYS`, `RELEASE_REQUIRES_FULL_ATP`) for that warehouse | deviation | The configuration stays the default of a warehouse without a rule, so nothing changes until a rule is saved; a request's `horizonDays` or `requireFullAtp` still wins over both. |
@@ -705,17 +705,17 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Sales does not learn from a packing slip that a drop-ship line shipped | handoff to sales (wave 27) | No `packingslip.posted` is published for a drop-ship line. Sales must consume `dev.passage.fulfillment.dropship.confirmed.v1` (`order_line_id`, `qty`) to mark the order line shipped, and `dropship.created` / `.cancelled` if it shows the line as drop-shipped; no consumer exists yet. |
 | The vendor confirmation is `POST /drop-ships/{id}:confirm`, not `/drop-ship/{orderLineId}:vendor-confirm` (section 5.28.5) | deviation | The drop-ship is a record with its own id, version and `DS-` number, created before the vendor ships; the command addresses it like every other fulfillment command (`If-Match` on its version). An order line has at most one active drop-ship, so `GET /drop-ships?orderId=` finds it. |
 | A drop-ship create and a release run of the same order line at the same moment can both succeed | deviation | Create refuses a line on a shipment and release skips a line with a drop-ship, but the two are not serialised on the order line (release locks per warehouse, a drop-ship has none). The window is the length of one transaction; a per-line lock on every release line was not worth the lock-table cost. |
-| The drop-ship routes in `policies/authz/data.json` | done (seeded in `policies/authz/data.json`) | `/v1/fulfillment/drop-ships` and `/v1/fulfillment/drop-ships/*` (GET) are under `WarehouseView`, `/v1/fulfillment/drop-ships` and `/v1/fulfillment/drop-ships/*:cancel` (POST) under `WarehouseRelease`, and `/v1/fulfillment/drop-ships/*:confirm` (POST) under `PurchaseOrderConfirm`. No new duty name. |
+| The drop-ship routes in `policies/authz/data.json` | done (seeded in `policies/authz/data.json`) | `/v1/fulfillment/drop-ships` and `/v1/fulfillment/drop-ships/*` (GET) are under `fulfillment.warehouse.view`, `/v1/fulfillment/drop-ships` and `/v1/fulfillment/drop-ships/*:cancel` (POST) under `fulfillment.warehouse.release`, and `/v1/fulfillment/drop-ships/*:confirm` (POST) under `procurement.purchase-order.confirm`. No new duty name. |
 | The purchase order link, quantity and cost are given by the caller and not checked against purchasing | handoff to purchasing (wave 17) | The service stores `purchaseOrderId`, `purchaseOrderLineId`, `vendorId` and `unitCost` as given (UUIDs, a positive quantity and cost of at most 6 decimals, a 3-letter currency). Reading the PO line, checking the vendor and quantity, and taking the cost from it belong with wave 17; a PO receipt in GR/IR is for purchasing to clear against the 2110 credit. |
 | A confirmed drop-ship cannot be reversed | deviation | A vendor return and the mirror posting of a booked confirmation are not built. Each vendor shipment is booked once; a vendor that ships in parts is built (slice 16), and a remainder the vendor will not ship is closed with `:close-remainder`. |
 | Rounding of partial confirmations | built in review | A confirmation books the cost of everything confirmed so far rounded once, less what the earlier confirmations booked, so the parts always add up to the confirmed total rounded once and, when all of it ships, to the whole-line amount (3 x 0.125 in single units books 0.13, 0.12, 0.13 = 0.38, not 0.39). The confirmation form previews the same amount. A whole confirmation books exactly what slice 15 booked. |
 | `dropship.confirmed.v1` is now published once per vendor shipment, not once per drop-ship | deviation (kept at v1) | Additive change: no service in the repository consumes any fulfillment drop-ship event yet (searched all services and apps), and a whole confirmation still sends one event with the slice 15 fields and values plus `confirmation_seq` 1 and `confirmed_qty` = `qty`, so no `.v2` was cut. Partial events happen only when a caller sends `qty`. The AsyncAPI tells consumers to act on `confirmed_qty` and the event's journal, never on `qty` (the ordered quantity), and to de-duplicate on `drop_ship_id` plus `confirmation_seq`; the ledger, sales and billing consumers must be written that way. |
 | Sales (wave 27) does not yet read `dropship.confirmed` per shipment (`confirmed_qty`) or `dropship.closed` | handoff to sales (wave 27) | Sales must mark `confirmed_qty` of the order line shipped on each event and cancel the order line remainder on `dropship.closed` (`qty_closed`). |
-| Confirming a drop-ship needs `PurchaseOrderConfirm`, not the `PurchasingConfirm` of section 5.28.5; creating and cancelling need `WarehouseRelease` | deviation | `PurchasingConfirm` is not a seeded duty; the purchasing service's duty for confirming purchase orders is `PurchaseOrderConfirm`, so the vendor confirmation stays a purchasing act under the seeded name (duty naming is #210). Creating and cancelling a drop-ship are order-to-warehouse routing, like release. |
+| Confirming a drop-ship needs `procurement.purchase-order.confirm`, not the `PurchasingConfirm` of section 5.28.5; creating and cancelling need `fulfillment.warehouse.release` | deviation | `PurchasingConfirm` is not a seeded duty; the purchasing service's duty for confirming purchase orders is `procurement.purchase-order.confirm`, so the vendor confirmation stays a purchasing act under the seeded name (duty naming is #210). Creating and cancelling a drop-ship are order-to-warehouse routing, like release. |
 | Cancelling a packing slip after the short pick action ran does not undo the action | deviation | The shipment returns to PACKED at the quantity that had shipped; the closed remainder stays closed and a backorder shipment stays (cancel it on its own if it should not ship). |
 | A shipment re-picked in rounds under KEEP_OPEN (lines left out of a re-pick keep their remainder) is closed or backordered at its next post once the warehouse switches to CANCEL_REMAINDER or REMAINDER_BACKORDER | deviation | The action reads the setting at post, so lines left out on purpose are treated as short. |
 | Closing a wave leaves its shipments alone | deviation | The wave is a pick-work container; shipments keep their own lifecycle (PICKED, PACKED). A short-picked line stays a backorder on its shipment and is re-picked through the shipment's own pick; a CLOSED wave refuses wave picks (FUL-0001), and a wave pick takes the wave row FOR SHARE so it cannot slip in beside a close. Nothing reopens a CLOSED wave. |
-| Assign and close need `WarehouseRelease`, not `WarehousePick` | deviation | Section 5.28.6 lists "reassign" on the wave / pick list screen, whose duty is `WarehousePick`. Handing work to a picker and closing the wave are supervisor actions here, so a picker cannot reassign or close their own wave; picks stay on `WarehousePick`. Both duties were already enforced by this service and are already on the #313 seeding list, so nothing is new for #313. |
+| Assign and close need `fulfillment.warehouse.release`, not `fulfillment.warehouse.pick` | deviation | Section 5.28.6 lists "reassign" on the wave / pick list screen, whose duty is `fulfillment.warehouse.pick`. Handing work to a picker and closing the wave are supervisor actions here, so a picker cannot reassign or close their own wave; picks stay on `fulfillment.warehouse.pick`. Both duties were already enforced by this service and are already on the #313 seeding list, so nothing is new for #313. |
 | Short picks report: "period" filters the line's first short pick | deviation | A line keeps the time of its first short pick, so a later short re-pick of the same line does not move it to another period. Lines short-picked before migration 0005 take their shipment's last change time. |
 | Returnable aging is as of today (UTC) only | deviation | The balance is the current one, so aging it as of a past date would mix in containers shipped later. The nightly job (not built) would run it daily. |
 | Returnable aging is computed on read and returns at most `limit` balances (default 100, max 500) | deviation | `count` and `chargeDueCount` cover every outstanding balance; the screen asks for 500 and says when the list is cut. Paging is not built. |

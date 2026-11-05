@@ -88,7 +88,7 @@ describe("posting settings page", () => {
       if (url.pathname === LIST) return json(200, { items: rows });
       return undefined;
     };
-    renderAt("/fulfillment/legal-entity-settings", ["WarehouseView", "WarehouseRelease", "ledger.setup.write"]);
+    renderAt("/fulfillment/legal-entity-settings", ["fulfillment.warehouse.view", "fulfillment.warehouse.release", "ledger.setup.write"]);
     const table = await findTable({ name: "Posting settings" });
     fireEvent.click(within(table).getByRole("button", { name: LE1 }));
     const cogs = screen.getByLabelText("Post cost of goods sold at shipment");

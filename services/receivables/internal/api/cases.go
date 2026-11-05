@@ -20,8 +20,8 @@ import (
 
 const maxCaseReason = 500
 
-// caseRoutes mounts the minimal collection cases (FR-30.18). Reads need ARView;
-// opening, assigning and closing need CollectionsMaintain (§5.30.17).
+// caseRoutes mounts the minimal collection cases (FR-30.18). Reads need receivables.view;
+// opening, assigning and closing need receivables.collection.maintain (§5.30.17).
 func (a *API) caseRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCollections)).Post("/cases", a.createCase)
 	r.With(authz.RequireDuty(dutyView)).Get("/cases", a.listCases)

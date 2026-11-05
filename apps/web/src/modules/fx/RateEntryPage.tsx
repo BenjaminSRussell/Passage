@@ -8,7 +8,7 @@ import { RateTypeField } from "./RateTypeField";
 import styles from "./pages.module.css";
 import { deviationBeyondLimit, DEVIATION_LIMIT_PERCENT, emptyEntry, formatRate, normalizeCurrency, SAME_CURRENCY_ERROR, validateEntry, type Deviation, type Errors, type RateEntry } from "./validate";
 
-const DUTY = "Maintain exchange rates";
+const DUTY = "fx.rate.maintain";
 const FIELDS = ["rateType", "from", "to", "validFrom", "rate"] as const;
 const SERVER_PREFIX = "rates[0].";
 
@@ -157,7 +157,7 @@ export function RateEntryPage() {
           ? `${review.input.from} to ${review.input.to} was ${formatRate(review.previous.rate)} from ${review.previous.validFrom}. Changes of more than ${DEVIATION_LIMIT_PERCENT}% need confirmation, because they are often a typing mistake.`
           : undefined}
       </Alert>
-      {check.isError ? <ApiFailure error={check.error} title="Could not compare with the previous rate" duty="View exchange rates" /> : null}
+      {check.isError ? <ApiFailure error={check.error} title="Could not compare with the previous rate" duty="fx.rate.view" /> : null}
       {publishFailure ? <ApiFailure error={publish.error} title="Could not save the rate" duty={DUTY} /> : null}
       <ImportNow key={values.rateType} rateType={types.data?.find((t) => t.code === values.rateType)} />
       <Alert tone="success" live="status" title={saved ? "Rate saved" : undefined}>

@@ -36,7 +36,7 @@ func TestImportNow(t *testing.T) {
 	tenantID := testkit.TenantID(1)
 	const ecbPath = "/v1/fx/providers/ecb:import"
 	const oxrPath = "/v1/fx/providers/openexchangerates:import"
-	adminDuties := "Administer exchange rates"
+	adminDuties := "fx.rate.administer"
 	todayStr := time.Now().UTC().Format(time.DateOnly)
 	future := time.Now().UTC().AddDate(0, 0, 2).Format(time.DateOnly)
 	ecbTypes := map[string]store.RateType{"CLOSING": {Code: "CLOSING", Provider: "ecb"}}
@@ -116,7 +116,7 @@ func TestImportNowHidesProviderErrorText(t *testing.T) {
 	r := httpx.NewRouter()
 	types := map[string]store.RateType{"CLOSING": {Code: "CLOSING", Provider: "ecb"}}
 	api.New(&fakeStore{types: types}).WithImporters(map[string]api.Importer{"ecb": imp}).Register(r)
-	rec := do(r, http.MethodPost, "/v1/fx/providers/ecb:import", `{"rateType":"CLOSING"}`, "Administer exchange rates", testkit.TenantID(1))
+	rec := do(r, http.MethodPost, "/v1/fx/providers/ecb:import", `{"rateType":"CLOSING"}`, "fx.rate.administer", testkit.TenantID(1))
 	body := rec.Body.String()
 	if rec.Code != 502 || !strings.Contains(body, "exchange-rate provider request failed") || strings.Contains(body, "internal-gw") || strings.Contains(body, "boom") {
 		t.Fatalf("got %d %s", rec.Code, body)

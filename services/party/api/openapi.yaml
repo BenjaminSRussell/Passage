@@ -369,7 +369,7 @@ paths:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
     post:
       operationId: addVendorBankAccount
-      x-passage-duty: party.vendor_bank.write
+      x-passage-duty: party.vendor-bank.write
       description: Stores a bank account; account and routing numbers are encrypted per tenant and field. Needs X-Passage-User. 503 PTY-BANK-ENCRYPTION-UNAVAILABLE when no field encryption keys are configured.
       requestBody:
         required: true
@@ -397,7 +397,7 @@ paths:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
     get:
       operationId: revealVendorBankAccounts
-      x-passage-duty: party.vendor_bank.reveal
+      x-passage-duty: party.vendor-bank.reveal
       description: Bank accounts with accountNumber and routingNumber decrypted. Each call is logged with the user and vendor id.
       responses:
         '200': { description: 'bankAccounts, unmasked.', content: { application/json: { schema: { type: object, required: [bankAccounts], properties: { bankAccounts: { type: array, items: { $ref: '#/components/schemas/BankAccount' } } } } } } }
@@ -454,7 +454,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     put:
       operationId: setProtectedFields
-      x-passage-duty: party.approval_policy.write
+      x-passage-duty: party.approval-policy.write
       description: Replaces the set of fields that need approval in this legal entity. fields is required; [] is an explicit unprotect-all, and a missing or null fields is 422. Only credit_limit is protectable today; changes already pending stay decidable. Every change enqueues dev.passage.party.protectedfields.updated.v1 with before, after and the actor. A credit limit request by the user who last unprotected the field within 24 hours is still held for approval. The legal entity id is not validated against the org service (party keeps no legal entity table); a scoped caller can only address its own.
       requestBody:
         required: true

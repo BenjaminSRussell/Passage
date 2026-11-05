@@ -78,10 +78,10 @@ func carrierServer(t *testing.T, fs *fakeStore, g carrier.Gateway) http.Handler 
 	return r
 }
 
-var shipDuty = map[string]string{"X-Passage-Duties": "WarehouseShip"}
+var shipDuty = map[string]string{"X-Passage-Duties": "fulfillment.warehouse.ship"}
 
 func shipKey(key string) map[string]string {
-	return map[string]string{"X-Passage-Duties": "WarehouseShip", "Idempotency-Key": key}
+	return map[string]string{"X-Passage-Duties": "fulfillment.warehouse.ship", "Idempotency-Key": key}
 }
 
 func TestCarrierLabel_BuysOnceAndRecordsLabelled(t *testing.T) {
@@ -161,7 +161,7 @@ func TestCarrierRates_PassesTheShipmentsEntityAndMapsErrors(t *testing.T) {
 		t.Fatalf("unconfigured: %d %s", rec.Code, rec.Body)
 	}
 	if rec := do(t, h, http.MethodPost, path, `{`+carrierBody+`}`, nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("without WarehouseShip: %d", rec.Code)
+		t.Fatalf("without fulfillment.warehouse.ship: %d", rec.Code)
 	}
 }
 

@@ -189,7 +189,7 @@ func TestPublishRatesFailureIsNotRecorded(t *testing.T) {
 func TestPublishRatesNeedsMaintainDuty(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/fx/rates", strings.NewReader(publishBody))
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
-	req.Header.Set("X-Passage-Duties", "View exchange rates")
+	req.Header.Set("X-Passage-Duties", "fx.rate.view")
 	req.Header.Set("Idempotency-Key", "k1")
 	rec := httptest.NewRecorder()
 	f := &fakeStore{}

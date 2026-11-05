@@ -4,7 +4,7 @@ Alert: `PassageFailoverInProgress`. Target: RTO <= 1 h, RPO <= 5 min, zero commi
 Example pair: eu-west (PRIMARY) to eu-central (PASSIVE), `deploy/multi-region/values/`.
 
 ## Preconditions
-1. Two distinct PlatformAdmin confirmations within 5 min (`failover.two_person_window_min`, OPS-1702).
+1. Two distinct platform.global.admin holder confirmations within 5 min (`failover.two_person_window_min`, OPS-1702).
 2. Target region lag: CNPG lag and MM2 lag below `FAILOVER_MAX_LAG_S` (300 s). Above it, the command
    is rejected (OPS-1701) unless `--accept-data-loss` is given with a second approver.
 3. Target is in the same residency as the source (PRD 9.50.20: failover never crosses a residency boundary).

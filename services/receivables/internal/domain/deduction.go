@@ -26,7 +26,7 @@ const (
 	CodeDeductionSplit        = "AR-DEDUCTION-SPLIT"
 	CodeDeductionMismatch     = "AR-DEDUCTION-MISMATCH"
 	// CodeDeductionWriteOffLimit reuses the catalog's write-off tolerance code
-	// (AR-0006): above deduction_write_off_limit needs ARWriteOffApprove.
+	// (AR-0006): above deduction_write_off_limit needs receivables.write-off.approve.
 	CodeDeductionWriteOffLimit = CodeWriteOffTolerance
 )
 
@@ -62,7 +62,7 @@ func ValidDeductionStatus(s string) bool {
 
 // DeductionWriteOffLimit is deduction_write_off_limit (BR-30.12 defaults: 50.00
 // USD, 45.00 EUR). Other currencies have no default, so their limit is zero and
-// every write-off needs ARWriteOffApprove.
+// every write-off needs receivables.write-off.approve.
 func DeductionWriteOffLimit(currency string) decimal.Decimal {
 	switch currency {
 	case "USD":
@@ -131,12 +131,12 @@ func CheckSplit(parent decimal.Decimal, parts []decimal.Decimal) error {
 }
 
 // CheckDeductionWriteOff allows a write-off up to deduction_write_off_limit, and
-// above it only with ARWriteOffApprove (BR-30.12, §5.30.17).
+// above it only with receivables.write-off.approve (BR-30.12, §5.30.17).
 func CheckDeductionWriteOff(amount decimal.Decimal, currency string, mayApprove bool) error {
 	limit := DeductionWriteOffLimit(currency)
 	if amount.GreaterThan(limit) && !mayApprove {
 		return &Error{Status: http.StatusForbidden, Code: CodeDeductionWriteOffLimit,
-			Detail: fmt.Sprintf("Write-off %s %s exceeds the deduction limit %s; it needs ARWriteOffApprove", amount, currency, limit)}
+			Detail: fmt.Sprintf("Write-off %s %s exceeds the deduction limit %s; it needs receivables.write-off.approve", amount, currency, limit)}
 	}
 	return nil
 }

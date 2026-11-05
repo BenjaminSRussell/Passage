@@ -357,10 +357,10 @@ func TestList_FiltersAndPaginates(t *testing.T) {
 func TestDuties_ForbidWithoutDuty(t *testing.T) {
 	h := router(newFake())
 	if rec := do(t, h, ctxFor(), http.MethodGet, "/v1/projects", "", nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("list without ProjInquire: status %d", rec.Code)
+		t.Fatalf("list without projects.inquire: status %d", rec.Code)
 	}
 	if rec := do(t, h, ctxFor(DutyInquire), http.MethodPost, "/v1/projects", "{}", map[string]string{"Idempotency-Key": "x"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without ProjMaintain: status %d", rec.Code)
+		t.Fatalf("create without projects.maintain: status %d", rec.Code)
 	}
 }
 
@@ -456,7 +456,7 @@ func TestTransition_RequiresManageDuty(t *testing.T) {
 	_, _, _ = f.CreateProject(context.Background(), sampleProject("P-D"), "")
 	rec := do(t, router(f), ctxFor(DutyMaintain, DutyInquire), http.MethodPost, "/v1/projects/P-D/transitions", `{"to":"IN_PROCESS"}`, map[string]string{"If-Match": `"1"`})
 	if rec.Code != http.StatusForbidden || errorCode(t, rec) != "AUTH-0003" {
-		t.Fatalf("transition without ProjManage: status %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("transition without projects.manage: status %d %s", rec.Code, rec.Body.String())
 	}
 }
 

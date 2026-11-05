@@ -85,10 +85,10 @@ func duty(name, key string, extra ...string) headers {
 }
 
 func (rg *rig) maintain(extra ...string) headers {
-	return duty("ReceivingMaintain", rg.key(), extra...)
+	return duty("receiving.receipt.maintain", rg.key(), extra...)
 }
 func (rg *rig) poster(version int) headers {
-	return duty("ReceivingPost", rg.key(), "If-Match", `"`+strconv.Itoa(version)+`"`)
+	return duty("receiving.receipt.post", rg.key(), "If-Match", `"`+strconv.Itoa(version)+`"`)
 }
 
 type receiptJSON struct {
@@ -133,7 +133,7 @@ func (rg *rig) posted(t *testing.T, slip string, ordered, qty int) receiptJSON {
 	if rg.confirmErsPrice != "" {
 		for _, l := range posted.Lines {
 			body := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":%s}`, legalEntityID, rg.confirmErsPrice)
-			rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, posted.ID, l.LineNo), body, userDuty("ErsPriceConfirm", rg.key(), "buyer"))
+			rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, posted.ID, l.LineNo), body, userDuty("receiving.ers-price.confirm", rg.key(), "buyer"))
 		}
 	}
 	return posted
@@ -147,7 +147,7 @@ func (rg *rig) confirmPrice(t *testing.T, receiptID string, lineNo int, price st
 func (rg *rig) confirmPriceAs(t *testing.T, receiptID string, lineNo int, price, user string, want int) {
 	t.Helper()
 	body := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":%s}`, legalEntityID, price)
-	rec := rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, receiptID, lineNo), body, userDuty("ErsPriceConfirm", rg.key(), user))
+	rec := rg.call(http.MethodPut, fmt.Sprintf("%s/%s/lines/%d/ers-price-confirmation", receiptsPath, receiptID, lineNo), body, userDuty("receiving.ers-price.confirm", rg.key(), user))
 	if rec.Code != want {
 		t.Fatalf("confirm price: %d %s, want %d", rec.Code, rec.Body.String(), want)
 	}
@@ -193,10 +193,10 @@ func TestDirectReceipt_ValidationAndAuth(t *testing.T) {
 			}
 		})
 	}
-	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), duty("APInquire", "k")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), duty("receiving.ap.inquire", "k")), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), headers{"Idempotency-Key": "k"}), http.StatusUnauthorized, "AUTH-0001")
-	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), duty("ReceivingMaintain", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
-	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "ReceivingMaintain"}), http.StatusBadRequest, "COM-0001")
+	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), duty("receiving.receipt.maintain", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "receiving.receipt.maintain"}), http.StatusBadRequest, "COM-0001")
 }
 
 func TestDirectReceipt_CallerWithoutEntityScopeIsForbidden(t *testing.T) {
@@ -221,14 +221,14 @@ func TestDirectReceipt_DomainConflicts(t *testing.T) {
 
 func TestDirectReceipt_IdempotencyReplayAndMismatch(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
-	hdr := duty("ReceivingMaintain", "same-key")
+	hdr := duty("receiving.receipt.maintain", "same-key")
 	first := rg.call(http.MethodPost, receiptsPath, directBody("PS-1", 10, 4, ""), hdr)
 	replay := rg.call(http.MethodPost, receiptsPath, directBody("PS-1", 10, 4, ""), hdr)
 	if first.Code != http.StatusCreated || replay.Code != http.StatusCreated || replay.Header().Get("Idempotent-Replayed") != "true" || first.Body.String() != replay.Body.String() {
 		t.Fatalf("first %d %s replay %d %s", first.Code, first.Body.String(), replay.Code, replay.Body.String())
 	}
 	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("PS-2", 10, 4, ""), hdr), http.StatusUnprocessableEntity, "COM-0409")
-	list := decode[struct{ Items []receiptJSON }](t, rg.call(http.MethodGet, receiptsPath, "", duty("ReceivingMaintain", "")), http.StatusOK)
+	list := decode[struct{ Items []receiptJSON }](t, rg.call(http.MethodGet, receiptsPath, "", duty("receiving.receipt.maintain", "")), http.StatusOK)
 	if len(list.Items) != 1 {
 		t.Fatalf("replay created %d receipts, want 1", len(list.Items))
 	}
@@ -292,7 +292,7 @@ func TestPost_LedgerEventAndGrirInOneStep(t *testing.T) {
 	}
 	page := decode[struct {
 		Items []struct{ OpenAmount, Status, UnitPrice string }
-	}](t, rg.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
+	}](t, rg.call(http.MethodGet, grirPath, "", duty("receiving.ap.inquire", "")), http.StatusOK)
 	if len(page.Items) != 1 || page.Items[0].OpenAmount != "10.00" || page.Items[0].Status != "OPEN" || page.Items[0].UnitPrice != "2.5" {
 		t.Fatalf("grir %+v", page)
 	}
@@ -302,8 +302,8 @@ func TestPost_Failures(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
 	r := rg.direct(t, "PS-1", 10, 4)
 	path := receiptsPath + "/" + r.ID + ":post"
-	problemCode(t, rg.call(http.MethodPost, path, "", duty("ReceivingMaintain", "k")), http.StatusForbidden, "AUTH-0003")
-	problemCode(t, rg.call(http.MethodPost, path, "", duty("ReceivingPost", "k2")), http.StatusPreconditionRequired, "COM-0428")
+	problemCode(t, rg.call(http.MethodPost, path, "", duty("receiving.receipt.maintain", "k")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, path, "", duty("receiving.receipt.post", "k2")), http.StatusPreconditionRequired, "COM-0428")
 	problemCode(t, rg.call(http.MethodPost, path, "", rg.poster(1)), http.StatusPreconditionFailed, "COM-0412")
 	rg.ledger.Err = errors.New("ledger down 10.0.0.9")
 	rec := rg.call(http.MethodPost, path, "", rg.poster(2))
@@ -313,7 +313,7 @@ func TestPost_Failures(t *testing.T) {
 	}
 	rg.ledger.Err = domain.ErrPeriodClosed
 	problemCode(t, rg.call(http.MethodPost, path, "", rg.poster(2)), http.StatusUnprocessableEntity, "PER-AP-001")
-	still := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("ReceivingMaintain", "")), http.StatusOK)
+	still := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+r.ID, "", duty("receiving.receipt.maintain", "")), http.StatusOK)
 	if still.State != "REGISTERED" || len(rg.st.Events()) != 0 {
 		t.Fatalf("failed post changed state to %s with %d events", still.State, len(rg.st.Events()))
 	}
@@ -325,7 +325,7 @@ func TestPost_Failures(t *testing.T) {
 func TestPost_ReplayDoesNotPostTwice(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
 	r := rg.direct(t, "PS-1", 10, 4)
-	hdr := duty("ReceivingPost", "post-key", "If-Match", `"2"`)
+	hdr := duty("receiving.receipt.post", "post-key", "If-Match", `"2"`)
 	path := receiptsPath + "/" + r.ID + ":post"
 	rg.call(http.MethodPost, path, "", hdr)
 	replay := rg.call(http.MethodPost, path, "", hdr)
@@ -339,7 +339,7 @@ func invoiceBody(number, receiptID string, qty int, extra string) string {
 		vendorID, legalEntityID, number, ledgerID, periodID, receiptID, qty, extra)
 }
 
-func (rg *rig) apPoster() headers { return duty("VendorInvoicePost", rg.key()) }
+func (rg *rig) apPoster() headers { return duty("receiving.vendor-invoice.post", rg.key()) }
 
 type invoiceJSON struct {
 	ID            string `json:"id"`
@@ -379,7 +379,7 @@ func TestCorrect_CreditsNeverBelowInvoicedQuantity(t *testing.T) {
 	}
 	page := decode[struct {
 		Items []struct{ ReceivedQty, InvoicedQty, Status string }
-	}](t, rg.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
+	}](t, rg.call(http.MethodGet, grirPath, "", duty("receiving.ap.inquire", "")), http.StatusOK)
 	if page.Items[0].ReceivedQty != "40" || page.Items[0].InvoicedQty != "40" || page.Items[0].Status != "CLEARED" {
 		t.Fatalf("grir after correction %+v", page.Items)
 	}
@@ -435,7 +435,7 @@ func TestCancel_ByState(t *testing.T) {
 	}
 	cleared := decode[struct {
 		Items []struct{ Status, OpenAmount string }
-	}](t, rg.call(http.MethodGet, grirPath+"?status=CLEARED", "", duty("APInquire", "")), http.StatusOK)
+	}](t, rg.call(http.MethodGet, grirPath+"?status=CLEARED", "", duty("receiving.ap.inquire", "")), http.StatusOK)
 	if len(cleared.Items) != 1 || cleared.Items[0].OpenAmount != "0.00" {
 		t.Fatalf("cancelled grir %+v", cleared)
 	}
@@ -474,7 +474,7 @@ func TestInvoice_PostsClearsGrirAndEmits(t *testing.T) {
 	}
 	page := decode[struct {
 		Items []struct{ Status, OpenAmount string }
-	}](t, rg.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
+	}](t, rg.call(http.MethodGet, grirPath, "", duty("receiving.ap.inquire", "")), http.StatusOK)
 	if page.Items[0].Status != "CLEARED" || page.Items[0].OpenAmount != "0.00" {
 		t.Fatalf("grir %+v", page.Items)
 	}
@@ -530,8 +530,8 @@ func TestInvoice_Rejections(t *testing.T) {
 	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-3", productID, 1, ""), rg.apPoster()), http.StatusNotFound, "RCV-NF-002")
 	other := strings.Replace(invoiceBody("INV-4", r.ID, 1, ""), vendorID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 1)
 	problemCode(t, rg.call(http.MethodPost, invoicesPath, other, rg.apPoster()), http.StatusUnprocessableEntity, "RCV-VAL-001")
-	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-5", r.ID, 1, ""), duty("ReceivingPost", "k")), http.StatusForbidden, "AUTH-0003")
-	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-5", r.ID, 1, ""), duty("VendorInvoicePost", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-5", r.ID, 1, ""), duty("receiving.receipt.post", "k")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-5", r.ID, 1, ""), duty("receiving.vendor-invoice.post", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
 	if len(rg.ledger.Entries) != entries {
 		t.Fatalf("rejected invoices reached the ledger: %d entries, want %d", len(rg.ledger.Entries), entries)
 	}
@@ -548,7 +548,7 @@ func TestInvoice_LedgerIDMustMatchTheConfiguredLedgerAndMayBeOmitted(t *testing.
 		t.Fatalf("an invoice for a foreign ledger reached the ledger: %d entries, want %d", len(rg.ledger.Entries), entries)
 	}
 
-	problemCode(t, rg.call(http.MethodPost, invoicesPath, foreign, duty("VendorInvoicePost", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, foreign, duty("receiving.vendor-invoice.post", "k", "X-Passage-Legal-Entity", ledgerID)), http.StatusForbidden, "AUTH-0003")
 
 	omitted := strings.Replace(invoiceBody("INV-2", r.ID, 1, ""), `"ledgerId":"`+ledgerID+`",`, "", 1)
 	got := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, omitted, rg.apPoster()), http.StatusCreated)
@@ -575,14 +575,14 @@ func TestInvoice_ValidationAndIdempotency(t *testing.T) {
 			t.Fatalf("%s: got %d %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	hdr := duty("VendorInvoicePost", "inv-key")
+	hdr := duty("receiving.vendor-invoice.post", "inv-key")
 	first := rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), hdr)
 	replay := rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), hdr)
 	if first.Code != http.StatusCreated || replay.Header().Get("Idempotent-Replayed") != "true" || first.Body.String() != replay.Body.String() {
 		t.Fatalf("first %d replay %d %s", first.Code, replay.Code, replay.Body.String())
 	}
 	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-9", r.ID, 1, ""), hdr), http.StatusUnprocessableEntity, "COM-0409")
-	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), duty("VendorInvoicePost", "")), http.StatusBadRequest, "COM-0001")
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), duty("receiving.vendor-invoice.post", "")), http.StatusBadRequest, "COM-0001")
 }
 
 func TestInvoice_ClosedPeriodPostsNothing(t *testing.T) {
@@ -597,7 +597,7 @@ func TestInvoice_ClosedPeriodPostsNothing(t *testing.T) {
 	}
 	page := decode[struct {
 		Items []struct{ InvoicedQty string }
-	}](t, closed.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
+	}](t, closed.call(http.MethodGet, grirPath, "", duty("receiving.ap.inquire", "")), http.StatusOK)
 	if page.Items[0].InvoicedQty != "0" {
 		t.Fatalf("closed-period invoice cleared quantity: %+v", page.Items)
 	}
@@ -611,7 +611,7 @@ func TestGetReceipt_AndList(t *testing.T) {
 	a := rg.direct(t, "PS-1", 10, 1)
 	b := rg.direct(t, "PS-2", 10, 2)
 	c := rg.direct(t, "PS-3", 10, 3)
-	viewer := duty("ReceivingMaintain", "")
+	viewer := duty("receiving.receipt.maintain", "")
 
 	rec := rg.call(http.MethodGet, receiptsPath+"/"+b.ID, "", viewer)
 	if got := decode[receiptJSON](t, rec, http.StatusOK); got.ID != b.ID || rec.Header().Get("ETag") != `"2"` {
@@ -619,7 +619,7 @@ func TestGetReceipt_AndList(t *testing.T) {
 	}
 	problemCode(t, rg.call(http.MethodGet, receiptsPath+"/"+productID, "", viewer), http.StatusNotFound, "RCV-NF-001")
 	problemCode(t, rg.call(http.MethodGet, receiptsPath+"/zzz", "", viewer), http.StatusBadRequest, "COM-0001")
-	problemCode(t, rg.call(http.MethodGet, receiptsPath+"/"+b.ID, "", duty("APInquire", "")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodGet, receiptsPath+"/"+b.ID, "", duty("receiving.ap.inquire", "")), http.StatusForbidden, "AUTH-0003")
 
 	type page struct {
 		Items      []receiptJSON `json:"items"`
@@ -647,7 +647,7 @@ func TestListGrir_FiltersTotalsAndPaging(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
 	rg.posted(t, "PS-1", 10, 4)
 	rg.posted(t, "PS-2", 10, 2)
-	viewer := duty("APInquire", "")
+	viewer := duty("receiving.ap.inquire", "")
 	type page struct {
 		Items  []struct{ ReceiptNumber, OpenAmount string }
 		Totals struct {
@@ -675,7 +675,7 @@ func TestListGrir_FiltersTotalsAndPaging(t *testing.T) {
 			t.Fatalf("%s: got %d %s", q, rec.Code, rec.Body.String())
 		}
 	}
-	problemCode(t, rg.call(http.MethodGet, grirPath, "", duty("ReceivingMaintain", "")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodGet, grirPath, "", duty("receiving.receipt.maintain", "")), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodGet, grirPath, "", headers{}), http.StatusUnauthorized, "AUTH-0001")
 }
 

@@ -109,7 +109,7 @@ func TestWithholding_TaxIsCalledPerLineWithASignedTokenAndTheAmountsAreRecorded(
 	}
 	verifier := tenant.NewServiceVerifier("tax", map[string]ed25519.PublicKey{"payables": f.verify})
 	claims, err := verifier.Verify(f.tax.tokens[0])
-	if err != nil || claims.Aud != "tax" || claims.Le != entityA || len(claims.Duties) != 1 || claims.Duties[0] != "Calculate withholding tax" {
+	if err != nil || claims.Aud != "tax" || claims.Le != entityA || len(claims.Duties) != 1 || claims.Duties[0] != "tax.withholding.calculate" {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

@@ -27,9 +27,9 @@ const copilot: PassageModule = {
     { path: "/copilot/kill-switch", element: createElement(KillSwitchPage), handle: { title: "Agent kill switch" } },
   ],
   nav: [
-    { label: "Copilot", to: "/copilot", duty: "CopilotUse" },
-    { label: "Tool catalog", to: "/copilot/tools", duty: "CopilotUse" },
-    { label: "Agent kill switch", to: "/copilot/kill-switch", duty: "AgentAdmin" },
+    { label: "Copilot", to: "/copilot", duty: "mcp.copilot.use" },
+    { label: "Tool catalog", to: "/copilot/tools", duty: "mcp.copilot.use" },
+    { label: "Agent kill switch", to: "/copilot/kill-switch", duty: "agents.admin" },
   ],
 };
 

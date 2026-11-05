@@ -51,7 +51,7 @@ func (f *fakeStore) MidQuarterTest(_ context.Context, in store.MidQuarterFilter)
 		MidQuarterResult: domain.MidQuarterTest(in.Year, nil)}, nil
 }
 
-const approverDuties = "CapexRequestApprove"
+const approverDuties = "assets.capex-request.approve"
 
 // inApproval stores a submitted 320,000 request (requester "plant.manager").
 func inApproval(f *fakeStore) string {
@@ -124,7 +124,7 @@ func TestCapexDecision_PostponeNeedsReasonAndReopenIsTheRequesters(t *testing.T)
 	if rec := decide(h, id, "approve", "", approverDuties, "cfo", `"3"`); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("approve a postponed request status = %d", rec.Code)
 	}
-	// Reopen is the requester's action: CapexRequestCreate, not the approver duty.
+	// Reopen is the requester's action: assets.capex-request.create, not the approver duty.
 	if rec := decide(h, id, "reopen", "", approverDuties, "cfo", `"3"`); rec.Code != http.StatusForbidden {
 		t.Fatalf("reopen with the approver duty status = %d", rec.Code)
 	}
@@ -177,17 +177,17 @@ func TestMidQuarterTest_Validation(t *testing.T) {
 	h := server(f)
 	le := testLE
 	path := "/v1/assets/mid-quarter-test?legalEntityId=" + le + "&bookCode=TAX&year=2026"
-	if rec := call(h, http.MethodGet, path, "", "AssetMaintain", false); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetView or AssetDepreciate status = %d", rec.Code)
+	if rec := call(h, http.MethodGet, path, "", "assets.asset.maintain", false); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.asset.view or assets.asset.depreciate status = %d", rec.Code)
 	}
-	rec := call(h, http.MethodGet, path, "", "AssetDepreciate", false)
+	rec := call(h, http.MethodGet, path, "", "assets.asset.depreciate", false)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"applies":false`) || !strings.Contains(rec.Body.String(), `"quarterBasis":["0","0","0","0"]`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
 	if f.lastMidQuarter != (store.MidQuarterFilter{LegalEntityID: le, BookCode: "TAX", Year: 2026}) {
 		t.Fatalf("store got %+v", f.lastMidQuarter)
 	}
-	bad := call(h, http.MethodGet, "/v1/assets/mid-quarter-test?legalEntityId=x&bookCode=tax&year=26", "", "AssetView", false)
+	bad := call(h, http.MethodGet, "/v1/assets/mid-quarter-test?legalEntityId=x&bookCode=tax&year=26", "", "assets.asset.view", false)
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("invalid query status = %d", bad.Code)
 	}

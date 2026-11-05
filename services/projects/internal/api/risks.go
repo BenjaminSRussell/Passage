@@ -32,7 +32,7 @@ type riskList struct {
 }
 
 // registerRisks mounts the risk and issue register of a project. Reads need
-// ProjInquire, writes ProjPlan (§8.41.17).
+// projects.inquire, writes projects.plan (§8.41.17).
 func (a *API) registerRisks(r chi.Router) {
 	r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/risks", a.listRisks)
 	r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/risks", a.createRisk)

@@ -180,7 +180,7 @@ export function validatePermit(values: PermitValues, types: PermitType[]): { err
   return { errors, input: { workOrderId: values.workOrderId, permitTypeCode: values.permitTypeCode, validFrom: from!, validTo: to! } };
 }
 
-/** Request a permit for an open work order (EamPlanner). */
+/** Request a permit for an open work order (eam.work.plan). */
 export function NewPermitPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();

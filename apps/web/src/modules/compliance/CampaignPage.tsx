@@ -33,7 +33,7 @@ const columns: DataTableColumn<CampaignEntry>[] = [
 ];
 
 /**
- * Certification campaign (PRD §9.48.6, duty SoDAdmin): plan the window of an
+ * Certification campaign (PRD §9.48.6, duty compliance.sod.admin): plan the window of an
  * access certification campaign, then check its progress and what closing it
  * does (FR-48.6, BR-48.9). Nothing is stored yet: the manager decisions are
  * entered here until campaigns are recorded.

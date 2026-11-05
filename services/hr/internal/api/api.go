@@ -31,12 +31,12 @@ const (
 	validationDetail = "request failed validation"
 	dateLayout       = "2006-01-02"
 
-	dutyWorkerMaintain = "HcmWorkerMaintain"
-	dutyWorkerInquire  = "HcmWorkerInquire"
+	dutyWorkerMaintain = "hr.worker.maintain"
+	dutyWorkerInquire  = "hr.worker.inquire"
 	dutyPIIRead        = domain.PIIReadDuty
-	dutyActionMaintain = "HcmActionMaintain"
-	dutyOrgMaintain    = "HcmOrgMaintain"
-	dutyOrgInquire     = "HcmOrgInquire"
+	dutyActionMaintain = "hr.action.maintain"
+	dutyOrgMaintain    = "hr.org.maintain"
+	dutyOrgInquire     = "hr.org.inquire"
 	maxSearchLength    = 100
 	maxReasonLength    = 500
 )

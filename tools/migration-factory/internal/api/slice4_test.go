@@ -13,7 +13,7 @@ import (
 // "available" flag is the same rule the pack-run route applies.
 func TestPackCatalog_ListsNinePacksAndMatchesThePackRunRoute(t *testing.T) {
 	h := New(unreachableStore{t}).Routes()
-	rec := do(t, h, request{method: "GET", path: "/api/v1/migration/packs", tenant: tenantA, duties: "MigrationView"})
+	rec := do(t, h, request{method: "GET", path: "/api/v1/migration/packs", tenant: tenantA, duties: "migration.factory.view"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}

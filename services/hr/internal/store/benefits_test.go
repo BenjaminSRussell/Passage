@@ -296,7 +296,7 @@ func TestSimulateMatchesEnrollment(t *testing.T) {
 	requireCode(t, err, CodeBenefitPlanNotFound)
 }
 
-// TestEmployeesSeeOnlyTheirOwnBenefits covers EssBenefits as own data
+// TestEmployeesSeeOnlyTheirOwnBenefits covers hr.benefits.self as own data
 // (8.42.17): an employee enrolls, records life events and reads benefits only
 // for the worker linked to their user.
 func TestEmployeesSeeOnlyTheirOwnBenefits(t *testing.T) {

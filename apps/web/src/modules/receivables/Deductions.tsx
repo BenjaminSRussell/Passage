@@ -57,7 +57,7 @@ import { useLoad } from "./useLoad";
 const PAGE = 500;
 const ZERO = /^0+(\.0+)?$/;
 
-/** deduction_write_off_limit defaults (BR-30.12); other currencies always need ARWriteOffApprove. */
+/** deduction_write_off_limit defaults (BR-30.12); other currencies always need receivables.write-off.approve. */
 const WRITE_OFF_LIMIT: Record<string, string> = { USD: "50.00", EUR: "45.00" };
 
 function statusBadge(status: DeductionStatus) {
@@ -306,7 +306,7 @@ export function parseParts(text: string, amount: string): { parts: string[]; err
   return { parts };
 }
 
-/** Whether a write-off of amount needs ARWriteOffApprove. */
+/** Whether a write-off of amount needs receivables.write-off.approve. */
 export function needsApproval(amount: string, currency: string): boolean {
   const limit = WRITE_OFF_LIMIT[currency];
   return limit === undefined || compareDecimals(amount, limit) > 0;
@@ -524,7 +524,7 @@ export function DeductionDetailPage() {
             </div>
             <p className={styles.note}>
               {approval
-                ? `Writing off ${money(d.amount, d.currency)} is above the deduction limit; it needs the ARWriteOffApprove duty.`
+                ? `Writing off ${money(d.amount, d.currency)} is above the deduction limit; it needs the receivables.write-off.approve duty.`
                 : `Write-offs up to ${money(WRITE_OFF_LIMIT[d.currency] ?? "0", d.currency)} post Dr 6110 / Cr 1200.`}
             </p>
           </div>

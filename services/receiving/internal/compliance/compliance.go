@@ -22,7 +22,7 @@ const (
 	holdCheckPath   = "/v1/privacy/holds:check"
 
 	audience      = "compliance"
-	dutyHoldCheck = "compliance.legal_hold.check"
+	dutyHoldCheck = "compliance.legal-hold.check"
 )
 
 type Client struct {

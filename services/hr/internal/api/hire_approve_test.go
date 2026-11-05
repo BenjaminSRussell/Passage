@@ -19,7 +19,7 @@ func TestCycleApprovalNeedsItsOwnDuty(t *testing.T) {
 		t.Errorf("approve with a bad id: status %d, want 404", rec.Code)
 	}
 	if rec := serve(t, tid(), http.MethodPost, "/v1/hr/compensation/cycles/"+testkit.TenantID(9)+"/apply", "", dutyCompApprove); rec.Code != http.StatusForbidden {
-		t.Errorf("apply with only HcmCompApprove: status %d, want 403", rec.Code)
+		t.Errorf("apply with only hr.compensation.approve: status %d, want 403", rec.Code)
 	}
 }
 
@@ -31,7 +31,7 @@ func TestHireFromOfferNewWorker(t *testing.T) {
 
 	rec := serve(t, tid(), http.MethodPost, target, body, dutyActionMaintain, dutyCompAdmin)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), dutyWorkerMaintain) {
-		t.Fatalf("newWorker without HcmWorkerMaintain: status %d body %s, want 403", rec.Code, rec.Body.String())
+		t.Fatalf("newWorker without hr.worker.maintain: status %d body %s, want 403", rec.Code, rec.Body.String())
 	}
 
 	both := `{"workerId":"` + plan + `",` + newWorker + `,"legalEntityId":"` + le + `","employmentType":"FULL_TIME"}`
