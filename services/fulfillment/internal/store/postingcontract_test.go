@@ -28,6 +28,7 @@ type matrixCell struct {
 		Kind        string `json:"kind"`
 		Qty         string `json:"qty"`
 		UnitCost    string `json:"unitCost"`
+		Weight      string `json:"weight"`
 	} `json:"lines"`
 	Journal []struct {
 		Account     string `json:"account"`
@@ -145,13 +146,14 @@ func TestPackingSlipLedgerContract_CogsMatrix(t *testing.T) {
 		ran++
 		t.Run(c.ID, func(t *testing.T) {
 			order, customer, le, wh := ids.New(), ids.New(), ids.New(), ids.New()
-			label := map[string]string{} // real order line id -> fixture order line
-			unit := map[string]string{}  // real order line id -> unit cost
+			label := map[string]string{}  // real order line id -> fixture order line
+			unit := map[string]string{}   // real order line id -> unit cost
+			weight := map[string]string{} // real order line id -> catch weight (catch-weight lines)
 			var rl []domain.ReleaseLine
 			for _, i := range stocked {
 				l := c.Lines[i]
 				ol := ids.New()
-				label[ol], unit[ol] = l.OrderLineID, l.UnitCost
+				label[ol], unit[ol], weight[ol] = l.OrderLineID, l.UnitCost, l.Weight
 				rl = append(rl, domain.ReleaseLine{OrderID: order, OrderLineID: ol, CustomerID: customer, LegalEntityID: le, WarehouseID: wh,
 					ProductID: ids.New(), Unit: "EA", Qty: dq(l.Qty), ConfirmedShipDate: today(), ATPOK: true})
 			}
@@ -164,6 +166,11 @@ func TestPackingSlipLedgerContract_CogsMatrix(t *testing.T) {
 			cost := map[string]store.Cost{}
 			for _, l := range sh.Lines {
 				cost[l.ID] = store.Cost{UnitCost: dq(unit[l.OrderLineID]), CostSnapshotID: "snap-" + label[l.OrderLineID]}
+				if w := weight[l.OrderLineID]; w != "" {
+					c := cost[l.ID]
+					c.Weight = dq(w)
+					cost[l.ID] = c
+				}
 			}
 			setCogsPolicy(t, s, ctx, le, c.CogsAtShipment)
 			in := store.PostInput{PostingDate: today(), Currency: c.Currency, CogsAtShipment: c.CogsAtShipment, Costs: cost}
@@ -242,6 +249,18 @@ func TestPackingSlipLedgerContract_CogsMatrix(t *testing.T) {
 			postedQty := map[string]decimal.Decimal{}
 			for _, l := range posted[0].Lines {
 				postedQty[l.OrderLineID] = dq(l.Qty)
+			}
+			// A catch-weight line carries the weight its cost was taken on; the
+			// reversal carries it negated.
+			for _, l := range posted[0].Lines {
+				if l.Weight != weight[l.OrderLineID] {
+					t.Fatalf("posted line %s weight %q, want %q", label[l.OrderLineID], l.Weight, weight[l.OrderLineID])
+				}
+			}
+			for _, l := range cancelled[0].Lines {
+				if w := weight[l.OrderLineID]; w != "" && !dq(l.Weight).Equal(dq(w).Neg()) {
+					t.Fatalf("reversal line %s weight %q, want -%s", label[l.OrderLineID], l.Weight, w)
+				}
 			}
 			for _, l := range cancelled[0].Lines {
 				if !dq(l.Qty).Equal(postedQty[l.OrderLineID].Neg()) || !dq(l.CostAmount).Equal(lineCost[label[l.OrderLineID]].Neg()) {

@@ -1,0 +1,82 @@
+{{- if .Values.consumer.enabled }}
+# The postings consumer (#480): books receiving's receipt.posted and sales'
+# DELIVERED orderprogress.recorded as inventory transactions. It starts only
+# while service:inventory-postings is seeded in the service principal table.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}-consumer
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/component: consumer
+spec:
+  replicas: {{ .Values.consumer.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/component: consumer
+    spec:
+      volumes:
+        - name: kafka
+          secret:
+            secretName: {{ required "consumer.kafka.secret is required" .Values.consumer.kafka.secret }}
+            defaultMode: 0440
+      containers:
+        - name: {{ .Chart.Name }}-consumer
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [consume]
+          ports:
+            - name: admin
+              containerPort: 9090
+          env:
+            - name: ADMIN_ADDR
+              value: ":9090"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret }}
+                  key: DATABASE_URL
+            - name: INV_NEGATIVE_DEFAULT
+              value: {{ .Values.inventory.negativeDefault | quote }}
+            - name: INV_JOURNAL_MAX_LINES
+              value: {{ .Values.inventory.journalMaxLines | quote }}
+            # loadConfig checks the posting-profile accounts in every mode.
+            - name: INV_INVENTORY_ACCOUNT
+              value: {{ .Values.inventory.inventoryAccount | quote }}
+            - name: INV_ADJUSTMENT_ACCOUNT
+              value: {{ .Values.inventory.adjustmentAccount | quote }}
+            - name: INV_OPENING_CLEARING_ACCOUNT
+              value: {{ .Values.inventory.openingClearingAccount | quote }}
+            - name: KAFKA_BROKERS
+              value: {{ required "consumer.kafka.brokers is required" .Values.consumer.kafka.brokers | quote }}
+            - name: KAFKA_GROUP
+              value: {{ .Values.consumer.kafka.group | quote }}
+            - name: KAFKA_USERNAME
+              value: {{ .Values.consumer.kafka.username | quote }}
+            - name: KAFKA_PASSWORD_FILE
+              value: /var/run/passage/kafka/password
+            - name: KAFKA_TLS_CA_FILE
+              value: /var/run/passage/kafka/ca.crt
+          volumeMounts:
+            - { name: kafka, mountPath: /var/run/passage/kafka, readOnly: true }
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.consumer.resources | nindent 12 }}
+{{- end }}

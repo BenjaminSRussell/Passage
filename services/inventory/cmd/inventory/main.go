@@ -27,10 +27,33 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
-	if err := run(context.Background(), os.Getenv); err != nil {
+	start := run
+	switch {
+	case len(os.Args) > 1 && os.Args[1] == "consume":
+		start = consume
+	case len(os.Args) > 1:
+		slog.Error("inventory stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the postings consumer)", os.Args[1]))
+		os.Exit(2)
+	}
+	if err := start(context.Background(), os.Getenv); err != nil {
 		slog.Error("inventory stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+// consume runs the postings consumer (#480): it books receiving and sales
+// postings through the store and has no HTTP API of its own.
+func consume(ctx context.Context, getenv func(string) string) error {
+	cfg, err := loadConfig(getenv)
+	if err != nil {
+		return err
+	}
+	pool, err := dbx.Connect(ctx, cfg.databaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	return runPostingsConsumer(ctx, getenv, store.New(pool).WithRules(cfg.rules), pool, cfg.negative)
 }
 
 func newLogger(w io.Writer) *slog.Logger {

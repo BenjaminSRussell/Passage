@@ -1003,6 +1003,7 @@ components:
         qty: { type: string }
         cost_amount: { type: string }
         cost_snapshot_id: { type: string }
+        weight: { type: string, description: "catch-weight lines only (#480): the shipped weight cost_amount is taken on (negated on a reversal); qty stays the cases" }
         product_id: { type: string, format: uuid, description: Set on a posted slip line. }
         tracking:
           type: array

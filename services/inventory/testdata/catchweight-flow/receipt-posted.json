@@ -1,0 +1,33 @@
+{
+  "receipt_id": "0199f480-0000-7000-8000-000000000001",
+  "receipt_number": "RCV-00000001",
+  "po_id": "0199f480-0000-7000-8000-000000000002",
+  "legal_entity_id": "0199f480-0000-7000-8000-00000000000a",
+  "vendor_id": "0199f480-0000-7000-8000-000000000003",
+  "posting_date": "2026-10-25",
+  "currency": "USD",
+  "ledger_entry_id": "entry-cw-1",
+  "lines": [
+    {
+      "line_no": 1,
+      "po_line_id": "0199f480-0000-7000-8000-000000000004",
+      "po_line_no": 1,
+      "product_id": "0199f480-0000-7000-8000-000000000005",
+      "unit": "KG",
+      "qty": "102",
+      "batch": "",
+      "serials": [],
+      "location_id": "0199f480-0000-7000-8000-000000000006",
+      "inventory_status": "AVAILABLE",
+      "amount": "204",
+      "amount_acct": "204",
+      "unit_price": "2",
+      "site_id": "0199f480-0000-7000-8000-000000000007",
+      "warehouse_id": "0199f480-0000-7000-8000-000000000008",
+      "cw_qty": 10,
+      "cw_nominal": "10",
+      "cw_min": "9.8",
+      "cw_max": "11"
+    }
+  ]
+}

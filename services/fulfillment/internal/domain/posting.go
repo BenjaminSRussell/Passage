@@ -31,13 +31,27 @@ const (
 	KindNonStocked LineKind = "NON_STOCKED"
 )
 
-// PostingLine is one shipped line at its cost snapshot.
+// PostingLine is one shipped line at its cost snapshot. Weight is set on a
+// catch-weight line only (FR-24.7, #480): Qty is then the shipped cases (the
+// sales quantity), Weight the shipped weight, which is the inventory quantity,
+// and UnitCost the cost per weight unit, so the line costs Weight x UnitCost.
 type PostingLine struct {
 	OrderLineID    string
 	Kind           LineKind
 	Qty            decimal.Decimal
+	Weight         decimal.Decimal
 	UnitCost       decimal.Decimal
 	CostSnapshotID string
+}
+
+// CostQty is the inventory quantity a line is costed on: the weight of a
+// catch-weight line (inventory qty is the weight, cw_qty the cases), else the
+// shipped quantity.
+func (l PostingLine) CostQty() decimal.Decimal {
+	if l.Weight.IsPositive() {
+		return l.Weight
+	}
+	return l.Qty
 }
 
 // JournalLine is a signed journal entry: debits are positive, credits negative.
@@ -58,7 +72,7 @@ func PackingSlipPosting(lines []PostingLine, cogsAtShipment bool, currency strin
 		if l.Kind != KindStocked {
 			continue
 		}
-		amt := money.Amount{Value: l.UnitCost, Currency: currency}.Mul(l.Qty)
+		amt := money.Amount{Value: l.UnitCost, Currency: currency}.Mul(l.CostQty())
 		if amt.IsZero() {
 			continue
 		}

@@ -567,6 +567,12 @@ type ProgressLine struct {
 	// line's delivered weight so far. Quantities stay in cases.
 	ReportedWeight  string `json:"reported_weight,omitempty"`
 	DeliveredWeight string `json:"delivered_weight,omitempty"`
+	// ProductID, Unit, SiteID and WarehouseID are the line's (#480), so a
+	// consumer that books the delivery in inventory needs no other read.
+	ProductID   string `json:"product_id,omitempty"`
+	Unit        string `json:"unit,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	WarehouseID string `json:"warehouse_id,omitempty"`
 }
 
 // OrderProgressData is the data member of orderprogress.recorded.v1.
@@ -574,6 +580,7 @@ type OrderProgressData struct {
 	ProgressID     string         `json:"progress_id"`
 	OrderID        string         `json:"order_id"`
 	LegalEntityID  string         `json:"legal_entity_id"`
+	Currency       string         `json:"currency,omitempty"`
 	Kind           string         `json:"kind"`
 	SourceRef      string         `json:"source_ref"`
 	Lines          []ProgressLine `json:"lines"`

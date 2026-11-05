@@ -26,6 +26,13 @@ type postedLineData struct {
 	InventoryStatus string   `json:"inventory_status"`
 	Amount          string   `json:"amount"`
 	AmountAcct      string   `json:"amount_acct"`
+	// UnitPrice is the line's net unit price in the receipt currency, per unit
+	// (per weight unit on a catch-weight line); amount is qty x unit_price.
+	UnitPrice string `json:"unit_price"`
+	// SiteID and WarehouseID are the PO line's delivery destination (#480),
+	// absent on a line without a PO line.
+	SiteID      string `json:"site_id,omitempty"`
+	WarehouseID string `json:"warehouse_id,omitempty"`
 	// Catch-weight lines only (FR-24.7): qty is the actual weight in unit and
 	// cw_qty the case count, with the per-case spec, so inventory can book
 	// the weight and the count together.
@@ -205,6 +212,7 @@ func receiptPostedEvent(tenantID string, r store.Receipt, amounts []store.LineAm
 		line := postedLineData{
 			LineNo: l.LineNo, POLineID: l.POLineID, POLineNo: l.POLineNo, ProductID: l.ProductID, Unit: l.Unit, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials,
 			LocationID: l.LocationID, InventoryStatus: l.InventoryStatus, Amount: a.Amount.String(), AmountAcct: a.AmountAcct.String(),
+			UnitPrice: l.UnitPrice.String(), SiteID: l.SiteID, WarehouseID: l.WarehouseID,
 		}
 		if l.CWQty > 0 {
 			line.CWQty, line.CWNominal, line.CWMin, line.CWMax = l.CWQty, l.CWNominal.String(), l.CWMin.String(), l.CWMax.String()

@@ -27,7 +27,8 @@ What is not in this slice is listed in `NOT-IMPLEMENTED.md`.
 ## Layout
 
 ```
-cmd/inventory/            entrypoint: config, connect, migrate, router, admin port, serve
+cmd/inventory/            entrypoint: config, connect, migrate, router, admin port, serve;
+                          `consume` runs the postings consumer (receipt.posted, orderprogress.recorded, #480)
 internal/domain/          journal rules, valuation, status model, dimensions, on-hand buckets, FEFO,
                           reservation, blocking, count, transfer and ABC rules (pure, no I/O)
 internal/store/           pgx repositories: journals, posting, on-hand projection, transactions,
@@ -308,6 +309,12 @@ export MIGRATE_ON_START=true              # dev only
 export INV_INVENTORY_ACCOUNT=1300 INV_ADJUSTMENT_ACCOUNT=5100 INV_OPENING_CLEARING_ACCOUNT=3900
 go run ./cmd/inventory
 ```
+
+`go run ./cmd/inventory consume` runs the postings consumer instead (same database and
+`INV_*` settings, plus `KAFKA_BROKERS` and the other `platform/eventing/kafka` variables): it
+books catch-weight lines of receiving's `receipt.posted` and sales' DELIVERED
+`orderprogress.recorded` as inventory transactions (qty the weight, `cw_qty` the cases; #480,
+see NOT-IMPLEMENTED.md).
 
 Optional: `INV_NEGATIVE_DEFAULT` (`forbid`, default, or `allow`), `INV_JOURNAL_MAX_LINES`
 (1000 to 50000, default 10000), `HTTP_ADDR` (`:8080`), `ADMIN_ADDR` (`:9090`).

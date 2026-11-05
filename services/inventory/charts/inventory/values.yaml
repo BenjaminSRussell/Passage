@@ -41,3 +41,22 @@ inventory:
   # Consignment accrual (posting profile consignment_accrual, FR-16.17). Optional:
   # OWNERSHIP_CHANGE journals are refused (INV-JNL-005) while it is empty.
   consignmentAccrualAccount: ""
+# The postings consumer (#480, args [consume]): books receiving's receipt.posted
+# and sales' DELIVERED orderprogress.recorded as inventory transactions. It exits
+# at start unless service:inventory-postings is seeded in the service principal
+# table. Off until the Kafka ACLs for its group and topics exist.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: inventory-postings
+    username: inventory-consumer
+    secret: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

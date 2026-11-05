@@ -3415,6 +3415,7 @@
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
+    "inventory-postings": ["inventory.transaction.apply"],
     "migration-loader": ["party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"],
     "production-planning": ["production.planned.intake"],
     "production-shopfloor": ["production.jobcard.shopfloor"],

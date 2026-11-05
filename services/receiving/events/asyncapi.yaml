@@ -229,7 +229,7 @@ components:
           type: array
           items:
             type: object
-            required: [line_no, po_line_id, product_id, unit, qty, batch, serials, location_id, inventory_status, amount, amount_acct]
+            required: [line_no, po_line_id, product_id, unit, qty, batch, serials, location_id, inventory_status, amount, amount_acct, unit_price]
             properties:
               line_no: { type: integer, minimum: 1 }
               po_line_id: { type: string }
@@ -243,6 +243,9 @@ components:
               inventory_status: { type: string, enum: [AVAILABLE, QUARANTINE, BLOCKED] }
               amount: { type: string, description: "decimal string, receipt currency" }
               amount_acct: { type: string, description: "decimal string, accounting currency (amount times the receipt exchange rate)" }
+              unit_price: { type: string, description: "decimal string, receipt currency: the line's net unit price per unit (per weight unit on a catch-weight line)" }
+              site_id: { type: string, format: uuid, description: "the PO line's delivery site (#480); absent without a PO line" }
+              warehouse_id: { type: string, format: uuid, description: "the PO line's delivery warehouse (#480); absent without a PO line or warehouse" }
               cw_qty: { type: integer, minimum: 1, description: "catch-weight lines only (FR-24.7): the case count; qty is then the actual weight in unit" }
               cw_nominal: { type: string, description: "catch-weight lines only: nominal weight per case, decimal string in unit" }
               cw_min: { type: string, description: "catch-weight lines only: minimum weight per case, decimal string in unit" }

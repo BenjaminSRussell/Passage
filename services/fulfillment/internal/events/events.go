@@ -321,6 +321,9 @@ type SlipLine struct {
 	Qty            string `json:"qty"`
 	CostAmount     string `json:"cost_amount"`
 	CostSnapshotID string `json:"cost_snapshot_id"`
+	// Weight is the shipped weight of a catch-weight line (#480), the inventory
+	// quantity cost_amount is taken on; qty stays the cases. Absent otherwise.
+	Weight string `json:"weight,omitempty"`
 	// ProductID and Tracking tell inventory which batches and serials to issue
 	// (BR-28.10). Tracking is empty for an untracked line and for reversals.
 	ProductID string          `json:"product_id,omitempty"`

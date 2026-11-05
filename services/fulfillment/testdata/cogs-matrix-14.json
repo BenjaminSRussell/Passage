@@ -47,11 +47,12 @@
    "ledgerTotal": "125.00",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "10",
-     "unitCost": "12.50"
+     "unitCost": "12.50",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [
@@ -118,11 +119,12 @@
    "ledgerTotal": "125.00",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "10",
-     "unitCost": "12.50"
+     "unitCost": "12.50",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [
@@ -257,25 +259,28 @@
    "ledgerTotal": "24.01",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "7",
-     "unitCost": "1.642857"
+     "unitCost": "1.642857",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L2",
      "qty": "3",
-     "unitCost": "0.835"
+     "unitCost": "0.835",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L3",
      "qty": "0.5",
-     "unitCost": "19.99"
+     "unitCost": "19.99",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [
@@ -430,25 +435,28 @@
    "ledgerTotal": "24.01",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "7",
-     "unitCost": "1.642857"
+     "unitCost": "1.642857",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L2",
      "qty": "3",
-     "unitCost": "0.835"
+     "unitCost": "0.835",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L3",
      "qty": "0.5",
-     "unitCost": "19.99"
+     "unitCost": "19.99",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [
@@ -569,18 +577,20 @@
    "ledgerTotal": "33.33",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "4",
-     "unitCost": "3.333"
+     "unitCost": "3.333",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L2",
      "qty": "6",
-     "unitCost": "3.333"
+     "unitCost": "3.333",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [
@@ -691,18 +701,20 @@
    "ledgerTotal": "33.33",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "4",
-     "unitCost": "3.333"
+     "unitCost": "3.333",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L2",
      "qty": "6",
-     "unitCost": "3.333"
+     "unitCost": "3.333",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [
@@ -742,11 +754,12 @@
    "ledgerTotal": "0.00",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "DROP_SHIP",
      "orderLineId": "L1",
      "qty": "5",
-     "unitCost": "9.00"
+     "unitCost": "9.00",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [],
@@ -765,11 +778,12 @@
    "ledgerTotal": "0.00",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "DROP_SHIP",
      "orderLineId": "L1",
      "qty": "5",
-     "unitCost": "9.00"
+     "unitCost": "9.00",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [],
@@ -788,18 +802,20 @@
    "ledgerTotal": "0.00",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "NON_STOCKED",
      "orderLineId": "L1",
      "qty": "1",
-     "unitCost": "100.00"
+     "unitCost": "100.00",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "NON_STOCKED",
      "orderLineId": "L2",
      "qty": "2.5",
-     "unitCost": "40.00"
+     "unitCost": "40.00",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [],
@@ -818,18 +834,20 @@
    "ledgerTotal": "0.00",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "NON_STOCKED",
      "orderLineId": "L1",
      "qty": "1",
-     "unitCost": "100.00"
+     "unitCost": "100.00",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "NON_STOCKED",
      "orderLineId": "L2",
      "qty": "2.5",
-     "unitCost": "40.00"
+     "unitCost": "40.00",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [],
@@ -845,25 +863,25 @@
    "journal": [
     {
      "account": "1405",
-     "amount": "49.481",
+     "amount": "56.491",
      "orderLineId": "L1"
     },
     {
      "account": "1400",
-     "amount": "-49.481",
+     "amount": "-56.491",
      "orderLineId": "L1"
     }
    ],
    "ledgerCancel": [
     {
      "account": "1405",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "C",
      "sourceLineRef": "L1"
     },
     {
      "account": "1400",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "D",
      "sourceLineRef": "L1"
     }
@@ -871,43 +889,44 @@
    "ledgerPost": [
     {
      "account": "1405",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "D",
      "sourceLineRef": "L1"
     },
     {
      "account": "1400",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "C",
      "sourceLineRef": "L1"
     }
    ],
-   "ledgerTotal": "49.481",
+   "ledgerTotal": "56.491",
    "lines": [
     {
-     "catchWeightKg": "13.7",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "12",
-     "unitCost": "4.12345"
+     "unitCost": "4.12345",
+     "weight": "13.7",
+     "weightUnit": "KG"
     }
    ],
    "mirror": [
     {
      "account": "1405",
-     "amount": "-49.481",
+     "amount": "-56.491",
      "orderLineId": "L1"
     },
     {
      "account": "1400",
-     "amount": "49.481",
+     "amount": "56.491",
      "orderLineId": "L1"
     }
    ],
-   "note": "Catch-weight item: 12 EA weighing 13.7 kg costs 12 x 4.12345 KWD on the inventory quantity (49.481), not on the weight",
+   "note": "Catch-weight item: 12 cases weighing 13.7 kg at 4.12345 KWD/kg cost 13.7 x 4.12345 on the inventory quantity, the weight (56.491265 -> 56.491), not 12 cases x 4.12345 (49.481)",
    "policy": "physical",
    "scenario": "catch-weight",
-   "totalCost": "49.481"
+   "totalCost": "56.491"
   },
   {
    "cogsAtShipment": true,
@@ -916,25 +935,25 @@
    "journal": [
     {
      "account": "5000",
-     "amount": "49.481",
+     "amount": "56.491",
      "orderLineId": "L1"
     },
     {
      "account": "1400",
-     "amount": "-49.481",
+     "amount": "-56.491",
      "orderLineId": "L1"
     }
    ],
    "ledgerCancel": [
     {
      "account": "5000",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "C",
      "sourceLineRef": "L1"
     },
     {
      "account": "1400",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "D",
      "sourceLineRef": "L1"
     }
@@ -942,43 +961,44 @@
    "ledgerPost": [
     {
      "account": "5000",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "D",
      "sourceLineRef": "L1"
     },
     {
      "account": "1400",
-     "amount": "49.481",
+     "amount": "56.491",
      "debitCredit": "C",
      "sourceLineRef": "L1"
     }
    ],
-   "ledgerTotal": "49.481",
+   "ledgerTotal": "56.491",
    "lines": [
     {
-     "catchWeightKg": "13.7",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "12",
-     "unitCost": "4.12345"
+     "unitCost": "4.12345",
+     "weight": "13.7",
+     "weightUnit": "KG"
     }
    ],
    "mirror": [
     {
      "account": "5000",
-     "amount": "-49.481",
+     "amount": "-56.491",
      "orderLineId": "L1"
     },
     {
      "account": "1400",
-     "amount": "49.481",
+     "amount": "56.491",
      "orderLineId": "L1"
     }
    ],
-   "note": "Catch-weight item: 12 EA weighing 13.7 kg costs 12 x 4.12345 KWD on the inventory quantity (49.481), not on the weight",
+   "note": "Catch-weight item: 12 cases weighing 13.7 kg at 4.12345 KWD/kg cost 13.7 x 4.12345 on the inventory quantity, the weight (56.491265 -> 56.491), not 12 cases x 4.12345 (49.481)",
    "policy": "cogs-at-shipment",
    "scenario": "catch-weight",
-   "totalCost": "49.481"
+   "totalCost": "56.491"
   },
   {
    "cogsAtShipment": false,
@@ -1061,46 +1081,52 @@
    "ledgerTotal": "1002",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "3",
-     "unitCost": "333.5"
+     "unitCost": "333.5",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "DROP_SHIP",
      "orderLineId": "L2",
      "qty": "2",
-     "unitCost": "500"
+     "unitCost": "500",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "NON_STOCKED",
      "orderLineId": "L3",
      "qty": "1",
-     "unitCost": "1200"
+     "unitCost": "1200",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L4",
      "qty": "4",
-     "unitCost": "0"
+     "unitCost": "0",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L5",
      "qty": "1",
-     "unitCost": "0.4"
+     "unitCost": "0.4",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L6",
      "qty": "2",
-     "unitCost": "0.5"
+     "unitCost": "0.5",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [
@@ -1211,46 +1237,52 @@
    "ledgerTotal": "1002",
    "lines": [
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L1",
      "qty": "3",
-     "unitCost": "333.5"
+     "unitCost": "333.5",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "DROP_SHIP",
      "orderLineId": "L2",
      "qty": "2",
-     "unitCost": "500"
+     "unitCost": "500",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "NON_STOCKED",
      "orderLineId": "L3",
      "qty": "1",
-     "unitCost": "1200"
+     "unitCost": "1200",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L4",
      "qty": "4",
-     "unitCost": "0"
+     "unitCost": "0",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L5",
      "qty": "1",
-     "unitCost": "0.4"
+     "unitCost": "0.4",
+     "weight": "",
+     "weightUnit": ""
     },
     {
-     "catchWeightKg": "",
      "kind": "STOCKED",
      "orderLineId": "L6",
      "qty": "2",
-     "unitCost": "0.5"
+     "unitCost": "0.5",
+     "weight": "",
+     "weightUnit": ""
     }
    ],
    "mirror": [

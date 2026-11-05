@@ -25,6 +25,7 @@ type cogsMatrix struct {
 			Kind        string `json:"kind"`
 			Qty         string `json:"qty"`
 			UnitCost    string `json:"unitCost"`
+			Weight      string `json:"weight"`
 		} `json:"lines"`
 		Journal      []fixtureEntry `json:"journal"`
 		Mirror       []fixtureEntry `json:"mirror"`
@@ -132,8 +133,12 @@ func TestCogsMatrix14_PostBalancedAndCancelMirrors(t *testing.T) {
 		ok := t.Run(c.ID, func(t *testing.T) {
 			var lines []PostingLine
 			for _, l := range c.Lines {
-				lines = append(lines, PostingLine{OrderLineID: l.OrderLineID, Kind: LineKind(l.Kind), Qty: decimal.RequireFromString(l.Qty),
-					UnitCost: decimal.RequireFromString(l.UnitCost), CostSnapshotID: "snap-" + l.OrderLineID})
+				pl := PostingLine{OrderLineID: l.OrderLineID, Kind: LineKind(l.Kind), Qty: decimal.RequireFromString(l.Qty),
+					UnitCost: decimal.RequireFromString(l.UnitCost), CostSnapshotID: "snap-" + l.OrderLineID}
+				if l.Weight != "" {
+					pl.Weight = decimal.RequireFromString(l.Weight)
+				}
+				lines = append(lines, pl)
 			}
 			post, err := PackingSlipPosting(lines, c.CogsAtShipment, c.Currency)
 			if err != nil {
@@ -189,5 +194,21 @@ func TestCogsMatrix14_FixtureMatchesReference(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatal("testdata/cogs-matrix-14.json differs from the reference output; regenerate it with python3 -I testdata/gen_cogs_matrix14.py testdata/cogs-matrix-14.json")
+	}
+}
+
+// TestCogsMatrix14_CatchWeightCostsTheWeight pins the #480 convention on the
+// catch-weight cell: 12 cases weighing 13.7 kg at 4.12345 KWD/kg cost the
+// weight (56.491), not the cases (49.481).
+func TestCogsMatrix14_CatchWeightCostsTheWeight(t *testing.T) {
+	line := PostingLine{OrderLineID: "L1", Kind: KindStocked, Qty: decimal.NewFromInt(12), Weight: decimal.RequireFromString("13.7"),
+		UnitCost: decimal.RequireFromString("4.12345")}
+	post, err := PackingSlipPosting([]PostingLine{line}, false, "KWD")
+	if err != nil || len(post) != 2 || !post[0].Amount.Value.Equal(decimal.RequireFromString("56.491")) {
+		t.Fatalf("catch-weight posting %+v %v, want Dr 1405 56.491", post, err)
+	}
+	line.Weight = decimal.Zero
+	if post, _ := PackingSlipPosting([]PostingLine{line}, false, "KWD"); !post[0].Amount.Value.Equal(decimal.RequireFromString("49.481")) {
+		t.Fatalf("plain line costs %s, want 12 x 4.12345 = 49.481", post[0].Amount.Value)
 	}
 }

@@ -956,6 +956,7 @@ components:
         progress_id: {type: string, format: uuid}
         order_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
+        currency: {type: string, pattern: "^[A-Z]{3}$", description: "the order currency (#480)"}
         kind: {type: string, enum: [DELIVERED, INVOICED]}
         source_ref: {type: string, description: the packing slip, shipment or invoice number the report came with}
         lines:
@@ -972,6 +973,10 @@ components:
               line_status: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
               reported_weight: {type: string, description: "catch-weight lines on a DELIVERED report only (FR-24.7): the weight this report delivered (its actualWeight, else cases x nominal), decimal string in the product's inventory weight unit"}
               delivered_weight: {type: string, description: "catch-weight lines on a DELIVERED report only: the line's delivered weight so far"}
+              product_id: {type: string, format: uuid, description: "the line's product (#480)"}
+              unit: {type: string, description: "the line's unit (the case unit on a catch-weight line)"}
+              site_id: {type: string, format: uuid, description: "the line's site, when set"}
+              warehouse_id: {type: string, format: uuid, description: "the line's warehouse, when set"}
         previous_status: {type: string}
         order_status: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED]}
         actor: {type: string}

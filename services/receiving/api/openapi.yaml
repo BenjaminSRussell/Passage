@@ -1192,8 +1192,9 @@ components:
         lineNo: { type: integer }
         vendorId: { type: string }
         poLineId: { type: string }
-        unitPrice: { type: string, description: The receipt line unit price. }
-        receivedQty: { type: string }
+        unitPrice: { type: string, description: The receipt line unit price (per weight unit on a catch-weight line). }
+        receivedQty: { type: string, description: The received quantity; the actual weight on a catch-weight line. }
+        cwQty: { type: integer, minimum: 1, description: "Catch-weight lines only (FR-24.7): the case count received (after corrections); receivedQty is then the weight and unitPrice the price per weight unit." }
         invoicedQty: { type: string }
         receivedAmount: { type: string }
         clearedAmount: { type: string }

@@ -182,6 +182,9 @@ type costDTO struct {
 	ShipmentLineID string `json:"shipmentLineId"`
 	UnitCost       string `json:"unitCost"`
 	CostSnapshotID string `json:"costSnapshotId"`
+	// Weight is the shipped weight of a catch-weight line (#480); unitCost is
+	// then per weight unit.
+	Weight string `json:"weight"`
 }
 
 // ---- handlers --------------------------------------------------------------
@@ -471,7 +474,16 @@ func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
 			fail(w, r, fmt.Sprintf("costs[%d].costSnapshotId", i), "is required and must be at most 128 characters")
 			return
 		}
-		costs[c.ShipmentLineID] = store.Cost{UnitCost: unit, CostSnapshotID: c.CostSnapshotID}
+		cost := store.Cost{UnitCost: unit, CostSnapshotID: c.CostSnapshotID}
+		if c.Weight != "" {
+			weight, err := nonNegative(c.Weight)
+			if err != nil || !weight.IsPositive() {
+				fail(w, r, fmt.Sprintf("costs[%d].weight", i), "must be a positive decimal with at most 6 decimals when given")
+				return
+			}
+			cost.Weight = weight
+		}
+		costs[c.ShipmentLineID] = cost
 	}
 	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment != nil && *req.CogsAtShipment,
 		CountryCode: req.CountryCode, Costs: costs, EmitASN: req.AsnEnabled != nil && *req.AsnEnabled,
