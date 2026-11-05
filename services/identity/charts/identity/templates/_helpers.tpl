@@ -35,6 +35,16 @@
 - name: IDENTITY_OPA_URL
   value: {{ .Values.scim.opaUrl | quote }}
 {{- end }}
+{{- if .Values.keycloakDeprovision.enabled }}
+- name: IDENTITY_KEYCLOAK_ADMIN_URL
+  value: {{ required "keycloakDeprovision.adminUrl is required" .Values.keycloakDeprovision.adminUrl | quote }}
+- name: IDENTITY_KEYCLOAK_CLIENT_ID
+  value: {{ .Values.keycloakDeprovision.clientId | quote }}
+- name: IDENTITY_KEYCLOAK_SECRETS_DIR
+  value: /var/run/passage/keycloak
+- name: IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL
+  value: {{ .Values.keycloakDeprovision.interval | quote }}
+{{- end }}
 {{- if .Values.bundle.enabled }}
 - name: IDENTITY_BUNDLE_TOKEN
   valueFrom:

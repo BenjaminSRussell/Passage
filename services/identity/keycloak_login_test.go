@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1" //nolint:gosec // RFC 6238 TOTP with the realm's HmacSHA1 policy, not a security hash here.
@@ -15,6 +16,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -26,8 +29,9 @@ import (
 // PASSAGE_TEST_KEYCLOAK_URL is set (the keycloak job in .github/workflows/ci.yml).
 
 const (
-	samlEntityID = "https://auth.passage.example.invalid/realms/passage"
-	otpPeriod    = 30
+	samlEntityID        = "https://auth.passage.example.invalid/realms/passage"
+	otpPeriod           = 30
+	deprovisionClientID = "passage-identity-deprovision"
 )
 
 var (
@@ -294,7 +298,9 @@ func randomSuffix(t *testing.T) string {
 // TestKeycloakOIDCLoginWithOTPThenDeprovision is the AC3 local-account path:
 // authorization code with PKCE, TOTP enrolment, a second login through the OTP
 // form, identity accepting the token with the duty claims, and then the user
-// disabled in Keycloak losing refresh and fresh login.
+// deprovisioned the way SCIM deprovisioning reaches Keycloak (KeycloakAdmin as
+// the passage-identity-deprovision service account): disabled, sessions logged
+// out, refresh and fresh login refused, token attributes kept.
 func TestKeycloakOIDCLoginWithOTPThenDeprovision(t *testing.T) {
 	admin, base, client := keycloakAdminOrSkip(t)
 	user := &loginUser{username: "ci-otp-" + randomSuffix(t), password: loginUserSecret}
@@ -330,12 +336,113 @@ func TestKeycloakOIDCLoginWithOTPThenDeprovision(t *testing.T) {
 		tokens = refreshed
 	}
 
-	admin.do(http.MethodPut, "/admin/realms/"+realmName+"/users/"+principal.UserID, map[string]any{"enabled": false}, http.StatusNoContent)
+	deprovisioner := deprovisionClient(t, admin, base, client)
+	outcome, err := deprovisioner.DeprovisionUser(context.Background(), realmName, KeycloakTarget{TenantID: loginTenantID, Subject: principal.UserID})
+	if err != nil || outcome != (KeycloakOutcome{Result: "disabled", UserID: principal.UserID}) {
+		t.Fatalf("deprovision = %+v, %v; want disabled %s", outcome, err, principal.UserID)
+	}
+	var after struct {
+		Enabled    bool                `json:"enabled"`
+		Attributes map[string][]string `json:"attributes"`
+	}
+	if err := json.Unmarshal(admin.do(http.MethodGet, "/admin/realms/"+realmName+"/users/"+principal.UserID, nil, http.StatusOK), &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Enabled || !slices.Equal(after.Attributes["tenant_id"], []string{loginTenantID}) || !slices.Equal(after.Attributes["duties"], []string{loginDuties}) {
+		t.Fatalf("after deprovisioning: enabled %v attributes %v, want disabled with tenant_id and duties kept", after.Enabled, after.Attributes)
+	}
+	if sessions := admin.do(http.MethodGet, "/admin/realms/"+realmName+"/users/"+principal.UserID+"/sessions", nil, http.StatusOK); strings.TrimSpace(string(sessions)) != "[]" {
+		t.Fatalf("sessions after deprovisioning = %s, want none", sessions)
+	}
 	if status, refreshed := again.token(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens.RefreshToken}}); status != http.StatusBadRequest || refreshed.Error != "invalid_grant" {
 		t.Fatalf("refresh after disabling the user: status %d error %q, want 400 invalid_grant", status, refreshed.Error)
 	}
 	if callback, _ := newBrowserLogin(t, base).login(user, ""); callback != nil {
 		t.Fatal("disabled user completed a fresh login")
+	}
+	// A repeat (the worker retrying after a lost answer) and the SCIM placeholder subject looked up by username
+	// both land on the same, already disabled user.
+	for _, target := range []KeycloakTarget{
+		{TenantID: loginTenantID, Subject: principal.UserID},
+		{TenantID: loginTenantID, Subject: "scim:" + principal.UserID, UserName: user.username},
+	} {
+		if again, err := deprovisioner.DeprovisionUser(context.Background(), realmName, target); err != nil || again.Result != "disabled" || again.UserID != principal.UserID {
+			t.Fatalf("repeat deprovision of %+v = %+v, %v", target, again, err)
+		}
+	}
+	admin.do(http.MethodDelete, "/admin/realms/"+realmName+"/users/"+principal.UserID, nil, http.StatusNoContent)
+	if gone, err := deprovisioner.DeprovisionUser(context.Background(), realmName, KeycloakTarget{TenantID: loginTenantID, Subject: principal.UserID}); err != nil || gone.Result != "not_found" {
+		t.Fatalf("deprovision of a deleted user = %+v, %v; want not_found", gone, err)
+	}
+}
+
+// deprovisionClient is identity's KeycloakAdmin as the realm's passage-identity-deprovision service account, with
+// the secret Keycloak generated at import read through SecretsDir as the identity pod reads it.
+func deprovisionClient(t *testing.T, admin *keycloakAdmin, base string, client *http.Client) *KeycloakAdmin {
+	t.Helper()
+	var clients []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(admin.do(http.MethodGet, "/admin/realms/"+realmName+"/clients?clientId="+deprovisionClientID, nil, http.StatusOK), &clients); err != nil || len(clients) != 1 {
+		t.Fatalf("%s not imported: %v %v", deprovisionClientID, err, clients)
+	}
+	var secret struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(admin.do(http.MethodGet, "/admin/realms/"+realmName+"/clients/"+clients[0].ID+"/client-secret", nil, http.StatusOK), &secret); err != nil || secret.Value == "" {
+		t.Fatalf("%s has no generated secret: %v", deprovisionClientID, err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, realmName), []byte(secret.Value+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	k, err := NewKeycloakAdmin(base, deprovisionClientID, SecretsDir(dir), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// TestKeycloakDeprovisionClientHoldsManageUsersOnly checks the service account's reach against a real Keycloak:
+// it may read and update the realm's users, and nothing else (no clients, no realm settings, no other realm).
+func TestKeycloakDeprovisionClientHoldsManageUsersOnly(t *testing.T) {
+	admin, base, client := keycloakAdminOrSkip(t)
+	k := deprovisionClient(t, admin, base, client)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		realm, method, path string
+		want                int
+	}{
+		{realmName, http.MethodGet, "/users?max=1", http.StatusOK},
+		{realmName, http.MethodGet, "/clients", http.StatusForbidden},
+		{realmName, http.MethodGet, "/roles", http.StatusForbidden},
+		{realmName, http.MethodGet, "/identity-provider/instances", http.StatusForbidden},
+		{realmName, http.MethodPut, "", http.StatusForbidden},
+		{realmName, http.MethodGet, "/events", http.StatusForbidden},
+	} {
+		var body any
+		if tc.method == http.MethodPut {
+			body = map[string]any{"registrationAllowed": true}
+		}
+		status, raw, err := k.call(ctx, tc.realm, "probe", tc.method, tc.path, body)
+		if err != nil || status != tc.want {
+			t.Errorf("%s /admin/realms/%s%s = %d %v %.200s, want %d", tc.method, tc.realm, tc.path, status, err, raw, tc.want)
+		}
+	}
+	// Its token is issued by the passage realm, so another realm's admin API does not accept it at all.
+	token, err := k.token(ctx, realmName, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/admin/realms/master/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		t.Errorf("master realm users with the passage service account = %d, want 401 or 403", resp.StatusCode)
 	}
 }
 

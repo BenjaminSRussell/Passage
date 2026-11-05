@@ -88,6 +88,49 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/users/{id}/keycloak-deprovisions:
+    get:
+      operationId: listKeycloakDeprovisions
+      x-passage-duty: identity.user.maintain
+      description: >-
+        The Keycloak calls SCIM deprovisioning (active=false or DELETE) queued for the user, newest first. pending calls
+        are retried with backoff; parked ones failed too often (or permanently) and wait for a retry; done ones disabled
+        the Keycloak user and logged out its sessions, found no Keycloak user, or were superseded by a SCIM reactivation.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The user's Keycloak deprovisioning calls., content: { application/json: { schema: { $ref: '#/components/schemas/KeycloakDeprovisionList' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/users/{id}/keycloak-deprovisions/{deprovisionId}:retry:
+    post:
+      operationId: retryKeycloakDeprovision
+      x-passage-duty: identity.user.maintain
+      description: >-
+        Makes a parked or pending Keycloak deprovisioning call due now with its attempt count reset, after its cause is
+        fixed. Needs a tenant administrator (tenant.administer, no legal-entity claim). A finished call returns 409
+        IDN-KEYCLOAK-DEPROVISION-DONE. Audited and emitted as dev.passage.identity.keycloakdeprovision.retried.v1.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: deprovisionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The call, now pending., content: { application/json: { schema: { $ref: '#/components/schemas/KeycloakDeprovision' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/authz/roles:
     get:
       operationId: listRoles
@@ -453,6 +496,28 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/User' } }
         next: { type: string, format: uuid }
+    KeycloakDeprovision:
+      type: object
+      required: [deprovisionId, userId, reason, state, attempts, requestedBy, requestedAt]
+      properties:
+        deprovisionId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        reason: { type: string, enum: [scim_deactivated, scim_deleted] }
+        state: { type: string, enum: [pending, parked, done] }
+        outcome: { type: string, enum: [disabled, not_found, superseded] }
+        attempts: { type: integer }
+        lastError: { type: string, description: The last Keycloak failure (operation, status, error code); never a token or secret. }
+        keycloakUserId: { type: string }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        nextAttemptAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        parkedAt: { type: string, format: date-time }
+    KeycloakDeprovisionList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/KeycloakDeprovision' } }
     DutyPermission:
       type: object
       required: [resource, methods]

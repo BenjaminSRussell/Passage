@@ -251,8 +251,50 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "passage-identity-deprovision",
+      "name": "Passage identity: SCIM deprovisioning",
+      "description": "Service account identity uses to disable deprovisioned users and log out their sessions. Holds realm-management manage-users only.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": false,
+      "attributes": {
+        "access.token.lifespan": "300",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      }
     }
   ],
+  "users": [
+    {
+      "username": "service-account-passage-identity-deprovision",
+      "enabled": true,
+      "serviceAccountClientId": "passage-identity-deprovision",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users"
+        ]
+      }
+    }
+  ],
+  "clientScopeMappings": {
+    "realm-management": [
+      {
+        "client": "passage-identity-deprovision",
+        "roles": [
+          "manage-users"
+        ]
+      }
+    ]
+  },
   "identityProviders": [
     {
       "alias": "corporate-oidc",

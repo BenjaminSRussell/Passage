@@ -52,12 +52,29 @@ type realmExport struct {
 	AuthenticationFlows []realmFlow                 `json:"authenticationFlows"`
 	RequiredActions     []realmAction               `json:"requiredActions"`
 	Components          map[string][]realmComponent `json:"components"`
+	Users               []realmUser                 `json:"users"`
+	ClientScopeMappings map[string][]struct {
+		Client string   `json:"client"`
+		Roles  []string `json:"roles"`
+	} `json:"clientScopeMappings"`
+}
+
+type realmUser struct {
+	Username       string              `json:"username"`
+	ServiceAccount string              `json:"serviceAccountClientId"`
+	RealmRoles     []string            `json:"realmRoles"`
+	ClientRoles    map[string][]string `json:"clientRoles"`
+	Credentials    []json.RawMessage   `json:"credentials"`
 }
 
 type realmClient struct {
 	ClientID       string            `json:"clientId"`
 	PublicClient   bool              `json:"publicClient"`
 	DirectGrants   bool              `json:"directAccessGrantsEnabled"`
+	StandardFlow   bool              `json:"standardFlowEnabled"`
+	ImplicitFlow   bool              `json:"implicitFlowEnabled"`
+	ServiceAccount bool              `json:"serviceAccountsEnabled"`
+	FullScope      *bool             `json:"fullScopeAllowed"`
 	RedirectURIs   []string          `json:"redirectUris"`
 	Attributes     map[string]string `json:"attributes"`
 	ProtocolMapper []realmMapper     `json:"protocolMappers"`
@@ -276,6 +293,47 @@ func TestKeycloakRealmFederationKeepsMFAAndTokenClaimsLocal(t *testing.T) {
 		if !tenantMapped {
 			t.Errorf("IdP %s needs a FORCE hardcoded tenant_id mapper, or federated users get no tid", idp.Alias)
 		}
+	}
+}
+
+// TestKeycloakRealmDeprovisionClientHoldsManageUsersOnly checks the service account identity's deprovisioning
+// worker uses: confidential, client credentials only, no secret in the export, and realm-management manage-users
+// as its only role and its only scope (fullScopeAllowed off), so its tokens can manage this realm's users and
+// nothing else.
+func TestKeycloakRealmDeprovisionClientHoldsManageUsersOnly(t *testing.T) {
+	realm := loadRealm(t)
+	client := findClient(realm, deprovisionClientID)
+	if client == nil {
+		t.Fatalf("client %s missing", deprovisionClientID)
+	}
+	if client.PublicClient || !client.ServiceAccount || client.StandardFlow || client.ImplicitFlow || client.DirectGrants || client.FullScope == nil || *client.FullScope {
+		t.Errorf("%s must be confidential with only the service account grant and fullScopeAllowed false: %+v", deprovisionClientID, client)
+	}
+	if len(client.RedirectURIs) != 0 || len(client.ProtocolMapper) != 0 {
+		t.Errorf("%s needs no redirect URIs or token mappers: %v %v", deprovisionClientID, client.RedirectURIs, client.ProtocolMapper)
+	}
+	var account *realmUser
+	for i := range realm.Users {
+		switch realm.Users[i].ServiceAccount {
+		case deprovisionClientID:
+			account = &realm.Users[i]
+		case "":
+			t.Errorf("the export must not create person accounts, found %s", realm.Users[i].Username)
+		}
+	}
+	if account == nil || len(account.RealmRoles) != 0 || len(account.Credentials) != 0 || len(account.ClientRoles) != 1 || !slices.Equal(account.ClientRoles["realm-management"], []string{"manage-users"}) {
+		t.Fatalf("service account of %s = %+v, want realm-management manage-users only", deprovisionClientID, account)
+	}
+	scoped := map[string][]string{}
+	for owner, mappings := range realm.ClientScopeMappings {
+		for _, m := range mappings {
+			if m.Client == deprovisionClientID {
+				scoped[owner] = m.Roles
+			}
+		}
+	}
+	if len(scoped) != 1 || !slices.Equal(scoped["realm-management"], []string{"manage-users"}) {
+		t.Errorf("scope mappings of %s = %v, want realm-management manage-users only", deprovisionClientID, scoped)
 	}
 }
 
