@@ -544,7 +544,7 @@ type outboundRequest struct {
 	Document       json.RawMessage `json:"document"`
 }
 
-// createOutbound builds an 855, 856 or 810 from a caller-supplied canonical
+// createOutbound builds an 855, 856, 810, 820 or 214 from a caller-supplied canonical
 // document. It is mounted only when AllowBodyOutbound is set (tests and
 // development); production documents come from outboundFromSource.
 func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {

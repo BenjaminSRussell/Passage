@@ -1,0 +1,15 @@
+--mdnboundary
+Content-Type: text/plain
+
+Your message was received and processed.
+--mdnboundary
+Content-Type: message/disposition-notification
+
+Reporting-UA: Partner AS2 Gateway 7.1
+Original-Recipient: rfc822; DISTRIBUTOR
+Final-Recipient: rfc822; DISTRIBUTOR
+Original-Message-ID: <passage-000000042@PASSAGE>
+Received-Content-MIC: 7v7F++Fq0FNA6tfz9m6aJFHPsThPHmXYXRK1zsaTRh4=, sha-256
+Disposition: automatic-action/MDN-sent-automatically; processed
+
+--mdnboundary--

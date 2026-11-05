@@ -82,10 +82,11 @@ paths:
   /edi/v1/partners/{id}/outbound:
     post:
       operationId: createOutbound
-      summary: Generate an outbound 855, 856 or 810 for the partner
+      summary: Generate an outbound 855, 856, 810, 820 or 214 for the partner
       description: >
         Builds the transaction from its canonical document (BR-35.2 856 S/O/P/I with SSCC-18,
-        BR-35.3 810, 855 acknowledgment), wraps it in an X12 00401 interchange from our identity
+        BR-35.3 810, 855 acknowledgment, 820 remittance whose items add up to the payment, 214
+        shipment status), wraps it in an X12 00401 interchange from our identity
         (EDI_ISA_QUALIFIER/EDI_ISA_ID) to the partner with the next gap-free control number
         (ISA13 and GS06, BR-35.5) and records it with ackStatus PENDING until the partner's 997 is
         matched. The message stays MAPPED: AS2/SFTP transmission is not built yet. A document that
@@ -1057,20 +1058,22 @@ components:
       additionalProperties: false
       required: [transactionSet, document]
       properties:
-        transactionSet: { type: string, enum: ['855', '856', '810'] }
+        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214'] }
         document:
           description: The canonical document for the set; unknown fields are refused. Decimals are strings.
           oneOf:
             - $ref: '#/components/schemas/Ack855'
             - $ref: '#/components/schemas/ASN'
             - $ref: '#/components/schemas/Invoice'
+            - $ref: '#/components/schemas/Remittance'
+            - $ref: '#/components/schemas/ShipmentStatus'
     OutboundResult:
       type: object
       required: [interchangeId, messageId, transactionSet, controlNumber, x12]
       properties:
         interchangeId: { type: string, format: uuid }
         messageId: { type: string, format: uuid }
-        transactionSet: { type: string, enum: ['855', '856', '810'] }
+        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214'] }
         controlNumber: { type: string, description: ISA13, nine digits }
         x12: { type: string, description: The serialized interchange }
     Decimal:
@@ -1160,6 +1163,60 @@ components:
                             type: array
                             minItems: 1
                             items: { $ref: '#/components/schemas/ItemRef' }
+    Remittance:
+      type: object
+      additionalProperties: false
+      required: [traceNumber, paymentDate, method, amount, payer, payee, items]
+      description: X12 820 payment order / remittance advice. amount (BPR02) must equal the sum of items[].paid.
+      properties:
+        traceNumber: { type: string, minLength: 1, maxLength: 50, description: TRN02 }
+        paymentDate: { type: string, pattern: '^[0-9]{8}$', description: BPR16 }
+        method: { type: string, enum: [ACH, CHK, FWT, BOP], description: BPR04 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        amount: { $ref: '#/components/schemas/Decimal' }
+        payer: { $ref: '#/components/schemas/Location' }
+        payee: { $ref: '#/components/schemas/Location' }
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [invoiceNumber, paid, invoiced, discount]
+            properties:
+              invoiceNumber: { type: string, minLength: 1, maxLength: 30 }
+              invoiceDate: { type: string, pattern: '^[0-9]{8}$' }
+              paid: { $ref: '#/components/schemas/Decimal' }
+              invoiced: { $ref: '#/components/schemas/Decimal' }
+              discount: { $ref: '#/components/schemas/Decimal' }
+    ShipmentStatus:
+      type: object
+      additionalProperties: false
+      required: [proNumber, shipmentId, scac, shipFrom, shipTo, events]
+      description: X12 214 carrier shipment status, one LX/AT7 loop per event.
+      properties:
+        proNumber: { type: string, minLength: 1, maxLength: 30, description: B1001 }
+        shipmentId: { type: string, minLength: 1, maxLength: 30, description: B1002 }
+        scac: { type: string, pattern: '^[A-Z]{2,4}$' }
+        bol: { type: string }
+        poNumber: { type: string }
+        shipFrom: { $ref: '#/components/schemas/Location' }
+        shipTo: { $ref: '#/components/schemas/Location' }
+        events:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, reason, date, time]
+            properties:
+              code: { type: string, pattern: '^[A-Z0-9]{2}$', description: AT701 status (AF, X6, X1, D1, ...) }
+              reason: { type: string, pattern: '^[A-Z0-9]{2}$', description: AT702 reason (NS normal) }
+              date: { type: string, pattern: '^[0-9]{8}$' }
+              time: { type: string, pattern: '^[0-9]{4}$' }
+              city: { type: string }
+              state: { type: string }
+              country: { type: string }
     Invoice:
       type: object
       additionalProperties: false

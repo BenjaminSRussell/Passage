@@ -229,6 +229,8 @@ func TestOutbound_ValidatesBeforeStore(t *testing.T) {
 		{"unknown request field", outboundPath, `{"transactionSet":"856","document":{},"x":1}`, key, http.StatusBadRequest, "COM-0001"},
 		{"document fails the 856 rules", outboundPath, `{"transactionSet":"856","document":{"shipmentId":"L1"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
 		{"unknown document field", outboundPath, `{"transactionSet":"810","document":{"number":"1","colour":"red"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
+		{"document fails the 820 rules", outboundPath, `{"transactionSet":"820","document":{"traceNumber":"T1","amount":"10"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
+		{"document fails the 214 rules", outboundPath, `{"transactionSet":"214","document":{"proNumber":"P1"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

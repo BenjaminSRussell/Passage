@@ -17,14 +17,14 @@ const OutboundVersion = "00401"
 var DefaultDelims = Delims{Element: '*', Component: '>', Segment: '~'}
 
 // functionalIDs maps each outbound transaction set to its GS01 functional id.
-var functionalIDs = map[string]string{"855": "PR", "856": "SH", "810": "IN"}
+var functionalIDs = map[string]string{"855": "PR", "856": "SH", "810": "IN", "820": "RA", "214": "QM"}
 
 // FunctionalIDOf returns the GS01 functional id of an outbound transaction
 // set, or "" for a set this service does not send.
 func FunctionalIDOf(setID string) string { return functionalIDs[setID] }
 
 // OutboundSets lists the transaction sets BuildOutbound writes.
-var OutboundSets = []string{"855", "856", "810"}
+var OutboundSets = []string{"855", "856", "810", "820", "214"}
 
 // BuildOutbound decodes a canonical document for setID and builds its
 // transaction. It returns the normalized document, re-encoded, so a caller can
@@ -55,8 +55,20 @@ func BuildOutbound(setID string, document json.RawMessage) (Transaction, []byte,
 			tr, err = Build810(inv)
 		}
 		doc = inv
+	case "820":
+		var rem Remittance
+		if err = strictDecode(document, &rem); err == nil {
+			tr, err = Build820(rem)
+		}
+		doc = rem
+	case "214":
+		var st ShipmentStatus
+		if err = strictDecode(document, &st); err == nil {
+			tr, err = Build214(st)
+		}
+		doc = st
 	default:
-		return Transaction{}, nil, outboundf("transaction set %q is not an outbound set (855, 856 or 810)", setID)
+		return Transaction{}, nil, outboundf("transaction set %q is not an outbound set (855, 856, 810, 820 or 214)", setID)
 	}
 	if err != nil {
 		return Transaction{}, nil, err

@@ -158,6 +158,32 @@ database or publishes an event, so these routes also run without a store.
 - **Web**: "Punchout cart check", "Self-billing match" and "Peppol invoice" screens in
   `apps/web/src/modules/integration`.
 
+## Slice 6 scope (#483)
+
+- **X12 820 and 214** (`internal/domain/x12_820.go`, `x12_214.go`): `Build820` (BPR, TRN,
+  CUR, N1 PR/PE, ENT with RMR IV and DTM 003; BPR02 must equal the RMR04 total) and `Map820`;
+  `Build214` (B10, L11 BM/PO, N1 SF/ST, LX with AT7 and MS1) and `Map214`. Both are outbound
+  sets of `POST /edi/v1/partners/{id}/outbound` (GS01 RA and QM). Goldens
+  `testdata/x12/820-remittance.x12`, `214-status.x12`; inbound fixture `820-inbound-00501.x12`.
+- **EDIFACT** (`internal/domain/edifact.go`): UNA/UNB/UNH/UNT/UNZ codec for syntax 3 and 4
+  with the release character, custom service characters and decimal comma; UNT01/UNT02 and
+  UNZ01/UNZ02 checks. D.96A mappings onto the canonical documents (`edifact_msgs.go`):
+  `MapORDERS`/`BuildORDERS` (Order, with the 850 count and item-reference issues),
+  `BuildDESADV`/`MapDESADV` (ASN, held to the 856 rules) and `BuildINVOIC`/`MapINVOIC`
+  (Invoice, held to the 810 rules). Goldens under `testdata/edifact/`.
+- **CONTRL** (`edifact_contrl.go`): `BuildCONTRL` (UCI 7 or 4, UCM 4 and UCS per rejected
+  message, back to the sender, never requesting a CONTRL), `RejectInterchangeCONTRL`,
+  `ParseCONTRL` and `ContrlAck.Status` onto the interchange ack status.
+- **Transports** (`internal/transport`): the `Sender` interface and `Message`/`Receipt`;
+  AS2 (RFC 4130) client and server with a detached CMS SignedData signature (`cms.go`,
+  stdlib `encoding/asn1`, RSA or ECDSA with SHA-256; checked against `openssl cms` both ways
+  when openssl is installed), synchronous MDN signed on request, MIC check, disposition
+  modifiers (authentication-failed, insufficient-message-security, decryption-failed,
+  unexpected-processing-error); SFTP with a pinned host key, `.part` upload and rename, and
+  an inbound `Pull` that archives each accepted file; an in-memory `Loopback`. Tested over
+  `httptest` and an in-process SSH/SFTP server. Nothing in the service calls the transports
+  yet (see `NOT-IMPLEMENTED.md`).
+
 ## Wave 35 proof
 
 - **Partner simulator round trip** (`internal/api/partnersim_test.go`, AC-35.1): the demo
@@ -180,15 +206,18 @@ Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
-internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders, SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
+internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810/820/214 builders, 820/214 maps, EDIFACT codec with ORDERS/DESADV/INVOIC and CONTRL, SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
+internal/transport/ AS2 (CMS signing, MDN), SFTP and loopback senders
 internal/events/    event type constants and payloads
 migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes)
 api/openapi.yaml    OpenAPI 3.1 for the routes above
 events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1 and message.failed.v1
 charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor)
 testdata/x12/       X12 fixtures for the domain and API tests
+testdata/edifact/   EDIFACT fixtures and goldens (ORDERS in, DESADV, INVOIC, CONTRL out)
+testdata/as2/       a third-party MDN
 ```
 
 ## Endpoints
@@ -242,7 +271,9 @@ The fulfillment, billing and sales charts verify edi's token from `serviceIdenti
 ## Dependencies
 
 Allowed set only: platform kernel, chi, pgx/v5, shopspring/decimal, rapid (tests).
-No new third-party dependencies in slices 1 to 5.
+No new third-party dependencies in slices 1 to 5. Slice 6 adds `github.com/pkg/sftp` and
+`golang.org/x/crypto/ssh` for the SFTP transport (the versions treasury already uses); AS2
+signing uses the standard library only.
 
 ## Error codes
 
