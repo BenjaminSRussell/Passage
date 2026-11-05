@@ -31,6 +31,9 @@ const (
 	keycloakURLEnv   = "PASSAGE_TEST_KEYCLOAK_URL"
 	keycloakAdminEnv = "PASSAGE_TEST_KEYCLOAK_ADMIN"
 	keycloakPassEnv  = "PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD"
+	// loginDuties are seeded duties from policies/authz/data.json, comma-joined
+	// the way the duties mapper emits them and apps/web parseDuties reads them.
+	loginDuties = "party.vendor.view,workflow.workitem.approve"
 )
 
 type realmExport struct {
@@ -40,6 +43,12 @@ type realmExport struct {
 	BrowserFlow         string                      `json:"browserFlow"`
 	Clients             []realmClient               `json:"clients"`
 	IdentityProviders   []realmIdP                  `json:"identityProviders"`
+	IdPMappers          []realmIdPMapper            `json:"identityProviderMappers"`
+	OTPType             string                      `json:"otpPolicyType"`
+	OTPAlgorithm        string                      `json:"otpPolicyAlgorithm"`
+	OTPDigits           int                         `json:"otpPolicyDigits"`
+	OTPPeriod           int                         `json:"otpPolicyPeriod"`
+	OTPCodeReusable     bool                        `json:"otpPolicyCodeReusable"`
 	AuthenticationFlows []realmFlow                 `json:"authenticationFlows"`
 	RequiredActions     []realmAction               `json:"requiredActions"`
 	Components          map[string][]realmComponent `json:"components"`
@@ -66,6 +75,12 @@ type realmIdP struct {
 	Enabled        bool              `json:"enabled"`
 	PostBrokerFlow string            `json:"postBrokerLoginFlowAlias"`
 	Config         map[string]string `json:"config"`
+}
+
+type realmIdPMapper struct {
+	Alias  string            `json:"identityProviderAlias"`
+	Mapper string            `json:"identityProviderMapper"`
+	Config map[string]string `json:"config"`
 }
 
 type realmFlow struct {
@@ -230,6 +245,40 @@ func TestKeycloakRealmUserProfileLocksTokenAttributesToAdmins(t *testing.T) {
 	}
 }
 
+// TestKeycloakRealmFederationKeepsMFAAndTokenClaimsLocal checks that a federated
+// login still needs the second factor, that the tenant comes from the realm (a
+// hardcoded mapper) and that no upstream IdP claim can write a token attribute.
+func TestKeycloakRealmFederationKeepsMFAAndTokenClaimsLocal(t *testing.T) {
+	realm := loadRealm(t)
+	if realm.OTPType != "totp" || realm.OTPAlgorithm != "HmacSHA1" || realm.OTPDigits != 6 || realm.OTPPeriod != 30 || realm.OTPCodeReusable {
+		t.Errorf("OTP policy %s/%s/%d/%ds reusable=%v, want totp/HmacSHA1/6/30s single-use (the CI login computes codes with it)",
+			realm.OTPType, realm.OTPAlgorithm, realm.OTPDigits, realm.OTPPeriod, realm.OTPCodeReusable)
+	}
+	tokenAttributes := map[string]bool{"tenant_id": true, "legal_entity_id": true, "duties": true, "tier": true}
+	for _, idp := range realm.IdentityProviders {
+		post := findFlow(realm, idp.PostBrokerFlow)
+		if post == nil || !secondFactorRequired(realm, post) {
+			t.Errorf("IdP %s postBrokerLoginFlowAlias %q must require the second factor", idp.Alias, idp.PostBrokerFlow)
+		}
+		var tenantMapped bool
+		for _, mapper := range realm.IdPMappers {
+			if mapper.Alias != idp.Alias {
+				continue
+			}
+			attribute := mapper.Config["attribute"] + mapper.Config["user.attribute"]
+			switch {
+			case mapper.Mapper == "hardcoded-attribute-idp-mapper" && attribute == "tenant_id":
+				tenantMapped = mapper.Config["syncMode"] == "FORCE"
+			case tokenAttributes[attribute]:
+				t.Errorf("IdP %s mapper %s lets the upstream IdP set token attribute %s", idp.Alias, mapper.Mapper, attribute)
+			}
+		}
+		if !tenantMapped {
+			t.Errorf("IdP %s needs a FORCE hardcoded tenant_id mapper, or federated users get no tid", idp.Alias)
+		}
+	}
+}
+
 func findClient(realm realmExport, id string) *realmClient {
 	for i := range realm.Clients {
 		if realm.Clients[i].ClientID == id {
@@ -384,7 +433,7 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 	admin.do(http.MethodPost, "/admin/realms/"+realmName+"/users", map[string]any{
 		"username": loginUserName, "email": loginUserName + "@example.test", "emailVerified": true, "enabled": true,
 		"firstName": "Ci", "lastName": "Login", "requiredActions": []string{},
-		"attributes":  map[string][]string{"tenant_id": {loginTenantID}, "duties": {"ap_clerk,approver"}, "tier": {"starter"}},
+		"attributes":  map[string][]string{"tenant_id": {loginTenantID}, "duties": {loginDuties}, "tier": {"starter"}},
 		"credentials": []map[string]any{{"type": "password", "value": loginUserSecret, "temporary": false}},
 	}, http.StatusCreated)
 
@@ -394,11 +443,21 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 	}
 	admin.do(http.MethodPut, "/admin/realms/"+realmName+"/users/"+created[0]["id"].(string), map[string]any{"requiredActions": []string{}}, http.StatusNoContent)
 
-	issuer := base + "/realms/" + realmName
 	accessToken := tokenRequest(t, client, base, realmName, url.Values{
 		"grant_type": {"password"}, "client_id": {"passage-web"}, "username": {loginUserName}, "password": {loginUserSecret},
 	})
+	verifyWithIdentity(t, base, client, accessToken)
+	claims := tokenClaims(t, accessToken)
+	if claims["duties"] != loginDuties || claims["tier"] != "starter" {
+		t.Fatalf("claims duties/tier = %v/%v, want the single-string values", claims["duties"], claims["tier"])
+	}
+}
 
+// verifyWithIdentity passes a Keycloak access token through identity's
+// JWTVerifier middleware and returns the principal it derives.
+func verifyWithIdentity(t *testing.T, base string, client *http.Client, accessToken string) tenant.Principal {
+	t.Helper()
+	issuer := base + "/realms/" + realmName
 	verifier, err := NewJWTVerifier(issuer, realmAudience, loginTenantID, issuer+"/protocol/openid-connect/certs", client)
 	if err != nil {
 		t.Fatal(err)
@@ -418,8 +477,15 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 	if principal.TenantID != loginTenantID || principal.UserID == "" {
 		t.Fatalf("verified principal = %+v, want tenant %s and a subject", principal, loginTenantID)
 	}
+	return principal
+}
 
+func tokenClaims(t *testing.T, accessToken string) map[string]any {
+	t.Helper()
 	parts := strings.Split(accessToken, ".")
+	if len(parts) != 3 {
+		t.Fatalf("access token has %d parts", len(parts))
+	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		t.Fatal(err)
@@ -428,9 +494,7 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		t.Fatal(err)
 	}
-	if claims["duties"] != "ap_clerk,approver" || claims["tier"] != "starter" {
-		t.Fatalf("claims duties/tier = %v/%v, want the single-string values", claims["duties"], claims["tier"])
-	}
+	return claims
 }
 
 var formAction = regexp.MustCompile(`action="([^"]*)"`)

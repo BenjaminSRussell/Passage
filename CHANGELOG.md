@@ -15,6 +15,11 @@ release may change public APIs.
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev
   chart with helm. The analytics, eam, hr, iot-edge, projects, shopfloor and transport charts now take
   `image.digest`. Syncing still needs a live cluster (#213).
+- Keycloak CI login tests (#80, wave 02 AC3) in `services/identity/keycloak_login_test.go`: OIDC authorization code
+  with PKCE and TOTP (enrolment, then the OTP form), identity's `JWTVerifier` accepting the token with the duty
+  claims, deprovisioning (a disabled user loses refresh and login), and federated login through two Keycloak stand-in
+  IdPs (OIDC and SAML) with the post-broker second factor. The realm export gains a FORCE hardcoded `tenant_id` mapper
+  per IdP placeholder and a pinned single-use OTP policy; new realm tests check both.
 - carrier-gateway TypeScript service (#482, wave 28 AC4) in `services/carrier-gateway-ts`. It has a carrier adapter
   interface, a deterministic sandbox carrier with no credentials, rate shopping, idempotent labels and tracking. Its
   `/v1/carrier` API takes signed service tokens. The adapter contract is replayed against a recorded fixture. There

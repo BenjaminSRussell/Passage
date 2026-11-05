@@ -19,6 +19,8 @@
   "otpPolicyAlgorithm": "HmacSHA1",
   "otpPolicyDigits": 6,
   "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyCodeReusable": false,
   "webAuthnPolicyRpEntityName": "Passage",
   "webAuthnPolicyUserVerificationRequirement": "required",
   "browserFlow": "passage-browser-mfa",
@@ -265,6 +267,28 @@
         "postBindingResponse": "true"
       },
       "postBrokerLoginFlowAlias": "passage-post-broker-mfa"
+    }
+  ],
+  "identityProviderMappers": [
+    {
+      "name": "tenant",
+      "identityProviderAlias": "corporate-oidc",
+      "identityProviderMapper": "hardcoded-attribute-idp-mapper",
+      "config": {
+        "syncMode": "FORCE",
+        "attribute": "tenant_id",
+        "attribute.value": "REPLACE_WITH_TENANT_ID"
+      }
+    },
+    {
+      "name": "tenant",
+      "identityProviderAlias": "corporate-saml",
+      "identityProviderMapper": "hardcoded-attribute-idp-mapper",
+      "config": {
+        "syncMode": "FORCE",
+        "attribute": "tenant_id",
+        "attribute.value": "REPLACE_WITH_TENANT_ID"
+      }
     }
   ],
   "authenticationFlows": [
