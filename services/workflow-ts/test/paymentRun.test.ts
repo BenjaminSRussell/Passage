@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ApplicationFailure } from "@temporalio/activity";
-import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/worker";
+import { bundleWorkflowCode, Worker, type WorkerOptions, type WorkflowBundle } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { createPaymentRunActivities, MAX_REASON_BYTES, PRE_JOURNAL_AUTH_BUDGET_MS, truncateToBytes, type PaymentRunActivities } from "../src/paymentRunActivities.js";
 import { createServiceTokenSigner } from "../src/serviceToken.js";
@@ -43,7 +43,7 @@ describe("payment run workflow", () => {
     await environment?.teardown();
   });
 
-  function worker(taskQueue: string, activities: PaymentRunActivities, shutdownGraceTime?: string) {
+  function worker(taskQueue: string, activities: PaymentRunActivities, shutdownGraceTime?: WorkerOptions["shutdownGraceTime"]) {
     return Worker.create({
       connection: environment.nativeConnection,
       taskQueue,
