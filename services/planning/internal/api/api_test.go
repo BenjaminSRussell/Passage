@@ -107,9 +107,20 @@ type fakeStore struct {
 	runStrategies map[string]domain.StrategySpec
 	lastSim       store.SimulationRequest
 	simulations   int
+	// Asynchronous plan runs (planrun_test.go); runGate, when set, holds
+	// RunPlan until it is closed or the run's context ends.
+	planRuns fakePlanRuns
+	runGate  chan struct{}
 }
 
-func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {
+func (f *fakeStore) RunPlan(ctx context.Context, req store.RunRequest) (store.Version, bool, error) {
+	if f.runGate != nil {
+		select {
+		case <-f.runGate:
+		case <-ctx.Done():
+			return store.Version{}, false, ctx.Err()
+		}
+	}
 	f.last = req
 	if f.runErr != nil {
 		return store.Version{}, false, f.runErr

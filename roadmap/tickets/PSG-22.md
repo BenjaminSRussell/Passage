@@ -62,7 +62,7 @@ Fix versions: v1.0
 - [ ] AC1: MRP correctness fixtures: 40 textbook scenarios (APICS CPIM-style) match expected planned orders and dates
 - [ ] AC2: Scale: 50k items × 12 periods × 5-level BOM plans in < 10 min; results deterministic across runs
 - [ ] AC3: Pegging tree for every planned order explains 100% of its quantity
-- [ ] AC4: Optional comparison: results match frePPLe on a shared dataset within tolerance
+- [x] AC4: ~~Optional comparison: results match frePPLe on a shared dataset within tolerance~~ Dropped from the wave 22 Definition of Done by [ADR-0002](../../docs/adr/0002-frepple-comparison.md) (accepted): the native planner stays the only engine; not passed, dropped.
 - [ ] AC5: Every deliverable above has code under the owned paths, or is listed with a reason in NOT-IMPLEMENTED.md in the service root.
 - [ ] AC6: `go vet ./... && go test ./...` passes in every owned Go module; web modules pass `npx vitest --run` and `npx tsc --noEmit` in apps/web; OpenAPI/AsyncAPI files match code; Helm chart lints.
 

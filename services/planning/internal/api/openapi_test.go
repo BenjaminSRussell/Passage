@@ -71,6 +71,8 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 
 	duties := map[string]string{
 		"POST /v1/planning/plans/{planCode}:run":              dutyRun,
+		"GET /v1/planning/plan-runs/{id}":                     dutyRun,
+		"POST /v1/planning/plan-runs/{id}:cancel":             dutyRun,
 		"GET /v1/planning/plans/{planCode}/versions":          dutyRead,
 		"GET /v1/planning/plans/{planCode}/versions/{number}": dutyRead,
 		"GET /v1/planning/planned-orders":                     dutyRead,

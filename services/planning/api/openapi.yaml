@@ -26,7 +26,7 @@ paths:
     post:
       operationId: runPlan
       summary: Run a static plan and make its version current on success
-      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope. Quota arrangements (FR-22.17, BR-22.12): a planned order of an item with an arrangement at siteId valid on its delivery date goes to the source with the lowest rating among the sources of its order type (vendor for purchase, production version for production, warehouse for transfer), orders taken in delivery order so the ratings move during the run; a source with a per-period maximum takes no more than what is left of it after the firmed and approved orders of the period; a split arrangement replaces the order by one order per source numbered <number>-<n>, with its pegging divided over them. The order then carries quotaArrangementId, quotaSourceId and, for a vendor source, vendorId; an order no source can take stays without a source. Firming books the order quantity on the source. DDMRP (FR-22.16, BR-22.11): an item whose site-scope item coverage is a decouplingPoint and that has a stored site-scope buffer at siteId (of the plan''s legal entity) is replenished by the buffer''s planned quantity (the last recalculation), due after the decoupled lead time and no earlier than the item''s lead time, instead of being netted: its own demand, receipts, on-hand, safety stock and min/max are not used, and it is removed from the components of other items (the decoupling point absorbs the demand above it) while its own components still explode. Its planned orders carry the buffer''s planningPriority and bufferZone. A green buffer plans nothing; a buffer in the red zone raises a red-zone action message (PLAN-0010) on each of its orders (on each part of a quota split).'
+      description: 'An item sent without a coverage code, without orderType or without leadTimeDays takes them from its stored site-scope item coverage at siteId and that coverage''s group (FR-22.2, FR-22.5): the whole coverage block (group settings with the item coverage''s min, max and receipt margin), the planned order type and the lead-time override. Inline values always win, including an explicit leadTimeDays of 0. An item left without a coverage code or order type is a 400 naming items[i].coverage.code or items[i].orderType. The Idempotency-Key fingerprint is the request as sent, so a retry replays even after the stored coverage changed. Warehouse and subcontractor scopes are not read (FR-22.18). A run with a scope (FR-22.13) still becomes the current version, so the plan then holds planned orders only for the items inside that scope. Quota arrangements (FR-22.17, BR-22.12): a planned order of an item with an arrangement at siteId valid on its delivery date goes to the source with the lowest rating among the sources of its order type (vendor for purchase, production version for production, warehouse for transfer), orders taken in delivery order so the ratings move during the run; a source with a per-period maximum takes no more than what is left of it after the firmed and approved orders of the period; a split arrangement replaces the order by one order per source numbered <number>-<n>, with its pegging divided over them. The order then carries quotaArrangementId, quotaSourceId and, for a vendor source, vendorId; an order no source can take stays without a source. Firming books the order quantity on the source. DDMRP (FR-22.16, BR-22.11): an item whose site-scope item coverage is a decouplingPoint and that has a stored site-scope buffer at siteId (of the plan''s legal entity) is replenished by the buffer''s planned quantity (the last recalculation), due after the decoupled lead time and no earlier than the item''s lead time, instead of being netted: its own demand, receipts, on-hand, safety stock and min/max are not used, and it is removed from the components of other items (the decoupling point absorbs the demand above it) while its own components still explode. Its planned orders carry the buffer''s planningPriority and bufferZone. A green buffer plans nothing; a buffer in the red zone raises a red-zone action message (PLAN-0010) on each of its orders (on each part of a quota split). Asynchronous run (#479): with `Prefer: respond-async` the request is validated and its snapshot built as above (a 400 or 422 is still answered in the request), then the service answers 202 with a PlanRun and `Location: /v1/planning/plan-runs/{id}` and plans and stores the version in the background, outside the 30 s request timeout of the router; poll the Location until the run is no longer `running`. Use it for any run above a few thousand items: a synchronous run that takes longer than the request timeout is cut off with no version stored. A retry with the same Idempotency-Key and body answers 200 with the same run (Idempotent-Replayed: true). One run of a plan runs at a time (409 PLAN-0001, also for a synchronous run while an asynchronous one is alive), and each instance executes at most PLANNING_MAX_CONCURRENT_RUNS runs (default 1; beyond it 503 PLAN-RUN-CAPACITY with Retry-After). A run is bounded by PLANNING_RUN_TIMEOUT_MINUTES (default 60). Without the preference the run is synchronous as before.'
       x-passage-duty: planning.run
       parameters:
         - name: planCode
@@ -34,6 +34,11 @@ paths:
           required: true
           schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: Prefer
+          in: header
+          required: false
+          description: '`respond-async` runs the plan in the background and answers 202 with a PlanRun (RFC 7240)'
+          schema: {type: string, example: respond-async}
       requestBody:
         required: true
         content:
@@ -41,21 +46,85 @@ paths:
             schema: {$ref: '#/components/schemas/RunRequest'}
       responses:
         '201':
-          description: Version created and made current
+          description: Version created and made current (synchronous run)
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PlanVersion'}
         '200':
-          description: 'Replay of an earlier run with the same Idempotency-Key (Idempotent-Replayed: true)'
+          description: 'Replay of an earlier run with the same Idempotency-Key (Idempotent-Replayed: true): its PlanVersion, or with Prefer: respond-async the PlanRun it started'
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/PlanVersion'}
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/PlanVersion'}
+                  - {$ref: '#/components/schemas/PlanRun'}
+        '202':
+          description: 'Asynchronous run accepted (Prefer: respond-async); poll the Location header'
+          headers:
+            Location:
+              description: /v1/planning/plan-runs/{id}
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanRun'}
         '400': {$ref: '#/components/responses/Problem'}
         '401': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '413': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '500': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /v1/planning/plan-runs/{id}:
+    get:
+      operationId: getPlanRun
+      summary: Status, progress and result of an asynchronous plan run (#479)
+      description: >-
+        A run is `running` (phase `planning` while the engine runs, then
+        `persisting` with rowsWritten of rowsTotal), then `succeeded` with the
+        version it made current, `failed` with a problem, or `cancelled`. A
+        version's rows commit together, so a failed or cancelled run stores
+        none of them. A running run whose instance stopped renewing its
+        heartbeat for 2 minutes reads as failed with PLAN-RUN-ABANDONED.
+        Readable with planning.run or planning.read, within the plan's legal
+        entity.
+      x-passage-duty: planning.run
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanRun'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/plan-runs/{id}:cancel:
+    post:
+      operationId: cancelPlanRun
+      summary: Ask a running asynchronous plan run to stop (#479)
+      description: >-
+        Sets cancelRequested; the instance executing the run stops it at once,
+        or on its next heartbeat (every 5 s) when another instance runs it.
+        The run then reads `cancelled` (problem PLAN-RUN-CANCELLED) with no
+        version stored. The engine phase itself is not interrupted, so a
+        cancel during it takes effect before the first row is written; a run
+        whose version had already committed reads `succeeded`. A run that is
+        not running is 409 PLAN-RUN-FINISHED.
+      x-passage-duty: planning.run
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '202':
+          description: Cancel requested
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanRun'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /v1/planning/plans/{planCode}/versions:
     get:
       operationId: listVersions
@@ -2597,6 +2666,27 @@ components:
         messages: {type: integer}
         durationMs: {type: integer, format: int64}
         planHash: {type: string, description: 'sha256 hex over orders, pegging and messages, and the quota source of each allocated order'}
+    PlanRun:
+      type: object
+      description: An asynchronous plan run (#479)
+      required: [id, planCode, status, phase, items, rowsWritten, rowsTotal, cancelRequested, createdAt, heartbeatAt, replayed]
+      properties:
+        id: {type: string, format: uuid}
+        planCode: {type: string}
+        status: {type: string, enum: [running, succeeded, failed, cancelled]}
+        phase: {type: string, enum: [planning, persisting, done], description: 'planning while the engine runs, persisting while the version is written'}
+        items: {type: integer, description: Items of the request}
+        rowsWritten: {type: integer, format: int64, description: 'Rows of the version (planned orders, pegging, messages, net requirements) sent so far, as of the last heartbeat; they commit together'}
+        rowsTotal: {type: integer, format: int64, description: Rows the version holds; 0 until the engine finished}
+        cancelRequested: {type: boolean}
+        requestedBy: {type: string, description: User who started the run}
+        createdAt: {type: string, format: date-time}
+        heartbeatAt: {type: string, format: date-time, description: 'Renewed every 5 s by the instance executing the run'}
+        finishedAt: {type: [string, 'null'], format: date-time}
+        versionNumber: {type: [integer, 'null'], description: Number of the version a succeeded run made current}
+        version: {$ref: '#/components/schemas/PlanVersion'}
+        replayed: {type: boolean, description: 'The Idempotency-Key had already stored the version (a synchronous run with the same key and body), so the run returned it'}
+        problem: {$ref: '#/components/schemas/Problem'}
     PlannedOrder:
       type: object
       properties:

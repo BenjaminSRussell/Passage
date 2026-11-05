@@ -2461,11 +2461,14 @@
       {"resource": "/v1/planning/strategies", "methods": ["GET"]},
       {"resource": "/v1/planning/strategies/*", "methods": ["GET"]},
       {"resource": "/v1/planning/forecast-allocation-keys", "methods": ["GET"]},
-      {"resource": "/v1/planning/forecast-allocation-keys/*", "methods": ["GET"]}
+      {"resource": "/v1/planning/forecast-allocation-keys/*", "methods": ["GET"]},
+      {"resource": "/v1/planning/plan-runs/*", "methods": ["GET"]}
     ]},
     "planning.run": {"permissions": [
       {"resource": "/v1/planning/ddmrp/buffers:recalculate", "methods": ["POST"]},
-      {"resource": "/v1/planning/plans/*:run", "methods": ["POST"]}
+      {"resource": "/v1/planning/plans/*:run", "methods": ["POST"]},
+      {"resource": "/v1/planning/plan-runs/*", "methods": ["GET"]},
+      {"resource": "/v1/planning/plan-runs/*:cancel", "methods": ["POST"]}
     ]},
     "planning.setup.maintain": {"permissions": [
       {"resource": "/v1/planning/buffer-profiles", "methods": ["POST"]},

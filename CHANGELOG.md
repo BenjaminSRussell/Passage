@@ -51,6 +51,17 @@ release may change public APIs.
   request timeout; numbers and caveats in `services/planning/README.md`. The plan-run route now accepts
   bodies up to 128 MiB and `RunPlan` sends its rows in batches of 10,000 (one unbounded batch ran out of
   memory at 50k items). ADR-0002 (Proposed) records the frePPLe comparison decision for AC4.
+- Asynchronous plan runs in planning (#479): `POST /v1/planning/plans/{planCode}:run` with
+  `Prefer: respond-async` validates the request, answers 202 with a plan run and its `Location`, and plans
+  and stores the version in the background, outside the router's 30 s request timeout. New routes
+  `GET /v1/planning/plan-runs/{id}` (status, phase, row progress, the version once succeeded) and
+  `POST /v1/planning/plan-runs/{id}:cancel`; migration `0030_plan_run`; one run per plan, at most
+  `PLANNING_MAX_CONCURRENT_RUNS` per process (default 1, else 503 with Retry-After), bounded by
+  `PLANNING_RUN_TIMEOUT_MINUTES` (default 60), a heartbeat that carries cancels across replicas and
+  reports the run of a dead process as abandoned. Without the preference the run is synchronous as before.
+  The 50k-item API scale test and the k6 S5 scenario now use the asynchronous route.
+  ADR-0002 is accepted: the frePPLe comparison is dropped from the wave 22 Definition of Done and the
+  native planner stays.
 - Wave 25 gaps (#481): production's `consume-shopfloor` consumer (principal `production-shopfloor`) posts
   closed shop-floor job-stops as job cards at the worker cost rate, pinned to the order's legal entity, and
   re-books them on `registration.corrected`; the web kiosk's IndexedDB offline queue replays punches and job

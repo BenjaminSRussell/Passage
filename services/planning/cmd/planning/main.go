@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -25,6 +26,10 @@ const (
 	defaultAdminAddr = ":9090"
 	// defaultHorizonDays is the default of PLANNING_HORIZON_DAYS (PRD 4.22.13).
 	defaultHorizonDays = 365
+	// maxRunTimeoutMinutes bounds PLANNING_RUN_TIMEOUT_MINUTES (default 60).
+	maxRunTimeoutMinutes = 720
+	// runStopWait is how long shutdown waits for interrupted runs to record it.
+	runStopWait = 10 * time.Second
 )
 
 func main() {
@@ -59,6 +64,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	concurrentRuns, err := intEnv(getenv, "PLANNING_MAX_CONCURRENT_RUNS", api.DefaultMaxConcurrentRuns, 1, api.MaxMaxConcurrentRuns)
+	if err != nil {
+		return err
+	}
+	runTimeout, err := intEnv(getenv, "PLANNING_RUN_TIMEOUT_MINUTES", int(api.DefaultRunTimeout/time.Minute), 1, maxRunTimeoutMinutes)
+	if err != nil {
+		return err
+	}
 	flags, err := featureFlags(getenv("PLANNING_FEATURE_FLAGS"))
 	if err != nil {
 		return err
@@ -86,7 +99,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool).WithMaxVersions(maxVersions)).WithHorizon(horizon)
+	a := api.New(store.New(pool).WithMaxVersions(maxVersions)).WithHorizon(horizon).WithRunLimits(concurrentRuns, time.Duration(runTimeout)*time.Minute)
 	if forecaster != nil {
 		a = a.WithStatisticalForecast(forecaster)
 	}
@@ -100,7 +113,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
-	return <-errs
+	err = <-errs
+	// Asynchronous plan runs still executing record that they were
+	// interrupted while the pool is open.
+	a.StopRuns(runStopWait)
+	return err
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

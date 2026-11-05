@@ -134,27 +134,66 @@ cd services/planning
 go test ./...                # domain + API; store tests skip without a database
 PASSAGE_TEST_DATABASE_URL=postgres://admin@host/db \
 PASSAGE_TEST_APP_DATABASE_URL=postgres://app@host/db go test ./...   # store tests as the RLS-bound app role
-DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_HORIZON_DAYS (365, 30 to 1095), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup)
+DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_HORIZON_DAYS (365, 30 to 1095), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup), PLANNING_MAX_CONCURRENT_RUNS (1, 1 to 16), PLANNING_RUN_TIMEOUT_MINUTES (60, 1 to 720)
 ```
+
+### Asynchronous plan runs (#479)
+
+A synchronous `POST /plans/{planCode}:run` runs inside the request, and the platform router cancels a
+request after 30 s (`httpx.RequestTimeout`), which is every run above roughly 3,000 items of the
+`mrp-50k` shape. With `Prefer: respond-async` the request is validated and the snapshot built as
+before (400 and 422 still come back in the request), then the service records a `plan_run` row
+(migration `0030`) and answers 202 with the run and `Location: /v1/planning/plan-runs/{id}`. The
+engine and the version's write run in the background on a context that keeps the caller's principal
+but not the request's deadline:
+
+- `GET /plan-runs/{id}`: `running` (phase `planning`, then `persisting` with `rowsWritten` of
+  `rowsTotal`), then `succeeded` with the version it made current, `failed` with a problem, or
+  `cancelled`. The version's rows commit in one transaction, so a failed or cancelled run stores none.
+- `POST /plan-runs/{id}:cancel`: stops the run at once on the instance that executes it, or on its
+  next heartbeat (every 5 s) from any other replica. The engine phase is not interrupted; a cancel
+  during it takes effect before the first row is written.
+- One run per plan (partial unique index; 409 `PLAN-0001`, also for a synchronous run while an
+  asynchronous one is alive). Each process executes at most `PLANNING_MAX_CONCURRENT_RUNS` runs
+  (default 1, 503 `PLAN-RUN-CAPACITY` with `Retry-After` beyond it) for at most
+  `PLANNING_RUN_TIMEOUT_MINUTES` (default 60, then `PLAN-RUN-TIMEOUT`). On shutdown, runs still
+  executing are cancelled and recorded as `PLAN-RUN-INTERRUPTED`; a process that dies leaves a row
+  whose heartbeat goes stale, which reads as failed (`PLAN-RUN-ABANDONED`) after 2 min and is
+  closed by the next run of the plan.
+- The same Idempotency-Key and body return the same run (200, `Idempotent-Replayed: true`). The run
+  stores its version under that key, so a synchronous retry with the key replays the version.
+
+Without the preference the run is synchronous, as the web run screen still uses it for the
+snapshots it sends. Not built: a queue (a run beyond capacity is refused, not queued), resuming a
+run after a restart (the request's snapshot lives only in memory), and the Temporal batch job.
 
 ### Scale run through the API (AC2, #479)
 
 `TestRunAPI_ScalePostgres` (`internal/api/scale_pg_test.go`) sends the `mrp-50k` snapshot of the
 engine scale test (`domain.ScaleSnapshot`: five BOM levels, 4 sales lines per item over 12 monthly
-periods, open POs, mixed coverage and lot rules) as one `POST /v1/planning/plans/{planCode}:run` over a
-loopback HTTP server, and the version is stored in Postgres through the RLS-bound app role. Planning has
-no item master of its own, so the items, BOMs and demand travel in the request; Postgres holds the plan.
-It is skipped unless `PASSAGE_PLANNING_API_SCALE_ITEMS` is set:
+periods, open POs, mixed coverage and lot rules) as one asynchronous
+`POST /v1/planning/plans/{planCode}:run` (`Prefer: respond-async`) over a loopback HTTP server with the
+production router (`httpx.NewRouter`, 30 s request timeout), polls `GET /plan-runs/{id}` every 2 s
+until the run succeeded, and the version is stored in Postgres through the RLS-bound app role.
+Planning has no item master of its own, so the items, BOMs and demand travel in the request; Postgres
+holds the plan. It fails if the 202 takes as long as the request timeout or a run takes 10 min or
+more. It is skipped unless `PASSAGE_PLANNING_API_SCALE_ITEMS` is set:
 
 ```
 PASSAGE_TEST_DATABASE_URL=... PASSAGE_TEST_APP_DATABASE_URL=... \
-PASSAGE_PLANNING_API_SCALE_ITEMS=50000 PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT=1 PASSAGE_PLANNING_API_SCALE_RUNS=1 \
+PASSAGE_PLANNING_API_SCALE_ITEMS=50000 PASSAGE_PLANNING_API_SCALE_RUNS=1 \
 go test -count=1 -timeout 60m -run TestRunAPI_ScalePostgres -v ./internal/api/
 ```
 
-`PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT=1` serves the routes on a chi router with only the tenant
-middleware, without the platform's 30 s request timeout; `PASSAGE_PLANNING_API_SCALE_RUNS` (default 2)
-repeats the run with a new Idempotency-Key and compares the stored plan hashes.
+`PASSAGE_PLANNING_API_SCALE_RUNS` (default 2) repeats the run with a new Idempotency-Key and compares
+the stored plan hashes.
+
+The 50k run through the asynchronous route has not been timed yet: the session that built it had no
+superuser access to the local Postgres for a run of this size. The numbers below are from
+2026-11-04, before the asynchronous route, on the synchronous route served without the router's
+request timeout (the `PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT` switch that this change removes). The
+asynchronous route runs the same engine call and the same `RunPlan` transaction, so they are the
+expected cost, not a measurement of it.
 
 Measured on 2026-11-04 on PostgreSQL 16.15 (local cluster, default settings) and the test process on
 the same host: a shared cloud VM with 4 vCPUs, 15 GB RAM and other workloads running at the same time.
@@ -180,10 +219,8 @@ What the run found, and what changed (#479):
 - All of a run's rows were queued in one pgx batch, about 9 million statements at 50k items; the test
   process was killed by the OOM killer at 13 GB. `RunPlan` now sends batches of 10,000 rows
   (`runBatchRows`) inside the same transaction.
-- Not changed: the platform router's 30 s request timeout (`httpx.RequestTimeout`) cancels any run that
-  takes longer, which is every run above roughly 3,000 items of this shape. A 50k run cannot succeed
-  through the deployed service until the run moves off the request (the Temporal batch job of
-  NOT-IMPLEMENTED.md) or the route gets a longer deadline.
+- The platform router's 30 s request timeout cancelled any run that takes longer. The run now moves
+  off the request with `Prefer: respond-async` (above); the synchronous route keeps the timeout.
 - Not changed: faster persistence (multi-row `insert ... select from unnest(...)` per table, and
   batching the `message.raised.v1` outbox rows) would cut most of the 8 minutes; it is a larger change
   of `RunPlan` and is left for the batch-job slice.
@@ -407,7 +444,9 @@ NOT-IMPLEMENTED.md):
 
 | Method | Path | Duty |
 |---|---|---|
-| POST | `/v1/planning/plans/{planCode}:run` | `planning.run` (Idempotency-Key required) |
+| POST | `/v1/planning/plans/{planCode}:run` | `planning.run` (Idempotency-Key required; `Prefer: respond-async` answers 202 with a plan run) |
+| GET | `/v1/planning/plan-runs/{id}` | `planning.run` or `planning.read` |
+| POST | `/v1/planning/plan-runs/{id}:cancel` | `planning.run` |
 | GET | `/v1/planning/plans/{planCode}/versions?limit=` | `planning.read` |
 | GET | `/v1/planning/plans/{planCode}/versions/{number}` | `planning.read` |
 | GET | `/v1/planning/plans/{planCode}/diff?from=&to=&limit=` | `planning.read` |

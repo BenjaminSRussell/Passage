@@ -5,6 +5,12 @@ migrateOnStart: false
 maxVersions: 20
 # PLANNING_HORIZON_DAYS: demand beyond this many days is ignored by a run (30 to 1095).
 horizonDays: 365
+# PLANNING_MAX_CONCURRENT_RUNS: asynchronous plan runs one replica executes at once (1 to 16);
+# a 50k-item run holds several GB (7.3 GiB peak for the whole test process in #479); whether one fits
+# the 4Gi limit below is not measured.
+maxConcurrentRuns: 1
+# PLANNING_RUN_TIMEOUT_MINUTES: an asynchronous plan run is failed after this long (1 to 720).
+runTimeoutMinutes: 60
 # PLANNING_FEATURE_FLAGS: comma-separated planning.dynamic, planning.statistical-forecast,
 # planning.mps-scope; an unknown name stops the service at startup.
 featureFlags: ""
