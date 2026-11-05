@@ -41,7 +41,8 @@ migrations/             0001_init.sql (rate_card, freight_bill, carrier_invoice,
                         0003_load_dg_decision.sql (load_build, load, load_shipment, dg_check,
                         freight_bill_decision), 0004_gate_goods_in_transit.sql (gate_visit,
                         gate_event, goods_in_transit_order, goods_in_transit_line),
-                        0005_screening_hold_route_plan.sql (screening_hold, route_plan), applied in order
+                        0005_screening_hold_route_plan.sql (screening_hold, route_plan), ...,
+                        0011/0012 (CDC publication and role grants for outbox-transport), applied in order
 api/openapi.yaml        OpenAPI 3.1 for every endpoint in this slice
 events/asyncapi.yaml    AsyncAPI 3 for every event the service publishes
 charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, ServiceMonitor toggle)
@@ -331,7 +332,11 @@ goods-in-transit orders, screening holds and route plans. Codes not yet raised (
 | dev.passage.tms.gate.checkedin.v1 | A driver and trailer check in (not on replay); no driver PII | gate visit id |
 | dev.passage.tms.goodsintransit.shipped.v1 | A goods-in-transit order ships; goods value and estimated cost per line and cost type, Σ lines = estimatedTotal | order id |
 
-Each is written to the outbox in the transaction that makes the change.
+Each is written to the outbox in the transaction that makes the change. The `outbox-transport`
+Debezium connector (`deploy/kafka/connect.yaml`) streams the outbox through the
+`passage_outbox_transport` publication (migration 0011) as the `debezium_cdc_transport` role
+(grants in migration 0012) and routes each event to `passage.tms.<aggregate_type>`: the release
+to `passage.tms.load`, the tender outcomes to `passage.tms.tender`.
 
 ## Dependencies
 

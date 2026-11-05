@@ -1,5 +1,5 @@
 # workflow-ts consumes transport's load.released and tender outcomes to start and signal tenderWorkflow (#426).
-# The topics are created by transport's outbox connector, which is not configured yet (see services/workflow-ts/NOT-IMPLEMENTED.md).
+# The topics are created by transport's outbox-transport connector (deploy/kafka/connect.yaml).
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:

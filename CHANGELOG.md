@@ -14,8 +14,11 @@ release may change public APIs.
   migration 0010) applies the tender gates and publishes `dev.passage.tms.load.released.v1` with the releasing user
   and legal-entity scope from the verified caller; workflow-ts's new Kafka consumer (`src/eventConsumer.ts`, kafkajs)
   starts `tenderWorkflow` from it and sends `tender-response` on `tender.accepted.v1` and `tender.declined.v1`. The
-  tender start is keyed on the release id, so a redelivered release never tenders a load twice. Transport's outbox
-  has no Debezium connector yet (#223, #106).
+  tender start is keyed on the release id, so a redelivered release never tenders a load twice. The new
+  `outbox-transport` Debezium connector streams transport's outbox (publication and CDC role grants in transport
+  migrations 0011 and 0012; own `debezium_cdc_transport` role and `passage_transport` database in the dev Postgres;
+  one Vault key, `passage/dev/transport-postgres/cdc-password`; literal ACLs) to `passage.tms.<aggregate_type>`, so the
+  release reaches `passage.tms.load` and the tender outcomes `passage.tms.tender`.
 - Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
   in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev

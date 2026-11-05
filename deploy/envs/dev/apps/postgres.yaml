@@ -47,6 +47,27 @@ spec:
         key: passage/dev/eam-postgres/cdc-password
         property: value
 ---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: transport-cdc
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: transport-cdc
+    creationPolicy: Owner
+  data:
+    - secretKey: CDC_PASSWORD
+      remoteRef:
+        key: passage/dev/transport-postgres/cdc-password
+        property: value
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -102,6 +123,16 @@ data:
     \c passage_eam
     GRANT ALL ON SCHEMA public TO passage_app;
     SQL
+  70-transport-db.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_TRANSPORT_PASSWORD" <<'SQL'
+    CREATE ROLE debezium_cdc_transport LOGIN NOSUPERUSER NOBYPASSRLS REPLICATION PASSWORD :'cdc_password';
+    SELECT 'CREATE DATABASE passage_transport' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_transport')\gexec
+    REVOKE CONNECT ON DATABASE passage_transport FROM PUBLIC;
+    GRANT CONNECT, CREATE ON DATABASE passage_transport TO passage_app;
+    GRANT CONNECT ON DATABASE passage_transport TO debezium_cdc_transport;
+    \c passage_transport
+    GRANT ALL ON SCHEMA public TO passage_app;
+    SQL
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -121,7 +152,7 @@ spec:
         app.kubernetes.io/name: postgres
       annotations:
         # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
-        passage.dev/init-rev: "6"
+        passage.dev/init-rev: "7"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -154,6 +185,9 @@ spec:
             - name: CDC_EAM_PASSWORD
               valueFrom:
                 secretKeyRef: { name: eam-cdc, key: CDC_PASSWORD }
+            - name: CDC_TRANSPORT_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: transport-cdc, key: CDC_PASSWORD }
             - name: ORG_OWNER_PASSWORD
               valueFrom:
                 secretKeyRef: { name: hello-ledger-db, key: ORG_OWNER_PASSWORD, optional: true }
