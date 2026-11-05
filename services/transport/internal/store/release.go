@@ -31,9 +31,14 @@ const releaseColumns = `id, load_id, legal_entity_id::text, carriers, coalesce(c
 // or refused with AUTH-0003, and nothing is published. The release takes the
 // tender start's per-load lock and gates: a FAILed DG check (TMS-0130), an OPEN
 // screening hold (TMS-0133) or an open tender (TMS-0114) refuse it, so the
-// workflow is not started for a cascade transport would refuse. A replay with
-// the same Idempotency-Key returns the first release and publishes nothing.
-func (s *Postgres) ReleaseLoad(ctx context.Context, in domain.LoadRelease, idem Idem, now time.Time) (domain.LoadRelease, error) {
+// workflow is not started for a cascade transport would refuse. version is the
+// If-Match value and must be the load's version (412 conflict_version
+// otherwise); it is compared under the per-load lock that serialises every
+// release and tender start of the load. The load moves from PLANNED or RATED
+// to TENDERED; any other status is 409 TMS-0136, so a released load is not
+// released twice. A replay with the same Idempotency-Key returns the first
+// release with the load as it is now and publishes nothing.
+func (s *Postgres) ReleaseLoad(ctx context.Context, in domain.LoadRelease, version int, idem Idem, now time.Time) (domain.LoadRelease, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.LoadRelease
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -52,7 +57,8 @@ func (s *Postgres) ReleaseLoad(ctx context.Context, in domain.LoadRelease, idem 
 				return false, reuse()
 			}
 			out = r
-			return true, nil
+			out.LoadStatus, out.LoadVersion, err = loadState(ctx, tx, p.TenantID, r.LoadID, false)
+			return true, err
 		}
 		if done, err := replay(); done || err != nil {
 			return err
@@ -71,13 +77,28 @@ func (s *Postgres) ReleaseLoad(ctx context.Context, in domain.LoadRelease, idem 
 		if done, err := replay(); done || err != nil {
 			return err
 		}
+		// The version the caller saw. The row lock comes after the gates, which
+		// lock a tender before its load (as a carrier response does).
+		_, current, err := loadState(ctx, tx, p.TenantID, in.LoadID, false)
+		if err != nil {
+			return err
+		}
+		if current != version {
+			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "the load changed since it was read; reload it and release it again")
+		}
 		if err := dgGate(ctx, tx, p.TenantID, in.LoadID); err != nil {
 			return err
 		}
 		if err := screeningGate(ctx, tx, p.TenantID, in.LoadID); err != nil {
 			return err
 		}
+		// A pending tender past its deadline is cascaded here; when it fails the
+		// load goes back to PLANNED and can be released again.
 		if err := openTenderGate(ctx, tx, p.TenantID, in.LoadID, now); err != nil {
+			return err
+		}
+		status, loadVersion, err := moveLoad(ctx, tx, p.TenantID, in.LoadID, domain.MoveRelease)
+		if err != nil {
 			return err
 		}
 		carriers, err := json.Marshal(in.Carriers)
@@ -98,6 +119,7 @@ func (s *Postgres) ReleaseLoad(ctx context.Context, in domain.LoadRelease, idem 
 		if err != nil {
 			return err
 		}
+		out.LoadStatus, out.LoadVersion = status, loadVersion
 		return enqueueReleased(ctx, tx, p.TenantID, out)
 	})
 	return out, err

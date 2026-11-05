@@ -21,11 +21,6 @@ const (
 // LoadModes lists the modes in display order.
 var LoadModes = []string{ModeTL, ModeLTL, ModeParcel, ModeIntermodal}
 
-// LoadPlanned is the state of a load built by rule and not yet rated or tendered.
-// The other §6.34.4 states (RATED, TENDERED, ACCEPTED, DISPATCHED, IN_TRANSIT,
-// DELIVERED, CLOSED, CANCELLED) are set by later steps of the load's life.
-const LoadPlanned = "PLANNED"
-
 // MaxBuildShipments bounds one load build request.
 const MaxBuildShipments = 500
 

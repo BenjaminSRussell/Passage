@@ -93,7 +93,7 @@ type Store interface {
 	BuildLoads(ctx context.Context, loads []domain.Load, idem Idem) ([]domain.Load, error)
 	ListLoads(ctx context.Context, f LoadFilter) ([]domain.Load, error)
 	GetLoad(ctx context.Context, id string) (domain.Load, error)
-	ReleaseLoad(ctx context.Context, in domain.LoadRelease, idem Idem, now time.Time) (domain.LoadRelease, error)
+	ReleaseLoad(ctx context.Context, in domain.LoadRelease, version int, idem Idem, now time.Time) (domain.LoadRelease, error)
 	RecordDGCheck(ctx context.Context, in domain.DGCheck) (domain.DGCheck, error)
 	ListDGChecks(ctx context.Context, loadID string) ([]domain.DGCheck, error)
 	DecideFreightBill(ctx context.Context, id, action, reason string, version int, idem Idem, now time.Time) (domain.FreightBill, error)

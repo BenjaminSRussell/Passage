@@ -22,6 +22,10 @@ type LoadRelease struct {
 	ReleasedBy       string            `json:"releasedBy"`
 	LegalEntityScope []string          `json:"legalEntityScope"`
 	ReleasedAt       time.Time         `json:"releasedAt"`
+	// LoadStatus and LoadVersion are the load's status and version after the
+	// release (TENDERED), or as they are now when the release is replayed.
+	LoadStatus  string `json:"loadStatus"`
+	LoadVersion int    `json:"loadVersion"`
 }
 
 // ReleaseOf returns the release of the tender t would start: its carriers in

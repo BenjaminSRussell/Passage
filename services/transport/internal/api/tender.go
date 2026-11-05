@@ -107,7 +107,8 @@ func (a *API) startTender(w http.ResponseWriter, r *http.Request) {
 // releaseLoad releases a load for tendering (FR-34.5): it takes the tender
 // start's body, checks it the same way and publishes load.released, from which
 // workflow-ts starts the tender cascade. Who released it and in which legal
-// entities come from the verified caller, never from the body (#426).
+// entities come from the verified caller, never from the body (#426). If-Match
+// carries the load version the planner saw; the load moves to TENDERED.
 func (a *API) releaseLoad(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -115,6 +116,11 @@ func (a *API) releaseLoad(w http.ResponseWriter, r *http.Request) {
 	loadID := chi.URLParam(r, "id")
 	if !uuidRe.MatchString(loadID) {
 		validationFailed(w, r, map[string]string{"id": "must be a lower-case UUID"})
+		return
+	}
+	version, err := ifMatch(r, "load")
+	if err != nil {
+		httpx.Fail(w, r, err)
 		return
 	}
 	idem, ok := readIdem(w, r)
@@ -131,7 +137,7 @@ func (a *API) releaseLoad(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	release, err := a.store.ReleaseLoad(r.Context(), domain.ReleaseOf(t), idem, a.now())
+	release, err := a.store.ReleaseLoad(r.Context(), domain.ReleaseOf(t), version, idem, a.now())
 	if err != nil {
 		a.fail(w, r, "release load failed", err)
 		return

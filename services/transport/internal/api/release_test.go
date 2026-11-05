@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/api"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/domain"
@@ -15,15 +17,31 @@ import (
 
 const releaseID = "0190f0a0-0000-7000-8000-0000000000f3"
 
-// ReleaseLoad fills the releaser from the principal in ctx, as the Postgres store does.
-func (f *fakeStore) ReleaseLoad(ctx context.Context, in domain.LoadRelease, idem store.Idem, now time.Time) (domain.LoadRelease, error) {
-	f.release, f.releaseIdem = in, idem
+// ReleaseLoad fills the releaser from the principal in ctx and moves the load
+// to TENDERED, as the Postgres store does.
+func (f *fakeStore) ReleaseLoad(ctx context.Context, in domain.LoadRelease, version int, idem store.Idem, now time.Time) (domain.LoadRelease, error) {
+	f.release, f.releaseVer, f.releaseIdem = in, version, idem
 	if f.releaseErr != nil {
 		return domain.LoadRelease{}, f.releaseErr
 	}
 	p, _ := tenant.FromContext(ctx)
 	in.ID, in.LegalEntityID, in.ReleasedBy, in.LegalEntityScope, in.ReleasedAt = releaseID, p.LegalEntityID, p.UserID, tenant.LegalEntityScopeList(p), now
+	in.LoadStatus, in.LoadVersion = domain.LoadTendered, version+1
 	return in, nil
+}
+
+// releaseLoad posts a release with the load version as If-Match.
+func releaseLoad(t *testing.T, h http.Handler, body string, header map[string]string, duties ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	h2 := map[string]string{"If-Match": `"1"`}
+	for k, v := range header {
+		if v == "" {
+			delete(h2, k)
+			continue
+		}
+		h2[k] = v
+	}
+	return doWith(t, h, http.MethodPost, base+"/loads/"+loadID+":release", body, h2, duties...)
 }
 
 func TestReleaseLoad_PassesTheCascadeAndAnswersAccepted(t *testing.T) {
@@ -31,7 +49,7 @@ func TestReleaseLoad_PassesTheCascadeAndAnswersAccepted(t *testing.T) {
 	f := &fakeStore{}
 	h := clockRouter(f, &now)
 	body := `{"carriers":[{"carrierId":"` + carrierA + `","rateQuoted":"120.5"},{"carrierId":"` + carrierB + `"}],"currency":"USD","timeoutMin":45}`
-	rec := doWith(t, h, http.MethodPost, base+"/loads/"+loadID+":release", body, map[string]string{"Idempotency-Key": "release-1"}, api.DutyTender)
+	rec := releaseLoad(t, h, body, map[string]string{"Idempotency-Key": "release-1", "If-Match": `W/"4"`}, api.DutyTender)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -46,6 +64,10 @@ func TestReleaseLoad_PassesTheCascadeAndAnswersAccepted(t *testing.T) {
 	if got.ID != releaseID || got.LoadID != loadID || got.ReleasedBy != "user-test" || len(got.LegalEntityScope) != 1 || !got.ReleasedAt.Equal(t0) {
 		t.Fatalf("release = %+v", got)
 	}
+	// The response carries the load's status after the release.
+	if got.LoadStatus != domain.LoadTendered || got.LoadVersion != 5 || f.releaseVer != 4 {
+		t.Fatalf("load after release = %s v%d, If-Match passed %d", got.LoadStatus, got.LoadVersion, f.releaseVer)
+	}
 	if f.releaseIdem.Key != "release-1" || f.releaseIdem.Fingerprint == "" {
 		t.Fatalf("idempotency = %+v", f.releaseIdem)
 	}
@@ -53,9 +75,26 @@ func TestReleaseLoad_PassesTheCascadeAndAnswersAccepted(t *testing.T) {
 
 func TestReleaseLoad_DefaultsTheTimeout(t *testing.T) {
 	f := &fakeStore{}
-	rec := do(t, router(f), http.MethodPost, base+"/loads/"+loadID+":release", `{"carriers":[{"carrierId":"`+carrierA+`"}]}`, api.DutyTender)
+	rec := releaseLoad(t, router(f), `{"carriers":[{"carrierId":"`+carrierA+`"}]}`, nil, api.DutyTender)
 	if rec.Code != http.StatusAccepted || f.release.TimeoutMin != 120 || f.release.Currency != "" {
 		t.Fatalf("status = %d, release %+v", rec.Code, f.release)
+	}
+}
+
+// The load version is required: 428 without If-Match, 400 when it is not a version.
+func TestReleaseLoad_RequiresIfMatch(t *testing.T) {
+	body := `{"carriers":[{"carrierId":"` + carrierA + `"}]}`
+	f := &fakeStore{}
+	rec := releaseLoad(t, router(f), body, map[string]string{"If-Match": ""}, api.DutyTender)
+	if rec.Code != http.StatusPreconditionRequired || problem(t, rec).Code != "COM-0428" {
+		t.Fatalf("no If-Match = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = releaseLoad(t, router(f), body, map[string]string{"If-Match": `"latest"`}, api.DutyTender)
+	if rec.Code != http.StatusBadRequest || problem(t, rec).Errors["If-Match"] == "" {
+		t.Fatalf("bad If-Match = %d %s", rec.Code, rec.Body.String())
+	}
+	if f.release.LoadID != "" {
+		t.Fatal("the store was called without a load version")
 	}
 }
 
@@ -73,7 +112,7 @@ func TestReleaseLoad_RefusesBadCascadesAndReleaserFields(t *testing.T) {
 		"rate with 3 decimal": `{"carriers":[{"carrierId":"` + carrierA + `","rateQuoted":"1.005"}],"currency":"USD"}`,
 	} {
 		f := &fakeStore{}
-		rec := do(t, router(f), http.MethodPost, base+"/loads/"+loadID+":release", body, api.DutyTender)
+		rec := releaseLoad(t, router(f), body, nil, api.DutyTender)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, body %s", name, rec.Code, rec.Body.String())
 		}
@@ -81,23 +120,31 @@ func TestReleaseLoad_RefusesBadCascadesAndReleaserFields(t *testing.T) {
 			t.Errorf("%s: the store was called", name)
 		}
 	}
-	if rec := do(t, router(&fakeStore{}), http.MethodPost, base+"/loads/NOT-A-UUID:release", `{}`, api.DutyTender); rec.Code != http.StatusBadRequest {
+	if rec := doWith(t, router(&fakeStore{}), http.MethodPost, base+"/loads/NOT-A-UUID:release", `{}`, map[string]string{"If-Match": `"1"`}, api.DutyTender); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad load id = %d", rec.Code)
 	}
 }
 
 func TestReleaseLoad_PassesStoreRefusals(t *testing.T) {
 	body := `{"carriers":[{"carrierId":"` + carrierA + `"}]}`
-	rec := do(t, router(&fakeStore{releaseErr: conflict(domain.CodeTenderOpen)}), http.MethodPost, base+"/loads/"+loadID+":release", body, api.DutyTender)
-	if rec.Code != http.StatusConflict || problem(t, rec).Code != domain.CodeTenderOpen {
-		t.Fatalf("open tender: status = %d, body %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, router(&fakeStore{releaseErr: store.NotFound("load")}), http.MethodPost, base+"/loads/"+loadID+":release", body, api.DutyTender)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown load: status = %d", rec.Code)
+	for name, c := range map[string]struct {
+		err    error
+		status int
+		code   string
+	}{
+		"open tender":      {conflict(domain.CodeTenderOpen), http.StatusConflict, domain.CodeTenderOpen},
+		"already tendered": {conflict(domain.CodeLoadState), http.StatusConflict, domain.CodeLoadState},
+		"stale version":    {httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionConflict, "changed"), http.StatusPreconditionFailed, store.CodeVersionConflict},
+		"failed DG check":  {httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeDGSegregation, "dg"), http.StatusUnprocessableEntity, domain.CodeDGSegregation},
+		"unknown load":     {store.NotFound("load"), http.StatusNotFound, domain.CodeNotFound},
+	} {
+		rec := releaseLoad(t, router(&fakeStore{releaseErr: c.err}), body, nil, api.DutyTender)
+		if rec.Code != c.status || problem(t, rec).Code != c.code {
+			t.Errorf("%s: status = %d, body %s", name, rec.Code, rec.Body.String())
+		}
 	}
 	// Neither the planning nor the carrier-response duty releases a load.
-	if rec := do(t, router(&fakeStore{}), http.MethodPost, base+"/loads/"+loadID+":release", body, api.DutyPlan, api.DutyRespond); rec.Code != http.StatusForbidden {
+	if rec := releaseLoad(t, router(&fakeStore{}), body, nil, api.DutyPlan, api.DutyRespond); rec.Code != http.StatusForbidden {
 		t.Fatalf("without transport.load.tender = %d, want 403", rec.Code)
 	}
 }

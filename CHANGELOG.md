@@ -32,6 +32,12 @@ release may change public APIs.
   migrations 0011 and 0012; own `debezium_cdc_transport` role and `passage_transport` database in the dev Postgres;
   one Vault key, `passage/dev/transport-postgres/cdc-password`; literal ACLs) to `passage.tms.<aggregate_type>`, so the
   release reaches `passage.tms.load` and the tender outcomes `passage.tms.tender`.
+- Transport load status through the tender (#426): the release moves a PLANNED or RATED load to TENDERED and needs
+  `If-Match` with the load version (428 without it, 412 `conflict_version` when stale; `GET /loads/{id}` returns the
+  version as ETag); a load in another status, such as one already released, is 409 TMS-0136, so a load is released
+  once. The release response carries `loadStatus` and `loadVersion`. A tender start also tenders the load (TENDERED
+  loads included, for the workflow's start after a release); an accepted tender makes the load ACCEPTED and a failed
+  one (every carrier declined or timed out) PLANNED again. The moves are checked in `domain.NextLoadStatus`.
 - Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
   in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev

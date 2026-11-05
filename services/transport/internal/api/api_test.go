@@ -58,6 +58,7 @@ type fakeStore struct {
 	// Load release (release_test.go).
 	release     domain.LoadRelease
 	releaseIdem store.Idem
+	releaseVer  int
 	releaseErr  error
 
 	// Slice 3: loads, DG checks and freight bill decisions (load_test.go).

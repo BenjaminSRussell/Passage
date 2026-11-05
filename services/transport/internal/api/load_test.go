@@ -161,7 +161,7 @@ func TestBuildLoads_StoreConflictPassesThrough(t *testing.T) {
 }
 
 func TestListAndGetLoad(t *testing.T) {
-	st := &fakeStore{load: domain.Load{ID: loadID, Status: domain.LoadPlanned},
+	st := &fakeStore{load: domain.Load{ID: loadID, Status: domain.LoadPlanned, Version: 3},
 		dgChecks: []domain.DGCheck{{ID: "dg-1", LoadID: loadID, Result: domain.DGWarn}}}
 	h := router(st)
 	if rec := do(t, h, http.MethodGet, base+"/loads?status=BOGUS", "", api.DutyView); rec.Code != http.StatusBadRequest {
@@ -178,7 +178,7 @@ func TestListAndGetLoad(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("get = %d %s", rec.Code, rec.Body.String())
 	}
-	if got.ID != loadID || len(got.DGChecks) != 1 || got.DGChecks[0].Result != domain.DGWarn {
+	if got.ID != loadID || len(got.DGChecks) != 1 || got.DGChecks[0].Result != domain.DGWarn || rec.Header().Get("ETag") != `"3"` {
 		t.Fatalf("detail = %+v", got)
 	}
 	if rec := do(t, h, http.MethodGet, base+"/loads/not-a-uuid", "", api.DutyView); rec.Code != http.StatusNotFound || problem(t, rec).Code != domain.CodeNotFound {

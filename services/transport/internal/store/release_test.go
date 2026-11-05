@@ -73,11 +73,12 @@ func TestReleaseLoad_PublishesTheVerifiedReleaser(t *testing.T) {
 	// Fields the store must not take from its input.
 	in.ReleasedBy, in.LegalEntityScope, in.LegalEntityID = "someone-else", []string{entityB}, entityB
 	idem := store.Idem{Key: "release-1", Fingerprint: "f1"}
-	got, err := s.ReleaseLoad(ctxBoth, in, idem, t0)
+	got, err := s.ReleaseLoad(ctxBoth, in, 1, idem, t0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ReleasedBy != "u" || got.LegalEntityID != entityA || !slices.Equal(got.LegalEntityScope, []string{entityA, entityB}) || !got.ReleasedAt.Equal(t0) {
+	if got.ReleasedBy != "u" || got.LegalEntityID != entityA || !slices.Equal(got.LegalEntityScope, []string{entityA, entityB}) || !got.ReleasedAt.Equal(t0) ||
+		got.LoadStatus != domain.LoadTendered || got.LoadVersion != 2 {
 		t.Fatalf("release = %+v", got)
 	}
 	if len(got.Carriers) != 2 || got.Carriers[0] != (domain.ReleasedCarrier{CarrierID: carrierA, RateQuoted: "120.00"}) || got.Carriers[1].CarrierID != carrierB || got.TimeoutMin != 45 {
@@ -100,11 +101,11 @@ func TestReleaseLoad_PublishesTheVerifiedReleaser(t *testing.T) {
 	}
 
 	// The same key and request replays the release and publishes nothing; another request under the key is refused.
-	again, err := s.ReleaseLoad(ctxBoth, in, idem, t0.Add(time.Minute))
-	if err != nil || again.ID != got.ID || !again.ReleasedAt.Equal(t0) {
+	again, err := s.ReleaseLoad(ctxBoth, in, 1, idem, t0.Add(time.Minute))
+	if err != nil || again.ID != got.ID || !again.ReleasedAt.Equal(t0) || again.LoadStatus != domain.LoadTendered || again.LoadVersion != 2 {
 		t.Fatalf("replay = %+v, %v", again, err)
 	}
-	if _, err := s.ReleaseLoad(ctxBoth, releaseOf(loadA, carrierB), store.Idem{Key: "release-1", Fingerprint: "f2"}, t0); problemCode(t, err) != store.CodeIdempotencyReuse {
+	if _, err := s.ReleaseLoad(ctxBoth, releaseOf(loadA, carrierB), 1, store.Idem{Key: "release-1", Fingerprint: "f2"}, t0); problemCode(t, err) != store.CodeIdempotencyReuse {
 		t.Fatalf("reused key = %v", err)
 	}
 	if n := len(events()); n != 1 {
@@ -112,7 +113,7 @@ func TestReleaseLoad_PublishesTheVerifiedReleaser(t *testing.T) {
 	}
 
 	// A caller scoped to another legal entity does not see the load, and nothing is published.
-	if _, err := s.ReleaseLoad(ctxB, releaseOf(loadA, carrierA), store.Idem{}, t0); problemCode(t, err) != domain.CodeNotFound {
+	if _, err := s.ReleaseLoad(ctxB, releaseOf(loadA, carrierA), 1, store.Idem{}, t0); problemCode(t, err) != domain.CodeNotFound {
 		t.Fatalf("release outside the caller's scope = %v, want TMS-0100", err)
 	}
 	// The release record follows the load's legal entity.
@@ -128,21 +129,21 @@ func TestReleaseLoad_PublishesTheVerifiedReleaser(t *testing.T) {
 	if _, err := s.CreateTender(ctxA, tender, store.Idem{}, t0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReleaseLoad(ctxA, releaseOf(loadA, carrierA), store.Idem{}, t0.Add(time.Minute)); problemCode(t, err) != domain.CodeTenderOpen {
+	if _, err := s.ReleaseLoad(ctxA, releaseOf(loadA, carrierA), 2, store.Idem{}, t0.Add(time.Minute)); problemCode(t, err) != domain.CodeTenderOpen {
 		t.Fatalf("release with a pending tender = %v, want TMS-0114", err)
 	}
 	if _, err := s.RecordDGCheck(ctxB, domain.DGCheck{LoadID: loadB, Regulation: domain.RegADR, Result: domain.DGFail, ADRPoints: dec("0"), Findings: []domain.DGFinding{}, ShippingPapers: domain.ShippingPapers(domain.DGRequest{}), CheckedAt: t0}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReleaseLoad(ctxB, releaseOf(loadB, carrierA), store.Idem{}, t0); problemCode(t, err) != domain.CodeDGSegregation {
+	if _, err := s.ReleaseLoad(ctxB, releaseOf(loadB, carrierA), 1, store.Idem{}, t0); problemCode(t, err) != domain.CodeDGSegregation {
 		t.Fatalf("release after a failed DG check = %v, want TMS-0130", err)
 	}
 	if n := len(events()); n != 1 {
 		t.Fatalf("load.released events after refusals = %d, want 1", n)
 	}
 	// A pending tender past its deadline is cascaded first, and once it has failed the load can be released again.
-	if _, err := s.ReleaseLoad(ctxA, releaseOf(loadA, carrierB), store.Idem{}, t0.Add(2*time.Hour)); err != nil {
-		t.Fatalf("release after the tender failed by time = %v", err)
+	if again, err := s.ReleaseLoad(ctxA, releaseOf(loadA, carrierB), 2, store.Idem{}, t0.Add(2*time.Hour)); err != nil || again.LoadStatus != domain.LoadTendered || again.LoadVersion != 4 {
+		t.Fatalf("release after the tender failed by time = %+v, %v (want TENDERED v4: PLANNED v3 after the failure)", again, err)
 	}
 	if n := len(events()); n != 2 {
 		t.Fatalf("load.released events = %d, want 2", n)

@@ -40,7 +40,9 @@ type TenderFilter struct {
 // cascaded first, so a tender that has failed by time no longer blocks a new one.
 // A load whose latest DG check FAILed is refused with TMS-0130 and nothing is
 // stored (AC-34.13, dg_check_mode BLOCK); so is a load with an OPEN screening
-// hold, with TMS-0133 (BR-34.17, AC-34.16).
+// hold, with TMS-0133 (BR-34.17, AC-34.16). The load moves to TENDERED; one
+// that is not PLANNED, RATED or already TENDERED by its release is refused
+// with TMS-0136.
 func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem, now time.Time) (domain.Tender, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Tender
@@ -82,6 +84,9 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 			return err
 		}
 		if err := openTenderGate(ctx, tx, p.TenantID, in.LoadID, now); err != nil {
+			return err
+		}
+		if _, _, err := moveLoad(ctx, tx, p.TenantID, in.LoadID, domain.MoveTender); err != nil {
 			return err
 		}
 		carriers, rates, attempts, err := marshalTender(in)
@@ -268,7 +273,8 @@ func (s *Postgres) ExpireTenders(ctx context.Context, now time.Time) ([]domain.T
 }
 
 // advance saves the tender's cascade state and writes one tender.expired event
-// per newly expired attempt. It bumps t.Version to the stored value.
+// per newly expired attempt. It bumps t.Version to the stored value and moves
+// the load to an ACCEPTED or failed tender's outcome (followTender).
 func advance(ctx context.Context, tx pgx.Tx, tenantID string, t *domain.Tender, expired []domain.Attempt) error {
 	_, _, attempts, err := marshalTender(*t)
 	if err != nil {
@@ -277,6 +283,9 @@ func advance(ctx context.Context, tx pgx.Tx, tenantID string, t *domain.Tender, 
 	if err := tx.QueryRow(ctx, `update tender set status = $3, attempts = $4::jsonb, accepted_carrier_id = $5::uuid, planner_task = $6,
 		pending_expires_at = $7, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2 returning version`,
 		tenantID, t.ID, t.Status, attempts, nullable(t.AcceptedCarrier), t.PlannerTask, pendingDeadline(*t)).Scan(&t.Version); err != nil {
+		return err
+	}
+	if err := followTender(ctx, tx, tenantID, *t); err != nil {
 		return err
 	}
 	for _, a := range expired {
