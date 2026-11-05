@@ -25,9 +25,11 @@ import (
 // entity, signed as multipart/signed with a detached CMS signature; the
 // partner answers synchronously in the HTTP response with an MDN
 // (multipart/report, RFC 3798), optionally signed, which carries the
-// Received-Content-MIC the sender compares with its own (BR-35.11).
-// Encryption (application/pkcs7-mime EnvelopedData), compression and
-// asynchronous MDNs are not implemented.
+// Received-Content-MIC the sender compares with its own (BR-35.11). The
+// signed entity may be encrypted (application/pkcs7-mime EnvelopedData, see
+// enveloped.go), and the MDN may be asked for asynchronously
+// (Receipt-Delivery-Option): the partner then answers the POST with an empty
+// 2xx and posts the MDN to our URL later. Compression is not implemented.
 
 // AS2Identity is our side: the AS2 name and the certificate and key that
 // sign messages and MDNs. Key nil sends unsigned messages and MDNs.
@@ -38,13 +40,14 @@ type AS2Identity struct {
 }
 
 // AS2Partner is a trading partner's AS2 profile: its name, endpoint, the
-// certificate its signatures must verify against, and whether its messages
-// must be signed.
+// certificate its signatures must verify against (and that we encrypt to),
+// and whether its messages must be signed or encrypted.
 type AS2Partner struct {
-	ID            string
-	URL           string
-	Cert          *x509.Certificate
-	RequireSigned bool
+	ID               string
+	URL              string
+	Cert             *x509.Certificate
+	RequireSigned    bool
+	RequireEncrypted bool
 }
 
 const (
@@ -54,12 +57,18 @@ const (
 	mdnProcessed    = "automatic-action/MDN-sent-automatically; processed"
 )
 
-// AS2Client sends to one partner and requires a synchronous MDN.
+// AS2Client sends to one partner. SignHash is the signature digest (zero is
+// SHA-256); Encryption is one of the Encrypt* algorithms (empty or "none"
+// sends the signed entity in clear); AsyncMDNURL, when set, asks for the MDN
+// at that URL instead of in the HTTP response.
 type AS2Client struct {
 	Us               AS2Identity
 	Partner          AS2Partner
 	HTTP             *http.Client
 	RequireSignedMDN bool
+	SignHash         crypto.Hash
+	Encryption       string
+	AsyncMDNURL      string
 	Now              func() time.Time
 }
 
@@ -121,8 +130,8 @@ func micOf(data []byte, h crypto.Hash) string {
 	return base64.StdEncoding.EncodeToString(d.Sum(nil)) + ", " + micalgOf[h]
 }
 
-// multipartSigned wraps entity and its detached signature.
-func multipartSigned(entity, sig []byte) (contentType string, body []byte) {
+// multipartSigned wraps entity and its detached signature made with hash.
+func multipartSigned(entity, sig []byte, hash crypto.Hash) (contentType string, body []byte) {
 	boundary := randomBoundary()
 	var b bytes.Buffer
 	b.WriteString("--" + boundary + "\r\n")
@@ -135,7 +144,7 @@ func multipartSigned(entity, sig []byte) (contentType string, body []byte) {
 		enc = enc[76:]
 	}
 	b.WriteString(enc + "\r\n--" + boundary + "--\r\n")
-	return fmt.Sprintf(`multipart/signed; protocol="application/pkcs7-signature"; micalg=sha-256; boundary="%s"`, boundary), b.Bytes()
+	return fmt.Sprintf(`multipart/signed; protocol="application/pkcs7-signature"; micalg=%s; boundary="%s"`, micalgOf[hash], boundary), b.Bytes()
 }
 
 // splitSigned returns the exact bytes of the signed first part and the
@@ -232,21 +241,44 @@ func (c *AS2Client) Send(ctx context.Context, m Message) (Receipt, error) {
 	if c.Now != nil {
 		now = c.Now
 	}
+	hash := c.SignHash
+	if hash == 0 {
+		hash = crypto.SHA256
+	}
+	if _, ok := micalgOf[hash]; !ok {
+		return Receipt{}, fmt.Errorf("%w: signature digest %v is not SHA-256, SHA-384 or SHA-512", ErrInvalid, hash)
+	}
+	encrypt := c.Encryption != "" && c.Encryption != EncryptNone
 	var (
 		contentType string
 		body        []byte
 		mic         string
 	)
-	if c.Us.Key != nil {
-		entity := payloadEntity(m)
-		sig, err := SignDetached(entity, c.Us.Cert, c.Us.Key, now())
+	entity := payloadEntity(m)
+	switch {
+	case c.Us.Key != nil:
+		sig, err := SignDetachedWith(entity, c.Us.Cert, c.Us.Key, now(), hash)
 		if err != nil {
 			return Receipt{}, err
 		}
-		contentType, body = multipartSigned(entity, sig)
-		mic = micOf(entity, crypto.SHA256)
-	} else {
-		contentType, body, mic = m.ContentType, m.Payload, micOf(m.Payload, crypto.SHA256)
+		contentType, body = multipartSigned(entity, sig, hash)
+		mic = micOf(entity, hash)
+		if encrypt {
+			// RFC 4130 §7.3.1: the MIC stays over the signed entity; the
+			// encrypted entity is the multipart/signed with its headers.
+			body = append([]byte("Content-Type: "+contentType+"\r\n\r\n"), body...)
+		}
+	case encrypt:
+		body, mic = entity, micOf(entity, hash)
+	default:
+		contentType, body, mic = m.ContentType, m.Payload, micOf(m.Payload, hash)
+	}
+	if encrypt {
+		sealed, err := Encrypt(body, c.Partner.Cert, c.Encryption)
+		if err != nil {
+			return Receipt{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		contentType, body = `application/pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"`, sealed
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Partner.URL, bytes.NewReader(body))
 	if err != nil {
@@ -264,7 +296,13 @@ func (c *AS2Client) Send(ctx context.Context, m Message) (Receipt, error) {
 	h.Set("Date", now().UTC().Format(time.RFC1123Z))
 	h.Set("Disposition-Notification-To", as2Quote(c.Us.ID))
 	if c.RequireSignedMDN {
-		h.Set("Disposition-Notification-Options", "signed-receipt-protocol=required, pkcs7-signature; signed-receipt-micalg=required, sha-256")
+		h.Set("Disposition-Notification-Options", "signed-receipt-protocol=required, pkcs7-signature; signed-receipt-micalg=required, "+micalgOf[hash])
+	}
+	if c.AsyncMDNURL != "" {
+		h.Set("Receipt-Delivery-Option", c.AsyncMDNURL)
+	}
+	if encrypt {
+		h.Set("Content-Transfer-Encoding", "binary")
 	}
 	hc := c.HTTP
 	if hc == nil {
@@ -282,6 +320,9 @@ func (c *AS2Client) Send(ctx context.Context, m Message) (Receipt, error) {
 	if resp.StatusCode/100 != 2 {
 		return Receipt{}, fmt.Errorf("as2 post: partner answered HTTP %d", resp.StatusCode)
 	}
+	if c.AsyncMDNURL != "" {
+		return Receipt{Transport: "as2", MessageID: m.ID, Reference: msgID, SentMIC: mic, Pending: true, At: now().UTC()}, nil
+	}
 	if len(raw) > maxMDNBytes {
 		return Receipt{}, errors.New("as2: MDN is larger than 1 MiB")
 	}
@@ -289,20 +330,34 @@ func (c *AS2Client) Send(ctx context.Context, m Message) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
-	if c.RequireSignedMDN && !mdn.Signed {
-		return Receipt{}, sigErr("the MDN is not signed")
-	}
-	if mdn.OriginalMessageID != msgID {
-		return Receipt{}, sigErr("MDN answers %s, not %s", mdn.OriginalMessageID, msgID)
-	}
-	receipt := Receipt{Transport: "as2", MessageID: m.ID, Reference: mdn.OriginalMessageID, MIC: mdn.MIC, Disposition: mdn.Disposition, SignedMDN: mdn.Signed, At: now().UTC()}
-	if !mdn.Processed() {
-		return receipt, fmt.Errorf("%w: MDN disposition %q", ErrRejected, mdn.Disposition)
-	}
-	if normalizeMIC(mdn.MIC) != normalizeMIC(mic) {
-		return receipt, sigErr("MDN MIC %q does not match ours %q", mdn.MIC, mic)
+	receipt := Receipt{Transport: "as2", MessageID: m.ID, Reference: mdn.OriginalMessageID, MIC: mdn.MIC, SentMIC: mic, Disposition: mdn.Disposition, SignedMDN: mdn.Signed, At: now().UTC()}
+	if err := mdn.Check(msgID, mic, c.RequireSignedMDN); err != nil {
+		if errors.Is(err, ErrRejected) {
+			return receipt, err
+		}
+		return Receipt{}, err
 	}
 	return receipt, nil
+}
+
+// Check holds an MDN to the message it answers: it must be for msgID (with
+// angle brackets), signed when requireSigned is set, say processed and carry
+// the MIC we computed. A refusal by the partner is ErrRejected; anything that
+// makes the MDN untrustworthy is ErrSignature.
+func (m MDN) Check(msgID, sentMIC string, requireSigned bool) error {
+	if requireSigned && !m.Signed {
+		return sigErr("the MDN is not signed")
+	}
+	if m.OriginalMessageID != msgID {
+		return sigErr("MDN answers %s, not %s", m.OriginalMessageID, msgID)
+	}
+	if !m.Processed() {
+		return fmt.Errorf("%w: MDN disposition %q", ErrRejected, m.Disposition)
+	}
+	if normalizeMIC(m.MIC) != normalizeMIC(sentMIC) {
+		return sigErr("MDN MIC %q does not match ours %q", m.MIC, sentMIC)
+	}
+	return nil
 }
 
 func normalizeMIC(s string) string {
@@ -370,134 +425,4 @@ func ReadMDN(contentType string, body []byte, partnerCert *x509.Certificate) (MD
 		return mdn, nil
 	}
 	return mdn, errors.New("as2: MDN has no message/disposition-notification part")
-}
-
-// AS2Server receives AS2 messages for our identity and answers each with a
-// synchronous MDN. Partner resolves the AS2-From name; Deliver hands the
-// verified payload on (to the inbound receipt) and its error becomes an
-// unexpected-processing-error disposition.
-type AS2Server struct {
-	Us       AS2Identity
-	Partner  func(as2From string) (AS2Partner, bool)
-	Deliver  func(ctx context.Context, from string, m Message) error
-	MaxBytes int64
-	Now      func() time.Time
-}
-
-func (s *AS2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "AS2 accepts POST only", http.StatusMethodNotAllowed)
-		return
-	}
-	from, to := as2Unquote(r.Header.Get("AS2-From")), as2Unquote(r.Header.Get("AS2-To"))
-	partner, ok := s.Partner(from)
-	if !ok || to != s.Us.ID {
-		http.Error(w, "unknown AS2-From or AS2-To", http.StatusForbidden)
-		return
-	}
-	msgID := strings.TrimSpace(r.Header.Get("Message-ID"))
-	if msgID == "" {
-		http.Error(w, "Message-ID is required", http.StatusBadRequest)
-		return
-	}
-	limit := s.MaxBytes
-	if limit <= 0 {
-		limit = defaultMaxBytes
-	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
-	if err != nil {
-		http.Error(w, "read body", http.StatusBadRequest)
-		return
-	}
-	if int64(len(body)) > limit {
-		http.Error(w, "message too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-	disposition, mic := mdnProcessed, ""
-	fail := func(modifier string) {
-		disposition = "automatic-action/MDN-sent-automatically; processed/error: " + modifier
-	}
-	msg := Message{ID: strings.Trim(msgID, "<>"), From: from, To: to}
-	media, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	switch {
-	case err != nil:
-		fail("unexpected-processing-error")
-	case media == "application/pkcs7-mime":
-		fail("decryption-failed")
-	case media == "multipart/signed":
-		signed, sig, err := splitSigned(params["boundary"], body)
-		if err != nil {
-			fail("integrity-check-failed")
-			break
-		}
-		hash, err := VerifyDetached(sig, signed, partner.Cert)
-		if err != nil {
-			fail("authentication-failed")
-			break
-		}
-		mic = micOf(signed, hash)
-		hdr, payload, err := parseEntity(signed)
-		if err != nil {
-			fail("unexpected-processing-error")
-			break
-		}
-		msg.ContentType, _, _ = mime.ParseMediaType(hdr.Get("Content-Type"))
-		msg.Payload = payload
-		if _, p, err := mime.ParseMediaType(hdr.Get("Content-Disposition")); err == nil {
-			msg.Filename = p["filename"]
-		}
-	case partner.RequireSigned:
-		fail("insufficient-message-security")
-	default:
-		mic = micOf(body, crypto.SHA256)
-		msg.ContentType, msg.Payload = media, body
-	}
-	if disposition == mdnProcessed {
-		if err := s.Deliver(r.Context(), from, msg); err != nil {
-			fail("unexpected-processing-error")
-		}
-	}
-	if r.Header.Get("Disposition-Notification-To") == "" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	s.writeMDN(w, r, from, msgID, mic, disposition)
-}
-
-func (s *AS2Server) writeMDN(w http.ResponseWriter, r *http.Request, to, origID, mic, disposition string) {
-	now := time.Now
-	if s.Now != nil {
-		now = s.Now
-	}
-	boundary := randomBoundary()
-	var b bytes.Buffer
-	text := "The AS2 message has been received and processed."
-	if disposition != mdnProcessed {
-		text = "The AS2 message could not be processed: " + disposition
-	}
-	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/plain; charset=us-ascii\r\n\r\n%s\r\n", boundary, text)
-	fmt.Fprintf(&b, "--%s\r\nContent-Type: message/disposition-notification\r\n\r\n", boundary)
-	fmt.Fprintf(&b, "Reporting-UA: passage-edi\r\nOriginal-Recipient: rfc822; %s\r\nFinal-Recipient: rfc822; %s\r\nOriginal-Message-ID: %s\r\n", s.Us.ID, s.Us.ID, origID)
-	if mic != "" {
-		fmt.Fprintf(&b, "Received-Content-MIC: %s\r\n", mic)
-	}
-	fmt.Fprintf(&b, "Disposition: %s\r\n\r\n--%s--\r\n", disposition, boundary)
-	reportType := fmt.Sprintf(`multipart/report; report-type=disposition-notification; boundary="%s"`, boundary)
-	contentType, body := reportType, b.Bytes()
-	if s.Us.Key != nil && strings.Contains(strings.ToLower(r.Header.Get("Disposition-Notification-Options")), "pkcs7-signature") {
-		entity := append([]byte("Content-Type: "+reportType+"\r\n\r\n"), body...)
-		if sig, err := SignDetached(entity, s.Us.Cert, s.Us.Key, now()); err == nil {
-			contentType, body = multipartSigned(entity, sig)
-		}
-	}
-	h := w.Header()
-	h.Set("Content-Type", contentType)
-	h.Set("MIME-Version", "1.0")
-	h.Set("AS2-Version", as2Version)
-	h.Set("AS2-From", as2Quote(s.Us.ID))
-	h.Set("AS2-To", as2Quote(to))
-	h.Set("Message-ID", "<mdn-"+randomBoundary()[14:]+">")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
 }

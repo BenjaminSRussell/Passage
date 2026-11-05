@@ -2,90 +2,21 @@ package transport
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/BenjaminSRussell/passage/services/edi/internal/transport/transporttest"
 )
 
-func newSigner(t *testing.T) ssh.Signer {
-	t.Helper()
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
-// startSFTPServer runs an in-process SSH server with the sftp subsystem on the
-// real file system; only client may log in. It returns the address and the
-// host key fingerprint.
-func startSFTPServer(t *testing.T, client ssh.PublicKey) (string, string) {
-	t.Helper()
-	host := newSigner(t)
-	conf := &ssh.ServerConfig{PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-		if string(key.Marshal()) == string(client.Marshal()) {
-			return nil, nil
-		}
-		return nil, os.ErrPermission
-	}}
-	conf.AddHostKey(host)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				_, chans, reqs, err := ssh.NewServerConn(conn, conf)
-				if err != nil {
-					return
-				}
-				go ssh.DiscardRequests(reqs)
-				for nc := range chans {
-					ch, creqs, err := nc.Accept()
-					if err != nil {
-						continue
-					}
-					go func() {
-						for r := range creqs {
-							ok := r.Type == "subsystem" && len(r.Payload) > 4 && string(r.Payload[4:]) == "sftp"
-							_ = r.Reply(ok, nil)
-							if ok {
-								if srv, err := sftp.NewServer(ch); err == nil {
-									_ = srv.Serve()
-									_ = srv.Close()
-								}
-							}
-						}
-					}()
-				}
-			}()
-		}
-	}()
-	return ln.Addr().String(), ssh.FingerprintSHA256(host.PublicKey())
-}
-
 func TestSFTP_SendAndPullAgainstAnSFTPServer(t *testing.T) {
-	key := newSigner(t)
-	addr, print := startSFTPServer(t, key.PublicKey())
+	key := transporttest.NewSigner(t)
+	addr, print := transporttest.StartSFTPServer(t, transporttest.SFTPLogin{Key: key.PublicKey()})
 	client, err := DialSFTP(context.Background(), SFTPConfig{Addr: addr, User: "edi", HostKeyFingerprint: print, Signer: key, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -147,9 +78,9 @@ func TestSFTP_SendAndPullAgainstAnSFTPServer(t *testing.T) {
 }
 
 func TestDialSFTP_PinsTheHostKey(t *testing.T) {
-	key := newSigner(t)
-	addr, print := startSFTPServer(t, key.PublicKey())
-	wrong := SFTPConfig{Addr: addr, User: "edi", HostKeyFingerprint: ssh.FingerprintSHA256(newSigner(t).PublicKey()), Signer: key, Timeout: 5 * time.Second}
+	key := transporttest.NewSigner(t)
+	addr, print := transporttest.StartSFTPServer(t, transporttest.SFTPLogin{Key: key.PublicKey()})
+	wrong := SFTPConfig{Addr: addr, User: "edi", HostKeyFingerprint: ssh.FingerprintSHA256(transporttest.NewSigner(t).PublicKey()), Signer: key, Timeout: 5 * time.Second}
 	if _, err := DialSFTP(context.Background(), wrong); err == nil || !strings.Contains(err.Error(), "does not match the pinned") {
 		t.Fatalf("err = %v", err)
 	}
@@ -158,7 +89,32 @@ func TestDialSFTP_PinsTheHostKey(t *testing.T) {
 			t.Fatalf("pin %q accepted", pin)
 		}
 	}
-	if _, err := DialSFTP(context.Background(), SFTPConfig{Addr: addr, User: "edi", HostKeyFingerprint: print, Signer: newSigner(t), Timeout: 5 * time.Second}); err == nil {
+	if _, err := DialSFTP(context.Background(), SFTPConfig{Addr: addr, User: "edi", HostKeyFingerprint: print, Signer: transporttest.NewSigner(t), Timeout: 5 * time.Second}); err == nil {
 		t.Fatal("an unknown client key logged in")
+	}
+}
+
+func TestSFTP_PasswordLoginAndFileSizeLimit(t *testing.T) {
+	addr, print := transporttest.StartSFTPServer(t, transporttest.SFTPLogin{User: "edi", Password: "s3cret"})
+	if _, err := DialSFTP(context.Background(), SFTPConfig{Addr: addr, User: "edi", HostKeyFingerprint: print, Password: "wrong", Timeout: 5 * time.Second}); err == nil {
+		t.Fatal("a wrong password logged in")
+	}
+	client, err := DialSFTP(context.Background(), SFTPConfig{Addr: addr, User: "edi", HostKeyFingerprint: print, Password: "s3cret", Timeout: 5 * time.Second, MaxFileBytes: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "big.edi"), []byte("123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ok.edi"), []byte("12345678"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Get(context.Background(), filepath.Join(dir, "big.edi")); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("a file over the limit: %v", err)
+	}
+	if got, err := client.Get(context.Background(), filepath.Join(dir, "ok.edi")); err != nil || string(got) != "12345678" {
+		t.Fatalf("%q %v", got, err)
 	}
 }
