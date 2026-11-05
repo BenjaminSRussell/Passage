@@ -89,6 +89,10 @@ type Inbound struct {
 	// each outbound control number inside the recording transaction, so a
 	// rolled-back receipt never consumes a number (gap-free, BR-35.5).
 	BuildAck func(next func() (int64, error)) (string, error)
+	// Source is set when a transport (AS2, SFTP) delivered the interchange:
+	// it is marked DONE in the same transaction, and the 997 is queued for
+	// delivery back over the partner's transport.
+	Source *InboundSource
 }
 
 // Received is the result of recording an inbound interchange. Messages carry
@@ -127,13 +131,16 @@ type MessageDetail struct {
 	Error          string          `json:"error,omitempty"`
 }
 
-// InterchangeDetail is one interchange with its messages and the 997 sent back.
-// The raw payload is not returned: it carries N1/N3/N4 party data that BR-35.12
-// masks, and the masking viewer belongs to the message monitor.
+// InterchangeDetail is one interchange with its messages, the 997 sent back
+// and its deliveries over the partner's transport (those the caller's legal
+// entity scope covers). The raw payload is not returned: it carries N1/N3/N4
+// party data that BR-35.12 masks, and the masking viewer belongs to the
+// message monitor.
 type InterchangeDetail struct {
 	InterchangeSummary
 	AckPayload string          `json:"ack997,omitempty"`
 	Messages   []MessageDetail `json:"messages"`
+	Deliveries []DeliveryView  `json:"deliveries,omitempty"`
 }
 
 // InterchangeFilter narrows the interchange list. Direction is IN, OUT or
@@ -369,6 +376,16 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 				}
 			}
 		}
+		if in.Source != nil {
+			if err := recordInboundDone(ctx, tx, tid, in.PartnerID, interchangeID, *in.Source); err != nil {
+				return err
+			}
+			if ack != "" {
+				if _, err := enqueueDelivery(ctx, tx, tid, in.PartnerID, interchangeID, "ACK", "997", in.ISAControl); err != nil {
+					return err
+				}
+			}
+		}
 		out = Received{InterchangeID: interchangeID, AckPayload: ack, AckStatus: status, Messages: messages}
 		return nil
 	})
@@ -445,7 +462,12 @@ func (s *Store) GetInterchange(ctx context.Context, id string) (InterchangeDetai
 			}
 			out.Messages = append(out.Messages, m)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		out.Deliveries, err = listDeliveries(ctx, tx, id)
+		return err
 	})
 	return out, err
 }

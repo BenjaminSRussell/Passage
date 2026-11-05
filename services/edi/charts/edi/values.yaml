@@ -14,3 +14,18 @@ serviceIdentity: { signingKeySecret: "", keyId: "" }
 sources: { fulfillmentUrl: "", billingUrl: "", salesUrl: "" }
 # Serves POST /partners/{id}/outbound with the document in the request body (the web Send EDI document screen and 855).
 allowBodyOutbound: true
+# Partner transports (#483). Secret material never goes to the database: a partner's transport names files in the
+# Secret `secretName`, mounted read-only at /var/run/passage/edi-secrets (EDI_SECRETS_DIR). Each key of the Secret is
+# one reference: an AS2 signing key (PEM private key followed by our certificate), an SFTP SSH private key (OpenSSH
+# or PEM, unencrypted) or an SFTP password (one line). With externalSecret.enabled the chart creates that Secret
+# from every property of the Vault path `externalSecret.key` through the ClusterSecretStore `externalSecret.storeName`.
+transports:
+  secretName: ""
+  externalSecret: { enabled: false, storeName: passage, key: "", refreshInterval: 1h }
+  # Run the delivery dispatcher and the SFTP poller in every replica (rows are leased, replicas never send one twice).
+  workers: false
+  intervalSeconds: 15
+  # The AS2 listener partners post to, on its own port and Service (edi-as2). It takes no Passage token: expose it
+  # through a route that does not require a JWT (not the passage-api Gateway SecurityPolicy); the caller is
+  # authenticated by its AS2 signature against the partner certificate.
+  as2: { enabled: false, port: 8081, publicUrl: "" }

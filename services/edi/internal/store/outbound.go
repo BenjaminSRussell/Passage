@@ -36,11 +36,16 @@ type OutboundResult struct {
 	TransactionSet string `json:"transactionSet"`
 	ControlNumber  string `json:"controlNumber"`
 	X12            string `json:"x12"`
+	// Delivery is the queued transmission when the partner has an AS2 or
+	// SFTP transport; without one the document is only returned here.
+	Delivery *DeliveryView `json:"delivery,omitempty"`
 }
 
 // CreateOutbound records an outbound interchange with its one message (status
 // MAPPED, awaiting transport) and ack_status PENDING until the partner's 997
-// is matched. The control number comes from the same counter as the 997s
+// is matched. When the partner has an AS2 or SFTP transport in the caller's
+// scope a PENDING delivery is queued in the same transaction; the dispatcher
+// sends it and the message becomes SENT once the partner confirms receipt. The control number comes from the same counter as the 997s
 // sent to the partner, so outbound ISA13 values stay gap-free. A replay with
 // the same key and request hash returns the stored result with created=false.
 func (s *Store) CreateOutbound(ctx context.Context, key, requestHash string, o Outbound) (OutboundResult, bool, error) {
@@ -73,6 +78,9 @@ func (s *Store) CreateOutbound(ctx context.Context, key, requestHash string, o O
 		if _, err := tx.Exec(ctx, `insert into message (tenant_id, id, interchange_id, transaction_set, st_control, status, canonical)
 			values ($1,$2,$3,$4,'0001','MAPPED',$5)`,
 			tid, out.MessageID, out.InterchangeID, o.TransactionSet, nullBytes(o.Canonical)); err != nil {
+			return err
+		}
+		if out.Delivery, err = enqueueDelivery(ctx, tx, tid, o.PartnerID, out.InterchangeID, "DOCUMENT", o.TransactionSet, out.ControlNumber); err != nil {
 			return err
 		}
 		if err := storeResponse(ctx, tx, key, out); err != nil {

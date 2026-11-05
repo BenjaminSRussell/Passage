@@ -577,6 +577,15 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/trade-profile")
 }
 
+test_edi_transport_routes if {
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/transport")
+	allowed("edi.admin", "GET", "/edi/v1/partners/p1/transport")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/transport")
+	not allowed("edi.operate", "GET", "/edi/v1/partners/p1/transport")
+	allowed("edi.operate", "POST", "/edi/v1/interchanges/i1:resend")
+	not allowed("edi.admin", "POST", "/edi/v1/interchanges/i1:resend")
+}
+
 granted_duty_known(duty) if data.duties[duty]
 
 test_service_principals_hold_only_known_unprivileged_duties if {

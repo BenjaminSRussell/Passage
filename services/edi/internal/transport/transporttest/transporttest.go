@@ -38,6 +38,25 @@ func NewSigner(t testing.TB) ssh.Signer {
 	return s
 }
 
+// NewSSHKey returns a fresh Ed25519 SSH key and its unencrypted OpenSSH PEM,
+// the layout of an SFTP key secret.
+func NewSSHKey(t testing.TB) (ssh.Signer, []byte) {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, pem.EncodeToMemory(block)
+}
+
 // SFTPLogin is who may log in to the test server: a client public key, a
 // password, or both. User, when set, must match too.
 type SFTPLogin struct {

@@ -20,6 +20,11 @@ channels:
     messages:
       messageFailed:
         $ref: '#/components/messages/MessageFailed'
+  messageSent:
+    address: passage.edi.message
+    messages:
+      messageSent:
+        $ref: '#/components/messages/MessageSent'
 operations:
   publishMessageReceived:
     action: send
@@ -33,6 +38,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/messageFailed' }
     summary: An inbound transaction failed mapping, or a received 997 could not be read or matched; also after a reprocess that still fails with another error (FR-35.10)
+  publishMessageSent:
+    action: send
+    channel: { $ref: '#/channels/messageSent' }
+    summary: The partner's transport confirmed receipt of one outbound transaction (processed AS2 MDN or completed SFTP upload, FR-35.5)
 components:
   messages:
     MessageReceived:
@@ -108,3 +117,28 @@ components:
               st_control: { type: string }
               error: { type: string, description: catalog code and detail of the failing rule }
               reprocessed: { type: boolean, description: true when a reprocess produced this failure }
+    MessageSent:
+      name: dev.passage.edi.message.sent.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.message.sent.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: outbound message id }
+          data:
+            type: object
+            required: [message_id, interchange_id, partner_id, transaction_set, control_number, st_control, transport, delivery_id, transport_message_id]
+            properties:
+              message_id: { type: string, format: uuid, description: the outbound message delivered }
+              interchange_id: { type: string, format: uuid, description: the outbound interchange }
+              partner_id: { type: string, format: uuid }
+              transaction_set: { type: string }
+              control_number: { type: string, description: ISA13 of the outbound interchange }
+              st_control: { type: string }
+              transport: { type: string, enum: [AS2, SFTP] }
+              delivery_id: { type: string, format: uuid }
+              transport_message_id: { type: string, description: The delivery message id (the AS2 Message-ID without angle brackets) }

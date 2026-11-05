@@ -1,0 +1,16 @@
+{{- if .Values.transports.as2.enabled }}
+# The AS2 listener for trading partners. It takes no Passage token (partners authenticate by their AS2 signature), so
+# it is a Service of its own: route it through an edge that does not require a JWT, never through passage-api.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-as2
+  labels:
+    app.kubernetes.io/name: edi
+    app.kubernetes.io/component: as2
+spec:
+  selector:
+    app.kubernetes.io/name: edi
+  ports:
+    - { name: as2, port: {{ .Values.transports.as2.port }}, targetPort: as2 }
+{{- end }}

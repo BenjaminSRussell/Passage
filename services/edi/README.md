@@ -181,8 +181,61 @@ database or publishes an event, so these routes also run without a store.
   modifiers (authentication-failed, insufficient-message-security, decryption-failed,
   unexpected-processing-error); SFTP with a pinned host key, `.part` upload and rename, and
   an inbound `Pull` that archives each accepted file; an in-memory `Loopback`. Tested over
-  `httptest` and an in-process SSH/SFTP server. Nothing in the service calls the transports
-  yet (see `NOT-IMPLEMENTED.md`).
+  `httptest` and an in-process SSH/SFTP server. Slice 7 wires them into the service (below).
+
+## Slice 7 scope: partner transports (#483)
+
+- **Transport per partner** (`PUT|GET /edi/v1/partners/{id}/transport`, migration
+  `0006_partner_transport.sql`, `internal/domain/transportcfg.go`): `kind` API (default, nothing
+  is transmitted), AS2 (partner and our AS2 ids, the partner's https URL, its pinned PEM
+  certificate, signing key reference, `sha-256|384|512`, encryption `none|aes128-cbc|aes192-cbc|aes256-cbc`,
+  MDN `sync|async`) or SFTP (host, port, user, pinned `SHA256:` host key, `key|password` with a
+  credential reference, outbound and inbound directories, archive and failed subdirectories, poll
+  interval). The row hangs off the trade profile and has the same RLS: tenant plus a restrictive
+  legal-entity policy, and repointing the profile carries the transport along. **No secret is
+  stored**: `signingKeyRef` and `credentialRef` are file names in `EDI_SECRETS_DIR` (a Secret the
+  chart mounts read-only and an ExternalSecret fills from Vault), read when a message is sent, so a
+  rotation needs no restart; the PUT refuses a reference that does not resolve to a usable secret,
+  the database checks refuse anything that is not a plain name (and PEM private keys in the
+  certificate column), and the GET reports `ok|missing|malformed` per reference, never content.
+- **Outbound delivery** (`internal/delivery`): an outbound document to a partner with an AS2 or SFTP
+  transport is queued (`transport_delivery`, PENDING) in the transaction that records it and the
+  route returns the delivery. The dispatcher (`EDI_TRANSPORT_WORKERS=true`) finds due tenants
+  through a SECURITY DEFINER index, leases rows with skip locked (several replicas never send a row
+  twice; a crash re-sends with the same Message-ID after the lease), signs (and encrypts) AS2
+  messages, requires a signed MDN with our MIC, and records DELIVERED (messages become SENT,
+  `dev.passage.edi.message.sent.v1`), AWAITING_MDN (asynchronous MDN), REJECTED (error
+  disposition, not retried) or PENDING with back-off from one minute to an hour, FAILED after 8
+  attempts. SFTP uploads as `.part` and renames. `POST /edi/v1/interchanges/{id}:resend` queues a
+  new delivery of a FAILED or REJECTED one; the interchange detail lists the deliveries.
+- **AS2 listener** (`EDI_AS2_ADDR`, `api.AS2Routes`): `POST /as2/v1/{endpoint}` and
+  `POST /as2/v1/{endpoint}/mdn`, on their own port and Service. See "AS2 listener security" below.
+  A verified X12 payload goes through the `/inbound/x12` pipeline, whose ISA sender must be the
+  endpoint's partner; the 997 is queued back over the partner's transport. Retransmissions
+  (same Message-ID and content, or an interchange inside the duplicate window) answer
+  `processed/warning: duplicate-document` and record nothing.
+- **SFTP poller**: every due partner with an inbound directory is polled once per interval, at
+  most 50 files of at most 4 MiB in name order, skipping `.part` files; a file is known by name and
+  SHA-256 (`transport_inbound`), is marked DONE in the receipt transaction and then moved to
+  `<inbound>/<archive>/<UTC stamp>_<name>`; a re-sent identical file is only archived. A file that
+  can never be accepted (not X12, unknown or foreign sender, too large) is PARKED at once and moved
+  to the failed directory; a transient failure backs off and is parked after 5 attempts. A server
+  that cannot be reached backs the partner's next poll off up to six hours.
+
+### AS2 listener security
+
+Partners call the AS2 listener without a Passage JWT, so it does not run the tenant middleware and
+ignores `X-Passage-*` headers. The endpoint id in the path (random, per partner transport, kept
+across updates) is resolved by the SECURITY DEFINER `edi_as2_endpoint()` to a tenant and partner
+and nothing else; the work then runs as the edi service in the one legal entity of the partner's
+trade profile. The caller is authenticated by its CMS signature against the certificate pinned on
+the transport (signatures are always required, encryption when selected), with AS2-From and AS2-To
+matching the profile; nothing is parsed before the signature verifies; bodies are capped at 8 MiB
+(1 MiB for MDNs) and the payload at 4 MiB. Unknown endpoints, other transports and inactive
+partners all answer 404. Asynchronous MDNs we owe are posted only to the scheme and host of the
+partner's configured AS2 URL, whatever `Receipt-Delivery-Option` says, and outbound HTTP follows no
+redirects. The main API router is unchanged and still requires a tenant; the AS2 Service must be
+routed through an edge that does not apply the passage-api JWT policy (not configured here).
 
 ## Wave 35 proof
 
@@ -209,12 +262,14 @@ cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
 internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810/820/214 builders, 820/214 maps, EDIFACT codec with ORDERS/DESADV/INVOIC and CONTRL, SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
-internal/transport/ AS2 (CMS signing, MDN), SFTP and loopback senders
+internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP and loopback senders; transporttest has the in-process partner endpoints
+internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
+internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
 internal/events/    event type constants and payloads
-migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes)
+migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index)
 api/openapi.yaml    OpenAPI 3.1 for the routes above
-events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1 and message.failed.v1
-charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor)
+events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1, message.failed.v1 and message.sent.v1
+charts/edi/         Helm chart (api deployment, service, optional AS2 service, transport ExternalSecret, ServiceMonitor)
 testdata/x12/       X12 fixtures for the domain and API tests
 testdata/edifact/   EDIFACT fixtures and goldens (ORDERS in, DESADV, INVOIC, CONTRL out)
 testdata/as2/       a third-party MDN
@@ -228,6 +283,8 @@ testdata/as2/       a third-party MDN
 | GET | /edi/v1/partners?environment= | edi.admin | `{items}` by name |
 | GET | /edi/v1/partners/{id} | edi.admin | `ETag` carries the version |
 | PUT | /edi/v1/partners/{id}/trade-profile | edi.admin | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
+| PUT | /edi/v1/partners/{id}/transport | edi.admin | Transport API, AS2 or SFTP with secret references; 409 EDI-0012 without a trade profile in the caller's entities |
+| GET | /edi/v1/partners/{id}/transport | edi.admin | The transport, the AS2 inbound and MDN URLs, the partner certificate fingerprint and whether each secret reference resolves |
 | POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810","sourceId"}`; 201 with the X12, repeat 200; 409 EDI-0012 without a profile, 503 EDI-0010 without source services |
 | POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
 | POST | /edi/v1/maps:test | edi.admin | Body `{"raw": "<X12>"}`; nothing is stored |
@@ -237,6 +294,9 @@ testdata/as2/       a third-party MDN
 | GET | /edi/v1/interchanges/{id}/payload | edi.operate | Raw payload as a segment tree; PII masked without `edi.pii.view` |
 | POST | /edi/v1/interchanges/{id}:reprocess?dryRun= | edi.operate | Re-map FAILED inbound transactions from the raw payload; `Idempotency-Key` unless `dryRun=true` |
 | POST | /edi/v1/interchanges:reprocess?dryRun= | edi.operate | Bulk reprocess of 1 to 200 distinct interchange ids; `Idempotency-Key` unless `dryRun=true` |
+| POST | /edi/v1/interchanges/{id}:resend | edi.operate | 202 with a new delivery of an outbound interchange whose last delivery FAILED or was REJECTED; 409 EDI-0015 otherwise |
+| POST | /as2/v1/{endpoint} | none (AS2 signature) | AS2 listener only (`EDI_AS2_ADDR`): a partner's AS2 message, answered with an MDN |
+| POST | /as2/v1/{endpoint}/mdn | none (AS2 signature) | AS2 listener only: the asynchronous MDN for one of our deliveries |
 | GET | /edi/v1/messages?partnerId=&direction=&status=&transactionSet=&controlNumber=&limit=&cursor= | edi.operate | `{items, nextCursor}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/messages/{id} | edi.operate | One message with envelope and canonical document (party names masked without `edi.pii.view`) |
 | GET | /edi/v1/partners/sla?days= | edi.operate | `{days, items}`, days 1 to 365 (default 30) |
@@ -265,6 +325,14 @@ and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASS
 `EDI_FULFILLMENT_URL`, `EDI_BILLING_URL`, `EDI_SALES_URL` (without a signing key the from-source
 or any source URL is unset the from-source route answers 503), `EDI_ALLOW_BODY_OUTBOUND` (off in the binary; the chart
 sets `allowBodyOutbound: true` so the integration screen and the 855 keep working).
+Transports: `EDI_SECRETS_DIR` (the mounted transport secrets; without it AS2 and SFTP transports
+are refused), `EDI_AS2_ADDR` (AS2 listener address, off when empty, must differ from `HTTP_ADDR`),
+`EDI_AS2_PUBLIC_URL` (https base URL partners reach the listener on; needed for asynchronous MDNs),
+`EDI_AS2_ALLOW_HTTP` (development only: http partner URLs), `EDI_TRANSPORT_WORKERS=true` (run the
+dispatcher and the SFTP poller) and `EDI_TRANSPORT_INTERVAL_SECONDS` (default 15). Chart values
+under `transports` set them, mount the Secret `transports.secretName` at
+`/var/run/passage/edi-secrets` and, with `transports.externalSecret.enabled`, create it from the
+Vault path `transports.externalSecret.key` (every property becomes one reference).
 The fulfillment, billing and sales charts verify edi's token from `serviceIdentity.publicKeys`
 (`edi=<base64 public key>`); until it is set they refuse every edi call.
 
@@ -288,6 +356,8 @@ signing uses the standard library only.
 | EDI-0007 | 422 | Outbound document breaks a mapping rule (invalid SSCC, totals that do not add up, unknown field, a value holding a delimiter) |
 | EDI-0008 | 409 | The partner is inactive; nothing can be sent to it |
 | EDI-0009 | 409 | Only inbound interchanges are reprocessed (an outbound one is resent) |
+| EDI-0015 | 409 | Nothing to resend: not outbound, its last delivery is not FAILED or REJECTED, or the partner has no AS2 or SFTP transport in the caller's entities |
+| EDI-0016 | 503 | No secret directory is configured (`EDI_SECRETS_DIR`), so AS2 and SFTP transports cannot be saved |
 | EDI-0160 | (in 200 map result) | A required 850 segment or element is missing or invalid; rejected |
 | EDI-0161 | (message error) | A received 997 answers no outbound interchange of the partner, or its AK101 does not match |
 | idempotency_key_reuse | 422 | `Idempotency-Key` already used with a different request body |

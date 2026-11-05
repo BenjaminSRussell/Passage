@@ -16,7 +16,7 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        {{- if .Values.serviceIdentity.signingKeySecret }}
+        {{- if or .Values.serviceIdentity.signingKeySecret .Values.transports.secretName }}
         fsGroup: 65532
         {{- end }}
         seccompProfile:
@@ -64,9 +64,30 @@ spec:
             - name: EDI_ALLOW_BODY_OUTBOUND
               value: "true"
             {{- end }}
+            {{- if .Values.transports.secretName }}
+            - name: EDI_SECRETS_DIR
+              value: /var/run/passage/edi-secrets
+            {{- end }}
+            {{- if .Values.transports.workers }}
+            - name: EDI_TRANSPORT_WORKERS
+              value: "true"
+            - name: EDI_TRANSPORT_INTERVAL_SECONDS
+              value: {{ .Values.transports.intervalSeconds | quote }}
+            {{- end }}
+            {{- if .Values.transports.as2.enabled }}
+            - name: EDI_AS2_ADDR
+              value: {{ printf ":%v" .Values.transports.as2.port | quote }}
+            {{- end }}
+            {{- if .Values.transports.as2.publicUrl }}
+            - name: EDI_AS2_PUBLIC_URL
+              value: {{ .Values.transports.as2.publicUrl | quote }}
+            {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
+            {{- if .Values.transports.as2.enabled }}
+            - { name: as2, containerPort: {{ .Values.transports.as2.port }} }
+            {{- end }}
           startupProbe:
             httpGet: { path: /healthz, port: http }
             failureThreshold: 30
@@ -75,16 +96,29 @@ spec:
             httpGet: { path: /healthz, port: http }
           readinessProbe:
             httpGet: { path: /readyz, port: http }
-          {{- if .Values.serviceIdentity.signingKeySecret }}
+          {{- if or .Values.serviceIdentity.signingKeySecret .Values.transports.secretName }}
           volumeMounts:
+            {{- if .Values.serviceIdentity.signingKeySecret }}
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+            {{- end }}
+            {{- if .Values.transports.secretName }}
+            - { name: edi-secrets, mountPath: /var/run/passage/edi-secrets, readOnly: true }
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if .Values.serviceIdentity.signingKeySecret }}
+      {{- if or .Values.serviceIdentity.signingKeySecret .Values.transports.secretName }}
       volumes:
+        {{- if .Values.serviceIdentity.signingKeySecret }}
         - name: service-identity
           secret:
             secretName: {{ .Values.serviceIdentity.signingKeySecret }}
             defaultMode: 0440
+        {{- end }}
+        {{- if .Values.transports.secretName }}
+        - name: edi-secrets
+          secret:
+            secretName: {{ .Values.transports.secretName }}
+            defaultMode: 0440
+        {{- end }}
       {{- end }}

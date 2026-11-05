@@ -20,10 +20,31 @@ var MessageAcked = events.Type(Context, "message", "acked", 1)
 // the monitor and the task queue).
 var MessageFailed = events.Type(Context, "message", "failed", 1)
 
-// All lists every event type this service publishes. posted and sent (PRD
-// §6.35.5) are published once posting into waves 26/19 and the AS2/SFTP
-// transports exist; see NOT-IMPLEMENTED.md.
-func All() []string { return []string{MessageReceived, MessageAcked, MessageFailed} }
+// MessageSent is published once per outbound transaction when the partner's
+// transport confirmed receipt of its interchange: a processed AS2 MDN
+// (synchronous or asynchronous) or a completed SFTP upload (PRD §6.35.5;
+// consumers: the monitor and analytics).
+var MessageSent = events.Type(Context, "message", "sent", 1)
+
+// All lists every event type this service publishes. posted (PRD §6.35.5) is
+// published once posting into waves 26/19 exists; see NOT-IMPLEMENTED.md.
+func All() []string { return []string{MessageReceived, MessageAcked, MessageFailed, MessageSent} }
+
+// MessageSentData is the payload of MessageSent. Transport is AS2 or SFTP;
+// TransportMessageID is the delivery's message id: the AS2 Message-ID
+// without angle brackets (an SFTP delivery has one too; its file name is on
+// the delivery).
+type MessageSentData struct {
+	MessageID          string `json:"message_id"`
+	InterchangeID      string `json:"interchange_id"`
+	PartnerID          string `json:"partner_id"`
+	TransactionSet     string `json:"transaction_set"`
+	ControlNumber      string `json:"control_number"`
+	STControl          string `json:"st_control"`
+	Transport          string `json:"transport"`
+	DeliveryID         string `json:"delivery_id"`
+	TransportMessageID string `json:"transport_message_id"`
+}
 
 // MessageReceivedData is the event payload. Canonical content is not included;
 // consumers read it through the message API so PII stays out of the bus.
