@@ -16,6 +16,20 @@ Each service has an `HTTPRoute` named after it. `/api/v1/<svc>` is rewritten to 
 
 The Gateway has two listeners. `https` (443, TLS terminate, Secret `passage-api-tls`, to be issued by cert-manager or supplied by the environment) is the listener for stage and prod. `http-dev` (80) is for dev only; remove it in any non-dev environment.
 
+## AS2 edge (#483)
+
+Trading partners post AS2 messages and asynchronous MDNs to the edi AS2 listener without a Passage token: edi authenticates each request by its AS2 signature against the partner certificate pinned on the transport (see `services/edi/README.md`, "AS2 listener security"). They come in through a second Gateway, `passage-as2`, so the JWT SecurityPolicy, which targets Gateway `passage-api`, cannot apply to them, and the API routes cannot be reached without a token through it:
+
+- `as2-gateway.yaml`: Gateway `passage-as2`, one listener `as2-https` (443, TLS terminate, hostname `as2.dev.passage.dev`, Secret `passage-as2-tls`). No plain-HTTP listener.
+- `as2-certificate.yaml`: cert-manager Certificate `passage-as2-tls` for that hostname (RSA 2048, many AS2 stacks lack ECDSA suites), from ClusterIssuer `passage-local-ca` in dev. cert-manager's CRDs are not vendored, so `validate-gateway-schema` skips the Certificate and `test_gateway.py` checks it.
+- `as2-httproute.yaml`: HTTPRoute `edi-as2`, the only route on the AS2 Gateway: `POST` with path prefix `/as2/v1/` to Service `edi-as2` port 8081 (the edi chart with `transports.as2.enabled`). Nothing else of edi and no other service is routed there.
+- `as2-clienttrafficpolicy.yaml`: TLS 1.2 or newer, and the `X-Passage-*` headers removed in `earlyRequestHeaders` (the listener ignores them anyway).
+- `as2-backendtrafficpolicy.yaml`: `requestBuffer.limit: 8Mi`, the listener's own body cap, so oversized bodies get 413 at the edge; and a global rate limit of 600 requests a minute per client address (IPv4 and IPv6, `sourceCIDR` Distinct; same rate-limit service as the tenant limit). Behind it edi keeps a token bucket per AS2 endpoint (`EDI_AS2_RATE_PER_MINUTE`, default 120 with bursts of 60). The per-address limit needs the real client address at Envoy (`externalTrafficPolicy: Local` on the Envoy Service, or PROXY protocol); behind a load balancer that rewrites the source it limits all partners together.
+
+The edi chart's NetworkPolicy admits only the Envoy proxies of `passage-as2` (namespace `envoy-gateway-system`, labels `gateway.envoyproxy.io/owning-gateway-name: passage-as2` and `owning-gateway-namespace: hello-ledger`) to the AS2 port; the API and metrics ports keep their previous reach (#82 item 2). `deploy/envs/dev/values/edi.yaml` turns the listener and the workers on with `EDI_AS2_PUBLIC_URL=https://as2.dev.passage.dev`.
+
+Operations: point DNS for `as2.<env>.passage.dev` at the load balancer address of the `passage-as2` Envoy Service (its own address, not passage-api's). In dev the certificate comes from the local CA, which partners do not trust; for stage and prod set the hostname (`as2.stage.passage.dev`, `as2.prod.passage.dev`, like the hello-ledger hosts) and issue the certificate from a publicly trusted issuer (ACME), or give partners the CA to pin. Partners that allow-list our address need the AS2 Envoy Service's address. The edge has no allow-list of partner addresses: the signature is the authentication.
+
 ## Dev JWKS and claim contract
 
 `passage-dev-jwks` holds a static placeholder public key (kid `passage-dev-placeholder`); no private key is kept, so nothing can mint accepted tokens until #80 supplies an IdP. To switch to the IdP, replace `localJWKS` in the SecurityPolicy provider with `remoteJWKS: {uri: https://<idp>/realms/<realm>/protocol/openid-connect/certs}` and set `issuer` to the realm URL. Realm-per-tenant needs one provider per realm.
@@ -31,7 +45,7 @@ The Gateway has two listeners. `https` (443, TLS terminate, Secret `passage-api-
 
 ## Tests
 
-`make -C deploy test-gateway` first validates the rendered kustomization against the vendored CRDs with `kubeconform -strict` (`go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7`), then runs `scripts/test_gateway.py` with `kubectl kustomize`: header removal covers every header in `tenant.go` plus the explicit list, the SecurityPolicy targets the Gateway, rate-limit rules are shared, keyed on tenant, with the 600/min fallback, the TLS listener, and the `/api` rewrite. It needs `pyyaml`.
+`make -C deploy test-gateway` first validates the rendered kustomization against the vendored CRDs with `kubeconform -strict` (`go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7`), then runs `scripts/test_gateway.py` with `kubectl kustomize`: header removal covers every header in `tenant.go` plus the explicit list, the SecurityPolicy targets the Gateway, rate-limit rules are shared, keyed on tenant, with the 600/min fallback, the TLS listener, and the `/api` rewrite. For the AS2 edge it checks that every HTTPRoute attaches to exactly one Gateway, that only `edi-as2` attaches to `passage-as2`, that the JWT SecurityPolicy targets the whole `passage-api` Gateway and no policy reaches the AS2 Gateway or route, that the AS2 route is `POST /as2/v1/` to `edi-as2` on the chart's port with the listener's hostname, the Certificate's DNS name and Secret, TLS 1.2, the stripped headers, the 8Mi buffer equal to `maxAS2Body` in `services/edi/internal/api/as2in.go`, the per-address rate limit, and the edi chart's gateway labels. `services/edi/charts/edi/test-as2.sh` (CI `charts` job) renders the chart and checks that the AS2 port admits only those proxies. It needs `pyyaml`.
 
 ## Service tokens
 

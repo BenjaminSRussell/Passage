@@ -10,6 +10,19 @@ release may change public APIs.
 
 ### Added
 
+- AS2 edge and listener hardening (#483): trading partners reach the edi AS2 listener through Gateway `passage-as2`
+  on `as2.dev.passage.dev` (`deploy/gateway/as2-*.yaml`), a Gateway of its own outside the `passage-api` JWT
+  SecurityPolicy, with one HTTPRoute (`POST /as2/v1/` to the `edi-as2` Service), HTTPS only with a cert-manager
+  Certificate, TLS 1.2 or newer, the identity headers stripped, an 8Mi request buffer (the listener's cap) and a
+  global rate limit per client address; the edi chart's new NetworkPolicy admits only that gateway's proxies to the
+  AS2 port, and `test_gateway.py` proves every API route stays behind the JWT policy and the AS2 route exposes only
+  `/as2/v1/`. The listener adds a token bucket per endpoint (`EDI_AS2_RATE_PER_MINUTE`, `EDI_AS2_RATE_BURST`, 429
+  with `Retry-After` before any lookup or signature work). Asynchronous MDNs we owe are stored in `transport_mdn`
+  (migration 0007) in the transaction that records the message and posted by the delivery dispatcher with leases,
+  back-off and FAILED after the last attempt, only to the partner's AS2 host and without following redirects.
+  Deliveries waiting for an asynchronous MDN time out after `EDI_AS2_MDN_TIMEOUT_MINUTES` (default 24 hours), are
+  sent again with the same Message-ID or FAILED, and every FAILED delivery publishes
+  `dev.passage.edi.delivery.failed.v1`.
 - Live tender trigger (#426): transport's `POST /v1/transport/loads/{id}:release` (duty `transport.load.tender`,
   migration 0010) applies the tender gates and publishes `dev.passage.tms.load.released.v1` with the releasing user
   and legal-entity scope from the verified caller; workflow-ts's new Kafka consumer (`src/eventConsumer.ts`, kafkajs)

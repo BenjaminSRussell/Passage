@@ -47,13 +47,16 @@ type AsyncMDN struct {
 // decrypted) payload on (to the inbound receipt) and its error becomes an
 // error disposition (see DispositionError). When the sender asks for an
 // asynchronous MDN the request is answered with an empty 200 and the MDN goes
-// to SendAsyncMDN, which decides whether and where to post it; without
-// SendAsyncMDN the MDN is returned synchronously.
+// to SendAsyncMDN, which decides whether and where to post it (or queues it
+// for posting); without SendAsyncMDN the MDN is returned synchronously. The
+// request is answered only after SendAsyncMDN returns: an error there is a
+// 503, so the sender retransmits instead of waiting for an MDN that was never
+// queued.
 type AS2Server struct {
 	Us           AS2Identity
 	Partner      func(as2From string) (AS2Partner, bool)
 	Deliver      func(ctx context.Context, from string, m Message) error
-	SendAsyncMDN func(ctx context.Context, mdn AsyncMDN)
+	SendAsyncMDN func(ctx context.Context, mdn AsyncMDN) error
 	MaxBytes     int64
 	Now          func() time.Time
 }
@@ -94,8 +97,17 @@ func (s *AS2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, mic, disposition := s.open(partner, r.Header.Get("Content-Type"), body)
 	msg.ID, msg.From, msg.To, msg.MIC = strings.Trim(msgID, "<>"), from, to, mic
+	wantMDN := r.Header.Get("Disposition-Notification-To") != ""
+	asyncURL := strings.TrimSpace(r.Header.Get("Receipt-Delivery-Option"))
+	async := wantMDN && asyncURL != "" && s.SendAsyncMDN != nil
 	if disposition == mdnProcessed {
+		if async {
+			// Built before Deliver so it can be stored with the receipt.
+			hdr, mdn := s.buildMDN(r.Header, from, msgID, mic, disposition)
+			msg.AsyncMDN = &AsyncMDN{URL: asyncURL, Header: hdr, Body: mdn, Partner: partner}
+		}
 		if err := s.Deliver(r.Context(), from, msg); err != nil {
+			msg.AsyncMDN = nil
 			var de *DispositionError
 			switch {
 			case errors.As(err, &de) && de.Warning:
@@ -107,16 +119,24 @@ func (s *AS2Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if r.Header.Get("Disposition-Notification-To") == "" {
+	if !wantMDN {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if async {
+		m := msg.AsyncMDN
+		if m == nil {
+			hdr, mdn := s.buildMDN(r.Header, from, msgID, mic, disposition)
+			m = &AsyncMDN{URL: asyncURL, Header: hdr, Body: mdn, Partner: partner}
+		}
+		if err := s.SendAsyncMDN(r.Context(), *m); err != nil {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 	hdr, mdn := s.buildMDN(r.Header, from, msgID, mic, disposition)
-	if url := strings.TrimSpace(r.Header.Get("Receipt-Delivery-Option")); url != "" && s.SendAsyncMDN != nil {
-		w.WriteHeader(http.StatusOK)
-		s.SendAsyncMDN(r.Context(), AsyncMDN{URL: url, Header: hdr, Body: mdn, Partner: partner})
-		return
-	}
 	for k, v := range hdr {
 		w.Header()[k] = v
 	}

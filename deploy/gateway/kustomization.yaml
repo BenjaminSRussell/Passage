@@ -8,3 +8,9 @@ resources:
   - clienttrafficpolicy.yaml
   - securitypolicy.yaml
   - backendtrafficpolicy.yaml
+  # AS2 edge for trading partners (#483): a Gateway of its own, outside the JWT SecurityPolicy.
+  - as2-gateway.yaml
+  - as2-certificate.yaml
+  - as2-httproute.yaml
+  - as2-clienttrafficpolicy.yaml
+  - as2-backendtrafficpolicy.yaml

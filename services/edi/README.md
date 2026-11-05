@@ -208,6 +208,23 @@ database or publishes an event, so these routes also run without a store.
   disposition, not retried) or PENDING with back-off from one minute to an hour, FAILED after 8
   attempts. SFTP uploads as `.part` and renames. `POST /edi/v1/interchanges/{id}:resend` queues a
   new delivery of a FAILED or REJECTED one; the interchange detail lists the deliveries.
+- **Asynchronous MDN timeout** (migration `0007_as2_mdn_queue.sql`): an AWAITING_MDN delivery waits
+  until `mdnDueAt`, `EDI_AS2_MDN_TIMEOUT_MINUTES` (default 1440, 5 to 10080) after it was sent. The
+  dispatcher then moves it back to PENDING to be sent again with the same Message-ID (the partner
+  drops the duplicate and answers it) with the usual back-off, or to FAILED once the 8 attempts are
+  used up. The delivery counts the waits (`mdnTimeouts`) and says why in `lastError`, the dispatcher
+  logs `edi delivery MDN timeout`, and a MDN arriving after the wait finds nothing waiting (404).
+  Every delivery that ends FAILED (attempts used up, MDN wait, transport gone) publishes
+  `dev.passage.edi.delivery.failed.v1` in the same transaction, for the monitor and the task queue;
+  the operator resends it.
+- **Asynchronous MDNs we owe** (`transport_mdn`): when a partner asks for its MDN at a
+  `Receipt-Delivery-Option` on its configured AS2 host, the signed MDN is stored, not posted from
+  memory: the processed MDN in the transaction that records the interchange (so it exists exactly
+  when the interchange does), an error or duplicate MDN on its own; the request is answered 200 only
+  once the MDN is stored (503 otherwise, so the partner retransmits). The dispatcher leases due MDNs
+  like deliveries (skip locked, attempts, back-off from a minute to an hour, FAILED after 8
+  attempts), checks the target against the partner's current AS2 URL again, and posts with a client
+  that follows no redirects. MDNs survive restarts and are sent by any replica running the workers.
 - **AS2 listener** (`EDI_AS2_ADDR`, `api.AS2Routes`): `POST /as2/v1/{endpoint}` and
   `POST /as2/v1/{endpoint}/mdn`, on their own port and Service. See "AS2 listener security" below.
   A verified X12 payload goes through the `/inbound/x12` pipeline, whose ISA sender must be the
@@ -232,10 +249,23 @@ trade profile. The caller is authenticated by its CMS signature against the cert
 the transport (signatures are always required, encryption when selected), with AS2-From and AS2-To
 matching the profile; nothing is parsed before the signature verifies; bodies are capped at 8 MiB
 (1 MiB for MDNs) and the payload at 4 MiB. Unknown endpoints, other transports and inactive
-partners all answer 404. Asynchronous MDNs we owe are posted only to the scheme and host of the
-partner's configured AS2 URL, whatever `Receipt-Delivery-Option` says, and outbound HTTP follows no
-redirects. The main API router is unchanged and still requires a tenant; the AS2 Service must be
-routed through an edge that does not apply the passage-api JWT policy (not configured here).
+partners all answer 404. Asynchronous MDNs we owe are stored and posted only to the scheme and host
+of the partner's configured AS2 URL, whatever `Receipt-Delivery-Option` says, and outbound HTTP
+follows no redirects. The main API router is unchanged and still requires a tenant.
+
+Each endpoint id has a token bucket (`EDI_AS2_RATE_PER_MINUTE`, default 120, and
+`EDI_AS2_RATE_BURST`, default 60; 0 a minute turns it off) shared by both routes and checked before
+anything else: no database lookup, key loading or signature work happens for a request over the
+limit, which gets 429 with `Retry-After` (logged once per episode). Only well-formed ids get a
+bucket, and at most 10000 are kept (refilled buckets are dropped first), so made-up ids cannot grow
+memory; evicting a bucket only resets it to full.
+
+The edge is the AS2 Gateway `passage-as2` (`deploy/gateway/as2-*.yaml`, see `deploy/gateway/README.md`):
+`https://as2.<env>.passage.dev`, its own Gateway so the passage-api JWT SecurityPolicy cannot apply,
+one route (`POST /as2/v1/` to the `edi-as2` Service), TLS 1.2 or newer, an 8 MiB request buffer and
+a rate limit per client address. The chart's NetworkPolicy admits only that Gateway's Envoy proxies to
+the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their previous reach unless
+`networkPolicy.apiFrom` names peers.
 
 ## Wave 35 proof
 
@@ -266,10 +296,10 @@ internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP a
 internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
 internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
 internal/events/    event type constants and payloads
-migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index)
+migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery)
 api/openapi.yaml    OpenAPI 3.1 for the routes above
-events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1, message.failed.v1 and message.sent.v1
-charts/edi/         Helm chart (api deployment, service, optional AS2 service, transport ExternalSecret, ServiceMonitor)
+events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1, message.failed.v1, message.sent.v1 and delivery.failed.v1
+charts/edi/         Helm chart (api deployment, service, optional AS2 service, NetworkPolicy, transport ExternalSecret, ServiceMonitor); test-as2.sh checks the AS2 port's NetworkPolicy
 testdata/x12/       X12 fixtures for the domain and API tests
 testdata/edifact/   EDIFACT fixtures and goldens (ORDERS in, DESADV, INVOIC, CONTRL out)
 testdata/as2/       a third-party MDN
@@ -295,8 +325,8 @@ testdata/as2/       a third-party MDN
 | POST | /edi/v1/interchanges/{id}:reprocess?dryRun= | edi.operate | Re-map FAILED inbound transactions from the raw payload; `Idempotency-Key` unless `dryRun=true` |
 | POST | /edi/v1/interchanges:reprocess?dryRun= | edi.operate | Bulk reprocess of 1 to 200 distinct interchange ids; `Idempotency-Key` unless `dryRun=true` |
 | POST | /edi/v1/interchanges/{id}:resend | edi.operate | 202 with a new delivery of an outbound interchange whose last delivery FAILED or was REJECTED; 409 EDI-0015 otherwise |
-| POST | /as2/v1/{endpoint} | none (AS2 signature) | AS2 listener only (`EDI_AS2_ADDR`): a partner's AS2 message, answered with an MDN |
-| POST | /as2/v1/{endpoint}/mdn | none (AS2 signature) | AS2 listener only: the asynchronous MDN for one of our deliveries |
+| POST | /as2/v1/{endpoint} | none (AS2 signature) | AS2 listener only (`EDI_AS2_ADDR`, edge `https://as2.<env>.passage.dev`): a partner's AS2 message, answered with an MDN (an asynchronous one is stored and posted by the dispatcher); 429 with `Retry-After` over the endpoint's rate limit |
+| POST | /as2/v1/{endpoint}/mdn | none (AS2 signature) | AS2 listener only: the asynchronous MDN for one of our deliveries (404 once the wait ran out); same rate limit |
 | GET | /edi/v1/messages?partnerId=&direction=&status=&transactionSet=&controlNumber=&limit=&cursor= | edi.operate | `{items, nextCursor}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/messages/{id} | edi.operate | One message with envelope and canonical document (party names masked without `edi.pii.view`) |
 | GET | /edi/v1/partners/sla?days= | edi.operate | `{days, items}`, days 1 to 365 (default 30) |
@@ -328,8 +358,12 @@ sets `allowBodyOutbound: true` so the integration screen and the 855 keep workin
 Transports: `EDI_SECRETS_DIR` (the mounted transport secrets; without it AS2 and SFTP transports
 are refused), `EDI_AS2_ADDR` (AS2 listener address, off when empty, must differ from `HTTP_ADDR`),
 `EDI_AS2_PUBLIC_URL` (https base URL partners reach the listener on; needed for asynchronous MDNs),
-`EDI_AS2_ALLOW_HTTP` (development only: http partner URLs), `EDI_TRANSPORT_WORKERS=true` (run the
-dispatcher and the SFTP poller) and `EDI_TRANSPORT_INTERVAL_SECONDS` (default 15). Chart values
+`EDI_AS2_ALLOW_HTTP` (development only: http partner URLs), `EDI_AS2_RATE_PER_MINUTE` and
+`EDI_AS2_RATE_BURST` (the listener's limit per endpoint, default 120 and 60; 0 a minute is off),
+`EDI_TRANSPORT_WORKERS=true` (run the dispatcher, which also posts the asynchronous MDNs we owe, and
+the SFTP poller; with the AS2 listener on, some replica must run them),
+`EDI_TRANSPORT_INTERVAL_SECONDS` (default 15) and `EDI_AS2_MDN_TIMEOUT_MINUTES` (how long a delivery
+waits for its asynchronous MDN, default 1440). Chart values
 under `transports` set them, mount the Secret `transports.secretName` at
 `/var/run/passage/edi-secrets` and, with `transports.externalSecret.enabled`, create it from the
 Vault path `transports.externalSecret.key` (every property becomes one reference).

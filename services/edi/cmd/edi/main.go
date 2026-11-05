@@ -91,7 +91,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	a.Secrets, a.AS2PublicURL, a.AllowInsecureAS2, a.AS2HTTP = tc.secrets, tc.publicURL, tc.allowHTTP, tc.http
+	a.Secrets, a.AS2PublicURL, a.AllowInsecureAS2 = tc.secrets, tc.publicURL, tc.allowHTTP
+	a.AS2Limit = api.NewAS2Limiter(tc.ratePerMinute, tc.rateBurst, 0)
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -100,7 +101,7 @@ func run() error {
 		go func() { errCh <- httpx.Serve(ctx, tc.as2Addr, a.AS2Routes()) }()
 	}
 	if tc.workers {
-		d := &delivery.Dispatcher{Store: st, Secrets: tc.secrets, HTTP: tc.http, AS2PublicURL: tc.publicURL}
+		d := &delivery.Dispatcher{Store: st, Secrets: tc.secrets, HTTP: tc.http, AS2PublicURL: tc.publicURL, MDNTimeout: tc.mdnTimeout}
 		p := &delivery.Poller{Store: st, Secrets: tc.secrets, Receive: a.ReceiveFromTransport}
 		go delivery.Run(ctx, "delivery dispatcher", tc.interval, d.RunOnce)
 		go delivery.Run(ctx, "sftp poller", tc.interval, p.RunOnce)
@@ -120,6 +121,11 @@ type transportConfig struct {
 	workers   bool
 	interval  time.Duration
 	http      *http.Client
+	// ratePerMinute and rateBurst are the AS2 listener's limit per endpoint
+	// (0 per minute: off); mdnTimeout bounds the wait for an asynchronous MDN.
+	ratePerMinute int
+	rateBurst     int
+	mdnTimeout    time.Duration
 }
 
 // loadTransportConfig reads EDI_SECRETS_DIR (the mounted directory of
@@ -127,8 +133,12 @@ type transportConfig struct {
 // differ from HTTP_ADDR because it serves partners without a Passage
 // identity), EDI_AS2_PUBLIC_URL (https base URL partners reach it on),
 // EDI_AS2_ALLOW_HTTP (http:// partner URLs, development only),
-// EDI_TRANSPORT_WORKERS (run the dispatcher and the SFTP poller) and
-// EDI_TRANSPORT_INTERVAL_SECONDS (how often they look for work, default 15).
+// EDI_AS2_RATE_PER_MINUTE and EDI_AS2_RATE_BURST (requests per AS2 endpoint,
+// default 120 a minute with bursts of 60; 0 a minute turns the limit off),
+// EDI_AS2_MDN_TIMEOUT_MINUTES (how long a delivery waits for its
+// asynchronous MDN, default 1440), EDI_TRANSPORT_WORKERS (run the dispatcher
+// and the SFTP poller) and EDI_TRANSPORT_INTERVAL_SECONDS (how often they
+// look for work, default 15).
 func loadTransportConfig(getenv func(string) string, httpAddr string) (transportConfig, error) {
 	c := transportConfig{as2Addr: getenv("EDI_AS2_ADDR"), allowHTTP: getenv("EDI_AS2_ALLOW_HTTP") == "true",
 		workers: getenv("EDI_TRANSPORT_WORKERS") == "true", publicURL: strings.TrimRight(getenv("EDI_AS2_PUBLIC_URL"), "/")}
@@ -155,6 +165,26 @@ func loadTransportConfig(getenv func(string) string, httpAddr string) (transport
 		return c, errors.New("EDI_TRANSPORT_INTERVAL_SECONDS must be 1 to 3600")
 	}
 	c.interval = time.Duration(seconds) * time.Second
+	if c.ratePerMinute, err = envIntFrom(getenv, "EDI_AS2_RATE_PER_MINUTE", 120); err != nil {
+		return c, err
+	}
+	if c.ratePerMinute < 0 || c.ratePerMinute > 100000 {
+		return c, errors.New("EDI_AS2_RATE_PER_MINUTE must be 0 (off) to 100000")
+	}
+	if c.rateBurst, err = envIntFrom(getenv, "EDI_AS2_RATE_BURST", 60); err != nil {
+		return c, err
+	}
+	if c.rateBurst < 1 || c.rateBurst > 10000 {
+		return c, errors.New("EDI_AS2_RATE_BURST must be 1 to 10000")
+	}
+	minutes, err := envIntFrom(getenv, "EDI_AS2_MDN_TIMEOUT_MINUTES", 1440)
+	if err != nil {
+		return c, err
+	}
+	if minutes < 5 || minutes > 10080 {
+		return c, errors.New("EDI_AS2_MDN_TIMEOUT_MINUTES must be 5 to 10080 (a week)")
+	}
+	c.mdnTimeout = time.Duration(minutes) * time.Minute
 	// Partner URLs are configured by an administrator; redirects are not
 	// followed so a partner endpoint cannot bounce the service elsewhere.
 	c.http = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

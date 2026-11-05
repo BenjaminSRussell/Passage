@@ -23,9 +23,30 @@ transports:
   secretName: ""
   externalSecret: { enabled: false, storeName: passage, key: "", refreshInterval: 1h }
   # Run the delivery dispatcher and the SFTP poller in every replica (rows are leased, replicas never send one twice).
+  # The dispatcher also posts the asynchronous MDNs the AS2 listener stores, so with as2.enabled some release must
+  # run the workers.
   workers: false
   intervalSeconds: 15
-  # The AS2 listener partners post to, on its own port and Service (edi-as2). It takes no Passage token: expose it
-  # through a route that does not require a JWT (not the passage-api Gateway SecurityPolicy); the caller is
-  # authenticated by its AS2 signature against the partner certificate.
-  as2: { enabled: false, port: 8081, publicUrl: "" }
+  # How long a delivery waits for its asynchronous MDN before it is sent again (FAILED after the last attempt).
+  mdnTimeoutMinutes: 1440
+  # The AS2 listener partners post to, on its own port and Service (edi-as2). It takes no Passage token: it is
+  # exposed by the AS2 edge (deploy/gateway/as2-*.yaml: Gateway passage-as2, outside the passage-api JWT
+  # SecurityPolicy), and the caller is authenticated by its AS2 signature against the partner certificate.
+  # publicUrl is that edge's https URL (https://as2.<env>.passage.dev). rateLimit is per AS2 endpoint, checked before
+  # any other work (429 with Retry-After); perMinute 0 turns it off.
+  as2:
+    enabled: false
+    port: 8081
+    publicUrl: ""
+    rateLimit: { perMinute: 120, burst: 60 }
+# Ingress to the edi pods. The AS2 port admits only the Envoy proxies of Gateway passage-as2. apiFrom lists the peers
+# admitted to the API (8080) and metrics (9090) ports; empty keeps those open inside the cluster as they were before
+# this policy (restricting them is #82 item 2).
+networkPolicy:
+  enabled: true
+  as2Gateway:
+    namespaces: [envoy-gateway-system]
+    podLabels:
+      gateway.envoyproxy.io/owning-gateway-name: passage-as2
+      gateway.envoyproxy.io/owning-gateway-namespace: hello-ledger
+  apiFrom: []

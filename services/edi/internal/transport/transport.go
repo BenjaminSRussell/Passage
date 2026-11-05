@@ -36,6 +36,12 @@ type Message struct {
 	// MIC is set on a received AS2 message: the Received-Content-MIC its MDN
 	// carries, which identifies the content of a retransmission.
 	MIC string
+	// AsyncMDN is set on a received AS2 message whose sender asked for an
+	// asynchronous MDN: the MDN that answers it as processed. A Deliver
+	// callback can store it together with what it records, so the receipt
+	// and the MDN we owe commit or roll back as one; when Deliver returns nil
+	// the AS2 server hands this same MDN (same Message-ID) to SendAsyncMDN.
+	AsyncMDN *AsyncMDN
 }
 
 // Receipt is the proof of delivery the transport obtained. For AS2 it is the

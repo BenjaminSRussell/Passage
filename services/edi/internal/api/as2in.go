@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
-	"net/url"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -37,15 +37,40 @@ const maxAsyncMDNBody = 1 << 20
 // certificate pinned there, with AS2-From and AS2-To matching the profile.
 // Nothing is parsed before the signature verifies. Mount it on its own
 // listener and expose that through a route that does not require a JWT; the
-// main API router keeps requiring one.
+// main API router keeps requiring one. With AS2Limit set, each endpoint id
+// has a token bucket checked before anything else (no database lookup, key
+// loading or signature work): over the limit the caller gets 429 with
+// Retry-After.
 //
 //	POST /as2/v1/{endpoint}      an AS2 message; answered with an MDN
 //	POST /as2/v1/{endpoint}/mdn  an asynchronous MDN for one of our messages
 func (a *API) AS2Routes() http.Handler {
 	r := httpx.NewRouterWithoutTenant()
-	r.Post("/as2/v1/{endpoint}", a.as2Receive)
-	r.Post("/as2/v1/{endpoint}/mdn", a.as2AsyncMDN)
+	limited := r.With(a.as2RateLimit)
+	limited.Post("/as2/v1/{endpoint}", a.as2Receive)
+	limited.Post("/as2/v1/{endpoint}/mdn", a.as2AsyncMDN)
 	return r
+}
+
+// as2RateLimit answers 429 when the endpoint's bucket is empty. Only
+// well-formed endpoint ids get a bucket; anything else is a 404 later that
+// costs nothing.
+func (a *API) as2RateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		endpoint := chi.URLParam(r, "endpoint")
+		if a.AS2Limit != nil && validID(endpoint) {
+			ok, wait, first := a.AS2Limit.Allow(endpoint)
+			if !ok {
+				if first {
+					slog.Warn("as2 rate limit reached", "endpoint", endpoint)
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+				http.Error(w, "too many requests", http.StatusTooManyRequests)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // as2Partner resolves the endpoint to its active AS2 partner transport and
@@ -102,16 +127,47 @@ func (a *API) as2Receive(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	origID := strings.Trim(strings.TrimSpace(r.Header.Get("Message-ID")), "<>")
+	// The Message-ID of the asynchronous MDN stored with the receipt, if any.
+	var stored string
+	// Every MDN of one request goes to the same Receipt-Delivery-Option.
+	var targetChecked, targetOK bool
+	allowed := func(m transport.AsyncMDN) bool {
+		if !targetChecked {
+			targetChecked, targetOK = true, a.mdnTargetAllowed(partner.ID, m, ep.Partner.URL)
+		}
+		return targetOK
+	}
 	srv := &transport.AS2Server{
 		Us: ep.Us,
 		Partner: func(from string) (transport.AS2Partner, bool) {
 			return ep.Partner, from == ep.Partner.ID
 		},
 		Deliver: func(_ context.Context, _ string, m transport.Message) error {
-			return a.deliverAS2(ctx, partner, rec, m)
+			var owed *store.OwedMDN
+			if m.AsyncMDN != nil && allowed(*m.AsyncMDN) {
+				o := owedMDN(m.ID, *m.AsyncMDN)
+				owed = &o
+			}
+			err := a.deliverAS2(ctx, partner, rec, m, owed)
+			if err == nil && owed != nil {
+				stored = owed.MessageID
+			}
+			return err
 		},
-		SendAsyncMDN: func(_ context.Context, mdn transport.AsyncMDN) {
-			a.sendAsyncMDN(ctx, partner.ID, ep.Partner.URL, mdn)
+		SendAsyncMDN: func(_ context.Context, mdn transport.AsyncMDN) error {
+			o := owedMDN(origID, mdn)
+			if stored != "" && o.MessageID == stored {
+				return nil // queued with the receipt
+			}
+			if !allowed(mdn) {
+				return nil
+			}
+			if err := a.store.QueueMDN(ctx, partner.ID, rec.LegalEntityID, o); err != nil {
+				slog.Error("as2 async MDN not queued", "partner", partner.ID, "err", err)
+				return err
+			}
+			return nil
 		},
 		MaxBytes: maxAS2Body,
 		Now:      a.now,
@@ -119,12 +175,31 @@ func (a *API) as2Receive(w http.ResponseWriter, r *http.Request) {
 	srv.ServeHTTP(w, r)
 }
 
+// owedMDN is the asynchronous MDN to store for the partner message origID.
+func owedMDN(origID string, m transport.AsyncMDN) store.OwedMDN {
+	return store.OwedMDN{OriginalMessageID: origID, MessageID: strings.Trim(m.Header.Get("Message-ID"), "<>"),
+		TargetURL: m.URL, Header: m.Header, Body: m.Body}
+}
+
+// mdnTargetAllowed holds the Receipt-Delivery-Option of a received message to
+// the partner's configured AS2 host (delivery.MDNTargetAllowed). An MDN for
+// any other URL is not stored or sent; the message is still processed.
+func (a *API) mdnTargetAllowed(partnerID string, m transport.AsyncMDN, partnerURL string) bool {
+	if len(m.URL) > 2048 || !delivery.MDNTargetAllowed(m.URL, partnerURL) {
+		slog.Warn("as2 async MDN not sent: Receipt-Delivery-Option is not on the partner's AS2 host", "partner", partnerID)
+		return false
+	}
+	return true
+}
+
 // deliverAS2 hands a verified AS2 payload to the receipt pipeline and maps
-// the outcome to an MDN disposition.
-func (a *API) deliverAS2(ctx context.Context, partner store.Partner, rec store.TransportRecord, m transport.Message) error {
+// the outcome to an MDN disposition. mdn, when set, is the asynchronous MDN
+// answering the message as processed; it is stored in the receipt
+// transaction, so it exists exactly when the interchange was recorded.
+func (a *API) deliverAS2(ctx context.Context, partner store.Partner, rec store.TransportRecord, m transport.Message, mdn *store.OwedMDN) error {
 	log := slog.With("partner", partner.ID, "as2MessageId", m.ID)
 	sum := sha256.Sum256(m.Payload)
-	src := store.InboundSource{Transport: "AS2", Ref: m.ID, SHA256: hex.EncodeToString(sum[:]), LegalEntityID: rec.LegalEntityID}
+	src := store.InboundSource{Transport: "AS2", Ref: m.ID, SHA256: hex.EncodeToString(sum[:]), LegalEntityID: rec.LegalEntityID, MDN: mdn}
 	if len(src.Ref) > 255 {
 		return &transport.DispositionError{Modifier: "unexpected-processing-error"}
 	}
@@ -199,36 +274,6 @@ func (a *API) ReceiveFromTransport(ctx context.Context, partnerID string, src st
 		return fmt.Errorf("%w: %s %s", delivery.ErrPermanent, p.Code, p.Detail)
 	}
 	return err
-}
-
-// sendAsyncMDN posts the MDN a partner asked to receive asynchronously, in
-// the background with three tries. It is posted only to the scheme and host
-// of the partner's configured AS2 URL: the Receipt-Delivery-Option header is
-// the sender's to choose, and posting wherever it says would let anyone
-// make the service call arbitrary URLs.
-func (a *API) sendAsyncMDN(ctx context.Context, partnerID, partnerURL string, mdn transport.AsyncMDN) {
-	target, err := url.Parse(mdn.URL)
-	base, berr := url.Parse(partnerURL)
-	if err != nil || berr != nil || target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) || target.User != nil {
-		slog.Warn("as2 async MDN not sent: Receipt-Delivery-Option is not on the partner's AS2 host", "partner", partnerID)
-		return
-	}
-	hc := a.AS2HTTP
-	bg := context.WithoutCancel(ctx)
-	go func() {
-		for try, wait := 1, 5*time.Second; try <= 3; try, wait = try+1, wait*6 {
-			cctx, cancel := context.WithTimeout(bg, time.Minute)
-			err := transport.PostAsyncMDN(cctx, hc, target.String(), mdn)
-			cancel()
-			if err == nil {
-				return
-			}
-			slog.Warn("as2 async MDN post failed", "partner", partnerID, "try", try, "err", err)
-			if try < 3 {
-				time.Sleep(wait)
-			}
-		}
-	}()
 }
 
 // as2AsyncMDN receives the asynchronous MDN for one of our deliveries. It

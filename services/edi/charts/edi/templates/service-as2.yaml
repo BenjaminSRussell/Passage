@@ -1,6 +1,7 @@
 {{- if .Values.transports.as2.enabled }}
 # The AS2 listener for trading partners. It takes no Passage token (partners authenticate by their AS2 signature), so
-# it is a Service of its own: route it through an edge that does not require a JWT, never through passage-api.
+# it is a Service of its own, routed only by the AS2 edge (deploy/gateway/as2-httproute.yaml on Gateway passage-as2),
+# never through passage-api; the NetworkPolicy admits only that gateway's proxies to its port.
 apiVersion: v1
 kind: Service
 metadata:

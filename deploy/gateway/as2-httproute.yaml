@@ -1,0 +1,22 @@
+# The only route on Gateway passage-as2: POST /as2/v1/{endpoint} and /as2/v1/{endpoint}/mdn to the edi chart's AS2
+# Service (transports.as2.enabled, port transports.as2.port). Nothing else of edi, and no other service, is reachable here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: edi-as2
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-as2
+      sectionName: as2-https
+  hostnames:
+    - as2.dev.passage.dev
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /as2/v1/
+          method: POST
+      backendRefs:
+        - name: edi-as2
+          port: 8081

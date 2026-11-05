@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -291,10 +292,11 @@ func TestTransportAS2_OutboundSyncMDNMarksSentAndPublishes(t *testing.T) {
 
 func TestTransportAS2_AsyncMDNOnlyFromThePartner(t *testing.T) {
 	e := newTransportEnv(t)
-	e.peer.as2.SendAsyncMDN = func(_ context.Context, m transport.AsyncMDN) {
+	e.peer.as2.SendAsyncMDN = func(_ context.Context, m transport.AsyncMDN) error {
 		e.peer.mu.Lock()
 		defer e.peer.mu.Unlock()
 		e.peer.asyncMDNs = append(e.peer.asyncMDNs, m)
+		return nil
 	}
 	e.putProfile()
 	v := e.mustPutTransport(e.as2Config(func(a *domain.AS2Settings) { a.MDNMode = "async" }))
@@ -339,6 +341,204 @@ func TestTransportAS2_AsyncMDNOnlyFromThePartner(t *testing.T) {
 	}
 	if code := post(mdn.Body, mdn.Header); code != http.StatusNotFound {
 		t.Fatalf("second MDN: %d", code)
+	}
+}
+
+func postAsyncMDN(t *testing.T, url string, m transport.AsyncMDN) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(m.Body))
+	for k, vs := range m.Header {
+		req.Header[k] = vs
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+func TestTransportAS2_AwaitingMDNTimesOutIsSentAgainThenFails(t *testing.T) {
+	e := newTransportEnv(t)
+	e.peer.as2.SendAsyncMDN = func(_ context.Context, m transport.AsyncMDN) error {
+		e.peer.mu.Lock()
+		defer e.peer.mu.Unlock()
+		e.peer.asyncMDNs = append(e.peer.asyncMDNs, m)
+		return nil
+	}
+	e.disp.MDNTimeout, e.disp.MaxAttempts = time.Hour, 2
+	e.putProfile()
+	v := e.mustPutTransport(e.as2Config(func(a *domain.AS2Settings) { a.MDNMode = "async" }))
+	out := e.outbound("asn-timeout")
+	id := out.Delivery.ID
+	exec := func(q string) {
+		t.Helper()
+		if _, err := e.admin.Exec(context.Background(), q, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.dispatch(1)
+	d := e.detail(out.InterchangeID).Deliveries[0]
+	if d.Status != "AWAITING_MDN" || d.MDNDueAt == nil || time.Until(*d.MDNDueAt) < 59*time.Minute || time.Until(*d.MDNDueAt) > 61*time.Minute {
+		t.Fatalf("waiting %+v", d)
+	}
+	// The wait runs out: sent again later with the same Message-ID.
+	exec(`update transport_delivery set mdn_due_at = now() - interval '1 second' where id = $1`)
+	e.dispatch(0)
+	d = e.detail(out.InterchangeID).Deliveries[0]
+	if d.Status != "PENDING" || d.MDNTimeouts != 1 || d.MDNDueAt != nil || d.NextAttemptAt == nil || time.Until(*d.NextAttemptAt) < 30*time.Second ||
+		!strings.Contains(d.LastError, "no asynchronous MDN within 1h0m0s") {
+		t.Fatalf("after the first timeout %+v", d)
+	}
+	exec(`update transport_delivery set next_attempt_at = now() where id = $1`)
+	e.dispatch(1)
+	if got := e.peer.messages(); len(got) != 2 || got[0].ID != out.Delivery.MessageID || got[1].ID != out.Delivery.MessageID {
+		t.Fatalf("partner received %+v", got)
+	}
+	if d = e.detail(out.InterchangeID).Deliveries[0]; d.Status != "AWAITING_MDN" || d.Attempts != 2 {
+		t.Fatalf("sent again %+v", d)
+	}
+	// The second wait runs out with the attempts used up: FAILED, with an event.
+	exec(`update transport_delivery set mdn_due_at = now() - interval '1 second' where id = $1`)
+	e.dispatch(0)
+	d = e.detail(out.InterchangeID).Deliveries[0]
+	if d.Status != "FAILED" || d.MDNTimeouts != 2 || !strings.Contains(d.LastError, "after 2 attempts") {
+		t.Fatalf("after the second timeout %+v", d)
+	}
+	if n := e.count(`select count(*) from outbox where type = $1 and aggregate_id = $2 and (payload->'data'->>'mdn_timeout')::boolean
+		and (payload->'data'->>'mdn_timeouts')::int = 2`, ediev.DeliveryFailed, id); n != 1 {
+		t.Fatalf("%d delivery.failed events", n)
+	}
+	if n := e.count(`select count(*) from transport_work where ref = $1`, id); n != 0 {
+		t.Fatalf("%d work rows left for a FAILED delivery", n)
+	}
+	// An MDN arriving now finds nothing waiting; the operator resends.
+	if code := postAsyncMDN(t, v.AS2Inbound.MDNURL, e.peer.asyncMDNs[1]); code != http.StatusNotFound {
+		t.Fatalf("late MDN: %d", code)
+	}
+	if rec := do(t, e.h, http.MethodPost, "/edi/v1/interchanges/"+out.InterchangeID+":resend", "", "edi.operate", srcScope); rec.Code != http.StatusAccepted {
+		t.Fatalf("resend: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// mdnSink is the partner's AS2 host: its AS2 server under /as2, its
+// receiver of asynchronous MDNs under /mdn, and /redirect bouncing to /mdn.
+type mdnSink struct {
+	srv  *httptest.Server
+	mu   sync.Mutex
+	mdns []transport.AsyncMDN
+}
+
+func (s *mdnSink) received() []transport.AsyncMDN {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]transport.AsyncMDN(nil), s.mdns...)
+}
+
+func (e *transportEnv) startMDNSink() *mdnSink {
+	s := &mdnSink{}
+	mux := http.NewServeMux()
+	mux.Handle("/as2", e.peer.as2)
+	mux.HandleFunc("/mdn", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.mdns = append(s.mdns, transport.AsyncMDN{Header: r.Header.Clone(), Body: body})
+	})
+	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/mdn", http.StatusFound) })
+	s.srv = httptest.NewServer(mux)
+	e.t.Cleanup(s.srv.Close)
+	return s
+}
+
+func TestTransportAS2_AsyncMDNWeOweIsStoredWithTheReceiptAndSentByTheDispatcher(t *testing.T) {
+	e := newTransportEnv(t)
+	sink := e.startMDNSink()
+	e.putProfile()
+	v := e.mustPutTransport(e.as2Config(func(a *domain.AS2Settings) { a.URL = sink.srv.URL + "/as2" }))
+	c := e.partnerClient(v.AS2Inbound.URL, e.them)
+	send := func(id, payload, mdnURL string) transport.Receipt {
+		t.Helper()
+		c.AsyncMDNURL = mdnURL
+		r, err := c.Send(context.Background(), transport.Message{ID: id, ContentType: transport.ContentX12, Payload: []byte(payload)})
+		if err != nil || !r.Pending {
+			t.Fatalf("%s: %+v %v", id, r, err)
+		}
+		return r
+	}
+	owed := func(id, status string) int {
+		t.Helper()
+		return e.count(`select count(*) from transport_mdn where original_message_id = $1 and status = $2 and legal_entity_id = $3`, id, status, srcLE)
+	}
+	check := func(m transport.AsyncMDN, id, mic string) transport.MDN {
+		t.Helper()
+		mdn, err := transport.ReadMDN(m.Header.Get("Content-Type"), m.Body, e.us.Cert)
+		if err != nil || !mdn.Signed || mdn.OriginalMessageID != "<"+id+">" || (mic != "" && mdn.MIC != mic) {
+			t.Fatalf("MDN for %s: %+v %v", id, mdn, err)
+		}
+		return mdn
+	}
+
+	// Recorded: the MDN is stored with the interchange and posted by the
+	// dispatcher, not from the request.
+	r := send("po-a1@distributor", x12Control(t, "000000201"), sink.srv.URL+"/mdn")
+	if n := e.count(`select count(*) from transport_mdn m join interchange i on i.id = m.interchange_id
+		where m.original_message_id = 'po-a1@distributor' and m.status = 'PENDING' and i.control_number = '000000201'`); n != 1 {
+		t.Fatalf("%d MDNs stored with the receipt", n)
+	}
+	if len(sink.received()) != 0 {
+		t.Fatal("MDN posted before the dispatcher ran")
+	}
+	e.dispatch(2) // the 997 and the MDN
+	if got := sink.received(); len(got) != 1 || !check(got[0], "po-a1@distributor", r.SentMIC).Processed() {
+		t.Fatalf("sink got %+v", got)
+	}
+	if owed("po-a1@distributor", "DELIVERED") != 1 || len(e.peer.messages()) != 1 {
+		t.Fatal("MDN not DELIVERED or the 997 not sent")
+	}
+
+	// Refused (not X12): nothing recorded, the error MDN is still owed.
+	send("po-a2@distributor", "UNB+UNOC:3+A+B'", sink.srv.URL+"/mdn")
+	if n := e.count(`select count(*) from transport_mdn where original_message_id = 'po-a2@distributor' and interchange_id is null`); n != 1 {
+		t.Fatalf("%d error MDNs", n)
+	}
+	e.dispatch(1)
+	if got := sink.received(); len(got) != 2 || check(got[1], "po-a2@distributor", "").Processed() ||
+		!strings.Contains(check(got[1], "po-a2@distributor", "").Disposition, "processed/error") {
+		t.Fatalf("sink got %+v", got)
+	}
+
+	// A Receipt-Delivery-Option off the partner's AS2 host: processed, no MDN stored.
+	send("po-a3@distributor", x12Control(t, "000000203"), "https://evil.example/mdn")
+	if n := e.count(`select count(*) from transport_mdn where original_message_id = 'po-a3@distributor'`); n != 0 {
+		t.Fatalf("%d MDNs for a foreign URL", n)
+	}
+	if n := e.count(`select count(*) from interchange where direction = 'IN'`); n != 2 {
+		t.Fatalf("%d inbound interchanges", n)
+	}
+	e.dispatch(1) // its 997
+
+	// Redirects are not followed: the attempt fails and backs off.
+	send("po-a4@distributor", x12Control(t, "000000204"), sink.srv.URL+"/redirect")
+	e.dispatch(2)
+	var attempts int
+	var lastErr string
+	if err := e.admin.QueryRow(context.Background(), `select attempts, coalesce(last_error, '') from transport_mdn
+		where original_message_id = 'po-a4@distributor' and status = 'PENDING' and next_attempt_at > now() + interval '30 seconds'`).Scan(&attempts, &lastErr); err != nil ||
+		attempts != 1 || !strings.Contains(lastErr, "HTTP 302") {
+		t.Fatalf("redirected MDN: %d %q %v", attempts, lastErr, err)
+	}
+	if len(sink.received()) != 2 {
+		t.Fatal("the redirect was followed")
+	}
+
+	// The partner's AS2 URL moves to another host: an MDN still owed for
+	// the old host is FAILED, not posted.
+	send("po-a5@distributor", x12Control(t, "000000205"), sink.srv.URL+"/mdn")
+	e.mustPutTransport(e.as2Config(func(a *domain.AS2Settings) { a.URL = "http://127.0.0.2:1/as2" }))
+	e.dispatch(2) // the 997 (unreachable, retried) and the MDN
+	if owed("po-a5@distributor", "FAILED") != 1 || len(sink.received()) != 2 {
+		t.Fatalf("MDN for a moved partner: %d sent", len(sink.received()))
 	}
 }
 

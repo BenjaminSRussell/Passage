@@ -1,0 +1,39 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- if and .Values.transports.as2.enabled (or (empty .Values.networkPolicy.as2Gateway.podLabels) (empty .Values.networkPolicy.as2Gateway.namespaces)) }}
+{{- fail "networkPolicy.as2Gateway.namespaces and podLabels must be set when transports.as2.enabled: the AS2 port is only admitted to the AS2 gateway's proxies" }}
+{{- end }}
+# The AS2 listener takes no Passage token, so its port is reachable only from the AS2 edge's Envoy proxies (Gateway
+# passage-as2), never from other pods or the passage-api gateway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: edi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: edi
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 9090 }
+      {{- with .Values.networkPolicy.apiFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if .Values.transports.as2.enabled }}
+    - ports:
+        - { protocol: TCP, port: {{ .Values.transports.as2.port }} }
+      from:
+        {{- range .Values.networkPolicy.as2Gateway.namespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $.Values.networkPolicy.as2Gateway.podLabels | nindent 14 }}
+        {{- end }}
+    {{- end }}
+{{- end }}

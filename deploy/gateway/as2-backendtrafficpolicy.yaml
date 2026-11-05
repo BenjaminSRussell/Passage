@@ -1,0 +1,35 @@
+# Limits on the AS2 route. requestBuffer receives each request in full at the edge and rejects bodies above 8Mi with
+# 413, the cap the edi AS2 listener applies (maxAS2Body). The global rate limit is per client address (partners post
+# from fixed AS2 servers or a VAN); edi adds a per-endpoint token bucket behind it (EDI_AS2_RATE_PER_MINUTE). The
+# per-address limit needs the real client address at Envoy (externalTrafficPolicy: Local on the Envoy Service, or
+# PROXY protocol); behind a load balancer that rewrites the source it becomes a limit for all partners together.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: passage-as2-limits
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: edi-as2
+  requestBuffer:
+    limit: 8Mi
+  rateLimit:
+    type: Global
+    global:
+      rules:
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 600
+            unit: Minute
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: ::/0
+          limit:
+            requests: 600
+            unit: Minute

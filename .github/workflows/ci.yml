@@ -291,10 +291,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
-      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity services/batch/charts/batch
+      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity services/batch/charts/batch services/edi/charts/edi
       - run: bash services/receiving/charts/receiving/test-env.sh
       - run: bash services/identity/charts/identity/test-networkpolicy.sh
       - run: bash services/batch/charts/batch/test-notify.sh
+      - run: bash services/edi/charts/edi/test-as2.sh
 
   deploy-release:
     runs-on: ubuntu-24.04

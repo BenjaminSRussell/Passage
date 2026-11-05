@@ -198,7 +198,11 @@ type DeliveryView struct {
 	LastError      string     `json:"lastError,omitempty"`
 	SentAt         *time.Time `json:"sentAt,omitempty"`
 	DeliveredAt    *time.Time `json:"deliveredAt,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
+	// MDNDueAt is when an AWAITING_MDN delivery stops waiting for its
+	// asynchronous MDN; MDNTimeouts counts the waits that ran out.
+	MDNDueAt    *time.Time `json:"mdnDueAt,omitempty"`
+	MDNTimeouts int        `json:"mdnTimeouts,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
 }
 
 // enqueueDelivery records a PENDING delivery of the interchange over the
@@ -229,12 +233,12 @@ func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchange
 
 const deliveryColumns = `select id::text, payload_kind, transport, message_id, status, attempts,
 	case when status = 'PENDING' then next_attempt_at end, coalesce(mdn_disposition, ''), mdn_signed, coalesce(reference, ''),
-	coalesce(last_error, ''), sent_at, delivered_at, created_at from transport_delivery`
+	coalesce(last_error, ''), sent_at, delivered_at, mdn_due_at, mdn_timeouts, created_at from transport_delivery`
 
 func scanDelivery(row pgx.Row) (DeliveryView, error) {
 	var d DeliveryView
 	err := row.Scan(&d.ID, &d.PayloadKind, &d.Transport, &d.MessageID, &d.Status, &d.Attempts, &d.NextAttemptAt, &d.MDNDisposition,
-		&d.MDNSigned, &d.Reference, &d.LastError, &d.SentAt, &d.DeliveredAt, &d.CreatedAt)
+		&d.MDNSigned, &d.Reference, &d.LastError, &d.SentAt, &d.DeliveredAt, &d.MDNDueAt, &d.MDNTimeouts, &d.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -313,6 +317,10 @@ type ClaimedDelivery struct {
 func (s *Store) ClaimDeliveries(ctx context.Context, limit int, lease time.Duration) ([]ClaimedDelivery, error) {
 	var out []ClaimedDelivery
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tid, err := tenantID(ctx)
+		if err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `with claimed as (
 				select id as claimed_id from transport_delivery where status = 'PENDING' and next_attempt_at <= now()
 				order by next_attempt_at, id limit $1 for update skip locked)
@@ -338,8 +346,8 @@ func (s *Store) ClaimDeliveries(ctx context.Context, limit int, lease time.Durat
 			}
 			err := scanTransport(tx.QueryRow(ctx, transportColumns+` where partner_id = $1`, c.PartnerID), &c.TransportCfg)
 			if errors.Is(err, ErrNotFound) || payload == nil || (err == nil && c.TransportCfg.Config.Kind != c.Transport) {
-				if _, err := tx.Exec(ctx, `update transport_delivery set status = 'FAILED', last_error = $2 where id = $1`, c.ID,
-					"the partner's "+strings.ToLower(c.Transport)+" transport or the payload is gone"); err != nil {
+				if err := finishDelivery(ctx, tx, tid, c.ID, DeliveryOutcome{Status: "FAILED",
+					Error: "the partner's " + strings.ToLower(c.Transport) + " transport or the payload is gone"}); err != nil {
 					return err
 				}
 				continue
@@ -356,10 +364,14 @@ func (s *Store) ClaimDeliveries(ctx context.Context, limit int, lease time.Durat
 }
 
 // DeliveryOutcome is what one attempt achieved. Status is DELIVERED,
-// AWAITING_MDN, REJECTED, FAILED, or PENDING to try again at RetryAt.
+// AWAITING_MDN (until MDNDueAt), REJECTED, FAILED, or PENDING to try again
+// at RetryAt. MDNTimeout marks the outcome of a wait for an asynchronous MDN
+// that ran out.
 type DeliveryOutcome struct {
 	Status         string
 	RetryAt        time.Time
+	MDNDueAt       time.Time
+	MDNTimeout     bool
 	SentMIC        string
 	MDNMIC         string
 	MDNDisposition string
@@ -377,7 +389,8 @@ func clip(s string, n int) string {
 
 // FinishDelivery records the outcome of an attempt on a claimed delivery.
 // When a document is DELIVERED its MAPPED messages become SENT and one
-// message.sent event per message goes to the outbox in the same transaction.
+// message.sent event per message goes to the outbox in the same transaction;
+// a delivery that ends FAILED publishes delivery.failed the same way.
 func (s *Store) FinishDelivery(ctx context.Context, id string, o DeliveryOutcome) error {
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tid, err := tenantID(ctx)
@@ -389,24 +402,46 @@ func (s *Store) FinishDelivery(ctx context.Context, id string, o DeliveryOutcome
 }
 
 func finishDelivery(ctx context.Context, tx pgx.Tx, tid, id string, o DeliveryOutcome) error {
-	var retry any
+	var retry, due any
 	if o.Status == "PENDING" {
 		retry = o.RetryAt
 	}
+	if o.Status == "AWAITING_MDN" && !o.MDNDueAt.IsZero() {
+		due = o.MDNDueAt
+	}
 	var partnerID, interchangeID, kind, transport, msgID string
+	var attempts, timeouts int
 	err := tx.QueryRow(ctx, `update transport_delivery set status = $2, next_attempt_at = coalesce($3, next_attempt_at),
 		sent_mic = coalesce($4, sent_mic), mdn_mic = coalesce($5, mdn_mic), mdn_disposition = coalesce($6, mdn_disposition),
 		mdn_signed = case when $6::text is null then mdn_signed else $7 end, reference = coalesce($8, reference), last_error = $9,
 		sent_at = case when $2 in ('AWAITING_MDN', 'DELIVERED') then coalesce(sent_at, now()) else sent_at end,
-		delivered_at = case when $2 = 'DELIVERED' then now() else delivered_at end
-		where id = $1 returning partner_id::text, interchange_id::text, payload_kind, transport, message_id`,
+		delivered_at = case when $2 = 'DELIVERED' then now() else delivered_at end,
+		mdn_due_at = $10, mdn_timeouts = mdn_timeouts + case when $11 then 1 else 0 end
+		where id = $1 returning partner_id::text, interchange_id::text, payload_kind, transport, message_id, attempts, mdn_timeouts`,
 		id, o.Status, retry, nullString(clip(o.SentMIC, 200)), nullString(clip(o.MDNMIC, 200)), nullString(clip(o.MDNDisposition, 500)), o.MDNSigned,
-		nullString(clip(o.Reference, 1024)), nullString(clip(o.Error, 1000))).Scan(&partnerID, &interchangeID, &kind, &transport, &msgID)
+		nullString(clip(o.Reference, 1024)), nullString(clip(o.Error, 1000)), due, o.MDNTimeout).
+		Scan(&partnerID, &interchangeID, &kind, &transport, &msgID, &attempts, &timeouts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
-	if err != nil || o.Status != "DELIVERED" || kind != "DOCUMENT" {
+	if err != nil {
 		return err
+	}
+	if o.Status == "FAILED" {
+		evt, err := events.New(ediev.DeliveryFailed, eventSource, id, tid, ediev.DeliveryFailedData{
+			DeliveryID: id, InterchangeID: interchangeID, PartnerID: partnerID, PayloadKind: kind, Transport: transport,
+			TransportMessageID: msgID, Attempts: attempts, MDNTimeouts: timeouts, MDNTimeout: o.MDNTimeout, Error: clip(o.Error, 1000),
+		})
+		if err != nil {
+			return err
+		}
+		if err := outbox.Enqueue(ctx, tx, "delivery", id, evt); err != nil {
+			return fmt.Errorf("edi: outbox: %w", err)
+		}
+		return nil
+	}
+	if o.Status != "DELIVERED" || kind != "DOCUMENT" {
+		return nil
 	}
 	rows, err := tx.Query(ctx, `update message m set status = 'SENT' from interchange i
 		where m.interchange_id = $1 and i.id = m.interchange_id and m.status = 'MAPPED'
@@ -437,10 +472,59 @@ func finishDelivery(ctx context.Context, tx pgx.Tx, tid, id string, o DeliveryOu
 	return nil
 }
 
-// AwaitingMDN is a delivery waiting for its asynchronous MDN.
+// AwaitingMDN is a delivery waiting for its asynchronous MDN. PartnerID,
+// Attempts and MDNTimeouts are set for ExpireAwaitingMDN.
 type AwaitingMDN struct {
-	ID      string
-	SentMIC string
+	ID          string
+	PartnerID   string
+	SentMIC     string
+	Attempts    int
+	MDNTimeouts int
+}
+
+// ExpiredMDNWait is one delivery ExpireAwaitingMDN stopped waiting for, with
+// the outcome recorded.
+type ExpiredMDNWait struct {
+	AwaitingMDN
+	Outcome DeliveryOutcome
+}
+
+// ExpireAwaitingMDN takes up to limit AWAITING_MDN deliveries of the
+// context's tenant whose wait ran out (mdn_due_at passed), lets decide choose
+// what becomes of each (PENDING to send again with the same Message-ID, or
+// FAILED) and records it as an MDN timeout. Rows are locked with skip locked,
+// so concurrent dispatchers and an MDN arriving at the same moment never both
+// win: the MDN then finds the row no longer waiting, or the sweep skips it.
+func (s *Store) ExpireAwaitingMDN(ctx context.Context, limit int, decide func(AwaitingMDN) DeliveryOutcome) ([]ExpiredMDNWait, error) {
+	var out []ExpiredMDNWait
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tid, err := tenantID(ctx)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select id::text, partner_id::text, coalesce(sent_mic, ''), attempts, mdn_timeouts from transport_delivery
+			where status = 'AWAITING_MDN' and mdn_due_at <= now() order by mdn_due_at, id limit $1 for update skip locked`, limit)
+		if err != nil {
+			return err
+		}
+		waits, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (AwaitingMDN, error) {
+			var w AwaitingMDN
+			return w, r.Scan(&w.ID, &w.PartnerID, &w.SentMIC, &w.Attempts, &w.MDNTimeouts)
+		})
+		if err != nil {
+			return err
+		}
+		for _, w := range waits {
+			o := decide(w)
+			o.MDNTimeout = true
+			if err := finishDelivery(ctx, tx, tid, w.ID, o); err != nil {
+				return err
+			}
+			out = append(out, ExpiredMDNWait{AwaitingMDN: w, Outcome: o})
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ApplyAsyncMDN locks the partner's AS2 delivery with this Message-ID
@@ -475,12 +559,15 @@ func (s *Store) ApplyAsyncMDN(ctx context.Context, partnerID, messageID string, 
 }
 
 // InboundSource identifies what a transport received: the AS2 Message-ID or
-// the SFTP file name, and the SHA-256 of the payload.
+// the SFTP file name, and the SHA-256 of the payload. MDN, when set, is the
+// asynchronous MDN that answers the message as processed: it is queued in the
+// transaction that records the interchange.
 type InboundSource struct {
 	Transport     string
 	Ref           string
 	SHA256        string
 	LegalEntityID string
+	MDN           *OwedMDN
 }
 
 // InboundRecord is the stored state of one received file or message.
@@ -534,8 +621,13 @@ func (s *Store) RecordInbound(ctx context.Context, partnerID string, src Inbound
 }
 
 // recordInboundDone marks the source DONE with its interchange inside the
-// receipt transaction.
+// receipt transaction and queues the asynchronous MDN that answers it.
 func recordInboundDone(ctx context.Context, tx pgx.Tx, tid, partnerID, interchangeID string, src InboundSource) error {
+	if src.MDN != nil {
+		if err := insertMDN(ctx, tx, tid, partnerID, src.LegalEntityID, interchangeID, *src.MDN); err != nil {
+			return err
+		}
+	}
 	_, err := tx.Exec(ctx, `insert into transport_inbound (tenant_id, partner_id, legal_entity_id, transport, ref, content_sha256, status,
 		interchange_id, attempts) values ($1, $2, $3, $4, $5, $6, 'DONE', $7, 1)
 		on conflict (tenant_id, partner_id, transport, ref, content_sha256) do update set status = 'DONE', interchange_id = excluded.interchange_id,

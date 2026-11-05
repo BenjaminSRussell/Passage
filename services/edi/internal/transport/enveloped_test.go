@@ -183,10 +183,15 @@ func TestAS2_AsyncMDNAndDuplicateWarning(t *testing.T) {
 	f, c := newAS2Fixture(t)
 	var mu sync.Mutex
 	var mdns []AsyncMDN
-	f.server.SendAsyncMDN = func(_ context.Context, m AsyncMDN) {
+	var queueErr error
+	f.server.SendAsyncMDN = func(_ context.Context, m AsyncMDN) error {
 		mu.Lock()
 		defer mu.Unlock()
+		if queueErr != nil {
+			return queueErr
+		}
 		mdns = append(mdns, m)
+		return nil
 	}
 	c.AsyncMDNURL = "https://passage.example/as2/v1/abc/mdn"
 	r, err := c.Send(context.Background(), x12Message("async-1"))
@@ -196,6 +201,18 @@ func TestAS2_AsyncMDNAndDuplicateWarning(t *testing.T) {
 	if len(mdns) != 1 || mdns[0].URL != c.AsyncMDNURL {
 		t.Fatalf("async MDNs %+v", mdns)
 	}
+	// Deliver saw the processed MDN before it was handed on, so it can store
+	// it with the receipt: the same MDN, by its Message-ID.
+	if len(f.got) != 1 || f.got[0].AsyncMDN == nil || f.got[0].AsyncMDN.Header.Get("Message-ID") != mdns[0].Header.Get("Message-ID") ||
+		!bytes.Equal(f.got[0].AsyncMDN.Body, mdns[0].Body) {
+		t.Fatalf("Deliver got %+v", f.got)
+	}
+	// An MDN that cannot be queued is a 503, so the sender retransmits.
+	queueErr = errors.New("queue down")
+	if _, err := c.Send(context.Background(), x12Message("async-503")); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("unqueued MDN: %v", err)
+	}
+	queueErr = nil
 	mdn, err := ReadMDN(mdns[0].Header.Get("Content-Type"), mdns[0].Body, f.partner.cert)
 	if err != nil {
 		t.Fatal(err)

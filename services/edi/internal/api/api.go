@@ -84,8 +84,10 @@ type API struct {
 	AS2PublicURL string
 	// AllowInsecureAS2 admits http:// partner AS2 URLs (development only).
 	AllowInsecureAS2 bool
-	// AS2HTTP posts asynchronous MDNs to partners.
-	AS2HTTP *http.Client
+	// AS2Limit is the per-endpoint rate limit of the AS2 listener; nil admits
+	// every request. Asynchronous MDNs we owe are stored and posted by the
+	// delivery dispatcher, not from the listener.
+	AS2Limit *AS2Limiter
 }
 
 // New returns the API. The store may be nil for routes that do not persist

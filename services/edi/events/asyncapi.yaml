@@ -25,6 +25,11 @@ channels:
     messages:
       messageSent:
         $ref: '#/components/messages/MessageSent'
+  deliveryFailed:
+    address: passage.edi.delivery
+    messages:
+      deliveryFailed:
+        $ref: '#/components/messages/DeliveryFailed'
 operations:
   publishMessageReceived:
     action: send
@@ -42,6 +47,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/messageSent' }
     summary: The partner's transport confirmed receipt of one outbound transaction (processed AS2 MDN or completed SFTP upload, FR-35.5)
+  publishDeliveryFailed:
+    action: send
+    channel: { $ref: '#/channels/deliveryFailed' }
+    summary: A transport delivery gave up and needs an operator (attempts used up, no asynchronous MDN within the wait, or the partner's transport is gone); a resend queues a new delivery
 components:
   messages:
     MessageReceived:
@@ -142,3 +151,29 @@ components:
               transport: { type: string, enum: [AS2, SFTP] }
               delivery_id: { type: string, format: uuid }
               transport_message_id: { type: string, description: The delivery message id (the AS2 Message-ID without angle brackets) }
+    DeliveryFailed:
+      name: dev.passage.edi.delivery.failed.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.delivery.failed.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: delivery id }
+          data:
+            type: object
+            required: [delivery_id, interchange_id, partner_id, payload_kind, transport, transport_message_id, attempts, mdn_timeouts, mdn_timeout, error]
+            properties:
+              delivery_id: { type: string, format: uuid }
+              interchange_id: { type: string, format: uuid, description: the outbound interchange (DOCUMENT) or the inbound one whose 997 this is (ACK) }
+              partner_id: { type: string, format: uuid }
+              payload_kind: { type: string, enum: [DOCUMENT, ACK] }
+              transport: { type: string, enum: [AS2, SFTP] }
+              transport_message_id: { type: string, description: The delivery message id (the AS2 Message-ID without angle brackets) }
+              attempts: { type: integer, minimum: 0, description: sends made }
+              mdn_timeouts: { type: integer, minimum: 0, description: waits for an asynchronous MDN that ran out (EDI_AS2_MDN_TIMEOUT_MINUTES) }
+              mdn_timeout: { type: boolean, description: true when the last wait for an asynchronous MDN ran out }
+              error: { type: string, description: the last failure recorded on the delivery }
