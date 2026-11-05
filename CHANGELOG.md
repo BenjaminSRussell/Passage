@@ -10,6 +10,12 @@ release may change public APIs.
 
 ### Added
 
+- Live tender trigger (#426): transport's `POST /v1/transport/loads/{id}:release` (duty `transport.load.tender`,
+  migration 0010) applies the tender gates and publishes `dev.passage.tms.load.released.v1` with the releasing user
+  and legal-entity scope from the verified caller; workflow-ts's new Kafka consumer (`src/eventConsumer.ts`, kafkajs)
+  starts `tenderWorkflow` from it and sends `tender-response` on `tender.accepted.v1` and `tender.declined.v1`. The
+  tender start is keyed on the release id, so a redelivered release never tenders a load twice. Transport's outbox
+  has no Debezium connector yet (#223, #106).
 - Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
   in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev

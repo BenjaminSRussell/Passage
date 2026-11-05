@@ -21,5 +21,14 @@ partyUrl: http://party.passage.svc:8080
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+# The tender trigger (#426): with brokers set, the worker consumes transport's passage.tms.load and passage.tms.tender,
+# starts tenderWorkflow on load.released and signals it on tender.accepted and tender.declined. The secret holds the
+# KafkaUser's password and the cluster CA (keys password, ca.crt); deploy/kafka/workflow-ts-consumer.yaml grants the user.
+kafka:
+  brokers: ""
+  group: workflow-ts-tender
+  dlqTopic: passage.workflow.tender.dlq
+  username: workflow-ts-consumer
+  secret: ""
 networkPolicy:
   gatewayNamespace: envoy-gateway-system

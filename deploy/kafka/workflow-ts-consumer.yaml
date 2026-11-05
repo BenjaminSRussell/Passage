@@ -1,0 +1,37 @@
+# workflow-ts consumes transport's load.released and tender outcomes to start and signal tenderWorkflow (#426).
+# The topics are created by transport's outbox connector, which is not configured yet (see services/workflow-ts/NOT-IMPLEMENTED.md).
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: workflow-ts-consumer
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: passage.tms.load, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.tms.tender, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.workflow.tender.dlq, patternType: literal}
+        operations: [Write, Describe]
+      - resource: {type: group, name: workflow-ts-tender, patternType: literal}
+        operations: [Read, Describe]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: passage-workflow-tender-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  topicName: passage.workflow.tender.dlq
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: 2592000000

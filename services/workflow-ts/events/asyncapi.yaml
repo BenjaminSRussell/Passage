@@ -15,10 +15,18 @@ channels:
         $ref: '#/components/messages/EntityDefinitionChanged'
   load:
     address: passage.tms.load
-    description: Topic for load events from services/transport; subject is the load id. Not yet published (transport has no release step).
+    description: Topic for load events from services/transport; subject is the load id. transport publishes load.released from POST /v1/transport/loads/{id}:release; src/eventConsumer.ts consumes it.
     messages:
       released:
         $ref: '#/components/messages/LoadReleased'
+  tender:
+    address: passage.tms.tender
+    description: Topic for tender outcomes from services/transport (its events/asyncapi.yaml has the payload); subject is the tender id.
+    messages:
+      accepted:
+        $ref: '#/components/messages/TenderAccepted'
+      declined:
+        $ref: '#/components/messages/TenderDeclined'
 operations:
   receiveEntityDefinitionChanged:
     action: receive
@@ -34,7 +42,17 @@ operations:
       data.releasedBy and data.legalEntityScope from the gateway-verified principal of the release request
       (X-Passage-User, X-Passage-Legal-Entity), never from the request body; it does not publish a release whose load is
       outside that scope. workflow-ts mints the tender's scoped=true transport.tender.execute token from these fields,
-      and refuses the event from any other source.
+      and refuses the event from any other source. A redelivered release does not tender the load twice: the tender
+      start is keyed on data.releaseId. Consumer group workflow-ts-tender (src/eventConsumer.ts); an event the workflow
+      refuses goes to passage.workflow.tender.dlq.
+  receiveTenderOutcome:
+    action: receive
+    channel:
+      $ref: '#/channels/tender'
+    summary: Sends the tender-response signal to tender:<tenantid>:<data.loadId> (src/tenderTriggers.ts handleTenderOutcome).
+    description: >-
+      The signal only makes the workflow read the tender from transport again, so it carries nothing the workflow trusts;
+      tender.expired is ignored (the workflow's own sweep causes it).
 components:
   messages:
     EntityDefinitionChanged:
@@ -47,3 +65,23 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: ../schemas/current/tms.load.released.v1.json
+    TenderAccepted:
+      name: dev.passage.tms.tender.accepted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, tenantid, data]
+        properties:
+          type: { type: string, const: dev.passage.tms.tender.accepted.v1 }
+          tenantid: { type: string }
+          data: { type: object, required: [loadId], properties: { loadId: { type: string } } }
+    TenderDeclined:
+      name: dev.passage.tms.tender.declined.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, tenantid, data]
+        properties:
+          type: { type: string, const: dev.passage.tms.tender.declined.v1 }
+          tenantid: { type: string }
+          data: { type: object, required: [loadId], properties: { loadId: { type: string } } }

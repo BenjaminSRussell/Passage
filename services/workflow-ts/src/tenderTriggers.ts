@@ -16,6 +16,8 @@ export interface LoadReleasedEvent {
   source: string;
   tenantid: string;
   data: {
+    /** The release (transport's load_release id); the tender start is keyed on it. Absent from releases before #426's producer. */
+    releaseId?: string;
     loadId: string;
     legalEntityId: string;
     releasedBy: string;
@@ -35,7 +37,7 @@ export interface TenderOutcomeEvent {
 export function toTenderInput(event: LoadReleasedEvent): TenderInput {
   if (event.type !== loadReleasedType) throw new TypeError(`expected ${loadReleasedType}, got ${event.type}`);
   if (event.source !== loadReleasedSource) throw new TypeError(`${loadReleasedType} is accepted only from ${loadReleasedSource}, got ${event.source}`);
-  const { loadId, legalEntityId, releasedBy, legalEntityScope, carriers, currency, timeoutMin } = event.data;
+  const { releaseId, loadId, legalEntityId, releasedBy, legalEntityScope, carriers, currency, timeoutMin } = event.data;
   const input: TenderInput = {
     tenantId: event.tenantid,
     legalEntityId,
@@ -45,6 +47,7 @@ export function toTenderInput(event: LoadReleasedEvent): TenderInput {
     ...(currency ? { currency } : {}),
     ...(timeoutMin ? { timeoutMin } : {}),
     requestedBy: releasedBy,
+    ...(releaseId ? { releaseId } : {}),
   };
   validateTenderInput(input);
   return input;

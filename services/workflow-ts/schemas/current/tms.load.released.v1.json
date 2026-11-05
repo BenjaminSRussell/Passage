@@ -18,6 +18,7 @@
       "type": "object",
       "required": ["loadId", "legalEntityId", "releasedBy", "legalEntityScope", "carriers"],
       "properties": {
+        "releaseId": { "type": "string", "description": "transport's id of the release; workflow-ts keys the tender start on it, so a redelivered release replays the same tender" },
         "loadId": { "type": "string" },
         "legalEntityId": { "type": "string", "description": "the load's legal entity; must be in legalEntityScope" },
         "releasedBy": { "type": "string", "description": "user id of the verified principal that released the load (X-Passage-User), not a body field" },

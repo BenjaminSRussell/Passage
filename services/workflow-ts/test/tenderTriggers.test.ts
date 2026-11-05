@@ -40,6 +40,12 @@ describe("tender triggers", () => {
     });
   });
 
+  it("carries the release id into the tender input and refuses one that is not a UUID", () => {
+    const releaseId = "01a1abf2-4d5a-7674-9348-53a0e1e4248e";
+    expect(toTenderInput({ ...released, data: { ...released.data, releaseId } })).toMatchObject({ releaseId });
+    expect(() => toTenderInput({ ...released, data: { ...released.data, releaseId: "r-1" } })).toThrow(/releaseId/);
+  });
+
   it("starts tender:<loadId>, reports a run already in flight and allows a re-release after the last run closed", async () => {
     const { client, start } = clientWith(vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(new WorkflowExecutionAlreadyStartedError("dup", "tender", "tenderWorkflow")));
     expect(await handleLoadReleased(client, "q", released)).toEqual({ workflowId: `tender:${released.tenantid}:${LOAD_ID}`, started: true });
