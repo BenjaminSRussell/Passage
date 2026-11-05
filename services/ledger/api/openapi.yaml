@@ -2745,7 +2745,8 @@ paths:
             verified service token, not from the request body: an entry another caller tags year_end_closing stays in)
             and the entries that reverse them, so a re-run of a year-end close nets to nothing. The response echoes
             excludesYearEndClosing: true; an older ledger ignores the parameter and does not echo it. Cannot be combined
-            with dim.* filters or group_by (400). Entries posted before the ledger recorded the service stay in.
+            with dim.* filters or group_by (400). Entries posted before the ledger recorded the service (migration 0028)
+            stay in and are not backfilled; redoing that year's close through the close service nets them out.
           schema: { type: boolean }
         - name: group_by
           in: query
