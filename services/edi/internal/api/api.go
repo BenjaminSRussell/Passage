@@ -26,6 +26,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -92,6 +93,10 @@ type API struct {
 	AS2PublicURL string
 	// AllowInsecureAS2 admits http:// partner AS2 URLs (development only).
 	AllowInsecureAS2 bool
+	// AS2Trust checks partner AS2 certificates against the trust roots and
+	// CRLs (EDI_AS2_TRUST_ROOTS, EDI_AS2_CRL_DIR) when a transport is saved
+	// and at every use; nil pins them only.
+	AS2Trust *certtrust.Checker
 	// AS2Limit is the per-endpoint rate limit of the AS2 listener; nil admits
 	// every request. Asynchronous MDNs we owe are stored and posted by the
 	// delivery dispatcher, not from the listener.

@@ -22,6 +22,15 @@ release may change public APIs.
   fulfillment by code. Receiving arrival and direct receipt lines without a purchase order line take `siteId` and
   `warehouseId`, carried on `receipt.posted`, so inventory books them instead of parking them.
 
+- Partner AS2 certificate chain and revocation checks in edi (#483): with the new `EDI_AS2_TRUST_ROOTS` (a PEM bundle of
+  CA certificates; chart `transports.trust.rootsConfigMap`) a partner's pinned AS2 certificate must also chain to a
+  trust root through the intermediates now accepted after it in `partnerCertificate`, and with `EDI_AS2_CRL_DIR`
+  (chart `transports.trust.crlConfigMap`) every certificate of the chain needs a current CRL from its issuer that does
+  not list it. Both fail closed when a transport is saved (400) and at every use (`internal/certtrust`): an untrusted
+  or revoked certificate gets 403 at the AS2 listener and fails outbound deliveries at once, a missing or expired CRL
+  answers 503 and backs deliveries off until it is refreshed. The files are reread when they change; nothing is
+  fetched from the network (no OCSP or CRL distribution points). `GET /partners/{id}/transport` shows
+  `partnerCertificateTrust`. Pinning is unchanged: signatures are still verified against the stored certificate only.
 - Partner update in edi (#483): `PATCH /edi/v1/partners/{id}` (duty `edi.admin`, seeded in `policies/authz/data.json`
   next to the existing partner read) changes a partner's name, ISA identity, ack SLA, status (inactive stops receipt,
   the AS2 listener and outbound documents) and EDIFACT identity as a JSON merge patch under `If-Match` on the partner

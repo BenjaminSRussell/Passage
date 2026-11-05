@@ -31,6 +31,13 @@ transports:
   intervalSeconds: 15
   # How long a delivery waits for its asynchronous MDN before it is sent again (FAILED after the last attempt).
   mdnTimeoutMinutes: 1440
+  # Partner AS2 certificates are always pinned. With rootsConfigMap (key rootsKey: a PEM bundle of the CAs partners'
+  # certificates must chain to, EDI_AS2_TRUST_ROOTS) they must also chain to one of them, through the intermediates
+  # stored after the certificate; with crlConfigMap (EDI_AS2_CRL_DIR, every key one CRL: PEM in data, DER in
+  # binaryData) every certificate of the chain needs a current CRL from its issuer that does not list it. Both fail
+  # closed and are read again when the ConfigMap changes; whoever operates the trust keeps the CRLs current (the
+  # service fetches nothing).
+  trust: { rootsConfigMap: "", rootsKey: roots.pem, crlConfigMap: "" }
   # The AS2 listener partners post to, on its own port and Service (edi-as2). It takes no Passage token: it is
   # exposed by the AS2 edge (deploy/gateway/as2-*.yaml: Gateway passage-as2, outside the passage-api JWT
   # SecurityPolicy), and the caller is authenticated by its AS2 signature against the partner certificate.

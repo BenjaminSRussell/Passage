@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -24,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/api"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
@@ -101,7 +103,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	a.Secrets, a.AS2PublicURL, a.AllowInsecureAS2 = tc.secrets, tc.publicURL, tc.allowHTTP
+	a.Secrets, a.AS2PublicURL, a.AllowInsecureAS2, a.AS2Trust = tc.secrets, tc.publicURL, tc.allowHTTP, tc.trust
 	a.AS2Limit = api.NewAS2Limiter(tc.ratePerMinute, tc.rateBurst, 0)
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -111,7 +113,7 @@ func run() error {
 		go func() { errCh <- httpx.Serve(ctx, tc.as2Addr, a.AS2Routes()) }()
 	}
 	if tc.workers {
-		d := &delivery.Dispatcher{Store: st, Secrets: tc.secrets, HTTP: tc.http, AS2PublicURL: tc.publicURL, MDNTimeout: tc.mdnTimeout}
+		d := &delivery.Dispatcher{Store: st, Secrets: tc.secrets, Trust: tc.trust, HTTP: tc.http, AS2PublicURL: tc.publicURL, MDNTimeout: tc.mdnTimeout}
 		p := &delivery.Poller{Store: st, Secrets: tc.secrets, Receive: a.ReceiveFromTransport}
 		go delivery.Run(ctx, "delivery dispatcher", tc.interval, d.RunOnce)
 		go delivery.Run(ctx, "sftp poller", tc.interval, p.RunOnce)
@@ -136,6 +138,9 @@ type transportConfig struct {
 	ratePerMinute int
 	rateBurst     int
 	mdnTimeout    time.Duration
+	// trust checks partner AS2 certificates against EDI_AS2_TRUST_ROOTS and
+	// EDI_AS2_CRL_DIR; nil pins them only.
+	trust *certtrust.Checker
 }
 
 // loadTransportConfig reads EDI_SECRETS_DIR (the mounted directory of
@@ -147,8 +152,11 @@ type transportConfig struct {
 // default 120 a minute with bursts of 60; 0 a minute turns the limit off),
 // EDI_AS2_MDN_TIMEOUT_MINUTES (how long a delivery waits for its
 // asynchronous MDN, default 1440), EDI_TRANSPORT_WORKERS (run the dispatcher
-// and the SFTP poller) and EDI_TRANSPORT_INTERVAL_SECONDS (how often they
-// look for work, default 15).
+// and the SFTP poller), EDI_TRANSPORT_INTERVAL_SECONDS (how often they
+// look for work, default 15), EDI_AS2_TRUST_ROOTS (a PEM bundle of the CAs
+// partner AS2 certificates must chain to; unset pins certificates only) and
+// EDI_AS2_CRL_DIR (a directory of CRLs from those CAs; with it every
+// certificate of a chain must be covered by a current CRL, fail closed).
 func loadTransportConfig(getenv func(string) string, httpAddr string) (transportConfig, error) {
 	c := transportConfig{as2Addr: getenv("EDI_AS2_ADDR"), allowHTTP: getenv("EDI_AS2_ALLOW_HTTP") == "true",
 		workers: getenv("EDI_TRANSPORT_WORKERS") == "true", publicURL: strings.TrimRight(getenv("EDI_AS2_PUBLIC_URL"), "/")}
@@ -158,6 +166,11 @@ func loadTransportConfig(getenv func(string) string, httpAddr string) (transport
 		}
 		c.secrets = secrets.Dir(dir)
 	}
+	trust, err := certtrust.New(getenv("EDI_AS2_TRUST_ROOTS"), getenv("EDI_AS2_CRL_DIR"))
+	if err != nil {
+		return c, fmt.Errorf("EDI_AS2_TRUST_ROOTS / EDI_AS2_CRL_DIR: %w", err)
+	}
+	c.trust = trust
 	if c.as2Addr != "" && c.as2Addr == httpAddr {
 		return c, errors.New("EDI_AS2_ADDR must differ from HTTP_ADDR: the AS2 listener serves partners without a Passage identity")
 	}

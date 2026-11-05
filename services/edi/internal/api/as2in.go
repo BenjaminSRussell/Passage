@@ -17,6 +17,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -112,7 +113,14 @@ func (a *API) as2Partner(w http.ResponseWriter, r *http.Request) (context.Contex
 		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
 		return nil, rec, partner, ep, false
 	}
-	ep, err = delivery.LoadAS2(a.Secrets, *rec.Config.AS2, a.now())
+	ep, err = delivery.LoadAS2(a.Secrets, a.AS2Trust, *rec.Config.AS2, a.now())
+	if errors.Is(err, certtrust.ErrUntrusted) {
+		// The pinned certificate no longer chains to the trust roots or was
+		// revoked: the partner cannot be authenticated until it is replaced.
+		slog.Warn("as2 partner certificate not trusted", "tenant", tid, "partner", pid, "err", err)
+		http.Error(w, "partner certificate not trusted", http.StatusForbidden)
+		return nil, rec, partner, ep, false
+	}
 	if err != nil {
 		slog.Error("as2 keys unavailable", "tenant", tid, "partner", pid, "err", err)
 		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)

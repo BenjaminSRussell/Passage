@@ -1462,7 +1462,13 @@ components:
         partnerAs2Id: { type: string, pattern: '^[A-Za-z0-9._@:-]{1,128}$' }
         ourAs2Id: { type: string, pattern: '^[A-Za-z0-9._@:-]{1,128}$' }
         url: { type: string, format: uri, description: The partner's AS2 URL (https) }
-        partnerCertificate: { type: string, description: 'One PEM certificate (RSA of 2048 bits or more, or ECDSA), valid now; RSA when encrypting' }
+        partnerCertificate:
+          type: string
+          description: >
+            The partner's PEM certificate (RSA of 2048 bits or more, or ECDSA), valid now, RSA when encrypting; it is
+            pinned (signatures are verified against it). It may be followed by up to five intermediate CA certificates.
+            With EDI_AS2_TRUST_ROOTS the certificate must chain to a trust root through them, and with EDI_AS2_CRL_DIR
+            every certificate of the chain needs a current CRL from its issuer that does not list it; otherwise 400.
         signingKeyRef: { type: string, pattern: '^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$', description: Name of the secret file holding our PEM private key and certificate }
         signingAlgorithm: { type: string, enum: [sha-256, sha-384, sha-512], default: sha-256 }
         encryptionAlgorithm: { type: string, enum: [none, aes128-cbc, aes192-cbc, aes256-cbc], default: none }
@@ -1499,6 +1505,14 @@ components:
             mdnUrl: { type: string, description: Where the partner posts asynchronous MDNs }
             partnerCertificateSha256: { type: string }
             partnerCertificateNotAfter: { type: string, format: date-time }
+            partnerCertificateTrust:
+              type: string
+              enum: [pinned, trusted, untrusted, revocation-unknown]
+              description: >
+                pinned without trust roots; otherwise whether the certificate chains to a trust root and is not revoked
+                now (untrusted: no chain or revoked, refused for good; revocation-unknown: no current CRL from an issuer,
+                refused until the CRL is refreshed)
+            partnerCertificateTrustError: { type: string }
         secrets:
           type: object
           description: Per reference field, whether the secret is ok, missing or malformed (never its content)

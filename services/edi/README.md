@@ -248,7 +248,8 @@ ignores `X-Passage-*` headers. The endpoint id in the path (random, per partner 
 across updates) is resolved by the SECURITY DEFINER `edi_as2_endpoint()` to a tenant and partner
 and nothing else; the work then runs as the edi service in the one legal entity of the partner's
 trade profile. The caller is authenticated by its CMS signature against the certificate pinned on
-the transport (signatures are always required, encryption when selected), with AS2-From and AS2-To
+the transport (signatures are always required, encryption when selected; with trust roots the
+certificate must also chain to them and not be revoked, 403 otherwise), with AS2-From and AS2-To
 matching the profile; nothing is parsed before the signature verifies; bodies are capped at 8 MiB
 (1 MiB for MDNs) and the payload at 4 MiB. Unknown endpoints, other transports and inactive
 partners all answer 404. Asynchronous MDNs we owe are stored and posted only to the scheme and host
@@ -376,6 +377,20 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   `partner_entity_index` a trigger on `partner_trade_profile` keeps (no RLS, no `passage_app`
   grant, listed in `tools/rlscheck`). `passage_app` gets UPDATE on the changed columns only:
   tenant, id, environment and creation time stay write-once and partners are never deleted.
+- **Partner certificate trust** (`internal/certtrust`): the partner AS2 certificate stays pinned
+  (signatures are verified against it alone, so another certificate of the same CA cannot sign for
+  the partner). The `partnerCertificate` field may carry up to five intermediate CA certificates after
+  it. With `EDI_AS2_TRUST_ROOTS` (a PEM bundle of CA certificates) the certificate must also chain to
+  one of them; with `EDI_AS2_CRL_DIR` (a directory of CRLs, PEM or DER, dot files skipped) every
+  certificate of the chain below the root must be covered by the newest current CRL its issuer
+  signed (thisUpdate passed, nextUpdate set and ahead) and not be listed. Both fail closed, at
+  `PUT /transport` (400 on `as2.partnerCertificate`) and at every use: an inbound AS2 message from a
+  partner whose certificate is untrusted or revoked gets 403, an outbound delivery FAILS at once
+  (`delivery.failed`); when an issuer has no current CRL the listener answers 503 and deliveries back
+  off until the CRL is refreshed. The files are read again when one changes (size or mtime), so a
+  rotated CRL needs no restart. `GET /transport` shows `partnerCertificateTrust` (`pinned`, `trusted`,
+  `untrusted`, `revocation-unknown`) with the reason. Nothing is fetched from the network: OCSP and
+  CRL distribution points are not used.
 - **Posting inbound documents (decision)**: nothing in edi posts a received document into another
   service, and no service grant was added for it. Sales already has the intake route
   (`POST /v1/sales/orders`, service-only `sales.channel.intake`), but its request needs a product,
@@ -413,6 +428,7 @@ internal/api/       HTTP handlers, DTOs, duty checks
 internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP and loopback senders; transporttest has the in-process partner endpoints
 internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
 internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
+internal/certtrust/ partner AS2 certificate chain and CRL checks (EDI_AS2_TRUST_ROOTS, EDI_AS2_CRL_DIR)
 internal/events/    event type constants and payloads
 migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal), 0009_partner_update.sql (partner UPDATE column grant, partner_entity_index and edi_partner_in_entity_scope())
 api/openapi.yaml    OpenAPI 3.1 for the routes above
@@ -484,8 +500,11 @@ are refused), `EDI_AS2_ADDR` (AS2 listener address, off when empty, must differ 
 `EDI_AS2_RATE_BURST` (the listener's limit per endpoint, default 120 and 60; 0 a minute is off),
 `EDI_TRANSPORT_WORKERS=true` (run the dispatcher, which also posts the asynchronous MDNs we owe, and
 the SFTP poller; with the AS2 listener on, some replica must run them),
-`EDI_TRANSPORT_INTERVAL_SECONDS` (default 15) and `EDI_AS2_MDN_TIMEOUT_MINUTES` (how long a delivery
-waits for its asynchronous MDN, default 1440). Chart values
+`EDI_TRANSPORT_INTERVAL_SECONDS` (default 15), `EDI_AS2_MDN_TIMEOUT_MINUTES` (how long a delivery
+waits for its asynchronous MDN, default 1440), `EDI_AS2_TRUST_ROOTS` (PEM bundle of the CAs partner AS2
+certificates must chain to; unset pins certificates only) and `EDI_AS2_CRL_DIR` (CRLs of those CAs,
+needs the roots; chart `transports.trust.rootsConfigMap`/`rootsKey` and `crlConfigMap`, mounted under
+`/etc/passage/edi-trust`). Chart values
 under `transports` set them, mount the Secret `transports.secretName` at
 `/var/run/passage/edi-secrets` and, with `transports.externalSecret.enabled`, create it from the
 Vault path `transports.externalSecret.key` (every property becomes one reference).

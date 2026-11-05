@@ -32,6 +32,18 @@ func certPEM(t *testing.T, ec bool, notAfter time.Time) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
 
+func caPEM(t *testing.T, notAfter time.Time) string {
+	t.Helper()
+	k, _ := rsa.GenerateKey(rand.Reader, 2048)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(8), Subject: pkix.Name{CommonName: "ca"}, NotBefore: notAfter.Add(-48 * time.Hour), NotAfter: notAfter,
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, k.Public(), k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
 func TestPartnerTransport_Validate(t *testing.T) {
 	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
 	rules := TransportRules{Now: now}
@@ -69,7 +81,8 @@ func TestPartnerTransport_Validate(t *testing.T) {
 		"http URL":               {as2(func(a *AS2Settings) { a.URL = "http://as2.acme.example/as2" }), rules, "as2.url"},
 		"relative URL":           {as2(func(a *AS2Settings) { a.URL = "/as2" }), rules, "as2.url"},
 		"expired certificate":    {as2(func(a *AS2Settings) { a.PartnerCertificate = certPEM(t, false, now.Add(-time.Hour)) }), rules, "as2.partnerCertificate"},
-		"two certificates":       {as2(func(a *AS2Settings) { a.PartnerCertificate = rsaCert + rsaCert }), rules, "as2.partnerCertificate"},
+		"a second leaf":          {as2(func(a *AS2Settings) { a.PartnerCertificate = rsaCert + rsaCert }), rules, "as2.partnerCertificate"},
+		"text after the PEM":     {as2(func(a *AS2Settings) { a.PartnerCertificate = rsaCert + "junk" }), rules, "as2.partnerCertificate"},
 		"EC cert and encryption": {as2(func(a *AS2Settings) { a.PartnerCertificate, a.EncryptionAlgorithm = ecCert, "aes128-cbc" }), rules, "as2.partnerCertificate"},
 		"async without URL":      {as2(func(a *AS2Settings) { a.MDNMode = "async" }), rules, "as2.mdnMode"},
 		"sha-1":                  {as2(func(a *AS2Settings) { a.SigningAlgorithm = "sha-1" }), rules, "as2.signingAlgorithm"},
@@ -87,6 +100,27 @@ func TestPartnerTransport_Validate(t *testing.T) {
 		if f := c.cfg.Validate(c.rules); f[c.field] == "" {
 			t.Errorf("%s: want %s in %v", name, c.field, f)
 		}
+	}
+	// The partner certificate may carry its intermediates; the trust rule
+	// sees the leaf and them, and its refusal is the field error.
+	caCert := caPEM(t, now.Add(24*time.Hour))
+	var seen int
+	trusting := TransportRules{Now: now, TrustCertificate: func(leaf *x509.Certificate, inter []*x509.Certificate) string {
+		seen = len(inter)
+		if leaf.Subject.CommonName != "p" {
+			return "wrong leaf"
+		}
+		return ""
+	}}
+	if f := as2(func(a *AS2Settings) { a.PartnerCertificate = rsaCert + caCert }).Validate(trusting); len(f) != 0 || seen != 1 {
+		t.Fatalf("leaf with an intermediate: %v %d", f, seen)
+	}
+	trusting.TrustCertificate = func(*x509.Certificate, []*x509.Certificate) string { return "is revoked" }
+	if f := as2(nil).Validate(trusting); f["as2.partnerCertificate"] != "is revoked" {
+		t.Fatalf("untrusted: %v", f)
+	}
+	if f := as2(func(a *AS2Settings) { a.PartnerCertificate = rsaCert + strings.Repeat(caCert, 6) }).Validate(rules); f["as2.partnerCertificate"] == "" {
+		t.Fatal("six intermediates accepted")
 	}
 	if f := as2(func(a *AS2Settings) { a.URL = "http://localhost:8080/as2" }).Validate(TransportRules{Now: now, AllowHTTP: true}); len(f) != 0 {
 		t.Fatalf("http allowed in development: %v", f)

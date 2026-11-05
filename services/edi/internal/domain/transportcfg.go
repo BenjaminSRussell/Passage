@@ -131,6 +131,10 @@ type TransportRules struct {
 	// AsyncMDN is whether this deployment can receive asynchronous MDNs (it
 	// has a public AS2 URL).
 	AsyncMDN bool
+	// TrustCertificate, when set, checks the partner certificate with the
+	// intermediates after it against the deployment's trust roots and CRLs
+	// and returns why it is refused ("" when trusted).
+	TrustCertificate func(leaf *x509.Certificate, intermediates []*x509.Certificate) string
 }
 
 // Validate returns field errors keyed by JSON path; an empty map means valid.
@@ -198,12 +202,22 @@ func (a *AS2Settings) validate(r TransportRules, fields map[string]string) {
 	default:
 		fields["as2.mdnMode"] = "must be sync or async"
 	}
-	cert, msg := ParsePartnerCertificate(a.PartnerCertificate, r.Now)
-	if msg != "" {
+	cert, intermediates, msg := ParsePartnerChain(a.PartnerCertificate, r.Now)
+	switch {
+	case msg != "":
 		fields["as2.partnerCertificate"] = msg
-	} else if _, isRSA := cert.PublicKey.(*rsa.PublicKey); !isRSA && a.EncryptionAlgorithm != "none" {
+	case a.EncryptionAlgorithm != "none" && !isRSAKey(cert):
 		fields["as2.partnerCertificate"] = "must hold an RSA key to encrypt to the partner"
+	case r.TrustCertificate != nil:
+		if why := r.TrustCertificate(cert, intermediates); why != "" {
+			fields["as2.partnerCertificate"] = why
+		}
 	}
+}
+
+func isRSAKey(c *x509.Certificate) bool {
+	_, ok := c.PublicKey.(*rsa.PublicKey)
+	return ok
 }
 
 func checkAS2URL(raw string, allowHTTP bool) string {
@@ -223,21 +237,59 @@ func checkAS2URL(raw string, allowHTTP bool) string {
 	return ""
 }
 
-// ParsePartnerCertificate reads one PEM certificate holding an RSA (2048 bits
-// or more) or ECDSA key that is valid at now. The message is empty when the
-// certificate is acceptable.
+// ParsePartnerCertificate reads the partner's pinned PEM certificate (the
+// first block, see ParsePartnerChain) holding an RSA (2048 bits or more) or
+// ECDSA key that is valid at now. The message is empty when the certificate
+// is acceptable.
 func ParsePartnerCertificate(pemText string, now time.Time) (*x509.Certificate, string) {
+	cert, _, msg := ParsePartnerChain(pemText, now)
+	return cert, msg
+}
+
+// ParsePartnerChain reads the partner certificate field: the partner's own
+// certificate (pinned: its signatures are verified against it), optionally
+// followed by the intermediate CA certificates that chain it to a trust
+// root (used only when trust roots are configured, EDI_AS2_TRUST_ROOTS). At
+// most five intermediates, 16 KiB in all, no private key.
+func ParsePartnerChain(pemText string, now time.Time) (*x509.Certificate, []*x509.Certificate, string) {
 	if len(pemText) > 16384 || strings.Contains(pemText, "PRIVATE KEY") {
-		return nil, "must be one PEM certificate (no private key), at most 16 KiB"
+		return nil, nil, "must be PEM certificates (no private key), at most 16 KiB"
 	}
-	block, rest := pem.Decode([]byte(pemText))
-	if block == nil || block.Type != "CERTIFICATE" || strings.TrimSpace(string(rest)) != "" {
-		return nil, "must be exactly one PEM CERTIFICATE block"
+	var certs []*x509.Certificate
+	for rest := []byte(pemText); ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			if strings.TrimSpace(string(rest)) != "" {
+				return nil, nil, "must hold only PEM CERTIFICATE blocks"
+			}
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			return nil, nil, "must hold only PEM CERTIFICATE blocks"
+		}
+		c, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, nil, "is not a valid X.509 certificate"
+		}
+		certs = append(certs, c)
 	}
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, "is not a valid X.509 certificate"
+	if len(certs) == 0 {
+		return nil, nil, "must be a PEM CERTIFICATE block"
 	}
+	if len(certs) > 6 {
+		return nil, nil, "may carry at most five intermediate certificates after the partner certificate"
+	}
+	for _, ic := range certs[1:] {
+		if !ic.IsCA {
+			return nil, nil, "certificates after the partner certificate must be CA certificates (intermediates)"
+		}
+	}
+	cert, msg := checkPartnerKey(certs[0], now)
+	return cert, certs[1:], msg
+}
+
+func checkPartnerKey(cert *x509.Certificate, now time.Time) (*x509.Certificate, string) {
 	switch k := cert.PublicKey.(type) {
 	case *rsa.PublicKey:
 		if k.N.BitLen() < 2048 {

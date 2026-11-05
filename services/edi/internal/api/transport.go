@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
@@ -28,6 +30,11 @@ type as2InboundView struct {
 	MDNURL                   string    `json:"mdnUrl,omitempty"`
 	PartnerCertificateSHA256 string    `json:"partnerCertificateSha256"`
 	PartnerCertificateExpiry time.Time `json:"partnerCertificateNotAfter"`
+	// PartnerCertificateTrust is "pinned" without trust roots, otherwise
+	// "trusted", or "untrusted" or "revocation-unknown" with the reason in
+	// PartnerCertificateTrustError.
+	PartnerCertificateTrust      string `json:"partnerCertificateTrust"`
+	PartnerCertificateTrustError string `json:"partnerCertificateTrustError,omitempty"`
 }
 
 type transportView struct {
@@ -58,9 +65,20 @@ func (a *API) transportView(t store.TransportRecord) transportView {
 			in.URL = a.AS2PublicURL + "/as2/v1/" + t.EndpointID
 			in.MDNURL = delivery.AS2MDNURL(a.AS2PublicURL, t.EndpointID)
 		}
-		if cert, msg := domain.ParsePartnerCertificate(t.Config.AS2.PartnerCertificate, a.now()); msg == "" {
+		if cert, intermediates, msg := domain.ParsePartnerChain(t.Config.AS2.PartnerCertificate, a.now()); msg == "" {
 			in.PartnerCertificateSHA256 = domain.CertificateFingerprint(cert)
 			in.PartnerCertificateExpiry = cert.NotAfter
+			in.PartnerCertificateTrust = "pinned"
+			if a.AS2Trust != nil {
+				switch err := a.AS2Trust.Verify(cert, intermediates, a.now()); {
+				case err == nil:
+					in.PartnerCertificateTrust = "trusted"
+				case errors.Is(err, certtrust.ErrUntrusted):
+					in.PartnerCertificateTrust, in.PartnerCertificateTrustError = "untrusted", err.Error()
+				default:
+					in.PartnerCertificateTrust, in.PartnerCertificateTrustError = "revocation-unknown", err.Error()
+				}
+			}
 		}
 		v.AS2Inbound = in
 	}
@@ -117,7 +135,18 @@ func (a *API) putTransport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg = cfg.WithDefaults()
-	fields := cfg.Validate(domain.TransportRules{Now: a.now(), AllowHTTP: a.AllowInsecureAS2, AsyncMDN: a.AS2PublicURL != ""})
+	rules := domain.TransportRules{Now: a.now(), AllowHTTP: a.AllowInsecureAS2, AsyncMDN: a.AS2PublicURL != ""}
+	if a.AS2Trust != nil {
+		// Fail closed: a certificate that does not chain to the trust roots,
+		// is revoked, or whose revocation status is unknown is not saved.
+		rules.TrustCertificate = func(leaf *x509.Certificate, intermediates []*x509.Certificate) string {
+			if err := a.AS2Trust.Verify(leaf, intermediates, a.now()); err != nil {
+				return err.Error()
+			}
+			return ""
+		}
+	}
+	fields := cfg.Validate(rules)
 	if len(fields) == 0 && cfg.Kind != domain.TransportAPI {
 		if a.Secrets == nil {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeTransportUnavailable, "no secret directory is configured (EDI_SECRETS_DIR); AS2 and SFTP cannot be used"))
