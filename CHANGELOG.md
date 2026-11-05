@@ -10,6 +10,18 @@ release may change public APIs.
 
 ### Added
 
+- Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
+  batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
+  equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
+  that names the line (`inventory_transaction_origin.line_source_id`, inventory migrations 0036 and 0037, the index
+  built concurrently). Sales' `:record-progress` lines take optional `tracking` entries on a DELIVERED report
+  (batch, serial, quantity, and on a catch-weight line split over several entries each entry's `actualWeight`),
+  passed through on `orderprogress.recorded`; inventory issues each entry under its batch and serial at its own
+  row's running average. Receipt cancellations and cancelled packing slips offset every entry of the line. Tracking
+  that cannot be booked parks with the new `INV-PST-005`. Location is still not booked: receiving names it by id and
+  fulfillment by code. Receiving arrival and direct receipt lines without a purchase order line take `siteId` and
+  `warehouseId`, carried on `receipt.posted`, so inventory books them instead of parking them.
+
 - Inbound EDIFACT over the transports, with CONTRL (#483): the edi receipt tells X12 (ISA) from EDIFACT (UNA/UNB)
   by the first segment, so the AS2 listener, the SFTP poller and the new `POST /edi/v1/inbound/edifact` take EDIFACT
   interchanges. They are read with UNG/UNE functional groups and every count and reference checked; the UNB sender
@@ -164,6 +176,9 @@ release may change public APIs.
 
 ### Fixed
 
+- Inventory postings consumer (#480): replaying a sales delivery that emptied its on-hand row no longer fails as a
+  reused Idempotency-Key (the row's running average had moved to zero, so the replay was a different request);
+  entries already booked are skipped.
 - Production GL posting sent the journal number as the ledger `documentId`, which the ledger refuses (it must be a
   UUID); it now sends the journal id (the order id for a settlement) and carries the number as line text (#478).
 - Ledger posting no longer deadlocks (`40P01`) when two ledgers of one tenant post the same new dimension

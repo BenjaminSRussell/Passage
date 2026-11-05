@@ -84,6 +84,9 @@ type document struct {
 	// statusChangeID is the audit row of a transaction registered through
 	// transactions:apply (CREATE); empty for document postings.
 	statusChangeID string
+	// lineSourceID is the document line a tracked entry's origin belongs to
+	// (#480); empty otherwise.
+	lineSourceID string
 }
 
 // PostJournal posts a DRAFT or APPROVED journal in one transaction: it locks the
@@ -635,8 +638,12 @@ func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc docum
 	if doc.referenceID != "" {
 		reference = &doc.referenceID
 	}
-	if _, err := tx.Exec(ctx, `insert into inventory_transaction_origin (tenant_id, legal_entity_id, id, source_type, source_id, product_id, reference_number, direction)
-		values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, doc.legalEntityID, originID, doc.sourceType, sourceID, r.product, reference, string(dir)); err != nil {
+	var line *string
+	if doc.lineSourceID != "" {
+		line = &doc.lineSourceID
+	}
+	if _, err := tx.Exec(ctx, `insert into inventory_transaction_origin (tenant_id, legal_entity_id, id, source_type, source_id, product_id, reference_number, direction, line_source_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, tenantID, doc.legalEntityID, originID, doc.sourceType, sourceID, r.product, reference, string(dir), line); err != nil {
 		return "", err
 	}
 	status := string(pl.Status)

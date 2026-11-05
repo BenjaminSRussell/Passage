@@ -93,3 +93,38 @@ func (s *Postgres) OriginBookings(ctx context.Context, legalEntityID, sourceType
 	})
 	return out, err
 }
+
+// LineBookings returns, for each document line origin, every transaction
+// booked for it in a legal entity, oldest first: the line's own booking for
+// an untracked line, or each entry of a tracked one (origins whose
+// line_source_id names the line, #480). A line without a booking is absent.
+// Corrections and cancellations read the line back this way so they offset
+// every entry, whatever the entries were.
+func (s *Postgres) LineBookings(ctx context.Context, legalEntityID, sourceType string, lineSourceIDs []string) (map[string][]TransactionRow, error) {
+	out := map[string][]TransactionRow{}
+	if len(lineSourceIDs) == 0 {
+		return out, nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select coalesce(o.line_source_id, o.source_id)::text, `+transactionColumns+transactionFrom+`
+			where t.tenant_id = $1 and t.legal_entity_id = $2::uuid and o.source_type = $3
+				and (o.source_id = any($4::uuid[]) or o.line_source_id = any($4::uuid[]))
+			order by t.created_at, t.id`,
+			p.TenantID, legalEntityID, sourceType, lineSourceIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var line string
+			r, err := scanTransactionWith(rows, &line)
+			if err != nil {
+				return err
+			}
+			out[line] = append(out[line], r)
+		}
+		return rows.Err()
+	})
+	return out, err
+}

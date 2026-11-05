@@ -1,0 +1,31 @@
+{
+  "progress_id": "0199f480-0000-7000-8000-000000000031",
+  "order_id": "0199f480-0000-7000-8000-000000000032",
+  "legal_entity_id": "0199f480-0000-7000-8000-00000000000a",
+  "currency": "USD",
+  "kind": "DELIVERED",
+  "source_ref": "PS-T",
+  "lines": [
+    {
+      "line_id": "0199f480-0000-7000-8000-000000000033",
+      "line_no": 1,
+      "quantity": "3",
+      "delivered_qty": "3",
+      "invoiced_qty": "0",
+      "line_status": "PICKED",
+      "product_id": "0199f480-0000-7000-8000-000000000025",
+      "unit": "EA",
+      "site_id": "0199f480-0000-7000-8000-000000000007",
+      "warehouse_id": "0199f480-0000-7000-8000-000000000008",
+      "tracking": [
+        { "batch": "LOT-7", "serial": "SN-0002", "quantity": "1" },
+        { "batch": "LOT-7", "serial": "SN-0003", "quantity": "1" },
+        { "batch": "LOT-8", "serial": "SN-0005", "quantity": "1" }
+      ]
+    }
+  ],
+  "previous_status": "CONFIRMED",
+  "order_status": "PARTIALLY_SHIPPED",
+  "actor": "fulfillment",
+  "version": 3
+}

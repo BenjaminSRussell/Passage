@@ -30,10 +30,11 @@ const (
 )
 
 type fakePostings struct {
-	got    []store.CreateTransactionInput
-	errs   []error
-	cost   decimal.Decimal
-	booked map[string]store.TransactionRow
+	got     []store.CreateTransactionInput
+	errs    []error
+	cost    decimal.Decimal
+	booked  map[string]store.TransactionRow
+	entries map[string][]string
 }
 
 func (f *fakePostings) CreateTransaction(ctx context.Context, in store.CreateTransactionInput) (store.StatusChange, bool, error) {
@@ -53,14 +54,17 @@ func (f *fakePostings) IssueBasis(context.Context, string, string, domain.Dimens
 	return "EUR", f.cost, nil
 }
 
-func (f *fakePostings) OriginBookings(ctx context.Context, le, sourceType string, sourceIDs []string) (map[string]store.TransactionRow, error) {
+func (f *fakePostings) LineBookings(ctx context.Context, le, sourceType string, lineIDs []string) (map[string][]store.TransactionRow, error) {
 	if p, _ := tenant.FromContext(ctx); p.LegalEntityID != postEntity || le != postEntity {
 		return nil, errors.New("read outside the document's legal entity")
 	}
-	out := map[string]store.TransactionRow{}
-	for _, id := range sourceIDs {
+	out := map[string][]store.TransactionRow{}
+	for _, id := range lineIDs {
 		if r, ok := f.booked[sourceType+"|"+id]; ok {
-			out[id] = r
+			out[id] = append(out[id], r)
+		}
+		for _, k := range f.entries[sourceType+"|"+id] {
+			out[id] = append(out[id], f.booked[k])
 		}
 	}
 	return out, nil
@@ -72,6 +76,20 @@ func (f *fakePostings) book(sourceType, sourceID string, r store.TransactionRow)
 	}
 	r.SourceType, r.SourceID, r.LegalEntityID = sourceType, sourceID, postEntity
 	f.booked[sourceType+"|"+sourceID] = r
+}
+
+// bookEntry books r as an entry (a serial or batch) of the document line lineID.
+func (f *fakePostings) bookEntry(sourceType, lineID, sourceID string, r store.TransactionRow) {
+	if f.booked == nil {
+		f.booked = map[string]store.TransactionRow{}
+	}
+	if f.entries == nil {
+		f.entries = map[string][]string{}
+	}
+	r.SourceType, r.SourceID, r.LegalEntityID = sourceType, sourceID, postEntity
+	k := sourceType + "|" + sourceID
+	f.booked[k] = r
+	f.entries[sourceType+"|"+lineID] = append(f.entries[sourceType+"|"+lineID], k)
 }
 
 // fakeUnits converts BOX into 12 EA (EA is the inventory unit) and knows no other unit.

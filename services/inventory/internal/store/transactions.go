@@ -135,14 +135,19 @@ const transactionFrom = `
 			join dimension_set d on d.tenant_id = t.tenant_id and d.hash = t.dimension_set_hash
 			left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE', 'TRANSFER_IN') and l.tenant_id = o.tenant_id and l.id = o.source_id`
 
-func scanTransaction(rows pgx.Rows) (TransactionRow, error) {
+func scanTransaction(rows pgx.Rows) (TransactionRow, error) { return scanTransactionWith(rows) }
+
+// scanTransactionWith scans the leading columns into lead, then the
+// transactionColumns.
+func scanTransactionWith(rows pgx.Rows, lead ...any) (TransactionRow, error) {
 	var r TransactionRow
 	var raw []byte
 	var qty, entered, cost string
 	var posted *string
-	if err := rows.Scan(&r.ID, &r.LegalEntityID, &r.OriginID, &r.SourceType, &r.SourceID, &r.JournalID, &r.Reference, &r.ProductID, &raw,
+	dest := append(lead, &r.ID, &r.LegalEntityID, &r.OriginID, &r.SourceType, &r.SourceID, &r.JournalID, &r.Reference, &r.ProductID, &raw,
 		&qty, &entered, &r.EnteredUnit, &r.CWQty, &r.IssueStatus, &r.ReceiptStatus, &r.PhysicalDate, &r.FinancialDate, &r.Currency,
-		&cost, &posted, &r.CreatedAt); err != nil {
+		&cost, &posted, &r.CreatedAt)
+	if err := rows.Scan(dest...); err != nil {
 		return r, err
 	}
 	if err := json.Unmarshal(raw, &r.Dims); err != nil {
