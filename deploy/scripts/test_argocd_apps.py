@@ -14,7 +14,9 @@ test checks, without a cluster:
   `${secrets:ns/name:key}`, workload secretKeyRef) are written by an ExternalSecret that a dev Application syncs;
 - every consumer KafkaUser in deploy/kafka is the username of a chart's consumer, reads its group and writes only
   dead-letter topics a synced KafkaTopic creates; the inventory postings consumer's ACLs are exactly the topics,
-  group and dead-letter topic its code uses (#480);
+  group and dead-letter topic its code uses (#480); an outbox connector that routes by event type (outbox-sales,
+  outbox-fulfillment) sends every message of its service's AsyncAPI to that message's channel, and the debezium
+  user's literal ACLs under its prefix are exactly those channels;
 - if helm is on PATH, every dev and local Application whose source is a chart in this repo renders with its
   values, and outside local every container image is pinned by digest; Temporal's persistence values name the
   Service and Secret its database chart renders.
@@ -463,6 +465,44 @@ class ArgoApplicationsTest(unittest.TestCase):
         want[("group", group)] = {"Read", "Describe"}
         self.assertEqual(granted, want)
         self.assertIn(dlq, topics)
+
+    def test_type_routed_outbox_connectors_match_their_asyncapi_channels(self):
+        # outbox-sales and outbox-fulfillment route by the event type's entity, not aggregate_type (#480): every
+        # message the service's AsyncAPI declares under its own topic prefix routes to that message's channel, the
+        # debezium user writes exactly those channels under the prefix by literal ACL, and the inventory postings
+        # consumer's sales and fulfillment topics are among them.
+        docs = load_docs(DEPLOY / "kafka/connect.yaml")
+        (debezium,) = [d for d in docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "debezium"]
+        writable = {a["resource"]["name"] for a in debezium["spec"]["authorization"]["acls"]
+                    if a["resource"]["type"] == "topic" and a["resource"].get("patternType") == "literal"
+                    and "Write" in a["operations"]}
+        connectors = {d["metadata"]["name"]: d["spec"]["config"] for d in docs if d["kind"] == "KafkaConnector"
+                      and d["spec"]["config"].get("transforms.outbox.route.by.field") == "type"}
+        self.assertLessEqual({"outbox-sales", "outbox-fulfillment"}, set(connectors))
+        routed = set()
+        for name, cfg in connectors.items():
+            with self.subTest(connector=name):
+                service = name.removeprefix("outbox-")
+                regex = re.compile(cfg["transforms.outbox.route.topic.regex"].replace("(?<", "(?P<"))
+                replacement = cfg["transforms.outbox.route.topic.replacement"]
+                prefix = replacement.split("${", 1)[0]
+                self.assertEqual(cfg["topic.prefix"] + ".", prefix)
+                spec = yaml.safe_load((REPO / f"services/{service}/events/asyncapi.yaml").read_text())
+                messages = spec["components"]["messages"]
+                channels = set()
+                for channel in spec["channels"].values():
+                    if not channel["address"].startswith(prefix):
+                        continue
+                    channels.add(channel["address"])
+                    for ref in channel["messages"].values():
+                        typ = messages[ref["$ref"].rsplit("/", 1)[1]]["name"]
+                        m = regex.fullmatch(typ)
+                        self.assertIsNotNone(m, f"{name}: {typ} does not match the route")
+                        self.assertEqual(replacement.replace("${routedByValue}", m["routedByValue"]), channel["address"], typ)
+                self.assertEqual({t for t in writable if t.startswith(prefix)}, channels,
+                                 f"{name}: debezium literal ACLs under {prefix} differ from the AsyncAPI channels")
+                routed |= channels
+        self.assertLessEqual({"passage.sales.orderprogress", "passage.fulfillment.packingslip"}, routed)
 
     @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
     def test_temporal_values_match_its_database(self):

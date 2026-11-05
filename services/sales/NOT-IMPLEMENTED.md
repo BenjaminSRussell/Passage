@@ -903,6 +903,14 @@ REJECTED status is visible on read and list only). Duties stay `sales.order.read
 
 ## Events (PRD §5.27.5)
 
+Relay to Kafka (#480): the `outbox-sales` Debezium connector (`deploy/kafka/connect.yaml`, publication and CDC role
+grants in migrations 0039 and 0040, role `debezium_cdc_sales` and database `passage_sales` in the dev Postgres) routes
+every event by its type to `passage.sales.<entity>`, the AsyncAPI channel, so `orderprogress.recorded` (written under
+aggregate_type `order`) lands on `passage.sales.orderprogress` for inventory's postings consumer. It uses
+`snapshot.mode: no_data`, so events committed before it first starts are not relayed, and it is not yet proven against
+a live cluster (#213). Nothing in dev writes the `passage-sales-db` secret (`DATABASE_URL` pointing at `passage_sales`) yet, and the dev
+Postgres network policy does not admit the sales pods.
+
 | Event | Status | Reason |
 |---|---|---|
 | `dev.passage.sales.orderprogress.recorded.v1` | implemented (not in the PRD event table) | Written in the `:record-progress` transaction with the report (kind, source reference), each covered line (quantity, delivered and invoiced quantity and status after), the order status before and after, the actor and the new order version. Consumers - billing, customer portal, analytics. Confirm the name and payload with the events owner. |

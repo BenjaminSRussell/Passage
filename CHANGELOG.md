@@ -61,6 +61,16 @@ release may change public APIs.
   `deploy/kafka/inventory-consumer.yaml` adds the consumer's KafkaUser, literal ACLs and dead-letter topic, and
   `make -C deploy test-argocd` checks consumer KafkaUsers against their charts. The consumer stays off in dev, like
   the other consumers.
+- Sales and fulfillment outboxes reach Kafka in dev (#480): new `outbox-sales` and `outbox-fulfillment` Debezium
+  connectors (publication and CDC role grants in sales migrations 0039 and 0040 and fulfillment migrations 0029 and
+  0030, each with a re-run test; own `debezium_cdc_sales` / `debezium_cdc_fulfillment` roles and `passage_sales` /
+  `passage_fulfillment` databases in the dev Postgres, init-rev 9; Vault keys `passage/dev/sales-postgres/cdc-password`
+  and `passage/dev/fulfillment-postgres/cdc-password`). Both route by event type to `passage.<context>.<entity>`, the
+  AsyncAPI channel, because these services write several entities under one aggregate_type: `orderprogress.recorded`
+  (aggregate `order`) lands on `passage.sales.orderprogress` and `packingslip.*` (aggregate `shipment`) on
+  `passage.fulfillment.packingslip`, the topics the inventory postings consumer reads. The debezium user gets a literal
+  ACL per channel; `make -C deploy test-argocd` checks the route and the ACLs against each service's AsyncAPI, and the
+  enricher chain test runs Debezium's EventRouter with the type route.
 - Live tender trigger (#426): transport's `POST /v1/transport/loads/{id}:release` (duty `transport.load.tender`,
   migration 0010) applies the tender gates and publishes `dev.passage.tms.load.released.v1` with the releasing user
   and legal-entity scope from the verified caller; workflow-ts's new Kafka consumer (`src/eventConsumer.ts`, kafkajs)

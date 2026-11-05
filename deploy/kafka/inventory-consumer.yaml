@@ -1,7 +1,8 @@
 # The inventory postings consumer (#480, `inventory consume`, group inventory-postings) books receiving's
 # receipt.posted / receipt.corrected, sales' orderprogress.recorded and fulfillment's packingslip.cancelled, and parks
 # what it cannot book on passage.inventory.postings.dlq. The chart's consumer.kafka.username names this user.
-# Literal ACLs: the user reads only its three source topics and writes only its dead-letter topic.
+# Literal ACLs: the user reads only its three source topics and writes only its dead-letter topic. The source topics
+# are created by the outbox-receiving, outbox-sales and outbox-fulfillment connectors (deploy/kafka/connect.yaml).
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:

@@ -184,6 +184,78 @@ class EventRouterChainTest {
         assertThrows(DataException.class, () -> chain(outboxInsert(bad)));
     }
 
+    /**
+     * The route of outbox-sales and outbox-fulfillment in deploy/kafka/connect.yaml (keep in step): by the event type's
+     * entity, not aggregate_type, because those services write several entities under one aggregate_type.
+     */
+    static EventRouter<SourceRecord> typeRouter(String context) {
+        EventRouter<SourceRecord> r = new EventRouter<>();
+        Map<String, String> cfg = new HashMap<>();
+        cfg.put("table.field.event.id", "id");
+        cfg.put("table.field.event.key", "aggregate_id");
+        cfg.put("table.field.event.payload", "payload");
+        cfg.put("route.by.field", "type");
+        cfg.put("route.topic.regex",
+                "dev\\.passage\\." + context + "\\.(?<routedByValue>[a-z][a-z0-9]*)\\.[a-z][a-z0-9]*\\.v[0-9]+");
+        cfg.put("route.topic.replacement", "passage." + context + ".${routedByValue}");
+        cfg.put("table.expand.json.payload", "true");
+        cfg.put("table.fields.additional.placement", "tenant_id:header:tenantid");
+        r.configure(cfg);
+        return r;
+    }
+
+    static SourceRecord outboxInsert(String context, String aggregateType, String type) {
+        String payload = goEvent("{\"legalEntityId\":\"" + LE + "\"}")
+                .replace("dev.passage.receiving.receipt.posted.v1", type)
+                .replace("passage/receiving", "passage/" + context);
+        Struct row = new Struct(ROW).put("id", "01JB0000000000000000000001").put("tenant_id", TENANT)
+                .put("aggregate_type", aggregateType).put("aggregate_id", "A-1")
+                .put("type", type).put("payload", payload).put("headers", "{}");
+        Struct value = ENVELOPE.create(row, new Struct(SOURCE).put("db", "passage_" + context), Instant.now());
+        return new SourceRecord(Map.of(), Map.of(), "passage." + context + ".public.outbox", null,
+                Schema.STRING_SCHEMA, "A-1", ENVELOPE.schema(), value);
+    }
+
+    @Test
+    void salesAndFulfillmentRouteByTheTypesEntity() throws Exception {
+        String[][] cases = {
+            // context, aggregate_type written by the service, event type, topic (AsyncAPI channel)
+            {"sales", "order", "dev.passage.sales.orderprogress.recorded.v1", "passage.sales.orderprogress"},
+            {"sales", "order", "dev.passage.sales.order.confirmed.v1", "passage.sales.order"},
+            {"sales", "order", "dev.passage.sales.orderhold.applied.v1", "passage.sales.orderhold"},
+            {"sales", "allocation", "dev.passage.sales.allocation.consumed.v1", "passage.sales.allocation"},
+            {"fulfillment", "shipment", "dev.passage.fulfillment.packingslip.cancelled.v1", "passage.fulfillment.packingslip"},
+            {"fulfillment", "shipment", "dev.passage.fulfillment.packingslip.posted.v1", "passage.fulfillment.packingslip"},
+            {"fulfillment", "drop_ship", "dev.passage.fulfillment.dropship.created.v1", "passage.fulfillment.dropship"},
+        };
+        for (String[] c : cases) {
+            EventRouter<SourceRecord> r = typeRouter(c[0]);
+            try {
+                SourceRecord out = enricher.apply(r.apply(outboxInsert(c[0], c[1], c[2])));
+                assertEquals(c[3], out.topic(), c[2]);
+                assertEquals("A-1", out.key());
+                JsonNode v = wireValue(out);
+                assertEquals(c[2], v.get("type").asText());
+                assertEquals(TENANT, v.get("tenantid").asText());
+                assertEquals(c[2], wireHeader(out, "ce_type"));
+            } finally {
+                r.close();
+            }
+        }
+    }
+
+    @Test
+    void typeOfAnotherContextIsNotRoutedIntoTheServicesTopics() {
+        EventRouter<SourceRecord> r = typeRouter("sales");
+        try {
+            SourceRecord out = r.apply(outboxInsert("sales", "order", "dev.passage.fulfillment.packingslip.posted.v1"));
+            assertEquals("dev.passage.fulfillment.packingslip.posted.v1", out.topic(),
+                    "an unmatched type keeps its own name, which no debezium ACL allows");
+        } finally {
+            r.close();
+        }
+    }
+
     @Test
     @SuppressWarnings("rawtypes")
     void discoverableThroughServiceLoader() {

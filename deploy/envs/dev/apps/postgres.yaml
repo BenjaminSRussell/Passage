@@ -68,6 +68,48 @@ spec:
         key: passage/dev/transport-postgres/cdc-password
         property: value
 ---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: sales-cdc
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: sales-cdc
+    creationPolicy: Owner
+  data:
+    - secretKey: CDC_PASSWORD
+      remoteRef:
+        key: passage/dev/sales-postgres/cdc-password
+        property: value
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: fulfillment-cdc
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: fulfillment-cdc
+    creationPolicy: Owner
+  data:
+    - secretKey: CDC_PASSWORD
+      remoteRef:
+        key: passage/dev/fulfillment-postgres/cdc-password
+        property: value
+---
 # eam's DATABASE_URL (chart value database.secretName eam-database, key url): its own login role
 # passage_eam_app in passage_eam, created by 60-eam-db.sh with the same Vault password (APP_PASSWORD). The
 # password goes into the URL as is, so it must be URL-safe (hex, like the other dev passwords).
@@ -191,6 +233,26 @@ data:
     \c passage_transport
     GRANT ALL ON SCHEMA public TO passage_app, passage_transport_app;
     SQL
+  80-sales-db.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_SALES_PASSWORD" <<'SQL'
+    CREATE ROLE debezium_cdc_sales LOGIN NOSUPERUSER NOBYPASSRLS REPLICATION PASSWORD :'cdc_password';
+    SELECT 'CREATE DATABASE passage_sales' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_sales')\gexec
+    REVOKE CONNECT ON DATABASE passage_sales FROM PUBLIC;
+    GRANT CONNECT, CREATE ON DATABASE passage_sales TO passage_app;
+    GRANT CONNECT ON DATABASE passage_sales TO debezium_cdc_sales;
+    \c passage_sales
+    GRANT ALL ON SCHEMA public TO passage_app;
+    SQL
+  90-fulfillment-db.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_FULFILLMENT_PASSWORD" <<'SQL'
+    CREATE ROLE debezium_cdc_fulfillment LOGIN NOSUPERUSER NOBYPASSRLS REPLICATION PASSWORD :'cdc_password';
+    SELECT 'CREATE DATABASE passage_fulfillment' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_fulfillment')\gexec
+    REVOKE CONNECT ON DATABASE passage_fulfillment FROM PUBLIC;
+    GRANT CONNECT, CREATE ON DATABASE passage_fulfillment TO passage_app;
+    GRANT CONNECT ON DATABASE passage_fulfillment TO debezium_cdc_fulfillment;
+    \c passage_fulfillment
+    GRANT ALL ON SCHEMA public TO passage_app;
+    SQL
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -210,7 +272,7 @@ spec:
         app.kubernetes.io/name: postgres
       annotations:
         # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
-        passage.dev/init-rev: "8"
+        passage.dev/init-rev: "9"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -246,6 +308,12 @@ spec:
             - name: CDC_TRANSPORT_PASSWORD
               valueFrom:
                 secretKeyRef: { name: transport-cdc, key: CDC_PASSWORD }
+            - name: CDC_SALES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: sales-cdc, key: CDC_PASSWORD }
+            - name: CDC_FULFILLMENT_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: fulfillment-cdc, key: CDC_PASSWORD }
             - name: EAM_APP_PASSWORD
               valueFrom:
                 secretKeyRef: { name: eam-database, key: APP_PASSWORD }
