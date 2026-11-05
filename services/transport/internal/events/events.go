@@ -45,6 +45,34 @@ type TenderPayload struct {
 	Currency  string `json:"currency,omitempty"`
 }
 
+// LoadReleased is published when a planner releases a load for tendering
+// (FR-34.5). Consumer: workflow-ts, which starts tenderWorkflow from it and
+// mints the tender's scoped service token from releasedBy and legalEntityScope
+// (contract: services/workflow-ts/events/asyncapi.yaml). Both come from the
+// verified caller of the release, never from the request body, and the event is
+// not published for a load outside that scope. The subject is the load id.
+const LoadReleased = "dev.passage.tms.load.released.v1"
+
+// ReleasedCarrier is one carrier of LoadReleasedPayload, in rank order.
+type ReleasedCarrier struct {
+	CarrierID  string `json:"carrierId"`
+	RateQuoted string `json:"rateQuoted,omitempty"`
+}
+
+// LoadReleasedPayload is the data of LoadReleased. ReleaseID names the release;
+// the workflow keys the tender start on it, so a redelivered event replays the
+// same tender and a new release starts a new one.
+type LoadReleasedPayload struct {
+	ReleaseID        string            `json:"releaseId"`
+	LoadID           string            `json:"loadId"`
+	LegalEntityID    string            `json:"legalEntityId"`
+	ReleasedBy       string            `json:"releasedBy"`
+	LegalEntityScope []string          `json:"legalEntityScope"`
+	Carriers         []ReleasedCarrier `json:"carriers"`
+	Currency         string            `json:"currency,omitempty"`
+	TimeoutMin       int               `json:"timeoutMin"`
+}
+
 // TrackingEventRecorded is published once per stored status report (FR-34.6).
 // Consumers: sales fulfilment and the customer portal. The subject is the load id.
 const TrackingEventRecorded = "dev.passage.tms.tracking.event.v1"

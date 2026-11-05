@@ -68,7 +68,7 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		if _, err := parentEntityTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, ""); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('transport.tender:' || $1 || ':' || $2))`, p.TenantID, in.LoadID); err != nil {
+		if err := lockLoadTender(ctx, tx, p.TenantID, in.LoadID); err != nil {
 			return err
 		}
 		// A concurrent request with the same key may have committed while this one waited.
@@ -81,21 +81,8 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		if err := screeningGate(ctx, tx, p.TenantID, in.LoadID); err != nil {
 			return err
 		}
-		open, _, err := scanTender(tx.QueryRow(ctx, `select `+tenderColumns+` from tender
-			where tenant_id = $1 and load_id = $2 and status in ('PENDING', 'ACCEPTED') for update`, p.TenantID, in.LoadID))
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-		case err != nil:
+		if err := openTenderGate(ctx, tx, p.TenantID, in.LoadID, now); err != nil {
 			return err
-		case open.Status == domain.TenderAccepted:
-			return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has accepted tender "+open.ID)
-		default:
-			if err := advance(ctx, tx, p.TenantID, &open, open.TickAt(now)); err != nil {
-				return err
-			}
-			if open.Status == domain.TenderPending {
-				return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has pending tender "+open.ID)
-			}
 		}
 		carriers, rates, attempts, err := marshalTender(in)
 		if err != nil {
@@ -113,6 +100,36 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		return err
 	})
 	return out, err
+}
+
+// openTenderGate refuses a load with an ACCEPTED tender, or a PENDING tender
+// still inside its deadline at now, with TMS-0114. A PENDING tender past its
+// deadline is cascaded first (and its expiry events written), so one that has
+// failed by time no longer blocks. The caller holds the per-load advisory lock.
+func openTenderGate(ctx context.Context, tx pgx.Tx, tenantID, loadID string, now time.Time) error {
+	open, _, err := scanTender(tx.QueryRow(ctx, `select `+tenderColumns+` from tender
+		where tenant_id = $1 and load_id = $2 and status in ('PENDING', 'ACCEPTED') for update`, tenantID, loadID))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	case open.Status == domain.TenderAccepted:
+		return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has accepted tender "+open.ID)
+	}
+	if err := advance(ctx, tx, tenantID, &open, open.TickAt(now)); err != nil {
+		return err
+	}
+	if open.Status == domain.TenderPending {
+		return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has pending tender "+open.ID)
+	}
+	return nil
+}
+
+// lockLoadTender serialises tender starts and releases of one load.
+func lockLoadTender(ctx context.Context, tx pgx.Tx, tenantID, loadID string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('transport.tender:' || $1 || ':' || $2))`, tenantID, loadID)
+	return err
 }
 
 // GetTender returns one tender as stored. A pending attempt past its deadline is

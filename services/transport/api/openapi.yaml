@@ -471,6 +471,47 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads/{id}:release:
+    post:
+      operationId: releaseLoad
+      summary: Release a load for tendering; workflow-ts starts the tender cascade (FR-34.5)
+      description: |
+        Takes the tender start's body and checks it the same way, then
+        publishes `dev.passage.tms.load.released.v1`, from which workflow-ts
+        starts `tenderWorkflow`; the cascade itself starts asynchronously
+        (#426). Who released the load (`releasedBy`) and the legal entities it
+        is released in (`legalEntityScope`) are the verified caller, never
+        body fields: the workflow's scoped service token is minted from them.
+        The caller needs an explicit legal-entity scope that lists the load's
+        legal entity (a load outside it is 404 TMS-0100). The tender start's
+        gates refuse the release and publish nothing: an ACCEPTED tender or a
+        PENDING tender inside its deadline (409 TMS-0114), a FAILed DG check
+        (422 TMS-0130), an OPEN screening hold (422 TMS-0133).
+      x-passage-duty: transport.load.tender
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Load id
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenderRequest' }
+      responses:
+        '202':
+          description: Load released (or the replayed release for a repeated Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoadRelease' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/transport/loads/{id}:tender:
     post:
       operationId: startTender
@@ -1639,6 +1680,26 @@ components:
               rateQuoted: { type: string, description: 'Decimal rate offered, at most two decimals' }
         currency: { type: string, pattern: '^[A-Z]{3}$', description: Required with quoted rates, not allowed without }
         timeoutMin: { type: integer, minimum: 5, maximum: 1440, default: 120 }
+    LoadRelease:
+      type: object
+      required: [id, loadId, legalEntityId, carriers, timeoutMin, releasedBy, legalEntityScope, releasedAt]
+      properties:
+        id: { type: string, format: uuid }
+        loadId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        carriers:
+          type: array
+          items:
+            type: object
+            required: [carrierId]
+            properties:
+              carrierId: { type: string, format: uuid }
+              rateQuoted: { type: string, description: Two decimals; absent when none was quoted }
+        currency: { type: string }
+        timeoutMin: { type: integer }
+        releasedBy: { type: string, description: The verified caller }
+        legalEntityScope: { type: array, items: { type: string, format: uuid }, description: The verified caller's legal entities }
+        releasedAt: { type: string, format: date-time }
     TenderAttempt:
       type: object
       required: [rank, carrierId, sentAt, expiresAt, response]

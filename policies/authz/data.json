@@ -1702,6 +1702,7 @@
     ]},
     "transport.freight-bill.approve": {"permissions": [{"resource": "/v1/transport/freight-bills/*:approve", "methods": ["POST"]}]},
     "transport.load.tender": {"permissions": [
+      {"resource": "/v1/transport/loads/*:release", "methods": ["POST"]},
       {"resource": "/v1/transport/loads/*:tender", "methods": ["POST"]},
       {"resource": "/v1/transport/tenders", "methods": ["GET"]},
       {"resource": "/v1/transport/tenders/*", "methods": ["GET"]},

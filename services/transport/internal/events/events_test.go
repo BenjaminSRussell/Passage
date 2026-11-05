@@ -19,7 +19,7 @@ func TestAsyncAPI_ListsEveryEventType(t *testing.T) {
 	for _, m := range regexp.MustCompile(`(?m)^      name: (\S+)$`).FindAllStringSubmatch(string(raw), -1) {
 		documented = append(documented, m[1])
 	}
-	published := []string{FreightBillMatched, FreightBillApproved, TenderAccepted, TenderDeclined, TenderExpired, TrackingEventRecorded, LandedCostPosted, GateCheckedIn, GoodsInTransitShipped}
+	published := []string{FreightBillMatched, FreightBillApproved, LoadReleased, TenderAccepted, TenderDeclined, TenderExpired, TrackingEventRecorded, LandedCostPosted, GateCheckedIn, GoodsInTransitShipped}
 	naming := regexp.MustCompile(`^dev\.passage\.tms\.[a-z]+\.[a-z]+\.v1$`)
 	for _, typ := range published {
 		if !naming.MatchString(typ) {

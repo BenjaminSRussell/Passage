@@ -879,6 +879,15 @@ test_workflow_ts_transport_service_duty if {
 	not allowed("transport.tender.execute", "POST", "/v1/transport/tenders/t1:respond")
 	not allowed("transport.tender.execute", "POST", "/v1/transport/tracking-events")
 	not allowed("transport.tender.execute", "POST", "/v1/transport/freight-bills")
+	not allowed("transport.tender.execute", "POST", "/v1/transport/loads/l1:release")
+}
+
+# #426: a planner releases a load for tendering under the human tender duty; workflow-ts then starts the cascade.
+test_transport_load_release_is_the_human_tender_duty if {
+	allowed("transport.load.tender", "POST", "/v1/transport/loads/l1:release")
+	not allowed("transport.load.tender", "GET", "/v1/transport/loads/l1:release")
+	not allowed("transport.load.plan", "POST", "/v1/transport/loads/l1:release")
+	not allowed("transport.tender.respond", "POST", "/v1/transport/loads/l1:release")
 }
 
 test_workflow_ts_party_decision_grant if {

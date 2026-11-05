@@ -55,6 +55,11 @@ type fakeStore struct {
 	voyageErr     error
 	createdVoyage domain.Voyage
 
+	// Load release (release_test.go).
+	release     domain.LoadRelease
+	releaseIdem store.Idem
+	releaseErr  error
+
 	// Slice 3: loads, DG checks and freight bill decisions (load_test.go).
 	builtLoads []domain.Load
 	buildIdem  store.Idem

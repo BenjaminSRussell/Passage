@@ -287,7 +287,7 @@ func doIssuedBy(t *testing.T, h http.Handler, issuer, method, path string, dutie
 	}
 	principal := tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: "00000000-0000-0000-0000-0000000000e1", UserID: "user-test", Duties: granted, Service: issuer}
 	body := `{}`
-	if strings.HasSuffix(path, ":tender") {
+	if strings.HasSuffix(path, ":tender") || strings.HasSuffix(path, ":release") {
 		body = `{"carriers":[{"carrierId":"` + carrierA + `"}]}`
 	}
 	req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(tenant.With(context.Background(), principal))
@@ -328,6 +328,7 @@ func TestTenderServiceDuty_ReachesOnlyTheWorkflowRoutes(t *testing.T) {
 		t.Fatalf("GET /tenders without loadId with the human duty = %d, want 200", rec.Code)
 	}
 	refuse := []struct{ method, path string }{
+		{http.MethodPost, base + "/loads/" + loadID + ":release"},
 		{http.MethodPost, base + "/tenders/" + tenderID + ":respond"},
 		{http.MethodPost, base + "/tracking-events"},
 		{http.MethodPost, base + "/freight-bills"},

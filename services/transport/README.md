@@ -65,6 +65,7 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
+| POST | /v1/transport/loads/{id}:release | transport.load.tender | Releases the load for tendering (#426): the tender start's body, checked the same way; publishes `load.released`, from which workflow-ts starts the tender cascade; `releasedBy` and `legalEntityScope` are the verified caller (an explicit scope listing the load's legal entity), never body fields; refused with nothing published by the tender gates (TMS-0114, TMS-0130, TMS-0133); 202 with the release; `Idempotency-Key` optional |
 | POST | /v1/transport/loads/{id}:tender | transport.load.tender, or the service-only `transport.tender.execute` from the `workflow-ts` issuer | Carriers in rank order with optional quoted rates; `timeoutMin` 5 to 1440 (default 120); one open tender per load (TMS-0114); `Idempotency-Key` optional |
 | GET | /v1/transport/tenders | transport.load.tender, or the service-only `transport.tender.execute` with `loadId` (the workflow adopting an open tender after TMS-0114) | Tender board, newest first, at most 500; filter by `status`, `loadId`; `overdue` flags a pending attempt past its deadline |
 | POST | /v1/transport/tenders:expire | transport.load.tender, or the service-only `transport.tender.execute` | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call); it expires only tenders in the caller's legal entities, so schedule it as an all-entity principal |
@@ -322,6 +323,7 @@ goods-in-transit orders, screening holds and route plans. Codes not yet raised (
 | Type | When | Subject |
 |---|---|---|
 | dev.passage.tms.freightbill.matched.v1 | A carrier invoice is matched to its bill | freight bill id |
+| dev.passage.tms.load.released.v1 | A planner releases a load for tendering (not on replay); the release id, the cascade, the releasing user and its legal-entity scope; workflow-ts starts `tenderWorkflow` from it | load id |
 | dev.passage.tms.tender.accepted.v1 / declined.v1 / expired.v1 | Each attempt outcome; payload has rank and the quoted rate | tender id |
 | dev.passage.tms.tracking.event.v1 | A status report is stored (not on replay) | load id |
 | dev.passage.tms.landedcost.posted.v1 | A voyage is allocated and posted; Σ receiptLines = total | voyage id |
@@ -342,7 +344,8 @@ No new third-party dependencies beyond the platform module and what it pulls in
 carry a nullable `legal_entity_id` (migration 0006) with a RESTRICTIVE legal-entity
 policy; `load_shipment`, `dg_check`, `screening_hold`, `freight_bill_decision`,
 `gate_event` and `goods_in_transit_line` follow their parent, and `tender` and
-`tracking_event` follow their load (migration 0007). A new load, goods-in-transit
+`tracking_event` follow their load (migration 0007). `load_release` (migration 0010)
+copies its load's entity, which is never NULL there, and has its own restrictive policy. A new load, goods-in-transit
 order, or invoice or visit without a parent takes `legalEntityId` from the request
 (default: the caller's single entity); a caller scoped to several entities or to all
 of them must send it (422). A freight bill, gate visit with a load, and matched
