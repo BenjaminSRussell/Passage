@@ -60,9 +60,10 @@ type Line struct {
 	CWNominal decimal.Decimal
 	CWMin     decimal.Decimal
 	CWMax     decimal.Decimal
-	// SiteID and WarehouseID are the PO line's delivery destination, copied
-	// when the line is bound to its PO line (#480); empty without a PO line.
-	// receipt.posted carries them so inventory can book the receipt.
+	// SiteID and WarehouseID are the line's delivery destination: the PO
+	// line's, copied when the line is bound to it, or the one keyed on a line
+	// without a PO line (#480). receipt.posted carries them so inventory can
+	// book the receipt.
 	SiteID      string
 	WarehouseID string
 }

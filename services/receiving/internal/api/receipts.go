@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -42,6 +43,11 @@ type arrivalLine struct {
 	Unit             string        `json:"unit"`
 	BatchTracked     bool          `json:"batchTracked"`
 	SerialTracked    bool          `json:"serialTracked"`
+	// SiteID and WarehouseID are the delivery destination of a line without
+	// a purchase order line (#480); a line with poLineNo takes the order
+	// line's destination and must omit them.
+	SiteID      string `json:"siteId,omitempty"`
+	WarehouseID string `json:"warehouseId,omitempty"`
 }
 
 type arrivalRequest struct {
@@ -76,6 +82,8 @@ type receiptLineBody struct {
 	Amount           *string  `json:"amount"`
 	AmountAcct       *string  `json:"amountAcct"`
 	CWQty            *int     `json:"cwQty,omitempty"`
+	SiteID           string   `json:"siteId,omitempty"`
+	WarehouseID      string   `json:"warehouseId,omitempty"`
 }
 
 type receiptBody struct {
@@ -130,6 +138,7 @@ func toReceiptBody(r store.Receipt) receiptBody {
 			OverDeliveryPct: l.OverDeliveryPct.String(), UnitPrice: l.UnitPrice.String(), Unit: l.Unit, BatchTracked: l.BatchTracked,
 			SerialTracked: l.SerialTracked, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials, LocationID: l.LocationID,
 			InventoryStatus: l.InventoryStatus, Amount: nullableString(l.Amount), AmountAcct: nullableString(l.AmountAcct),
+			SiteID: l.SiteID, WarehouseID: l.WarehouseID,
 		}
 		if l.CWQty > 0 {
 			body.CWQty = &l.CWQty
@@ -224,6 +233,25 @@ func buildArrival(req arrivalRequest) (store.Receipt, map[string]string) {
 			if l.UnitPrice != nil {
 				fields[name("unitPrice")] = poOverrideMessage
 			}
+			if l.SiteID != "" {
+				fields[name("siteId")] = poOverrideMessage
+			}
+			if l.WarehouseID != "" {
+				fields[name("warehouseId")] = poOverrideMessage
+			}
+		} else {
+			// Without a purchase order line the line names its own
+			// destination, so inventory can book it under the site (#480).
+			if l.SiteID != "" {
+				checkUUID(fields, name("siteId"), l.SiteID)
+			}
+			if l.WarehouseID != "" {
+				checkUUID(fields, name("warehouseId"), l.WarehouseID)
+				if l.SiteID == "" {
+					fields[name("warehouseId")] = "needs siteId"
+				}
+			}
+			line.SiteID, line.WarehouseID = strings.ToLower(l.SiteID), strings.ToLower(l.WarehouseID)
 		}
 		if v, ok := decimalField(fields, name("orderedRemaining"), l.OrderedRemaining, !fromPO); ok && !fromPO {
 			if v.Sign() <= 0 {
