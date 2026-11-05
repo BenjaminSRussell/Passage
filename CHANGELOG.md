@@ -22,6 +22,15 @@ release may change public APIs.
   fulfillment by code. Receiving arrival and direct receipt lines without a purchase order line take `siteId` and
   `warehouseId`, carried on `receipt.posted`, so inventory books them instead of parking them.
 
+- TA1 interchange acknowledgments and duplicate answers in edi (#483): the X12 codec reads and writes TA1 segments.
+  An interchange an AS2 or SFTP transport brought from the authenticated partner that fails at the envelope (IEA
+  missing, IEA01 or IEA02 wrong, no group, content after IEA) is answered with a TA1 R and its TA105 code (023, 021,
+  001, 024) instead of a 997, and a duplicate interchange (EDI-0102) with a TA1 R 025, or for EDIFACT a CONTRL UCI 4
+  with code 26 (AC-35.5). The answer is recorded as a refused interchange in its own transaction after the rolled-back
+  receipt, takes the next number of the partner's gap-free counter, is shown as `ta1` on the interchange and is
+  queued back over the partner's transport; the duplicate's AS2 message or file is marked DONE so a retransmission is
+  not answered twice. A TA1 from the partner is matched to our outbound interchange (TA1 R rejects its messages and
+  publishes `message.acked`). The operator routes still answer duplicates with 409 only.
 - Inbound 820 and 214 receipt in edi (#483): the X12 receipt maps the 820 onto the canonical remittance and the 214
   onto the shipment status next to the 850, with the same 997 codes, `dev.passage.edi.message.received.v1` and
   `message.failed`; reprocess and `maps:test` (new `document` field) cover them, and party names are masked without

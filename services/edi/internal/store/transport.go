@@ -664,19 +664,25 @@ func recordInboundDone(ctx context.Context, tx pgx.Tx, tid, partnerID, interchan
 }
 
 // Refusal is an interchange a transport brought from an authenticated
-// partner that the receipt refused as a whole (its syntax, or a sender that
-// is not the partner), with the negative 997 or CONTRL that answers it.
-// Standard is X12 or EDIFACT, Control the ISA13 or UNB05 as read, Reason
-// the refusal. BuildAck works as Inbound.BuildAck.
+// partner that the receipt refused as a whole (its syntax, a sender that is
+// not the partner, or a duplicate control number), with the negative 997,
+// TA1 or CONTRL that answers it. Standard is X12 or EDIFACT, Control the
+// ISA13 or UNB05 as read, Reason the refusal. BuildAck works as
+// Inbound.BuildAck. AckSet names the acknowledgment's delivery file (997 or
+// CONTRL by standard when empty, TA1). SourceStatus is what the transport
+// source becomes: PARKED (the default: a retransmission is refused again) or
+// DONE (a duplicate: a retransmission is a duplicate again).
 type Refusal struct {
-	PartnerID string
-	Standard  string
-	Version   string
-	Control   string
-	Raw       string
-	Reason    string
-	BuildAck  func(next func() (int64, error)) (string, error)
-	Source    InboundSource
+	PartnerID    string
+	Standard     string
+	Version      string
+	Control      string
+	Raw          string
+	Reason       string
+	AckSet       string
+	SourceStatus string
+	BuildAck     func(next func() (int64, error)) (string, error)
+	Source       InboundSource
 }
 
 // ErrNoAck means no acknowledgment could be built for a refused
@@ -685,9 +691,9 @@ var ErrNoAck = errors.New("edi: no acknowledgment for the refused interchange")
 
 // RecordRefusal records a refused interchange in one transaction: the
 // interchange (REJECTED, the reason, no messages, the acknowledgment as its
-// ack payload), its transport source PARKED with it, so a retransmission is
-// refused again without a second acknowledgment, and the acknowledgment
-// queued over the partner's transport. The control number comes from the
+// ack payload), its transport source PARKED (or DONE, see SourceStatus) with
+// it, so a retransmission gets no second acknowledgment, and the
+// acknowledgment queued over the partner's transport. The control number comes from the
 // standard's gap-free counter. A refused interchange never counts in the
 // duplicate window. The source's asynchronous MDN is not stored: the
 // transport answers the refusal with its error MDN. It returns the
@@ -695,6 +701,13 @@ var ErrNoAck = errors.New("edi: no acknowledgment for the refused interchange")
 func (s *Store) RecordRefusal(ctx context.Context, r Refusal) (string, error) {
 	interchangeID := ids.New()
 	standard, ackSet := standardOf(r.Standard)
+	if r.AckSet != "" {
+		ackSet = r.AckSet
+	}
+	srcStatus := r.SourceStatus
+	if srcStatus != "DONE" {
+		srcStatus = "PARKED"
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tid, err := tenantID(ctx)
 		if err != nil {
@@ -719,10 +732,10 @@ func (s *Store) RecordRefusal(ctx context.Context, r Refusal) (string, error) {
 		}
 		src := r.Source
 		if _, err := tx.Exec(ctx, `insert into transport_inbound (tenant_id, partner_id, legal_entity_id, transport, ref, content_sha256, status,
-			interchange_id, attempts, last_error) values ($1, $2, $3, $4, $5, $6, 'PARKED', $7, 1, $8)
-			on conflict (tenant_id, partner_id, transport, ref, content_sha256) do update set status = 'PARKED', interchange_id = excluded.interchange_id,
+			interchange_id, attempts, last_error) values ($1, $2, $3, $4, $5, $6, $9, $7, 1, $8)
+			on conflict (tenant_id, partner_id, transport, ref, content_sha256) do update set status = excluded.status, interchange_id = excluded.interchange_id,
 			attempts = transport_inbound.attempts + 1, next_attempt_at = null, last_error = excluded.last_error, updated_at = now()`,
-			tid, r.PartnerID, src.LegalEntityID, src.Transport, src.Ref, src.SHA256, interchangeID, reason); err != nil {
+			tid, r.PartnerID, src.LegalEntityID, src.Transport, src.Ref, src.SHA256, interchangeID, reason, srcStatus); err != nil {
 			return err
 		}
 		_, err = enqueueDelivery(ctx, tx, tid, r.PartnerID, interchangeID, "ACK", standard, ackSet, r.Control)

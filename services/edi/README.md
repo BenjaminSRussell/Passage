@@ -231,7 +231,8 @@ database or publishes an event, so these routes also run without a store.
   first segment), whose ISA or UNB sender must be the endpoint's partner; the 997 or CONTRL is
   queued back over the partner's transport (slice 8). Retransmissions
   (same Message-ID and content, or an interchange inside the duplicate window) answer
-  `processed/warning: duplicate-document` and record nothing.
+  `processed/warning: duplicate-document` and record no receipt (a new message repeating an
+  interchange is also answered with a TA1 025 or CONTRL 26, slice 9).
 - **SFTP poller**: every due partner with an inbound directory is polled once per interval, at
   most 50 files of at most 4 MiB in name order, skipping `.part` files; a file is known by name and
   SHA-256 (`transport_inbound`), is marked DONE in the receipt transaction and then moved to
@@ -313,8 +314,8 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   again without a second acknowledgment), and the acknowledgment is queued in the same transaction.
   A refused interchange never counts in the duplicate window, so the corrected one is received. No
   acknowledgment is built for traffic that is not authenticated (unknown endpoint, bad signature),
-  for payloads over 4 MiB, for an ISA or UNB that cannot be read, or for an X12 interchange without
-  a group other than 997s.
+  for payloads over 4 MiB, for an ISA or UNB that cannot be read, or for an interchange of
+  acknowledgments only. Slice 9 adds the TA1 for X12 envelope errors and duplicates (below).
 
 ## Slice 9 scope: #483 follow-ups
 
@@ -345,6 +346,22 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   reprocess and `maps:test` (which returns `document`) cover them, and payer, payee, ship-from and
   ship-to names are masked without `edi.pii.view`. Inbound X12 856 and 810 are still rejected
   (EDI-0006).
+- **TA1 and duplicate acknowledgments** (`internal/domain/x12_ta1.go`): the X12 codec reads and
+  writes TA1 segments (between ISA and the first GS). An interchange a transport brought from the
+  authenticated partner that fails at the interchange level (`TA1Cause`: IEA missing 023, IEA02 not
+  ISA13 001, IEA01 not the group count 021, no group or content after IEA 024) is answered with a
+  TA1 R carrying that TA105 code instead of a 997; group and transaction errors keep the negative
+  997. A duplicate interchange (EDI-0102) over AS2 or SFTP is answered with a TA1 R 025 (X12) or a
+  CONTRL UCI 4 with code 26 (EDIFACT, when the partner wants CONTRLs), next to the
+  `processed/warning: duplicate-document` MDN or the archived file. The answer is recorded like a
+  refusal (`store.RecordRefusal`): its own transaction after the rolled-back receipt, the next
+  number of the partner's X12 (or EDIFACT) counter, an interchange with `refusal` EDI-0102, no
+  messages and the TA1 (shown as `ta1` on the interchange), queued as `TA1_<isa13>_<id>.x12`, and
+  the AS2 message or file DONE with it so a retransmission is not answered again. Interchanges of
+  acknowledgments only (997s, TA1s, CONTRLs) are never answered; the operator routes still answer a
+  duplicate with 409 and record nothing. A TA1 from the partner is matched by TA101 to our outbound
+  interchange: R rejects its messages (FAILED, REJECTED, `message.acked`), A or E is noted on the
+  TA1 (POSTED) and the 997 answers the groups; an unmatched TA1 is FAILED with EDI-0161.
 - **Posting inbound documents (decision)**: nothing in edi posts a received document into another
   service, and no service grant was added for it. Sales already has the intake route
   (`POST /v1/sales/orders`, service-only `sales.channel.intake`), but its request needs a product,
@@ -484,10 +501,10 @@ signing uses the standard library only.
 | EDI-0016 | 503 | No secret directory is configured (`EDI_SECRETS_DIR`), so AS2 and SFTP transports cannot be saved |
 | EDI-0017 | 409 | An EDIFACT ORDERS, DESADV or INVOIC for a partner without an EDIFACT identity (`edifactId`) |
 | EDI-0160 | (in 200 map result) | A required 850 segment or element is missing or invalid; rejected |
-| EDI-0161 | (message error) | A received 997 answers no outbound interchange of the partner, or its AK101 does not match; a received CONTRL answers no outbound EDIFACT interchange of the partner |
+| EDI-0161 | (message error) | A received 997 or TA1 answers no outbound interchange of the partner, or the 997's AK101 does not match; a received CONTRL answers no outbound EDIFACT interchange of the partner |
 | idempotency_key_reuse | 422 | `Idempotency-Key` already used with a different request body |
 | EDI-0101 | 422 | Interchange sender (ISA05/ISA06 or UNB S002) is not configured for any partner in the environment, or is not the transport's partner |
-| EDI-0102 | 409 | Duplicate ISA13 or UNB 0020 inside the duplicate window (TA1 025 semantics; no TA1 interchange is sent yet) |
+| EDI-0102 | 409 | Duplicate ISA13 or UNB 0020 inside the duplicate window; over AS2 or SFTP also answered with a TA1 R 025 or a CONTRL code 26 |
 | EDI-0103 | (in 200 map result) | CTT01 does not match the PO1 count; the transaction is rejected |
 | EDI-0105 | (in 200 map result) | No item cross-reference for the line; accepted with errors |
 | EDI-0133 | (in 200 punchout result) | Punchout line dropped: missing part id, quantity, price, price unit, allowed currency or mapped unit |

@@ -88,7 +88,8 @@ type Group struct {
 	Transactions []Transaction
 }
 
-// Interchange is one ISA..IEA envelope.
+// Interchange is one ISA..IEA envelope. TA1 holds the interchange
+// acknowledgments it carries between ISA and the first GS.
 type Interchange struct {
 	Delims   Delims
 	Sender   Party
@@ -98,6 +99,7 @@ type Interchange struct {
 	Version  string
 	Control  string
 	Usage    string
+	TA1      []InterchangeAck
 	Groups   []Group
 }
 
@@ -114,7 +116,8 @@ func element(s Segment, i int) string {
 
 // Parse reads one interchange. It checks the envelope counts (SE01, GE01, IEA01)
 // and control numbers (SE02, GE02, IEA02) so a truncated or mis-numbered
-// interchange never reaches the mapper.
+// interchange never reaches the mapper. TA1 segments are read before the
+// first group; IEA01 counts the groups only.
 func Parse(raw string) (Interchange, error) {
 	ic, body, err := readISA(raw)
 	if err != nil {
@@ -124,11 +127,19 @@ func Parse(raw string) (Interchange, error) {
 	if err != nil {
 		return Interchange{}, err
 	}
-	groups, ieaCount, ieaControl, rest, err := parseGroups(segs)
+	first := 0
+	for ; first < len(segs) && segs[first].ID == "TA1"; first++ {
+		ta1, err := parseTA1(segs[first])
+		if err != nil {
+			return Interchange{}, err
+		}
+		ic.TA1 = append(ic.TA1, ta1)
+	}
+	groups, ieaCount, ieaControl, rest, err := parseGroups(segs[first:])
 	if err != nil {
 		return Interchange{}, err
 	}
-	if rest != len(segs) {
+	if first+rest != len(segs) {
 		return Interchange{}, syntaxf("content after IEA")
 	}
 	if ieaCount != strconv.Itoa(len(groups)) {
@@ -295,6 +306,11 @@ func Serialize(ic Interchange) (string, error) {
 	// ISA16 is the component separator itself; written raw so it is not treated as a value.
 	out.WriteString(strings.Join(isa, el))
 	out.WriteString(el + string(d.Component) + string(d.Segment))
+	for _, a := range ic.TA1 {
+		if err := seg("TA1", a.Control, a.Date, a.Time, a.Code, a.Note); err != nil {
+			return "", err
+		}
+	}
 	for _, g := range ic.Groups {
 		if err := seg("GS", g.FunctionalID, g.Sender, g.Receiver, g.Date, g.Time, g.Control, "X", g.Version); err != nil {
 			return "", err

@@ -708,7 +708,12 @@ paths:
         become ACKED (AK5 A/E) or FAILED (AK5 R), the outbound interchange takes the AK9 status and
         dev.passage.edi.message.acked.v1 is published per answered message. The 997 itself is
         POSTED, or FAILED with EDI-0161 when it answers nothing; 997s are never acknowledged, so
-        ack997 is absent for an interchange of 997s only.
+        ack997 is absent for an interchange of 997s only. TA1 segments (before the first GS) are
+        matched by TA101 to our outbound interchange with that ISA13: a TA1 R rejects every
+        message (FAILED, the interchange REJECTED, message.acked per message), a TA1 A or E is
+        noted (the 997 answers the groups); a TA1 is POSTED, or FAILED with EDI-0161, and never
+        answered. A duplicate is 409 here; over AS2 or SFTP it is also answered with a TA1 R 025
+        queued to the partner.
       x-passage-duty: edi.operate
       parameters:
         - name: environment
@@ -1206,6 +1211,7 @@ components:
           properties:
             ack997: { type: string, description: Serialized X12 997 sent back to the partner }
             contrl: { type: string, description: Serialized EDIFACT CONTRL sent back to the partner (EDIFACT interchanges) }
+            ta1: { type: string, description: 'Serialized X12 TA1 sent back instead of a 997: TA1 R for an interchange refused at the envelope (TA105 001, 021, 023, 024) or a duplicate (025)' }
             messages:
               type: array
               items:
@@ -1216,7 +1222,7 @@ components:
                   transactionSet: { type: string }
                   stControl: { type: string }
                   status: { type: string, enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED] }
-                  canonical: { type: object, description: 'Canonical document: 850 or ORDERS Order, 997 FunctionalAck, CONTRL ContrlAck, outbound 855 Ack855, 856 or DESADV ASN, 810 or INVOIC Invoice' }
+                  canonical: { type: object, description: 'Canonical document: 850 or ORDERS Order, 820 Remittance, 214 ShipmentStatus, 997 FunctionalAck, CONTRL ContrlAck, TA1 InterchangeAck (control, date, time, code, note), outbound 855 Ack855, 856 or DESADV ASN, 810 or INVOIC Invoice' }
                   error: { type: string }
             deliveries:
               type: array

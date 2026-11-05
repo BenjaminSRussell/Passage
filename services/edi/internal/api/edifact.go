@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -241,13 +242,16 @@ func contrlMessage(m domain.EdifactMessage) (store.Message, error) {
 }
 
 // refuse answers a payload a transport brought from an authenticated partner
-// that the receipt refused for its syntax or its sender, with a negative 997
-// (X12) or CONTRL (EDIFACT) when one can be built from what the envelope
-// says: the refused interchange is recorded with the acknowledgment, its
-// source is parked with it and the acknowledgment is queued over the
-// partner's transport (store.RecordRefusal). Nothing is built for a payload
+// that the receipt refused for its syntax or its sender, with a negative 997,
+// a TA1 (X12) or a CONTRL (EDIFACT) when one can be built from what the
+// envelope says: the refused interchange is recorded with the
+// acknowledgment, its source is parked with it and the acknowledgment is
+// queued over the partner's transport (store.RecordRefusal). An X12 error at
+// the interchange level (IEA missing or wrong, no group, content after IEA)
+// gets a TA1 R with its TA105 code; an error inside a group, or a refused
+// sender, gets a 997 rejecting each group. Nothing is built for a payload
 // over the size limit, one whose ISA or UNB cannot be read, a CONTRL the
-// partner does not want, or an X12 interchange without a group. Only the
+// partner does not want, or a payload of acknowledgments only. Only the
 // transports call it, after the partner was authenticated (AS2 signature,
 // pinned SFTP host key); it returns an error only for a failure worth
 // retrying.
@@ -257,11 +261,14 @@ func (a *API) refuse(ctx context.Context, partner store.Partner, src store.Inbou
 	}
 	at := a.now().UTC()
 	r := store.Refusal{PartnerID: partner.ID, Raw: string(payload), Reason: p.Code + ": " + p.Detail, Source: src}
-	log := func(what string, err error) {
-		slog.Warn("edi refusal acknowledgment not built", "partner", partner.ID, "ref", src.Ref, "ack", what, "err", err)
-	}
+	log := refusalLog(partner, src)
 	switch domain.DetectSyntax(payload) {
 	case domain.SyntaxX12:
+		if ic, note, ok := domain.TA1Cause(string(payload)); ok {
+			r.Standard, r.Version, r.Control, r.AckSet = domain.SyntaxX12, ic.Version, ic.Control, "TA1"
+			r.BuildAck = ta1Ack(ic, note, at, log)
+			break
+		}
 		ic, err := domain.Parse(string(payload))
 		groups := domain.RefusedGroups(ic)
 		ok := err == nil && len(groups) > 0
@@ -313,27 +320,104 @@ func (a *API) refuse(ctx context.Context, partner store.Partner, src store.Inbou
 			cause = &domain.EdifactError{Code: domain.ContrlErrEmpty}
 		}
 		r.Standard, r.Version, r.Control = domain.SyntaxEdifact, ic.Syntax+":"+ic.SyntaxVersion, ic.Control
-		r.BuildAck = func(next func() (int64, error)) (string, error) {
-			n, err := next()
-			if err != nil {
-				return "", err
-			}
-			c, err := domain.RefusalCONTRL(ic, cause, strconv.FormatInt(n, 10), at)
-			if err == nil {
-				var raw string
-				if raw, err = domain.SerializeEdifact(c, false); err == nil {
-					return raw, nil
-				}
-			}
-			log("CONTRL", err)
-			return "", nil
-		}
+		r.BuildAck = contrlRefusalAck(ic, cause, at, log)
 	default:
 		return nil
 	}
+	return a.recordRefusal(ctx, r)
+}
+
+// answerDuplicate answers an interchange a transport brought whose control
+// number the partner already used inside the duplicate window (EDI-0102):
+// X12 with a TA1 R 025, EDIFACT with a CONTRL UCI 4 and code 26 (when the
+// partner wants CONTRLs). The duplicate is recorded as a refused
+// interchange (it never counts in the window and has no messages) with its
+// own control number from the partner's counter, outside the rolled-back
+// receipt, and its source is DONE: a retransmission of the same AS2 message
+// or file is a duplicate again and is not answered twice. An interchange of
+// acknowledgments only (997s, TA1s, CONTRLs) is never answered.
+func (a *API) answerDuplicate(ctx context.Context, partner store.Partner, src store.InboundSource, payload []byte, p *httpx.Problem) error {
+	at := a.now().UTC()
+	r := store.Refusal{PartnerID: partner.ID, Raw: string(payload), Reason: p.Code + ": " + p.Detail, Source: src, SourceStatus: "DONE"}
+	log := refusalLog(partner, src)
+	switch domain.DetectSyntax(payload) {
+	case domain.SyntaxX12:
+		ic, err := domain.Parse(string(payload))
+		if err != nil || len(domain.RefusedGroups(ic)) == 0 {
+			return nil
+		}
+		r.Standard, r.Version, r.Control, r.AckSet = domain.SyntaxX12, ic.Version, ic.Control, "TA1"
+		r.BuildAck = ta1Ack(ic, domain.TA1Duplicate, at, log)
+	case domain.SyntaxEdifact:
+		ic, _, err := domain.ReadEdifact(string(payload))
+		if err != nil || ic.Control == "" || partner.Edifact() == nil || !partner.Edifact().WantsContrl(ic.AckRequest) {
+			return nil
+		}
+		answerable := false
+		for _, m := range ic.Messages {
+			answerable = answerable || m.Type != "CONTRL"
+		}
+		if !answerable {
+			return nil
+		}
+		r.Standard, r.Version, r.Control = domain.SyntaxEdifact, ic.Syntax+":"+ic.SyntaxVersion, ic.Control
+		r.BuildAck = contrlRefusalAck(ic, &domain.EdifactError{Code: domain.ContrlErrDuplicate}, at, log)
+	default:
+		return nil
+	}
+	return a.recordRefusal(ctx, r)
+}
+
+func (a *API) recordRefusal(ctx context.Context, r store.Refusal) error {
 	_, err := a.store.RecordRefusal(ctx, r)
 	if errors.Is(err, store.ErrNoAck) {
 		return nil
 	}
 	return err
+}
+
+func refusalLog(partner store.Partner, src store.InboundSource) func(string, error) {
+	return func(what string, err error) {
+		slog.Warn("edi refusal acknowledgment not built", "partner", partner.ID, "ref", src.Ref, "ack", what, "err", err)
+	}
+}
+
+// ta1Ack builds the TA1 R with the TA105 note answering ic on the X12
+// counter, or "" (nothing recorded) when it cannot be written.
+func ta1Ack(ic domain.Interchange, note string, at time.Time, log func(string, error)) func(next func() (int64, error)) (string, error) {
+	return func(next func() (int64, error)) (string, error) {
+		n, err := next()
+		if err != nil {
+			return "", err
+		}
+		t, err := domain.BuildTA1(ic, domain.TA1Rejected, note, fmt.Sprintf("%09d", n), at)
+		if err == nil {
+			var raw string
+			if raw, err = domain.Serialize(t); err == nil {
+				return raw, nil
+			}
+		}
+		log("TA1", err)
+		return "", nil
+	}
+}
+
+// contrlRefusalAck builds the CONTRL UCI 4 for cause answering ic on the
+// EDIFACT counter, or "" when it cannot be written.
+func contrlRefusalAck(ic domain.EdifactInterchange, cause *domain.EdifactError, at time.Time, log func(string, error)) func(next func() (int64, error)) (string, error) {
+	return func(next func() (int64, error)) (string, error) {
+		n, err := next()
+		if err != nil {
+			return "", err
+		}
+		c, err := domain.RefusalCONTRL(ic, cause, strconv.FormatInt(n, 10), at)
+		if err == nil {
+			var raw string
+			if raw, err = domain.SerializeEdifact(c, false); err == nil {
+				return raw, nil
+			}
+		}
+		log("CONTRL", err)
+		return "", nil
+	}
 }

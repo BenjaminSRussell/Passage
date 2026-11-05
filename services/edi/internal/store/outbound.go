@@ -298,3 +298,39 @@ func matchContrl(ctx context.Context, tx pgx.Tx, tid, partnerID string, m *Messa
 	m.Status, m.Error = "POSTED", strings.Join(notes, "; ")
 	return nil
 }
+
+// matchTA1 applies a received TA1 (m.TA1) to the partner's outbound X12
+// interchange whose ISA13 equals TA101. A TA1 R rejects the interchange as a
+// whole: every message still MAPPED or SENT becomes FAILED with the TA105
+// note, the interchange becomes REJECTED with acked_at, and message.acked is
+// published per message. A TA1 A or E only says the envelope was read; the
+// 997 answers the groups, so nothing changes and the TA1 is noted. m becomes
+// POSTED when it matched and FAILED with EDI-0161 otherwise.
+func matchTA1(ctx context.Context, tx pgx.Tx, tid, partnerID string, m *Message) error {
+	ta1 := m.TA1
+	interchangeID, msgs, ok, err := lockOutbound(ctx, tx, partnerID, domain.SyntaxX12, ta1.Control)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		m.Status, m.Error = "FAILED", fmt.Sprintf("%s: no outbound interchange %s to this partner answers this TA1", domain.CodeUnmatchedAck, ta1.Control)
+		return nil
+	}
+	if ta1.Code != domain.TA1Rejected {
+		m.Status, m.Error = "POSTED", fmt.Sprintf("interchange %s accepted by the partner TA1 (TA104 %s, TA105 %s); its 997 answers the groups", ta1.Control, ta1.Code, ta1.Note)
+		return nil
+	}
+	answers := make([]ackAnswer, len(msgs))
+	for i, om := range msgs {
+		answers[i] = ackAnswer{msg: om, ackStatus: domain.StatusRejected, errText: "interchange rejected by the partner TA1 (TA105 " + ta1.Note + ")"}
+	}
+	applied, err := applyAnswers(ctx, tx, tid, partnerID, interchangeID, ta1.Control, m.ID, answers, domain.StatusRejected)
+	if err != nil {
+		return err
+	}
+	m.Status = "POSTED"
+	if applied == 0 && len(answers) > 0 {
+		m.Error = fmt.Sprintf("outbound interchange %s was already acknowledged", ta1.Control)
+	}
+	return nil
+}

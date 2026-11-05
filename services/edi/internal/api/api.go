@@ -547,6 +547,15 @@ func (a *API) receiveX12Interchange(ctx context.Context, body []byte, o receiveO
 		all      []domain.TxOutcome
 		messages []store.Message
 	)
+	// A TA1 is matched to the outbound interchange it answers and is never
+	// acknowledged itself.
+	for _, ta1 := range ic.TA1 {
+		m, err := ta1Message(ta1)
+		if err != nil {
+			return receiveResponse{}, err
+		}
+		messages = append(messages, m)
+	}
 	for _, g := range ic.Groups {
 		// A 997 group is matched to the outbound document it answers and is
 		// never acknowledged itself.
@@ -579,8 +588,8 @@ func (a *API) receiveX12Interchange(ctx context.Context, body []byte, o receiveO
 	if len(messages) == 0 {
 		return receiveResponse{}, httpx.NewProblem(http.StatusBadRequest, CodeSyntax, "interchange carries no transactions")
 	}
-	// An interchange of 997s only is accepted; the store downgrades it when a
-	// 997 cannot be read or matched.
+	// An interchange of 997s or TA1s only is accepted; the store downgrades it
+	// when one cannot be read or matched.
 	status := domain.StatusAccepted
 	if len(all) > 0 {
 		status = domain.SummarizeOutcomes(all)
@@ -648,6 +657,17 @@ func ackMessage(t domain.Transaction) (store.Message, error) {
 	}
 	m.Ack, m.Canonical = &ack, canonical
 	return m, nil
+}
+
+// ta1Message records one received TA1 (TransactionSet TA1, STControl the
+// TA101 it answers) for the store to match.
+func ta1Message(ta1 domain.InterchangeAck) (store.Message, error) {
+	canonical, err := json.Marshal(ta1)
+	if err != nil {
+		return store.Message{}, err
+	}
+	a := ta1
+	return store.Message{ID: ids.New(), TransactionSet: "TA1", STControl: ta1.Control, Status: "RECEIVED", Canonical: canonical, TA1: &a}, nil
 }
 
 type outboundRequest struct {

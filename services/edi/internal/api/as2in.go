@@ -261,9 +261,11 @@ func ediPayload(m transport.Message) bool {
 // one wrapping delivery.ErrPermanent for a payload that can never be
 // recorded, and any other error for a failure worth retrying
 // (delivery.Receiver). A payload refused for its syntax or its sender is
-// answered with a negative 997 or CONTRL when its envelope allows one (see
-// refuse): the transport authenticated the partner, so the answer goes back
-// to it over its own transport, next to the error MDN or the parked file.
+// answered with a negative 997, a TA1 or a CONTRL when its envelope allows
+// one (see refuse), and a duplicate interchange with a TA1 025 or a CONTRL
+// 26 (see answerDuplicate): the transport authenticated the partner, so the
+// answer goes back to it over its own transport, next to the error or
+// duplicate MDN, the parked file or the archived duplicate.
 func (a *API) ReceiveFromTransport(ctx context.Context, partnerID string, src store.InboundSource, payload []byte) error {
 	partner, err := a.store.GetPartner(ctx, partnerID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -278,6 +280,9 @@ func (a *API) ReceiveFromTransport(ctx context.Context, partnerID string, src st
 	case err == nil:
 		return nil
 	case errors.As(err, &p) && p.Code == CodeDuplicateControl:
+		if aerr := a.answerDuplicate(ctx, partner, src, payload, p); aerr != nil {
+			return aerr
+		}
 		return fmt.Errorf("%w: %s", store.ErrDuplicate, p.Detail)
 	case errors.As(err, &p):
 		if rerr := a.refuse(ctx, partner, src, payload, p); rerr != nil {
