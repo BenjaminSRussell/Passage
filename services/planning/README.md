@@ -188,12 +188,20 @@ go test -count=1 -timeout 60m -run TestRunAPI_ScalePostgres -v ./internal/api/
 `PASSAGE_PLANNING_API_SCALE_RUNS` (default 2) repeats the run with a new Idempotency-Key and compares
 the stored plan hashes.
 
-The 50k run through the asynchronous route has not been timed yet: the session that built it had no
-superuser access to the local Postgres for a run of this size. The numbers below are from
-2026-11-04, before the asynchronous route, on the synchronous route served without the router's
-request timeout (the `PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT` switch that this change removes). The
-asynchronous route runs the same engine call and the same `RunPlan` transaction, so they are the
-expected cost, not a measurement of it.
+Measured on 2026-11-05 through the asynchronous route and the production router (30 s request timeout in place),
+on PostgreSQL 16 (local throwaway cluster, default settings) on the same kind of shared 4-vCPU VM, one run:
+
+| Items | Run | End to end | 202 after | Engine | Planned orders | Messages | Rows stored | On disk | Test-process peak RSS |
+|---|---|---|---|---|---|---|---|---|---|
+| 10,000 | 1 | 1 min 56.6 s | 366 ms | 9.8 s | 442,164 | 28,400 | 1,899,692 | 627 MB | 1.4 GiB |
+| 50,000 | 1 | 9 min 41.1 s | 1.87 s | 57.9 s | 2,159,385 | 141,806 | 9,238,394 | 3,072 MB | 6.2 GiB |
+
+The 50k run meets the 10 min budget through the API, but with little margin on this host; persistence is
+still the cost (about 16,000 rows per second). Peak RSS is for the whole test process (generator, client,
+server and plan), so the server alone holds less; the chart's memory limit is 8Gi so one 50k run fits.
+
+The earlier numbers below are from 2026-11-04, on the synchronous route served without the router's
+request timeout (the `PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT` switch this change removed).
 
 Measured on 2026-11-04 on PostgreSQL 16.15 (local cluster, default settings) and the test process on
 the same host: a shared cloud VM with 4 vCPUs, 15 GB RAM and other workloads running at the same time.
