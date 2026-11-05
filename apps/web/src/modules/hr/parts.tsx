@@ -34,6 +34,10 @@ const KNOWN: Record<string, string> = {
   "HCM-QST-NOT-INVITED": "You weren't invited to this questionnaire.",
   "HCM-QST-ANSWERED": "You have already answered this questionnaire, and answers can't be changed.",
   "HCM-OFR-001": "This offer has already been converted to a hire.",
+  "HCM-OFR-004": "The candidate's details were erased, so enter the new worker's legal name.",
+  "HCM-CMP-SOD":
+    "You can't approve this cycle: whoever created it, submitted a worksheet on it, or is a worker or proposing manager on it can't approve it. Ask another approver.",
+  "HCM-CMP-010": "This cycle has to be approved before it can be applied.",
   "HCM-INC-SELF-CLOSE": "Whoever reported an incident can't close it. Ask another incident administrator.",
   "HCM-LOAN-001": "Items are still out on loan. Record them returned or lost first.",
 };
