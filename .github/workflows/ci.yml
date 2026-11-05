@@ -300,6 +300,8 @@ jobs:
           cache: false
       - run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
       - run: pip install pyyaml==6.0.2 && PATH="$(go env GOPATH)/bin:$PATH" make -C deploy test-gateway
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - run: make -C deploy test-argocd
       - name: Install Kyverno CLI
         env:
           KYVERNO_VERSION: 1.19.2

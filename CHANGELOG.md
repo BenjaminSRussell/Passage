@@ -10,6 +10,11 @@ release may change public APIs.
 
 ### Added
 
+- Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
+  in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
+  ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev
+  chart with helm. The analytics, eam, hr, iot-edge, projects, shopfloor and transport charts now take
+  `image.digest`. Syncing still needs a live cluster (#213).
 - carrier-gateway TypeScript service (#482, wave 28 AC4) in `services/carrier-gateway-ts`. It has a carrier adapter
   interface, a deterministic sandbox carrier with no credentials, rate shopping, idempotent labels and tracking. Its
   `/v1/carrier` API takes signed service tokens. The adapter contract is replayed against a recorded fixture. There

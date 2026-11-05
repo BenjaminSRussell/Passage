@@ -2,6 +2,7 @@ image:
   repository: ghcr.io/benjaminsrussell/passage-eam
   # Pin by digest in GitOps overlays (rollback by digest).
   tag: "0.1.0"
+  digest: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 2

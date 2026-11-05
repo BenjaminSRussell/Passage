@@ -43,7 +43,7 @@ spec:
           {{- end }}
           containers:
             - name: {{ $job.command }}
-              image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+              image: "{{ $root.Values.image.repository }}{{ if $root.Values.image.digest }}@{{ $root.Values.image.digest }}{{ else }}:{{ $root.Values.image.tag }}{{ end }}"
               imagePullPolicy: {{ $root.Values.image.pullPolicy }}
               args:
                 - {{ $job.command }}

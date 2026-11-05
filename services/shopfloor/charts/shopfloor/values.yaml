@@ -1,6 +1,7 @@
 image:
   repository: ghcr.io/benjaminsrussell/passage/shopfloor
   tag: "0.1.0"
+  digest: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 3

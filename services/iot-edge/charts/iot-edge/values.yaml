@@ -1,6 +1,7 @@
 image:
   repository: ghcr.io/benjaminsrussell/passage/iot-edge
   tag: "0.1.0"
+  digest: ""
   pullPolicy: IfNotPresent
 
 # Rollout ring for this plant: canary | ring1 | all (FR-25.19).
