@@ -156,18 +156,8 @@ func (b *browserLogin) settle(resp *http.Response) (callback, page string) {
 // Keycloak keeps showing the password form (the login was refused).
 func (b *browserLogin) login(user *loginUser, idpHint string) (url.Values, string) {
 	b.t.Helper()
-	verifierBytes := make([]byte, 32)
-	_, _ = rand.Read(verifierBytes)
-	verifier := base64.RawURLEncoding.EncodeToString(verifierBytes)
-	challenge := sha256.Sum256([]byte(verifier))
-	query := url.Values{
-		"client_id": {"passage-web"}, "response_type": {"code"}, "scope": {"openid"}, "redirect_uri": {webCallbackURL},
-		"code_challenge": {base64.RawURLEncoding.EncodeToString(challenge[:])}, "code_challenge_method": {"S256"}, "state": {"s-" + verifier[:8]},
-	}
-	if idpHint != "" {
-		query.Set("kc_idp_hint", idpHint)
-	}
-	resp, err := b.client.Get(b.base + "/realms/" + realmName + "/protocol/openid-connect/auth?" + query.Encode())
+	authURL, verifier, state := authorizationRequest(b.base, idpHint)
+	resp, err := b.client.Get(authURL)
 	if err != nil {
 		b.t.Fatal(err)
 	}
@@ -192,14 +182,38 @@ func (b *browserLogin) login(user *loginUser, idpHint string) (url.Values, strin
 	if callback == "" {
 		b.t.Fatalf("login did not reach %s: %.600s", webCallbackURL, page)
 	}
+	return callbackQuery(b.t, callback, state), verifier
+}
+
+// authorizationRequest builds passage-web's authorization-code request with PKCE S256 against
+// base and returns its URL, the code verifier and the state.
+func authorizationRequest(base, idpHint string) (authURL, verifier, state string) {
+	verifierBytes := make([]byte, 32)
+	_, _ = rand.Read(verifierBytes)
+	verifier = base64.RawURLEncoding.EncodeToString(verifierBytes)
+	challenge := sha256.Sum256([]byte(verifier))
+	state = "s-" + verifier[:8]
+	query := url.Values{
+		"client_id": {"passage-web"}, "response_type": {"code"}, "scope": {"openid"}, "redirect_uri": {webCallbackURL},
+		"code_challenge": {base64.RawURLEncoding.EncodeToString(challenge[:])}, "code_challenge_method": {"S256"}, "state": {state},
+	}
+	if idpHint != "" {
+		query.Set("kc_idp_hint", idpHint)
+	}
+	return base + "/realms/" + realmName + "/protocol/openid-connect/auth?" + query.Encode(), verifier, state
+}
+
+// callbackQuery checks that the passage-web callback carries the request's state and a code.
+func callbackQuery(t *testing.T, callback, state string) url.Values {
+	t.Helper()
 	parsed, err := url.Parse(callback)
 	if err != nil {
-		b.t.Fatal(err)
+		t.Fatal(err)
 	}
-	if parsed.Query().Get("state") != query.Get("state") || parsed.Query().Get("code") == "" {
-		b.t.Fatalf("callback %s: want state %s and a code", callback, query.Get("state"))
+	if parsed.Query().Get("state") != state || parsed.Query().Get("code") == "" {
+		t.Fatalf("callback %s: want state %s and a code", callback, state)
 	}
-	return parsed.Query(), verifier
+	return parsed.Query()
 }
 
 func (b *browserLogin) answer(page string, user *loginUser) (*pageForm, string) {

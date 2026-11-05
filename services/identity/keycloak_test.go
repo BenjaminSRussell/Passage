@@ -176,7 +176,7 @@ func TestKeycloakRealmRequiresMFAAndHoldsNoSecrets(t *testing.T) {
 		t.Fatalf("browserFlow %q is not defined in the export", realm.BrowserFlow)
 	}
 	if !secondFactorRequired(realm, bound) {
-		t.Error("bound browser flow must require a second-factor subflow: required OTP after a conditional WebAuthn step")
+		t.Error("bound browser flow must require a second-factor subflow: WebAuthn or a required OTP form, as alternatives")
 	}
 	if !flowReachesRequired(realm, bound, "auth-username-password-form") {
 		t.Error("bound browser flow never requires the username/password form")
@@ -313,22 +313,27 @@ func findFlow(realm realmExport, alias string) *realmFlow {
 	return &realm.AuthenticationFlows[i]
 }
 
-func conditionalWebAuthnStep(realm realmExport, flow *realmFlow) bool {
+// secondFactorFlow reports whether flow offers exactly the two second factors as alternatives:
+// webauthn-authenticator, and a subflow that requires auth-otp-form. Keycloak runs the alternative
+// the user has a credential for; a user with neither falls through to the OTP form, which sends
+// them to CONFIGURE_TOTP, so no alternative lets a password alone through.
+func secondFactorFlow(realm realmExport, flow *realmFlow) bool {
+	var webauthn, otp bool
 	for _, exec := range flow.Executions {
+		if exec.Requirement != "ALTERNATIVE" {
+			return false
+		}
 		sub := findFlow(realm, exec.FlowAlias)
-		if exec.Requirement != "CONDITIONAL" || sub == nil {
-			continue
-		}
-		var configured, webauthn bool
-		for _, inner := range sub.Executions {
-			configured = configured || (inner.Authenticator == "conditional-user-configured" && inner.Requirement == "REQUIRED")
-			webauthn = webauthn || (inner.Authenticator == "webauthn-authenticator" && inner.Requirement == "REQUIRED")
-		}
-		if configured && webauthn {
-			return true
+		switch {
+		case exec.Authenticator == "webauthn-authenticator":
+			webauthn = true
+		case sub != nil && len(sub.Executions) == 1 && sub.Executions[0].Authenticator == "auth-otp-form" && sub.Executions[0].Requirement == "REQUIRED":
+			otp = true
+		default:
+			return false
 		}
 	}
-	return false
+	return webauthn && otp
 }
 
 func secondFactorRequired(realm realmExport, flow *realmFlow) bool {
@@ -337,10 +342,7 @@ func secondFactorRequired(realm realmExport, flow *realmFlow) bool {
 		if sub == nil {
 			continue
 		}
-		otpRequired := slices.ContainsFunc(sub.Executions, func(inner realmExec) bool {
-			return inner.Authenticator == "auth-otp-form" && inner.Requirement == "REQUIRED"
-		})
-		if exec.Requirement == "REQUIRED" && otpRequired && conditionalWebAuthnStep(realm, sub) {
+		if exec.Requirement == "REQUIRED" && secondFactorFlow(realm, sub) {
 			return true
 		}
 		if secondFactorRequired(realm, sub) {
@@ -457,11 +459,20 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 // JWTVerifier middleware and returns the principal it derives.
 func verifyWithIdentity(t *testing.T, base string, client *http.Client, accessToken string) tenant.Principal {
 	t.Helper()
+	return verifyWithIdentityIssuer(t, base, base, client, accessToken)
+}
+
+// verifyWithIdentityIssuer is verifyWithIdentity for a token whose issuer is the Keycloak host the
+// browser used (issuerBase), with the keys fetched from base. NewJWTVerifier refuses a plain-http
+// issuer on a non-loopback host, so the test sets that issuer on the verifier after creating it.
+func verifyWithIdentityIssuer(t *testing.T, base, issuerBase string, client *http.Client, accessToken string) tenant.Principal {
+	t.Helper()
 	issuer := base + "/realms/" + realmName
 	verifier, err := NewJWTVerifier(issuer, realmAudience, loginTenantID, issuer+"/protocol/openid-connect/certs", client)
 	if err != nil {
 		t.Fatal(err)
 	}
+	verifier.issuer = issuerBase + "/realms/" + realmName
 	var principal tenant.Principal
 	handler := verifier.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, _ = tenant.FromContext(r.Context())

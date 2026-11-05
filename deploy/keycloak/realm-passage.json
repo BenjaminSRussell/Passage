@@ -22,7 +22,33 @@
   "otpPolicyLookAheadWindow": 1,
   "otpPolicyCodeReusable": false,
   "webAuthnPolicyRpEntityName": "Passage",
+  "webAuthnPolicyRpId": "keycloak.passage.example.invalid",
+  "webAuthnPolicySignatureAlgorithms": [
+    "ES256",
+    "RS256"
+  ],
+  "webAuthnPolicyAttestationConveyancePreference": "none",
+  "webAuthnPolicyAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyRequireResidentKey": "not specified",
   "webAuthnPolicyUserVerificationRequirement": "required",
+  "webAuthnPolicyCreateTimeout": 0,
+  "webAuthnPolicyAvoidSameAuthenticatorRegister": false,
+  "webAuthnPolicyAcceptableAaguids": [],
+  "webAuthnPolicyExtraOrigins": [],
+  "webAuthnPolicyPasswordlessRpEntityName": "Passage",
+  "webAuthnPolicyPasswordlessRpId": "keycloak.passage.example.invalid",
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": [
+    "ES256",
+    "RS256"
+  ],
+  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
+  "webAuthnPolicyPasswordlessAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyPasswordlessRequireResidentKey": "Yes",
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
+  "webAuthnPolicyPasswordlessCreateTimeout": 0,
+  "webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister": false,
+  "webAuthnPolicyPasswordlessAcceptableAaguids": [],
+  "webAuthnPolicyPasswordlessExtraOrigins": [],
   "browserFlow": "passage-browser-mfa",
   "requiredActions": [
     {
@@ -347,30 +373,30 @@
     },
     {
       "alias": "passage-browser-mfa second factor",
-      "description": "WebAuthn when enrolled, then OTP (enrols if missing)",
+      "description": "WebAuthn or OTP, whichever the user has; a user with neither enrols OTP",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
       "authenticationExecutions": [
         {
-          "requirement": "CONDITIONAL",
+          "requirement": "ALTERNATIVE",
           "priority": 10,
           "userSetupAllowed": false,
-          "autheticatorFlow": true,
-          "flowAlias": "passage-browser-mfa webauthn"
+          "autheticatorFlow": false,
+          "authenticator": "webauthn-authenticator"
         },
         {
-          "requirement": "REQUIRED",
+          "requirement": "ALTERNATIVE",
           "priority": 20,
           "userSetupAllowed": false,
-          "autheticatorFlow": false,
-          "authenticator": "auth-otp-form"
+          "autheticatorFlow": true,
+          "flowAlias": "passage-browser-mfa otp"
         }
       ]
     },
     {
-      "alias": "passage-browser-mfa webauthn",
-      "description": "Runs only when the user has a WebAuthn credential",
+      "alias": "passage-browser-mfa otp",
+      "description": "OTP form; sends a user without OTP to CONFIGURE_TOTP",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
@@ -380,14 +406,7 @@
           "priority": 10,
           "userSetupAllowed": false,
           "autheticatorFlow": false,
-          "authenticator": "conditional-user-configured"
-        },
-        {
-          "requirement": "REQUIRED",
-          "priority": 20,
-          "userSetupAllowed": false,
-          "autheticatorFlow": false,
-          "authenticator": "webauthn-authenticator"
+          "authenticator": "auth-otp-form"
         }
       ]
     },
@@ -409,30 +428,30 @@
     },
     {
       "alias": "passage-post-broker-mfa second factor",
-      "description": "WebAuthn when enrolled, then OTP (enrols if missing)",
+      "description": "WebAuthn or OTP, whichever the user has; a user with neither enrols OTP",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
       "authenticationExecutions": [
         {
-          "requirement": "CONDITIONAL",
+          "requirement": "ALTERNATIVE",
           "priority": 10,
           "userSetupAllowed": false,
-          "autheticatorFlow": true,
-          "flowAlias": "passage-post-broker-mfa webauthn"
+          "autheticatorFlow": false,
+          "authenticator": "webauthn-authenticator"
         },
         {
-          "requirement": "REQUIRED",
+          "requirement": "ALTERNATIVE",
           "priority": 20,
           "userSetupAllowed": false,
-          "autheticatorFlow": false,
-          "authenticator": "auth-otp-form"
+          "autheticatorFlow": true,
+          "flowAlias": "passage-post-broker-mfa otp"
         }
       ]
     },
     {
-      "alias": "passage-post-broker-mfa webauthn",
-      "description": "Runs only when the user has a WebAuthn credential",
+      "alias": "passage-post-broker-mfa otp",
+      "description": "OTP form; sends a user without OTP to CONFIGURE_TOTP",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
@@ -442,14 +461,7 @@
           "priority": 10,
           "userSetupAllowed": false,
           "autheticatorFlow": false,
-          "authenticator": "conditional-user-configured"
-        },
-        {
-          "requirement": "REQUIRED",
-          "priority": 20,
-          "userSetupAllowed": false,
-          "autheticatorFlow": false,
-          "authenticator": "webauthn-authenticator"
+          "authenticator": "auth-otp-form"
         }
       ]
     }
