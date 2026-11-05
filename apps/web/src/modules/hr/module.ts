@@ -9,8 +9,10 @@ import { CourseDetailPage } from "./CourseDetailPage";
 import { CourseSessionPage } from "./CourseSessionPage";
 import { CoursesPage } from "./CoursesPage";
 import { ExpiringCertificationsPage } from "./ExpiringCertificationsPage";
+import { MyAbsencePage } from "./MyAbsencePage";
 import { MyProfilePage } from "./MyProfilePage";
 import { MyTeamPage } from "./MyTeamPage";
+import { HrProfileChangesPage, TeamChangesPage } from "./ProfileChangesPage";
 import { NewBenefitPlanPage } from "./NewBenefitPlanPage";
 import { NewAbsencePlanPage } from "./NewAbsencePlanPage";
 import { NewCoursePage } from "./NewCoursePage";
@@ -115,7 +117,10 @@ const hr: PassageModule = {
     { path: "/hr/workers/:id/performance", element: createElement(WorkerPerformancePage), handle: { title: "Goals and reviews", duty: "hr.performance.manage" } },
     { path: "/hr/reviews/:id", element: createElement(ReviewPage), handle: { title: "Review", duty: "hr.performance.manage" } },
     { path: "/hr/my/profile", element: createElement(MyProfilePage), handle: { title: "My profile", duty: "hr.profile.self" } },
+    { path: "/hr/my/absence", element: createElement(MyAbsencePage), handle: { title: "My absence", duty: "hr.absence.self" } },
     { path: "/hr/my/team", element: createElement(MyTeamPage), handle: { title: "My team", duty: "hr.team.manage" } },
+    { path: "/hr/my/team/changes", element: createElement(TeamChangesPage), handle: { title: "Team changes", duty: "hr.team.approve" } },
+    { path: "/hr/profile-changes", element: createElement(HrProfileChangesPage), handle: { title: "Profile changes", duty: "hr.worker.maintain" } },
     { path: "/hr/my/team/:id", element: createElement(TeamMemberPage), handle: { title: "Team member", duty: "hr.team.manage" } },
   ],
   nav: [
@@ -143,7 +148,10 @@ const hr: PassageModule = {
     { label: "My goals", to: "/hr/my/goals", duty: "hr.performance.self" },
     { label: "My reviews", to: "/hr/my/reviews", duty: "hr.performance.self" },
     { label: "My profile", to: "/hr/my/profile", duty: "hr.profile.self" },
+    { label: "My absence", to: "/hr/my/absence", duty: "hr.absence.self" },
     { label: "My team", to: "/hr/my/team", duty: "hr.team.manage" },
+    { label: "Team changes", to: "/hr/my/team/changes", duty: "hr.team.approve" },
+    { label: "Profile changes", to: "/hr/profile-changes", duty: "hr.worker.maintain" },
   ],
 };
 

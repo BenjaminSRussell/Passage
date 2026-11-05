@@ -88,7 +88,7 @@ describe("self service", () => {
         : undefined;
     const { container } = renderAt("/hr/my/profile");
     expect(await screen.findByText("***-**-6789")).toBeTruthy();
-    expect(paths).toEqual(["/api/v1/hr/me"]);
+    expect(paths).toEqual(["/api/v1/hr/me", "/api/v1/hr/me/profile-changes"]);
     expect(pageViolations(container)).toEqual([]);
   });
 

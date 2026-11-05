@@ -94,6 +94,8 @@ type API struct {
 	reviewsOpened        atomic.Int64
 	reviewsSelfSubmitted atomic.Int64
 	reviewsSignedOff     atomic.Int64
+	profileChanges       atomic.Int64
+	profileDecisions     atomic.Int64
 }
 
 // Sequencer allocates the next formatted number of a numbering sequence.
@@ -206,6 +208,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Post("/v1/hr/questionnaires/schedules/{id}/answers", scheduleRoute(a.submitAnswers))
 	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/schedules/{id}/results", scheduleRoute(a.scheduleResults))
 	a.registerSelfService(r)
+	a.registerProfileChanges(r)
 	a.registerPerformance(r)
 }
 
@@ -270,6 +273,8 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_reviews_opened_total", "Reviews opened; repeats for a period are not counted.", a.reviewsOpened.Load())
 		counter("hr_reviews_self_submitted_total", "Self-assessments newly submitted.", a.reviewsSelfSubmitted.Load())
 		counter("hr_reviews_signed_off_total", "Reviews newly signed off by a manager.", a.reviewsSignedOff.Load())
+		counter("hr_profile_changes_total", "Self-service profile changes submitted (applied or pending).", a.profileChanges.Load())
+		counter("hr_profile_change_decisions_total", "Profile change decisions that changed a change's status.", a.profileDecisions.Load())
 	})
 }
 

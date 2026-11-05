@@ -20,6 +20,11 @@ release may change public APIs.
   claims, deprovisioning (a disabled user loses refresh and login), and federated login through two Keycloak stand-in
   IdPs (OIDC and SAML) with the post-broker second factor. The realm export gains a FORCE hardcoded `tenant_id` mapper
   per IdP placeholder and a pinned single-use OTP policy; new realm tests check both.
+- HR employee and manager self-service (#267). Employees change their own preferred name at once, and their home
+  address and bank account with approval, through `/v1/hr/me/profile-changes`. The new value stays sealed until a
+  manager (address changes of direct reports) or HR (`hr.worker.maintain`, any change) approves it into the PII
+  vault with an audit row. Web screens: update my details, my absence, team changes, profile changes.
+
 - carrier-gateway TypeScript service (#482, wave 28 AC4) in `services/carrier-gateway-ts`. It has a carrier adapter
   interface, a deterministic sandbox carrier with no credentials, rate shopping, idempotent labels and tracking. Its
   `/v1/carrier` API takes signed service tokens. The adapter contract is replayed against a recorded fixture. There

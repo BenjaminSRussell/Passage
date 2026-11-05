@@ -2326,6 +2326,222 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /v1/hr/me/profile-changes:
+    post:
+      operationId: requestMyProfileChange
+      summary: The signed-in worker changes their own preferred name, home address or bank account
+      description: |
+        PREFERRED_NAME applies at once (status APPLIED). HOME_ADDRESS and
+        BANK_ACCOUNT are sensitive: the new value is sealed on the change and
+        waits for approval (status PENDING); the response carries only the
+        masked summary (city and country, or the account's last four). One
+        pending change per kind (HCM-ESS-003, 409). The worker is the one
+        linked to the caller's sign-in; nothing in the body names one.
+      x-passage-duty: hr.profile.self
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileChangeRequest"
+      responses:
+        "201":
+          description: The change, applied or pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileChange"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-ESS-001, no worker is linked to the caller's sign-in
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-ESS-003 (a change of this kind is already pending) or HCM-ESS-002 (more than one linked worker)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listMyProfileChanges
+      summary: The signed-in worker's own profile changes, newest first
+      x-passage-duty: hr.profile.self
+      parameters:
+        - $ref: "#/components/parameters/ProfileChangeStatus"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of changes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileChangeList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/me/profile-changes/{id}/cancel:
+    post:
+      operationId: cancelMyProfileChange
+      summary: The signed-in worker withdraws their own pending change
+      description: Any other worker's change is 404. Withdrawing again returns it unchanged; a decided change is HCM-ESS-004 (409). The sealed value is dropped.
+      x-passage-duty: hr.profile.self
+      parameters:
+        - $ref: "#/components/parameters/ProfileChangeId"
+      responses:
+        "200":
+          description: The withdrawn change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileChange"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/me/team/profile-changes:
+    get:
+      operationId: listTeamProfileChanges
+      summary: The manager's approval queue of their direct reports' home address changes, newest first
+      description: Bank account changes never appear here; HR decides them.
+      x-passage-duty: hr.team.approve
+      parameters:
+        - $ref: "#/components/parameters/ProfileChangeStatus"
+        - name: workerId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of changes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileChangeList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/me/team/profile-changes/{id}/decide:
+    post:
+      operationId: decideTeamProfileChange
+      summary: A manager approves or rejects a direct report's home address change
+      description: |
+        A change of anyone but a direct report is 404 HCM-ESS-NOT-FOUND; a
+        bank account change is HCM-ESS-005 (403, HR decides it); a change to
+        the caller's own record is HCM-ESS-006 (403). Approval writes the
+        address to the PII vault with a p3_change audit row. Repeating the
+        outcome returns the change unchanged; the other outcome is
+        HCM-ESS-004 (409).
+      x-passage-duty: hr.team.approve
+      parameters:
+        - $ref: "#/components/parameters/ProfileChangeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileChangeDecision"
+      responses:
+        "200":
+          description: The decided change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileChange"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/profile-changes:
+    get:
+      operationId: listProfileChanges
+      summary: HR's queue of every self-service profile change in the tenant, newest first
+      x-passage-duty: hr.worker.maintain
+      parameters:
+        - $ref: "#/components/parameters/ProfileChangeStatus"
+        - name: workerId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of changes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileChangeList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/profile-changes/{id}/decide:
+    post:
+      operationId: decideProfileChange
+      summary: HR approves or rejects any pending home address or bank account change
+      description: A change to the caller's own record is HCM-ESS-006 (403). Approval writes the value to the PII vault with a p3_change audit row; the sealed copy on the change is dropped either way.
+      x-passage-duty: hr.worker.maintain
+      parameters:
+        - $ref: "#/components/parameters/ProfileChangeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileChangeDecision"
+      responses:
+        "200":
+          description: The decided change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileChange"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
   /v1/hr/incidents:
     post:
       operationId: reportIncident
@@ -4778,6 +4994,20 @@ components:
       schema:
         type: string
         format: uuid
+    ProfileChangeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProfileChangeStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [APPLIED, PENDING, APPROVED, REJECTED, CANCELED]
     GoalId:
       name: id
       in: path
@@ -5043,6 +5273,101 @@ components:
         updatedAt:
           type: string
           format: date-time
+    Address:
+      type: object
+      required: [line1, city, postalCode, country]
+      properties:
+        line1:
+          type: string
+          maxLength: 200
+        line2:
+          type: string
+          maxLength: 200
+        city:
+          type: string
+          maxLength: 100
+        region:
+          type: string
+          maxLength: 100
+        postalCode:
+          type: string
+          maxLength: 20
+        country:
+          type: string
+          pattern: "^[A-Za-z]{2}$"
+          description: ISO 3166-1 alpha-2, upper-cased on receipt.
+    ProfileChangeRequest:
+      type: object
+      required: [kind]
+      description: Only the field that matches kind is read.
+      properties:
+        kind:
+          type: string
+          enum: [PREFERRED_NAME, HOME_ADDRESS, BANK_ACCOUNT]
+        preferredName:
+          type: string
+          maxLength: 100
+          description: Empty clears the preferred name.
+        address:
+          $ref: "#/components/schemas/Address"
+        bankAccount:
+          type: string
+          description: 8 to 34 letters and digits once spaces and hyphens are dropped (an IBAN fits).
+    ProfileChangeDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVE, REJECT]
+        note:
+          type: string
+          maxLength: 500
+    ProfileChange:
+      type: object
+      required: [id, workerId, workerName, personnelNumber, kind, status, summary, requestedBy, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        workerName:
+          type: string
+        personnelNumber:
+          type: string
+        kind:
+          type: string
+          enum: [PREFERRED_NAME, HOME_ADDRESS, BANK_ACCOUNT]
+        status:
+          type: string
+          enum: [APPLIED, PENDING, APPROVED, REJECTED, CANCELED]
+        summary:
+          type: string
+          description: The masked new value. The preferred name itself, the address's city and country, or the bank account as ****####.
+        requestedBy:
+          type: string
+        decidedBy:
+          type: string
+        decidedAt:
+          type: string
+          format: date-time
+        decisionNote:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ProfileChangeList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileChange"
+        nextCursor:
+          type: string
     TeamWorkerList:
       type: object
       required: [items]
@@ -5079,6 +5404,9 @@ components:
         bankAccount:
           type: string
           description: "Masked as ****#### unless revealed."
+        homeAddress:
+          type: string
+          description: "City and country unless revealed; the full one-line address on a reveal."
         masked:
           type: boolean
     WorkerList:

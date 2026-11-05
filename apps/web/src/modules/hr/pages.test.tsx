@@ -129,7 +129,10 @@ describe("hr module", () => {
       { label: "My goals", to: "/hr/my/goals", duty: "hr.performance.self" },
       { label: "My reviews", to: "/hr/my/reviews", duty: "hr.performance.self" },
       { label: "My profile", to: "/hr/my/profile", duty: "hr.profile.self" },
+      { label: "My absence", to: "/hr/my/absence", duty: "hr.absence.self" },
       { label: "My team", to: "/hr/my/team", duty: "hr.team.manage" },
+      { label: "Team changes", to: "/hr/my/team/changes", duty: "hr.team.approve" },
+      { label: "Profile changes", to: "/hr/profile-changes", duty: "hr.worker.maintain" },
     ]);
     expect(loadModules().map((m) => m.id)).toContain("hr");
   });

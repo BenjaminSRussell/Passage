@@ -26,6 +26,7 @@ export interface Worker {
 export interface PIIView {
   nationalId: string;
   bankAccount?: string;
+  homeAddress?: string;
   masked: boolean;
 }
 

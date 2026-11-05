@@ -273,6 +273,29 @@ unique per worker and period across legal entities: opening it again from a
 scope that cannot see the existing one is 409 `HCM-REV-STATE`, and naming a
 different `legalEntityId` than the existing review's is 422 `HCM-ENTITY-MISMATCH`.
 
+## Self-service profile changes (#267)
+
+An employee (`hr.profile.self`) changes their own record through
+`/v1/hr/me/profile-changes`; the worker is always the one whose `user_id` is
+the caller's sign-in. A preferred name applies at once (status `APPLIED`). A
+home address or bank account is sensitive: the new value is sealed on the
+`hr_profile_change` row under its own fieldcrypt field and waits (`PENDING`),
+one pending change per kind (`HCM-ESS-003`). Responses and queues show only a
+masked summary (the address's city and country, the account's last four).
+The employee can withdraw a pending change.
+
+A manager (`hr.team.approve`) decides their direct reports' address changes
+through `/v1/hr/me/team/profile-changes`; anyone else's change is the uniform
+404 and a bank account change is `HCM-ESS-005` (HR decides it, since it routes
+pay). HR (`hr.worker.maintain`) sees and decides every change through
+`/v1/hr/profile-changes`. Nobody decides a change to their own record
+(`HCM-ESS-006`). Approval re-seals the value into `worker_pii`
+(`home_address_sealed` or `bank_account_sealed`) with a `p3_change` audit row
+in the same transaction; any decision or withdrawal drops the sealed copy on
+the change row. The home address is part of the PII view: city and country
+when masked, the full line on an audited reveal. `hr reseal-pii` re-seals it
+with the other vault fields.
+
 ## Run
 
 Configuration is read from the environment and validated at startup:
@@ -483,6 +506,12 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | GET | `/v1/hr/questionnaires/schedules/{id}` | hr.questionnaire.self |
 | POST | `/v1/hr/questionnaires/schedules/{id}/answers` | hr.questionnaire.self (own worker only) |
 | GET | `/v1/hr/questionnaires/schedules/{id}/results?by=department` | hr.questionnaire.admin |
+| POST / GET | `/v1/hr/me/profile-changes` | hr.profile.self (own worker only) |
+| POST | `/v1/hr/me/profile-changes/{id}/cancel` | hr.profile.self (own worker only) |
+| GET | `/v1/hr/me/team/profile-changes?status=&workerId=` | hr.team.approve (direct reports' address changes) |
+| POST | `/v1/hr/me/team/profile-changes/{id}/decide` | hr.team.approve (direct reports' address changes) |
+| GET | `/v1/hr/profile-changes?status=&workerId=` | hr.worker.maintain |
+| POST | `/v1/hr/profile-changes/{id}/decide` | hr.worker.maintain |
 
 ## Error codes
 
@@ -568,6 +597,12 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-QST-001` | 422 | Questionnaire closed |
 | `HCM-QST-002` | 422 | Anonymous breakdown or population under 5 |
 | `HCM-QST-NOT-OPEN`, `HCM-QST-NOT-OWN`, `HCM-QST-NOT-INVITED`, `HCM-QST-ANSWERED` | 422 / 403 / 403 / 409 | Answering rules |
+| `HCM-ESS-001`, `HCM-ESS-002` | 404 / 409 | No worker, or more than one, is linked to the caller's sign-in |
+| `HCM-ESS-003` | 409 | A profile change of that kind is already pending |
+| `HCM-ESS-004` | 409 | The profile change was already decided or withdrawn the other way |
+| `HCM-ESS-005` | 403 | A manager tried to decide a bank account change |
+| `HCM-ESS-006` | 403 | An approver tried to decide a change to their own record |
+| `HCM-ESS-NOT-FOUND` | 404 | Profile change does not exist, or is outside the caller's team or own record |
 | `idempotency_key_reuse` | 422 | Same key used with a different request body |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry |
 | `AUTH-0003` | 403 | Caller lacks the duty (kernel `authz`) |

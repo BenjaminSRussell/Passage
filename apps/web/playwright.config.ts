@@ -9,6 +9,8 @@ const E2E_DUTIES = [
   "audit.read",
   "batch.read",
   "engineering.read",
+  "hr.profile.self",
+  "hr.team.approve",
   "identity.legal-entity.maintain",
   "identity.security-role.maintain",
   "tax.code.maintain",

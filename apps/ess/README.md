@@ -1,10 +1,15 @@
 # apps/ess — Employee self-service (wave 42)
 
-Status: **partly built (#267).** The shell module has `/hr/my/profile` (hr.profile.self), `/hr/my/team` and
-`/hr/my/team/:id` (hr.team.manage). The service scopes them server-side: `GET /v1/hr/me`, `/v1/hr/me/team`,
-`/v1/hr/me/team/{id}`; hr.team.approve absence decide, list and balances are limited to direct reports.
-Still open: address change, pay statements, questionnaires, checklist tasks, team calendar,
-manager-scoped course approval.
+Status: **partly built (#267).** The shell module has, for the employee, `/hr/my/profile` (hr.profile.self: masked
+record, home address, and "Update my details" for the preferred name, home address and bank account) and `/hr/my/absence`
+(hr.absence.self: balances, requests and the leave request form); for the manager, `/hr/my/team`, `/hr/my/team/:id`
+(hr.team.manage), the team's absence queue and `/hr/my/team/changes` (hr.team.approve: direct reports' address changes);
+and for HR, `/hr/profile-changes` (hr.worker.maintain: every change, including bank accounts). The service scopes all of
+them server-side from the caller's sign-in (`worker.user_id`): `/v1/hr/me`, `/v1/hr/me/profile-changes`,
+`/v1/hr/me/team`, `/v1/hr/me/team/{id}`, `/v1/hr/me/team/profile-changes`; hr.team.approve absence decide, list and
+balances are limited to direct reports. Still open (see `services/hr/NOT-IMPLEMENTED.md`): pay statements (payroll has
+no self-scoped read), benefits enrollment and "My courses" screens, checklist tasks, team calendar, manager-scoped
+course approval.
 
 Decision (PRD 8.42.12, open question 2): ESS ships as a shell module under
 `apps/web/src/modules/hr/` rather than a separate PWA. The HR module built in
