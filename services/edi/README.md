@@ -338,6 +338,21 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   `acked_at` unless an earlier CONTRL answered it; `dev.passage.edi.message.acked.v1` is published
   per answered message. The CONTRL is POSTED (with notes for UCMs naming no message), or FAILED with
   EDI-0161 when it answers nothing. The SLA dashboard counts EDIFACT acknowledgments like 997s.
+- **Inbound 820 and 214**: the X12 receipt maps the 820 onto the canonical remittance (`Map820`:
+  BPR, TRN, CUR, N1 PR/PE, RMR IV lines; BPR02 must equal the RMR04 total) and the 214 onto the
+  shipment status (`Map214`: B10, L11, N1 SF/ST, LX/AT7/MS1) next to the 850, with the same 997 codes
+  (AK5 A, E, or R with the failing rule), `message.received` and, when it fails, `message.failed`;
+  reprocess and `maps:test` (which returns `document`) cover them, and payer, payee, ship-from and
+  ship-to names are masked without `edi.pii.view`. Inbound X12 856 and 810 are still rejected
+  (EDI-0006).
+- **Posting inbound documents (decision)**: nothing in edi posts a received document into another
+  service, and no service grant was added for it. Sales already has the intake route
+  (`POST /v1/sales/orders`, service-only `sales.channel.intake`), but its request needs a product,
+  site and warehouse per line and an invoice account that the 850 and ORDERS do not carry and edi
+  cannot resolve without the BR-35.1 item cross-reference; transport's
+  `POST /v1/transport/tracking-events` needs a load id and stop number the 214 does not carry;
+  receivables has no remittance-advice route. Consumers read `dev.passage.edi.message.received.v1`
+  and the canonical document; `NOT-IMPLEMENTED.md` (Handoffs) lists what each posting needs.
 
 ## Wave 35 proof
 
@@ -390,7 +405,7 @@ testdata/as2/       a third-party MDN
 | POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810"\|"DESADV"\|"INVOIC","sourceId"}`; 201 with the X12 or EDIFACT, repeat 200; 409 EDI-0012 without a profile, EDI-0017 EDIFACT without `edifactId`; 503 EDI-0010 without source services |
 | POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"855"\|"856"\|"810"\|"820"\|"214"\|"ORDERS"\|"DESADV"\|"INVOIC","document":{...}}`; requires `Idempotency-Key`; 201 with the X12 or EDIFACT, replay 200 |
 | POST | /edi/v1/maps:test | edi.admin | Body `{"raw": "<X12>"}`; nothing is stored |
-| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | edi.operate | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
+| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | edi.operate | `text/plain` interchange; 850, 820 and 214 are mapped, 997s matched; returns 201 with 997 text (none for an interchange of 997s) |
 | POST | /edi/v1/inbound/edifact?environment=TEST\|PROD | edi.operate | `text/plain` EDIFACT interchange; returns 201 with the CONTRL text when the partner gets one; a received CONTRL is matched to our outbound EDIFACT |
 | GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | edi.operate | `{items}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/interchanges/{id} | edi.operate | Messages with canonical documents (party names masked without `edi.pii.view`), the 997 or CONTRL, and `refusal` for a refused interchange |
@@ -461,7 +476,7 @@ signing uses the standard library only.
 | EDI-0003 | 400 / 413 / 422 | Malformed X12 or EDIFACT interchange (or the other syntax on an inbound route), empty interchange, or over 4 MiB; 422 on reprocess when the stored payload no longer parses; 400 for a punchout document that is not a PunchOutOrderMessage or an OCI post without NEW_ITEM fields |
 | EDI-0004 | 409 | Partner with this ISA or EDIFACT identity already exists in the environment |
 | EDI-0005 | 404 | Partner, interchange or message not found |
-| EDI-0006 | (in 200 map result) / 422 | Transaction set or EDIFACT message type not supported yet; the transaction is rejected (AK5 R, UCM 4); 422 for the raw viewer of an EDIFACT payload |
+| EDI-0006 | (in 200 map result) / 422 | Transaction set (other than 850, 820, 214 and 997) or EDIFACT message type not supported yet; the transaction is rejected (AK5 R, UCM 4); 422 for the raw viewer of an EDIFACT payload |
 | EDI-0007 | 422 | Outbound document breaks a mapping rule (invalid SSCC, totals that do not add up, unknown field, a value holding a delimiter) |
 | EDI-0008 | 409 | The partner is inactive; nothing can be sent to it |
 | EDI-0009 | 409 | Only inbound interchanges are reprocessed (an outbound one is resent) |

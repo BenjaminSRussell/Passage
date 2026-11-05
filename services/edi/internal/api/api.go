@@ -1,10 +1,10 @@
 // Package api exposes the edi HTTP surface: partner profiles, the dry-run map
-// tester, inbound X12 receipt (850s mapped, 997s matched to outbound
-// documents) and EDIFACT receipt (ORDERS, DESADV and INVOIC mapped, CONTRL
-// answers), outbound 855/856/810 generation, and the message monitor with
-// single and bulk reprocess, the masked raw segment-tree viewer and the
-// partner SLA dashboard. Handlers decode, validate,
-// check duties, then call the domain and store.
+// tester, inbound X12 receipt (850, 820 and 214 mapped, 997s matched to
+// outbound documents) and EDIFACT receipt (ORDERS, DESADV and INVOIC mapped,
+// CONTRL answers, received CONTRLs matched), outbound X12 and EDIFACT
+// generation, and the message monitor with single and bulk reprocess, the
+// masked raw segment-tree viewer and the partner SLA dashboard. Handlers
+// decode, validate, check duties, then call the domain and store.
 package api
 
 import (
@@ -305,32 +305,54 @@ func (a *API) getInterchange(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, d)
 }
 
-// txResult is the outcome of mapping one transaction set.
+// txResult is the outcome of mapping one transaction set. order is set for
+// an 850 (and an ORDERS), document for every set that mapped onto a
+// canonical document; unsupported marks a set no mapping exists for.
 type txResult struct {
-	outcome   domain.TxOutcome
-	status    string
-	order     *domain.Order
-	canonical []byte
-	errText   string
-	issues    []domain.Issue
+	outcome     domain.TxOutcome
+	status      string
+	order       *domain.Order
+	document    any
+	canonical   []byte
+	errText     string
+	issues      []domain.Issue
+	unsupported bool
 }
 
+// InboundSets lists the X12 transaction sets the receipt maps onto a
+// canonical document: the 850 order, the 820 remittance and the 214
+// shipment status. A 997 is matched, not mapped; any other set is rejected
+// (AK5 R, EDI-0006).
+var InboundSets = []string{"850", "820", "214"}
+
 // mapTransaction maps one transaction and derives its 997 code and message
-// status. Only 850 is mapped in this slice; other sets are rejected (AK5 R).
+// status: AK5 A and MAPPED without issues, E and FAILED with only
+// accepted-with-error issues, R and FAILED with a rejecting issue. Sets
+// outside InboundSets are rejected (AK5 R).
 func mapTransaction(t domain.Transaction) (txResult, error) {
 	res := txResult{outcome: domain.TxOutcome{SetID: t.SetID, Control: t.Control}}
-	if t.SetID != "850" {
+	var issues []domain.Issue
+	switch t.SetID {
+	case "850":
+		order, is := domain.Map850(t)
+		res.order, res.document, issues = &order, order, is
+	case "820":
+		r, is := domain.Map820(t)
+		res.document, issues = r, is
+	case "214":
+		st, is := domain.Map214(t)
+		res.document, issues = st, is
+	default:
 		res.outcome.Code = domain.AckRejected
 		res.status = "FAILED"
 		res.errText = "transaction set " + t.SetID + " is not supported yet"
+		res.unsupported = true
 		return res, nil
 	}
-	order, issues := domain.Map850(t)
-	canonical, err := json.Marshal(order)
+	canonical, err := json.Marshal(res.document)
 	if err != nil {
 		return txResult{}, err
 	}
-	res.order = &order
 	res.canonical = canonical
 	res.issues = issues
 	var details []string
@@ -356,11 +378,13 @@ type mapRequest struct {
 }
 
 type mapResult struct {
-	TransactionSet string         `json:"transactionSet"`
-	STControl      string         `json:"stControl"`
-	Status         string         `json:"status"`
-	Order          *domain.Order  `json:"order,omitempty"`
-	Issues         []domain.Issue `json:"issues"`
+	TransactionSet string        `json:"transactionSet"`
+	STControl      string        `json:"stControl"`
+	Status         string        `json:"status"`
+	Order          *domain.Order `json:"order,omitempty"`
+	// Document is the canonical remittance (820) or shipment status (214).
+	Document any            `json:"document,omitempty"`
+	Issues   []domain.Issue `json:"issues"`
 }
 
 // mapsTest runs the mapping over a sample interchange without persisting
@@ -385,10 +409,13 @@ func (a *API) mapsTest(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			mr := mapResult{TransactionSet: t.SetID, STControl: t.Control, Status: res.status, Order: res.order, Issues: res.issues}
+			if res.order == nil {
+				mr.Document = res.document
+			}
 			if mr.Issues == nil {
 				mr.Issues = []domain.Issue{}
 			}
-			if res.order == nil && res.errText != "" {
+			if res.unsupported {
 				mr.Issues = append(mr.Issues, domain.Issue{Code: CodeUnsupportedSet, Detail: res.errText, Reject: true})
 			}
 			results = append(results, mr)

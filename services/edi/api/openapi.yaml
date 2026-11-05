@@ -700,7 +700,10 @@ paths:
       description: >
         Identifies the partner by ISA sender, rejects duplicate ISA13 values inside the
         duplicate window (EDI-0102), records every transaction and returns the 997 generated in the
-        same transaction. Unknown senders are EDI-0101. A 997 group (GS01 FA) from the partner is
+        same transaction. Unknown senders are EDI-0101. The 850 is mapped onto the canonical order,
+        the 820 onto the remittance and the 214 onto the shipment status, each published with
+        dev.passage.edi.message.received.v1 (and message.failed when a rule breaks, AK5 R or E);
+        other sets are rejected (AK5 R, EDI-0006). A 997 group (GS01 FA) from the partner is
         matched by AK102 to the outbound interchange with that control number: answered messages
         become ACKED (AK5 A/E) or FAILED (AK5 R), the outbound interchange takes the AK9 status and
         dev.passage.edi.message.acked.v1 is published per answered message. The 997 itself is
@@ -1260,6 +1263,11 @@ components:
         stControl: { type: string }
         status: { type: string, enum: [MAPPED, FAILED] }
         order: { type: object, description: Canonical order (850 only) }
+        document:
+          description: Canonical remittance (820) or shipment status (214)
+          oneOf:
+            - $ref: '#/components/schemas/Remittance'
+            - $ref: '#/components/schemas/ShipmentStatus'
         issues:
           type: array
           items: { $ref: '#/components/schemas/Issue' }

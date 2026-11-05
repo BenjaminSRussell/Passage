@@ -22,6 +22,13 @@ release may change public APIs.
   fulfillment by code. Receiving arrival and direct receipt lines without a purchase order line take `siteId` and
   `warehouseId`, carried on `receipt.posted`, so inventory books them instead of parking them.
 
+- Inbound 820 and 214 receipt in edi (#483): the X12 receipt maps the 820 onto the canonical remittance and the 214
+  onto the shipment status next to the 850, with the same 997 codes, `dev.passage.edi.message.received.v1` and
+  `message.failed`; reprocess and `maps:test` (new `document` field) cover them, and party names are masked without
+  `edi.pii.view`. Posting received documents into sales, transport or receivables stays a handoff and no service grant
+  was added: sales' `sales.channel.intake` route needs product, site, warehouse and invoice-account ids the 850 and
+  ORDERS do not carry (BR-35.1 item cross-reference), transport's tracking ingest needs a load id and stop, and
+  receivables has no remittance route (`services/edi/NOT-IMPLEMENTED.md`, Handoffs).
 - Outbound EDIFACT with CONTRL matching (#483): edi's `POST /edi/v1/partners/{id}/outbound` builds ORDERS, DESADV
   (held to the 856 rules) and INVOIC (held to the 810 rules), and `outbound:from-source` builds DESADV from the
   fulfillment shipment and INVOIC from the billing invoice under the existing read grant. Each goes in a UNOC syntax
