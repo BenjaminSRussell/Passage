@@ -20,7 +20,7 @@ Stack ([ADR-0001](docs/adr/0001-platform-stack.md)): Kubernetes · Go, TypeScrip
 
 ## Run it locally
 
-**Prerequisites:** Go 1.25+, Node 24.15+ (or 22.22.2+), Python 3.11+, and Docker.
+**Prerequisites:** Go 1.26+, Node 24.15+ (or 22.22.2+), Python 3.11+, and Docker.
 
 ### 1. The web app
 
