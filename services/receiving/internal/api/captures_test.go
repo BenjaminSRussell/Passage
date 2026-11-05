@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/ocr"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
@@ -93,6 +94,20 @@ func TestInvoiceCapture_OCRUsesTheExtractorAndFlagsLowConfidence(t *testing.T) {
 	got := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", "%PDF-1.7 scan"), duty("VendorInvoicePost", rg.key())), http.StatusCreated)
 	if ex.Calls != 1 || got.Source != "OCR" || got.Status != "NEEDS_REVIEW" || len(got.ReviewReasons) != 1 || got.ReviewReasons[0] != domain.ReviewLowConfidence || got.Confidence != "0.55" {
 		t.Fatalf("calls %d capture %+v", ex.Calls, got)
+	}
+}
+
+func TestInvoiceCapture_LocalOCRProviderReadsAPDFTextLayer(t *testing.T) {
+	rg := newCaptureRig(ocr.Local{})
+	pdf := "%PDF-1.7\n1 0 obj << /Length 0 >>\nstream\nBT (Invoice Number: LOC-7) Tj (Invoice Date: 2026-11-01) Tj (Currency: USD) Tj " +
+		"(Vendor Tax ID: US99) Tj (Line: Field service | 3 | HUR | 90 | 270) Tj (Total: 270.00) Tj ET\nendstream\nendobj\n"
+	got := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", pdf), duty("VendorInvoicePost", rg.key())), http.StatusCreated)
+	if got.Source != "OCR" || got.Status != "CAPTURED" || got.InvoiceNumber != "LOC-7" || got.Total != "270" || got.Confidence != "0.85" || len(got.Lines) != 1 || got.Lines[0].Qty != "3" {
+		t.Fatalf("capture %+v", got)
+	}
+	problem := decodeProblem(t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "\x89PNG scan"), duty("VendorInvoicePost", rg.key())))
+	if problem.Status != http.StatusUnprocessableEntity || problem.Code != domain.CodeCaptureExtraction {
+		t.Fatalf("image without a text layer %+v", problem)
 	}
 }
 

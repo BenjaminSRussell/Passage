@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/ocr"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
@@ -186,6 +187,24 @@ func TestBuildPortsIgnoresTheRemovedLegacyPOLineFlag(t *testing.T) {
 	}
 	if !ports.RequirePOLine {
 		t.Fatal("RECEIVING_ALLOW_LEGACY_PO_LINE=1 must no longer waive poLineNo")
+	}
+}
+
+func TestBuildPortsSelectsTheOCRProvider(t *testing.T) {
+	env := map[string]string{"PASSAGE_ALLOW_FAKES": "1"}
+	get := func(k string) string { return env[k] }
+	if ports, err := buildPorts(get); err != nil || ports.Extractor != nil {
+		t.Fatalf("no OCR_PROVIDER: extractor %T err %v", ports.Extractor, err)
+	}
+	env["OCR_PROVIDER"] = "local"
+	if ports, err := buildPorts(get); err != nil {
+		t.Fatal(err)
+	} else if _, ok := ports.Extractor.(ocr.Local); !ok {
+		t.Fatalf("OCR_PROVIDER=local wired %T", ports.Extractor)
+	}
+	env["OCR_PROVIDER"] = "cloud-vision"
+	if _, err := buildPorts(get); err == nil || !strings.Contains(err.Error(), "OCR_PROVIDER") {
+		t.Fatalf("unknown provider must stop startup: %v", err)
 	}
 }
 

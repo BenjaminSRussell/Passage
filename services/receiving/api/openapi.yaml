@@ -314,8 +314,8 @@ paths:
       x-passage-duty: VendorInvoicePost
       description: >-
         Captures a vendor invoice document as a draft that posts nothing. format UBL parses a UBL 2.1 Invoice (a DOCTYPE is
-        refused); format OCR hands the PDF or image to the configured document extractor (503 COM-0503 when none is wired:
-        no OCR provider is chosen yet). The capture is CAPTURED, or NEEDS_REVIEW with reviewReasons LOW_CONFIDENCE
+        refused); format OCR hands the PDF or image to the document extractor chosen by OCR_PROVIDER (503 COM-0503 when
+        none is set; the local provider reads labelled lines from a PDF text layer and refuses images with RCV-CAP-002). The capture is CAPTURED, or NEEDS_REVIEW with reviewReasons LOW_CONFIDENCE
         (confidence below 0.80), TOTAL_MISMATCH (total differs from the line sum by more than 0.01; the UBL total is the
         tax-exclusive amount) or NO_VENDOR_TAX_ID. The same document (SHA-256) in the same legal entity answers 200 with the
         existing capture instead of a second row. A person turns a capture into an invoice with POST /v1/receiving/invoices:post.

@@ -31,6 +31,8 @@ tax:
   rules: ""
 # legalEntityCountries maps legal entity ids to ISO country codes ("<uuid>=GB,<uuid>=DE"); one-time payee erasure keeps every payee of an entity that is not listed.
 legalEntityCountries: ""
+# ocrProvider selects the invoice OCR extractor: "" (OCR captures answer 503) or "local" (reads the text layer of a PDF; no network, no key).
+ocrProvider: ""
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }
