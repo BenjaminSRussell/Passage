@@ -80,6 +80,32 @@ func CheckLose(status string) error {
 	return nil
 }
 
+// CheckCancel returns nil when a quotation may be CANCELLED: it is a DRAFT or
+// SENT. A partly converted quotation is CONVERTED and keeps its orders.
+func CheckCancel(status string) error {
+	if status != QuoteDraft && status != QuoteSent {
+		return ErrQuotationState
+	}
+	return nil
+}
+
+// CheckChange returns nil when a quotation may be changed on day today: a DRAFT
+// or SENT quotation whose validity has not passed may take a new validity or
+// probability; only a DRAFT may take new lines (a sent offer's prices are what
+// the customer holds).
+func CheckChange(status string, validUntil, today time.Time, changesLines bool) error {
+	switch {
+	case status == QuoteDraft:
+	case status == QuoteSent && !changesLines:
+	default:
+		return ErrQuotationState
+	}
+	if expired(validUntil, today) {
+		return ErrQuotationExpired
+	}
+	return nil
+}
+
 // CheckConvertible returns nil when a quotation may convert lines on day today:
 // it was sent (or already partly converted) and is still valid.
 func CheckConvertible(status string, validUntil, today time.Time) error {

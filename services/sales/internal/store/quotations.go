@@ -69,6 +69,7 @@ type Quotation struct {
 	ProbabilityPct   int             `json:"probabilityPct"`
 	NetTotal         decimal.Decimal `json:"netTotal"`
 	LostReason       *string         `json:"lostReason,omitempty"`
+	CancelReason     *string         `json:"cancelReason,omitempty"`
 	Version          int             `json:"version"`
 	CreatedBy        string          `json:"createdBy"`
 	CreatedAt        time.Time       `json:"createdAt"`
@@ -172,14 +173,8 @@ func (s *Postgres) CreateQuotation(ctx context.Context, in NewQuotation) (Quotat
 			*in.ProbabilityPct, in.ValidUntil.Format(dayLayout), domain.SumNets(nets).String(), in.IdempotencyKey, in.RequestHash, in.Actor); err != nil {
 			return err
 		}
-		for _, l := range in.Lines {
-			if _, err := tx.Exec(ctx, `insert into sales_quotation_line (tenant_id, id, quotation_id, line_no, product_id, quantity, unit,
-					site_id, warehouse_id, unit_price, disc_pct, line_net, requested_ship_date, line_status)
-				values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN')`,
-				p.TenantID, ids.New(), id, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
-				l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate); err != nil {
-				return err
-			}
+		if err := insertQuotationLines(ctx, tx, p.TenantID, id, in.Lines); err != nil {
+			return err
 		}
 		created = true
 		out, err = loadQuotation(ctx, tx, p.TenantID, id, false)
@@ -196,7 +191,7 @@ func (s *Postgres) CreateQuotation(ctx context.Context, in NewQuotation) (Quotat
 }
 
 const quotationColumns = `q.id::text, q.legal_entity_id::text, q.quotation_number, q.customer_id::text, q.invoice_account_id::text,
-	q.currency::text, q.status, q.probability_pct, q.valid_until::text, q.net_total::text, q.lost_reason, q.version, q.created_by,
+	q.currency::text, q.status, q.probability_pct, q.valid_until::text, q.net_total::text, q.lost_reason, q.cancel_reason, q.version, q.created_by,
 	q.created_at, q.updated_at,
 	(select count(*) from sales_quotation_line l where l.tenant_id = q.tenant_id and l.quotation_id = q.id),
 	(select count(*) from sales_quotation_line l where l.tenant_id = q.tenant_id and l.quotation_id = q.id and l.line_status = 'OPEN')`
@@ -205,7 +200,7 @@ func scanQuotation(row pgx.Row) (Quotation, error) {
 	var q Quotation
 	var net string
 	if err := row.Scan(&q.ID, &q.LegalEntityID, &q.QuotationNumber, &q.CustomerID, &q.InvoiceAccountID, &q.Currency, &q.Status,
-		&q.ProbabilityPct, &q.ValidUntil, &net, &q.LostReason, &q.Version, &q.CreatedBy, &q.CreatedAt, &q.UpdatedAt,
+		&q.ProbabilityPct, &q.ValidUntil, &net, &q.LostReason, &q.CancelReason, &q.Version, &q.CreatedBy, &q.CreatedAt, &q.UpdatedAt,
 		&q.LineCount, &q.OpenLines); err != nil {
 		return Quotation{}, err
 	}
@@ -441,4 +436,128 @@ func loadQuotation(ctx context.Context, tx pgx.Tx, tenantID, id string, lock boo
 		q.Lines = append(q.Lines, l)
 	}
 	return q, rows.Err()
+}
+
+// QuotationChange is one PATCH of a quotation. Nil fields are left as they are;
+// Lines, when set, replaces the whole line set (DRAFT only) and carries LineNet.
+type QuotationChange struct {
+	Version        int
+	ValidUntil     *time.Time
+	ProbabilityPct *int
+	Lines          []Line
+	Actor          string
+}
+
+// CancelQuotation moves a DRAFT or SENT quotation to CANCELLED with a reason
+// and writes quotation.cancelled in the same transaction (BR-27.5).
+func (s *Postgres) CancelQuotation(ctx context.Context, id string, version int, reason, actor string) (Quotation, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out Quotation
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q, err := loadQuotation(ctx, tx, p.TenantID, id, true)
+		if err != nil {
+			return err
+		}
+		if q.Version != version {
+			return versionConflict()
+		}
+		if err := quotationProblem(q.Status, domain.CheckCancel(q.Status)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `update sales_quotation set status = 'CANCELLED', cancel_reason = $3, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2`, p.TenantID, id, reason); err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, "quotation", id, salesevents.QuotationCancelled, p.TenantID, salesevents.QuotationCancelledData{
+			QuotationID: id, QuotationNumber: q.QuotationNumber, LegalEntityID: q.LegalEntityID, CustomerID: q.CustomerID,
+			PreviousStatus: q.Status, Reason: reason, NetTotal: q.NetTotal.String(), Currency: q.Currency, Actor: actor,
+			Version: q.Version + 1}); err != nil {
+			return err
+		}
+		out, err = loadQuotation(ctx, tx, p.TenantID, id, false)
+		return err
+	})
+	return out, err
+}
+
+// ChangeQuotation applies a new validity, probability and/or line set to a
+// DRAFT or SENT quotation under its row lock (FR-27.1). A SENT quotation takes
+// no new lines. A call that changes nothing is refused as a validation error
+// by the API, so every success bumps the version and writes quotation.changed.
+func (s *Postgres) ChangeQuotation(ctx context.Context, id string, in QuotationChange, now time.Time) (Quotation, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out Quotation
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q, err := loadQuotation(ctx, tx, p.TenantID, id, true)
+		if err != nil {
+			return err
+		}
+		if q.Version != in.Version {
+			return versionConflict()
+		}
+		validUntil, err := time.Parse(dayLayout, q.ValidUntil)
+		if err != nil {
+			return err
+		}
+		if err := quotationProblem(q.Status, domain.CheckChange(q.Status, validUntil, now, in.Lines != nil)); err != nil {
+			return err
+		}
+		changed := []string{}
+		if in.ValidUntil != nil {
+			validUntil = *in.ValidUntil
+			changed = append(changed, "valid_until")
+		}
+		probability := q.ProbabilityPct
+		if in.ProbabilityPct != nil {
+			probability = *in.ProbabilityPct
+			changed = append(changed, "probability_pct")
+		}
+		net, lineCount := q.NetTotal, len(q.Lines)
+		if in.Lines != nil {
+			nets := make([]decimal.Decimal, 0, len(in.Lines))
+			for _, l := range in.Lines {
+				nets = append(nets, l.LineNet)
+			}
+			net, lineCount = domain.SumNets(nets), len(in.Lines)
+			// Replace rather than upsert: only a DRAFT takes lines and a DRAFT has
+			// never converted, nothing stores a quotation line id (conversion, its
+			// event and the order go by line number), and the lines are renumbered,
+			// so the new lines get new ids.
+			if _, err := tx.Exec(ctx, `delete from sales_quotation_line where tenant_id = $1 and quotation_id = $2`, p.TenantID, id); err != nil {
+				return err
+			}
+			if err := insertQuotationLines(ctx, tx, p.TenantID, id, in.Lines); err != nil {
+				return err
+			}
+			changed = append(changed, "lines")
+		}
+		if _, err := tx.Exec(ctx, `update sales_quotation set valid_until = $3::date, probability_pct = $4, net_total = $5::numeric,
+				version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
+			p.TenantID, id, validUntil.Format(dayLayout), probability, net.String()); err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, "quotation", id, salesevents.QuotationChanged, p.TenantID, salesevents.QuotationChangedData{
+			QuotationID: id, QuotationNumber: q.QuotationNumber, LegalEntityID: q.LegalEntityID, CustomerID: q.CustomerID, Status: q.Status,
+			Changed: changed, ValidUntil: validUntil.Format(dayLayout), ProbabilityPct: probability, LineCount: lineCount,
+			NetTotal: net.String(), Currency: q.Currency, Actor: in.Actor, Version: q.Version + 1}); err != nil {
+			return err
+		}
+		out, err = loadQuotation(ctx, tx, p.TenantID, id, false)
+		return err
+	})
+	return out, err
+}
+
+// insertQuotationLines stores OPEN quotation lines.
+func insertQuotationLines(ctx context.Context, tx pgx.Tx, tenantID, quotationID string, lines []Line) error {
+	for _, l := range lines {
+		if _, err := tx.Exec(ctx, `insert into sales_quotation_line (tenant_id, id, quotation_id, line_no, product_id, quantity, unit,
+				site_id, warehouse_id, unit_price, disc_pct, line_net, requested_ship_date, line_status)
+			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13::date, 'OPEN')`,
+			tenantID, ids.New(), quotationID, l.LineNo, l.ProductID, l.Quantity.String(), l.Unit, l.SiteID, l.WarehouseID,
+			l.UnitPrice.String(), l.DiscPct.String(), l.LineNet.String(), l.RequestedShipDate); err != nil {
+			return err
+		}
+	}
+	return nil
 }

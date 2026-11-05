@@ -243,6 +243,12 @@ type Problem struct {
 	// Backward schedules each order with a due date as late as it can run
 	// and still end by that date (FR-23.2); BR-23.2 describes the fallback.
 	Backward bool
+	// DailyBuckets is operations mode (FR-23.2): an operation that follows
+	// another in its order starts at the beginning of a local day of its
+	// resource, no earlier than the minute-level ready time, so the plan
+	// moves in whole-day steps between operations. The first operation of an
+	// order is placed as in jobs mode.
+	DailyBuckets bool
 	// Pegs link a parent order to the orders that consume its output; a
 	// dependent starts no earlier than its parents end (FR-23.8). ParentEnds
 	// holds the last end of each parent order that is not part of this run;
@@ -486,7 +492,7 @@ func Schedule(p Problem) Result {
 		days = DefaultNetworkDelayDays
 	}
 	e := &engine{caps: capacities(p.Resources, p.Start, p.HorizonDays), busy: groupBusy(p.Booked), booked: map[string]int{},
-		nets: map[string]ResourceNetwork{}, infinite: p.Infinite, delay: time.Duration(days) * 24 * time.Hour, days: days}
+		nets: map[string]ResourceNetwork{}, infinite: p.Infinite, daily: p.DailyBuckets, delay: time.Duration(days) * 24 * time.Hour, days: days}
 	for _, b := range p.Booked {
 		e.booked[b.ResourceID] += minutesBetween(b.Start, b.End)
 	}

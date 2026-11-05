@@ -2,8 +2,10 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -306,4 +308,55 @@ func (a *API) putTree(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", etag(rev))
 	httpx.JSON(w, http.StatusOK, saved)
+}
+
+// listTreeRevisions lists the stored revisions of a tree, newest first, so a
+// maintainer can see what a run made on an older revision used.
+func (a *API) listTreeRevisions(w http.ResponseWriter, r *http.Request) {
+	if !principal(r) {
+		httpx.Fail(w, r, unauthenticated())
+		return
+	}
+	items, err := a.store.ListTreeRevisions(r.Context(), chi.URLParam(r, "code"))
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// getTreeRevision returns the tree as it was at one revision.
+func (a *API) getTreeRevision(w http.ResponseWriter, r *http.Request) {
+	if !principal(r) {
+		httpx.Fail(w, r, unauthenticated())
+		return
+	}
+	code := chi.URLParam(r, "code")
+	rev, err := strconv.Atoi(chi.URLParam(r, "revision"))
+	if err != nil || rev < 1 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodePartNotFound, fmt.Sprintf("tree %s has no stored revision %s", code, chi.URLParam(r, "revision"))))
+		return
+	}
+	t, err := a.store.GetTreeRevision(r.Context(), code, rev)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", etag(rev))
+	httpx.JSON(w, http.StatusOK, t)
+}
+
+// runTree returns the reporting tree a run was limited to, as it was when the
+// run was made: the units behind the run's unit, even after the tree changed.
+func (a *API) runTree(w http.ResponseWriter, r *http.Request) {
+	id, ok := runID(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.store.RunTree(r.Context(), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, v)
 }

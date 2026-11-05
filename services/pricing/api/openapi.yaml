@@ -1885,6 +1885,49 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/reps/{repId}/statement:
+    parameters:
+      - {name: repId, in: path, required: true, description: "The rep id (a w42 worker id), 1 to 64 characters, without / or : and not . or .. (a sales group refuses such rep ids, so every rep can be addressed here).", schema: {type: string, minLength: 1, maxLength: 64, pattern: "^[^/:]+$"}}
+    get:
+      operationId: getCommissionStatement
+      summary: Commission statement of one rep for one invoice month, with earned, credited and net totals per currency (§5.26.15).
+      description: >
+        The statement document of a rep's commission: every commission transaction of the rep in
+        the legal entity whose invoice falls in the month (credit notes as negative rows, each
+        naming the line it reverses), in invoice order, and per currency the footer: earnedAmount
+        (the positive rows), creditedAmount (the negative rows) and netAmount (what the rep is
+        owed). The footer is summed by the database in the same statement that reads the lines,
+        so it is exact whatever the line count and always agrees with the lines, and it is what
+        the settlement export pays the rep for invoices dated in the same month. The month is the
+        invoice date's month as the invoice feed dates it; a credit note counts in the month of
+        its own date, not the month of the invoice it reverses. A legal entity outside the
+        caller's scope is refused with 403 AUTH-0003. Until w42 links a caller to a worker, any
+        holder of pricing.commission.view reads any rep's statement (the PRD's "Sales rep (own)"
+        restriction is not applied yet). A month without
+        transactions is a statement with no lines and no totals. Only the rep id is shown, never
+        a name. format=json (default) lists at most 5,000 lines and sets linesTruncated=true when
+        there are more (lineCount and totals still cover every transaction). format=csv streams
+        every line as it is read, then the footer rows (rowType LINE, TOTAL_EARNED,
+        TOTAL_CREDITED, TOTAL_NET); text cells that could run as a spreadsheet formula are
+        prefixed with an apostrophe, and if the read fails after the download started the
+        connection is aborted, so a client never keeps a short file that looks complete. Read
+        only: nothing is written and no event is raised.
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: true, description: "The invoice month, such as 2027-03.", schema: {type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"}}
+        - {name: format, in: query, required: false, schema: {type: string, enum: [json, csv], default: json}}
+      responses:
+        "200":
+          description: The statement.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionStatement"}
+            text/csv:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/commission/transactions:
     get:
       operationId: listCommissionTransactions
@@ -3959,7 +4002,7 @@ components:
       type: object
       required: [repId, sharePct]
       properties:
-        repId: {type: string, minLength: 1, maxLength: 64, description: "Worker id (w42)."}
+        repId: {type: string, minLength: 1, maxLength: 64, pattern: "^[^/:]+$", description: "Worker id (w42). Without / or : and not . or .., because it is a path segment of the commission statement."}
         sharePct: {type: string, description: "Decimal above 0 and at most 100; the shares of a group sum to 100."}
     SalesGroupInput:
       type: object
@@ -4038,6 +4081,30 @@ components:
         debitAccount: {type: string, example: "6200"}
         creditAccount: {type: string, example: "2170"}
         status: {type: string, enum: [POSTED]}
+    CommissionStatement:
+      type: object
+      required: [legalEntityId, repId, period, lineCount, linesTruncated, totals, lines]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        repId: {type: string}
+        period: {type: string, description: "The invoice month, such as 2027-03."}
+        lineCount: {type: integer, description: "Every transaction of the rep in the month, whatever the list limit."}
+        linesTruncated: {type: boolean, description: "True when lines holds only the first 5,000."}
+        totals:
+          type: array
+          description: One footer per currency, summed over every transaction.
+          items:
+            type: object
+            required: [currency, lineCount, earnedAmount, creditedAmount, netAmount]
+            properties:
+              currency: {type: string}
+              lineCount: {type: integer}
+              earnedAmount: {type: string, description: "Sum of the positive rows, rounded to the currency's minor unit."}
+              creditedAmount: {type: string, description: "Sum of the negative rows (credit notes)."}
+              netAmount: {type: string, description: "Earned plus credited: what the rep is owed."}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/CommissionTransaction"}
     CommissionTransactionList:
       type: object
       required: [items]

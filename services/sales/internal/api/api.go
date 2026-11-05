@@ -171,6 +171,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(quotations+"/{id}", a.getQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:send", a.sendQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:lose", a.loseQuotation)
+	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:cancel", a.cancelQuotation)
+	r.With(authz.RequireDuty(dutyQuotation)).Patch(quotations+"/{id}", a.changeQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:convert", a.convertQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(expirationRun, a.expireQuotations)
 	r.With(authz.RequireDuty(dutyRead)).Get(summaryPath, a.getSummary)

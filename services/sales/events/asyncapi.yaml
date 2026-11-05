@@ -137,6 +137,16 @@ channels:
     messages:
       quotationExpired:
         $ref: "#/components/messages/QuotationExpired"
+  quotationChanged:
+    address: passage.sales.quotation
+    messages:
+      quotationChanged:
+        $ref: "#/components/messages/QuotationChanged"
+  quotationCancelled:
+    address: passage.sales.quotation
+    messages:
+      quotationCancelled:
+        $ref: "#/components/messages/QuotationCancelled"
   intakeErrorRecorded:
     address: passage.sales.intakeerror
     messages:
@@ -261,6 +271,18 @@ operations:
     summary: A DRAFT or SENT quotation past its validity was moved to EXPIRED by the expiry run (FR-27.1). Consumers - analytics and CRM.
     messages:
       - {$ref: "#/channels/quotationExpired/messages/quotationExpired"}
+  publishQuotationChanged:
+    action: send
+    channel: {$ref: "#/channels/quotationChanged"}
+    summary: A DRAFT or SENT quotation took a new validity, probability or line set (FR-27.1). Consumers - analytics and CRM.
+    messages:
+      - {$ref: "#/channels/quotationChanged/messages/quotationChanged"}
+  publishQuotationCancelled:
+    action: send
+    channel: {$ref: "#/channels/quotationCancelled"}
+    summary: A DRAFT or SENT quotation was cancelled by a user with a reason (BR-27.5). Consumers - analytics and CRM.
+    messages:
+      - {$ref: "#/channels/quotationCancelled/messages/quotationCancelled"}
   publishIntakeErrorRecorded:
     action: send
     channel: {$ref: "#/channels/intakeErrorRecorded"}
@@ -481,6 +503,22 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/QuotationExpiredData"
+    QuotationChanged:
+      name: dev.passage.sales.quotation.changed.v1
+      title: Quotation changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/QuotationChangedData"
+    QuotationCancelled:
+      name: dev.passage.sales.quotation.cancelled.v1
+      title: Quotation cancelled
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/QuotationCancelledData"
     IntakeErrorRecorded:
       name: dev.passage.sales.intakeerror.recorded.v1
       title: Intake error recorded
@@ -1268,6 +1306,40 @@ components:
         currency: {type: string, description: ISO 4217 alpha-3}
         actor: {type: string}
         version: {type: integer, description: quotation version produced by the expiry}
+    QuotationChangedData:
+      type: object
+      required: [quotation_id, quotation_number, legal_entity_id, customer_id, status, changed, valid_until, probability_pct, line_count, net_total, currency, actor, version]
+      properties:
+        quotation_id: {type: string, format: uuid}
+        quotation_number: {type: string, description: SQ- number}
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        status: {type: string, enum: [DRAFT, SENT]}
+        changed:
+          type: array
+          description: what the call changed
+          items: {type: string, enum: [valid_until, probability_pct, lines]}
+        valid_until: {type: string, format: date, description: the validity after the change}
+        probability_pct: {type: integer, minimum: 0, maximum: 100}
+        line_count: {type: integer, minimum: 1}
+        net_total: {type: string, description: decimal string in currency}
+        currency: {type: string, description: ISO 4217 alpha-3}
+        actor: {type: string}
+        version: {type: integer, description: quotation version produced by the change}
+    QuotationCancelledData:
+      type: object
+      required: [quotation_id, quotation_number, legal_entity_id, customer_id, previous_status, reason, net_total, currency, actor, version]
+      properties:
+        quotation_id: {type: string, format: uuid}
+        quotation_number: {type: string, description: SQ- number}
+        legal_entity_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        previous_status: {type: string, enum: [DRAFT, SENT]}
+        reason: {type: string, maxLength: 200}
+        net_total: {type: string, description: decimal string in currency}
+        currency: {type: string, description: ISO 4217 alpha-3}
+        actor: {type: string}
+        version: {type: integer, description: quotation version produced by the cancellation}
     IntakeErrorData:
       type: object
       required: [intake_error_id, legal_entity_id, channel, request_hash, error_code, attempts, version]

@@ -307,5 +307,10 @@ describe("DefinitionEditorPage", () => {
       calcExpression: "C1-C2",
     });
     expect(cleanColumn({ code: "C1", label: "P", periodExpr: "P", calcExpression: "x" })).toEqual({ code: "C1", label: "P", periodExpr: "P" });
+    // A column dimension filter is kept on a period column, dropped when empty or on a CALC column.
+    const filter = { cost_center: ["CC100", "CC200"] };
+    expect(cleanColumn({ code: "C1", label: "P", periodExpr: "P", dimensionFilter: filter }).dimensionFilter).toEqual(filter);
+    expect(cleanColumn({ code: "C1", label: "P", periodExpr: "P", dimensionFilter: {} })).toEqual({ code: "C1", label: "P", periodExpr: "P" });
+    expect(cleanColumn({ code: "V", label: "V", periodExpr: "CALC", calcExpression: "C1", dimensionFilter: filter }).dimensionFilter).toBeUndefined();
   });
 });

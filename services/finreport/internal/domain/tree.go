@@ -179,6 +179,33 @@ func (t Tree) Coverage(unit string) (map[string]bool, error) {
 	return out, nil
 }
 
+// Subtree returns the tree limited to unit and the units below it, in the
+// tree's order (the whole tree when unit is empty). The unit keeps its parent
+// code. It is what a run on the unit used, and all a run's viewer is shown.
+func (t Tree) Subtree(unit string) Tree {
+	if unit == "" {
+		return t
+	}
+	keep := map[string]bool{unit: true}
+	for grew := true; grew; {
+		grew = false
+		for _, u := range t.Units {
+			if !keep[u.Code] && u.Parent != "" && keep[u.Parent] {
+				keep[u.Code] = true
+				grew = true
+			}
+		}
+	}
+	out := t
+	out.Units = nil
+	for _, u := range t.Units {
+		if keep[u.Code] {
+			out.Units = append(out.Units, u)
+		}
+	}
+	return out
+}
+
 // TreeScope is what limiting a run to a unit left out.
 type TreeScope struct {
 	// Outside lists (sorted) the dimension values with balances that the unit

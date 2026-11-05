@@ -119,3 +119,40 @@ func TestFormatQuotationNumber(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestCheckCancel_DraftAndSentOnly(t *testing.T) {
+	for status, want := range map[string]error{QuoteDraft: nil, QuoteSent: nil, QuoteConverted: ErrQuotationState,
+		QuoteLost: ErrQuotationState, QuoteExpired: ErrQuotationState, QuoteCancelled: ErrQuotationState} {
+		if got := CheckCancel(status); !errors.Is(got, want) && got != want {
+			t.Errorf("CheckCancel(%s) = %v, want %v", status, got, want)
+		}
+	}
+}
+
+func TestCheckChange_StateLinesAndExpiry(t *testing.T) {
+	validUntil := day("2027-03-31")
+	cases := []struct {
+		name   string
+		status string
+		today  string
+		lines  bool
+		want   error
+	}{
+		{"draft takes lines", QuoteDraft, "2027-03-10", true, nil},
+		{"draft takes validity", QuoteDraft, "2027-03-31", false, nil},
+		{"sent extends validity", QuoteSent, "2027-03-10", false, nil},
+		{"sent takes no lines", QuoteSent, "2027-03-10", true, ErrQuotationState},
+		{"lapsed draft", QuoteDraft, "2027-04-01", false, ErrQuotationExpired},
+		{"lapsed sent", QuoteSent, "2027-04-01", false, ErrQuotationExpired},
+		{"converted", QuoteConverted, "2027-03-10", false, ErrQuotationState},
+		{"cancelled", QuoteCancelled, "2027-03-10", false, ErrQuotationState},
+		{"lost", QuoteLost, "2027-03-10", false, ErrQuotationState},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CheckChange(tc.status, validUntil, day(tc.today), tc.lines); !errors.Is(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

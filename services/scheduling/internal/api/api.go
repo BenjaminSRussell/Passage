@@ -206,6 +206,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:firm", a.firmJob)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load", a.capacityLoad)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load/jobs", a.capacityLoadJobs)
+	// Slice 30: materialized capacity load and bottleneck episodes (AC-23.6).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/bottlenecks", a.listBottlenecks)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/bottlenecks/{id}", a.getBottleneck)
+	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/capacity-load:refresh", a.refreshCapacityLoad)
 	// Slice 17: run measures and the late orders inquiry (PRD 4.23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/kpis", a.runKPIs)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/late-orders", a.lateOrders)

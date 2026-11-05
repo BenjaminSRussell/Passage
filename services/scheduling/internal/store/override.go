@@ -129,7 +129,7 @@ func affectedJobs(ctx context.Context, tx pgx.Tx, o CapacityOverride) ([]Affecte
 func (s *Postgres) CreateCapacityOverride(ctx context.Context, in CapacityOverride, idem Idem) (OverrideResult, bool, error) {
 	var out OverrideResult
 	created := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		id, found, err := replayRow(ctx, tx, "scheduling_capacity_override", idem)
 		if err != nil {
 			return err
@@ -143,6 +143,7 @@ func (s *Postgres) CreateCapacityOverride(ctx context.Context, in CapacityOverri
 				return httpx.NewProblem(http.StatusNotFound, CodeResourceNotFound, "resource not found")
 			}
 			id = ids.New()
+			trackResources(ctx, in.ResourceID)
 			if _, err := tx.Exec(ctx, `insert into scheduling_capacity_override (tenant_id, id, resource_id, kind, start_at, end_at, reason, idempotency_key, idempotency_fingerprint)
 				values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, tenantOf(ctx), id, in.ResourceID, in.Kind, in.StartAt, in.EndAt, in.Reason,
 				nullable(idem.Key), nullable(idem.Fingerprint)); err != nil {
@@ -216,7 +217,7 @@ func nullTime(t time.Time) *time.Time {
 // DeleteCapacityOverride removes an override; the calendar of its resource
 // returns to what it was for later runs and moves.
 func (s *Postgres) DeleteCapacityOverride(ctx context.Context, resourceID, id string) error {
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	return s.loadTx(&ctx, func(tx pgx.Tx) error {
 		o, err := scanOverride(tx.QueryRow(ctx, `delete from scheduling_capacity_override where id = $1::uuid and resource_id = $2::uuid returning `+overrideCols, id, resourceID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -224,6 +225,7 @@ func (s *Postgres) DeleteCapacityOverride(ctx context.Context, resourceID, id st
 			}
 			return err
 		}
+		trackResources(ctx, o.ResourceID)
 		return enqueue(ctx, tx, "capacityoverride", o.ID, schedevents.CapacityOverrideDeleted, schedevents.CapacityOverrideData{
 			OverrideID: o.ID, ResourceID: o.ResourceID, Kind: o.Kind, Start: rfc(o.StartAt), End: rfc(o.EndAt), Reason: o.Reason, AffectedJobs: []string{}})
 	})

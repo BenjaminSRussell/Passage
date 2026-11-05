@@ -57,6 +57,7 @@ export interface Site {
   timeZone: string;
   status: string;
   defaultWarehouseId?: string;
+  fiscalCalendarId?: string;
   version: number;
 }
 

@@ -33,11 +33,13 @@ var (
 	OrderUnscheduled = events.Type(Context, "order", "unscheduled", 1)
 
 	ParametersUpdated = events.Type(Context, "parameters", "updated", 1)
+
+	BottleneckDetected = events.Type(Context, "bottleneck", "detected", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated, BottleneckDetected}
 }
 
 type RunCompletedData struct {
@@ -140,6 +142,30 @@ type CampaignCancelledData struct {
 	OrderIDs        []string `json:"orderIds"`
 	CounterRestored bool     `json:"counterRestored"`
 	Version         int      `json:"version"`
+}
+
+// BottleneckDetectedData announces that a resource entered a bottleneck
+// episode (AC-23.6, SCHED-0015): from FirstWeek on it has weeks loaded above
+// ThresholdPct for at least ConsecutiveWeeks in a row. It is published once
+// when the episode opens, not on every run that finds the resource still
+// overloaded. Periods are the flagged weeks (PRD 4.23 events: resourceId,
+// periods[], loadPct); PeakLoadPct is the highest of them, in percent.
+type BottleneckDetectedData struct {
+	EpisodeID        string             `json:"episodeId"`
+	ResourceID       string             `json:"resourceId"`
+	ResourceCode     string             `json:"resourceCode"`
+	FirstWeek        string             `json:"firstWeek"`
+	FlaggedWeeks     int                `json:"flaggedWeeks"`
+	Periods          []BottleneckPeriod `json:"periods"`
+	PeakLoadPct      float64            `json:"peakLoadPct"`
+	ThresholdPct     int                `json:"thresholdPct"`
+	ConsecutiveWeeks int                `json:"consecutiveWeeks"`
+}
+
+// BottleneckPeriod is one flagged week: its Monday (UTC) and its load.
+type BottleneckPeriod struct {
+	WeekStart string  `json:"weekStart"`
+	LoadPct   float64 `json:"loadPct"`
 }
 
 // CapacityOverrideData announces a downtime or extra shift on a resource

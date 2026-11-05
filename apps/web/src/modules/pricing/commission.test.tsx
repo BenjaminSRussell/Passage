@@ -237,6 +237,7 @@ describe("commission form rules", () => {
     expect(validateSalesGroup(ok)).toEqual({});
     expect(validateSalesGroup({ ...ok, reps: [{ repId: "R1", sharePct: "50" }, { repId: "R1", sharePct: "50" }] })["reps[1].repId"]).toBe("Each rep appears once.");
     expect(validateSalesGroup({ ...ok, reps: [{ repId: "R1", sharePct: "0" }] })["reps[0].sharePct"]).toBeDefined();
+    expect(validateSalesGroup({ ...ok, reps: [{ repId: "EU/R1", sharePct: "100" }] })["reps[0].repId"]).toMatch(/no \/ or :/);
     expect(toSalesGroupInput({ ...ok, name: " SG " }).name).toBe("SG");
     expect(validateRule({ customerGroup: "", itemGroup: "", basis: "REVENUE", ratePct: "101" }).ratePct).toBeDefined();
     expect(validateRule({ customerGroup: "", itemGroup: "", basis: "REVENUE", ratePct: "0" })).toEqual({});

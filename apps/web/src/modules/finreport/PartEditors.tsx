@@ -190,6 +190,19 @@ export function ColumnsEditor({ columns, onChange }: { columns: DefinitionColumn
                   )}
                 </FormField>
               )}
+              {col.periodExpr.trim() === "CALC" ? null : (
+                <FormField id={`fr-col-${i}-dims`} label="Dimension filter" optional hint="attribute=value,value; use * for any value">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      key={`${i}-${formatDimensionFilter(col.dimensionFilter)}`}
+                      className={styles.mono}
+                      defaultValue={formatDimensionFilter(col.dimensionFilter)}
+                      onBlur={(e) => changeColumn(i, { dimensionFilter: parseDimensionFilter(e.target.value) })}
+                    />
+                  )}
+                </FormField>
+              )}
               <div className={styles.lineActions}>
                 <Button size="sm" variant="ghost" aria-label={`Remove column ${i + 1}`} disabled={columns.length === 1} onClick={() => onChange(columns.filter((_, j) => j !== i))}>
                   Remove

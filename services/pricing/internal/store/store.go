@@ -116,6 +116,7 @@ type Store interface {
 	ListCommissionRules(ctx context.Context, salesGroupID string, limit int) ([]CommissionRuleRow, error)
 	PostCommission(ctx context.Context, c CommissionPosting) ([]CommissionTxn, bool, error)
 	ListCommissionTransactions(ctx context.Context, f CommissionFilter) ([]CommissionTxn, error)
+	StreamCommissionStatement(ctx context.Context, f CommissionStatementFilter, start func([]CommissionStatementTotal) error, line func(CommissionTxn) error) error
 	SettlementTotals(ctx context.Context, legalEntityID string, from, to time.Time) ([]domain.SettlementRow, error)
 	CreateFund(ctx context.Context, f domain.Fund, idempotencyKey string) (domain.Fund, error)
 	GetFund(ctx context.Context, id string) (domain.Fund, error)

@@ -367,7 +367,7 @@ func (s *Postgres) CompareRuns(ctx context.Context, baseID, otherID string) (Run
 func (s *Postgres) RollbackRun(ctx context.Context, runID string, idem Idem) (RollbackOutcome, bool, error) {
 	var out RollbackOutcome
 	replayed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		src, err := loadSnapshotRun(ctx, tx, runID, true)
 		if err != nil {
 			return err
@@ -486,6 +486,9 @@ func (s *Postgres) RollbackRun(ctx context.Context, runID string, idem Idem) (Ro
 		}
 		prior, err := orderDates(ctx, tx, orderIDs)
 		if err != nil {
+			return err
+		}
+		if err := trackOps(ctx, tx, opIDs); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `delete from scheduled_job where job_id = any($1::uuid[]) and not firmed`, opIDs); err != nil {

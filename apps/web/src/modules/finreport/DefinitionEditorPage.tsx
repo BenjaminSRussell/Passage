@@ -65,7 +65,10 @@ export function cleanRow(row: DefinitionRow): DefinitionRow {
 export function cleanColumn(col: DefinitionColumn): DefinitionColumn {
   const out: DefinitionColumn = { code: col.code.trim(), label: col.label, periodExpr: col.periodExpr.trim() };
   if (out.periodExpr === "CALC") out.calcExpression = col.calcExpression ?? "";
-  else if (col.currencyType) out.currencyType = col.currencyType;
+  else {
+    if (col.currencyType) out.currencyType = col.currencyType;
+    if (col.dimensionFilter && Object.keys(col.dimensionFilter).length > 0) out.dimensionFilter = col.dimensionFilter;
+  }
   return out;
 }
 

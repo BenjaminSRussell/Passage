@@ -1,6 +1,9 @@
 package store_test
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -202,5 +205,100 @@ func TestPostgres_WorkspaceSummary(t *testing.T) {
 	}
 	if theirs, err := s.WorkspaceSummary(principal(12, ""), "", asOf); err != nil || theirs.ActiveRecords != 0 || theirs.JournalsToPost != 0 {
 		t.Fatalf("other tenant = %+v, %v", theirs, err)
+	}
+}
+
+// The commission statement against Postgres: one rep's month in invoice order, the totals split
+// into earned and credited, nothing of another rep, month, legal entity or tenant, and a refusal
+// from start before any line is read.
+func TestPostgres_StreamCommissionStatement(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(12, "")
+	s := store.New(pool)
+	reps := []domain.Share{{RepID: "R1", SharePct: decimal.NewFromInt(60)}, {RepID: "R2", SharePct: decimal.NewFromInt(40)}}
+	g, err := s.CreateSalesGroup(ctx, store.SalesGroup{LegalEntityID: legalEntity, Name: "SG-ST", Reps: reps}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateCommissionRule(ctx, domain.CommissionRule{SalesGroupID: g.ID, Basis: domain.CommissionRevenue, RatePct: decimal.NewFromInt(5)}, ""); err != nil {
+		t.Fatal(err)
+	}
+	post := func(line, reverses, date, net string) {
+		t.Helper()
+		l := commissionLine(line, reverses, net)
+		l.InvoiceDate = day(date)
+		if strings.HasPrefix(line, "EUR-") {
+			l.Currency = "EUR"
+		}
+		if _, _, err := s.PostCommission(ctx, store.CommissionPosting{LegalEntityID: legalEntity, SalesGroupID: g.ID, Line: l}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post("INV-2", "", "2027-03-20", "2000")      // R1 60
+	post("INV-1", "", "2027-03-01", "10000")     // R1 300
+	post("CN-1", "INV-1", "2027-03-15", "-4000") // R1 -120
+	post("INV-3", "", "2027-04-01", "1000")      // next month
+	post("EUR-1", "", "2027-03-31", "500")       // R1 15 EUR
+
+	f := store.CommissionStatementFilter{LegalEntityID: legalEntity, RepID: "R1", PeriodKey: "2027-03"}
+	var totals []store.CommissionStatementTotal
+	var got []string
+	err = s.StreamCommissionStatement(ctx, f, func(t []store.CommissionStatementTotal) error { totals = t; return nil },
+		func(x store.CommissionTxn) error { got = append(got, x.InvoiceLineID); return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "INV-1,CN-1,INV-2,EUR-1" {
+		t.Fatalf("lines = %v, want INV-1, CN-1, INV-2, EUR-1 in invoice order", got)
+	}
+	if len(totals) != 2 || totals[0].Currency != "EUR" || totals[0].Lines != 1 || !totals[0].Net.Equal(decimal.NewFromInt(15)) ||
+		!totals[0].Credited.IsZero() {
+		t.Fatalf("totals = %+v, want EUR first: 1 line, net 15, nothing credited", totals)
+	}
+	if u := totals[1]; u.Currency != "USD" || u.Lines != 3 || !u.Earned.Equal(decimal.NewFromInt(360)) ||
+		!u.Credited.Equal(decimal.NewFromInt(-120)) || !u.Net.Equal(decimal.NewFromInt(240)) {
+		t.Fatalf("USD total = %+v, want 3 lines, earned 360, credited -120, net 240", u)
+	}
+
+	// A commission committed by another transaction while the statement is read is in neither
+	// the totals nor the lines: both come from one snapshot, so the footer matches the lines.
+	counted, listed := 0, 0
+	err = s.StreamCommissionStatement(ctx, f, func(t []store.CommissionStatementTotal) error {
+		for _, x := range t {
+			counted += x.Lines
+		}
+		post("INV-5", "", "2027-03-25", "1000") // R1 30 USD
+		return nil
+	}, func(store.CommissionTxn) error { listed++; return nil })
+	if err != nil || counted != 4 || listed != 4 {
+		t.Fatalf("read during a post: totals count %d, lines %d, %v; want 4 and 4", counted, listed, err)
+	}
+	listed = 0
+	if err := s.StreamCommissionStatement(ctx, f, func([]store.CommissionStatementTotal) error { return nil },
+		func(store.CommissionTxn) error { listed++; return nil }); err != nil || listed != 5 {
+		t.Fatalf("next read = %d lines, %v; want the new commission too", listed, err)
+	}
+	for _, other := range []struct {
+		name string
+		ctx  context.Context
+		f    store.CommissionStatementFilter
+	}{
+		{"other month", ctx, store.CommissionStatementFilter{LegalEntityID: legalEntity, RepID: "R1", PeriodKey: "2027-05"}},
+		{"other rep", ctx, store.CommissionStatementFilter{LegalEntityID: legalEntity, RepID: "R9", PeriodKey: "2027-03"}},
+		{"other legal entity", ctx, store.CommissionStatementFilter{LegalEntityID: otherLegalEntity, RepID: "R1", PeriodKey: "2027-03"}},
+		{"other tenant", principal(13, ""), f},
+		{"caller scoped to another legal entity", principal(12, otherLegalEntity), f},
+	} {
+		n := 0
+		err := s.StreamCommissionStatement(other.ctx, other.f, func(t []store.CommissionStatementTotal) error { n += len(t); return nil },
+			func(store.CommissionTxn) error { n++; return nil })
+		if err != nil || n != 0 {
+			t.Errorf("%s: read %d rows, %v; want none", other.name, n, err)
+		}
+	}
+	refused, read := errors.New("refused"), 0
+	if err := s.StreamCommissionStatement(ctx, f, func([]store.CommissionStatementTotal) error { return refused },
+		func(store.CommissionTxn) error { read++; return nil }); !errors.Is(err, refused) || read != 0 {
+		t.Fatalf("refused start = %v after %d lines", err, read)
 	}
 }

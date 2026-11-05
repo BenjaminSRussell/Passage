@@ -78,6 +78,11 @@ channels:
     messages:
       parametersUpdated:
         $ref: '#/components/messages/ParametersUpdated'
+  bottleneck:
+    address: passage.scheduling.bottleneck
+    messages:
+      bottleneckDetected:
+        $ref: '#/components/messages/BottleneckDetected'
 operations:
   publishRunCompleted:
     action: send
@@ -175,8 +180,25 @@ operations:
     messages:
       - $ref: '#/channels/parameters/messages/parametersUpdated'
     summary: The tenant's scheduling parameters changed
+  publishBottleneckDetected:
+    action: send
+    channel: { $ref: '#/channels/bottleneck' }
+    messages:
+      - $ref: '#/channels/bottleneck/messages/bottleneckDetected'
+    summary: A resource entered a bottleneck episode
 components:
   messages:
+    BottleneckDetected:
+      title: Bottleneck detected
+      summary: >-
+        A resource has weeks loaded above the bottleneck threshold for the configured number of consecutive weeks.
+        Published once when the episode opens; it is not repeated by later runs while the resource stays overloaded,
+        and a new event follows only after the episode has closed (no flagged week left, or its last flagged week
+        has passed) and the resource is overloaded again.
+      name: dev.passage.scheduling.bottleneck.detected.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/BottleneckDetectedData'
     ParametersUpdated:
       title: Scheduling parameters updated
       summary: >-
@@ -555,6 +577,27 @@ components:
           type: array
           description: Operation numbers a firmed job holds; they stay where they are.
           items: { type: integer }
+    BottleneckDetectedData:
+      type: object
+      required: [episodeId, resourceId, resourceCode, firstWeek, flaggedWeeks, periods, peakLoadPct, thresholdPct, consecutiveWeeks]
+      properties:
+        episodeId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        resourceCode: { type: string, description: Code of the resource, for the SCHED-0015 message. }
+        firstWeek: { type: string, format: date, description: Monday (UTC) of the first flagged week. }
+        flaggedWeeks: { type: integer, description: Flagged weeks when the episode opened. }
+        periods:
+          type: array
+          description: The flagged weeks from the current week on, in order.
+          items:
+            type: object
+            required: [weekStart, loadPct]
+            properties:
+              weekStart: { type: string, format: date, description: Monday (UTC) of the week. }
+              loadPct: { type: number, description: Booked over open minutes of the week, in percent. }
+        peakLoadPct: { type: number, description: Load of the most loaded flagged week, in percent. }
+        thresholdPct: { type: integer, description: The load percentage a week must exceed. }
+        consecutiveWeeks: { type: integer, description: Consecutive weeks above the threshold that make a bottleneck. }
     ParametersUpdatedData:
       type: object
       required: [defaultMode, defaultDirection, defaultFinite, dragSnapMinutes, propagationOrders, propagationLevels, version]

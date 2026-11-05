@@ -240,6 +240,9 @@ type engine struct {
 	infinite bool
 	delay    time.Duration
 	days     int
+	// daily is operations mode (FR-23.2): an operation that follows another
+	// starts at the beginning of a local day of its resource.
+	daily bool
 }
 
 func (e *engine) holds(rid string) bool { return e.caps[rid].res.Finite && !e.infinite }
@@ -362,6 +365,10 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			return pls, ws, &stop{idx: k, reason: "duration must be at least one minute"}
 		}
 		ready := latest(start, op.ReadyAt, notBefore[k])
+		// after is what the predecessors alone allow; operations mode rounds
+		// it, not the run start or the operation's own floor, up to a day
+		// boundary (FR-23.2).
+		var after time.Time
 		var prev *Placement
 		frozen := false
 		for i := range fixed {
@@ -369,14 +376,14 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			if f.OperNumber >= op.OperNumber {
 				continue
 			}
-			ready = latest(ready, f.Release())
+			after = latest(after, f.Release())
 			if prev == nil || f.OperNumber > prev.OperNumber {
 				prev, frozen = &fixed[i], true
 			}
 		}
 		if k > 0 {
 			p := &pls[k-1]
-			ready = latest(ready, p.Release())
+			after = latest(after, p.Release())
 			if prev == nil || p.OperNumber > prev.OperNumber {
 				prev, frozen = p, false
 			}
@@ -384,8 +391,9 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 		if prev != nil {
 			// The wait between the operation right before (placed now or
 			// fixed) and this one (FR-23.3).
-			ready = latest(ready, prev.Release().Add(queueWait(prev, op)))
+			after = latest(after, prev.Release().Add(queueWait(prev, op)))
 		}
+		ready = latest(ready, after)
 		var net *ResourceNetwork
 		if op.Network != "" && prev != nil {
 			n, ok := e.nets[op.Network]
@@ -395,7 +403,7 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			}
 			net = &n
 		}
-		pl, w, st := e.placeOp(op, ready, prev, frozen, net)
+		pl, w, st := e.placeOp(op, ready, after, prev, frozen, net)
 		if prev != nil && prev.OverlapBP > 0 {
 			// An overlapped operation may start inside its predecessor but
 			// never ends before the predecessor's last units are through it
@@ -405,12 +413,14 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 			// at the floor itself, which cannot end before it.
 			floor := prev.End.Add(queueWait(prev, op))
 			for try := 0; st == nil && pl.End.Before(floor) && try < maxOverlapRetries; try++ {
-				ready = latest(ready, pl.Start.Add(floor.Sub(pl.End)))
-				pl, w, st = e.placeOp(op, ready, prev, frozen, net)
+				after = latest(after, pl.Start.Add(floor.Sub(pl.End)))
+				ready = latest(ready, after)
+				pl, w, st = e.placeOp(op, ready, after, prev, frozen, net)
 			}
 			if st == nil && pl.End.Before(floor) {
-				ready = latest(ready, floor)
-				pl, w, st = e.placeOp(op, ready, prev, frozen, net)
+				after = latest(after, floor)
+				ready = latest(ready, after)
+				pl, w, st = e.placeOp(op, ready, after, prev, frozen, net)
 			}
 		}
 		if st != nil {
@@ -430,8 +440,10 @@ func (e *engine) attempt(chain []Operation, fixed []Placement, start time.Time, 
 // within the edge's maximum wait (BR-23.11). When no candidate meets the wait,
 // the stop asks for the predecessor to be delayed by the smallest overrun; a
 // frozen predecessor cannot move, so the best edge candidate is taken with a
-// SCHED-0010 warning instead.
-func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen bool, net *ResourceNetwork) (Placement, []Warning, *stop) {
+// SCHED-0010 warning instead. ready is the earliest start; after is the part
+// of it the predecessors set, which operations mode moves to the next day
+// boundary of each candidate (FR-23.2).
+func (e *engine) placeOp(op Operation, ready, after time.Time, prev *Placement, frozen bool, net *ResourceNetwork) (Placement, []Warning, *stop) {
 	var best, over Placement
 	var bestSlot, overSlot slot
 	found, overFound, sawEdge := false, false, false
@@ -448,14 +460,21 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 		if !ok {
 			continue
 		}
-		r := ready
+		r, a := ready, after
 		var edge NetworkEdge
 		if net != nil {
 			if edge, ok = net.Edge(prev.ResourceID, rid); !ok {
 				continue
 			}
 			sawEdge = true
-			r = latest(r, prev.End.Add(minutes(edge.TransferMinutes)))
+			a = latest(a, prev.End.Add(minutes(edge.TransferMinutes)))
+			r = latest(r, a)
+		}
+		if e.daily && prev != nil {
+			// Operations mode: the day after the predecessor's day on this
+			// resource's calendar, but never before the run start, so a
+			// follower of a job that ended on an earlier day starts at once.
+			r = latest(r, DayCeil(a, c.res.Location))
 		}
 		s, conf := placeOnSec(c, op, e.busyOn(rid), r, sequenced(c, op, e.infinite), secondaryChecker(e.caps, e.busy, op, e.infinite))
 		if conf != nil {
@@ -521,4 +540,20 @@ func (e *engine) placeOp(op Operation, ready time.Time, prev *Placement, frozen 
 			Detail: fmt.Sprintf("job %s does not match any block on %s; placed in unblocked capacity", op.ID, c.res.Code)})
 	}
 	return best, ws, nil
+}
+
+// DayCeil is t when it is local midnight in loc, otherwise the next local
+// midnight (operations mode, FR-23.2: an operation that follows another starts
+// on a day bucket boundary). A DST day is 23 or 25 hours long.
+func DayCeil(t time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	l := t.In(loc)
+	y, m, d := l.Date()
+	mid := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	if mid.Equal(t) {
+		return t
+	}
+	return time.Date(y, m, d+1, 0, 0, 0, 0, loc).UTC()
 }

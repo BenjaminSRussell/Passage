@@ -146,7 +146,7 @@ func firmedProblem(what string) error {
 func (s *Postgres) UpdateOperation(ctx context.Context, id string, version int, patch OperationPatch, idem Idem) (OperationUpdate, bool, error) {
 	var out OperationUpdate
 	replayed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		cur, found, err := lockOperation(ctx, tx, id)
 		if err != nil {
 			return err
@@ -266,7 +266,7 @@ func (s *Postgres) UpdateOperation(ctx context.Context, id string, version int, 
 func (s *Postgres) DeleteOperation(ctx context.Context, id string, version int, idem Idem) (OperationRemoval, bool, error) {
 	var out OperationRemoval
 	replayed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		cur, found, err := lockOperation(ctx, tx, id)
 		if err != nil {
 			return err
@@ -318,7 +318,7 @@ func (s *Postgres) DeleteOperation(ctx context.Context, id string, version int, 
 func (s *Postgres) UnscheduleOrder(ctx context.Context, orderID string, idem Idem) (OrderUnschedule, bool, error) {
 	var out OrderUnschedule
 	replayed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.loadTx(&ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select id::text, oper_number from scheduling_operation where order_id = $1::uuid order by oper_number for update`, orderID)
 		if err != nil {
 			return err

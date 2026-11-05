@@ -64,11 +64,13 @@ export interface SitePatch {
   name?: string;
   timeZone?: string;
   defaultWarehouseId?: string; // "" clears it
+  fiscalCalendarId?: string; // "" clears it
 }
 export const updateSite = (legalEntityId: string, id: string, version: number, change: SitePatch) =>
   scopedPatch<Site>(legalEntityId, "/sites", id, { version, ...change });
 
 export interface WarehousePatch {
+  siteId?: string; // moves the warehouse; the site must be active and of the warehouse's legal entity
   addressId?: string; // "" clears it
   name?: string;
   type?: WarehouseType;

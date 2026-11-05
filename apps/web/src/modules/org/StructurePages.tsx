@@ -36,7 +36,7 @@ import {
   type OperatingUnitType,
   type WarehouseType,
 } from "./api/write";
-import { withFreshRowOnConflict } from "./api/structure";
+import { listFiscalCalendars, withFreshRowOnConflict } from "./api/structure";
 import { useLegalEntity } from "./legalEntityContext";
 import { ScopedListPage, type ListControls } from "./pages";
 import styles from "./pages.module.css";
@@ -391,6 +391,8 @@ export function SitesPage() {
     (signal) => (scope === "" || !canWriteSite ? Promise.resolve([]) : listWarehouses(scope, { signal }).then((page) => page.items)),
     `site-warehouses:${scope}:${canWriteSite}`,
   );
+  // Fiscal calendars are tenant-level; only a caller who can edit a site needs the choice.
+  const calendars = useRows((signal) => (canWriteSite ? listFiscalCalendars({ signal }) : Promise.resolve([])), `site-calendars:${canWriteSite}`);
   return (
     <ScopedListPage<Site>
       title="Sites"
@@ -408,12 +410,13 @@ export function SitesPage() {
           set: (row, status) => setSiteStatus(row.legalEntityId, row.id, row.version, status),
           get: (row) => getSite(row.legalEntityId, row.id),
         }, (row, save) => (
-          <EditAction<{ name: string; timeZone: string; defaultWarehouseId: string }, "name" | "timeZone" | "defaultWarehouseId">
+          <EditAction<{ name: string; timeZone: string; defaultWarehouseId: string; fiscalCalendarId: string }, "name" | "timeZone" | "defaultWarehouseId" | "fiscalCalendarId">
             subject={`site ${row.code}`}
-            initial={{ name: row.name, timeZone: row.timeZone, defaultWarehouseId: row.defaultWarehouseId ?? "" }}
+            initial={{ name: row.name, timeZone: row.timeZone, defaultWarehouseId: row.defaultWarehouseId ?? "", fiscalCalendarId: row.fiscalCalendarId ?? "" }}
             validate={validateEditZoned}
             fieldCodes={{
               "ORG-SITE-DEFAULT-WAREHOUSE-INVALID": { field: "defaultWarehouseId", message: "Choose an active warehouse of this site." },
+              "ORG-SITE-CALENDAR-INVALID": { field: "fiscalCalendarId", message: "Choose an active fiscal calendar with a generated year." },
             }}
             save={(change) =>
               save(() =>
@@ -421,12 +424,16 @@ export function SitesPage() {
                   name: trimmed(change.name),
                   timeZone: trimmed(change.timeZone),
                   defaultWarehouseId: change.defaultWarehouseId,
+                  fiscalCalendarId: change.fiscalCalendarId,
                 }),
               )
             }
             fields={({ errors, text }) => {
               const choices = warehouses.rows.filter((wh) => wh.siteId === row.id && (wh.status === "active" || wh.id === row.defaultWarehouseId));
               const current = row.defaultWarehouseId;
+              const currentCalendar = row.fiscalCalendarId;
+              // The service assigns only an active calendar with at least one generated year (ORG-SITE-CALENDAR-INVALID otherwise).
+              const calendarChoices = calendars.rows.filter((cal) => (cal.status === "active" && (cal.generatedYears?.length ?? 0) > 0) || cal.id === currentCalendar);
               return (
                 <>
                   <FormField id={`site-edit-name-${row.id}`} label="Name" error={errors.name}>
@@ -449,6 +456,25 @@ export function SitesPage() {
                         {choices.map((wh) => (
                           <option key={wh.id} value={wh.id}>
                             {wh.code} - {wh.name}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </FormField>
+                  <FormField
+                    id={`site-edit-cal-${row.id}`}
+                    label="Fiscal calendar"
+                    optional
+                    hint={calendars.error ? `Fiscal calendars could not be loaded (${calendars.error.code}).` : "Blank uses the legal entity's calendar."}
+                    error={errors.fiscalCalendarId}
+                  >
+                    {(control) => (
+                      <Select {...control} {...text("fiscalCalendarId")}>
+                        <option value="">None</option>
+                        {currentCalendar && !calendarChoices.some((cal) => cal.id === currentCalendar) ? <option value={currentCalendar}>{currentCalendar}</option> : null}
+                        {calendarChoices.map((cal) => (
+                          <option key={cal.id} value={cal.id}>
+                            {cal.code} - {cal.name}
                           </option>
                         ))}
                       </Select>
@@ -540,16 +566,22 @@ export function WarehousesPage() {
           set: (row, status) => setWarehouseStatus(row.legalEntityId, row.id, row.version, status),
           get: (row) => getWarehouse(row.legalEntityId, row.id),
         }, (row, save) => (
-          <EditAction<{ name: string; type: WarehouseType; timeZone: string }, "name" | "timeZone">
+          <EditAction<{ name: string; type: WarehouseType; timeZone: string; siteId: string }, "name" | "timeZone" | "siteId">
             subject={`warehouse ${row.code}`}
-            initial={{ name: row.name, type: row.type, timeZone: row.timeZone }}
+            initial={{ name: row.name, type: row.type, timeZone: row.timeZone, siteId: row.siteId }}
             validate={validateEditZoned}
+            fieldCodes={{
+              "ORG-WH-SITE-INVALID": { field: "siteId", message: "Choose an active site." },
+              "ORG-WH-LE-MISMATCH": { field: "siteId", message: "Choose a site of the same legal entity." },
+              "ORG-WH-IS-DEFAULT": { field: "siteId", message: "This is its site's default warehouse; change the site's default first." },
+            }}
             save={(change) =>
               save(() =>
                 updateWarehouse(row.legalEntityId, row.id, row.version, {
                   name: trimmed(change.name),
                   type: change.type,
                   timeZone: trimmed(change.timeZone),
+                  siteId: change.siteId,
                 }),
               )
             }
@@ -571,6 +603,29 @@ export function WarehousesPage() {
                 </FormField>
                 <FormField id={`wh-edit-tz-${row.id}`} label="Time zone" hint="IANA name." error={errors.timeZone}>
                   {(control) => <Input {...control} {...text("timeZone")} />}
+                </FormField>
+                <FormField
+                  id={`wh-edit-site-${row.id}`}
+                  label="Site"
+                  hint={
+                    siteOf(row.siteId)?.defaultWarehouseId === row.id
+                      ? "Active sites of the same legal entity. This is its site's default warehouse: change the site's default before moving it."
+                      : "Active sites of the same legal entity."
+                  }
+                  error={errors.siteId}
+                >
+                  {(control) => (
+                    <Select {...control} {...text("siteId")}>
+                      {!siteOf(row.siteId) ? <option value={row.siteId}>{row.siteId}</option> : null}
+                      {sites.rows
+                        .filter((site) => site.legalEntityId === row.legalEntityId && (site.status === "active" || site.id === row.siteId))
+                        .map((site) => (
+                          <option key={site.id} value={site.id}>
+                            {site.code} - {site.name}
+                          </option>
+                        ))}
+                    </Select>
+                  )}
                 </FormField>
               </>
             )}

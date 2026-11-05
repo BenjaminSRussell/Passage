@@ -851,6 +851,115 @@ no FAIL lines on the doc gates.
 | Rollback re-checks not done: resource efficiency changed since the run (job lengths), network transfer time and maximum wait (BR-23.11), a setup matrix version that changed between the run's day and the restored jobs' day, and jobs restored into the past | later slice of PSG-23 | The checks above cover what the Gantt flags and what runs and moves refuse; efficiency and network waits are not flagged on existing jobs either, and runs themselves accept a start in the past. |
 | Network feasibility report (4.23.14) | later slice of PSG-23 | Not part of this slice. |
 
+## Slice 30: materialized capacity load and bottleneck episodes (PRD 4.23.14, AC-23.6, SCHED-0015)
+
+Weekly load is now also kept as rows. `scheduling_capacity_load` holds, per
+resource and Monday-start UTC week with at least one booking, the open and
+booked minutes, the load and the bottleneck flag (a week with no row is booked
+0). Every transaction that places, moves or removes jobs, or changes a calendar,
+rewrites the rows of the resources it touched before it commits (`Postgres.loadTx`
+collects the resources: `RunSchedule`, `MoveJob`, `RollbackRun` and the order
+import, reimport, withdrawal, operation change and delete and unschedule paths
+through `writePlacements` and the job deletes; capacity override create and
+delete, and resource updates, for the calendar). A resource's rewrite is
+serialized by an advisory lock, so two writers cannot interleave. The rewrite
+takes the locks of all its resources in id order before it reads anything, and
+then writes only rows of the two new tables, which have no foreign key to
+`scheduling_resource`: the key-share lock of a foreign key check waited on
+`UpdateResource`'s `FOR UPDATE` on the resource row while `UpdateResource`
+waited for the advisory lock, a deadlock the review reproduced (40P01) and
+removed (proof in `lockLoad`; concurrency test in `capacityload_test.go`).
+Because the calendar is read after the lock, a resource change that committed
+while the rewrite waited is the one it uses. Primary and
+secondary bookings both count, as in `GET /capacity-load`, which still
+computes on read (the table is checked against it in the store tests after
+every writer). The flag is the one the read gives: above `SCHED_BOTTLENECK_PCT`
+for `SCHED_BOTTLENECK_WEEKS` weeks in a row (the store takes the rule from
+the service configuration).
+
+`scheduling_bottleneck_episode` records a stretch with flagged weeks from the
+current week on. When a rewrite finds such a week and the resource has no open
+episode, it opens one and writes `dev.passage.scheduling.bottleneck.detected.v1`
+(episode, resource id and code, first week, flagged weeks, `periods[]` with
+each flagged week's load, peak load, rule) through the outbox in the same
+transaction; later runs that still find the resource overloaded add nothing.
+When no flagged week is left the episode closes (silently); a new overload
+opens a new episode and sends a new event. Weeks already past neither open nor
+keep an episode open: the episode keeps its last flagged week (`last_week`),
+reads report it closed at the end of that week once it has passed, and the next
+rewrite of the resource records that close before it looks at new weeks, so a
+later overload of the same resource is a new episode with its own event even
+when nothing touched the resource in between. Weeks are UTC weeks (Monday
+00:00 UTC), the same buckets as `GET /capacity-load?period=week`; open and
+booked minutes are both cut at the UTC boundary, so the load % of a week is
+consistent, but a site far from UTC has a few local hours of Sunday or Monday
+counted in the neighbouring week. Open minutes come from the resource's shifts
+in its time zone (DST included) with capacity overrides applied, as on read.
+
+`GET /v1/scheduling/bottlenecks?status&resourceId&limit` lists episodes (open ones
+carry the current flagged weeks and peak), `GET /v1/scheduling/bottlenecks/{id}`
+adds the resource's materialized weeks from the first week on (404 `SCHED-0147`),
+and `POST /v1/scheduling/capacity-load:refresh` (duty `scheduling.run`) rebuilds
+every resource, 50 resources per transaction so a large tenant's runs and moves
+wait for one batch at most: for data that existed before the migration and to
+repair the table. Migration `0022_capacity_load.sql` (both tables with tenant policies;
+grants SELECT, INSERT, DELETE on the load table, which is rewritten by delete
+and insert, and SELECT, INSERT, UPDATE on episodes, which are closed in place).
+Web: a Bottlenecks list (open, closed, all; rebuild button) and an episode detail
+with its weekly load and a link to the jobs of each week; nav entry on
+`scheduling.read`. The OpenAPI and AsyncAPI specs have no FAIL lines on the doc
+gates.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource rows `/v1/scheduling/bottlenecks` (GET) and `/v1/scheduling/bottlenecks/*` (GET) under `scheduling.read`, and resource row `/v1/scheduling/capacity-load:refresh` (POST) under `scheduling.run` | handoff - main session (authz seed) | Existing duties; only the route rows are new (no new duty, nothing for #313). Until seeded the gateway answers 403 for the Bottlenecks pages and the rebuild button. |
+| Kafka topic `passage.scheduling.bottleneck` (outbox aggregate type `bottleneck`) and a consumer that notifies planners | handoff - deploy owner (#313) and a notification wave | Nothing consumes `bottleneck.detected` yet; if topics are created ahead of time this one is new. |
+| `bottleneck.cleared` event | later slice of PSG-23 | The PRD names only `bottleneck.detected`. An episode whose weeks pass is reported closed on read and stored closed on the next rewrite; there is no timer that writes the close at the moment (FR-23.11 job runner), so nothing is published then. |
+| Bookings spanning more than 260 weeks on one resource | accepted | Only the latest 260 weeks are materialized (the oldest history drops out, never the weeks ahead); runs reach 730 days ahead. |
+| Weeks in the resource's local time instead of UTC | decision for Ben | Kept UTC to match the existing weekly `GET /capacity-load` and the bottleneck flag it shows; local weeks would change both. |
+| Reading `GET /capacity-load` from the table, and load by resource group | later slice of PSG-23 | The read still computes from bookings and the calendar, so a request with another threshold or weeks with no bookings is exact; the table serves the episodes. |
+
+## Slice 31: operations mode in daily buckets (FR-23.2)
+
+`mode: operations` on `POST /v1/scheduling/runs` (or `defaultMode` of the
+scheduling parameters) now changes the plan. The first operation of an order is
+placed as in jobs mode (earliest open minute at or after its ready time). Every
+operation that follows another in the order (placed in the run or fixed/firmed)
+may start no earlier than the next local midnight, in its candidate resource's
+time zone, at or after the time its predecessors allow (end, queue times,
+overlap share, network transfer): `domain.DayCeil`, applied per candidate in
+`engine.placeOp` when `Problem.DailyBuckets` is set. Only that predecessor time
+is rounded; the run start, the operation's own ready time and a peg or backward
+floor are not, so a follower whose fixed predecessor ended on an earlier day
+starts at the run start. A predecessor that ends exactly at midnight has used
+only the day before, so its follower may start at that midnight. The first
+open interval of that day then gives the start, so the plan steps in whole
+days between operations, a DST day being 23 or 25 hours. Booked minutes,
+splitting across shifts, secondaries, changeovers, blocks, networks, pegs and
+the backward direction (BR-23.2) work unchanged because they share the engine;
+the BR-23.8 resource choice compares the finish of each day-aligned candidate.
+`jobs` mode is unchanged. Moves (`:move`), `POST /orders/{id}:schedule` and the
+campaign sequencer are jobs mode; a rollback (slice 29) keeps the source run's
+mode and restores its stored placements, and the capacity load (slice 30)
+counts booked minutes, which do not depend on the mode. No migration,
+endpoint, event or duty; the OpenAPI `mode` description and the web run form
+hint say so. Web: no new screen (the Mode selector of the start-run form
+already exists and the run detail shows the mode). Tests:
+`domain/dailybuckets_test.go` (DayCeil with DST; jobs versus operations chains;
+split job; backward latest start; run start not rounded; midnight boundary;
+queue time past midnight; follower's time zone; overlap by the day; network
+maximum wait) and `store/dailybuckets_test.go` (run end to end on Postgres).
+
+| Item | Status | Reason |
+|---|---|---|
+| Day-level capacity check in operations mode (a day bucket that refuses a job once its open minutes are used, instead of splitting it to the minute) | later slice of PSG-23 | Slice 31 aligns followers to day boundaries; the minutes still book exactly in open intervals, as FR-23.1 and the GiST invariant need. |
+| Mode on `POST /orders/{id}:schedule`, on moves and on the CP-SAT campaign path | later slice of PSG-23 | The per-order command and moves always run in jobs mode and the campaign sequencer ignores mode. A move or the successors it propagates can therefore land on the same day as the operation before them in a plan made in operations mode; the move's constraint check does not flag it. |
+| Day boundary of the follower's resource, not the predecessor's | decision for Ben | When the two resources are in different time zones the follower waits for midnight where it runs (a predecessor ending 10:00 UTC lets a New York follower start 05:00 UTC the next day). |
+| Queue times and transfer counted in minutes before the day is rounded | decision for Ben | A queue that ends after midnight moves the follower one more day; the alternative, whole days of queue on top of the next day, was not chosen. |
+| Overlap applied by the day | decision for Ben | With an overlap quantity (BR-23.5) the follower may start the day after the overlap share is through, while the predecessor still runs, and never ends before it; the alternative is to ignore overlap in operations mode. |
+| Backward runs use the same day ceiling | decision for Ben | Backward (BR-23.2) searches the latest start of the first operation with the forward engine, so followers sit on the next day boundary after it; there is no mirrored day floor that ends each operation on the day before its follower. |
+| Network maximum wait in operations mode | accepted | The wait (BR-23.11) stays a hard limit from the predecessor's end to the follower's day-aligned start; on a calendar closed overnight no pair meets a short wait and the order is unplaced with NETWORK_INFEASIBLE. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -858,7 +967,7 @@ no FAIL lines on the doc gates.
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) | partial (slices 27 and 28) | Queue before and queue after are built (slice 27); setup that must not split is built (BR-23.3). Overlap quantity (BR-23.5) is built (slice 28); transit time apart from the network edge's transfer minutes is not modelled; queue times from the production route are a handoff to wave 21. |
-| 1 | Operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | `mode` is accepted and recorded, and both modes place at minute granularity. |
+| 1 | Operations mode in daily buckets (FR-23.2) | built (slice 31) | `mode: operations` on `POST /runs` (or `defaultMode`): an operation that follows another starts at the next local midnight of its resource; see Slice 31. |
 | 1 | Duration from route times and efficiency (BR-23.1) | built (slices 18 and 21) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); the scheduling resource's `efficiencyPct` stretches or shrinks them when the job is placed (slice 21). Efficiency from wave 9 resources and per-day overrides remain a handoff (row below). |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
@@ -872,7 +981,7 @@ no FAIL lines on the doc gates.
 | 3 | Capacity load by resource and ISO week with bottleneck flag (FR-23.9) | built | `GET /v1/scheduling/capacity-load`; weeks start Monday 00:00 UTC. |
 | 3 | Load by day and drill-down to jobs | built (slice 16) | `period=day` on `GET /capacity-load` and `GET /capacity-load/jobs`. Days are local days of the resource's calendar time zone. |
 | 3 | Load by resource group; US week numbering; weeks in the resource's time zone | later slice of PSG-23 | Groups come from wave 9; weeks start Monday 00:00 UTC (slice 3). |
-| 3 | Materialized CapacityLoad table refreshed per run and move; `bottleneck.detected` event once per episode (AC-23.6, SCHED-0015) | later slice of PSG-23 | Load is computed on read, so it is never stale; the event needs episode state and is not declared in AsyncAPI yet. |
+| 3 | Materialized CapacityLoad table refreshed per run and move; `bottleneck.detected` event once per episode (AC-23.6, SCHED-0015) | built (slice 30) | `scheduling_capacity_load` is rewritten in the transaction of every writer that changes bookings or calendars; `bottleneck.detected` is published when an episode opens (see the slice 30 section). |
 | 4 | CP-SAT job-shop optimizer (FR-23.6, BR-23.9) | built in `services/scheduler-py` | Weighted lateness + lambda x makespan, 2,000-operation window, time limit, `num_workers` 8; ft06 proves 55. |
 | 4 | Optimization runs from the scheduling service (`algorithm: cp-sat`, solver_status, heuristic kept on UNKNOWN, AC-23.9, SCHED-0006) | later slice of PSG-23 | The Go service calls scheduler-opt for campaign sequencing only (slice 6, deliverable 7 below). Schedule runs do not call the job-shop endpoint yet; `schedule_run.algorithm` is constrained to `heuristic` and `solver_status` stays null. scheduler-opt already takes candidate machines and network steps and returns the chosen machines. |
 | 5 | Schedule dates flow to production orders and planning (FR-23.10) | partial — consumers are waves 21 and 22 | `job.scheduled` and `orderdates.changed` are published through the outbox with start, end and late minutes. Production order date updates and the `planning.finite-capacity` flag (AC-23.8) are owned by the consuming waves. |

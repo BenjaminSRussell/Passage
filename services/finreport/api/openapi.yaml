@@ -272,6 +272,30 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Definition'}
         '404': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/runs/{id}/tree:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      operationId: getRunTree
+      summary: The reporting tree a run was limited to, as it was when the run was made
+      description: >-
+        For a run made with tree (POST /runs): the tree at the revision the run recorded, limited
+        to the run's unit and the units below it (the whole tree for a whole-tree run), the run's
+        unit and the tree's current revision, so a client can show the units behind a stored run
+        after the tree changed. A statement viewer sees only the units the run covered; reading
+        whole trees stays with reporting.definition.maintain. 404 REPORT-0037 when the run was
+        not limited to a tree, or when that revision was not kept (a revision replaced before
+        revisions were stored).
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: The tree at the run's revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunTree'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /v1/reporting/runs/{id}/cells:
     parameters:
       - $ref: '#/components/parameters/RunId'
@@ -1000,6 +1024,57 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/trees/{code}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: listTreeRevisions
+      summary: Stored revisions of a reporting tree
+      description: >-
+        Every save of a tree keeps the revision it produced, newest first, so that a run made on
+        an older revision can still show its units (GET /runs/{id}/tree). Trees saved before
+        revisions were kept have only their then-current revision.
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The revisions, newest first, without their bodies
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/TreeRevision'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/trees/{code}/revisions/{revision}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+      - name: revision
+        in: path
+        required: true
+        description: Tree revision number, from 1
+        schema: {type: integer, minimum: 1}
+    get:
+      operationId: getTreeRevision
+      summary: Read a reporting tree as it was at one revision
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: The tree at that revision
+          headers:
+            ETag:
+              description: The revision read
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Tree'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /v1/reporting/column-sets:
     get:
       operationId: listColumnSets
@@ -1372,6 +1447,19 @@ components:
         periodExpr: {type: string, pattern: '^(P|P-[0-9]+|YTD|PY|PYTD|Q|FY|CALC)$'}
         currencyType: {type: string, enum: [acct, rpt, txn], description: Omitted means the run's currency type}
         calcExpression: {type: string}
+        dimensionFilter:
+          type: object
+          description: >-
+            Limits the column to balances whose dimension values match, in the shape of a row's
+            dimensionFilter ({attribute: [values or "*"]}): "*" matches every balance, also one without
+            a value for the attribute, and "" matches only a balance without a value.
+            A row picks up a balance only when its own filter and the column's both match, so
+            one definition can show a column per cost center. Not allowed on CALC columns or on
+            columns of a cash_flow definition (422 COM-0001).
+          additionalProperties:
+            type: array
+            maxItems: 200
+            items: {type: string}
     RowSet:
       type: object
       required: [code, name, rows]
@@ -1429,6 +1517,22 @@ components:
         normalBalance: {type: string, enum: [debit, credit], description: How amounts are presented; debit when omitted}
         accountFrom: {type: string, description: Dimension hierarchies only; with accountTo, limits the rows to this account range}
         accountTo: {type: string}
+    TreeRevision:
+      type: object
+      required: [revision, updatedBy, createdAt]
+      properties:
+        revision: {type: integer, minimum: 1}
+        updatedBy: {type: string}
+        createdAt: {type: string, format: date-time}
+    RunTree:
+      type: object
+      required: [code, unit, revision, currentRevision, tree]
+      properties:
+        code: {type: string, description: Tree code}
+        unit: {type: string, description: The run's unit; empty for the whole tree}
+        revision: {type: integer, minimum: 1, description: Tree revision the run used}
+        currentRevision: {type: integer, minimum: 1, description: Tree revision now; larger than revision when the tree changed after the run}
+        tree: {$ref: '#/components/schemas/Tree'}
     Tree:
       type: object
       required: [code, name, attribute, units]

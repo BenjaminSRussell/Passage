@@ -68,6 +68,17 @@ func ValidateCommissionRule(r CommissionRule) map[string]string {
 	return fields
 }
 
+// RepIDRule describes a valid rep id for a validation message.
+const RepIDRule = "must be 1 to 64 characters, without / or : and not . or .."
+
+// ValidRepID reports whether id can be a rep id. The rep id is a path segment of the commission
+// statement (/v1/pricing/commission/reps/{repId}/statement) and the gateway matches that
+// segment with a glob whose * stops at / and :, and a client normalises . and .. away, so a rep
+// id holding any of them could never be addressed.
+func ValidRepID(id string) bool {
+	return strings.TrimSpace(id) != "" && len(id) <= 64 && !strings.ContainsAny(id, "/:") && id != "." && id != ".."
+}
+
 // ValidateShares checks a sales group's rep shares (FR-26.18, BR-26.12): one to MaxReps reps,
 // each rep once with a share above zero, and shares that sum to exactly 100 percent.
 // The order of the reps matters: the first rep takes the rounding residual.
@@ -86,8 +97,8 @@ func ValidateShares(shares []Share) map[string]string {
 	for i, s := range shares {
 		key := "reps[" + strconv.Itoa(i) + "]"
 		switch {
-		case strings.TrimSpace(s.RepID) == "" || len(s.RepID) > 64:
-			fields[key+".repId"] = "must be 1 to 64 characters"
+		case !ValidRepID(s.RepID):
+			fields[key+".repId"] = RepIDRule
 		case seen[s.RepID]:
 			fields[key+".repId"] = "appears more than once"
 		}

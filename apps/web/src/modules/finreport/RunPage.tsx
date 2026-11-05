@@ -18,6 +18,7 @@ import {
 import { checkDrill, displayAmount } from "./drill";
 import { CURRENCY_TYPE_LABELS, periodLabel } from "./format";
 import { LinesPanel } from "./LinesPanel";
+import { RunTreeCard } from "./TreeRevisions";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -157,6 +158,7 @@ export function RunPage() {
         getRowKey={(row) => row.code}
         empty={{ title: "This statement has no rows" }}
       />
+      {run.tree ? <RunTreeCard runId={run.id} /> : null}
       {selected && selectedRow && selectedCol ? (
         <DrillPanel
           key={`${selected.row}/${selected.column}`}

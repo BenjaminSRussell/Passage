@@ -20,6 +20,7 @@ import {
 import { DEFINITION_CODE } from "./format";
 import { ColumnsEditor, RowsEditor } from "./PartEditors";
 import { TreeUnitsEditor } from "./TreeEditor";
+import { TreeRevisionsCard } from "./TreeRevisions";
 import { cleanColumn, cleanRow } from "./DefinitionEditorPage";
 import styles from "./pages.module.css";
 
@@ -34,6 +35,8 @@ interface PartKind<T extends { code: string; name: string }> {
   /** A new part may start from something else, such as a template named in the query string. */
   start?(search: URLSearchParams, signal: AbortSignal): Promise<T | null>;
   body(part: T, change: (patch: Partial<T>) => void): ReactElement;
+  /** History of the part, shown below the form of a saved part; re-keyed by the revision so a save reloads it. */
+  revisions?(code: string, etag: string | null): ReactElement;
   description: string;
 }
 
@@ -91,6 +94,7 @@ const treeKind: PartKind<Tree> = {
     units: t.units.map((u) => ({ code: u.code.trim(), name: u.name, ...(u.parent ? { parent: u.parent } : {}), ...(u.values && u.values.length > 0 ? { values: u.values } : {}) })),
   }),
   body: (part, change) => <TreeUnitsEditor tree={part} onChange={change} />,
+  revisions: (code, etag) => <TreeRevisionsCard key={`${code}/${etag}`} code={code} />,
   description: "Reporting units over the values of one dimension attribute, with roll-up. A statement run can be limited to one unit.",
 };
 
@@ -222,6 +226,7 @@ function PartEditor<T extends { code: string; name: string; description?: string
           {dirty ? <span className={styles.note}>Unsaved changes.</span> : null}
         </div>
       </form>
+      {!isNew && kind.revisions ? kind.revisions(current.code, etag) : null}
       {notice ? (
         <Alert tone="success" live="status">
           {notice}

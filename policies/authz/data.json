@@ -262,7 +262,8 @@
       {"resource": "/v1/reporting/runs/*/cells/*/*/balances", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/outputs/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/lag", "methods": ["GET"]},
-      {"resource": "/v1/reporting/runs/*/definition", "methods": ["GET"]}
+      {"resource": "/v1/reporting/runs/*/definition", "methods": ["GET"]},
+      {"resource": "/v1/reporting/runs/*/tree", "methods": ["GET"]}
     ]},
     "reporting.definition.maintain": {"permissions": [
       {"resource": "/v1/reporting/definitions/*", "methods": ["PUT"]},
@@ -284,7 +285,9 @@
       {"resource": "/v1/reporting/column-set-templates", "methods": ["GET"]},
       {"resource": "/v1/reporting/definitions:compose", "methods": ["POST"]},
       {"resource": "/v1/reporting/trees", "methods": ["GET"]},
-      {"resource": "/v1/reporting/trees/*", "methods": ["GET", "PUT"]}
+      {"resource": "/v1/reporting/trees/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/reporting/trees/*/revisions", "methods": ["GET"]},
+      {"resource": "/v1/reporting/trees/*/revisions/*", "methods": ["GET"]}
     ]},
     "reporting.statement.run": {"permissions": [
       {"resource": "/v1/reporting/runs", "methods": ["POST"]},
@@ -2502,7 +2505,8 @@
       {"resource": "/v1/pricing/commission/sales-groups", "methods": ["GET"]},
       {"resource": "/v1/pricing/commission/sales-groups/*", "methods": ["GET"]},
       {"resource": "/v1/pricing/commission/settlement-export", "methods": ["GET"]},
-      {"resource": "/v1/pricing/commission/transactions", "methods": ["GET"]}
+      {"resource": "/v1/pricing/commission/transactions", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commission/reps/*/statement", "methods": ["GET"]}
     ]},
     "pricing.fund.maintain": {"permissions": [
       {"resource": "/v1/pricing/funds", "methods": ["GET", "POST"]},
@@ -2981,7 +2985,9 @@
       {"resource": "/v1/sales/quotations/*:convert", "methods": ["POST"]},
       {"resource": "/v1/sales/quotations/*:lose", "methods": ["POST"]},
       {"resource": "/v1/sales/quotations/*:send", "methods": ["POST"]},
-      {"resource": "/v1/sales/quotations:expire", "methods": ["POST"]}
+      {"resource": "/v1/sales/quotations:expire", "methods": ["POST"]},
+      {"resource": "/v1/sales/quotations/*:cancel", "methods": ["POST"]},
+      {"resource": "/v1/sales/quotations/*", "methods": ["PATCH"]}
     ]},
     "scheduling.campaign.write": {"permissions": [
       {"resource": "/v1/scheduling/campaigns", "methods": ["POST"]},
@@ -3035,12 +3041,15 @@
       {"resource": "/v1/scheduling/operations/*", "methods": ["GET"]},
       {"resource": "/v1/scheduling/parameters", "methods": ["GET"]},
       {"resource": "/v1/scheduling/dispatch-list", "methods": ["GET"]},
-      {"resource": "/v1/scheduling/runs/*/compare", "methods": ["GET"]}
+      {"resource": "/v1/scheduling/runs/*/compare", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/bottlenecks", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/bottlenecks/*", "methods": ["GET"]}
     ]},
     "scheduling.run": {"permissions": [
       {"resource": "/v1/scheduling/runs", "methods": ["POST"]},
       {"resource": "/v1/scheduling/orders/*:schedule", "methods": ["POST"]},
-      {"resource": "/v1/scheduling/runs/*:rollback", "methods": ["POST"]}
+      {"resource": "/v1/scheduling/runs/*:rollback", "methods": ["POST"]},
+      {"resource": "/v1/scheduling/capacity-load:refresh", "methods": ["POST"]}
     ]},
     "scheduling.schedule.write": {"permissions": [
       {"resource": "/v1/scheduling/campaigns/*:sequence", "methods": ["POST"]},
