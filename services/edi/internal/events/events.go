@@ -10,8 +10,9 @@ const Context = "edi"
 // interchange is recorded (FR-35.4 consumers: purchasing, sales, tms).
 var MessageReceived = events.Type(Context, "message", "received", 1)
 
-// MessageAcked is published once per outbound transaction when the partner's
-// 997 answering it is matched (BR-35.5; consumers: analytics, the monitor).
+// MessageAcked is published once per outbound transaction (or EDIFACT
+// message) when the partner's 997 (or CONTRL) answering it is matched
+// (BR-35.5; consumers: analytics, the monitor).
 var MessageAcked = events.Type(Context, "message", "acked", 1)
 
 // MessageFailed is published when an inbound transaction fails mapping or a
@@ -89,7 +90,9 @@ type MessageReceivedData struct {
 
 // MessageAckedData is the payload of MessageAcked. AckStatus is ACCEPTED,
 // ACCEPTED_WITH_ERRORS or REJECTED from the partner's AK5 for this transaction
-// (or AK9 when the 997 acknowledges the whole group without AK2 loops).
+// (or AK9 when the 997 acknowledges the whole group without AK2 loops); for
+// an EDIFACT message, from the partner's CONTRL (REJECTED for UCI 4 or a UCM
+// 4 naming the message, ACCEPTED otherwise).
 type MessageAckedData struct {
 	MessageID      string `json:"message_id"`
 	InterchangeID  string `json:"interchange_id"`

@@ -44,6 +44,10 @@ spec:
               value: {{ .Values.isaSender.qualifier | quote }}
             - name: EDI_ISA_ID
               value: {{ .Values.isaSender.id | quote }}
+            - name: EDI_EDIFACT_ID
+              value: {{ .Values.edifactSender.id | quote }}
+            - name: EDI_EDIFACT_QUALIFIER
+              value: {{ .Values.edifactSender.qualifier | quote }}
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_NAME
               value: edi

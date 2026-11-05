@@ -5,6 +5,8 @@ replicaCount: 2
 dupWindowDays: 30
 # Our ISA06/GS02 identity on outbound 855/856/810 interchanges.
 isaSender: { qualifier: ZZ, id: PASSAGE }
+# Our UNB S002 identity on outbound EDIFACT (DESADV, INVOIC, ORDERS); the CONTRLs we send answer from the recipient the partner addressed.
+edifactSender: { id: PASSAGE, qualifier: ZZZ }
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 500m, memory: 256Mi }

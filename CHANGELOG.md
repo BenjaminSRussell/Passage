@@ -22,6 +22,17 @@ release may change public APIs.
   fulfillment by code. Receiving arrival and direct receipt lines without a purchase order line take `siteId` and
   `warehouseId`, carried on `receipt.posted`, so inventory books them instead of parking them.
 
+- Outbound EDIFACT with CONTRL matching (#483): edi's `POST /edi/v1/partners/{id}/outbound` builds ORDERS, DESADV
+  (held to the 856 rules) and INVOIC (held to the 810 rules), and `outbound:from-source` builds DESADV from the
+  fulfillment shipment and INVOIC from the billing invoice under the existing read grant. Each goes in a UNOC syntax
+  3 interchange from our UNB identity (new `EDI_EDIFACT_ID`/`EDI_EDIFACT_QUALIFIER`, default PASSAGE/ZZZ, chart
+  `edifactSender`) to the partner's `edifactId` (409 EDI-0017 without one), asks for a CONTRL, takes UNB 0020 from the
+  partner's gap-free EDIFACT counter (shared with the CONTRLs we send it), and is queued over the partner's AS2 or
+  SFTP transport like X12. A CONTRL from the partner is now matched by UCI 0020 to that interchange the way a 997 is
+  matched: messages become ACKED, or FAILED for UCI 4 or a UCM 4 naming them, the interchange takes the CONTRL status
+  and `acked_at`, and `dev.passage.edi.message.acked.v1` is published per message (its `transaction_set` and
+  `control_number` now also carry EDIFACT values); an unmatched CONTRL stays FAILED with EDI-0161. The outbound result
+  gains `standard` and `edifact` (`x12` is omitted for EDIFACT).
 - Inbound EDIFACT over the transports, with CONTRL (#483): the edi receipt tells X12 (ISA) from EDIFACT (UNA/UNB)
   by the first segment, so the AS2 listener, the SFTP poller and the new `POST /edi/v1/inbound/edifact` take EDIFACT
   interchanges. They are read with UNG/UNE functional groups and every count and reference checked; the UNB sender

@@ -1,6 +1,7 @@
 // Command edi runs the EDI engine HTTP API: partner profiles and transports,
 // the map tester, inbound X12 receipt with 997 generation and 997 matching,
-// outbound 855/856/810/820/214 generation and the interchange list; the AS2
+// outbound 855/856/810/820/214 and EDIFACT ORDERS/DESADV/INVOIC generation
+// with 997 and CONTRL matching, and the interchange list; the AS2
 // listener for partners (EDI_AS2_ADDR); and, with EDI_TRANSPORT_WORKERS=true,
 // the delivery dispatcher and the SFTP poller.
 package main
@@ -61,6 +62,15 @@ func run() error {
 	if fields := probe.Validate(); len(fields) > 0 {
 		return errors.New("EDI_ISA_QUALIFIER must be two upper-case letters or digits and EDI_ISA_ID 1 to 15 letters or digits")
 	}
+	// Our UNB S002 identity on outbound EDIFACT, held to the partner rules.
+	edifactSender := api.DefaultEdifactSender
+	if id, q := os.Getenv("EDI_EDIFACT_ID"), os.Getenv("EDI_EDIFACT_QUALIFIER"); id != "" || q != "" {
+		edifactSender = domain.EdifactParty{ID: id, Qualifier: q}
+	}
+	probe.EDIFACT = &domain.EdifactIdentity{ID: edifactSender.ID, Qualifier: edifactSender.Qualifier}
+	if fields := probe.Validate(); len(fields) > 0 {
+		return errors.New("EDI_EDIFACT_ID must be 1 to 35 letters, digits, '.', '_' or '-' and EDI_EDIFACT_QUALIFIER 1 to 4 letters or digits (or empty)")
+	}
 	pool, err := dbx.Connect(ctx, url)
 	if err != nil {
 		return err
@@ -81,7 +91,7 @@ func run() error {
 	}
 	st := store.New(pool, dupDays)
 	a := api.New(st)
-	a.Sender = sender
+	a.Sender, a.EdifactSender = sender, edifactSender
 	a.AllowBodyOutbound = os.Getenv("EDI_ALLOW_BODY_OUTBOUND") == "true"
 	fulfillmentURL, billingURL, salesURL := os.Getenv("EDI_FULFILLMENT_URL"), os.Getenv("EDI_BILLING_URL"), os.Getenv("EDI_SALES_URL")
 	if signer != nil && fulfillmentURL != "" && billingURL != "" && salesURL != "" {

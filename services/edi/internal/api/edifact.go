@@ -221,22 +221,22 @@ func mapEdifactMessage(m domain.EdifactMessage) (txResult, domain.EdifactOutcome
 	return res, eo, nil
 }
 
-// contrlMessage records a received CONTRL. Outbound EDIFACT interchanges are
-// not generated yet, so no CONTRL can answer one of ours: it is stored with
-// its reading and FAILED, like a 997 that matches nothing.
+// contrlMessage reads one received CONTRL, the EDIFACT counterpart of
+// ackMessage: a CONTRL that cannot be read is recorded FAILED with the syntax
+// error; a readable one carries its reading for the store to match to our
+// outbound EDIFACT interchange with its UCI reference.
 func contrlMessage(m domain.EdifactMessage) (store.Message, error) {
-	msg := store.Message{ID: ids.New(), TransactionSet: m.Type, STControl: m.Ref, Status: "FAILED"}
+	msg := store.Message{ID: ids.New(), TransactionSet: m.Type, STControl: m.Ref, Status: "RECEIVED"}
 	ack, err := domain.ParseCONTRL(m)
 	if err != nil {
-		msg.Error = CodeSyntax + ": " + err.Error()
+		msg.Status, msg.Error = "FAILED", CodeSyntax+": "+err.Error()
 		return msg, nil
 	}
 	canonical, err := json.Marshal(ack)
 	if err != nil {
 		return store.Message{}, err
 	}
-	msg.Canonical = canonical
-	msg.Error = fmt.Sprintf("%s: no outbound EDIFACT interchange %s to this partner answers this CONTRL", domain.CodeUnmatchedAck, ack.InterchangeRef)
+	msg.Contrl, msg.Canonical = &ack, canonical
 	return msg, nil
 }
 

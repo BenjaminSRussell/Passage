@@ -51,6 +51,7 @@ const (
 	CodeNoTradeProfile   = "EDI-0012"
 	CodeSourceNotFinal   = "EDI-0013"
 	CodeSourceForbidden  = "EDI-0014"
+	CodeNoEdifactID      = "EDI-0017"
 )
 
 // Interchange list page size: default and maximum.
@@ -66,13 +67,19 @@ const maxInbound = 4 << 20
 // EDI_ISA_QUALIFIER and EDI_ISA_ID are not set.
 var DefaultSender = domain.Party{Qualifier: "ZZ", ID: "PASSAGE"}
 
+// DefaultEdifactSender is our UNB S002 identity on outbound EDIFACT
+// interchanges when EDI_EDIFACT_ID and EDI_EDIFACT_QUALIFIER are not set.
+var DefaultEdifactSender = domain.EdifactParty{ID: "PASSAGE", Qualifier: "ZZZ"}
+
 // API holds the store used by the handlers that persist state. Sender is our
-// ISA06/GS02 identity on outbound documents.
+// ISA06/GS02 identity on outbound documents, EdifactSender our UNB S002
+// identity on outbound EDIFACT.
 type API struct {
-	store   *store.Store
-	now     func() time.Time
-	Sender  domain.Party
-	Sources Sources
+	store         *store.Store
+	now           func() time.Time
+	Sender        domain.Party
+	EdifactSender domain.EdifactParty
+	Sources       Sources
 	// AllowBodyOutbound mounts POST /partners/{id}/outbound, which takes the
 	// canonical document from the request body. Tests and development only.
 	AllowBodyOutbound bool
@@ -94,7 +101,7 @@ type API struct {
 // New returns the API. The store may be nil for routes that do not persist
 // (maps:test), which lets those routes be tested without a database.
 func New(s *store.Store) *API {
-	return &API{store: s, now: time.Now, Sender: DefaultSender}
+	return &API{store: s, now: time.Now, Sender: DefaultSender, EdifactSender: DefaultEdifactSender}
 }
 
 // Routes returns the HTTP handler with kernel middleware and every edi route.
@@ -621,9 +628,10 @@ type outboundRequest struct {
 	Document       json.RawMessage `json:"document"`
 }
 
-// createOutbound builds an 855, 856, 810, 820 or 214 from a caller-supplied canonical
-// document. It is mounted only when AllowBodyOutbound is set (tests and
-// development); production documents come from outboundFromSource.
+// createOutbound builds an 855, 856, 810, 820 or 214, or an EDIFACT ORDERS,
+// DESADV or INVOIC, from a caller-supplied canonical document. It is mounted
+// only when AllowBodyOutbound is set (tests and development); production
+// documents come from outboundFromSource.
 func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 255 {
@@ -643,18 +651,34 @@ func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 	a.sendOutbound(w, r, key, id, req.TransactionSet, req.Document)
 }
 
-// sendOutbound builds the transaction for a canonical document, wraps it in an
-// interchange to the partner with the next gap-free control number and records
-// it with ack_status PENDING until the partner's 997 is matched. When the
-// partner has an AS2 or SFTP transport the interchange is queued for delivery
-// in the same transaction (the response carries the delivery); the message
-// stays MAPPED until the transport confirms receipt and then becomes SENT.
+// sendOutbound builds the transaction (or, for ORDERS, DESADV and INVOIC,
+// the EDIFACT message) for a canonical document, wraps it in an interchange
+// to the partner with the next gap-free control number of the standard and
+// records it with ack_status PENDING until the partner's 997 or CONTRL is
+// matched. An EDIFACT document needs the partner's UNB identity (409
+// EDI-0017); it goes from EdifactSender in a UNOC syntax 3 interchange that
+// requests a CONTRL. When the partner has an AS2 or SFTP transport the
+// interchange is queued for delivery in the same transaction (the response
+// carries the delivery); the message stays MAPPED until the transport
+// confirms receipt and then becomes SENT.
 func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerID, setID string, document json.RawMessage) {
-	if domain.FunctionalIDOf(setID) == "" {
-		httpx.Fail(w, r, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ")}))
+	edifact := domain.IsEdifactOutbound(setID)
+	if domain.FunctionalIDOf(setID) == "" && !edifact {
+		httpx.Fail(w, r, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ") +
+			" or " + strings.Join(domain.EdifactOutboundTypes, ", ")}))
 		return
 	}
-	tr, canonical, err := domain.BuildOutbound(setID, document)
+	var (
+		tr        domain.Transaction
+		msg       domain.EdifactMessage
+		canonical []byte
+		err       error
+	)
+	if edifact {
+		msg, canonical, err = domain.BuildEdifactOutbound(setID, document)
+	} else {
+		tr, canonical, err = domain.BuildOutbound(setID, document)
+	}
 	if errors.Is(err, domain.ErrOutbound) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
 		return
@@ -676,30 +700,43 @@ func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerI
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodePartnerInactive, "partner is inactive; no documents can be sent to it"))
 		return
 	}
-	usage := "P"
-	if partner.Environment == "TEST" {
-		usage = "T"
-	}
-	to := domain.Party{Qualifier: partner.ISAQualifier, ID: partner.ISAID}
 	at := a.now()
-	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+setID+"\x00"), canonical...))
-	res, created, err := a.store.CreateOutbound(r.Context(), key, hex.EncodeToString(sum[:]), store.Outbound{
-		PartnerID:      partner.ID,
-		TransactionSet: setID,
-		Canonical:      canonical,
-		Build: func(control int64) (string, error) {
+	out := store.Outbound{PartnerID: partner.ID, TransactionSet: setID, Canonical: canonical}
+	if edifact {
+		if partner.Edifact() == nil {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNoEdifactID, "partner has no EDIFACT identity (edifactId); "+setID+" cannot be addressed to it"))
+			return
+		}
+		to := domain.EdifactParty{ID: partner.EdifactID, Qualifier: partner.EdifactQualifier}
+		out.Standard = domain.SyntaxEdifact
+		out.Build = func(control int64) (string, error) {
+			ic, err := domain.EdifactOutbound([]domain.EdifactMessage{msg}, a.EdifactSender, to, control, partner.Environment == "TEST", at)
+			if err != nil {
+				return "", err
+			}
+			return domain.SerializeEdifact(ic, false)
+		}
+	} else {
+		usage := "P"
+		if partner.Environment == "TEST" {
+			usage = "T"
+		}
+		to := domain.Party{Qualifier: partner.ISAQualifier, ID: partner.ISAID}
+		out.Build = func(control int64) (string, error) {
 			ic, err := domain.OutboundEnvelope(tr, a.Sender, to, usage, control, at)
 			if err != nil {
 				return "", err
 			}
 			return domain.Serialize(ic)
-		},
-	})
+		}
+	}
+	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+setID+"\x00"), canonical...))
+	res, created, err := a.store.CreateOutbound(r.Context(), key, hex.EncodeToString(sum[:]), out)
 	if errors.Is(err, store.ErrIdempotencyReuse) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body"))
 		return
 	}
-	if errors.Is(err, domain.ErrSyntax) {
+	if errors.Is(err, domain.ErrSyntax) || errors.Is(err, domain.ErrEdifactSyntax) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
 		return
 	}

@@ -82,17 +82,22 @@ paths:
   /edi/v1/partners/{id}/outbound:
     post:
       operationId: createOutbound
-      summary: Generate an outbound 855, 856, 810, 820 or 214 for the partner
+      summary: Generate an outbound 855, 856, 810, 820 or 214, or an EDIFACT ORDERS, DESADV or INVOIC, for the partner
       description: >
         Builds the transaction from its canonical document (BR-35.2 856 S/O/P/I with SSCC-18,
         BR-35.3 810, 855 acknowledgment, 820 remittance whose items add up to the payment, 214
         shipment status), wraps it in an X12 00401 interchange from our identity
         (EDI_ISA_QUALIFIER/EDI_ISA_ID) to the partner with the next gap-free control number
         (ISA13 and GS06, BR-35.5) and records it with ackStatus PENDING until the partner's 997 is
-        matched. The message stays MAPPED: AS2/SFTP transmission is not built yet. A document that
-        breaks a mapping rule is 422 EDI-0007. Served only when EDI_ALLOW_BODY_OUTBOUND=true
-        (tests and development); production generates from the owning services through
-        outbound:from-source.
+        matched. ORDERS, DESADV (held to the 856 rules) and INVOIC (held to the 810 rules) are
+        written as EDIFACT D.96A in a UNOC syntax 3 interchange from our UNB identity
+        (EDI_EDIFACT_ID/EDI_EDIFACT_QUALIFIER) to the partner's edifactId, asking for a CONTRL
+        (UNB 0031 = 1), with the next number of the partner's gap-free EDIFACT counter (the one
+        the CONTRLs we send it use) as UNB 0020; the partner's CONTRL is matched to it. With an
+        AS2 or SFTP transport the interchange is queued for delivery (delivery); the message
+        becomes SENT when the transport confirms receipt. A document that breaks a mapping rule
+        is 422 EDI-0007. Served only when EDI_ALLOW_BODY_OUTBOUND=true (tests and development);
+        production generates from the owning services through outbound:from-source.
       x-passage-duty: edi.operate
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -117,7 +122,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
-          description: EDI-0008 — the partner is inactive
+          description: EDI-0008 — the partner is inactive; EDI-0017 — an EDIFACT message for a partner without edifactId
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -213,8 +218,10 @@ paths:
   /edi/v1/partners/{id}/outbound:from-source:
     post:
       operationId: outboundFromSource
-      summary: Generate the 856 from a fulfillment shipment or the 810 from a billing invoice
+      summary: Generate the 856 or DESADV from a fulfillment shipment, or the 810 or INVOIC from a billing invoice
       description: >
+        DESADV and INVOIC are the EDIFACT counterparts built from the same canonical ASN and
+        invoice (see createOutbound for the envelope); they need the partner's edifactId.
         Reads the shipment (with its sales order for the customer PO) or the invoice from its owning
         service under a service grant limited to the read duties fulfillment.shipment.read,
         billing.invoice.read and sales.order.lookup, for the legal entity of the partner's trade
@@ -249,7 +256,7 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
-          description: EDI-0008 partner inactive, EDI-0012 no trade profile, EDI-0013 source not final
+          description: EDI-0008 partner inactive, EDI-0012 no trade profile, EDI-0013 source not final, EDI-0017 DESADV or INVOIC for a partner without edifactId
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -738,8 +745,12 @@ paths:
         are 400. A CONTRL is returned (and queued over the partner's transport) when the partner's
         edifactContrl is ALWAYS, or REQUESTED and UNB 0031 is 1: UCI 7 when a message is
         accepted, UCI 4 when none is, UCM 4 with UCS and UCD for each rejected message, UCF per
-        group with a rejected message. Received CONTRLs are recorded FAILED with EDI-0161 (no
-        outbound EDIFACT exists to match) and never acknowledged.
+        group with a rejected message. A CONTRL from the partner is matched by its UCI 0020 to our
+        outbound EDIFACT interchange with that reference, as a 997 is by AK102: the messages it
+        answers become ACKED, or FAILED when the UCI is 4 or a UCM 4 names them, the interchange
+        takes the CONTRL's status and acked_at, and dev.passage.edi.message.acked.v1 is published
+        per answered message. The CONTRL is POSTED, or FAILED with EDI-0161 when it answers
+        nothing; CONTRLs are never acknowledged.
       x-passage-duty: edi.operate
       parameters:
         - name: environment
@@ -1290,31 +1301,37 @@ components:
       additionalProperties: false
       required: [transactionSet, sourceId]
       properties:
-        transactionSet: { type: string, enum: ['856', '810'] }
-        sourceId: { type: string, format: uuid, description: shipment id for 856, invoice id for 810 }
+        transactionSet: { type: string, enum: ['856', '810', DESADV, INVOIC] }
+        sourceId: { type: string, format: uuid, description: shipment id for 856 and DESADV, invoice id for 810 and INVOIC }
     OutboundRequest:
       type: object
       additionalProperties: false
       required: [transactionSet, document]
       properties:
-        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214'] }
+        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214', ORDERS, DESADV, INVOIC] }
         document:
-          description: The canonical document for the set; unknown fields are refused. Decimals are strings.
+          description: >
+            The canonical document for the set; unknown fields are refused. Decimals are strings.
+            DESADV takes the ASN, INVOIC the Invoice and ORDERS the canonical order an inbound 850
+            maps to (purpose, orderType, poNumber, poDate, ship-to, lines).
           oneOf:
             - $ref: '#/components/schemas/Ack855'
             - $ref: '#/components/schemas/ASN'
             - $ref: '#/components/schemas/Invoice'
             - $ref: '#/components/schemas/Remittance'
             - $ref: '#/components/schemas/ShipmentStatus'
+            - { type: object, description: Canonical order (ORDERS) }
     OutboundResult:
       type: object
-      required: [interchangeId, messageId, transactionSet, controlNumber, x12]
+      required: [interchangeId, messageId, transactionSet, controlNumber]
       properties:
         interchangeId: { type: string, format: uuid }
         messageId: { type: string, format: uuid }
-        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214'] }
-        controlNumber: { type: string, description: ISA13, nine digits }
-        x12: { type: string, description: The serialized interchange }
+        standard: { type: string, enum: [X12, EDIFACT] }
+        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214', ORDERS, DESADV, INVOIC] }
+        controlNumber: { type: string, description: 'ISA13, nine digits; for EDIFACT the UNB 0020 reference' }
+        x12: { type: string, description: The serialized X12 interchange }
+        edifact: { type: string, description: The serialized EDIFACT interchange }
         delivery:
           description: The queued delivery when the partner has an AS2 or SFTP transport in the caller's legal entities
           allOf: [{ $ref: '#/components/schemas/Delivery' }]

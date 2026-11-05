@@ -286,9 +286,9 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   accepted-with-errors as for the 850), DESADV is held to the 856 rules and INVOIC to the 810 rules;
   each message is stored with its canonical document under the UNH type and reference and gets
   `dev.passage.edi.message.received.v1` (standard EDIFACT), failed ones also `message.failed`. Other
-  message types are FAILED (EDI-0006). A received CONTRL is read, recorded FAILED with EDI-0161
-  (there are no outbound EDIFACT interchanges to match yet) and never acknowledged. Reprocess reads
-  stored EDIFACT and re-maps by type and UNH reference.
+  message types are FAILED (EDI-0006). A received CONTRL is read, matched to our outbound EDIFACT
+  interchange (slice 9) and never acknowledged. Reprocess reads stored EDIFACT and re-maps by type
+  and UNH reference.
 - **CONTRL answers**: a partner's `edifactContrl` is REQUESTED (default: when UNB 0031 = 1), ALWAYS
   or NEVER. `BuildCONTRL` goes back from the recipient to the sender in the sender's syntax and
   service characters, on the partner's own gap-free EDIFACT counter (`control_number_counter`
@@ -316,6 +316,29 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   for payloads over 4 MiB, for an ISA or UNB that cannot be read, or for an X12 interchange without
   a group other than 997s.
 
+## Slice 9 scope: #483 follow-ups
+
+- **Outbound EDIFACT** (`internal/domain/edifact_outbound.go`): `POST /partners/{id}/outbound`
+  takes `ORDERS`, `DESADV` and `INVOIC` next to the X12 sets, and `outbound:from-source` takes
+  `DESADV` (from the fulfillment shipment, like the 856) and `INVOIC` (from the billing invoice,
+  like the 810) under the same service grant. `BuildEdifactOutbound` holds DESADV to the 856 rules
+  and INVOIC to the 810 rules; the message goes in a UNOC syntax 3 interchange (UNA, default service
+  characters, UNB 0035 test indicator for a TEST partner) from our UNB identity (`EDI_EDIFACT_ID`,
+  `EDI_EDIFACT_QUALIFIER`, default PASSAGE/ZZZ, chart `edifactSender`) to the partner's
+  `edifactId`/`edifactQualifier` (409 EDI-0017 when it has none), asks for a CONTRL (UNB 0031 = 1)
+  and takes UNB 0020 from the partner's gap-free EDIFACT counter, the one the CONTRLs we send it
+  use. It is stored as an OUT interchange (standard EDIFACT, version UNOC:3, UNH reference 1),
+  returned as `edifact` with `standard`, and queued over the partner's AS2 or SFTP transport like
+  X12 (`application/edifact`, `<type>_<ref>_<id>.edi`), becoming SENT on the MDN or upload.
+- **CONTRL matching**: a CONTRL from the partner is matched by its UCI 0020 to our outbound EDIFACT
+  interchange with that reference, the way a 997 is matched by AK102 (`store.matchContrl`, sharing
+  `applyAnswers` with the 997): each message still MAPPED or SENT becomes ACKED, or FAILED when the
+  UCI is 4 or a UCM 4 names it (the error says which, with the 0085 code); UCI 8 (received, nothing
+  checked) acknowledges; the interchange takes the CONTRL's status (`ContrlAck.Status`) and
+  `acked_at` unless an earlier CONTRL answered it; `dev.passage.edi.message.acked.v1` is published
+  per answered message. The CONTRL is POSTED (with notes for UCMs naming no message), or FAILED with
+  EDI-0161 when it answers nothing. The SLA dashboard counts EDIFACT acknowledgments like 997s.
+
 ## Wave 35 proof
 
 - **Partner simulator round trip** (`internal/api/partnersim_test.go`, AC-35.1): the demo
@@ -338,7 +361,7 @@ Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
-internal/domain/    X12 codec, 997 out and in (and the negative 997 of a refused interchange), 850 mapping, 855/856/810/820/214 builders, 820/214 maps, EDIFACT codec with groups, ORDERS/DESADV/INVOIC and CONTRL (accept, reject, refusal), SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
+internal/domain/    X12 codec, 997 out and in (and the negative 997 of a refused interchange), 850 mapping, 855/856/810/820/214 builders, 820/214 maps, EDIFACT codec with groups, ORDERS/DESADV/INVOIC (in and out) and CONTRL (accept, reject, refusal, matching our outbound), SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
 internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP and loopback senders; transporttest has the in-process partner endpoints
@@ -364,11 +387,11 @@ testdata/as2/       a third-party MDN
 | PUT | /edi/v1/partners/{id}/trade-profile | edi.admin | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
 | PUT | /edi/v1/partners/{id}/transport | edi.admin | Transport API, AS2 or SFTP with secret references; 409 EDI-0012 without a trade profile in the caller's entities |
 | GET | /edi/v1/partners/{id}/transport | edi.admin | The transport, the AS2 inbound and MDN URLs, the partner certificate fingerprint and whether each secret reference resolves |
-| POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810","sourceId"}`; 201 with the X12, repeat 200; 409 EDI-0012 without a profile, 503 EDI-0010 without source services |
-| POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
+| POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810"\|"DESADV"\|"INVOIC","sourceId"}`; 201 with the X12 or EDIFACT, repeat 200; 409 EDI-0012 without a profile, EDI-0017 EDIFACT without `edifactId`; 503 EDI-0010 without source services |
+| POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"855"\|"856"\|"810"\|"820"\|"214"\|"ORDERS"\|"DESADV"\|"INVOIC","document":{...}}`; requires `Idempotency-Key`; 201 with the X12 or EDIFACT, replay 200 |
 | POST | /edi/v1/maps:test | edi.admin | Body `{"raw": "<X12>"}`; nothing is stored |
 | POST | /edi/v1/inbound/x12?environment=TEST\|PROD | edi.operate | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
-| POST | /edi/v1/inbound/edifact?environment=TEST\|PROD | edi.operate | `text/plain` EDIFACT interchange; returns 201 with the CONTRL text when the partner gets one |
+| POST | /edi/v1/inbound/edifact?environment=TEST\|PROD | edi.operate | `text/plain` EDIFACT interchange; returns 201 with the CONTRL text when the partner gets one; a received CONTRL is matched to our outbound EDIFACT |
 | GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | edi.operate | `{items}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/interchanges/{id} | edi.operate | Messages with canonical documents (party names masked without `edi.pii.view`), the 997 or CONTRL, and `refusal` for a refused interchange |
 | GET | /edi/v1/interchanges/{id}/payload | edi.operate | Raw payload as a segment tree; PII masked without `edi.pii.view`; X12 only (422 EDI-0006 for EDIFACT) |
@@ -401,6 +424,8 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/edi
 Configuration: `DATABASE_URL` (required), `HTTP_ADDR` (default `:8080`),
 `MIGRATE_ON_START` (dev only), `EDI_DUP_WINDOW_DAYS` (default 30), `EDI_ISA_QUALIFIER`
 and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASSAGE),
+`EDI_EDIFACT_ID` and `EDI_EDIFACT_QUALIFIER` (our UNB S002 identity on outbound EDIFACT, default
+PASSAGE/ZZZ; the qualifier may be empty),
 `PASSAGE_SERVICE_NAME=edi` with `PASSAGE_SERVICE_SIGNING_KEY` or `_FILE` (and `PASSAGE_SERVICE_KEY_ID`),
 `EDI_FULFILLMENT_URL`, `EDI_BILLING_URL`, `EDI_SALES_URL` (without a signing key the from-source
 or any source URL is unset the from-source route answers 503), `EDI_ALLOW_BODY_OUTBOUND` (off in the binary; the chart
@@ -442,8 +467,9 @@ signing uses the standard library only.
 | EDI-0009 | 409 | Only inbound interchanges are reprocessed (an outbound one is resent) |
 | EDI-0015 | 409 | Nothing to resend: not outbound, its last delivery is not FAILED or REJECTED, or the partner has no AS2 or SFTP transport in the caller's entities |
 | EDI-0016 | 503 | No secret directory is configured (`EDI_SECRETS_DIR`), so AS2 and SFTP transports cannot be saved |
+| EDI-0017 | 409 | An EDIFACT ORDERS, DESADV or INVOIC for a partner without an EDIFACT identity (`edifactId`) |
 | EDI-0160 | (in 200 map result) | A required 850 segment or element is missing or invalid; rejected |
-| EDI-0161 | (message error) | A received 997 answers no outbound interchange of the partner, or its AK101 does not match; every received CONTRL (no outbound EDIFACT exists yet) |
+| EDI-0161 | (message error) | A received 997 answers no outbound interchange of the partner, or its AK101 does not match; a received CONTRL answers no outbound EDIFACT interchange of the partner |
 | idempotency_key_reuse | 422 | `Idempotency-Key` already used with a different request body |
 | EDI-0101 | 422 | Interchange sender (ISA05/ISA06 or UNB S002) is not configured for any partner in the environment, or is not the transport's partner |
 | EDI-0102 | 409 | Duplicate ISA13 or UNB 0020 inside the duplicate window (TA1 025 semantics; no TA1 interchange is sent yet) |

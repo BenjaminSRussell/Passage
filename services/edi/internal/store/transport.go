@@ -208,8 +208,10 @@ type DeliveryView struct {
 
 // enqueueDelivery records a PENDING delivery of the interchange over the
 // partner's transport when it has an AS2 or SFTP transport the caller may
-// see; otherwise it does nothing and returns nil.
-func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchangeID, payloadKind, setID, control string) (*DeliveryView, error) {
+// see; otherwise it does nothing and returns nil. standard (X12 or EDIFACT)
+// is the syntax of what is sent, setID the transaction set, message type or
+// TA1 that names the file.
+func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchangeID, payloadKind, standard, setID, control string) (*DeliveryView, error) {
 	var kind, entity string
 	err := tx.QueryRow(ctx, `select kind, legal_entity_id::text from partner_transport where partner_id = $1`, partnerID).Scan(&kind, &entity)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && kind == domain.TransportAPI) {
@@ -221,8 +223,8 @@ func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchange
 	id := ids.New()
 	compact := strings.ReplaceAll(id, "-", "")
 	ext := ".x12"
-	if !isDigitsOnly(setID) {
-		ext = ".edi" // an EDIFACT message type (CONTRL), not an X12 set id
+	if standard == domain.SyntaxEdifact {
+		ext = ".edi"
 	}
 	msgID := "edi-" + compact + "@passage"
 	filename := fmt.Sprintf("%s_%s_%s%s", setID, fileSafe(control), compact[:12], ext)
@@ -233,15 +235,6 @@ func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchange
 		return nil, err
 	}
 	return &d, nil
-}
-
-func isDigitsOnly(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return s != ""
 }
 
 // fileSafe turns a control number into a file name part: an EDIFACT UNB05
@@ -295,12 +288,12 @@ func (s *Store) Resend(ctx context.Context, interchangeID string) (DeliveryView,
 		if err != nil {
 			return err
 		}
-		var partnerID, direction, control, setID, status string
-		err = tx.QueryRow(ctx, `select i.partner_id::text, i.direction, i.control_number,
+		var partnerID, direction, standard, control, setID, status string
+		err = tx.QueryRow(ctx, `select i.partner_id::text, i.direction, i.standard, i.control_number,
 			coalesce((select m.transaction_set from message m where m.interchange_id = i.id order by m.st_control limit 1), ''),
 			coalesce((select d.status from transport_delivery d where d.interchange_id = i.id and d.payload_kind = 'DOCUMENT'
 				order by d.created_at desc, d.id desc limit 1), '')
-			from interchange i where i.id = $1 for update of i`, interchangeID).Scan(&partnerID, &direction, &control, &setID, &status)
+			from interchange i where i.id = $1 for update of i`, interchangeID).Scan(&partnerID, &direction, &standard, &control, &setID, &status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -310,7 +303,7 @@ func (s *Store) Resend(ctx context.Context, interchangeID string) (DeliveryView,
 		if direction != "OUT" || (status != "FAILED" && status != "REJECTED") {
 			return ErrNotResendable
 		}
-		d, err := enqueueDelivery(ctx, tx, tid, partnerID, interchangeID, "DOCUMENT", setID, control)
+		d, err := enqueueDelivery(ctx, tx, tid, partnerID, interchangeID, "DOCUMENT", standard, setID, control)
 		if err != nil {
 			return err
 		}
@@ -732,7 +725,7 @@ func (s *Store) RecordRefusal(ctx context.Context, r Refusal) (string, error) {
 			tid, r.PartnerID, src.LegalEntityID, src.Transport, src.Ref, src.SHA256, interchangeID, reason); err != nil {
 			return err
 		}
-		_, err = enqueueDelivery(ctx, tx, tid, r.PartnerID, interchangeID, "ACK", ackSet, r.Control)
+		_, err = enqueueDelivery(ctx, tx, tid, r.PartnerID, interchangeID, "ACK", standard, ackSet, r.Control)
 		return err
 	})
 	if err != nil {
