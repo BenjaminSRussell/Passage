@@ -98,6 +98,31 @@ spec:
         key: passage/dev/eam-postgres/cdc-password
         property: value
 ---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: debezium-cdc-transport
+  namespace: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: debezium-cdc-transport
+    creationPolicy: Owner
+    template:
+      data:
+        username: debezium_cdc_transport
+        password: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/transport-postgres/cdc-password
+        property: value
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -106,7 +131,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [debezium-cdc-metadata, debezium-cdc-batch, debezium-cdc-receiving, debezium-cdc-eam]
+    resourceNames: [debezium-cdc-metadata, debezium-cdc-batch, debezium-cdc-receiving, debezium-cdc-eam, debezium-cdc-transport]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -321,6 +321,9 @@ type SlipLine struct {
 	Qty            string `json:"qty"`
 	CostAmount     string `json:"cost_amount"`
 	CostSnapshotID string `json:"cost_snapshot_id"`
+	// Weight is the shipped weight of a catch-weight line (#480), the inventory
+	// quantity cost_amount is taken on; qty stays the cases. Absent otherwise.
+	Weight string `json:"weight,omitempty"`
 	// ProductID and Tracking tell inventory which batches and serials to issue
 	// (BR-28.10). Tracking is empty for an untracked line and for reversals.
 	ProductID string          `json:"product_id,omitempty"`
@@ -408,16 +411,22 @@ type PackingSlipPostedData struct {
 // mirrors it: lines carry negative quantities and costs, the journal negative
 // amounts on the same accounts (FR-28.5).
 type PackingSlipCancelledData struct {
-	PackingSlipID string           `json:"packing_slip_id"`
-	ReversalID    string           `json:"reversal_id"`
-	ShipmentID    string           `json:"shipment_id"`
-	OrderID       string           `json:"order_id"`
-	PostingDate   string           `json:"posting_date"`
-	Currency      string           `json:"currency"`
-	Lines         []SlipLine       `json:"lines"`
-	Journal       []JournalEntry   `json:"journal"`
-	PackagingFees []PackagingFee   `json:"packaging_fees"`
-	Returnables   []ReturnableMove `json:"returnables"`
+	PackingSlipID string `json:"packing_slip_id"`
+	// PackingSlipNumber is the cancelled slip's number, the source reference
+	// its delivery was reported to sales under; with LegalEntityID (the
+	// shipment's) the inventory postings consumer finds and offsets the
+	// delivery it booked (#480).
+	PackingSlipNumber string           `json:"packing_slip_number"`
+	ReversalID        string           `json:"reversal_id"`
+	ShipmentID        string           `json:"shipment_id"`
+	OrderID           string           `json:"order_id"`
+	LegalEntityID     string           `json:"legal_entity_id"`
+	PostingDate       string           `json:"posting_date"`
+	Currency          string           `json:"currency"`
+	Lines             []SlipLine       `json:"lines"`
+	Journal           []JournalEntry   `json:"journal"`
+	PackagingFees     []PackagingFee   `json:"packaging_fees"`
+	Returnables       []ReturnableMove `json:"returnables"`
 }
 
 // DropShipData is published when a drop-ship is created (FR-28.7), confirmed

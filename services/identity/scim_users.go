@@ -359,7 +359,11 @@ func (a *SCIMAPI) saveUser(w http.ResponseWriter, r *http.Request, id string, pr
 		}
 		next.ID, next.CreatedAt, next.Groups = cur.ID, cur.CreatedAt, cur.Groups
 		result = next
-		return writeUserChange(r.Context(), tx, p.TenantID, p.UserID, cur, next)
+		reason := deprovisionDeactivated
+		if r.Method == http.MethodDelete {
+			reason = deprovisionDeleted
+		}
+		return writeUserChange(r.Context(), tx, p.TenantID, p.UserID, reason, cur, next)
 	})
 	if err != nil {
 		scimFail(w, r, err)
@@ -372,7 +376,10 @@ func (a *SCIMAPI) saveUser(w http.ResponseWriter, r *http.Request, id string, pr
 	writeSCIM(w, http.StatusOK, result.resource())
 }
 
-func writeUserChange(ctx context.Context, tx pgx.Tx, tenantID, actor string, cur, next scimUser) error {
+// writeUserChange stores a SCIM user change. Deprovisioning also ends the user's role assignments and queues the
+// Keycloak call that disables the user (reason says whether SCIM deactivated or deleted it); reactivation cancels
+// a queued call that has not run yet.
+func writeUserChange(ctx context.Context, tx pgx.Tx, tenantID, actor, reason string, cur, next scimUser) error {
 	if cur.UserName == next.UserName && cur.ExternalID == next.ExternalID && cur.DisplayName == next.DisplayName && cur.Email == next.Email && cur.Active == next.Active {
 		return nil
 	}
@@ -394,8 +401,14 @@ where tenant_id = $1 and user_id = $2`, tenantID, next.ID, next.UserName, next.E
 		if err := endAssignments(ctx, tx, tenantID, actor, next.ID); err != nil {
 			return err
 		}
+		if err := queueKeycloakDeprovision(ctx, tx, tenantID, next.ID, cur.UserName, reason, actor); err != nil {
+			return err
+		}
 		return recordUser(ctx, tx, tenantID, actor, "deprovisioned", next)
 	case !cur.Active && next.Active:
+		if err := supersedeKeycloakDeprovision(ctx, tx, tenantID, next.ID); err != nil {
+			return err
+		}
 		return recordUser(ctx, tx, tenantID, actor, "reactivated", next)
 	}
 	return recordUser(ctx, tx, tenantID, actor, "updated", next)

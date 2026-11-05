@@ -1,0 +1,28 @@
+{
+  "progress_id": "0199f480-0000-7000-8000-000000000011",
+  "order_id": "0199f480-0000-7000-8000-000000000012",
+  "legal_entity_id": "0199f480-0000-7000-8000-00000000000a",
+  "currency": "USD",
+  "kind": "DELIVERED",
+  "source_ref": "PS-W",
+  "lines": [
+    {
+      "line_id": "0199f480-0000-7000-8000-000000000013",
+      "line_no": 1,
+      "quantity": "5",
+      "delivered_qty": "5",
+      "invoiced_qty": "0",
+      "line_status": "PICKED",
+      "reported_weight": "51",
+      "delivered_weight": "51",
+      "product_id": "0199f480-0000-7000-8000-000000000005",
+      "unit": "CS",
+      "site_id": "0199f480-0000-7000-8000-000000000007",
+      "warehouse_id": "0199f480-0000-7000-8000-000000000008"
+    }
+  ],
+  "previous_status": "CONFIRMED",
+  "order_status": "PARTIALLY_SHIPPED",
+  "actor": "fulfillment",
+  "version": 3
+}

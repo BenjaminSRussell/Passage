@@ -279,7 +279,7 @@ idempotency key `eam-downtime:{downtimeId}`, so a republished event with a new
 id books nothing more. The window is widened to whole minutes (start down, end
 up) and split into consecutive spans of at most 31 days, keyed `eam-downtime:{id}` then `:{n}`. Booked jobs the window overlaps are listed in the log and the
 `capacityoverride.created` event, not moved, as for the route. EAM's `resourceId` is the asset's `production_resource_id`, which must be a scheduling resource id; EAM has no scheduling lookup, so it is not checked on asset save (documented in `asyncapi.yaml`) and a wrong one is dead-lettered. Alert on `event_consumer_dead_lettered_total{consumer="scheduling-downtime"}` > 0 (a non-empty `passage.eam.downtime.dlq`); replay per `platform/go/eventing/README.md`. Deploy: `consumer.enabled` in the chart, a
-`KafkaUser` `scheduling-consumer` (`deploy/kafka/scheduling-consumer.yaml`)
+`KafkaUser` `scheduling-consumer` (`deploy/kafka/scheduling-consumer.yaml`, dev Argo CD Application `kafka-consumer-users`)
 whose secret (key `password`, plus the cluster CA as `ca.crt`) must be copied
 into the release namespace. Not built: planned downtime of RELEASED work
 orders (EAM D3).

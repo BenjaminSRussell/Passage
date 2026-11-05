@@ -1295,11 +1295,12 @@ paths:
       operationId: getBatchRecordPdf
       summary: The sealed batch record rendered as a PDF (FR-24.21)
       description: >-
-        A plain PDF 1.4 rendering derived only from the sealed JSON document (a header with the batch, approval, seal,
-        content hash and signatures, then the sealed document itself, indented), the same bytes on every call.
-        X-Content-SHA256 is the content hash of the sealed JSON it shows; the sealed JSON stays the record of
-        authority. NOT PDF/A-2b: the font is not embedded and there is no XMP metadata or output intent, and there is
-        no conformance validator in the build; see NOT-IMPLEMENTED.md.
+        A PDF/A-2b rendering (ISO 19005-2 level B) derived only from the sealed JSON document (a header with the
+        batch, approval, seal, content hash and signatures, then the sealed document itself, indented), the same bytes
+        on every call: the font program is embedded, XMP metadata carries pdfaid part 2 / conformance B and the seal
+        time, an sRGB output intent embeds its ICC profile, and the trailer has a document ID derived from the
+        content. X-Content-SHA256 is the content hash of the sealed JSON it shows; the sealed JSON stays the record
+        of authority.
       x-passage-duty: production.batch-order.read
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -1447,8 +1448,8 @@ paths:
         reproduces it. The document carries every signature of the record and signaturesVerified, true only when every
         decision and the approval are backed by a signature made here with a verified re-authentication (false for a
         dev-unverified signature or a decision made before signatures were made by the service). A sealed record never
-        changes again; the database refuses any update or delete. GET .../pdf renders it; no PDF/A rendition or
-        document archive yet. Writes dev.passage.production.batchrecord.sealed.v1.
+        changes again; the database refuses any update or delete. GET .../pdf renders it as PDF/A-2b; no document
+        archive yet. Writes dev.passage.production.batchrecord.sealed.v1.
       x-passage-duty: production.batch-record.approve
       parameters:
         - $ref: '#/components/parameters/Id'

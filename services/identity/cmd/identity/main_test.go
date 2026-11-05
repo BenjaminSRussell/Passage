@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -46,6 +47,11 @@ func TestConfigFromRejectsIncompleteOrMalformedSettings(t *testing.T) {
 		"bundle without operator":   {with(map[string]string{"IDENTITY_BUNDLE_TOKEN": "t", "IDENTITY_BUNDLE_SIGNING_KEY_PATH": "/k.pem", "IDENTITY_BUNDLE_KEY_ID": "k"}), "IDENTITY_OPERATOR_TENANT_ID"},
 		"bundle key without token":  {with(map[string]string{"IDENTITY_BUNDLE_KEY_ID": "k"}), "IDENTITY_BUNDLE_TOKEN"},
 		"scim without issuer":       {with(map[string]string{"IDENTITY_OPA_URL": "http://127.0.0.1:8181"}), "IDENTITY_SCIM_ISSUER_BASE"},
+		"keycloak without secrets":  {with(map[string]string{"IDENTITY_KEYCLOAK_ADMIN_URL": "https://kc.test", "IDENTITY_OPERATOR_TENANT_ID": operatorID}), "IDENTITY_KEYCLOAK_SECRETS_DIR"},
+		"keycloak without operator": {with(map[string]string{"IDENTITY_KEYCLOAK_ADMIN_URL": "https://kc.test", "IDENTITY_KEYCLOAK_SECRETS_DIR": "/s"}), "IDENTITY_OPERATOR_TENANT_ID"},
+		"keycloak settings, no URL": {with(map[string]string{"IDENTITY_KEYCLOAK_SECRETS_DIR": "/s"}), "IDENTITY_KEYCLOAK_ADMIN_URL"},
+		"keycloak interval too short": {with(map[string]string{"IDENTITY_KEYCLOAK_ADMIN_URL": "https://kc.test", "IDENTITY_KEYCLOAK_SECRETS_DIR": "/s", "IDENTITY_OPERATOR_TENANT_ID": operatorID,
+			"IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL": "1s"}), "IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := configFrom(env(tc.set)); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -71,6 +77,29 @@ func TestConfigFromRejectsIncompleteOrMalformedSettings(t *testing.T) {
 		cfg, err = configFrom(env(with(bundle)))
 		if err != nil || cfg.bundleRegoPath != "/policy/custom.rego" {
 			t.Fatalf("override = %q err = %v", cfg.bundleRegoPath, err)
+		}
+	})
+
+	t.Run("keycloak deprovisioning settings", func(t *testing.T) {
+		kc := map[string]string{"IDENTITY_KEYCLOAK_ADMIN_URL": "https://kc.test", "IDENTITY_KEYCLOAK_SECRETS_DIR": "/var/run/passage/keycloak", "IDENTITY_OPERATOR_TENANT_ID": operatorID}
+		cfg, err := configFrom(env(with(kc)))
+		if err != nil || !cfg.keycloakDeprovisionEnabled() || cfg.keycloakClientID != defaultKeycloakClientID || cfg.deprovisionInterval != identity.DefaultDeprovisionInterval {
+			t.Fatalf("defaults: cfg = %+v err = %v", cfg, err)
+		}
+		if worker, err := newDeprovisioner(nil, cfg); err != nil || worker == nil {
+			t.Fatalf("worker = %v, %v", worker, err)
+		}
+		kc["IDENTITY_KEYCLOAK_CLIENT_ID"], kc["IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL"] = "custom", "2m"
+		if cfg, err = configFrom(env(with(kc))); err != nil || cfg.keycloakClientID != "custom" || cfg.deprovisionInterval != 2*time.Minute {
+			t.Fatalf("overrides: cfg = %+v err = %v", cfg, err)
+		}
+		kc["IDENTITY_KEYCLOAK_ADMIN_URL"] = "http://keycloak.hello-ledger.svc:8080"
+		cfg, _ = configFrom(env(with(kc)))
+		if _, err := newDeprovisioner(nil, cfg); err == nil {
+			t.Fatal("a plain-http Keycloak admin URL off loopback was accepted")
+		}
+		if cfg, err := configFrom(env(base)); err != nil || cfg.keycloakDeprovisionEnabled() {
+			t.Fatalf("off by default: %+v %v", cfg, err)
 		}
 	})
 
@@ -129,7 +158,8 @@ func TestRouterServesHealthAndGuardsAdminRoutes(t *testing.T) {
 		t.Fatalf("no tenant = %d, want 401", rec.Code)
 	}
 	tenantOnly := map[string]string{"X-Passage-Tenant": operatorID, "X-Passage-User": "u"}
-	for _, path := range []string{"/v1/authz/roles", "/v1/authz/duties", "/v1/identity/users", "/v1/legal-entities", "/v1/tenants", "/v1/authz/assignments"} {
+	for _, path := range []string{"/v1/authz/roles", "/v1/authz/duties", "/v1/identity/users", "/v1/legal-entities", "/v1/tenants", "/v1/authz/assignments",
+		"/v1/identity/users/" + operatorID + "/keycloak-deprovisions"} {
 		if rec := get(router, path, tenantOnly); rec.Code != http.StatusForbidden {
 			t.Errorf("%s without a duty = %d, want 403", path, rec.Code)
 		}

@@ -18,15 +18,21 @@ import (
 
 // SFTPConfig configures the SFTP connection to a partner. HostKeyFingerprint
 // is the partner's host key as `ssh-keygen -lf` prints it (SHA256:...); host
-// key checking cannot be skipped. Signer is the client key, supplied by the
-// caller from its secret store (this package never reads key files).
+// key checking cannot be skipped. Signer is the client key, or Password the
+// login password, supplied by the caller from its secret store (this package
+// never reads key files). MaxFileBytes caps a downloaded file (default 32 MiB).
 type SFTPConfig struct {
 	Addr               string
 	User               string
 	HostKeyFingerprint string
 	Signer             ssh.Signer
+	Password           string
 	Timeout            time.Duration
+	MaxFileBytes       int64
 }
+
+// ErrTooLarge marks a remote file larger than the configured limit.
+var ErrTooLarge = errors.New("sftp: file is larger than the limit")
 
 // SFTPFiles is the file system surface the SFTP transport needs; SFTPClient
 // implements it over SSH and tests may use any other implementation.
@@ -106,17 +112,22 @@ const defaultSFTPTimeout = 30 * time.Second
 
 // SFTPClient is SFTPFiles over one SSH connection.
 type SFTPClient struct {
-	ssh     *ssh.Client
-	sftp    *sftp.Client
-	timeout time.Duration
+	ssh      *ssh.Client
+	sftp     *sftp.Client
+	timeout  time.Duration
+	maxBytes int64
 }
 
 // DialSFTP connects, verifies the host key against the pinned fingerprint and
-// authenticates with the client key.
+// authenticates with the client key or the password.
 func DialSFTP(ctx context.Context, cfg SFTPConfig) (*SFTPClient, error) {
 	pinned := strings.TrimSpace(cfg.HostKeyFingerprint)
-	if !strings.HasPrefix(pinned, "SHA256:") || len(pinned) == len("SHA256:") || cfg.Signer == nil || cfg.User == "" || cfg.Addr == "" {
-		return nil, errors.New("sftp: address, user, client key and a SHA256: host key fingerprint are all required")
+	if !strings.HasPrefix(pinned, "SHA256:") || len(pinned) == len("SHA256:") || (cfg.Signer == nil && cfg.Password == "") || cfg.User == "" || cfg.Addr == "" {
+		return nil, errors.New("sftp: address, user, client key or password and a SHA256: host key fingerprint are all required")
+	}
+	auth := []ssh.AuthMethod{ssh.Password(cfg.Password)}
+	if cfg.Signer != nil {
+		auth = []ssh.AuthMethod{ssh.PublicKeys(cfg.Signer)}
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
@@ -124,7 +135,7 @@ func DialSFTP(ctx context.Context, cfg SFTPConfig) (*SFTPClient, error) {
 	}
 	conf := &ssh.ClientConfig{
 		User: cfg.User,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(cfg.Signer)},
+		Auth: auth,
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			if got := ssh.FingerprintSHA256(key); got != pinned {
 				return fmt.Errorf("sftp: host key %s does not match the pinned %s", got, pinned)
@@ -151,7 +162,11 @@ func DialSFTP(ctx context.Context, cfg SFTPConfig) (*SFTPClient, error) {
 		_ = client.Close()
 		return nil, fmt.Errorf("sftp session: %w", err)
 	}
-	return &SFTPClient{ssh: client, sftp: fs, timeout: timeout}, nil
+	maxBytes := cfg.MaxFileBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxBytes
+	}
+	return &SFTPClient{ssh: client, sftp: fs, timeout: timeout, maxBytes: maxBytes}, nil
 }
 
 // Close ends the SFTP session and the SSH connection.
@@ -229,7 +244,10 @@ func (c *SFTPClient) Get(ctx context.Context, remotePath string) ([]byte, error)
 			return err
 		}
 		defer func() { _ = f.Close() }()
-		data, err = io.ReadAll(f)
+		data, err = io.ReadAll(io.LimitReader(f, c.maxBytes+1))
+		if err == nil && int64(len(data)) > c.maxBytes {
+			data, err = nil, ErrTooLarge
+		}
 		return err
 	})
 	return data, err

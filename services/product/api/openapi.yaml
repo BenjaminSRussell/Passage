@@ -190,14 +190,19 @@ paths:
     get:
       operationId: convertUnit
       summary: Convert a quantity between units
+      description: >-
+        Product-specific conversions first, then class conversions (FR-8.7). Without `to` the quantity is
+        converted into the base (inventory) unit of `product`, which the answer names in `to` (#480); the
+        service-only duty product.uom.convert (the inventory postings consumer) reaches this operation only.
       x-passage-duty: product.read
+      x-passage-duty-alternatives: [product.uom.convert]
       parameters:
-        - { name: product, in: query, schema: { type: string } }
+        - { name: product, in: query, schema: { type: string }, description: 'Required when to is omitted.' }
         - { name: from, in: query, required: true, schema: { type: string } }
-        - { name: to, in: query, required: true, schema: { type: string } }
+        - { name: to, in: query, schema: { type: string }, description: 'Target unit; default the base unit of product.' }
         - { name: qty, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: 'Converted quantity, rounded half-even to the target unit (BR-8.6).' }
+        '200': { description: 'Converted quantity, rounded half-even to the target unit (BR-8.6): {from, to, quantity}.' }
         default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:

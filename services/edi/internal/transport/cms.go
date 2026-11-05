@@ -33,6 +33,8 @@ var (
 	oidSigningTime   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
 	oidRSA           = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
 	oidECDSASHA256   = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+	oidECDSASHA384   = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 3}
+	oidECDSASHA512   = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 4}
 	oidSHA256        = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
 	oidSHA384        = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 2}
 	oidSHA512        = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 3}
@@ -105,22 +107,39 @@ func setOf(class, tag int, elems [][]byte) asn1.RawValue {
 	return asn1.RawValue{Class: class, Tag: tag, IsCompound: true, Bytes: bytes.Join(sorted, nil)}
 }
 
+// oidOfDigest is the CMS digest algorithm and ECDSA signature algorithm of
+// each supported hash.
+var oidOfDigest = map[crypto.Hash][2]asn1.ObjectIdentifier{
+	crypto.SHA256: {oidSHA256, oidECDSASHA256},
+	crypto.SHA384: {oidSHA384, oidECDSASHA384},
+	crypto.SHA512: {oidSHA512, oidECDSASHA512},
+}
+
 // SignDetached returns the DER CMS SignedData over content with SHA-256,
 // without the content (detached) and with the signer certificate included.
 func SignDetached(content []byte, cert *x509.Certificate, key crypto.Signer, at time.Time) ([]byte, error) {
+	return SignDetachedWith(content, cert, key, at, crypto.SHA256)
+}
+
+// SignDetachedWith is SignDetached with SHA-256, SHA-384 or SHA-512.
+func SignDetachedWith(content []byte, cert *x509.Certificate, key crypto.Signer, at time.Time, hash crypto.Hash) ([]byte, error) {
 	if cert == nil || key == nil {
 		return nil, errors.New("transport: signing needs a certificate and key")
+	}
+	oids, ok := oidOfDigest[hash]
+	if !ok {
+		return nil, fmt.Errorf("transport: digest %v is not supported for signing", hash)
 	}
 	var sigAlg asn1.ObjectIdentifier
 	switch key.Public().(type) {
 	case *rsa.PublicKey:
 		sigAlg = oidRSA
 	case *ecdsa.PublicKey:
-		sigAlg = oidECDSASHA256
+		sigAlg = oids[1]
 	default:
 		return nil, errors.New("transport: signing key must be RSA or ECDSA")
 	}
-	digest := crypto.SHA256.New()
+	digest := hash.New()
 	digest.Write(content)
 	ct, err := attr(oidContentType, oidData)
 	if err != nil {
@@ -139,9 +158,9 @@ func SignDetached(content []byte, cert *x509.Certificate, key crypto.Signer, at 
 	if err != nil {
 		return nil, err
 	}
-	h := crypto.SHA256.New()
+	h := hash.New()
 	h.Write(toSign)
-	signature, err := key.Sign(rand.Reader, h.Sum(nil), crypto.SHA256)
+	signature, err := key.Sign(rand.Reader, h.Sum(nil), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -149,18 +168,18 @@ func SignDetached(content []byte, cert *x509.Certificate, key crypto.Signer, at 
 	if err != nil {
 		return nil, err
 	}
-	sha256Alg := pkix.AlgorithmIdentifier{Algorithm: oidSHA256, Parameters: asn1.NullRawValue}
+	digestAlg := pkix.AlgorithmIdentifier{Algorithm: oids[0], Parameters: asn1.NullRawValue}
 	algParams := asn1.NullRawValue
-	if sigAlg.Equal(oidECDSASHA256) {
+	if !sigAlg.Equal(oidRSA) {
 		algParams = asn1.RawValue{}
 	}
 	sd := signedData{
 		Version:          1,
-		DigestAlgorithms: []pkix.AlgorithmIdentifier{sha256Alg},
+		DigestAlgorithms: []pkix.AlgorithmIdentifier{digestAlg},
 		EncapContentInfo: encapContentInfo{EContentType: oidData},
 		Certificates:     asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: cert.Raw},
 		SignerInfos: []signerInfo{{
-			Version: 1, SID: asn1.RawValue{FullBytes: sid}, DigestAlgorithm: sha256Alg,
+			Version: 1, SID: asn1.RawValue{FullBytes: sid}, DigestAlgorithm: digestAlg,
 			SignedAttrs:        asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: attrs.Bytes},
 			SignatureAlgorithm: pkix.AlgorithmIdentifier{Algorithm: sigAlg, Parameters: algParams},
 			Signature:          signature,

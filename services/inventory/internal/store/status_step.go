@@ -74,6 +74,17 @@ type CreateTransactionInput struct {
 	Date           time.Time
 	IdempotencyKey string
 	Negative       domain.NegativePolicy
+	// Corrects is the transaction a compensating registration offsets (the
+	// postings consumer's receipt corrections and cancelled deliveries, #480):
+	// it must be a transaction of the same legal entity, product and
+	// dimensions, and is recorded as corrects_transaction_id. Value, when set,
+	// is the registration's cost amount instead of Qty × CostPrice or the
+	// running average: a reversal returns exactly what the original booked,
+	// and a receipt converted into the inventory unit keeps the document
+	// amount. It carries the sign of Qty and the currency's minor unit.
+	// Neither is reachable through transactions:apply.
+	Corrects string
+	Value    *decimal.Decimal
 }
 
 // StatusStepInput is one status move of an inventory transaction (FR-16.2,
@@ -135,6 +146,13 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 	if strings.TrimSpace(dims[domain.DimSite]) == "" {
 		return StatusChange{}, false, domainProblem(&domain.Error{Code: domain.CodeDimensionMandatory, Detail: "dimension site is mandatory"})
 	}
+	if in.Value != nil && (in.Value.Sign()*in.Qty.Sign() < 0 || !in.Value.Equal(money.Amount{Value: *in.Value, Currency: in.Currency}.Round().Value)) {
+		return StatusChange{}, false, problem(http.StatusBadRequest, domain.CodeInvalid,
+			"a registration's own value carries the sign of the quantity and the currency's minor unit")
+	}
+	if in.Corrects != "" && !ids.Valid(in.Corrects) {
+		return StatusChange{}, false, problem(http.StatusBadRequest, domain.CodeInvalid, "corrects must be a transaction id")
+	}
 	in.Dims = dims
 	date := stepDate(in.Date)
 	hash := createRequestHash(in)
@@ -166,6 +184,18 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		}
 		vendorOwned := domain.VendorOwned(dims)
 		r := &row{product: in.ProductID, dims: dims, hash: dims.Hash()}
+		if in.Corrects != "" {
+			var same bool
+			err := tx.QueryRow(ctx, `select legal_entity_id = $3::uuid and product_id = $4::uuid and dimension_set_hash = $5
+				from inventory_transaction where tenant_id = $1 and id = $2`, tp.TenantID, in.Corrects, in.LegalEntityID, in.ProductID, r.hash).Scan(&same)
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !same) {
+				return problem(http.StatusUnprocessableEntity, domain.CodeInvalid,
+					"corrects names no transaction of this legal entity, product and dimensions")
+			}
+			if err != nil {
+				return err
+			}
+		}
 		currency := in.Currency
 		if vendorOwned {
 			currency = "" // vendor-owned rows are never valued, in any currency
@@ -176,6 +206,8 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		value := decimal.Zero
 		switch {
 		case vendorOwned:
+		case in.Value != nil:
+			value = *in.Value
 		case in.Qty.Sign() > 0:
 			value = domain.ReceiptValue(in.Qty, in.CostPrice, in.Currency)
 		default:
@@ -197,7 +229,7 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		doc := document{legalEntityID: in.LegalEntityID, currency: in.Currency, date: date, sourceType: in.SourceType,
 			referenceID: strings.TrimSpace(in.Reference), statusChangeID: changeID}
 		pl := domain.PostedLine{Line: domain.JournalLine{ProductID: in.ProductID, Dims: dims, Qty: in.Qty, EnteredQty: in.EnteredQty,
-			EnteredUnit: in.EnteredUnit, CostPrice: in.CostPrice, CWQty: in.CWQty}, Status: in.Status, Value: value}
+			EnteredUnit: in.EnteredUnit, CostPrice: in.CostPrice, CWQty: in.CWQty}, Status: in.Status, Value: value, Corrects: in.Corrects}
 		txnID, err := writeTransaction(ctx, tx, tp.TenantID, doc, in.SourceID, r, pl)
 		if err != nil {
 			return err
@@ -567,6 +599,12 @@ func createRequestHash(in CreateTransactionInput) string {
 		in.Qty.String(), in.EnteredQty.String(), in.EnteredUnit, string(in.Status), in.Currency, in.CostPrice.String()}
 	if in.CWQty > 0 {
 		parts = append(parts, strconv.Itoa(in.CWQty))
+	}
+	if in.Corrects != "" {
+		parts = append(parts, "corrects", in.Corrects)
+	}
+	if in.Value != nil {
+		parts = append(parts, "value", in.Value.String())
 	}
 	return fingerprint(append(parts, requestedDate(in.Date))...)
 }

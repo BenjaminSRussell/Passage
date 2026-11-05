@@ -39,6 +39,10 @@ spec:
               value: {{ .Values.maxVersions | quote }}
             - name: PLANNING_HORIZON_DAYS
               value: {{ .Values.horizonDays | quote }}
+            - name: PLANNING_MAX_CONCURRENT_RUNS
+              value: {{ .Values.maxConcurrentRuns | quote }}
+            - name: PLANNING_RUN_TIMEOUT_MINUTES
+              value: {{ .Values.runTimeoutMinutes | quote }}
             - name: PLANNING_FEATURE_FLAGS
               value: {{ .Values.featureFlags | quote }}
             {{- if .Values.forecastUrl }}

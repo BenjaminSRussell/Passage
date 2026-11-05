@@ -18,7 +18,7 @@ Screens for the transport service (`services/transport`), through the web BFF at
 | `/transport/carrier-invoices` | Carrier invoices; UNEXPECTED_INVOICE is the exception queue | transport.freight-bill.reconcile |
 | `/transport/carrier-invoices/new` | Register an invoice; prefilled from a bill's detail page | transport.freight-bill.reconcile |
 | `/transport/tenders` | Tender board: status filter, overdue flag, "Cascade overdue tenders" runs the expiry sweep | transport.load.tender |
-| `/transport/tenders/new` | Start a tender: load, carriers in rank order with quoted rates, response time | transport.load.tender |
+| `/transport/tenders/new` | Start a tender: load, carriers in rank order with quoted rates, response time. With transport.load.tender the page reads the load and shows its status and version; "Release to the tender workflow" (PLANNED or RATED loads only) sends the same cascade to `:release` with the version as `If-Match` and one `Idempotency-Key` per form, then shows the load's resulting status (TENDERED). A stale version (412) or a status conflict (409, TMS-0114, TMS-0136) rereads the load; 404 and 422 (TMS-0130, TMS-0133) are shown as neighbouring actions show them | transport.load.tender |
 | `/transport/tenders/:id` | Cascade attempts; record the pending carrier's acceptance or decline (TMS-0105, TMS-0113) | transport.load.tender, transport.tender.respond to respond |
 | `/transport/tracking` | Latest status reports and a load-timeline lookup | transport.view |
 | `/transport/tracking/new` | Record a status report by hand (source + reference is the idempotency key) | transport.tracking-event.ingest |

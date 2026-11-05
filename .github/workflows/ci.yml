@@ -133,6 +133,15 @@ jobs:
           password="Kc-$(openssl rand -hex 16)"
           echo "::add-mask::$password"
           echo "PASSAGE_TEST_KEYCLOAK_ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
+      # The WebAuthn login drives Chromium with a virtual authenticator (services/identity/testdata/webauthn_browser.cjs);
+      # playwright is pinned to the version apps/web uses.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - run: |
+          npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/playwright" playwright@1.64.1
+          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/playwright/node_modules" >> "$GITHUB_ENV"
       - run: >-
           docker run -d --name keycloak -p 8080:8080
           -e KC_BOOTSTRAP_ADMIN_USERNAME="$PASSAGE_TEST_KEYCLOAK_ADMIN"
@@ -282,9 +291,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
-      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity
+      - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity services/batch/charts/batch services/edi/charts/edi
       - run: bash services/receiving/charts/receiving/test-env.sh
       - run: bash services/identity/charts/identity/test-networkpolicy.sh
+      - run: bash services/batch/charts/batch/test-notify.sh
+      - run: bash services/edi/charts/edi/test-as2.sh
 
   deploy-release:
     runs-on: ubuntu-24.04

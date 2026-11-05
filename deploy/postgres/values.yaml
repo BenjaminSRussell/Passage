@@ -6,7 +6,10 @@ resources:
   requests: { cpu: 100m, memory: 256Mi }
   limits: { cpu: "1", memory: 1Gi }
 clientApps: []
+# enabled: false drops logical WAL, the debezium_cdc role, its Vault key and the Kafka Connect ingress (a database
+# with no outbox, e.g. Apicurio Registry's); clientApps is then required.
 cdc:
+  enabled: true
   kafkaNamespace: kafka
 secretName: ""
 externalSecret:

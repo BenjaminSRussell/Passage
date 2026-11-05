@@ -11,6 +11,26 @@ scim:
   issuerBase: ""
   audience: passage-api
   opaUrl: ""
+# SCIM deprovisioning (active=false or DELETE) is queued in identity_keycloak_deprovisions either way; with
+# keycloakDeprovision.enabled a worker disables the Keycloak user and logs out its sessions through each tenant
+# realm's passage-identity-deprovision service account (realm-management manage-users only, see
+# deploy/keycloak/README.md). Needs operatorTenantId (the worker lists tenants as the operator) and an https
+# adminUrl (Keycloak's root URL). The client secrets live in the Secret `secretName`, one key per realm name,
+# mounted read-only; with externalSecret.enabled the chart renders the ESO ExternalSecret that fills it from
+# <pathPrefix>/<realm> (property value) for every realm in externalSecret.realms. No secret goes in values.
+keycloakDeprovision:
+  enabled: false
+  adminUrl: ""
+  clientId: passage-identity-deprovision
+  interval: 30s
+  secretName: identity-keycloak
+  externalSecret:
+    enabled: true
+    storeName: passage
+    environment: ""
+    pathPrefix: passage/{env}/identity/keycloak
+    refreshInterval: 1h
+    realms: []
 bundle:
   enabled: false
   secret: identity-bundle

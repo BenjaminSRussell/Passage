@@ -446,16 +446,19 @@ components:
       summary: >
         A posted, uninvoiced packing slip was cancelled. reversal_id names the reversing
         slip; its lines carry negative quantities and costs and its journal mirrors the
-        original with negative amounts (FR-28.5).
+        original with negative amounts (FR-28.5). The inventory postings consumer books
+        the exact mirror of each delivery line it booked for the slip (#480).
       contentType: application/json
       payload:
         type: object
         required: [packing_slip_id, reversal_id, shipment_id, order_id, posting_date, currency, lines, journal, packaging_fees, returnables]
         properties:
           packing_slip_id: { type: string, format: uuid, description: The cancelled slip. }
+          packing_slip_number: { type: string, example: "PS-0000001", description: "The cancelled slip's number, the source reference its delivery was reported to sales under; inventory finds the delivery it booked by it (#480)." }
           reversal_id: { type: string, format: uuid, description: The reversing slip. }
           shipment_id: { type: string, format: uuid }
           order_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid, description: "The shipment's legal entity (#480)." }
           posting_date: { type: string, format: date }
           currency: { type: string }
           lines:
@@ -1003,6 +1006,7 @@ components:
         qty: { type: string }
         cost_amount: { type: string }
         cost_snapshot_id: { type: string }
+        weight: { type: string, description: "catch-weight lines only (#480): the shipped weight cost_amount is taken on (negated on a reversal); qty stays the cases" }
         product_id: { type: string, format: uuid, description: Set on a posted slip line. }
         tracking:
           type: array

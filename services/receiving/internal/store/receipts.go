@@ -34,7 +34,8 @@ const (
 		COALESCE((SELECT g.cleared_amount FROM receiving_grir_open_item g WHERE g.tenant_id = receiving_receipt_line.tenant_id AND g.receipt_id = receiving_receipt_line.receipt_id AND g.line_no = receiving_receipt_line.line_no), 0),
 		COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
 		unit_price, currency, COALESCE(unit, ''), COALESCE(batch, ''), COALESCE(location_id::text, ''), inventory_status,
-		batch_tracked, serial_tracked, amount, amount_acct, cw_qty, cw_nominal, cw_min, cw_max`
+		batch_tracked, serial_tracked, amount, amount_acct, cw_qty, cw_nominal, cw_min, cw_max,
+		COALESCE(site_id::text, ''), COALESCE(warehouse_id::text, '')`
 )
 
 type scanner interface{ Scan(dest ...any) error }
@@ -90,7 +91,8 @@ func scanLine(row scanner) (Line, error) {
 	var cwQty *int
 	var nominal, minv, maxv *decimal.Decimal
 	err := row.Scan(&l.LineNo, &l.POLineID, &l.POLineNo, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.ClearedAmount, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
-		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct, &cwQty, &nominal, &minv, &maxv)
+		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct, &cwQty, &nominal, &minv, &maxv,
+		&l.SiteID, &l.WarehouseID)
 	if cwQty != nil {
 		l.CWQty = *cwQty
 	}
@@ -218,11 +220,11 @@ func insertArrival(ctx context.Context, tx pgx.Tx, tenantID string, in Receipt) 
 			currency = in.Currency
 		}
 		rows[i] = []any{tenantID, in.ID, lineNo, in.LegalEntityID, l.ProductID, l.OrderedRemaining, l.UnitPrice, currency,
-			l.POLineID, l.Unit, l.OrderedRemaining, l.OverDeliveryPct, l.BatchTracked, l.SerialTracked, l.POLineNo}
+			l.POLineID, l.Unit, l.OrderedRemaining, l.OverDeliveryPct, l.BatchTracked, l.SerialTracked, l.POLineNo, l.SiteID, l.WarehouseID}
 	}
 	return execBatch(ctx, tx, `INSERT INTO receiving_receipt_line (tenant_id, receipt_id, line_no, legal_entity_id, product_id, qty, unit_price, currency,
-		po_line_id, unit, ordered_remaining, over_delivery_pct, batch_tracked, serial_tracked, po_line_no)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, ''), $11, $12, $13, $14, NULLIF($15, 0))`, rows)
+		po_line_id, unit, ordered_remaining, over_delivery_pct, batch_tracked, serial_tracked, po_line_no, site_id, warehouse_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, ''), $11, $12, $13, $14, NULLIF($15, 0), NULLIF($16, '')::uuid, NULLIF($17, '')::uuid)`, rows)
 }
 
 func (s *Postgres) mapWriteError(ctx context.Context, tenantID string, in Receipt, err error) error {

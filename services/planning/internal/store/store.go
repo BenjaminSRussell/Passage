@@ -53,6 +53,13 @@ const (
 // Store is the persistence contract the API depends on.
 type Store interface {
 	RunPlan(ctx context.Context, req RunRequest) (Version, bool, error)
+	// Asynchronous plan runs (#479), planrun.go.
+	BeginPlanRun(ctx context.Context, req PlanRunStart) (PlanRun, bool, error)
+	ReplayPlanRun(ctx context.Context, key, inputHash string) (PlanRun, bool, error)
+	GetPlanRun(ctx context.Context, id string) (PlanRun, error)
+	HeartbeatPlanRun(ctx context.Context, id string, p PlanRunProgress) (bool, error)
+	FinishPlanRun(ctx context.Context, id string, f PlanRunFinish) (PlanRun, error)
+	CancelPlanRun(ctx context.Context, id string) (PlanRun, error)
 	GetVersion(ctx context.Context, planCode string, number int) (Version, error)
 	ListVersions(ctx context.Context, planCode string, limit int) ([]Version, error)
 	DiffVersions(ctx context.Context, planCode string, from, to, limit int) (VersionDiff, error)
@@ -155,6 +162,12 @@ type RunRequest struct {
 	InputHash      string
 	IdempotencyKey string
 	Result         domain.Result
+	// RunID is the asynchronous plan run this persists (#479), empty for a
+	// synchronous run; any other live run of the plan refuses it with 409.
+	RunID string
+	// Progress, when set, is called with the number of rows written so far
+	// each time a batch of rows has been sent.
+	Progress func(rows int64)
 }
 
 // Version is a plan version as the API shows it.
@@ -329,6 +342,11 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		if err != nil {
 			return err
 		}
+		// An asynchronous run of the plan that is still alive (#479) holds the
+		// plan as the row lock does; the run itself passes its RunID.
+		if err := refuseActiveRun(ctx, tx, p.TenantID, req.PlanCode, req.RunID); err != nil {
+			return err
+		}
 		if req.ForecastModel != "" {
 			if err := requireModelEntity(ctx, tx, p.TenantID, req.ForecastModel, planEntity); err != nil {
 				return err
@@ -358,9 +376,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		}
 		asOf := req.AsOf.Format(dateLayout)
 		r := req.Result
-		// The run executes inside this request, so the version is written and
-		// started in one transaction; plan.started.v1 precedes the run's other
-		// events in the outbox.
+		// The version is written and started in one transaction (a run in the
+		// request and an asynchronous run alike); plan.started.v1 precedes the
+		// run's other events in the outbox.
 		if err := enqueue(ctx, tx, planevents.PlanStarted, planID, p.TenantID, versionID, planevents.PlanStartedData{
 			PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, VersionNumber: number, Kind: planKindStatic,
 			SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: req.ItemsPlanned,
@@ -377,7 +395,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		// with forced RLS. The batches are bounded because one batch of a 50k-item
 		// plan (about 9 million rows) held its queued arguments in memory and ran
 		// the process out of memory on a 15 GB host (#479).
-		batch := &chunkedBatch{ctx: ctx, tx: tx, batch: &pgx.Batch{}, rows: runBatchRows}
+		batch := &chunkedBatch{ctx: ctx, tx: tx, batch: &pgx.Batch{}, rows: runBatchRows, progress: req.Progress}
 		counts := planevents.PlannedCounts{}
 		orderIDs := make([]string, len(r.Orders))
 		for i := range r.Orders {
@@ -534,6 +552,10 @@ type chunkedBatch struct {
 	tx    pgx.Tx
 	batch *pgx.Batch
 	rows  int
+	// written counts the statements sent; progress, if set, receives it after
+	// each send.
+	written  int64
+	progress func(int64)
 }
 
 func (c *chunkedBatch) queue(sql string, args ...any) error {
@@ -551,7 +573,14 @@ func (c *chunkedBatch) flush() error {
 	}
 	b := c.batch
 	c.batch = &pgx.Batch{}
-	return c.tx.SendBatch(c.ctx, b).Close()
+	if err := c.tx.SendBatch(c.ctx, b).Close(); err != nil {
+		return err
+	}
+	c.written += int64(b.Len())
+	if c.progress != nil {
+		c.progress(c.written)
+	}
+	return nil
 }
 
 // purgeVersions deletes the versions of a plan numbered at or below cut with
@@ -617,18 +646,24 @@ func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code, requestedEntity st
 func (s *Postgres) PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error) {
 	p, _ := tenant.FromContext(ctx)
 	var entity string
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2`, p.TenantID, planCode).Scan(&entity)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			entity, err = httpx.OwnerLegalEntity(ctx, requestedEntity)
-			return err
-		case err != nil:
-			return err
-		}
-		return assertOwner(requestedEntity, entity)
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		entity, err = planEntity(ctx, tx, p.TenantID, planCode, requestedEntity)
+		return err
 	})
 	return entity, err
+}
+
+// planEntity is PlanLegalEntity inside tx.
+func planEntity(ctx context.Context, tx pgx.Tx, tenantID, planCode, requestedEntity string) (string, error) {
+	var entity string
+	err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2`, tenantID, planCode).Scan(&entity)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return httpx.OwnerLegalEntity(ctx, requestedEntity)
+	case err != nil:
+		return "", err
+	}
+	return entity, assertOwner(requestedEntity, entity)
 }
 
 func codeTaken(what, code string) error {

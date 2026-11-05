@@ -14,7 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/transport/internal/store"
 )
 
-var loadStatuses = []string{domain.LoadPlanned, "RATED", "TENDERED", "ACCEPTED", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "CLOSED", "CANCELLED"}
+var loadStatuses = domain.LoadStatuses
 
 type loadBuildRequest struct {
 	Capacity  domain.Capacity       `json:"capacity"`
@@ -131,6 +131,8 @@ func (a *API) getLoad(w http.ResponseWriter, r *http.Request) {
 	if checks == nil {
 		checks = []domain.DGCheck{}
 	}
+	// The release takes this version as If-Match.
+	w.Header().Set("ETag", `"`+strconv.Itoa(load.Version)+`"`)
 	httpx.JSON(w, http.StatusOK, loadDetail{Load: load, DGChecks: checks})
 }
 
@@ -250,7 +252,7 @@ func (a *API) decideFreightBill(w http.ResponseWriter, r *http.Request, action s
 		httpx.Fail(w, r, store.NotFound("freight bill"))
 		return
 	}
-	version, err := ifMatch(r)
+	version, err := ifMatch(r, "freight bill")
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -287,16 +289,17 @@ func (a *API) decideFreightBill(w http.ResponseWriter, r *http.Request, action s
 	httpx.JSON(w, http.StatusOK, bill)
 }
 
-// ifMatch reads the required If-Match header (428 when absent), as in receivables.
-func ifMatch(r *http.Request) (int, error) {
+// ifMatch reads the required If-Match header with the version of the named
+// record (428 when absent), as in receivables.
+func ifMatch(r *http.Request, record string) (int, error) {
 	raw := strings.Trim(r.Header.Get("If-Match"), `W/" `)
 	if raw == "" {
-		return 0, httpx.NewProblem(http.StatusPreconditionRequired, "COM-0428", "If-Match header with the freight bill version is required")
+		return 0, httpx.NewProblem(http.StatusPreconditionRequired, "COM-0428", "If-Match header with the "+record+" version is required")
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 1 {
 		validation := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
-		validation.Errors = map[string]string{"If-Match": "must be the freight bill version, such as \"2\""}
+		validation.Errors = map[string]string{"If-Match": "must be the " + record + " version, such as \"2\""}
 		return 0, validation
 	}
 	return v, nil

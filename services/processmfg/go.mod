@@ -7,6 +7,7 @@ require (
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/shopspring/decimal v1.4.0
+	golang.org/x/image v0.31.0
 	pgregory.net/rapid v1.3.0
 )
 

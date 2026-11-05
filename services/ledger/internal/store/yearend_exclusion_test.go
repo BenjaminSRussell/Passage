@@ -85,3 +85,46 @@ func TestPostgres_ExcludeYearEndClosingTrustsOnlyTheCloseService(t *testing.T) {
 		t.Fatalf("totals must follow the rows: %+v", tb)
 	}
 }
+
+// An entry posted before migration 0028 has no posted_by_service, so it stays in like any entry another caller tagged
+// year_end_closing: its source fields are request data and the journal is append-only, so nothing backfills it (#469).
+// Redoing that year's close through the close service clears the difference: the old entry and its reversal both stay
+// in and cancel, and the new closing entry is recorded with the verified poster and left out.
+func TestPostgres_ExcludeYearEndClosingNetsOutAPre0028ClosingOnceTheCloseIsRedone(t *testing.T) {
+	e, _ := setup(t)
+	closeCtx := serviceCtx(e.tenant, e.le, ClosePostingService)
+	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "EXP-1", "100.00")); err != nil {
+		t.Fatal(err)
+	}
+	// Posted without a verified service: stored exactly like a closing entry from before 0028.
+	legacy, err := e.store.PostEntry(e.ctx, closingEntry(e.ledger.ID, "CLOSE-LEGACY", "100.00"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var poster *string
+	if err := e.admin.QueryRow(context.Background(), `select posted_by_service from journal_entry where id = $1`, legacy.Entries[0].ID).Scan(&poster); err != nil || poster != nil {
+		t.Fatalf("legacy entry posted_by_service = %v, %v; want NULL", poster, err)
+	}
+	net := func() string {
+		t.Helper()
+		tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: e.ledger.ID, PeriodFrom: "2026-03", PeriodTo: "2026-03",
+			AccountFrom: "6010", AccountTo: "6010", ExcludeYearEndClosing: true})
+		if err != nil || !tb.ExcludesYearEndClosing || len(tb.Rows) != 1 {
+			t.Fatalf("excluded balance: %+v %v", tb, err)
+		}
+		return tb.Rows[0].Net
+	}
+	if got := net(); got != "0.00" {
+		t.Fatalf("an unattributed closing entry stays in and shows as the difference: net %s, want 0.00", got)
+	}
+	hash, _ := domain.HashPayload("reverse CLOSE-LEGACY")
+	if _, err := e.store.ReverseEntry(closeCtx, ReverseInput{EntryID: legacy.Entries[0].ID, Key: "REV-CLOSE-LEGACY", Hash: hash, Actor: "svc", TraceID: testTrace, Today: testToday}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.PostEntry(closeCtx, closingEntry(e.ledger.ID, "CLOSE-REDO", "100.00")); err != nil {
+		t.Fatal(err)
+	}
+	if got := net(); got != "100.00" {
+		t.Fatalf("after the redo only the expense counts: net %s, want 100.00", got)
+	}
+}

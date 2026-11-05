@@ -21,6 +21,19 @@ type Issue struct {
 	Code   string `json:"code"`
 	Detail string `json:"detail"`
 	Reject bool   `json:"reject"`
+	// Contrl places an EDIFACT issue for the CONTRL that rejects its message
+	// (UCM, UCS and UCD); zero for X12 and for issues without a place.
+	Contrl ContrlPlace `json:"-"`
+}
+
+// ContrlPlace is where a mapping issue lies in an EDIFACT message: the 0085
+// code, the segment position (UNH is 1), and the data element and component
+// positions inside the segment. Zero positions are left out of the CONTRL.
+type ContrlPlace struct {
+	Code      string
+	Segment   int
+	Element   int
+	Component int
 }
 
 // ItemRef is one PO106/PO107 pair: qualifier BP, VP, UP or EN.

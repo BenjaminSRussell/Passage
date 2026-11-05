@@ -207,7 +207,8 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			results = append(results, ProgressLineResult{LineID: l.ID, LineNo: l.LineNo, Quantity: req.Quantity,
 				DeliveredQty: next.Delivered, InvoicedQty: next.Invoiced, LineStatus: next.Status})
 			ev := salesevents.ProgressLine{LineID: l.ID, LineNo: l.LineNo, Quantity: req.Quantity.String(),
-				DeliveredQty: next.Delivered.String(), InvoicedQty: next.Invoiced.String(), LineStatus: next.Status}
+				DeliveredQty: next.Delivered.String(), InvoicedQty: next.Invoiced.String(), LineStatus: next.Status,
+				ProductID: l.ProductID, Unit: l.Unit, SiteID: l.SiteID, WarehouseID: l.WarehouseID}
 			if in.Kind == domain.ProgressDelivered && l.CatchWeight != nil && l.ActualWeight != nil {
 				reported := req.Quantity.Mul(l.CatchWeight.Nominal)
 				if req.ActualWeight != nil {
@@ -250,7 +251,7 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			return err
 		}
 		if err := enqueue(ctx, tx, "order", o.ID, salesevents.OrderProgressRecorded, p.TenantID, salesevents.OrderProgressData{
-			ProgressID: id, OrderID: o.ID, LegalEntityID: o.LegalEntityID, Kind: in.Kind, SourceRef: in.SourceRef, Lines: evLines,
+			ProgressID: id, OrderID: o.ID, LegalEntityID: o.LegalEntityID, Currency: o.Currency, Kind: in.Kind, SourceRef: in.SourceRef, Lines: evLines,
 			PreviousStatus: o.Status, OrderStatus: status, Actor: in.Actor, Version: version}); err != nil {
 			return err
 		}

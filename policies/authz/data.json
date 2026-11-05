@@ -1064,7 +1064,8 @@
       {"resource": "/edi/v1/maps:test", "methods": ["POST"]},
       {"resource": "/edi/v1/partners", "methods": ["GET", "POST"]},
       {"resource": "/edi/v1/partners/*", "methods": ["GET"]},
-      {"resource": "/edi/v1/partners/*/trade-profile", "methods": ["PUT"]}
+      {"resource": "/edi/v1/partners/*/trade-profile", "methods": ["PUT"]},
+      {"resource": "/edi/v1/partners/*/transport", "methods": ["GET", "PUT"]}
     ]},
     "edi.operate": {"permissions": [
       {"resource": "/edi/v1/inbound/x12", "methods": ["POST"]},
@@ -1072,6 +1073,7 @@
       {"resource": "/edi/v1/interchanges/*", "methods": ["GET"]},
       {"resource": "/edi/v1/interchanges/*/payload", "methods": ["GET"]},
       {"resource": "/edi/v1/interchanges/*:reprocess", "methods": ["POST"]},
+      {"resource": "/edi/v1/interchanges/*:resend", "methods": ["POST"]},
       {"resource": "/edi/v1/interchanges:reprocess", "methods": ["POST"]},
       {"resource": "/edi/v1/messages", "methods": ["GET"]},
       {"resource": "/edi/v1/messages/*", "methods": ["GET"]},
@@ -1702,6 +1704,7 @@
     ]},
     "transport.freight-bill.approve": {"permissions": [{"resource": "/v1/transport/freight-bills/*:approve", "methods": ["POST"]}]},
     "transport.load.tender": {"permissions": [
+      {"resource": "/v1/transport/loads/*:release", "methods": ["POST"]},
       {"resource": "/v1/transport/loads/*:tender", "methods": ["POST"]},
       {"resource": "/v1/transport/tenders", "methods": ["GET"]},
       {"resource": "/v1/transport/tenders/*", "methods": ["GET"]},
@@ -2461,11 +2464,14 @@
       {"resource": "/v1/planning/strategies", "methods": ["GET"]},
       {"resource": "/v1/planning/strategies/*", "methods": ["GET"]},
       {"resource": "/v1/planning/forecast-allocation-keys", "methods": ["GET"]},
-      {"resource": "/v1/planning/forecast-allocation-keys/*", "methods": ["GET"]}
+      {"resource": "/v1/planning/forecast-allocation-keys/*", "methods": ["GET"]},
+      {"resource": "/v1/planning/plan-runs/*", "methods": ["GET"]}
     ]},
     "planning.run": {"permissions": [
       {"resource": "/v1/planning/ddmrp/buffers:recalculate", "methods": ["POST"]},
-      {"resource": "/v1/planning/plans/*:run", "methods": ["POST"]}
+      {"resource": "/v1/planning/plans/*:run", "methods": ["POST"]},
+      {"resource": "/v1/planning/plan-runs/*", "methods": ["GET"]},
+      {"resource": "/v1/planning/plan-runs/*:cancel", "methods": ["POST"]}
     ]},
     "planning.setup.maintain": {"permissions": [
       {"resource": "/v1/planning/buffer-profiles", "methods": ["POST"]},
@@ -2619,7 +2625,8 @@
       {"resource": "/v1/pricing/journals/*/audit-extract", "methods": ["GET"]}
     ]},
     "product.configuration.read": {"service_only": true, "permissions": [{"resource": "/v1/product/saved-configurations/*", "methods": ["GET"]}]},
-    "product.configure": {"permissions": [{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
+    "product.uom.convert": {"service_only": true, "permissions": [{"resource": "/v1/product/uom/convert", "methods": ["GET"]}]},
+    "product.configure": {"permissions":[{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
     "product.gtin.allocate": {"permissions": [{"resource": "/v1/product/gtins", "methods": ["POST"]}]},
     "product.read": {"permissions": [
       {"resource": "/v1/product/barcodes/*", "methods": ["GET"]},
@@ -3308,7 +3315,8 @@
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "inventory": {
-      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"]
+      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
+      "product": ["product.uom.convert"]
     },
     "eam": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
@@ -3409,6 +3417,7 @@
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
+    "inventory-postings": ["inventory.transaction.apply"],
     "migration-loader": ["party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"],
     "production-planning": ["production.planned.intake"],
     "production-shopfloor": ["production.jobcard.shopfloor"],

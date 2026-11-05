@@ -1,0 +1,19 @@
+# TLS for the AS2 edge. Partners' AS2 software validates this certificate, so outside dev the issuer must be one
+# they trust (a public ACME issuer, or a CA the partner pins); dev uses the local CA from deploy/envs/dev/apps/cert-issuer.yaml.
+# RSA rather than ECDSA: several AS2 stacks still only offer RSA cipher suites.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: passage-as2-tls
+  namespace: hello-ledger
+spec:
+  secretName: passage-as2-tls
+  dnsNames:
+    - as2.dev.passage.dev
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  issuerRef:
+    kind: ClusterIssuer
+    name: passage-local-ca

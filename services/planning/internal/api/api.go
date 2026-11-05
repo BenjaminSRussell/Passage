@@ -76,10 +76,15 @@ type API struct {
 	// generator is the statistical forecast service; nil while the
 	// planning.statistical-forecast flag is off.
 	generator ForecastGenerator
+
+	// runs executes asynchronous plan runs (planrun.go).
+	runs *runner
 }
 
 // New returns an API over st.
-func New(st store.Store) *API { return &API{store: st, now: time.Now} }
+func New(st store.Store) *API {
+	return &API{store: st, now: time.Now, runs: newRunner(DefaultMaxConcurrentRuns, DefaultRunTimeout)}
+}
 
 // Register mounts the routes on r. /readyz replaces the router's static probe
 // with one that checks the database, so the chart's readiness probe fails
@@ -87,6 +92,7 @@ func New(st store.Store) *API { return &API{store: st, now: time.Now} }
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/planning/plans/{planCode}:run", a.runPlan)
+	a.registerPlanRuns(r)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions", a.listVersions)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions/{number}", a.getVersion)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/diff", a.diffVersions)
@@ -130,6 +136,10 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP planning_plan_runs_completed_total Plan versions that became current.\n# TYPE planning_plan_runs_completed_total counter\nplanning_plan_runs_completed_total %d\n", a.runsCompleted.Load())
 		fmt.Fprintf(w, "# HELP planning_plan_runs_replayed_total Plan runs answered from an Idempotency-Key replay.\n# TYPE planning_plan_runs_replayed_total counter\nplanning_plan_runs_replayed_total %d\n", a.runsReplayed.Load())
 		fmt.Fprintf(w, "# HELP planning_plan_runs_refused_total Plan runs refused (invalid input, cycle, lock).\n# TYPE planning_plan_runs_refused_total counter\nplanning_plan_runs_refused_total %d\n", a.runsRefused.Load())
+		fmt.Fprintf(w, "# HELP planning_async_plan_runs_total Asynchronous plan runs started and how they ended.\n# TYPE planning_async_plan_runs_total counter\n")
+		fmt.Fprintf(w, "planning_async_plan_runs_total{outcome=\"started\"} %d\nplanning_async_plan_runs_total{outcome=\"succeeded\"} %d\nplanning_async_plan_runs_total{outcome=\"failed\"} %d\nplanning_async_plan_runs_total{outcome=\"cancelled\"} %d\n",
+			a.runs.started.Load(), a.runs.succeeded.Load(), a.runs.failed.Load(), a.runs.cancelled.Load())
+		fmt.Fprintf(w, "# HELP planning_async_plan_runs_executing Asynchronous plan runs executing in this process.\n# TYPE planning_async_plan_runs_executing gauge\nplanning_async_plan_runs_executing %d\n", len(a.runs.slots))
 	})
 }
 
@@ -625,42 +635,81 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	started := a.now()
-	result, planned, err := a.plan(req, asOf, domain.ApplyBuffers(items, buffers))
-	if err != nil {
-		a.runsRefused.Add(1)
-		httpx.Fail(w, r, runProblem(err))
+	job := runJob{code: code, req: req, key: key, inputHash: fmt.Sprintf("%x", sha256.Sum256(body)), asOf: asOf, items: domain.ApplyBuffers(items, buffers), buffers: buffers}
+	if prefersAsync(r) {
+		a.startRun(w, r, job)
 		return
 	}
-	result, err = a.applyQuotaToRun(r.Context(), code, req, asOf, result)
+	v, replayed, err := a.executeRun(r.Context(), job, nil)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	result = domain.ApplyDefaultVendors(result, defaultVendors(req.Items))
-	result = domain.SplitWarehouses(domain.AddBufferResults(result, buffers))
+	if replayed {
+		w.Header().Set("Idempotent-Replayed", "true")
+		httpx.JSON(w, http.StatusOK, v)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, v)
+}
+
+// runJob is a validated plan run: the snapshot with its stored setup applied
+// (buildSnapshot, domain.ApplyBuffers), ready for the engine.
+type runJob struct {
+	code      string
+	req       runRequest
+	key       string
+	inputHash string
+	asOf      time.Time
+	items     []domain.Item
+	buffers   []domain.RunBuffer
+}
+
+// executeRun plans the job and stores the result as the plan's current
+// version, in the request (prog nil) or in an asynchronous run (prog reports
+// its phase and rows and names the run to the store).
+func (a *API) executeRun(ctx context.Context, job runJob, prog *runProgress) (store.Version, bool, error) {
+	started := a.now()
+	result, planned, err := a.plan(job.req, job.asOf, job.items)
+	if err != nil {
+		a.runsRefused.Add(1)
+		return store.Version{}, false, runProblem(err)
+	}
+	result, err = a.applyQuotaToRun(ctx, job.code, job.req, job.asOf, result)
+	if err != nil {
+		return store.Version{}, false, err
+	}
+	result = domain.ApplyDefaultVendors(result, defaultVendors(job.req.Items))
+	result = domain.SplitWarehouses(domain.AddBufferResults(result, job.buffers))
 	elapsed := a.now().Sub(started).Milliseconds()
-	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
-		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: planned, DurationMs: elapsed,
-		InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,
-	})
+	run := store.RunRequest{
+		PlanCode: job.code, SiteID: job.req.SiteID, LegalEntityID: job.req.LegalEntityID, ForecastModel: job.req.ForecastModel, AsOf: job.asOf, ItemsPlanned: planned, DurationMs: elapsed,
+		InputHash: job.inputHash, IdempotencyKey: job.key, Result: result,
+	}
+	if prog != nil {
+		// A cancel that arrived while the engine ran stops the run here,
+		// before anything is written.
+		if err := ctx.Err(); err != nil {
+			return store.Version{}, false, err
+		}
+		run.RunID, run.Progress = prog.id, prog.wrote
+		prog.persisting(int64(len(result.Orders) + len(result.Pegging) + len(result.Messages) + len(result.Net)))
+	}
+	v, replayed, err := a.store.RunPlan(ctx, run)
 	if err != nil {
 		var p *httpx.Problem
 		if errors.As(err, &p) && p.Code == store.CodeAlreadyRunning {
 			a.runsRefused.Add(1)
 		}
-		slog.Error("plan run failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
-		httpx.Fail(w, r, err)
-		return
+		slog.Error("plan run failed", "err", err, "planCode", job.code, "correlationId", middleware.GetReqID(ctx))
+		return store.Version{}, false, err
 	}
 	if replayed {
 		a.runsReplayed.Add(1)
-		w.Header().Set("Idempotent-Replayed", "true")
-		httpx.JSON(w, http.StatusOK, v)
-		return
+	} else {
+		a.runsCompleted.Add(1)
 	}
-	a.runsCompleted.Add(1)
-	httpx.JSON(w, http.StatusCreated, v)
+	return v, replayed, nil
 }
 
 // inlineStrategies lays the strategy sent on an item's coverage block over the

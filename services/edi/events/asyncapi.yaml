@@ -20,11 +20,21 @@ channels:
     messages:
       messageFailed:
         $ref: '#/components/messages/MessageFailed'
+  messageSent:
+    address: passage.edi.message
+    messages:
+      messageSent:
+        $ref: '#/components/messages/MessageSent'
+  deliveryFailed:
+    address: passage.edi.delivery
+    messages:
+      deliveryFailed:
+        $ref: '#/components/messages/DeliveryFailed'
 operations:
   publishMessageReceived:
     action: send
     channel: { $ref: '#/channels/messageReceived' }
-    summary: One inbound transaction set has been recorded (FR-35.4)
+    summary: One inbound transaction set (X12) or message (EDIFACT ORDERS, DESADV, INVOIC, CONTRL; standard EDIFACT) has been recorded (FR-35.4)
   publishMessageAcked:
     action: send
     channel: { $ref: '#/channels/messageAcked' }
@@ -32,7 +42,15 @@ operations:
   publishMessageFailed:
     action: send
     channel: { $ref: '#/channels/messageFailed' }
-    summary: An inbound transaction failed mapping, or a received 997 could not be read or matched; also after a reprocess that still fails with another error (FR-35.10)
+    summary: An inbound transaction failed mapping, or a received 997 or CONTRL could not be read or matched; also after a reprocess that still fails with another error (FR-35.10)
+  publishMessageSent:
+    action: send
+    channel: { $ref: '#/channels/messageSent' }
+    summary: The partner's transport confirmed receipt of one outbound transaction (processed AS2 MDN or completed SFTP upload, FR-35.5)
+  publishDeliveryFailed:
+    action: send
+    channel: { $ref: '#/channels/deliveryFailed' }
+    summary: A transport delivery gave up and needs an operator (attempts used up, no asynchronous MDN within the wait, or the partner's transport is gone); a resend queues a new delivery
 components:
   messages:
     MessageReceived:
@@ -108,3 +126,54 @@ components:
               st_control: { type: string }
               error: { type: string, description: catalog code and detail of the failing rule }
               reprocessed: { type: boolean, description: true when a reprocess produced this failure }
+    MessageSent:
+      name: dev.passage.edi.message.sent.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.message.sent.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: outbound message id }
+          data:
+            type: object
+            required: [message_id, interchange_id, partner_id, transaction_set, control_number, st_control, transport, delivery_id, transport_message_id]
+            properties:
+              message_id: { type: string, format: uuid, description: the outbound message delivered }
+              interchange_id: { type: string, format: uuid, description: the outbound interchange }
+              partner_id: { type: string, format: uuid }
+              transaction_set: { type: string }
+              control_number: { type: string, description: ISA13 of the outbound interchange }
+              st_control: { type: string }
+              transport: { type: string, enum: [AS2, SFTP] }
+              delivery_id: { type: string, format: uuid }
+              transport_message_id: { type: string, description: The delivery message id (the AS2 Message-ID without angle brackets) }
+    DeliveryFailed:
+      name: dev.passage.edi.delivery.failed.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.delivery.failed.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: delivery id }
+          data:
+            type: object
+            required: [delivery_id, interchange_id, partner_id, payload_kind, transport, transport_message_id, attempts, mdn_timeouts, mdn_timeout, error]
+            properties:
+              delivery_id: { type: string, format: uuid }
+              interchange_id: { type: string, format: uuid, description: the outbound interchange (DOCUMENT) or the inbound one whose 997 or CONTRL this is (ACK; also the negative 997 or CONTRL of an interchange a transport refused) }
+              partner_id: { type: string, format: uuid }
+              payload_kind: { type: string, enum: [DOCUMENT, ACK] }
+              transport: { type: string, enum: [AS2, SFTP] }
+              transport_message_id: { type: string, description: The delivery message id (the AS2 Message-ID without angle brackets) }
+              attempts: { type: integer, minimum: 0, description: sends made }
+              mdn_timeouts: { type: integer, minimum: 0, description: waits for an asynchronous MDN that ran out (EDI_AS2_MDN_TIMEOUT_MINUTES) }
+              mdn_timeout: { type: boolean, description: true when the last wait for an asynchronous MDN ran out }
+              error: { type: string, description: the last failure recorded on the delivery }

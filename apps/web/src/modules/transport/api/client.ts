@@ -345,6 +345,31 @@ export function startTender(loadId: string, input: NewTender, key: string = newK
   return post<Tender>(`/loads/${encodeURIComponent(loadId)}:tender`, input, key);
 }
 
+export interface LoadRelease {
+  id: string;
+  loadId: string;
+  legalEntityId: string;
+  carriers: TenderCarrier[];
+  currency?: string;
+  timeoutMin: number;
+  releasedBy: string;
+  legalEntityScope: string[];
+  releasedAt: string;
+  /** The load's status after the release (TENDERED), or as it is now for a replayed key. */
+  loadStatus: LoadStatus;
+  /** The load's version after the release, for the next If-Match. */
+  loadVersion: number;
+}
+
+/**
+ * Releases a load for tendering (FR-34.5): the tender workflow starts the cascade from it.
+ * `version` is the load version the planner saw, sent as If-Match; reuse one key per form so
+ * a retried release cannot start two cascades.
+ */
+export function releaseLoad(loadId: string, input: NewTender, version: number, key: string = newKey()): Promise<LoadRelease> {
+  return post<LoadRelease>(`/loads/${encodeURIComponent(loadId)}:release`, input, key, { "If-Match": `"${version}"` });
+}
+
 export function listTenders(filter: { status?: TenderStatus | ""; loadId?: string } = {}, signal?: AbortSignal): Promise<Tender[]> {
   return items<Tender>(`/tenders${query(filter)}`, signal);
 }

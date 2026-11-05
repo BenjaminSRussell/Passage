@@ -41,7 +41,8 @@ migrations/             0001_init.sql (rate_card, freight_bill, carrier_invoice,
                         0003_load_dg_decision.sql (load_build, load, load_shipment, dg_check,
                         freight_bill_decision), 0004_gate_goods_in_transit.sql (gate_visit,
                         gate_event, goods_in_transit_order, goods_in_transit_line),
-                        0005_screening_hold_route_plan.sql (screening_hold, route_plan), applied in order
+                        0005_screening_hold_route_plan.sql (screening_hold, route_plan), ...,
+                        0011/0012 (CDC publication and role grants for outbox-transport), applied in order
 api/openapi.yaml        OpenAPI 3.1 for every endpoint in this slice
 events/asyncapi.yaml    AsyncAPI 3 for every event the service publishes
 charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, ServiceMonitor toggle)
@@ -65,7 +66,8 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | /v1/transport/loads/{id}:tender | transport.load.tender, or the service-only `transport.tender.execute` from the `workflow-ts` issuer | Carriers in rank order with optional quoted rates; `timeoutMin` 5 to 1440 (default 120); one open tender per load (TMS-0114); `Idempotency-Key` optional |
+| POST | /v1/transport/loads/{id}:release | transport.load.tender | Releases the load for tendering (#426): the tender start's body, checked the same way; publishes `load.released`, from which workflow-ts starts the tender cascade; `releasedBy` and `legalEntityScope` are the verified caller (an explicit scope listing the load's legal entity), never body fields; refused with nothing published by the tender gates (TMS-0114, TMS-0130, TMS-0133); `If-Match` with the load version required; the load moves PLANNED or RATED to TENDERED (any other status, such as a load already released, is 409 TMS-0136); 202 with the release and the load's `loadStatus` and `loadVersion`; `Idempotency-Key` optional |
+| POST | /v1/transport/loads/{id}:tender | transport.load.tender, or the service-only `transport.tender.execute` from the `workflow-ts` issuer | Carriers in rank order with optional quoted rates; `timeoutMin` 5 to 1440 (default 120); one open tender per load (TMS-0114); the load moves to TENDERED (a released load already is; other statuses than PLANNED, RATED and TENDERED are TMS-0136); no `If-Match`, the workflow starts it after a release; `Idempotency-Key` optional |
 | GET | /v1/transport/tenders | transport.load.tender, or the service-only `transport.tender.execute` with `loadId` (the workflow adopting an open tender after TMS-0114) | Tender board, newest first, at most 500; filter by `status`, `loadId`; `overdue` flags a pending attempt past its deadline |
 | POST | /v1/transport/tenders:expire | transport.load.tender, or the service-only `transport.tender.execute` | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call); it expires only tenders in the caller's legal entities, so schedule it as an all-entity principal |
 | GET | /v1/transport/tenders/{id} | transport.load.tender, or the service-only `transport.tender.execute` | One tender with its attempts |
@@ -84,7 +86,7 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 |---|---|---|---|
 | POST | /v1/transport/loads:build | transport.load.plan | Shipments grouped by ship-from site, ship-to region, mode and pickup date, packed first-fit decreasing by weight; never over capacity (BR-34.8); too large TMS-0115, already planned TMS-0116; `Idempotency-Key` optional |
 | GET | /v1/transport/loads | transport.view | Newest first, at most 500; filter by `status` |
-| GET | /v1/transport/loads/{id} | transport.view | The load with its DG checks, newest first (at most 20) |
+| GET | /v1/transport/loads/{id} | transport.view | The load with its DG checks, newest first (at most 20); ETag is the load version |
 | POST | /v1/transport/loads/{id}:dg-check | transport.load.plan | ADR or 49CFR check of the request's DG lines; stored with findings and shipping-paper lines; a FAIL blocks tendering |
 | POST | /v1/transport/loads/{id}:screen | transport.load.plan | Screens the parties through the `ScreeningProvider` hook; HOLD on a hit or timeout (TMS-0133), WARN when cross-border and no provider (TMS-0134); not stored |
 | GET | /v1/transport/transfer-rules/{incoterm} | transport.view | Default goods-in-transit transfer event for an Incoterms 2020 rule (BR-34.11) |
@@ -148,7 +150,9 @@ allocation are naturally idempotent: repeating them returns the stored result an
 no event; so is shipping a goods-in-transit order. A gate check-out stores its own key on
 the visit, so a retried check-out returns the checked-out visit. Freight bill decisions also need `If-Match` with the bill version (the ETag of
 `GET /freight-bills/{id}`): without it 428 `COM-0428`, stale 412 `conflict_version`. A
-replayed decision key returns the bill as it is now.
+replayed decision key returns the bill as it is now. A load release needs `If-Match` with
+the load version (the ETag of `GET /loads/{id}`) the same way; a replayed release key
+returns the first release with the load's status as it is now.
 
 The web module `apps/web/src/modules/transport` gives the screens: workspace, rate shop
 with explain trace, rate card list and form, freight bill list, detail (reconciliation
@@ -223,6 +227,16 @@ go test ./internal/store/
   response arrives, and the expiry is saved even when the late response is rejected.
   Invariant: a load has at most one ACCEPTED and at most one PENDING tender (partial
   unique index), so a load is never in two cascades.
+- Load status (§6.34.4, #426), checked in `domain.NextLoadStatus`: a release moves a
+  PLANNED or RATED load to TENDERED, and a released load cannot be released again
+  (TMS-0136); a tender start takes PLANNED, RATED or TENDERED (the workflow starts the
+  tender of a released load) and leaves the load TENDERED. An ACCEPTED tender makes the
+  load ACCEPTED; a TENDER_FAILED tender (every carrier declined or timed out, by response,
+  sweep or the lazy cascade of a later start) puts it back to PLANNED, where it can be
+  released again. One decline that passes the load to the next carrier leaves it
+  TENDERED. A tender outcome on a load that is not TENDERED leaves the load as it is
+  (`domain.LoadAfterTender`); the outcome is never refused for the load. Every move bumps
+  the load version.
 - BR-34.9 tracking: events apply by occurred_at (ties by source and ref), so ingest order
   does not matter; a D1 with no earlier AF sets the stop DELIVERED and backfills the
   pickup as inferred; a stop's status never moves back.
@@ -310,8 +324,9 @@ Envelope: RFC 9457 `application/problem+json`, `type` = `https://passage.dev/pro
 | TMS-0122 | 409 | The screening hold is already released by another user or for another reason (slice-local; the catalog leaves 0122 unassigned) |
 | TMS-0123 | 503 | The optimizer is not configured, unreachable, failing, or answered with something that is not a plan (slice-local) |
 | TMS-0134 | screening | No provider and the load is cross-border: NOT_SCREENED |
-| COM-0428 | 428 | `If-Match` missing on approve or dispute |
-| conflict_version | 412 | `If-Match` is not the bill's current version |
+| TMS-0136 | 409 | The load's status does not allow the release or tender start, such as a load already released (TENDERED) or DISPATCHED (slice-local; the catalog ends at TMS-0135) |
+| COM-0428 | 428 | `If-Match` missing on approve, dispute or load release |
+| conflict_version | 412 | `If-Match` is not the bill's or load's current version |
 
 TMS-0100 is also the not-found code for tenders, voyages, loads, gate visits,
 goods-in-transit orders, screening holds and route plans. Codes not yet raised (TMS-0103,
@@ -322,6 +337,7 @@ goods-in-transit orders, screening holds and route plans. Codes not yet raised (
 | Type | When | Subject |
 |---|---|---|
 | dev.passage.tms.freightbill.matched.v1 | A carrier invoice is matched to its bill | freight bill id |
+| dev.passage.tms.load.released.v1 | A planner releases a load for tendering (not on replay); the release id, the cascade, the releasing user and its legal-entity scope; workflow-ts starts `tenderWorkflow` from it | load id |
 | dev.passage.tms.tender.accepted.v1 / declined.v1 / expired.v1 | Each attempt outcome; payload has rank and the quoted rate | tender id |
 | dev.passage.tms.tracking.event.v1 | A status report is stored (not on replay) | load id |
 | dev.passage.tms.landedcost.posted.v1 | A voyage is allocated and posted; Σ receiptLines = total | voyage id |
@@ -329,7 +345,11 @@ goods-in-transit orders, screening holds and route plans. Codes not yet raised (
 | dev.passage.tms.gate.checkedin.v1 | A driver and trailer check in (not on replay); no driver PII | gate visit id |
 | dev.passage.tms.goodsintransit.shipped.v1 | A goods-in-transit order ships; goods value and estimated cost per line and cost type, Σ lines = estimatedTotal | order id |
 
-Each is written to the outbox in the transaction that makes the change.
+Each is written to the outbox in the transaction that makes the change. The `outbox-transport`
+Debezium connector (`deploy/kafka/connect.yaml`) streams the outbox through the
+`passage_outbox_transport` publication (migration 0011) as the `debezium_cdc_transport` role
+(grants in migration 0012) and routes each event to `passage.tms.<aggregate_type>`: the release
+to `passage.tms.load`, the tender outcomes to `passage.tms.tender`.
 
 ## Dependencies
 
@@ -342,7 +362,8 @@ No new third-party dependencies beyond the platform module and what it pulls in
 carry a nullable `legal_entity_id` (migration 0006) with a RESTRICTIVE legal-entity
 policy; `load_shipment`, `dg_check`, `screening_hold`, `freight_bill_decision`,
 `gate_event` and `goods_in_transit_line` follow their parent, and `tender` and
-`tracking_event` follow their load (migration 0007). A new load, goods-in-transit
+`tracking_event` follow their load (migration 0007). `load_release` (migration 0010)
+copies its load's entity, which is never NULL there, and has its own restrictive policy. A new load, goods-in-transit
 order, or invoice or visit without a parent takes `legalEntityId` from the request
 (default: the caller's single entity); a caller scoped to several entities or to all
 of them must send it (422). A freight bill, gate visit with a load, and matched

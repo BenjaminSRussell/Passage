@@ -98,6 +98,7 @@ type API struct {
 	trackingIngested atomic.Int64
 	voyagesPosted    atomic.Int64
 	loadsBuilt       atomic.Int64
+	loadsReleased    atomic.Int64
 	dgChecks         atomic.Int64
 	screenings       atomic.Int64
 	billsApproved    atomic.Int64
@@ -165,6 +166,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:dg-check", a.checkLoadDG)
 	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:screen", a.screenLoad)
 	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/transfer-rules/{incoterm}", a.transferRule)
+	r.With(authz.RequireDuty(DutyTender)).Post(prefix+"/loads/{id}:release", a.releaseLoad)
 	r.With(requireTenderOrWorkflow).Post(prefix+"/loads/{id}:tender", a.startTender)
 	r.With(requireTenderOrWorkflow).Get(prefix+"/tenders", a.listTenders)
 	r.With(requireTenderOrWorkflow).Post(prefix+"/tenders:expire", a.expireTenders)
@@ -647,6 +649,7 @@ func (a *API) Metrics() http.Handler {
 			{"transport_tracking_events_total", "Tracking events stored (replays excluded).", a.trackingIngested.Load()},
 			{"transport_voyages_posted_total", "Voyage allocate requests answered with a posted voyage, replays included.", a.voyagesPosted.Load()},
 			{"transport_loads_built_total", "Loads returned by rule-based load builds, replays included.", a.loadsBuilt.Load()},
+			{"transport_loads_released_total", "Load releases for tendering, replays included.", a.loadsReleased.Load()},
 			{"transport_dg_checks_total", "Dangerous-goods checks run and stored.", a.dgChecks.Load()},
 			{"transport_screenings_total", "Load screening requests answered with a decision.", a.screenings.Load()},
 			{"transport_freight_bills_approved_total", "Freight bill approvals applied or replayed.", a.billsApproved.Load()},

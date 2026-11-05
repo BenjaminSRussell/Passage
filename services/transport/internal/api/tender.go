@@ -88,6 +88,69 @@ func (a *API) startTender(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	t, fields := req.tender(loadID)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	now := a.now()
+	t.Send(now)
+	created, err := a.store.CreateTender(r.Context(), t, idem, now)
+	if err != nil {
+		a.fail(w, r, "start tender failed", err)
+		return
+	}
+	a.tendersStarted.Add(1)
+	httpx.JSON(w, http.StatusCreated, a.tenderView(created))
+}
+
+// releaseLoad releases a load for tendering (FR-34.5): it takes the tender
+// start's body, checks it the same way and publishes load.released, from which
+// workflow-ts starts the tender cascade. Who released it and in which legal
+// entities come from the verified caller, never from the body (#426). If-Match
+// carries the load version the planner saw; the load moves to TENDERED.
+func (a *API) releaseLoad(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	loadID := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(loadID) {
+		validationFailed(w, r, map[string]string{"id": "must be a lower-case UUID"})
+		return
+	}
+	version, err := ifMatch(r, "load")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	idem, ok := readIdem(w, r)
+	if !ok {
+		return
+	}
+	var req tenderRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	t, fields := req.tender(loadID)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	release, err := a.store.ReleaseLoad(r.Context(), domain.ReleaseOf(t), version, idem, a.now())
+	if err != nil {
+		a.fail(w, r, "release load failed", err)
+		return
+	}
+	a.loadsReleased.Add(1)
+	httpx.JSON(w, http.StatusAccepted, release)
+}
+
+// tender validates a tender request (route-guide carriers, quoted rates,
+// currency and timeout) and returns the unsent tender, or the field errors. The
+// load release takes the same body and validates it the same way, so a release
+// never publishes a cascade the tender start would refuse.
+func (req tenderRequest) tender(loadID string) (domain.Tender, map[string]string) {
 	fields := map[string]string{}
 	carriers := make([]string, 0, len(req.Carriers))
 	rates := map[string]decimal.Decimal{}
@@ -122,26 +185,16 @@ func (a *API) startTender(w http.ResponseWriter, r *http.Request) {
 		fields["timeoutMin"] = "must be between 5 and 1440 minutes"
 	}
 	if len(fields) > 0 {
-		validationFailed(w, r, fields)
-		return
+		return domain.Tender{}, fields
 	}
 	t, err := domain.NewTender(loadID, carriers, time.Duration(timeout)*time.Minute)
 	if err != nil {
-		validationFailed(w, r, map[string]string{"carriers": err.Error()})
-		return
+		return domain.Tender{}, map[string]string{"carriers": err.Error()}
 	}
 	if len(rates) > 0 {
 		t.Currency, t.Rates = req.Currency, rates
 	}
-	now := a.now()
-	t.Send(now)
-	created, err := a.store.CreateTender(r.Context(), t, idem, now)
-	if err != nil {
-		a.fail(w, r, "start tender failed", err)
-		return
-	}
-	a.tendersStarted.Add(1)
-	httpx.JSON(w, http.StatusCreated, a.tenderView(created))
+	return t, nil
 }
 
 func (a *API) listTenders(w http.ResponseWriter, r *http.Request) {

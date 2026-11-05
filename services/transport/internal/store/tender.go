@@ -40,7 +40,9 @@ type TenderFilter struct {
 // cascaded first, so a tender that has failed by time no longer blocks a new one.
 // A load whose latest DG check FAILed is refused with TMS-0130 and nothing is
 // stored (AC-34.13, dg_check_mode BLOCK); so is a load with an OPEN screening
-// hold, with TMS-0133 (BR-34.17, AC-34.16).
+// hold, with TMS-0133 (BR-34.17, AC-34.16). The load moves to TENDERED; one
+// that is not PLANNED, RATED or already TENDERED by its release is refused
+// with TMS-0136.
 func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem, now time.Time) (domain.Tender, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Tender
@@ -68,7 +70,7 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		if _, err := parentEntityTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, ""); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('transport.tender:' || $1 || ':' || $2))`, p.TenantID, in.LoadID); err != nil {
+		if err := lockLoadTender(ctx, tx, p.TenantID, in.LoadID); err != nil {
 			return err
 		}
 		// A concurrent request with the same key may have committed while this one waited.
@@ -81,21 +83,11 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		if err := screeningGate(ctx, tx, p.TenantID, in.LoadID); err != nil {
 			return err
 		}
-		open, _, err := scanTender(tx.QueryRow(ctx, `select `+tenderColumns+` from tender
-			where tenant_id = $1 and load_id = $2 and status in ('PENDING', 'ACCEPTED') for update`, p.TenantID, in.LoadID))
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-		case err != nil:
+		if err := openTenderGate(ctx, tx, p.TenantID, in.LoadID, now); err != nil {
 			return err
-		case open.Status == domain.TenderAccepted:
-			return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has accepted tender "+open.ID)
-		default:
-			if err := advance(ctx, tx, p.TenantID, &open, open.TickAt(now)); err != nil {
-				return err
-			}
-			if open.Status == domain.TenderPending {
-				return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has pending tender "+open.ID)
-			}
+		}
+		if _, _, err := moveLoad(ctx, tx, p.TenantID, in.LoadID, domain.MoveTender); err != nil {
+			return err
 		}
 		carriers, rates, attempts, err := marshalTender(in)
 		if err != nil {
@@ -113,6 +105,36 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		return err
 	})
 	return out, err
+}
+
+// openTenderGate refuses a load with an ACCEPTED tender, or a PENDING tender
+// still inside its deadline at now, with TMS-0114. A PENDING tender past its
+// deadline is cascaded first (and its expiry events written), so one that has
+// failed by time no longer blocks. The caller holds the per-load advisory lock.
+func openTenderGate(ctx context.Context, tx pgx.Tx, tenantID, loadID string, now time.Time) error {
+	open, _, err := scanTender(tx.QueryRow(ctx, `select `+tenderColumns+` from tender
+		where tenant_id = $1 and load_id = $2 and status in ('PENDING', 'ACCEPTED') for update`, tenantID, loadID))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	case open.Status == domain.TenderAccepted:
+		return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has accepted tender "+open.ID)
+	}
+	if err := advance(ctx, tx, tenantID, &open, open.TickAt(now)); err != nil {
+		return err
+	}
+	if open.Status == domain.TenderPending {
+		return httpx.NewProblem(http.StatusConflict, domain.CodeTenderOpen, "load already has pending tender "+open.ID)
+	}
+	return nil
+}
+
+// lockLoadTender serialises tender starts and releases of one load.
+func lockLoadTender(ctx context.Context, tx pgx.Tx, tenantID, loadID string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('transport.tender:' || $1 || ':' || $2))`, tenantID, loadID)
+	return err
 }
 
 // GetTender returns one tender as stored. A pending attempt past its deadline is
@@ -251,7 +273,8 @@ func (s *Postgres) ExpireTenders(ctx context.Context, now time.Time) ([]domain.T
 }
 
 // advance saves the tender's cascade state and writes one tender.expired event
-// per newly expired attempt. It bumps t.Version to the stored value.
+// per newly expired attempt. It bumps t.Version to the stored value and moves
+// the load to an ACCEPTED or failed tender's outcome (followTender).
 func advance(ctx context.Context, tx pgx.Tx, tenantID string, t *domain.Tender, expired []domain.Attempt) error {
 	_, _, attempts, err := marshalTender(*t)
 	if err != nil {
@@ -260,6 +283,9 @@ func advance(ctx context.Context, tx pgx.Tx, tenantID string, t *domain.Tender, 
 	if err := tx.QueryRow(ctx, `update tender set status = $3, attempts = $4::jsonb, accepted_carrier_id = $5::uuid, planner_task = $6,
 		pending_expires_at = $7, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2 returning version`,
 		tenantID, t.ID, t.Status, attempts, nullable(t.AcceptedCarrier), t.PlannerTask, pendingDeadline(*t)).Scan(&t.Version); err != nil {
+		return err
+	}
+	if err := followTender(ctx, tx, tenantID, *t); err != nil {
 		return err
 	}
 	for _, a := range expired {

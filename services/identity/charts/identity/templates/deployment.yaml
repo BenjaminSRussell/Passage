@@ -1,3 +1,7 @@
+{{- if and .Values.keycloakDeprovision.enabled (not .Values.operatorTenantId) }}
+{{- fail "keycloakDeprovision.enabled requires operatorTenantId" }}
+{{- end }}
+{{- $secretVolumes := or .Values.bundle.enabled .Values.keycloakDeprovision.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,17 +20,25 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        {{- if .Values.bundle.enabled }}
+        {{- if $secretVolumes }}
         fsGroup: 65532
         {{- end }}
         seccompProfile:
           type: RuntimeDefault
-      {{- if .Values.bundle.enabled }}
+      {{- if $secretVolumes }}
       volumes:
+        {{- if .Values.bundle.enabled }}
         - name: bundle
           secret:
             secretName: {{ .Values.bundle.secret }}
             defaultMode: 0440
+        {{- end }}
+        {{- if .Values.keycloakDeprovision.enabled }}
+        - name: keycloak
+          secret:
+            secretName: {{ .Values.keycloakDeprovision.secretName }}
+            defaultMode: 0440
+        {{- end }}
       {{- end }}
       containers:
         - name: identity
@@ -39,9 +51,14 @@ spec:
               drop: [ALL]
           env:
             {{- include "identity.env" . | nindent 12 }}
-          {{- if .Values.bundle.enabled }}
+          {{- if $secretVolumes }}
           volumeMounts:
+            {{- if .Values.bundle.enabled }}
             - { name: bundle, mountPath: /var/run/passage/bundle, readOnly: true }
+            {{- end }}
+            {{- if .Values.keycloakDeprovision.enabled }}
+            - { name: keycloak, mountPath: /var/run/passage/keycloak, readOnly: true }
+            {{- end }}
           {{- end }}
           ports:
             - { name: http, containerPort: 8080 }

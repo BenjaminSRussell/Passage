@@ -16,7 +16,11 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-const catchLocation = "00000000-0000-0000-0000-0000000000f1"
+const (
+	catchLocation  = "00000000-0000-0000-0000-0000000000f1"
+	catchSite      = "00000000-0000-0000-0000-0000000000f2"
+	catchWarehouse = "00000000-0000-0000-0000-0000000000f3"
+)
 
 func catchArrival(p tenant.Principal, slip string) store.Receipt {
 	return store.Receipt{
@@ -24,7 +28,7 @@ func catchArrival(p tenant.Principal, slip string) store.Receipt {
 		Date: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Currency: "USD", ExchangeRate: decimal.RequireFromString("1"),
 		Lines: []store.Line{{
 			ProductID: productID, OrderedRemaining: decimal.NewFromInt(200), UnitPrice: decimal.RequireFromString("2"),
-			Unit: "KG",
+			Unit: "KG", SiteID: catchSite, WarehouseID: catchWarehouse,
 		}},
 	}
 }
@@ -85,6 +89,23 @@ func TestCatchWeightReceiptPostsWeightAndCases(t *testing.T) {
 	if !posted.Lines[0].Amount.Decimal.Equal(decimal.RequireFromString("204")) {
 		t.Fatalf("posted amount %s, want 204", posted.Lines[0].Amount.Decimal)
 	}
+	// The PO line's destination is stored with the line and read back (#480).
+	if posted.Lines[0].SiteID != catchSite || posted.Lines[0].WarehouseID != catchWarehouse {
+		t.Fatalf("destination %q / %q, want %s / %s", posted.Lines[0].SiteID, posted.Lines[0].WarehouseID, catchSite, catchWarehouse)
+	}
+	grirCases := func(want int) {
+		t.Helper()
+		page, err := st.ListGrir(ctxOf(p), store.GrirFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range page.Items {
+			if g.ReceiptID == r.ID && g.CWQty != want {
+				t.Fatalf("GR/IR item cwQty %d, want %d", g.CWQty, want)
+			}
+		}
+	}
+	grirCases(10)
 	var qty, amount decimal.Decimal
 	err = dbx.WithTenantTx(ctxOf(p), e.pool, func(tx pgx.Tx) error {
 		return tx.QueryRow(context.Background(), `select received_qty, received_amount from receiving_grir_open_item where receipt_id = $1`, r.ID).Scan(&qty, &amount)
@@ -109,6 +130,7 @@ func TestCatchWeightReceiptPostsWeightAndCases(t *testing.T) {
 	if got := correct("92", 9); !got.Lines[0].Qty.Equal(decimal.NewFromInt(92)) || got.Lines[0].CWQty != 9 {
 		t.Fatalf("short-case correction: qty=%s cwQty=%d, want 92 and 9", got.Lines[0].Qty, got.Lines[0].CWQty)
 	}
+	grirCases(9)
 	if got := correct("93", 0); !got.Lines[0].Qty.Equal(decimal.NewFromInt(93)) || got.Lines[0].CWQty != 9 {
 		t.Fatalf("weight-only correction: qty=%s cwQty=%d, want 93 and 9", got.Lines[0].Qty, got.Lines[0].CWQty)
 	}

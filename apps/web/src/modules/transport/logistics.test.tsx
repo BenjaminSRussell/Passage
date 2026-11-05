@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import type { LoadTracking, Tender, TrackingEvent, Voyage, VoyageSummary } from "./api/client";
+import { PrincipalProvider } from "../../shell/principal";
+import type { LoadDetail, LoadRelease, LoadTracking, Tender, TrackingEvent, Voyage, VoyageSummary } from "./api/client";
 import transport from "./module";
 
 const LOAD = "0195f0a0-0000-7000-8000-0000000000a1";
@@ -45,16 +46,18 @@ function Where() {
   return <p data-testid="location">{location.pathname + location.search}</p>;
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, duties: string[] = []) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        {transport.routes.map((route) => (
-          <Route key={route.path} path={route.path} element={route.element} />
-        ))}
-      </Routes>
-      <Where />
-    </MemoryRouter>,
+    <PrincipalProvider duties={duties}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          {transport.routes.map((route) => (
+            <Route key={route.path} path={route.path} element={route.element} />
+          ))}
+        </Routes>
+        <Where />
+      </MemoryRouter>
+    </PrincipalProvider>,
   );
 }
 
@@ -173,6 +176,142 @@ describe("Start tender", () => {
     expect(screen.getByText("Enter the load id as a lower-case UUID.")).toBeInTheDocument();
     expect(screen.getByText(/Carrier 1: Enter the carrier id/)).toBeInTheDocument();
     expect(calls).toHaveLength(0);
+  });
+});
+
+const loadDetail = (extra: Partial<LoadDetail> = {}): LoadDetail => ({
+  id: LOAD,
+  mode: "TL",
+  status: "PLANNED",
+  shipFromSiteId: "0195f0a0-0000-7000-8000-0000000000b1",
+  shipToRegion: "US-SE",
+  pickupDate: "2026-06-01",
+  totalWeightKg: "19200",
+  totalVolumeM3: "24",
+  pallets: 12,
+  capacity: { maxWeightKg: "20000", maxVolumeM3: "90", maxPallets: 26 },
+  shipmentIds: [],
+  version: 3,
+  createdAt: "2026-06-01T08:00:00Z",
+  dgChecks: [],
+  ...extra,
+});
+
+const release = (extra: Partial<LoadRelease> = {}): LoadRelease => ({
+  id: "0195f0a0-0000-7000-8000-0000000000f4",
+  loadId: LOAD,
+  legalEntityId: "0195f0a0-0000-7000-8000-0000000000e1",
+  carriers: [{ carrierId: C1, rateQuoted: "412.50" }],
+  currency: "USD",
+  timeoutMin: 120,
+  releasedBy: "planner-1",
+  legalEntityScope: ["0195f0a0-0000-7000-8000-0000000000e1"],
+  releasedAt: "2026-06-01T08:00:00Z",
+  loadStatus: "TENDERED",
+  loadVersion: 4,
+  ...extra,
+});
+
+const TENDER_DUTY = ["transport.load.tender"];
+
+describe("Release a load to the tender workflow", () => {
+  it("shows the load status and releases with If-Match and one Idempotency-Key", async () => {
+    handler = (url, init) => {
+      if (url.pathname === `/api/v1/transport/loads/${LOAD}:release` && init.method === "POST") return json(202, release());
+      if (url.pathname === `/api/v1/transport/loads/${LOAD}`) return json(200, loadDetail());
+      return undefined;
+    };
+    const { container } = renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
+    expect(await screen.findByText("version 3")).toBeInTheDocument();
+    expect(screen.getByText("Planned")).toBeInTheDocument();
+    fill("Carrier 1 carrier id", C1);
+    fill("Carrier 1 rate quoted", "412.50");
+    expect(violations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
+    expect(await screen.findByText(/Load released for tendering \(release 0195f0a0…\)\. The load is now tendered/)).toBeInTheDocument();
+    const [call] = posts(`${LOAD}:release`);
+    expect(call.body).toEqual({ carriers: [{ carrierId: C1, rateQuoted: "412.50" }], currency: "USD", timeoutMin: 120 });
+    expect(header(call, "If-Match")).toBe('"3"');
+    expect(header(call, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+    // The resulting status replaces the one read; a tendered load is not released again.
+    expect(screen.getByText("Tendered")).toBeInTheDocument();
+    expect(screen.getByText("version 4")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Release to the tender workflow" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Load id")).toHaveValue(LOAD);
+  });
+
+  it("offers no release without transport.load.tender, and does not read the load", () => {
+    renderAt(`/transport/tenders/new?loadId=${LOAD}`);
+    expect(screen.queryByRole("button", { name: "Release to the tender workflow" })).not.toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("offers no release for a load that is already tendered", async () => {
+    handler = (url) => (url.pathname === `/api/v1/transport/loads/${LOAD}` ? json(200, loadDetail({ status: "TENDERED" })) : undefined);
+    renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
+    expect(await screen.findByText(/Only a planned or rated load is released/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Release to the tender workflow" })).not.toBeInTheDocument();
+  });
+
+  it("shows a load that cannot be found (404)", async () => {
+    handler = () => problem(404, "TMS-0100", "load not found");
+    renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
+    const alert = await findAlert();
+    expect(alert).toHaveTextContent("Could not read the load");
+    expect(alert).toHaveTextContent("TMS-0100");
+    expect(screen.queryByRole("button", { name: "Release to the tender workflow" })).not.toBeInTheDocument();
+  });
+
+  it("shows the gate that refused the release (409 open tender, 422 screening hold)", async () => {
+    for (const [status, code, detail] of [
+      [409, "TMS-0114", "load already has pending tender x"],
+      [422, "TMS-0133", "the load has an open screening hold"],
+    ] as const) {
+      let reads = 0;
+      handler = (url, init) => {
+        if (init.method === "POST") return problem(status, code, detail);
+        if (url.pathname === `/api/v1/transport/loads/${LOAD}`) {
+          reads++;
+          return json(200, loadDetail());
+        }
+        return undefined;
+      };
+      const view = renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
+      await screen.findByText("version 3");
+      fill("Carrier 1 carrier id", C1);
+      fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
+      const alert = await findAlert();
+      expect(alert).toHaveTextContent("Could not release the load");
+      expect(alert).toHaveTextContent(`${detail} (${code})`);
+      // A 409 rereads the load so the planner sees its status now; a 422 does not need to.
+      await waitFor(() => expect(reads).toBe(status === 409 ? 2 : 1));
+      view.unmount();
+    }
+  });
+
+  it("rereads the load after a stale version (412) and releases with the new one", async () => {
+    let version = 3;
+    handler = (url, init) => {
+      if (init.method === "POST") {
+        return header({ init }, "If-Match") === `"${version}"` ? json(202, release({ loadVersion: version + 1 })) : problem(412, "conflict_version", "the load changed since it was read; reload it and release it again");
+      }
+      if (url.pathname === `/api/v1/transport/loads/${LOAD}`) return json(200, loadDetail({ version }));
+      return undefined;
+    };
+    renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
+    await screen.findByText("version 3");
+    version = 5;
+    fill("Carrier 1 carrier id", C1);
+    fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
+    expect(await findAlert()).toHaveTextContent("conflict_version");
+    expect(await screen.findByText("version 5")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
+    expect(await screen.findByText(/Load released for tendering/)).toBeInTheDocument();
+    const [first, second] = posts(`${LOAD}:release`);
+    expect(header(first, "If-Match")).toBe('"3"');
+    expect(header(second, "If-Match")).toBe('"5"');
+    // The same request, so the same key: a retry cannot release twice.
+    expect(header(second, "Idempotency-Key")).toBe(header(first, "Idempotency-Key"));
   });
 });
 

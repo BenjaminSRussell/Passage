@@ -58,8 +58,8 @@ func (a *API) registerRecords(r chi.Router) {
 }
 
 // recordPDF renders a sealed record as a PDF derived from its sealed JSON
-// (FR-24.21). The rendering is not PDF/A-2b yet (NOT-IMPLEMENTED.md); the
-// X-Content-SHA256 header is the hash of the sealed JSON it shows.
+// (FR-24.21) as PDF/A-2b; the X-Content-SHA256 header is the hash of the
+// sealed JSON it shows.
 func (a *API) recordPDF(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return

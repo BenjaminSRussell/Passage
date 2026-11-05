@@ -165,8 +165,12 @@ var errStoredPayload = store.ErrUnreadable
 // reprocessPlan maps each failed message again from the raw interchange. A
 // message is found by transaction set and ST02 among the non-997 groups. A
 // transaction that is missing, or whose set and ST02 occur more than once (ST02
-// is only unique inside a group), stays FAILED with the reason.
+// is only unique inside a group), stays FAILED with the reason. An EDIFACT
+// interchange is reprocessed by edifactReprocessPlan.
 func reprocessPlan(raw string, failed []store.Message) ([]store.Message, error) {
+	if domain.DetectSyntax([]byte(raw)) == domain.SyntaxEdifact {
+		return edifactReprocessPlan(raw, failed)
+	}
 	ic, err := domain.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errStoredPayload, err)
@@ -195,6 +199,45 @@ func reprocessPlan(raw string, failed []store.Message) ([]store.Message, error) 
 			next.Status, next.Canonical, next.Error = res.status, res.canonical, res.errText
 		default:
 			next.Error = fmt.Sprintf("transaction set %s ST02 %s occurs in more than one group; reprocess cannot tell them apart", m.TransactionSet, m.STControl)
+		}
+		out = append(out, next)
+	}
+	return out, nil
+}
+
+// edifactReprocessPlan is reprocessPlan for EDIFACT: a message is found by
+// message type and UNH reference; a message whose UNT was wrong stays FAILED
+// (the stored text cannot change), as does a type and reference that occurs
+// in more than one group.
+func edifactReprocessPlan(raw string, failed []store.Message) ([]store.Message, error) {
+	ic, broken, err := domain.ReadEdifact(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errStoredPayload, err)
+	}
+	bad := map[string]string{}
+	for _, e := range broken {
+		bad[edifactKey(e.Group, e.Message)] = e.Detail
+	}
+	byKey := map[string][]domain.EdifactMessage{}
+	for _, m := range ic.Messages {
+		byKey[m.Type+"/"+m.Ref] = append(byKey[m.Type+"/"+m.Ref], m)
+	}
+	out := make([]store.Message, 0, len(failed))
+	for _, m := range failed {
+		next := store.Message{ID: m.ID, TransactionSet: m.TransactionSet, STControl: m.STControl, Status: "FAILED"}
+		switch ms := byKey[m.TransactionSet+"/"+m.STControl]; {
+		case len(ms) == 0:
+			next.Error = fmt.Sprintf("message %s %s is not in the stored interchange", m.TransactionSet, m.STControl)
+		case len(ms) > 1:
+			next.Error = fmt.Sprintf("message %s %s occurs in more than one group; reprocess cannot tell them apart", m.TransactionSet, m.STControl)
+		case bad[edifactKey(ms[0].Group, ms[0].Ref)] != "":
+			next.Error = CodeSyntax + ": " + bad[edifactKey(ms[0].Group, ms[0].Ref)]
+		default:
+			res, _, err := mapEdifactMessage(ms[0])
+			if err != nil {
+				return nil, err
+			}
+			next.Status, next.Canonical, next.Error = res.status, res.canonical, res.errText
 		}
 		out = append(out, next)
 	}
@@ -348,6 +391,10 @@ func (a *API) getPayload(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		httpx.Fail(w, r, err)
+		return
+	}
+	if domain.DetectSyntax([]byte(p.Raw)) == domain.SyntaxEdifact {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupportedSet, "the segment tree viewer reads X12 only; EDIFACT payloads are not shown yet"))
 		return
 	}
 	ic, err := domain.Parse(p.Raw)

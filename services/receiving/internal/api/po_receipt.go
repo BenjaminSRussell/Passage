@@ -111,6 +111,7 @@ func (a *API) bindPurchaseOrder(ctx context.Context, in *store.Receipt) (map[int
 			return nil, poProblem(http.StatusUnprocessableEntity, domain.CodeOverDelivery, "purchase order line %d has no open quantity", l.POLineNo)
 		}
 		l.OrderedRemaining, l.UnitPrice = open, line.NetUnitPrice()
+		l.SiteID, l.WarehouseID = line.SiteID, line.WarehouseID
 		l.POLineID = stableID(principal.TenantID, strings.ToLower(in.PurchaseOrderID), "po-line", fmt.Sprint(l.POLineNo))
 		poQty[l.LineNo] = line.Qty
 	}

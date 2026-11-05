@@ -146,6 +146,17 @@ describe("tender workflow", () => {
     expect(fake.startKey).toBe(`tender:${firstRunId}`);
   }, 60_000);
 
+  it("keys the tender start on the release, so a redelivered release that starts a new run replays the same tender", async () => {
+    const fake = new FakeTransport();
+    const releaseId = "01a1abf2-4d5a-7674-9348-53a0e1e4248e";
+    await run(fake, async (handle) => {
+      await until(handle, (state) => state.pendingCarrierId === CARRIERS[0]);
+      fake.respond(CARRIERS[0]!, true);
+      await handle.signal(tenderResponseSignal);
+    }, { releaseId });
+    expect(fake.startKey).toBe(`tender:release:${releaseId}`);
+  }, 60_000);
+
   it("does not lose a response that arrives while the tender is being read", async () => {
     const fake = new FakeTransport();
     let readHookDone = false;

@@ -67,14 +67,17 @@ test-policies:
 GATEWAY_CRDS := third_party/envoy-gateway-v1.4.0/crds.yaml
 GATEWAY_SCHEMAS ?= $(CURDIR)/.gateway-schemas
 
+# cert-manager's CRDs are not vendored: the AS2 edge Certificate is skipped here and its fields are checked by
+# scripts/test_gateway.py instead.
 validate-gateway-schema:
 	@which kubeconform >/dev/null || { echo "kubeconform not installed; run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7" >&2; exit 2; }
 	$(PYTHON) scripts/crd_schemas.py $(GATEWAY_CRDS) $(GATEWAY_SCHEMAS)
-	kubectl kustomize gateway | kubeconform -strict -summary -schema-location default -schema-location '$(GATEWAY_SCHEMAS)/{{.ResourceKind}}-{{.Group}}-{{.ResourceAPIVersion}}.json' -
+	kubectl kustomize gateway | kubeconform -strict -summary -skip Certificate -schema-location default -schema-location '$(GATEWAY_SCHEMAS)/{{.ResourceKind}}-{{.Group}}-{{.ResourceAPIVersion}}.json' -
 
 test-gateway: validate-gateway-schema
 	$(PYTHON) -m unittest scripts/test_gateway.py -v
 
-# Argo CD Applications: structure, sync policy, chart coverage; renders every dev chart when helm is on PATH.
+# Argo CD Applications: structure, sync policy, chart coverage, event backbone and Temporal order, directory manifest
+# coverage and Secret references; renders every dev chart when helm is on PATH.
 test-argocd:
 	$(PYTHON) -m unittest scripts/test_argocd_apps.py -v

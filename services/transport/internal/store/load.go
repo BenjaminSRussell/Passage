@@ -428,3 +428,70 @@ func scanDecision(row pgx.Row) (domain.Decision, string, error) {
 	}
 	return d, deref(hash), nil
 }
+
+// loadState returns a load's status and version, or TMS-0100; lock takes the
+// row lock.
+func loadState(ctx context.Context, tx pgx.Tx, tenantID, loadID string, lock bool) (status string, version int, err error) {
+	q := `select status, version from load where tenant_id = $1 and id = $2`
+	if lock {
+		q += ` for update`
+	}
+	err = tx.QueryRow(ctx, q, tenantID, loadID).Scan(&status, &version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", 0, NotFound("load")
+	}
+	return status, version, err
+}
+
+// moveLoad applies a load command (domain.NextLoadStatus) under the load's row
+// lock and returns the load's status and version afterwards. A status that does
+// not allow the command is 409 TMS-0136. A command that leaves the status as it
+// is (a tender start on a released load) does not bump the version.
+func moveLoad(ctx context.Context, tx pgx.Tx, tenantID, loadID, move string) (string, int, error) {
+	status, version, err := loadState(ctx, tx, tenantID, loadID, true)
+	if err != nil {
+		return "", 0, err
+	}
+	next, err := domain.NextLoadStatus(status, move)
+	var rule *domain.Error
+	if errors.As(err, &rule) {
+		return "", 0, httpx.NewProblem(http.StatusConflict, rule.Code, "the load is "+status+"; "+loadMoveHint[move])
+	}
+	if err != nil || next == status {
+		return status, version, err
+	}
+	err = tx.QueryRow(ctx, `update load set status = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2 returning version`,
+		tenantID, loadID, next).Scan(&version)
+	return next, version, err
+}
+
+var loadMoveHint = map[string]string{
+	domain.MoveRelease: "only a PLANNED or RATED load is released for tendering",
+	domain.MoveTender:  "only a PLANNED, RATED or released (TENDERED) load is tendered",
+}
+
+// followTender moves the tender's load to the tender's outcome: ACCEPTED when a
+// carrier accepted, back to PLANNED when every carrier declined or timed out
+// (domain.LoadAfterTender). A load that is not TENDERED, or not stored here, is
+// left as it is: the outcome is the carrier's answer and is never refused for
+// the load's sake. The caller holds the tender's row lock; the load's row lock
+// is taken after it, as everywhere else.
+func followTender(ctx context.Context, tx pgx.Tx, tenantID string, t domain.Tender) error {
+	if t.Status != domain.TenderAccepted && t.Status != domain.TenderFailed {
+		return nil
+	}
+	var status string
+	err := tx.QueryRow(ctx, `select status from load where tenant_id = $1 and id = $2 for update`, tenantID, t.LoadID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	next, moved := domain.LoadAfterTender(status, t.Status)
+	if !moved {
+		return nil
+	}
+	_, err = tx.Exec(ctx, `update load set status = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`, tenantID, t.LoadID, next)
+	return err
+}

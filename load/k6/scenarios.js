@@ -44,7 +44,7 @@ const PATHS = {
   generatedData: '/api/v1/data', // metadata listGeneratedEntityRecords ("entity read (generated)")
   parties: '/api/v1/party/parties', // party createParty (form save)
   analyticsQuery: '/api/v1/analytics/query', // analytics planQuery (explorer)
-  planRun: '/api/v1/planning/plans', // planning runPlan: /{planCode}:run
+  planRun: '/api/v1/planning/plans', // planning runPlan: /{planCode}:run (async), then getPlanRun
   allocationRuns: '/api/v1/controlling/allocation-runs', // costacct allocation run
   dashboards: '/api/v1/analytics/dashboards', // analytics getDashboard: /{id} (definition and tiles)
 };
@@ -282,8 +282,11 @@ export function s4Scan() {
   }));
 }
 
-// S5: MRP regeneration of the pool's items (50k in fx-load-10k). runPlan is
-// synchronous: 201 means the version was created and made current.
+// S5: MRP regeneration of the pool's items (50k in fx-load-10k). The run is
+// asynchronous (Prefer: respond-async, #479): 202 with the run's Location
+// (a service path; the gateway serves it under /api), then the run is polled
+// until it is no longer running. Only a succeeded run counts as completed; the
+// time is from the POST to the poll that saw it finish.
 export function s5Mrp() {
   const items = [];
   for (let i = 0; i < MRP_ITEMS.length; i++) items.push({ itemId: MRP_ITEMS[i] });
@@ -291,10 +294,19 @@ export function s5Mrp() {
   const res = http.post(
     `${BASE}${PATHS.planRun}/${POOL.mrp.planCode}:run`,
     JSON.stringify({ asOf: POOL.postingDate, siteId: POOL.siteId, items }),
-    { headers: headers(idem('s5')), tags: { op: 'mrp' }, timeout: '20m' },
+    { headers: headers(Object.assign({ Prefer: 'respond-async' }, idem('s5'))), tags: { op: 'mrp' }, timeout: '60s' },
   );
+  if (!check(res, { 'run accepted (202)': (r) => r.status === 202 })) return;
+  const location = `${BASE}/api${res.headers.Location}`;
+  let status = 'running';
+  while (status === 'running' && Date.now() - start < 20 * 60 * 1000) {
+    sleep(5);
+    const poll = http.get(location, { headers: headers(), tags: { op: 'mrp_poll' } });
+    if (!ok(poll)) return;
+    status = poll.json('status');
+  }
   mrpRun.add((Date.now() - start) / 1000);
-  if (ok(res)) mrpCompleted.add(1);
+  if (check(status, { 'run succeeded': (s) => s === 'succeeded' })) mrpCompleted.add(1);
 }
 
 // S6: month-end work: inventory close, FX revaluation, allocations.

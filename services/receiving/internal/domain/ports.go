@@ -141,6 +141,10 @@ type PurchaseOrderLine struct {
 	ReceivedQty decimal.Decimal
 	InvoicedQty decimal.Decimal
 	Status      string
+	// SiteID and WarehouseID are where the line is delivered: purchasing
+	// returns the effective values (the PO header's when the line has none).
+	SiteID      string
+	WarehouseID string
 }
 
 var hundredPct = decimal.NewFromInt(100)

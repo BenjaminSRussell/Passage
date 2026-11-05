@@ -27,7 +27,8 @@ service check strips `/api` and looks the method and path up in `services/*/api/
 | `PATHS.parties` | `POST /api/v1/party/parties` | party `POST /v1/party/parties` | none |
 | `PATHS.dashboards` | `GET /api/v1/analytics/dashboards/{id}` | analytics `GET /v1/analytics/dashboards/{id}` | none |
 | `PATHS.analyticsQuery` | `POST /api/v1/analytics/query` | analytics `POST /v1/analytics/query` | none |
-| `PATHS.planRun` | `POST /api/v1/planning/plans/{planCode}:run` | planning `POST /v1/planning/plans/{planCode}:run` | none |
+| `PATHS.planRun` | `POST /api/v1/planning/plans/{planCode}:run` (`Prefer: respond-async`) | planning `POST /v1/planning/plans/{planCode}:run` | none |
+| S5 poll of the run's `Location` | `GET /api/v1/planning/plan-runs/{id}` | planning `GET /v1/planning/plan-runs/{id}` | none |
 | `PATHS.allocationRuns` | `POST /api/v1/controlling/allocation-runs` | costacct `POST /v1/controlling/allocation-runs` | none |
 | `UNVERIFIED_PATHS.scans` | `POST /api/v1/warehouse/scans` | none (expected) | not checked |
 | `UNVERIFIED_PATHS.inventoryClose` | `POST /api/v1/inventory/close` | none (expected) | not checked |

@@ -248,8 +248,11 @@ type PackingSlipLine struct {
 	OrderLineID    string          `json:"orderLineId"`
 	ShipmentLineID string          `json:"shipmentLineId"`
 	Qty            decimal.Decimal `json:"qty"`
-	CostAmount     decimal.Decimal `json:"costAmount"`
-	CostSnapshotID string          `json:"costSnapshotId"`
+	// Weight is the shipped catch weight of a catch-weight line (#480), the
+	// inventory quantity its cost is taken on; nil on a plain line.
+	Weight         *decimal.Decimal `json:"weight,omitempty"`
+	CostAmount     decimal.Decimal  `json:"costAmount"`
+	CostSnapshotID string           `json:"costSnapshotId"`
 }
 
 // PackResult is the response of a pack command.
@@ -276,6 +279,11 @@ type PackInput struct {
 type Cost struct {
 	UnitCost       decimal.Decimal
 	CostSnapshotID string
+	// Weight is the shipped weight of a catch-weight line (FR-24.7, #480), in
+	// the product's inventory weight unit; UnitCost is then per weight unit and
+	// the line costs Weight x UnitCost (inventory qty is the weight, cw_qty the
+	// cases). Zero on a plain line.
+	Weight decimal.Decimal
 }
 
 // PostInput is the packing-slip posting request.
@@ -1225,9 +1233,13 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 					return PackingSlip{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeCostMissing, "unit cost missing for shipment line "+l.ID)
 				}
 				postLines = append(postLines, domain.PostingLine{OrderLineID: l.OrderLineID, Kind: domain.KindStocked, Qty: q,
-					UnitCost: cost.UnitCost, CostSnapshotID: cost.CostSnapshotID})
-				slip.Lines = append(slip.Lines, PackingSlipLine{OrderLineID: l.OrderLineID, ShipmentLineID: l.ID, Qty: q,
-					CostSnapshotID: cost.CostSnapshotID})
+					Weight: cost.Weight, UnitCost: cost.UnitCost, CostSnapshotID: cost.CostSnapshotID})
+				sl := PackingSlipLine{OrderLineID: l.OrderLineID, ShipmentLineID: l.ID, Qty: q, CostSnapshotID: cost.CostSnapshotID}
+				if cost.Weight.IsPositive() {
+					w := cost.Weight
+					sl.Weight = &w
+				}
+				slip.Lines = append(slip.Lines, sl)
 			}
 			if len(slip.Lines) == 0 {
 				return PackingSlip{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeNothingToShip, "no packed quantity is waiting to ship on this shipment")
@@ -1374,8 +1386,13 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			}
 			rev.Number = fmt.Sprintf("PS-%07d", seq)
 			for _, l := range orig.Lines {
-				rev.Lines = append(rev.Lines, PackingSlipLine{OrderLineID: l.OrderLineID, ShipmentLineID: l.ShipmentLineID,
-					Qty: l.Qty.Neg(), CostAmount: l.CostAmount.Neg(), CostSnapshotID: l.CostSnapshotID})
+				rl := PackingSlipLine{OrderLineID: l.OrderLineID, ShipmentLineID: l.ShipmentLineID,
+					Qty: l.Qty.Neg(), CostAmount: l.CostAmount.Neg(), CostSnapshotID: l.CostSnapshotID}
+				if l.Weight != nil {
+					w := l.Weight.Neg()
+					rl.Weight = &w
+				}
+				rev.Lines = append(rev.Lines, rl)
 				if _, err := tx.Exec(ctx, `update shipment_line set qty_shipped = qty_shipped - $3 where tenant_id = $1 and id = $2`,
 					p.TenantID, l.ShipmentLineID, l.Qty); err != nil {
 					return PackingSlip{}, err
@@ -1412,7 +1429,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 				return PackingSlip{}, err
 			}
 			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipCancelled, p.TenantID, fulevents.PackingSlipCancelledData{
-				PackingSlipID: orig.ID, ReversalID: rev.ID, ShipmentID: sh.ID, OrderID: sh.OrderID,
+				PackingSlipID: orig.ID, PackingSlipNumber: orig.Number, ReversalID: rev.ID, ShipmentID: sh.ID, OrderID: sh.OrderID, LegalEntityID: sh.LegalEntityID,
 				PostingDate: rev.PostingDate.Format("2006-01-02"), Currency: rev.Currency, Lines: slipLineData(rev.Lines),
 				Journal: journalData(rev.Journal), PackagingFees: feeData(rev.PackagingFees), Returnables: returnableData(returnables, -1),
 			}); err != nil {
@@ -1469,8 +1486,8 @@ func insertSlip(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, 
 		return err
 	}
 	for _, l := range slip.Lines {
-		if _, err := tx.Exec(ctx, `insert into packing_slip_line (tenant_id, packing_slip_id, order_line_id, shipment_line_id, qty, cost_amount, cost_snapshot_id)
-			values ($1, $2, $3, $4, $5, $6, $7)`, tenantID, slip.ID, l.OrderLineID, l.ShipmentLineID, l.Qty, l.CostAmount, l.CostSnapshotID); err != nil {
+		if _, err := tx.Exec(ctx, `insert into packing_slip_line (tenant_id, packing_slip_id, order_line_id, shipment_line_id, qty, cost_amount, cost_snapshot_id, weight)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, slip.ID, l.OrderLineID, l.ShipmentLineID, l.Qty, l.CostAmount, l.CostSnapshotID, l.Weight); err != nil {
 			return err
 		}
 	}
@@ -1493,7 +1510,7 @@ func loadSlip(ctx context.Context, tx pgx.Tx, id string) (PackingSlip, error) {
 	if err := json.Unmarshal(journal, &slip.Journal); err != nil {
 		return slip, err
 	}
-	rows, err := tx.Query(ctx, `select order_line_id, shipment_line_id, qty::text, cost_amount::text, cost_snapshot_id from packing_slip_line where packing_slip_id = $1 order by shipment_line_id`, id)
+	rows, err := tx.Query(ctx, `select order_line_id, shipment_line_id, qty::text, cost_amount::text, cost_snapshot_id, weight from packing_slip_line where packing_slip_id = $1 order by shipment_line_id`, id)
 	if err != nil {
 		return slip, err
 	}
@@ -1502,7 +1519,7 @@ func loadSlip(ctx context.Context, tx pgx.Tx, id string) (PackingSlip, error) {
 	for rows.Next() {
 		var l PackingSlipLine
 		var qty, cost string
-		if err := rows.Scan(&l.OrderLineID, &l.ShipmentLineID, &qty, &cost, &l.CostSnapshotID); err != nil {
+		if err := rows.Scan(&l.OrderLineID, &l.ShipmentLineID, &qty, &cost, &l.CostSnapshotID, &l.Weight); err != nil {
 			return slip, err
 		}
 		l.Qty, l.CostAmount = dec(qty), dec(cost)
@@ -1527,7 +1544,11 @@ func journalData(lines []JournalEntry) []fulevents.JournalEntry {
 func slipLineData(lines []PackingSlipLine) []fulevents.SlipLine {
 	out := []fulevents.SlipLine{}
 	for _, l := range lines {
-		out = append(out, fulevents.SlipLine{OrderLineID: l.OrderLineID, Qty: l.Qty.String(), CostAmount: l.CostAmount.String(), CostSnapshotID: l.CostSnapshotID})
+		sl := fulevents.SlipLine{OrderLineID: l.OrderLineID, Qty: l.Qty.String(), CostAmount: l.CostAmount.String(), CostSnapshotID: l.CostSnapshotID}
+		if l.Weight != nil {
+			sl.Weight = l.Weight.String()
+		}
+		out = append(out, sl)
 	}
 	return out
 }

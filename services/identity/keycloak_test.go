@@ -52,12 +52,29 @@ type realmExport struct {
 	AuthenticationFlows []realmFlow                 `json:"authenticationFlows"`
 	RequiredActions     []realmAction               `json:"requiredActions"`
 	Components          map[string][]realmComponent `json:"components"`
+	Users               []realmUser                 `json:"users"`
+	ClientScopeMappings map[string][]struct {
+		Client string   `json:"client"`
+		Roles  []string `json:"roles"`
+	} `json:"clientScopeMappings"`
+}
+
+type realmUser struct {
+	Username       string              `json:"username"`
+	ServiceAccount string              `json:"serviceAccountClientId"`
+	RealmRoles     []string            `json:"realmRoles"`
+	ClientRoles    map[string][]string `json:"clientRoles"`
+	Credentials    []json.RawMessage   `json:"credentials"`
 }
 
 type realmClient struct {
 	ClientID       string            `json:"clientId"`
 	PublicClient   bool              `json:"publicClient"`
 	DirectGrants   bool              `json:"directAccessGrantsEnabled"`
+	StandardFlow   bool              `json:"standardFlowEnabled"`
+	ImplicitFlow   bool              `json:"implicitFlowEnabled"`
+	ServiceAccount bool              `json:"serviceAccountsEnabled"`
+	FullScope      *bool             `json:"fullScopeAllowed"`
 	RedirectURIs   []string          `json:"redirectUris"`
 	Attributes     map[string]string `json:"attributes"`
 	ProtocolMapper []realmMapper     `json:"protocolMappers"`
@@ -176,7 +193,7 @@ func TestKeycloakRealmRequiresMFAAndHoldsNoSecrets(t *testing.T) {
 		t.Fatalf("browserFlow %q is not defined in the export", realm.BrowserFlow)
 	}
 	if !secondFactorRequired(realm, bound) {
-		t.Error("bound browser flow must require a second-factor subflow: required OTP after a conditional WebAuthn step")
+		t.Error("bound browser flow must require a second-factor subflow: WebAuthn or a required OTP form, as alternatives")
 	}
 	if !flowReachesRequired(realm, bound, "auth-username-password-form") {
 		t.Error("bound browser flow never requires the username/password form")
@@ -279,6 +296,47 @@ func TestKeycloakRealmFederationKeepsMFAAndTokenClaimsLocal(t *testing.T) {
 	}
 }
 
+// TestKeycloakRealmDeprovisionClientHoldsManageUsersOnly checks the service account identity's deprovisioning
+// worker uses: confidential, client credentials only, no secret in the export, and realm-management manage-users
+// as its only role and its only scope (fullScopeAllowed off), so its tokens can manage this realm's users and
+// nothing else.
+func TestKeycloakRealmDeprovisionClientHoldsManageUsersOnly(t *testing.T) {
+	realm := loadRealm(t)
+	client := findClient(realm, deprovisionClientID)
+	if client == nil {
+		t.Fatalf("client %s missing", deprovisionClientID)
+	}
+	if client.PublicClient || !client.ServiceAccount || client.StandardFlow || client.ImplicitFlow || client.DirectGrants || client.FullScope == nil || *client.FullScope {
+		t.Errorf("%s must be confidential with only the service account grant and fullScopeAllowed false: %+v", deprovisionClientID, client)
+	}
+	if len(client.RedirectURIs) != 0 || len(client.ProtocolMapper) != 0 {
+		t.Errorf("%s needs no redirect URIs or token mappers: %v %v", deprovisionClientID, client.RedirectURIs, client.ProtocolMapper)
+	}
+	var account *realmUser
+	for i := range realm.Users {
+		switch realm.Users[i].ServiceAccount {
+		case deprovisionClientID:
+			account = &realm.Users[i]
+		case "":
+			t.Errorf("the export must not create person accounts, found %s", realm.Users[i].Username)
+		}
+	}
+	if account == nil || len(account.RealmRoles) != 0 || len(account.Credentials) != 0 || len(account.ClientRoles) != 1 || !slices.Equal(account.ClientRoles["realm-management"], []string{"manage-users"}) {
+		t.Fatalf("service account of %s = %+v, want realm-management manage-users only", deprovisionClientID, account)
+	}
+	scoped := map[string][]string{}
+	for owner, mappings := range realm.ClientScopeMappings {
+		for _, m := range mappings {
+			if m.Client == deprovisionClientID {
+				scoped[owner] = m.Roles
+			}
+		}
+	}
+	if len(scoped) != 1 || !slices.Equal(scoped["realm-management"], []string{"manage-users"}) {
+		t.Errorf("scope mappings of %s = %v, want realm-management manage-users only", deprovisionClientID, scoped)
+	}
+}
+
 func findClient(realm realmExport, id string) *realmClient {
 	for i := range realm.Clients {
 		if realm.Clients[i].ClientID == id {
@@ -313,22 +371,27 @@ func findFlow(realm realmExport, alias string) *realmFlow {
 	return &realm.AuthenticationFlows[i]
 }
 
-func conditionalWebAuthnStep(realm realmExport, flow *realmFlow) bool {
+// secondFactorFlow reports whether flow offers exactly the two second factors as alternatives:
+// webauthn-authenticator, and a subflow that requires auth-otp-form. Keycloak runs the alternative
+// the user has a credential for; a user with neither falls through to the OTP form, which sends
+// them to CONFIGURE_TOTP, so no alternative lets a password alone through.
+func secondFactorFlow(realm realmExport, flow *realmFlow) bool {
+	var webauthn, otp bool
 	for _, exec := range flow.Executions {
+		if exec.Requirement != "ALTERNATIVE" {
+			return false
+		}
 		sub := findFlow(realm, exec.FlowAlias)
-		if exec.Requirement != "CONDITIONAL" || sub == nil {
-			continue
-		}
-		var configured, webauthn bool
-		for _, inner := range sub.Executions {
-			configured = configured || (inner.Authenticator == "conditional-user-configured" && inner.Requirement == "REQUIRED")
-			webauthn = webauthn || (inner.Authenticator == "webauthn-authenticator" && inner.Requirement == "REQUIRED")
-		}
-		if configured && webauthn {
-			return true
+		switch {
+		case exec.Authenticator == "webauthn-authenticator":
+			webauthn = true
+		case sub != nil && len(sub.Executions) == 1 && sub.Executions[0].Authenticator == "auth-otp-form" && sub.Executions[0].Requirement == "REQUIRED":
+			otp = true
+		default:
+			return false
 		}
 	}
-	return false
+	return webauthn && otp
 }
 
 func secondFactorRequired(realm realmExport, flow *realmFlow) bool {
@@ -337,10 +400,7 @@ func secondFactorRequired(realm realmExport, flow *realmFlow) bool {
 		if sub == nil {
 			continue
 		}
-		otpRequired := slices.ContainsFunc(sub.Executions, func(inner realmExec) bool {
-			return inner.Authenticator == "auth-otp-form" && inner.Requirement == "REQUIRED"
-		})
-		if exec.Requirement == "REQUIRED" && otpRequired && conditionalWebAuthnStep(realm, sub) {
+		if exec.Requirement == "REQUIRED" && secondFactorFlow(realm, sub) {
 			return true
 		}
 		if secondFactorRequired(realm, sub) {
@@ -457,11 +517,20 @@ func TestKeycloakLoginIsAcceptedByIdentityJWTVerifier(t *testing.T) {
 // JWTVerifier middleware and returns the principal it derives.
 func verifyWithIdentity(t *testing.T, base string, client *http.Client, accessToken string) tenant.Principal {
 	t.Helper()
+	return verifyWithIdentityIssuer(t, base, base, client, accessToken)
+}
+
+// verifyWithIdentityIssuer is verifyWithIdentity for a token whose issuer is the Keycloak host the
+// browser used (issuerBase), with the keys fetched from base. NewJWTVerifier refuses a plain-http
+// issuer on a non-loopback host, so the test sets that issuer on the verifier after creating it.
+func verifyWithIdentityIssuer(t *testing.T, base, issuerBase string, client *http.Client, accessToken string) tenant.Principal {
+	t.Helper()
 	issuer := base + "/realms/" + realmName
 	verifier, err := NewJWTVerifier(issuer, realmAudience, loginTenantID, issuer+"/protocol/openid-connect/certs", client)
 	if err != nil {
 		t.Fatal(err)
 	}
+	verifier.issuer = issuerBase + "/realms/" + realmName
 	var principal tenant.Principal
 	handler := verifier.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, _ = tenant.FromContext(r.Context())

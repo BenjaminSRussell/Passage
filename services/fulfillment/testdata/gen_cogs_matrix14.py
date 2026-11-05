@@ -9,8 +9,12 @@ Dr 1405 delivered-not-invoiced / Cr 1400; cogs_at_shipment: Dr 5000 / Cr 1400).
 Rules taken from the PRD, not from the engine:
 - BR-28.1: a stocked line posts its cost; a drop-ship line and a non-stocked or
   service line post nothing at the packing slip; a standard-cost item posts at
-  standard; a catch-weight item posts on its inventory quantity, never on its
-  catch weight.
+  standard; a catch-weight item posts on its inventory quantity.
+- Catch weight (FR-24.7, the convention of receiving, sales and inventory,
+  #480): a catch-weight line is priced and costed per weight unit. Its
+  inventory quantity is the weight (cw_qty is the case count) and its sales
+  and shipped quantity is cases, so the line costs weight x cost per weight
+  unit, never cases x cost.
 - Each line amount is quantity x unit cost rounded once to the currency's ISO
   4217 minor unit, half away from zero (Python ROUND_HALF_UP on Decimal is half
   away from zero for negative values too). A line that rounds to zero posts
@@ -30,7 +34,9 @@ from decimal import Decimal, ROUND_HALF_UP
 
 MINOR = {"USD": 2, "EUR": 2, "JPY": 0, "KWD": 3}
 
-# Seven slip scenarios. Lines: (order line, kind, inventory qty, unit cost[, catch weight]).
+# Seven slip scenarios. Lines: (order line, kind, shipped qty, unit cost[, weight]). A line with a
+# weight is a catch-weight line: qty is the shipped cases, weight (KG) the inventory quantity and
+# unit cost per KG.
 SCENARIOS = [
     ("stocked-running-average", "AC-28.1: 10 units at the running-average snapshot 12.50 USD", "USD", [
         ("L1", "STOCKED", "10", "12.50"),
@@ -52,8 +58,8 @@ SCENARIOS = [
         ("L1", "NON_STOCKED", "1", "100.00"),
         ("L2", "NON_STOCKED", "2.5", "40.00"),
     ]),
-    ("catch-weight", "Catch-weight item: 12 EA weighing 13.7 kg costs 12 x 4.12345 KWD on the inventory "
-     "quantity (49.481), not on the weight", "KWD", [
+    ("catch-weight", "Catch-weight item: 12 cases weighing 13.7 kg at 4.12345 KWD/kg cost 13.7 x 4.12345 "
+     "on the inventory quantity, the weight (56.491265 -> 56.491), not 12 cases x 4.12345 (49.481)", "KWD", [
         ("L1", "STOCKED", "12", "4.12345", "13.7"),
     ]),
     ("mixed-slip-zero-decimals", "One slip in JPY mixing stocked, drop-ship, service and zero-cost lines; "
@@ -68,6 +74,11 @@ SCENARIOS = [
 ]
 
 POLICIES = [("physical", False, "1405"), ("cogs-at-shipment", True, "5000")]
+
+
+def cost_qty(line):
+    # The inventory quantity: the weight of a catch-weight line, else the shipped quantity.
+    return line[4] if len(line) > 4 else line[2]
 
 
 def amount(qty, unit, currency):
@@ -94,10 +105,10 @@ def main():
         for policy, cogs, debit in POLICIES:
             journal = []
             for line in lines:
-                ol, kind, qty, unit = line[:4]
+                ol, kind, _, unit = line[:4]
                 if kind != "STOCKED":
                     continue
-                a = amount(qty, unit, currency)
+                a = amount(cost_qty(line), unit, currency)
                 if a == 0:
                     continue
                 journal.append({"account": debit, "amount": fmt(a, currency), "orderLineId": ol})
@@ -114,7 +125,7 @@ def main():
                 "cogsAtShipment": cogs,
                 "currency": currency,
                 "lines": [{"orderLineId": l[0], "kind": l[1], "qty": l[2], "unitCost": l[3],
-                           "catchWeightKg": l[4] if len(l) > 4 else ""} for l in lines],
+                           "weight": l[4] if len(l) > 4 else "", "weightUnit": "KG" if len(l) > 4 else ""} for l in lines],
                 "journal": journal,
                 "mirror": mirror,
                 "totalCost": fmt(total, currency),
@@ -132,7 +143,7 @@ def main():
         "11.50", "-11.50", "2.51", "-2.51", "10.00", "-10.00"]  # 11.499999, 2.505, 9.995
     assert by_id["standard-cost/cogs-at-shipment"]["totalCost"] == "33.33"  # 13.332 -> 13.33, 19.998 -> 20.00
     assert by_id["drop-ship/physical"]["journal"] == [] and by_id["non-stocked-service/cogs-at-shipment"]["journal"] == []
-    assert by_id["catch-weight/physical"]["totalCost"] == "49.481"  # 12 x 4.12345 = 49.4814
+    assert by_id["catch-weight/physical"]["totalCost"] == "56.491"  # 13.7 kg x 4.12345 = 56.491265; 12 x 4.12345 would be 49.481
     assert [j["amount"] for j in by_id["mixed-slip-zero-decimals/cogs-at-shipment"]["journal"]] == [
         "1001", "-1001", "1", "-1"]  # 1000.5 -> 1001; 0.4 -> 0 (none); 2 x 0.5 = 1
     doc = {"fixture": "cogs-matrix-14", "source": "testdata/gen_cogs_matrix14.py (python3 -I), independent of the Go engine",

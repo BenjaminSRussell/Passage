@@ -26,6 +26,7 @@ spec:
       containers:
         - name: postgres
           image: {{ .Values.image | quote }}
+          {{- if .Values.cdc.enabled }}
           args:
             - -c
             - wal_level=logical
@@ -33,6 +34,7 @@ spec:
             - max_wal_senders=10
             - -c
             - max_replication_slots=10
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

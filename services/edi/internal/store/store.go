@@ -52,20 +52,35 @@ func New(pool *pgxpool.Pool, dupWindowDays int) *Store {
 
 // Partner is a trading partner as stored.
 type Partner struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	ISAQualifier  string    `json:"isaQualifier"`
-	ISAID         string    `json:"isaId"`
-	Environment   string    `json:"environment"`
-	AckSLAMinutes int       `json:"ackSlaMinutes"`
-	Status        string    `json:"status"`
-	Version       int       `json:"version"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ISAQualifier  string `json:"isaQualifier"`
+	ISAID         string `json:"isaId"`
+	Environment   string `json:"environment"`
+	AckSLAMinutes int    `json:"ackSlaMinutes"`
+	// The UNB identity of a partner that sends EDIFACT, and when its
+	// interchanges are answered with a CONTRL (REQUESTED, ALWAYS, NEVER).
+	EdifactID        string    `json:"edifactId,omitempty"`
+	EdifactQualifier string    `json:"edifactQualifier,omitempty"`
+	EdifactContrl    string    `json:"edifactContrl,omitempty"`
+	Status           string    `json:"status"`
+	Version          int       `json:"version"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
-// Message is one transaction set inside a received interchange. Ack is set
-// for a parsed 997: ReceiveInterchange matches it to the outbound interchange
-// it answers and sets Status to POSTED (matched) or FAILED (no match).
+// Edifact returns the partner's EDIFACT identity, or nil when it has none.
+func (p Partner) Edifact() *domain.EdifactIdentity {
+	if p.EdifactID == "" {
+		return nil
+	}
+	return &domain.EdifactIdentity{ID: p.EdifactID, Qualifier: p.EdifactQualifier, Contrl: p.EdifactContrl}
+}
+
+// Message is one transaction set (X12) or message (EDIFACT: TransactionSet
+// is the UNH message type, STControl the UNH 0062 reference) inside a
+// received interchange. Ack is set for a parsed 997: ReceiveInterchange
+// matches it to the outbound interchange it answers and sets Status to POSTED
+// (matched) or FAILED (no match).
 type Message struct {
 	ID             string
 	TransactionSet string
@@ -76,19 +91,28 @@ type Message struct {
 	Ack            *domain.FunctionalAck
 }
 
-// Inbound is one received X12 interchange ready to be recorded.
+// Inbound is one received interchange ready to be recorded. Standard is X12
+// (the default when empty) or EDIFACT; ISAControl is the interchange control
+// number (ISA13, or the EDIFACT UNB05 reference) the duplicate window
+// applies to.
 type Inbound struct {
 	PartnerID  string
+	Standard   string
 	Version    string
 	ISAControl string
 	Raw        string
 	AckStatus  string
 	Messages   []Message
-	// BuildAck returns the serialized 997 text, or "" when nothing needs one
-	// (an interchange of 997s is never acknowledged). It calls next to allocate
+	// BuildAck returns the serialized 997 (or CONTRL) text, or "" when nothing
+	// needs one (an interchange of 997s or CONTRLs is never acknowledged, and a
+	// partner may not want CONTRLs). It calls next to allocate
 	// each outbound control number inside the recording transaction, so a
 	// rolled-back receipt never consumes a number (gap-free, BR-35.5).
 	BuildAck func(next func() (int64, error)) (string, error)
+	// Source is set when a transport (AS2, SFTP) delivered the interchange:
+	// it is marked DONE in the same transaction, and the 997 or CONTRL is
+	// queued for delivery back over the partner's transport.
+	Source *InboundSource
 }
 
 // Received is the result of recording an inbound interchange. Messages carry
@@ -115,6 +139,10 @@ type InterchangeSummary struct {
 	ReceivedAt    time.Time `json:"receivedAt"`
 	MessageCount  int       `json:"messageCount"`
 	FailedCount   int       `json:"failedCount"`
+	// Refusal is why a transport's interchange was refused as a whole (it has
+	// no messages; ack_status is REJECTED and the negative 997 or CONTRL was
+	// queued back to the partner).
+	Refusal string `json:"refusal,omitempty"`
 }
 
 // MessageDetail is one stored transaction set of an interchange.
@@ -127,13 +155,19 @@ type MessageDetail struct {
 	Error          string          `json:"error,omitempty"`
 }
 
-// InterchangeDetail is one interchange with its messages and the 997 sent back.
-// The raw payload is not returned: it carries N1/N3/N4 party data that BR-35.12
-// masks, and the masking viewer belongs to the message monitor.
+// InterchangeDetail is one interchange with its messages, the 997 sent back
+// and its deliveries over the partner's transport (those the caller's legal
+// entity scope covers). The raw payload is not returned: it carries N1/N3/N4
+// party data that BR-35.12 masks, and the masking viewer belongs to the
+// message monitor.
 type InterchangeDetail struct {
 	InterchangeSummary
-	AckPayload string          `json:"ack997,omitempty"`
+	AckPayload string `json:"ack997,omitempty"`
+	// Contrl is the CONTRL sent back for an inbound EDIFACT interchange (the
+	// ack997 field stays empty for EDIFACT).
+	Contrl     string          `json:"contrl,omitempty"`
 	Messages   []MessageDetail `json:"messages"`
+	Deliveries []DeliveryView  `json:"deliveries,omitempty"`
 }
 
 // InterchangeFilter narrows the interchange list. Direction is IN, OUT or
@@ -158,10 +192,12 @@ func isUnique(err error) bool {
 	return errors.As(err, &pe) && pe.Code == "23505"
 }
 
-const partnerColumns = `select id::text, name, isa_qualifier, isa_id, environment, ack_sla_minutes, status, version, created_at from trading_partner`
+const partnerColumns = `select id::text, name, isa_qualifier, isa_id, environment, ack_sla_minutes,
+	coalesce(edifact_id, ''), coalesce(edifact_qualifier, ''), coalesce(edifact_contrl, ''), status, version, created_at from trading_partner`
 
 func scanPartner(row pgx.Row, p *Partner) error {
-	err := row.Scan(&p.ID, &p.Name, &p.ISAQualifier, &p.ISAID, &p.Environment, &p.AckSLAMinutes, &p.Status, &p.Version, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.Name, &p.ISAQualifier, &p.ISAID, &p.Environment, &p.AckSLAMinutes,
+		&p.EdifactID, &p.EdifactQualifier, &p.EdifactContrl, &p.Status, &p.Version, &p.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -171,8 +207,8 @@ func scanPartner(row pgx.Row, p *Partner) error {
 // CreatePartner stores a partner under the caller's Idempotency-Key. A replay
 // with the same key and request hash returns the stored partner with
 // created=false; the same key with another request returns ErrIdempotencyReuse.
-// A profile whose ISA identity already exists in the environment returns
-// ErrDuplicate.
+// A profile whose ISA or EDIFACT identity already exists in the environment
+// returns ErrDuplicate.
 func (s *Store) CreatePartner(ctx context.Context, key, requestHash string, prof domain.PartnerProfile) (Partner, bool, error) {
 	prof = prof.WithDefaults()
 	var out Partner
@@ -187,9 +223,14 @@ func (s *Store) CreatePartner(ctx context.Context, key, requestHash string, prof
 		}
 		out = Partner{ID: ids.New(), Name: prof.Name, ISAQualifier: prof.ISA.Qualifier, ISAID: prof.ISA.ID,
 			Environment: prof.Environment, AckSLAMinutes: prof.AckSLAMinutes}
-		err = tx.QueryRow(ctx, `insert into trading_partner (tenant_id, id, name, isa_qualifier, isa_id, environment, ack_sla_minutes)
-			values ($1,$2,$3,$4,$5,$6,$7) returning status, version, created_at`,
-			tid, out.ID, out.Name, out.ISAQualifier, out.ISAID, out.Environment, out.AckSLAMinutes).Scan(&out.Status, &out.Version, &out.CreatedAt)
+		if e := prof.EDIFACT; e != nil {
+			out.EdifactID, out.EdifactQualifier, out.EdifactContrl = e.ID, e.Qualifier, e.Contrl
+		}
+		err = tx.QueryRow(ctx, `insert into trading_partner (tenant_id, id, name, isa_qualifier, isa_id, environment, ack_sla_minutes,
+			edifact_id, edifact_qualifier, edifact_contrl)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning status, version, created_at`,
+			tid, out.ID, out.Name, out.ISAQualifier, out.ISAID, out.Environment, out.AckSLAMinutes,
+			nullString(out.EdifactID), nullString(out.EdifactQualifier), nullString(out.EdifactContrl)).Scan(&out.Status, &out.Version, &out.CreatedAt)
 		if isUnique(err) {
 			return ErrDuplicate
 		}
@@ -282,26 +323,52 @@ func (s *Store) FindPartnerBySender(ctx context.Context, sender domain.Party, en
 	return out, err
 }
 
-// nextControl allocates the next outbound X12 control number for a partner. It
-// upserts the counter row inside the caller's transaction, so numbers are
-// gap-free and a rolled-back transaction gives its number back.
-func nextControl(ctx context.Context, tx pgx.Tx, tid, partnerID string) (int64, error) {
+// FindPartnerByEdifactSender resolves the active partner whose EDIFACT
+// identity matches the UNB sender (S002 id and qualifier) in the given
+// environment, the EDIFACT counterpart of FindPartnerBySender.
+func (s *Store) FindPartnerByEdifactSender(ctx context.Context, sender domain.EdifactParty, environment string) (Partner, error) {
+	var out Partner
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return scanPartner(tx.QueryRow(ctx, partnerColumns+
+			` where edifact_id = $1 and coalesce(edifact_qualifier, '') = $2 and environment = $3 and status = 'active'`,
+			sender.ID, sender.Qualifier, environment), &out)
+	})
+	return out, err
+}
+
+// nextControl allocates the next outbound control number of a standard (X12
+// ISA13/GS06, EDIFACT UNB05) for a partner. It upserts the counter row inside
+// the caller's transaction, so numbers are gap-free and a rolled-back
+// transaction gives its number back.
+func nextControl(ctx context.Context, tx pgx.Tx, tid, partnerID, standard string) (int64, error) {
 	var n int64
 	err := tx.QueryRow(ctx, `insert into control_number_counter (tenant_id, partner_id, direction, standard, last_value)
-		values ($1, $2, 'OUT', 'X12', 1)
+		values ($1, $2, 'OUT', $3, 1)
 		on conflict (tenant_id, partner_id, direction, standard)
 		do update set last_value = control_number_counter.last_value + 1
-		returning last_value`, tid, partnerID).Scan(&n)
+		returning last_value`, tid, partnerID, standard).Scan(&n)
 	return n, err
 }
 
-// ReceiveInterchange records an inbound interchange, its messages, one
-// message.received event per transaction and one message.failed event per
-// failed transaction in a single transaction. A control
-// number already seen inside the duplicate window returns ErrDuplicate and
-// nothing is written. Outside the window the number may be reused (BR-35.5).
+// standardOf is the stored standard of an inbound interchange (X12 when
+// unset) and the set id of the acknowledgment that answers it.
+func standardOf(standard string) (string, string) {
+	if standard == domain.SyntaxEdifact {
+		return domain.SyntaxEdifact, "CONTRL"
+	}
+	return domain.SyntaxX12, "997"
+}
+
+// ReceiveInterchange records an inbound X12 or EDIFACT interchange, its
+// messages, one message.received event per transaction and one
+// message.failed event per failed transaction in a single transaction. A
+// control number already seen from the partner in the same standard inside
+// the duplicate window returns ErrDuplicate and nothing is written; refused
+// interchanges do not count. Outside the window the number may be reused
+// (BR-35.5).
 func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, error) {
 	var out Received
+	standard, ackSet := standardOf(in.Standard)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tid, err := tenantID(ctx)
 		if err != nil {
@@ -310,19 +377,19 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 		// Serialize receipts of the same control number so two concurrent copies
 		// cannot both pass the window check.
 		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`,
-			"edi:interchange:IN:X12:"+tid+":"+in.PartnerID+":"+in.ISAControl); err != nil {
+			"edi:interchange:IN:"+standard+":"+tid+":"+in.PartnerID+":"+in.ISAControl); err != nil {
 			return err
 		}
 		var recent bool
 		if err := tx.QueryRow(ctx, `select exists (select 1 from interchange
-			where partner_id = $1 and direction = 'IN' and standard = 'X12' and control_number = $2
-			and received_at > now() - make_interval(days => $3))`, in.PartnerID, in.ISAControl, s.dupWindowDays).Scan(&recent); err != nil {
+			where partner_id = $1 and direction = 'IN' and standard = $4 and control_number = $2 and refusal is null
+			and received_at > now() - make_interval(days => $3))`, in.PartnerID, in.ISAControl, s.dupWindowDays, standard).Scan(&recent); err != nil {
 			return err
 		}
 		if recent {
 			return ErrDuplicate
 		}
-		ack, err := in.BuildAck(func() (int64, error) { return nextControl(ctx, tx, tid, in.PartnerID) })
+		ack, err := in.BuildAck(func() (int64, error) { return nextControl(ctx, tx, tid, in.PartnerID, standard) })
 		if err != nil {
 			return err
 		}
@@ -335,7 +402,7 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 					return err
 				}
 			}
-			if m.TransactionSet == "997" && m.Status == "FAILED" && status == string(domain.StatusAccepted) {
+			if (m.TransactionSet == "997" || m.TransactionSet == "CONTRL") && m.Status == "FAILED" && status == string(domain.StatusAccepted) {
 				status = string(domain.StatusAcceptedWithErrors)
 			}
 			messages = append(messages, m)
@@ -343,8 +410,8 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 		interchangeID := ids.New()
 		if _, err := tx.Exec(ctx, `insert into interchange (tenant_id, id, partner_id, direction, standard, version,
 			control_number, raw_payload, ack_status, ack_payload)
-			values ($1,$2,$3,'IN','X12',$4,$5,$6,$7,$8)`,
-			tid, interchangeID, in.PartnerID, in.Version, in.ISAControl, in.Raw, status, nullString(ack)); err != nil {
+			values ($1,$2,$3,'IN',$9,$4,$5,$6,$7,$8)`,
+			tid, interchangeID, in.PartnerID, in.Version, in.ISAControl, in.Raw, status, nullString(ack), standard); err != nil {
 			return err
 		}
 		for _, m := range messages {
@@ -354,7 +421,7 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 				return err
 			}
 			if err := enqueueReceived(ctx, tx, tid, ediev.MessageReceivedData{
-				MessageID: m.ID, InterchangeID: interchangeID, PartnerID: in.PartnerID, Standard: "X12",
+				MessageID: m.ID, InterchangeID: interchangeID, PartnerID: in.PartnerID, Standard: standard,
 				TransactionSet: m.TransactionSet, ControlNumber: in.ISAControl, STControl: m.STControl,
 				Status: m.Status,
 			}); err != nil {
@@ -369,6 +436,16 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 				}
 			}
 		}
+		if in.Source != nil {
+			if err := recordInboundDone(ctx, tx, tid, in.PartnerID, interchangeID, *in.Source); err != nil {
+				return err
+			}
+			if ack != "" {
+				if _, err := enqueueDelivery(ctx, tx, tid, in.PartnerID, interchangeID, "ACK", ackSet, in.ISAControl); err != nil {
+					return err
+				}
+			}
+		}
 		out = Received{InterchangeID: interchangeID, AckPayload: ack, AckStatus: status, Messages: messages}
 		return nil
 	})
@@ -378,12 +455,13 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 const interchangeColumns = `select i.id::text, i.partner_id::text, p.name, i.direction, i.standard, i.version, i.control_number,
 	i.ack_status, i.received_at,
 	(select count(*) from message m where m.interchange_id = i.id)::int,
-	(select count(*) from message m where m.interchange_id = i.id and m.status = 'FAILED')::int
+	(select count(*) from message m where m.interchange_id = i.id and m.status = 'FAILED')::int,
+	coalesce(i.refusal, '')
 	from interchange i join trading_partner p on p.id = i.partner_id`
 
 func scanInterchange(row pgx.Row, v *InterchangeSummary) error {
 	err := row.Scan(&v.ID, &v.PartnerID, &v.PartnerName, &v.Direction, &v.Standard, &v.Version, &v.ControlNumber,
-		&v.AckStatus, &v.ReceivedAt, &v.MessageCount, &v.FailedCount)
+		&v.AckStatus, &v.ReceivedAt, &v.MessageCount, &v.FailedCount, &v.Refusal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -424,7 +502,10 @@ func (s *Store) GetInterchange(ctx context.Context, id string) (InterchangeDetai
 		if err := tx.QueryRow(ctx, `select ack_payload from interchange where id = $1`, id).Scan(&ack); err != nil {
 			return err
 		}
-		if ack != nil {
+		switch {
+		case ack != nil && out.Standard == domain.SyntaxEdifact:
+			out.Contrl = *ack
+		case ack != nil:
 			out.AckPayload = *ack
 		}
 		rows, err := tx.Query(ctx, `select id::text, transaction_set, st_control, status, canonical, coalesce(error, '')
@@ -445,7 +526,12 @@ func (s *Store) GetInterchange(ctx context.Context, id string) (InterchangeDetai
 			}
 			out.Messages = append(out.Messages, m)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		out.Deliveries, err = listDeliveries(ctx, tx, id)
+		return err
 	})
 	return out, err
 }

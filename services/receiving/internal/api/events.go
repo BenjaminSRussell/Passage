@@ -1,6 +1,8 @@
 package api
 
 import (
+	"time"
+
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -26,6 +28,13 @@ type postedLineData struct {
 	InventoryStatus string   `json:"inventory_status"`
 	Amount          string   `json:"amount"`
 	AmountAcct      string   `json:"amount_acct"`
+	// UnitPrice is the line's net unit price in the receipt currency, per unit
+	// (per weight unit on a catch-weight line); amount is qty x unit_price.
+	UnitPrice string `json:"unit_price"`
+	// SiteID and WarehouseID are the PO line's delivery destination (#480),
+	// absent on a line without a PO line.
+	SiteID      string `json:"site_id,omitempty"`
+	WarehouseID string `json:"warehouse_id,omitempty"`
 	// Catch-weight lines only (FR-24.7): qty is the actual weight in unit and
 	// cw_qty the case count, with the per-case spec, so inventory can book
 	// the weight and the count together.
@@ -58,8 +67,13 @@ type correctedLineData struct {
 }
 
 type receiptCorrectedData struct {
-	ReceiptID     string              `json:"receipt_id"`
-	ReceiptNumber string              `json:"receipt_number"`
+	ReceiptID     string `json:"receipt_id"`
+	ReceiptNumber string `json:"receipt_number"`
+	// LegalEntityID and PostingDate (the adjustment's posting date) let the
+	// inventory postings consumer book the correction in the receipt's legal
+	// entity on that date (#480).
+	LegalEntityID string              `json:"legal_entity_id"`
+	PostingDate   string              `json:"posting_date"`
 	Kind          string              `json:"kind"`
 	CorrectionSeq int                 `json:"correction_seq"`
 	LedgerEntryID string              `json:"ledger_entry_id"`
@@ -205,6 +219,7 @@ func receiptPostedEvent(tenantID string, r store.Receipt, amounts []store.LineAm
 		line := postedLineData{
 			LineNo: l.LineNo, POLineID: l.POLineID, POLineNo: l.POLineNo, ProductID: l.ProductID, Unit: l.Unit, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials,
 			LocationID: l.LocationID, InventoryStatus: l.InventoryStatus, Amount: a.Amount.String(), AmountAcct: a.AmountAcct.String(),
+			UnitPrice: l.UnitPrice.String(), SiteID: l.SiteID, WarehouseID: l.WarehouseID,
 		}
 		if l.CWQty > 0 {
 			line.CWQty, line.CWNominal, line.CWMin, line.CWMax = l.CWQty, l.CWNominal.String(), l.CWMin.String(), l.CWMax.String()
@@ -214,9 +229,16 @@ func receiptPostedEvent(tenantID string, r store.Receipt, amounts []store.LineAm
 	return newEvent("receiving", "receipt", "posted", r.ID, tenantID, data)
 }
 
-func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledgerEntryID string, lines []correctedLineData) (events.Event, error) {
+// receiptCorrectedEvent announces a correction or cancellation posted on
+// postingDate, the adjustment's date: the requested one, else the receipt
+// date (domain.Receipt.Correct and Cancel apply the same rule).
+func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, postingDate time.Time, ledgerEntryID string, lines []correctedLineData) (events.Event, error) {
+	if postingDate.IsZero() {
+		postingDate = r.Date
+	}
 	return newEvent("receiving", "receipt", "corrected", r.ID, tenantID, receiptCorrectedData{
-		ReceiptID: r.ID, ReceiptNumber: r.Number, Kind: kind, CorrectionSeq: seq, LedgerEntryID: ledgerEntryID, Currency: r.Currency, Lines: lines,
+		ReceiptID: r.ID, ReceiptNumber: r.Number, LegalEntityID: r.LegalEntityID, PostingDate: postingDate.Format(dateLayout),
+		Kind: kind, CorrectionSeq: seq, LedgerEntryID: ledgerEntryID, Currency: r.Currency, Lines: lines,
 	})
 }
 

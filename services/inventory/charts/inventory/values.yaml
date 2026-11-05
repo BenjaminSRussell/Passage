@@ -41,3 +41,31 @@ inventory:
   # Consignment accrual (posting profile consignment_accrual, FR-16.17). Optional:
   # OWNERSHIP_CHANGE journals are refused (INV-JNL-005) while it is empty.
   consignmentAccrualAccount: ""
+# Product service base URL, used by the postings consumer to convert plain
+# (not catch-weight) document quantities into the product's inventory unit
+# (#480, duty product.uom.convert). Optional: without it plain lines are parked
+# (INV-PST-002). With it serviceIdentity.signingKeySecret is required, and the
+# product service must trust inventory's public key.
+productUrl: ""
+# The postings consumer (#480, args [consume]): books receiving's receipt.posted
+# and receipt.corrected, sales' DELIVERED orderprogress.recorded and
+# fulfillment's packingslip.cancelled as inventory transactions. It exits at
+# start unless service:inventory-postings is seeded in the service principal
+# table. Its KafkaUser, ACLs and dead-letter topic are
+# deploy/kafka/inventory-consumer.yaml; off by default, like the other consumers
+# in dev, until it is turned on per environment.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: inventory-postings
+    username: inventory-consumer
+    secret: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

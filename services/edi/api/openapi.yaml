@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Passage EDI engine API
   version: 0.1.0
-  description: Trading partner profiles, the map test harness, inbound X12 receipt with 997 matching, outbound 855/856/810 generation, the interchange list, the message monitor with reprocess and the partner SLA dashboard (PSG-35 slices 1 to 3).
+  description: Trading partner profiles, the map test harness, inbound X12 receipt with 997 matching, outbound 855/856/810 generation, the interchange list, the message monitor with reprocess and the partner SLA dashboard (PSG-35 slices 1 to 3); partner transports (AS2, SFTP) with outbound delivery, resend, and the AS2 listener partners call (#483).
 servers:
   - url: https://api.{env}.passage.dev/v1
     variables:
@@ -150,6 +150,66 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/transport:
+    put:
+      operationId: putTransport
+      summary: Select the partner's transport (API, AS2 or SFTP) and its settings
+      description: >
+        The transport hangs off the partner's trade profile and is scoped to its legal entity: the
+        caller must be scoped to that entity (another entity sees 404 on GET and 409 EDI-0012 on PUT).
+        API (the default) transmits nothing. AS2 signs every message (sha-256, sha-384 or sha-512),
+        may encrypt it to the partner certificate (aes128-cbc, aes192-cbc, aes256-cbc) and always
+        requires a signed MDN, synchronous or asynchronous (async needs EDI_AS2_PUBLIC_URL); the
+        partner's messages to the endpoint in as2Inbound must be signed with partnerCertificate, and
+        encrypted when an encryption algorithm is set. SFTP uploads to outboundDir (as .part, then
+        renamed) and, with inboundDir, polls it every pollIntervalSeconds. No secret is accepted:
+        signingKeyRef (a PEM private key with our certificate) and credentialRef (an SSH private
+        key, or a password) name files in the service's secret directory (EDI_SECRETS_DIR, filled
+        by an ExternalSecret), and a reference that does not resolve to a usable secret is refused.
+        The AS2 endpoint id is kept across updates.
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PartnerTransport' }
+      responses:
+        '200':
+          description: Transport saved
+          headers:
+            ETag: { schema: { type: string }, description: Version of the transport }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransportView' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — the partner has no trade profile in the caller's legal entities
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: EDI-0016 — no secret directory is configured
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getTransport
+      summary: Read the partner's transport, its AS2 inbound URL and whether its secrets resolve
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The transport
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransportView' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /edi/v1/partners/{id}/outbound:from-source:
     post:
       operationId: outboundFromSource
@@ -274,7 +334,7 @@ paths:
         edi.pii.view, the party name (N102), N2 names, every N3 and N4 element and the PER contact name
         and numbers are replaced by "***" and flagged masked (BR-35.12); entity codes, qualifiers and the
         GLN stay visible. The raw text itself is never returned. A stored payload that no longer parses
-        is EDI-0003.
+        is EDI-0003; an EDIFACT payload is EDI-0006 (the viewer reads X12 only).
       x-passage-duty: edi.operate
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -376,6 +436,122 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/interchanges/{id}:resend:
+    post:
+      operationId: resendInterchange
+      summary: Queue a new delivery of an outbound interchange whose last delivery failed or was rejected
+      description: >
+        The new delivery has its own AS2 Message-ID (and SFTP file name) and is sent by the
+        dispatcher. Only an outbound interchange whose latest document delivery is FAILED or
+        REJECTED, to a partner whose transport (AS2 or SFTP) the caller's legal entities cover, can
+        be resent (409 EDI-0015 otherwise).
+      x-passage-duty: edi.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '202':
+          description: Delivery queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Delivery' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0015 — nothing to resend
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /as2/v1/{endpoint}:
+    servers:
+      - url: https://as2.{env}.passage.dev
+        description: The AS2 listener (EDI_AS2_ADDR), reached by partners without a Passage token
+        variables:
+          env: { default: dev }
+    post:
+      operationId: as2Receive
+      summary: Receive an AS2 message from the partner of this endpoint (RFC 4130)
+      description: >
+        Called by the trading partner's AS2 software, not by Passage users: there is no JWT and
+        X-Passage-* headers are ignored. The endpoint id selects one partner transport (tenant,
+        partner and legal entity come from it); the caller is authenticated by its CMS signature
+        against the pinned partner certificate, AS2-From must be the partner's AS2 id and AS2-To
+        ours. Nothing is parsed before the signature verifies (and the envelope decrypts when
+        encryption is required). The syntax is told by the first segment: an X12 payload (ISA)
+        goes through the inbound pipeline of /edi/v1/inbound/x12, an EDIFACT payload (UNA or UNB)
+        through that of /edi/v1/inbound/edifact; its ISA or UNB sender must be this partner, and
+        the 997 or CONTRL is queued back over the partner's transport. A payload refused for its
+        syntax or its sender is answered with processed/error and, when its envelope can be read,
+        with a negative 997 or CONTRL queued the same way (the refused interchange is recorded
+        with its refusal and no messages). The MDN (signed when asked) is returned in the response, or, when
+        the sender asks for an asynchronous MDN at a Receipt-Delivery-Option on the partner's
+        configured AS2 host, stored (in the transaction that records the interchange) and posted by
+        the delivery dispatcher with retries; the request is answered 200 only once it is stored.
+        Each endpoint has a rate limit (EDI_AS2_RATE_PER_MINUTE, EDI_AS2_RATE_BURST) checked before
+        any other work. Dispositions: processed; processed/warning: duplicate-document for a Message-ID or
+        interchange recorded before; processed/error with authentication-failed,
+        decryption-failed, integrity-check-failed, insufficient-message-security or
+        unexpected-processing-error. Bodies above 8 MiB are 413.
+      x-passage-duty: none (partner authenticated by its AS2 signature)
+      security: []
+      parameters:
+        - name: endpoint
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/signed: { schema: { type: string, format: binary } }
+          application/pkcs7-mime: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: The MDN (multipart/report, multipart/signed when signed); empty for an asynchronous MDN
+        '400': { description: Message-ID missing }
+        '403': { description: AS2-From or AS2-To do not match the endpoint }
+        '404': { description: Unknown endpoint, not an AS2 transport, or the partner is inactive }
+        '413': { description: Body above 8 MiB }
+        '429':
+          description: The endpoint's rate limit is used up; retry after Retry-After seconds
+          headers:
+            Retry-After: { schema: { type: integer, minimum: 1 } }
+        '503': { description: Our keys or the partner certificate cannot be loaded, or the asynchronous MDN cannot be stored }
+  /as2/v1/{endpoint}/mdn:
+    servers:
+      - url: https://as2.{env}.passage.dev
+        description: The AS2 listener (EDI_AS2_ADDR), reached by partners without a Passage token
+        variables:
+          env: { default: dev }
+    post:
+      operationId: as2AsyncMDN
+      summary: Receive the asynchronous MDN for one of our AS2 deliveries
+      description: >
+        The MDN must be signed by the partner certificate, come from the partner's AS2 id to ours,
+        answer a delivery of this partner that is AWAITING_MDN and carry the MIC we computed. A
+        processed MDN marks the delivery DELIVERED and its messages SENT (with
+        dev.passage.edi.message.sent.v1); an error disposition marks it REJECTED. An MDN arriving
+        after the wait ran out (mdnDueAt) finds no delivery waiting: the delivery was sent again or
+        FAILED. Shares the endpoint's rate limit.
+      x-passage-duty: none (partner authenticated by its AS2 signature)
+      security: []
+      parameters:
+        - name: endpoint
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/signed: { schema: { type: string, format: binary } }
+      responses:
+        '200': { description: MDN applied }
+        '400': { description: Not a signed MDN of the partner, or its MIC or Message-ID does not match }
+        '403': { description: AS2-From or AS2-To do not match the endpoint }
+        '404': { description: Unknown endpoint, or no delivery waits for this MDN }
+        '413': { description: Body above 1 MiB }
+        '429':
+          description: The endpoint's rate limit is used up; retry after Retry-After seconds
+          headers:
+            Retry-After: { schema: { type: integer, minimum: 1 } }
   /edi/v1/messages:
     get:
       operationId: listMessages
@@ -523,6 +699,47 @@ paths:
         dev.passage.edi.message.acked.v1 is published per answered message. The 997 itself is
         POSTED, or FAILED with EDI-0161 when it answers nothing; 997s are never acknowledged, so
         ack997 is absent for an interchange of 997s only.
+      x-passage-duty: edi.operate
+      parameters:
+        - name: environment
+          in: query
+          required: false
+          schema: { type: string, enum: [TEST, PROD], default: PROD }
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        '201':
+          description: Interchange recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiveResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /edi/v1/inbound/edifact:
+    post:
+      operationId: receiveEdifact
+      summary: Receive one raw EDIFACT interchange from a partner
+      description: >
+        The EDIFACT counterpart of /edi/v1/inbound/x12. Reads UNA (custom service characters),
+        UNB, optional UNG..UNE functional groups, UNH..UNT messages and UNZ, with UNT01/UNT02,
+        UNE01/UNE02 and UNZ01/UNZ02 checked; identifies the partner by UNB sender (S002 id and
+        qualifier against the partner's edifactId and edifactQualifier, EDI-0101 when none),
+        rejects a UNB 0020 interchange reference seen from the partner inside the duplicate
+        window (EDI-0102), and records every message: ORDERS mapped like the 850, DESADV held to
+        the 856 rules, INVOIC to the 810 rules, with dev.passage.edi.message.received.v1
+        (standard EDIFACT) per message and message.failed per failed one. A message whose UNT
+        count or reference is wrong is FAILED while the rest is processed; other envelope errors
+        are 400. A CONTRL is returned (and queued over the partner's transport) when the partner's
+        edifactContrl is ALWAYS, or REQUESTED and UNB 0031 is 1: UCI 7 when a message is
+        accepted, UCI 4 when none is, UCM 4 with UCS and UCD for each rejected message, UCF per
+        group with a rejected message. Received CONTRLs are recorded FAILED with EDI-0161 (no
+        outbound EDIFACT exists to match) and never acknowledged.
       x-passage-duty: edi.operate
       parameters:
         - name: environment
@@ -961,6 +1178,12 @@ components:
         receivedAt: { type: string, format: date-time }
         messageCount: { type: integer }
         failedCount: { type: integer }
+        refusal:
+          type: string
+          description: >
+            Why an interchange a transport brought was refused as a whole (syntax or sender); it
+            has no messages, its ackStatus is REJECTED and the negative 997 or CONTRL was queued
+            back. A refused interchange never counts in the duplicate window.
     InterchangeDetail:
       allOf:
         - $ref: '#/components/schemas/InterchangeSummary'
@@ -968,6 +1191,7 @@ components:
           required: [messages]
           properties:
             ack997: { type: string, description: Serialized X12 997 sent back to the partner }
+            contrl: { type: string, description: Serialized EDIFACT CONTRL sent back to the partner (EDIFACT interchanges) }
             messages:
               type: array
               items:
@@ -978,8 +1202,12 @@ components:
                   transactionSet: { type: string }
                   stControl: { type: string }
                   status: { type: string, enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED] }
-                  canonical: { type: object, description: 'Canonical document: 850 Order, 997 FunctionalAck, outbound 855 Ack855, 856 ASN or 810 Invoice' }
+                  canonical: { type: object, description: 'Canonical document: 850 or ORDERS Order, 997 FunctionalAck, CONTRL ContrlAck, outbound 855 Ack855, 856 or DESADV ASN, 810 or INVOIC Invoice' }
                   error: { type: string }
+            deliveries:
+              type: array
+              description: Deliveries of the interchange (DOCUMENT) or of its 997 or CONTRL (ACK) over the partner's transport, in the caller's legal entities
+              items: { $ref: '#/components/schemas/Delivery' }
     PartnerRequest:
       type: object
       additionalProperties: false
@@ -990,6 +1218,13 @@ components:
         isaId: { type: string, pattern: '^[A-Za-z0-9]{1,15}$' }
         environment: { type: string, enum: [TEST, PROD] }
         ackSlaMinutes: { type: integer, minimum: 5, maximum: 1440, default: 60 }
+        edifactId: { type: string, pattern: '^[A-Za-z0-9._-]{1,35}$', description: UNB S002 0004 sender id of a partner that sends EDIFACT }
+        edifactQualifier: { type: string, pattern: '^[A-Za-z0-9]{1,4}$', description: UNB S002 0007 code qualifier (14 GLN, ZZZ); omit when the partner sends none }
+        edifactContrl:
+          type: string
+          enum: [REQUESTED, ALWAYS, NEVER]
+          default: REQUESTED
+          description: When inbound EDIFACT is answered with a CONTRL; REQUESTED follows UNB 0031. Needs edifactId.
     Partner:
       type: object
       required: [id, name, isaQualifier, isaId, environment, ackSlaMinutes, status, version, createdAt]
@@ -1000,6 +1235,9 @@ components:
         isaId: { type: string }
         environment: { type: string, enum: [TEST, PROD] }
         ackSlaMinutes: { type: integer }
+        edifactId: { type: string }
+        edifactQualifier: { type: string }
+        edifactContrl: { type: string, enum: [REQUESTED, ALWAYS, NEVER] }
         status: { type: string, enum: [active, inactive] }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
@@ -1034,6 +1272,7 @@ components:
               status: { type: string, enum: [MAPPED, FAILED, POSTED] }
               error: { type: string }
         ack997: { type: string, description: Serialized X12 997 functional acknowledgment; absent when only 997s were received }
+        contrl: { type: string, description: Serialized EDIFACT CONTRL; absent when the partner does not get one or only CONTRLs were received }
     TradeProfile:
       type: object
       additionalProperties: false
@@ -1076,6 +1315,99 @@ components:
         transactionSet: { type: string, enum: ['855', '856', '810', '820', '214'] }
         controlNumber: { type: string, description: ISA13, nine digits }
         x12: { type: string, description: The serialized interchange }
+        delivery:
+          description: The queued delivery when the partner has an AS2 or SFTP transport in the caller's legal entities
+          allOf: [{ $ref: '#/components/schemas/Delivery' }]
+    Delivery:
+      type: object
+      required: [id, payloadKind, transport, messageId, status, attempts, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        payloadKind: { type: string, enum: [DOCUMENT, ACK] }
+        transport: { type: string, enum: [AS2, SFTP] }
+        messageId: { type: string, description: AS2 Message-ID without angle brackets }
+        status:
+          type: string
+          enum: [PENDING, AWAITING_MDN, DELIVERED, REJECTED, FAILED]
+          description: >
+            PENDING is due at nextAttemptAt (retries back off from one minute to an hour; FAILED after
+            8 attempts); AWAITING_MDN waits for an asynchronous MDN until mdnDueAt
+            (EDI_AS2_MDN_TIMEOUT_MINUTES, default 24 hours), then is sent again with the same
+            Message-ID, or FAILED when the attempts are used up; REJECTED means the partner's MDN
+            reported an error (not retried; resend it). FAILED publishes
+            dev.passage.edi.delivery.failed.v1; resend it.
+        attempts: { type: integer }
+        nextAttemptAt: { type: string, format: date-time }
+        mdnDisposition: { type: string }
+        mdnSigned: { type: boolean }
+        reference: { type: string, description: Original-Message-ID of the MDN, or the remote SFTP path }
+        lastError: { type: string }
+        sentAt: { type: string, format: date-time }
+        deliveredAt: { type: string, format: date-time }
+        mdnDueAt: { type: string, format: date-time, description: When an AWAITING_MDN delivery stops waiting for its asynchronous MDN }
+        mdnTimeouts: { type: integer, description: How many waits for an asynchronous MDN ran out }
+        createdAt: { type: string, format: date-time }
+    PartnerTransport:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [API, AS2, SFTP] }
+        as2: { $ref: '#/components/schemas/AS2Settings' }
+        sftp: { $ref: '#/components/schemas/SFTPSettings' }
+    AS2Settings:
+      type: object
+      required: [partnerAs2Id, ourAs2Id, url, partnerCertificate, signingKeyRef]
+      properties:
+        partnerAs2Id: { type: string, pattern: '^[A-Za-z0-9._@:-]{1,128}$' }
+        ourAs2Id: { type: string, pattern: '^[A-Za-z0-9._@:-]{1,128}$' }
+        url: { type: string, format: uri, description: The partner's AS2 URL (https) }
+        partnerCertificate: { type: string, description: 'One PEM certificate (RSA of 2048 bits or more, or ECDSA), valid now; RSA when encrypting' }
+        signingKeyRef: { type: string, pattern: '^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$', description: Name of the secret file holding our PEM private key and certificate }
+        signingAlgorithm: { type: string, enum: [sha-256, sha-384, sha-512], default: sha-256 }
+        encryptionAlgorithm: { type: string, enum: [none, aes128-cbc, aes192-cbc, aes256-cbc], default: none }
+        mdnMode: { type: string, enum: [sync, async], default: sync }
+    SFTPSettings:
+      type: object
+      required: [host, user, hostKeyFingerprint, authMethod, credentialRef, outboundDir]
+      properties:
+        host: { type: string }
+        port: { type: integer, minimum: 1, maximum: 65535, default: 22 }
+        user: { type: string, pattern: '^[A-Za-z0-9._-]{1,64}$' }
+        hostKeyFingerprint: { type: string, pattern: '^SHA256:[A-Za-z0-9+/]{43}$', description: As ssh-keygen -lf prints it; the host key is pinned }
+        authMethod: { type: string, enum: [key, password] }
+        credentialRef: { type: string, pattern: '^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$', description: Name of the secret file holding the SSH private key or the password }
+        outboundDir: { type: string }
+        inboundDir: { type: string, description: Polled when set }
+        archiveDir: { type: string, default: processed, description: Subdirectory of inboundDir for handled files }
+        failedDir: { type: string, default: failed, description: Subdirectory of inboundDir for parked files }
+        pollIntervalSeconds: { type: integer, minimum: 60, maximum: 86400, default: 300 }
+    TransportView:
+      type: object
+      required: [partnerId, legalEntityId, kind, version, updatedAt]
+      properties:
+        partnerId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        kind: { type: string, enum: [API, AS2, SFTP] }
+        as2: { $ref: '#/components/schemas/AS2Settings' }
+        sftp: { $ref: '#/components/schemas/SFTPSettings' }
+        as2Inbound:
+          type: object
+          properties:
+            endpointId: { type: string, format: uuid }
+            url: { type: string, description: The AS2 URL to give the partner (with EDI_AS2_PUBLIC_URL) }
+            mdnUrl: { type: string, description: Where the partner posts asynchronous MDNs }
+            partnerCertificateSha256: { type: string }
+            partnerCertificateNotAfter: { type: string, format: date-time }
+        secrets:
+          type: object
+          description: Per reference field, whether the secret is ok, missing or malformed (never its content)
+          additionalProperties:
+            type: object
+            properties:
+              ref: { type: string }
+              status: { type: string, enum: [ok, missing, malformed] }
+        version: { type: integer }
+        updatedAt: { type: string, format: date-time }
     Decimal:
       type: string
       pattern: '^-?[0-9]+(\.[0-9]+)?$'

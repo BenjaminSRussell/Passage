@@ -1,6 +1,6 @@
 # ADR-0002: frePPLe comparison for master planning (wave 22, AC4)
 
-**Status:** Proposed — 2026-11-04 (awaiting a decision by the deciders; nothing in the code depends on it)
+**Status:** Accepted — 2026-11-05 (proposed 2026-11-04; option 2, as #479 recommends)
 **Deciders:** Ben Russell, Zach Demanche
 **Issues:** [#22](https://github.com/BenjaminSRussell/Passage/issues/22) (AC4), [#479](https://github.com/BenjaminSRussell/Passage/issues/479)
 
@@ -44,18 +44,19 @@ subset of the data before "within tolerance" means anything.
    - For: keeps the door open at no current cost.
    - Against: an open, optional box on #22 that no one owns; the DoD stays ambiguous.
 
-## Recommendation
+## Decision
 
-Option 2, as #479 proposes: drop the frePPLe comparison from wave 22's Definition of Done, keep the native
-planner, and treat `mrp-textbook` (independent reference MRP plus hand-derived plans) as the correctness proof.
-If a customer later asks for an external comparison, do it once, by hand, on their data (option 3's manual run),
-rather than maintaining a frePPLe harness in CI.
+Option 2, as #479 proposes: drop the frePPLe comparison from the wave 22 Definition of Done and keep the native
+planner as the only engine. `mrp-textbook` (an independent reference MRP plus hand-derived plans) and the
+property tests are the correctness proof. If a customer later asks for an external comparison, it is done once,
+by hand, on their data (option 3's manual run), not as a frePPLe harness maintained in CI.
 
-## Consequences (if accepted)
+## Consequences
 
-- #22: AC4 is checked off as "dropped by ADR-0002", not as passed.
-- `services/planning/NOT-IMPLEMENTED.md`: the AC4 and "frePPLe comparison" rows change from "later slice" to
-  "dropped (ADR-0002)".
-- The `frepple-compare` fixture in the phase-4 PRD test plan is no longer expected.
-
-Until a decider accepts or rejects this ADR, AC4 stays open on #22 and the NOT-IMPLEMENTED rows stay as they are.
+- #22: AC4 is checked off as "dropped by ADR-0002", not as passed (`roadmap/tickets/PSG-22.md`).
+- The wave 22 proof list (`roadmap/waves.json`, `roadmap/phase-4-manufacturing.md`) no longer asks for the
+  comparison.
+- `services/planning/NOT-IMPLEMENTED.md`: the AC4 row reads "dropped (ADR-0002)" instead of "later slice".
+- The `frepple-compare` fixture and the frePPLe row of the phase-4 PRD test plan are no longer expected
+  (`docs/prd/phase-4-manufacturing.md`, `docs/PRD-full.md`).
+- No frePPLe image, translator or AGPL code enters the toolchain.

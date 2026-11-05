@@ -417,6 +417,11 @@ func (s *Store) ListGrir(ctx context.Context, f store.GrirFilter) (page store.Gr
 			}
 			g.AgeDays = int(time.Since(g.CreatedAt).Hours() / 24)
 			g.OpenAmount = g.ReceivedAmount.Sub(g.ClearedAmount)
+			for _, l := range t.receipts[g.ReceiptID].Lines {
+				if l.LineNo == g.LineNo {
+					g.CWQty = l.CWQty
+				}
+			}
 			if len(page.Items) <= limit && !skipForCursor(g.CreatedAt, g.ID, f.CursorCreatedAt, f.CursorID) {
 				page.Items = append(page.Items, g)
 			}

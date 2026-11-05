@@ -90,27 +90,42 @@ func Load(getenv func(string) string) (Config, error) {
 	return cfg, nil
 }
 
-func loadSMTP(src secretSource, allowInsecure bool) (*SMTPConfig, error) {
-	values := map[string]string{}
-	for _, f := range []struct{ file, env string }{
+// Secret keys (files under NOTIFY_SECRETS_DIR) and their env fallbacks, in the order the batch chart's ExternalSecret
+// maps them (charts/batch/templates/externalsecret.yaml; TestChartExternalSecretMapsEveryAdapterKey keeps them equal).
+var (
+	smtpSecrets = []struct{ file, env string }{
 		{"smtp-host", "NOTIFY_SMTP_HOST"},
 		{"smtp-port", "NOTIFY_SMTP_PORT"},
 		{"smtp-user", "NOTIFY_SMTP_USER"},
 		{"smtp-password", "NOTIFY_SMTP_PASSWORD"},
-	} {
+	}
+	webhookTokenSecret = struct{ file, env string }{"webhook-token", "NOTIFY_WEBHOOK_TOKEN"}
+)
+
+func smtpSecretKeys() []string {
+	out := make([]string, len(smtpSecrets))
+	for i, s := range smtpSecrets {
+		out[i] = s.file
+	}
+	return out
+}
+
+func webhookSecretKeys() []string { return []string{webhookTokenSecret.file} }
+
+func loadSMTP(src secretSource, allowInsecure bool) (*SMTPConfig, error) {
+	values := map[string]string{}
+	var missing []string
+	for _, f := range smtpSecrets {
 		v, err := src.get(f.file, f.env)
 		if err != nil {
 			return nil, err
 		}
 		values[f.file] = v
-	}
-	from := strings.TrimSpace(src.getenv("NOTIFY_SMTP_FROM"))
-	var missing []string
-	for _, name := range []string{"smtp-host", "smtp-port", "smtp-user", "smtp-password"} {
-		if values[name] == "" {
-			missing = append(missing, name)
+		if v == "" {
+			missing = append(missing, f.file)
 		}
 	}
+	from := strings.TrimSpace(src.getenv("NOTIFY_SMTP_FROM"))
 	if from == "" {
 		missing = append(missing, "NOTIFY_SMTP_FROM")
 	}
@@ -137,14 +152,14 @@ func loadSMTP(src secretSource, allowInsecure bool) (*SMTPConfig, error) {
 }
 
 func loadWebhook(src secretSource, allowInsecure bool) (*WebhookConfig, error) {
-	token, err := src.get("webhook-token", "NOTIFY_WEBHOOK_TOKEN")
+	token, err := src.get(webhookTokenSecret.file, webhookTokenSecret.env)
 	if err != nil {
 		return nil, err
 	}
 	rawURL := strings.TrimSpace(src.getenv("NOTIFY_WEBHOOK_URL"))
 	var missing []string
 	if token == "" {
-		missing = append(missing, "webhook-token")
+		missing = append(missing, webhookTokenSecret.file)
 	}
 	if rawURL == "" {
 		missing = append(missing, "NOTIFY_WEBHOOK_URL")

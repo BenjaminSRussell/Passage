@@ -72,7 +72,7 @@ Production control workspace; demo plant runs its first production order end-to-
 - [ ] MRP correctness fixtures: 40 textbook scenarios (APICS CPIM-style) match expected planned orders and dates
 - [ ] Scale: 50k items × 12 periods × 5-level BOM plans in < 10 min; results deterministic across runs
 - [ ] Pegging tree for every planned order explains 100% of its quantity
-- [ ] Optional comparison: results match frePPLe on a shared dataset within tolerance
+- [ ] No frePPLe comparison: dropped from the Definition of Done by ADR-0002 (accepted); the native planner is the only engine and the textbook fixtures are its correctness reference
 
 **Deploy**
 

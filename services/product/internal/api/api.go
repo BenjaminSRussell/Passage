@@ -46,6 +46,10 @@ const (
 	dutyReleasedRead = "product.released.read"
 
 	dutyConfigurationRead = "product.configuration.read"
+	// dutyUOMConvert is the service-only duty of the unit conversion alone: the
+	// inventory postings consumer converts a document quantity into the
+	// product's inventory unit with it (#480) and reads nothing else.
+	dutyUOMConvert = "product.uom.convert"
 
 	codeOrgUnavailable = "PRD-ORG-UNAVAILABLE"
 	// codeOrgServiceCaller: a service caller (the migration loader) placed a
@@ -112,7 +116,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyGTIN)).Post("/v1/product/gtins", a.allocateGTIN)
 	r.With(authz.RequireDuty(dutyView)).Post("/v1/product/gtins:validate", a.validateGTIN)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/gtins/{gtin}", a.getGTIN)
-	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/uom/convert", a.convert)
+	r.With(authz.RequireAnyDuty(dutyView, dutyUOMConvert)).Get("/v1/product/uom/convert", a.convert)
 	r.With(authz.RequireDuty(dutyConfigure)).Post("/v1/product/configuration-models/{id}:solve", a.solve)
 	r.With(authz.RequireDuty(dutyConfigurationRead)).Get("/v1/product/saved-configurations/{id}", a.getSavedConfiguration)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/barcodes/{gtin}", a.barcode)
@@ -697,12 +701,27 @@ func (a *API) convert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	qty, err := a.store.ConvertUOM(r.Context(), q.Get("product"), q.Get("from"), q.Get("to"), q.Get("qty"))
+	product, to := q.Get("product"), q.Get("to")
+	if to == "" {
+		// Without a target unit the quantity is converted into the product's
+		// base (inventory) unit, which the answer names (#480).
+		if !ids.Valid(product) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "to, or a product to convert into its base unit, is required"))
+			return
+		}
+		p, err := a.store.GetProduct(r.Context(), product)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		to = p.BaseUOM
+	}
+	qty, err := a.store.ConvertUOM(r.Context(), product, q.Get("from"), to, q.Get("qty"))
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]string{"from": q.Get("from"), "to": q.Get("to"), "quantity": qty})
+	httpx.JSON(w, http.StatusOK, map[string]string{"from": q.Get("from"), "to": to, "quantity": qty})
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request) {

@@ -49,6 +49,8 @@ type lineBody struct {
 	ReceivedQty decimal.Decimal `json:"receivedQty"`
 	InvoicedQty decimal.Decimal `json:"invoicedQty"`
 	Status      string          `json:"status"`
+	SiteID      string          `json:"siteId"`
+	WarehouseID string          `json:"warehouseId"`
 }
 
 type orderBody struct {

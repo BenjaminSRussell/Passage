@@ -10,11 +10,79 @@ release may change public APIs.
 
 ### Added
 
+- Inbound EDIFACT over the transports, with CONTRL (#483): the edi receipt tells X12 (ISA) from EDIFACT (UNA/UNB)
+  by the first segment, so the AS2 listener, the SFTP poller and the new `POST /edi/v1/inbound/edifact` take EDIFACT
+  interchanges. They are read with UNG/UNE functional groups and every count and reference checked; the UNB sender
+  must be the partner's new `edifactId`/`edifactQualifier` (and the transport's partner); the UNB reference is
+  checked against the duplicate window; ORDERS, DESADV and INVOIC are mapped onto the canonical order, ASN and
+  invoice with the 850/856/810 rules and published as `dev.passage.edi.message.received.v1` (standard EDIFACT).
+  Partners get a CONTRL (`edifactContrl`: REQUESTED when UNB 0031 = 1, ALWAYS, NEVER) on their own gap-free
+  EDIFACT counter, queued back over their AS2 or SFTP transport like the 997: UCI 7 or 4, UCF per rejected group,
+  UCM 4 with UCS and UCD placing each syntax or mapping error. A payload an authenticated transport brought and the
+  receipt refused for syntax or sender is now also answered with a negative 997 (AK502/AK905 trailer codes) or
+  CONTRL (UCI 4 with the 0085 code, 23 for a foreign sender) next to the error MDN or the parked file, recorded as a
+  refused interchange (migration 0008: `interchange.refusal`) that never counts as a duplicate.
+- AS2 edge and listener hardening (#483): trading partners reach the edi AS2 listener through Gateway `passage-as2`
+  on `as2.dev.passage.dev` (`deploy/gateway/as2-*.yaml`), a Gateway of its own outside the `passage-api` JWT
+  SecurityPolicy, with one HTTPRoute (`POST /as2/v1/` to the `edi-as2` Service), HTTPS only with a cert-manager
+  Certificate, TLS 1.2 or newer, the identity headers stripped, an 8Mi request buffer (the listener's cap) and a
+  global rate limit per client address; the edi chart's new NetworkPolicy admits only that gateway's proxies to the
+  AS2 port, and `test_gateway.py` proves every API route stays behind the JWT policy and the AS2 route exposes only
+  `/as2/v1/`. The listener adds a token bucket per endpoint (`EDI_AS2_RATE_PER_MINUTE`, `EDI_AS2_RATE_BURST`, 429
+  with `Retry-After` before any lookup or signature work). Asynchronous MDNs we owe are stored in `transport_mdn`
+  (migration 0007) in the transaction that records the message and posted by the delivery dispatcher with leases,
+  back-off and FAILED after the last attempt, only to the partner's AS2 host and without following redirects.
+  Deliveries waiting for an asynchronous MDN time out after `EDI_AS2_MDN_TIMEOUT_MINUTES` (default 24 hours), are
+  sent again with the same Message-ID or FAILED, and every FAILED delivery publishes
+  `dev.passage.edi.delivery.failed.v1`.
+- Inventory postings consumer follow-ups (#480): plain (not catch-weight) receipt and delivery lines are booked in
+  the product's inventory unit, converted by the product service (`GET /v1/product/uom/convert` without `to` now
+  converts into the product's base unit; new service-only duty `product.uom.convert`, granted inventory -> product).
+  Without `PRODUCT_URL` such a line is parked (`INV-PST-002`), and a conversion product refuses parks it
+  (`INV-PST-001`). The consumer also offsets its bookings: receiving's `receipt.corrected` books a correction's delta
+  or a cancellation's remaining net, and fulfillment's `packingslip.cancelled` books the exact mirror of the
+  delivery. Each offset is read back from the booking it corrects (`corrects_transaction_id`), keyed so replays
+  book nothing twice, and refused when the original is missing (`INV-PST-003`) or does not match (`INV-PST-004`).
+  Additive event fields: `receipt.corrected` gains `legal_entity_id`, `posting_date` and, on a cancellation,
+  `cw_qty_delta`; `packingslip.cancelled` gains `packing_slip_number` and `legal_entity_id`. New shared fixtures in
+  `services/inventory/testdata/catchweight-flow` are checked by the receiving and fulfillment producer tests.
+  `deploy/kafka/inventory-consumer.yaml` adds the consumer's KafkaUser, literal ACLs and dead-letter topic, and
+  `make -C deploy test-argocd` checks consumer KafkaUsers against their charts. The consumer stays off in dev, like
+  the other consumers.
+- Live tender trigger (#426): transport's `POST /v1/transport/loads/{id}:release` (duty `transport.load.tender`,
+  migration 0010) applies the tender gates and publishes `dev.passage.tms.load.released.v1` with the releasing user
+  and legal-entity scope from the verified caller; workflow-ts's new Kafka consumer (`src/eventConsumer.ts`, kafkajs)
+  starts `tenderWorkflow` from it and sends `tender-response` on `tender.accepted.v1` and `tender.declined.v1`. The
+  tender start is keyed on the release id, so a redelivered release never tenders a load twice. The new
+  `outbox-transport` Debezium connector streams transport's outbox (publication and CDC role grants in transport
+  migrations 0011 and 0012; own `debezium_cdc_transport` role and `passage_transport` database in the dev Postgres;
+  one Vault key, `passage/dev/transport-postgres/cdc-password`; literal ACLs) to `passage.tms.<aggregate_type>`, so the
+  release reaches `passage.tms.load` and the tender outcomes `passage.tms.tender`.
+- Transport load status through the tender (#426): the release moves a PLANNED or RATED load to TENDERED and needs
+  `If-Match` with the load version (428 without it, 412 `conflict_version` when stale; `GET /loads/{id}` returns the
+  version as ETag); a load in another status, such as one already released, is 409 TMS-0136, so a load is released
+  once. The release response carries `loadStatus` and `loadVersion`. A tender start also tenders the load (TENDERED
+  loads included, for the workflow's start after a release); an accepted tender makes the load ACCEPTED and a failed
+  one (every carrier declined or timed out) PLANNED again. The moves are checked in `domain.NextLoadStatus`. The web
+  tender form gains "Release to the tender workflow" for holders of `transport.load.tender`: it shows the load's
+  status and version, releases with `If-Match` and one `Idempotency-Key`, and shows the resulting status.
+- Dev database wiring for transport and eam (#426): the ExternalSecrets `transport-db` and `eam-database` in
+  `deploy/envs/dev/apps/postgres.yaml` write each chart's `url` for its own login role (`passage_transport_app`,
+  `passage_eam_app`; NOSUPERUSER, NOBYPASSRLS) from the new Vault keys `passage/dev/transport-postgres/app-password`
+  and `passage/dev/eam-postgres/app-password`; the init scripts create the roles with the same password (init-rev 8),
+  the dev Postgres NetworkPolicy admits the transport and eam pods, and transport migrates on start in dev
+  (`deploy/envs/dev/values/transport.yaml`). `make -C deploy test-argocd` checks the Secret, role, grants and policy
+  and, with helm, that each chart reads that Secret.
 - Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
   in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev
   chart with helm. The analytics, eam, hr, iot-edge, projects, shopfloor and transport charts now take
   `image.digest`. Syncing still needs a live cluster (#213).
+- Event backbone completion in dev Argo CD (#106): `apicurio-postgres` (the `deploy/postgres` chart gains
+  `cdc.enabled: false` for a plain database) and the `apicurio-database` ExternalSecret give Apicurio Registry its
+  SQL storage, and `kafka-consumer-users` syncs the receiving and scheduling consumer KafkaUsers and dead-letter
+  topics. `test-argocd` now asserts the backbone and Temporal sync order, that every directory manifest is applied,
+  and that Strimzi cluster labels and every connector or workload Secret reference resolve to a synced ExternalSecret.
 - Keycloak CI login tests (#80, wave 02 AC3) in `services/identity/keycloak_login_test.go`: OIDC authorization code
   with PKCE and TOTP (enrolment, then the OTP form), identity's `JWTVerifier` accepting the token with the duty
   claims, deprovisioning (a disabled user loses refresh and login), and federated login through two Keycloak stand-in
@@ -46,6 +114,17 @@ release may change public APIs.
   request timeout; numbers and caveats in `services/planning/README.md`. The plan-run route now accepts
   bodies up to 128 MiB and `RunPlan` sends its rows in batches of 10,000 (one unbounded batch ran out of
   memory at 50k items). ADR-0002 (Proposed) records the frePPLe comparison decision for AC4.
+- Asynchronous plan runs in planning (#479): `POST /v1/planning/plans/{planCode}:run` with
+  `Prefer: respond-async` validates the request, answers 202 with a plan run and its `Location`, and plans
+  and stores the version in the background, outside the router's 30 s request timeout. New routes
+  `GET /v1/planning/plan-runs/{id}` (status, phase, row progress, the version once succeeded) and
+  `POST /v1/planning/plan-runs/{id}:cancel`; migration `0030_plan_run`; one run per plan, at most
+  `PLANNING_MAX_CONCURRENT_RUNS` per process (default 1, else 503 with Retry-After), bounded by
+  `PLANNING_RUN_TIMEOUT_MINUTES` (default 60), a heartbeat that carries cancels across replicas and
+  reports the run of a dead process as abandoned. Without the preference the run is synchronous as before.
+  The 50k-item API scale test and the k6 S5 scenario now use the asynchronous route.
+  ADR-0002 is accepted: the frePPLe comparison is dropped from the wave 22 Definition of Done and the
+  native planner stays.
 - Wave 25 gaps (#481): production's `consume-shopfloor` consumer (principal `production-shopfloor`) posts
   closed shop-floor job-stops as job cards at the worker cost rate, pinned to the order's legal entity, and
   re-books them on `registration.corrected`; the web kiosk's IndexedDB offline queue replays punches and job

@@ -1,21 +1,31 @@
-// Command edi runs the EDI engine HTTP API: partner profiles, the map tester,
-// inbound X12 receipt with 997 generation and 997 matching, outbound
-// 855/856/810 generation and the interchange list.
+// Command edi runs the EDI engine HTTP API: partner profiles and transports,
+// the map tester, inbound X12 receipt with 997 generation and 997 matching,
+// outbound 855/856/810/820/214 generation and the interchange list; the AS2
+// listener for partners (EDI_AS2_ADDR); and, with EDI_TRANSPORT_WORKERS=true,
+// the delivery dispatcher and the SFTP poller.
 package main
 
 import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/api"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
@@ -69,18 +79,124 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	a := api.New(store.New(pool, dupDays))
+	st := store.New(pool, dupDays)
+	a := api.New(st)
 	a.Sender = sender
 	a.AllowBodyOutbound = os.Getenv("EDI_ALLOW_BODY_OUTBOUND") == "true"
 	fulfillmentURL, billingURL, salesURL := os.Getenv("EDI_FULFILLMENT_URL"), os.Getenv("EDI_BILLING_URL"), os.Getenv("EDI_SALES_URL")
 	if signer != nil && fulfillmentURL != "" && billingURL != "" && salesURL != "" {
 		a.Sources = sources.New(signer, fulfillmentURL, billingURL, salesURL, nil)
 	}
-	return httpx.Serve(ctx, addr, a.Routes())
+	tc, err := loadTransportConfig(os.Getenv, addr)
+	if err != nil {
+		return err
+	}
+	a.Secrets, a.AS2PublicURL, a.AllowInsecureAS2 = tc.secrets, tc.publicURL, tc.allowHTTP
+	a.AS2Limit = api.NewAS2Limiter(tc.ratePerMinute, tc.rateBurst, 0)
+
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 2)
+	if tc.as2Addr != "" {
+		go func() { errCh <- httpx.Serve(ctx, tc.as2Addr, a.AS2Routes()) }()
+	}
+	if tc.workers {
+		d := &delivery.Dispatcher{Store: st, Secrets: tc.secrets, HTTP: tc.http, AS2PublicURL: tc.publicURL, MDNTimeout: tc.mdnTimeout}
+		p := &delivery.Poller{Store: st, Secrets: tc.secrets, Receive: a.ReceiveFromTransport}
+		go delivery.Run(ctx, "delivery dispatcher", tc.interval, d.RunOnce)
+		go delivery.Run(ctx, "sftp poller", tc.interval, p.RunOnce)
+	}
+	go func() { errCh <- httpx.Serve(ctx, addr, a.Routes()) }()
+	err = <-errCh
+	stop()
+	return err
+}
+
+// transportConfig is the AS2 and SFTP setup from the environment.
+type transportConfig struct {
+	secrets   secrets.Store
+	publicURL string
+	allowHTTP bool
+	as2Addr   string
+	workers   bool
+	interval  time.Duration
+	http      *http.Client
+	// ratePerMinute and rateBurst are the AS2 listener's limit per endpoint
+	// (0 per minute: off); mdnTimeout bounds the wait for an asynchronous MDN.
+	ratePerMinute int
+	rateBurst     int
+	mdnTimeout    time.Duration
+}
+
+// loadTransportConfig reads EDI_SECRETS_DIR (the mounted directory of
+// transport secrets), EDI_AS2_ADDR (the AS2 listener, off when empty; it must
+// differ from HTTP_ADDR because it serves partners without a Passage
+// identity), EDI_AS2_PUBLIC_URL (https base URL partners reach it on),
+// EDI_AS2_ALLOW_HTTP (http:// partner URLs, development only),
+// EDI_AS2_RATE_PER_MINUTE and EDI_AS2_RATE_BURST (requests per AS2 endpoint,
+// default 120 a minute with bursts of 60; 0 a minute turns the limit off),
+// EDI_AS2_MDN_TIMEOUT_MINUTES (how long a delivery waits for its
+// asynchronous MDN, default 1440), EDI_TRANSPORT_WORKERS (run the dispatcher
+// and the SFTP poller) and EDI_TRANSPORT_INTERVAL_SECONDS (how often they
+// look for work, default 15).
+func loadTransportConfig(getenv func(string) string, httpAddr string) (transportConfig, error) {
+	c := transportConfig{as2Addr: getenv("EDI_AS2_ADDR"), allowHTTP: getenv("EDI_AS2_ALLOW_HTTP") == "true",
+		workers: getenv("EDI_TRANSPORT_WORKERS") == "true", publicURL: strings.TrimRight(getenv("EDI_AS2_PUBLIC_URL"), "/")}
+	if dir := getenv("EDI_SECRETS_DIR"); dir != "" {
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			return c, errors.New("EDI_SECRETS_DIR must be a directory")
+		}
+		c.secrets = secrets.Dir(dir)
+	}
+	if c.as2Addr != "" && c.as2Addr == httpAddr {
+		return c, errors.New("EDI_AS2_ADDR must differ from HTTP_ADDR: the AS2 listener serves partners without a Passage identity")
+	}
+	if c.publicURL != "" {
+		u, err := url.Parse(c.publicURL)
+		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || (u.Scheme != "https" && !(c.allowHTTP && u.Scheme == "http")) {
+			return c, errors.New("EDI_AS2_PUBLIC_URL must be an https URL without credentials or query")
+		}
+	}
+	seconds, err := envIntFrom(getenv, "EDI_TRANSPORT_INTERVAL_SECONDS", 15)
+	if err != nil {
+		return c, err
+	}
+	if seconds < 1 || seconds > 3600 {
+		return c, errors.New("EDI_TRANSPORT_INTERVAL_SECONDS must be 1 to 3600")
+	}
+	c.interval = time.Duration(seconds) * time.Second
+	if c.ratePerMinute, err = envIntFrom(getenv, "EDI_AS2_RATE_PER_MINUTE", 120); err != nil {
+		return c, err
+	}
+	if c.ratePerMinute < 0 || c.ratePerMinute > 100000 {
+		return c, errors.New("EDI_AS2_RATE_PER_MINUTE must be 0 (off) to 100000")
+	}
+	if c.rateBurst, err = envIntFrom(getenv, "EDI_AS2_RATE_BURST", 60); err != nil {
+		return c, err
+	}
+	if c.rateBurst < 1 || c.rateBurst > 10000 {
+		return c, errors.New("EDI_AS2_RATE_BURST must be 1 to 10000")
+	}
+	minutes, err := envIntFrom(getenv, "EDI_AS2_MDN_TIMEOUT_MINUTES", 1440)
+	if err != nil {
+		return c, err
+	}
+	if minutes < 5 || minutes > 10080 {
+		return c, errors.New("EDI_AS2_MDN_TIMEOUT_MINUTES must be 5 to 10080 (a week)")
+	}
+	c.mdnTimeout = time.Duration(minutes) * time.Minute
+	// Partner URLs are configured by an administrator; redirects are not
+	// followed so a partner endpoint cannot bounce the service elsewhere.
+	c.http = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return c, nil
 }
 
 func envInt(name string, def int) (int, error) {
-	v := os.Getenv(name)
+	return envIntFrom(os.Getenv, name, def)
+}
+
+func envIntFrom(getenv func(string) string, name string, def int) (int, error) {
+	v := getenv(name)
 	if v == "" {
 		return def, nil
 	}

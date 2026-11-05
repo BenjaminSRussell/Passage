@@ -127,6 +127,7 @@ type grirItemBody struct {
 	POLineID       string `json:"poLineId"`
 	UnitPrice      string `json:"unitPrice"`
 	ReceivedQty    string `json:"receivedQty"`
+	CWQty          *int   `json:"cwQty,omitempty"`
 	InvoicedQty    string `json:"invoicedQty"`
 	ReceivedAmount string `json:"receivedAmount"`
 	ClearedAmount  string `json:"clearedAmount"`
@@ -188,8 +189,13 @@ func (a *API) listGrir(w http.ResponseWriter, r *http.Request) {
 
 func toGrirBody(g store.GrirItem) grirItemBody {
 	scale := money.MinorUnits(g.Currency)
+	var cwQty *int
+	if g.CWQty > 0 {
+		cwQty = &g.CWQty
+	}
 	return grirItemBody{
-		ID: g.ID, ReceiptID: g.ReceiptID, ReceiptNumber: g.ReceiptNumber, LineNo: g.LineNo, VendorID: g.VendorID, POLineID: g.POLineID,
+		CWQty: cwQty,
+		ID:    g.ID, ReceiptID: g.ReceiptID, ReceiptNumber: g.ReceiptNumber, LineNo: g.LineNo, VendorID: g.VendorID, POLineID: g.POLineID,
 		UnitPrice: g.UnitPrice.String(), ReceivedQty: g.ReceivedQty.String(), InvoicedQty: g.InvoicedQty.String(), ReceivedAmount: g.ReceivedAmount.StringFixed(scale),
 		ClearedAmount: g.ClearedAmount.StringFixed(scale), OpenAmount: g.OpenAmount.StringFixed(scale), Currency: g.Currency, Status: g.Status,
 		AgeDays: g.AgeDays, CreatedAt: g.CreatedAt.UTC().Format(time.RFC3339),

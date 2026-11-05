@@ -1,0 +1,21 @@
+{
+  "receipt_id": "0199f480-0000-7000-8000-000000000001",
+  "receipt_number": "RCV-00000001",
+  "legal_entity_id": "0199f480-0000-7000-8000-00000000000a",
+  "posting_date": "2026-10-29",
+  "kind": "CANCELLATION",
+  "correction_seq": 1,
+  "ledger_entry_id": "entry-cw-3",
+  "currency": "USD",
+  "lines": [
+    {
+      "line_no": 1,
+      "po_line_id": "0199f480-0000-7000-8000-000000000004",
+      "product_id": "0199f480-0000-7000-8000-000000000005",
+      "qty_delta": "-92",
+      "cw_qty_delta": -9,
+      "amount_delta": "-184",
+      "amount_acct_delta": "-184"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# Dev values for the transport Application (deploy/envs/dev/apps/services.yaml). The database is passage_transport
+# in the shared dev Postgres (deploy/envs/dev/apps/postgres.yaml): the ExternalSecret `transport-db` writes the
+# chart's DATABASE_URL (key url) for the role passage_transport_app, and the Postgres NetworkPolicy admits the
+# transport pods. Migrations run on start, as receiving and fx do in dev, so the role owns the tables it creates
+# and migration 0012 grants the outbox to debezium_cdc_transport for the outbox-transport connector.
+env:
+  MIGRATE_ON_START: "true"

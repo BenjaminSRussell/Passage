@@ -52,6 +52,14 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
+	// The AS2 listener (partners, no Passage identity) is documented in the same file.
+	_ = chi.Walk(withBody.AS2Routes().(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if route == "/healthz" || route == "/readyz" {
+			return nil
+		}
+		served[route+" "+strings.ToLower(method)] = true
+		return nil
+	})
 	declared := declaredOperations(string(spec))
 	for op := range served {
 		hasDuty, ok := declared[op]
@@ -67,7 +75,7 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 			t.Errorf("documented but not served: %s", op)
 		}
 	}
-	if len(served) != 19 {
+	if len(served) != 25 {
 		t.Fatalf("router walk yielded %d operations: %v", len(served), served)
 	}
 }

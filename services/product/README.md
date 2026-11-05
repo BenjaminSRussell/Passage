@@ -31,7 +31,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/product`. T
 | `POST /v1/product/gtins` | `product.gtin.allocate` |
 | `POST /v1/product/configuration-models/{id}:solve` | `product.configure` |
 | `POST /v1/product/setup/*` | `product.setup.write` |
-| `GET /v1/product/uom/convert` | `product.read` |
+| `GET /v1/product/uom/convert?product=&from=&to=&qty=` (without `to`: into the product's base unit, which the answer names; #480) | `product.read`, or the service-only `product.uom.convert` (the inventory postings consumer; it reaches nothing else) |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` on the admin port | public |
 
 Contract: `api/openapi.yaml`, `events/asyncapi.yaml`. Paths follow `/v1/<context>/...`. The legal-entity header is `X-Passage-Legal-Entity`.

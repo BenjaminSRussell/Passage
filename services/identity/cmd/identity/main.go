@@ -28,6 +28,9 @@ const (
 	uuidTextLength  = 36
 
 	scimRealmCacheTTL = 30 * time.Second
+
+	defaultKeycloakClientID = "passage-identity-deprovision"
+	minDeprovisionInterval  = 5 * time.Second
 )
 
 func main() {
@@ -66,11 +69,19 @@ type config struct {
 	bundleAddr       string
 	bundleTLSCert    string
 	bundleTLSKey     string
+
+	keycloakAdminURL    string
+	keycloakClientID    string
+	keycloakSecretsDir  string
+	deprovisionInterval time.Duration
 }
 
 func (c config) scimEnabled() bool { return c.scimIssuerBase != "" }
 
 func (c config) bundleEnabled() bool { return c.bundleToken != "" }
+
+// keycloakDeprovisionEnabled reports whether SCIM deprovisionings are carried to Keycloak.
+func (c config) keycloakDeprovisionEnabled() bool { return c.keycloakAdminURL != "" }
 
 func configFrom(getenv func(string) string) (config, error) {
 	c := config{
@@ -90,6 +101,10 @@ func configFrom(getenv func(string) string) (config, error) {
 		bundleAddr:       getenv("IDENTITY_BUNDLE_ADDR"),
 		bundleTLSCert:    getenv("IDENTITY_BUNDLE_TLS_CERT_PATH"),
 		bundleTLSKey:     getenv("IDENTITY_BUNDLE_TLS_KEY_PATH"),
+
+		keycloakAdminURL:   getenv("IDENTITY_KEYCLOAK_ADMIN_URL"),
+		keycloakClientID:   getenv("IDENTITY_KEYCLOAK_CLIENT_ID"),
+		keycloakSecretsDir: getenv("IDENTITY_KEYCLOAK_SECRETS_DIR"),
 	}
 	if c.databaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")
@@ -119,6 +134,9 @@ func configFrom(getenv func(string) string) (config, error) {
 	if c.bundleEnabled() && (c.bundleAddr == c.httpAddr || (c.httpAddr == "" && c.bundleAddr == defaultHTTPAddr)) {
 		return c, errors.New("IDENTITY_BUNDLE_ADDR must differ from HTTP_ADDR so ingress never reaches the bundle")
 	}
+	if err := c.keycloakFrom(getenv); err != nil {
+		return c, err
+	}
 	if c.bundleRegoPath == "" {
 		c.bundleRegoPath = filepath.Join(filepath.Dir(c.cataloguePath), "authz.rego")
 	}
@@ -126,6 +144,31 @@ func configFrom(getenv func(string) string) (config, error) {
 		c.httpAddr = defaultHTTPAddr
 	}
 	return c, nil
+}
+
+func (c *config) keycloakFrom(getenv func(string) string) error {
+	interval := getenv("IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL")
+	if !c.keycloakDeprovisionEnabled() {
+		if c.keycloakClientID != "" || c.keycloakSecretsDir != "" || interval != "" {
+			return errors.New("IDENTITY_KEYCLOAK_* settings need IDENTITY_KEYCLOAK_ADMIN_URL")
+		}
+		return nil
+	}
+	if c.keycloakSecretsDir == "" || c.operatorTenantID == "" {
+		return errors.New("IDENTITY_KEYCLOAK_ADMIN_URL needs IDENTITY_KEYCLOAK_SECRETS_DIR and IDENTITY_OPERATOR_TENANT_ID (the deprovisioning worker lists tenants as the operator)")
+	}
+	if c.keycloakClientID == "" {
+		c.keycloakClientID = defaultKeycloakClientID
+	}
+	c.deprovisionInterval = identity.DefaultDeprovisionInterval
+	if interval != "" {
+		d, err := time.ParseDuration(interval)
+		if err != nil || d < minDeprovisionInterval {
+			return errors.New("IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL must be a duration of at least 5s, got " + interval)
+		}
+		c.deprovisionInterval = d
+	}
+	return nil
 }
 
 func loadCatalogue(path string) (*identity.Catalogue, error) {
@@ -145,6 +188,7 @@ func newRouter(pool *pgxpool.Pool, catalogue *identity.Catalogue, operatorTenant
 		identity.NewRoleAssignmentsAPI(pool, catalogue, operatorTenantID).Register(admin)
 		identity.NewEffectivePermissionsAPI(pool, catalogue).Register(admin)
 		identity.NewUsersAPI(pool).Register(admin)
+		identity.NewKeycloakDeprovisionsAPI(pool).Register(admin)
 		identity.NewCatalogueAPI(catalogue).Register(admin)
 	})
 	if scim != nil {
@@ -167,6 +211,20 @@ func newSCIM(pool *pgxpool.Pool, cfg config) (*identity.SCIMAPI, error) {
 		return nil, err
 	}
 	return identity.NewSCIMAPI(pool, verifiers, opa), nil
+}
+
+// newDeprovisioner builds the worker that carries SCIM deprovisionings to Keycloak, or nil when it is off. The
+// rows are queued either way, so turning it on later processes what SCIM deprovisioned in the meantime.
+func newDeprovisioner(pool *pgxpool.Pool, cfg config) (*identity.KeycloakDeprovisioner, error) {
+	if !cfg.keycloakDeprovisionEnabled() {
+		slog.Info("keycloak deprovisioning is disabled: IDENTITY_KEYCLOAK_ADMIN_URL is not set; SCIM deprovisionings stay queued")
+		return nil, nil
+	}
+	admin, err := identity.NewKeycloakAdmin(cfg.keycloakAdminURL, cfg.keycloakClientID, identity.SecretsDir(cfg.keycloakSecretsDir), nil)
+	if err != nil {
+		return nil, err
+	}
+	return identity.NewKeycloakDeprovisioner(pool, admin, cfg.operatorTenantID, cfg.deprovisionInterval)
 }
 
 func newBundleAPI(pool *pgxpool.Pool, catalogue *identity.Catalogue, cfg config) (*identity.PolicyBundleAPI, error) {
@@ -264,12 +322,21 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	deprovisioner, err := newDeprovisioner(pool, cfg)
+	if err != nil {
+		return err
+	}
 	router := newRouter(pool, catalogue, cfg.operatorTenantID, scim)
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	if deprovisioner != nil {
+		worker := make(chan struct{})
+		go func() { defer close(worker); deprovisioner.Run(ctx) }()
+		defer func() { stop(); <-worker }()
+	}
 	if bundle == nil {
 		return httpx.Serve(ctx, cfg.httpAddr, router)
 	}
-	ctx, stop := context.WithCancel(ctx)
-	defer stop()
 	bundleErr := make(chan error, 1)
 	go func() {
 		err := serveBundle(ctx, cfg, bundle)

@@ -16,6 +16,12 @@ export interface TenderInput {
   timeoutMin?: number;
   requestedBy: string;
   /**
+   * The load release this run tenders (load.released `releaseId`). The tender start is keyed on it, so a redelivered
+   * release that starts a new run after the first ended gets the same tender back instead of tendering the load again.
+   * Without it the key is the first execution run id.
+   */
+  releaseId?: string;
+  /**
    * Wait after a read or sweep that ran out of its activity window, before trying again (default OUTAGE_RETRY_MS).
    * Not mapped from any event; tests lengthen it so a week-long outage costs a few windows instead of a few hundred.
    */
@@ -79,6 +85,7 @@ export function validateTenderInput(input: TenderInput): void {
   if (!input.tenantId || !input.legalEntityId || !input.loadId || !input.requestedBy) invalid("tenantId, legalEntityId, loadId and requestedBy are required");
   if (!(input.legalEntityScope ?? []).includes(input.legalEntityId)) invalid("legalEntityScope must include the load's legal entity");
   if (input.carriers.length === 0) invalid("at least one carrier is required");
+  if (input.releaseId !== undefined && !/^[0-9a-f-]{36}$/.test(input.releaseId)) invalid("releaseId must be a UUID");
   if (input.outageRetryMs !== undefined && !(input.outageRetryMs >= 60_000)) invalid("outageRetryMs must be at least one minute");
   if (new Set(input.carriers.map((carrier) => carrier.carrierId)).size !== input.carriers.length) invalid("list each carrier once, in rank order");
 }
@@ -122,12 +129,14 @@ export async function tenderWorkflow(input: TenderInput): Promise<TenderState> {
     return false;
   };
 
-  // The start is idempotent on the first execution run id, so retrying it after an outage returns the same tender.
+  // The start is idempotent on the release (else the first execution run id), so retrying it after an outage, a reset
+  // run or a run started again by the same release returns the same tender.
+  const idempotencyKey = input.releaseId ? `tender:release:${input.releaseId}` : `tender:${workflowInfo().firstExecutionRunId}`;
   let tender: TenderView | undefined;
   while (!tender) {
     try {
       tender = follow(
-        await activities.startTender({ ...ref, loadId: input.loadId, carriers: input.carriers, currency: input.currency, timeoutMin: input.timeoutMin, idempotencyKey: `tender:${workflowInfo().firstExecutionRunId}` }),
+        await activities.startTender({ ...ref, loadId: input.loadId, carriers: input.carriers, currency: input.currency, timeoutMin: input.timeoutMin, idempotencyKey }),
       );
     } catch (error) {
       if (await rideOutOutage(error)) return stall("transport_unreachable");

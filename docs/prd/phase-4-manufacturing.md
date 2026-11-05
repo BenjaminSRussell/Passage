@@ -663,7 +663,7 @@ Interaction rules: planned-orders grid supports keyboard range selection and `F`
 
 ### 4.22.9 Test plan and fixtures
 
-Fixtures: `mrp-textbook-40` (APICS CPIM-style scenarios: lot-for-lot, FOQ, POQ, safety stock, scrap, phantom, multi-source, delays; expected planned orders as JSON); `mrp-3level` (BR-22.2); `mrp-50k` (generated: 50k items, 5-level BOMs, 12 monthly periods, 200k sales lines); `forecast-history-2k` (24 months, mix of smooth/intermittent); `frepple-compare` (shared dataset exported to frePPLe, expected within ±1 day and ±1% qty).
+Fixtures: `mrp-textbook-40` (APICS CPIM-style scenarios: lot-for-lot, FOQ, POQ, safety stock, scrap, phantom, multi-source, delays; expected planned orders as JSON); `mrp-3level` (BR-22.2); `mrp-50k` (generated: 50k items, 5-level BOMs, 12 monthly periods, 200k sales lines); `forecast-history-2k` (24 months, mix of smooth/intermittent); `frepple-compare` (dropped by ADR-0002: no frePPLe comparison is expected).
 
 | Test | Type | Target | Pass criterion |
 |---|---|---|---|
@@ -674,7 +674,7 @@ Fixtures: `mrp-textbook-40` (APICS CPIM-style scenarios: lot-for-lot, FOQ, POQ, 
 | Scale | performance | 50k plan | < 10 min, memory < 8 GB |
 | Firming saga | contract | planning ↔ production/purchasing | compensations on injected failure |
 | Forecast models | unit (Python) | statsforecast wrapper | model selection matches fixture |
-| frePPLe comparison | integration (optional) | shared dataset | within tolerance |
+| frePPLe comparison | dropped (ADR-0002, docs/adr/0002-frepple-comparison.md, accepted) | — | not part of the wave 22 Definition of Done; the native planner is the only engine |
 
 Reconciliation: Σ supply − Σ demand per item/site over the horizon = closing PAB; planned production orders firmed = ProductionOrders with origin PlannedOrder.
 

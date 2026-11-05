@@ -372,6 +372,7 @@ components:
               qty: { $ref: "#/components/schemas/Decimal" }
               costAmount: { $ref: "#/components/schemas/Decimal" }
               costSnapshotId: { type: string }
+              weight: { $ref: "#/components/schemas/Decimal", description: "Catch-weight lines only (#480): the shipped weight costAmount is taken on; qty stays the cases." }
         journal:
           type: array
           items: { $ref: "#/components/schemas/JournalEntry" }
@@ -880,6 +881,7 @@ paths:
                       shipmentLineId: { type: string, format: uuid }
                       unitCost: { $ref: "#/components/schemas/Decimal" }
                       costSnapshotId: { type: string, maxLength: 128 }
+                      weight: { type: string, description: "Catch-weight lines only (FR-24.7, #480): the shipped weight in the product's inventory weight unit, a positive decimal with at most 6 decimals. unitCost is then per weight unit and the line costs weight x unitCost (the inventory quantity is the weight; qty stays the cases)." }
       responses:
         "201":
           description: Packing slip POSTED

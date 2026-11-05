@@ -1,0 +1,26 @@
+# Client side of the AS2 edge: TLS 1.2 or newer, and the Passage identity headers are removed before anything else
+# runs. The edi AS2 listener ignores them anyway (it has no tenant middleware); removing them keeps the rule that only
+# the gateway's JWT policy ever sets them.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: passage-as2-client
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: passage-as2
+  tls:
+    minVersion: "1.2"
+  headers:
+    earlyRequestHeaders:
+      remove:
+        - X-Passage-Tenant
+        - X-Passage-Legal-Entity
+        - X-Passage-User
+        - X-Passage-Duties
+        - X-Passage-Tier
+        - X-Passage-LegalEntity
+        - X-Passage-LegalEntity-Scope
+        - X-Passage-Service-Token

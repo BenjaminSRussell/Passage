@@ -1,0 +1,29 @@
+# The AS2 edge (#483). Trading partners post AS2 messages and asynchronous MDNs without a Passage token; edi
+# authenticates them by their AS2 signature against the certificate pinned on the partner's transport. This is a
+# Gateway of its own, so SecurityPolicy/passage-api-jwt (which targets Gateway passage-api) can never apply to it, and
+# its only route is HTTPRoute/edi-as2 (POST /as2/v1/ to the edi-as2 Service). HTTPS only; the hostname is per
+# environment (as2.<env>.passage.dev, like the IdP's idp.<env>.passage.dev). deploy/scripts/test_gateway.py checks
+# that no other route attaches here and that every passage-api route stays behind the JWT policy.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: passage-as2
+  namespace: hello-ledger
+spec:
+  gatewayClassName: passage-envoy
+  listeners:
+    - name: as2-https
+      protocol: HTTPS
+      port: 443
+      hostname: as2.dev.passage.dev
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: passage-as2-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+        kinds:
+          - kind: HTTPRoute

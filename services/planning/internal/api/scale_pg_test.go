@@ -13,11 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
-	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/planning/internal/store"
@@ -30,13 +27,6 @@ import (
 // PASSAGE_TEST_APP_DATABASE_URL; see README.md "Scale run through the API".
 const EnvAPIScaleItems = "PASSAGE_PLANNING_API_SCALE_ITEMS"
 
-// EnvAPIScaleNoTimeout=1 serves the run on a chi router with only the tenant
-// middleware instead of httpx.NewRouter, so the platform's 30 s request
-// timeout (httpx.RequestTimeout) does not cut the run off. It measures what
-// the handler and the store take; the production router cannot finish a run
-// that takes longer than the timeout.
-const EnvAPIScaleNoTimeout = "PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT"
-
 // EnvAPIScaleRuns is the number of runs (default 2, which also compares their
 // plan hashes). Each 50k-item version takes about 4.5 GB on disk, so a host
 // with less than about 10 GB free sets 1.
@@ -44,12 +34,15 @@ const EnvAPIScaleRuns = "PASSAGE_PLANNING_API_SCALE_RUNS"
 
 // TestRunAPI_ScalePostgres is AC2 of issue #22 through the HTTP API (issue
 // #479): the mrp-50k snapshot of the engine scale test (domain.ScaleSnapshot)
-// is sent as one POST /v1/planning/plans/{planCode}:run over a loopback HTTP
-// server with the production router (httpx.NewRouter, so its request timeout
-// applies), and the version is persisted to Postgres through the application
-// role under RLS. A second run with a fresh Idempotency-Key must store the
-// same plan hash. Each run must answer 201 within the AC2 budget of 10 min;
-// the client waits up to an hour, so a slower run still reports its time.
+// is sent as one asynchronous POST /v1/planning/plans/{planCode}:run
+// (Prefer: respond-async) over a loopback HTTP server with the production
+// router (httpx.NewRouter, so its 30 s request timeout applies to every
+// request), and the version is persisted to Postgres through the application
+// role under RLS. The POST must answer 202 within the request timeout; the
+// test then polls GET /plan-runs/{id} until the run succeeded. A second run
+// with a fresh Idempotency-Key must store the same plan hash. Each run must
+// finish within the AC2 budget of 10 min; the poll waits up to an hour, so a
+// slower run still reports its time.
 func TestRunAPI_ScalePostgres(t *testing.T) {
 	raw := os.Getenv(EnvAPIScaleItems)
 	if raw == "" {
@@ -70,14 +63,11 @@ func TestRunAPI_ScalePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := httpx.NewRouter()
-	if os.Getenv(EnvAPIScaleNoTimeout) == "1" {
-		router = chi.NewRouter()
-		router.Use(tenant.Middleware)
-		t.Logf("%s=1: serving without the %s request timeout", EnvAPIScaleNoTimeout, httpx.RequestTimeout)
-	}
-	New(store.New(app)).Register(router)
+	a := New(store.New(app))
+	a.Register(router)
 	srv := httptest.NewServer(router)
 	defer srv.Close()
+	defer a.StopRuns(time.Minute)
 
 	began := time.Now()
 	body, err := json.Marshal(scaleRunRequest(domain.ScaleSnapshot(n)))
@@ -88,6 +78,23 @@ func TestRunAPI_ScalePostgres(t *testing.T) {
 
 	const budget = 10 * time.Minute
 	client := &http.Client{Timeout: time.Hour}
+	get := func(url string) (int, []byte) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-Legal-Entity", scaleLegalEntity)
+		req.Header.Set("X-Passage-Duties", dutyRun)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode, out
+	}
 	var hashes []string
 	for run := 1; run <= runs; run++ {
 		req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/planning/plans/MRP-SCALE:run", bytes.NewReader(body))
@@ -98,6 +105,7 @@ func TestRunAPI_ScalePostgres(t *testing.T) {
 		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 		req.Header.Set("X-Passage-Legal-Entity", scaleLegalEntity)
 		req.Header.Set("X-Passage-Duties", dutyRun)
+		req.Header.Set("Prefer", "respond-async")
 		req.Header.Set(idempotencyKey, fmt.Sprintf("scale-%d-%d", n, run))
 		began := time.Now()
 		resp, err := client.Do(req)
@@ -106,18 +114,46 @@ func TestRunAPI_ScalePostgres(t *testing.T) {
 		}
 		out, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		accepted := time.Since(began)
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("run %d: status %d after %s: %.500s", run, resp.StatusCode, accepted.Round(time.Millisecond), out)
+		}
+		location := resp.Header.Get("Location")
+		t.Logf("run %d: 202 after %s, polling %s", run, accepted.Round(time.Millisecond), location)
+		var pr store.PlanRun
+		lastLog := time.Now()
+		for {
+			time.Sleep(2 * time.Second)
+			code, out := get(srv.URL + location)
+			if code != http.StatusOK {
+				t.Fatalf("run %d: GET %s = %d: %.500s", run, location, code, out)
+			}
+			if err := json.Unmarshal(out, &pr); err != nil {
+				t.Fatal(err)
+			}
+			if pr.Status != store.RunRunning {
+				break
+			}
+			if time.Since(lastLog) >= 30*time.Second {
+				t.Logf("run %d: %s, %s, %d of %d rows", run, time.Since(began).Round(time.Second), pr.Phase, pr.RowsWritten, pr.RowsTotal)
+				lastLog = time.Now()
+			}
+			if time.Since(began) > time.Hour {
+				t.Fatalf("run %d still running after an hour", run)
+			}
+		}
 		took := time.Since(began)
-		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("run %d: status %d after %s: %.500s", run, resp.StatusCode, took.Round(time.Millisecond), out)
+		if pr.Status != store.RunSucceeded || pr.Version == nil {
+			t.Fatalf("run %d: %s after %s: %+v", run, pr.Status, took.Round(time.Millisecond), pr.Problem)
 		}
-		var v store.Version
-		if err := json.Unmarshal(out, &v); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("run %d: %s end to end (engine %d ms), version %d, %d planned orders, %d messages, hash %.16s",
-			run, took.Round(time.Millisecond), v.DurationMs, v.Number, v.PlannedOrders, v.Messages, v.PlanHash)
+		v := *pr.Version
+		t.Logf("run %d: %s end to end (202 after %s, engine %d ms), version %d, %d planned orders, %d messages, %d rows, hash %.16s",
+			run, took.Round(time.Millisecond), accepted.Round(time.Millisecond), v.DurationMs, v.Number, v.PlannedOrders, v.Messages, pr.RowsWritten, v.PlanHash)
 		if v.PlannedOrders == 0 {
 			t.Fatal("the run planned no orders")
+		}
+		if accepted >= httpx.RequestTimeout {
+			t.Errorf("run %d: 202 after %s; want it within the %s request timeout", run, accepted, httpx.RequestTimeout)
 		}
 		if took >= budget {
 			t.Errorf("run %d took %s; want < %s", run, took, budget)
@@ -137,7 +173,7 @@ func TestRunAPI_ScalePostgres(t *testing.T) {
 	if err := admin.QueryRow(context.Background(), `select pg_size_pretty(sum(pg_total_relation_size(c.oid))) from pg_class c join pg_namespace s on s.oid = c.relnamespace where s.nspname = current_schema() and c.relkind = 'r'`).Scan(&size); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("stored over both versions: %d planned orders, %d pegs, %d net requirement rows, %s on disk", orders, pegs, nets, size)
+	t.Logf("stored over all versions: %d planned orders, %d pegs, %d net requirement rows, %s on disk", orders, pegs, nets, size)
 }
 
 const scaleLegalEntity = "00000000-0000-4000-8000-0000000000e1"

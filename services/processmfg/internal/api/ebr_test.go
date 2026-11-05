@@ -274,7 +274,8 @@ func TestRecord_PDF(t *testing.T) {
 	rec := call{method: "GET", path: recordsPath + "/" + ebrRecord + "/pdf", duties: DutyRead}.do(h)
 	body := rec.Body.String()
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/pdf" || rec.Header().Get("X-Content-SHA256") != hash ||
-		!strings.HasPrefix(body, "%PDF-1.4") || !strings.Contains(body, hash) || !strings.Contains(body, "Signatures verified: NO") {
+		!strings.HasPrefix(body, "%PDF-1.7") || !strings.Contains(body, hash) || !strings.Contains(body, "Signatures verified: NO") ||
+		!strings.Contains(body, "<pdfaid:part>2</pdfaid:part>") || !strings.Contains(body, "<xmp:CreateDate>2026-11-04T10:00:00Z</xmp:CreateDate>") || !strings.Contains(body, "/FontFile2") {
 		t.Fatalf("pdf %d %v %.300s", rec.Code, rec.Header(), body)
 	}
 	f.ebr.record = &store.Record{ID: ebrRecord, Status: store.RecordApproved}

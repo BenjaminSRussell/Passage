@@ -1017,8 +1017,8 @@ func HashHex(document string) string {
 // the batch, the approval, the seal and the content hash, then the sealed JSON
 // document itself, indented, so the rendering shows exactly what was hashed.
 // The sealed JSON stays the record of authority; the PDF is derived from it
-// alone and is the same bytes every time. It is not PDF/A-2b (see
-// domain.RenderTextPDF and NOT-IMPLEMENTED.md).
+// alone and is the same bytes every time. It is PDF/A-2b (domain.RenderTextPDF),
+// dated with the seal time.
 func RenderRecordPDF(r Record) ([]byte, error) {
 	if r.Status != RecordSealed || r.SealedDocument == nil || r.ContentHash == nil {
 		return nil, httpx.NewProblem(http.StatusConflict, CodeRecordState,
@@ -1060,5 +1060,5 @@ func RenderRecordPDF(r Record) ([]byte, error) {
 	}
 	lines = append(lines, "", "Sealed document:")
 	lines = append(lines, strings.Split(pretty.String(), "\n")...)
-	return domain.RenderTextPDF("Batch record "+doc.BatchNumber, lines), nil
+	return domain.RenderTextPDF(domain.PDFMeta{Title: "Batch record " + doc.BatchNumber, Created: doc.SealedAt}, lines), nil
 }

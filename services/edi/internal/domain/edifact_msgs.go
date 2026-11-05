@@ -134,28 +134,36 @@ func chargeMOA(indicator string) string {
 // MapORDERS converts an inbound ORDERS message into the canonical order with
 // the 850's checks: BGM number and DTM 137 date, at least one line, numeric
 // positive quantities and prices, and CNT 2 equal to the LIN count (EDI-0103).
+// Each issue carries its place in the message for the CONTRL (UNH is
+// segment 1).
 func MapORDERS(m EdifactMessage) (Order, []Issue) {
 	o := Order{Lines: []OrderLine{}}
 	var issues []Issue
-	malformed := func(detail string) { issues = append(issues, Issue{Code: CodeMalformed, Detail: detail, Reject: true}) }
-	cnt := -1
-	sawBGM := false
-	for _, s := range m.Segments {
+	reject := func(code, detail string, place ContrlPlace) {
+		issues = append(issues, Issue{Code: code, Detail: detail, Reject: true, Contrl: place})
+	}
+	malformed := func(detail string, place ContrlPlace) { reject(CodeMalformed, detail, place) }
+	// Where each line's LIN, QTY 21 and PRI are, and the CNT and DTM 137.
+	type linePlace struct{ lin, qty, pri int }
+	var places []linePlace
+	cnt, cntPos, bgmPos, datePos := -1, 0, 0, 0
+	for i, s := range m.Segments {
+		pos := i + 2
 		last := len(o.Lines) - 1
 		switch s.Tag {
 		case "BGM":
-			sawBGM = true
+			bgmPos = pos
 			o.OrderType, o.PONumber, o.Purpose = bgmToOrderType[s.El(0, 0)], s.El(1, 0), bgmToPurpose[s.El(2, 0)]
 			if o.OrderType == "" {
-				malformed("BGM 1001 " + s.El(0, 0) + " is not 220, 221 or 226")
+				malformed("BGM 1001 "+s.El(0, 0)+" is not 220, 221 or 226", ContrlPlace{ContrlErrInvalidValue, pos, 1, 1})
 			}
 			if o.Purpose == "" {
-				malformed("BGM 1225 " + s.El(2, 0) + " is not 9, 1 or 4")
+				malformed("BGM 1225 "+s.El(2, 0)+" is not 9, 1 or 4", ContrlPlace{ContrlErrInvalidValue, pos, 3, 1})
 			}
 		case "DTM":
 			switch s.El(0, 0) {
 			case "137":
-				o.PODate = s.El(0, 1)
+				o.PODate, datePos = s.El(0, 1), pos
 			case "2":
 				o.RequestedDelivery = s.El(0, 1)
 			case "10":
@@ -181,6 +189,7 @@ func MapORDERS(m EdifactMessage) (Order, []Issue) {
 			}
 		case "LIN":
 			o.Lines = append(o.Lines, OrderLine{LineNo: s.El(0, 0)})
+			places = append(places, linePlace{lin: pos})
 			if refs := itemRefsOf(s, 2); len(refs) > 0 {
 				o.Lines[len(o.Lines)-1].ItemRef = &refs[0]
 			}
@@ -197,42 +206,70 @@ func MapORDERS(m EdifactMessage) (Order, []Issue) {
 		case "QTY":
 			if last >= 0 && s.El(0, 0) == "21" {
 				o.Lines[last].Quantity, o.Lines[last].UOM = decimalPoint(s.El(0, 1)), s.El(0, 2)
+				places[last].qty = pos
 			}
 		case "PRI":
 			if last >= 0 && (s.El(0, 0) == "AAA" || s.El(0, 0) == "AAB") {
 				o.Lines[last].UnitPrice = decimalPoint(s.El(0, 1))
+				places[last].pri = pos
 			}
 		case "CNT":
 			if s.El(0, 0) == "2" {
+				cntPos = pos
 				n, err := strconv.Atoi(s.El(0, 1))
 				if err != nil {
-					malformed("CNT 2 " + s.El(0, 1) + " is not a number")
+					malformed("CNT 2 "+s.El(0, 1)+" is not a number", ContrlPlace{ContrlErrInvalidValue, pos, 1, 2})
 				}
 				cnt = n
 			}
 		}
 	}
-	if !sawBGM || o.PONumber == "" {
-		malformed("BGM with an order number is required")
+	if bgmPos == 0 || o.PONumber == "" {
+		place := ContrlPlace{Code: ContrlErrMissing}
+		if bgmPos > 0 {
+			place = ContrlPlace{ContrlErrMissing, bgmPos, 2, 1}
+		}
+		malformed("BGM with an order number is required", place)
 	}
 	if !isDigits(o.PODate, 8) {
-		malformed("DTM 137 order date must be CCYYMMDD (format 102)")
+		place := ContrlPlace{Code: ContrlErrMissing}
+		if datePos > 0 {
+			place = ContrlPlace{ContrlErrInvalidValue, datePos, 1, 2}
+		}
+		malformed("DTM 137 order date must be CCYYMMDD (format 102)", place)
 	}
 	if len(o.Lines) == 0 {
-		malformed("at least one LIN is required")
+		malformed("at least one LIN is required", ContrlPlace{Code: ContrlErrMissing})
 	}
-	for _, l := range o.Lines {
+	for i, l := range o.Lines {
 		q, err := edifactNumber(l.Quantity)
 		p, err2 := edifactNumber(l.UnitPrice)
-		if l.LineNo == "" || err != nil || !q.IsPositive() || err2 != nil || p.IsNegative() || l.UOM == "" {
-			malformed("line " + l.LineNo + " needs QTY 21 with a positive quantity and unit and a PRI AAA price")
+		lp := places[i]
+		place := ContrlPlace{}
+		switch {
+		case l.LineNo == "":
+			place = ContrlPlace{ContrlErrMissing, lp.lin, 1, 1}
+		case lp.qty == 0:
+			place = ContrlPlace{ContrlErrMissing, lp.lin, 0, 0}
+		case err != nil || !q.IsPositive():
+			place = ContrlPlace{ContrlErrInvalidValue, lp.qty, 1, 2}
+		case l.UOM == "":
+			place = ContrlPlace{ContrlErrMissing, lp.qty, 1, 3}
+		case lp.pri == 0:
+			place = ContrlPlace{ContrlErrMissing, lp.lin, 0, 0}
+		case err2 != nil || p.IsNegative():
+			place = ContrlPlace{ContrlErrInvalidValue, lp.pri, 1, 2}
+		}
+		if place.Code != "" {
+			malformed("line "+l.LineNo+" needs QTY 21 with a positive quantity and unit and a PRI AAA price", place)
 		}
 		if l.ItemRef == nil {
-			issues = append(issues, Issue{Code: CodeNoItemRef, Detail: "line " + l.LineNo + " has no LIN or PIA product id", Reject: true})
+			reject(CodeNoItemRef, "line "+l.LineNo+" has no LIN or PIA product id", ContrlPlace{ContrlErrMissing, lp.lin, 3, 1})
 		}
 	}
 	if cnt >= 0 && cnt != len(o.Lines) {
-		issues = append(issues, Issue{Code: CodeCountMismatch, Detail: "CNT 2 " + strconv.Itoa(cnt) + " differs from " + strconv.Itoa(len(o.Lines)) + " LIN segments", Reject: true})
+		reject(CodeCountMismatch, "CNT 2 "+strconv.Itoa(cnt)+" differs from "+strconv.Itoa(len(o.Lines))+" LIN segments",
+			ContrlPlace{ContrlErrCount, cntPos, 1, 2})
 	}
 	return o, issues
 }

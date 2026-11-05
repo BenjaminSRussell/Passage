@@ -79,7 +79,7 @@
     {
       "id": "mrp_completed",
       "metric": "mrp_runs_completed",
-      "description": "S5 MRP run returned 201 (a timed-out or failed run cannot pass mrp_50k)",
+      "description": "S5 MRP run accepted (202) and polled to succeeded (a timed-out, failed or cancelled run cannot pass mrp_50k)",
       "minCount": 1
     }
   ],

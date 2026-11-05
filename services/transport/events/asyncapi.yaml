@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Transport events
-  version: 0.4.0
+  version: 0.5.0
   description: CloudEvents 1.0 envelope; amounts are decimal strings. Each event is written to the outbox in the transaction that makes the change; the Debezium outbox router sends it to the topic of its aggregate.
 defaultContentType: application/cloudevents+json
 channels:
@@ -13,6 +13,12 @@ channels:
         $ref: '#/components/messages/FreightBillMatched'
       freightBillApproved:
         $ref: '#/components/messages/FreightBillApproved'
+  load:
+    address: passage.tms.load
+    description: Topic for load events; subject is the load id.
+    messages:
+      loadReleased:
+        $ref: '#/components/messages/LoadReleased'
   tender:
     address: passage.tms.tender
     description: Topic for tender outcomes (BR-34.3); subject is the tender id.
@@ -62,6 +68,17 @@ operations:
     summary: A freight bill was approved for payment (BR-34.4). Consumers AP (wave 19 vendor invoice for the invoiced amount) and the ledger (accrual reversal, variance to 5250).
     messages:
       - $ref: '#/channels/freightBillMatched/messages/freightBillApproved'
+  publishLoadReleased:
+    action: send
+    channel:
+      $ref: '#/channels/load'
+    summary: A planner released a load for tendering (POST /v1/transport/loads/{id}:release). Consumer workflow-ts, which starts tenderWorkflow (its side of the contract is services/workflow-ts/events/asyncapi.yaml).
+    description: >-
+      releasedBy and legalEntityScope are the gateway-verified caller of the release (X-Passage-User, X-Passage-Legal-Entity),
+      never request input; a load outside that scope is refused and publishes nothing. workflow-ts mints the tender's scoped
+      transport.tender.execute token from them and keys the tender start on releaseId.
+    messages:
+      - $ref: '#/channels/load/messages/loadReleased'
   publishTenderOutcome:
     action: send
     channel:
@@ -168,6 +185,44 @@ components:
               reason: { type: string, description: required when a variance or dispute is approved }
               approvedBy: { type: string }
               approvedAt: { type: string, format: date-time }
+    LoadReleased:
+      name: dev.passage.tms.load.released.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.load.released.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: load id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            type: object
+            required: [releaseId, loadId, legalEntityId, releasedBy, legalEntityScope, carriers, timeoutMin]
+            properties:
+              releaseId: { type: string, format: uuid, description: the release; workflow-ts keys the tender start on it }
+              loadId: { type: string, format: uuid }
+              legalEntityId: { type: string, format: uuid, description: the load's legal entity, always in legalEntityScope }
+              releasedBy: { type: string, description: user id of the verified caller (X-Passage-User) }
+              legalEntityScope:
+                type: array
+                description: legal entities of the verified caller (X-Passage-Legal-Entity)
+                items: { type: string, format: uuid }
+              carriers:
+                type: array
+                description: route-guide carriers in rank order, each once (1 to 20)
+                items:
+                  type: object
+                  required: [carrierId]
+                  properties:
+                    carrierId: { type: string, format: uuid }
+                    rateQuoted: { type: string, description: rate quoted to the carrier with two decimals; absent when none }
+              currency: { type: string, description: ISO 4217 alpha-3; present only with quoted rates }
+              timeoutMin: { type: integer, minimum: 5, maximum: 1440 }
     TenderAccepted:
       name: dev.passage.tms.tender.accepted.v1
       contentType: application/cloudevents+json

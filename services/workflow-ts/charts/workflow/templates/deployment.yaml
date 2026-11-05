@@ -18,17 +18,25 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        {{- if .Values.serviceIdentity.signingKeySecret }}
+        {{- if or .Values.serviceIdentity.signingKeySecret .Values.kafka.secret }}
         fsGroup: 65532
         {{- end }}
         seccompProfile:
           type: RuntimeDefault
-{{- if .Values.serviceIdentity.signingKeySecret }}
+{{- if or .Values.serviceIdentity.signingKeySecret .Values.kafka.secret }}
       volumes:
+{{- if .Values.serviceIdentity.signingKeySecret }}
         - name: service-identity
           secret:
             secretName: {{ .Values.serviceIdentity.signingKeySecret }}
             defaultMode: 0440
+{{- end }}
+{{- if .Values.kafka.secret }}
+        - name: kafka
+          secret:
+            secretName: {{ .Values.kafka.secret }}
+            defaultMode: 0440
+{{- end }}
 {{- end }}
       containers:
         - name: workflow
@@ -58,9 +66,24 @@ spec:
             - { name: PASSAGE_SERVICE_KEY_ID, value: {{ .Values.serviceIdentity.keyId | quote }} }
 {{- end }}
 {{- end }}
-{{- if .Values.serviceIdentity.signingKeySecret }}
+{{- if .Values.kafka.brokers }}
+            - { name: KAFKA_BROKERS, value: {{ .Values.kafka.brokers | quote }} }
+            - { name: KAFKA_GROUP, value: {{ .Values.kafka.group | quote }} }
+            - { name: WORKFLOW_DLQ_TOPIC, value: {{ .Values.kafka.dlqTopic | quote }} }
+{{- if .Values.kafka.secret }}
+            - { name: KAFKA_USERNAME, value: {{ .Values.kafka.username | quote }} }
+            - { name: KAFKA_PASSWORD_FILE, value: /var/run/passage/kafka/password }
+            - { name: KAFKA_TLS_CA_FILE, value: /var/run/passage/kafka/ca.crt }
+{{- end }}
+{{- end }}
+{{- if or .Values.serviceIdentity.signingKeySecret .Values.kafka.secret }}
           volumeMounts:
+{{- if .Values.serviceIdentity.signingKeySecret }}
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
+{{- if .Values.kafka.secret }}
+            - { name: kafka, mountPath: /var/run/passage/kafka, readOnly: true }
+{{- end }}
 {{- end }}
           ports:
             - { name: http, containerPort: 8080 }

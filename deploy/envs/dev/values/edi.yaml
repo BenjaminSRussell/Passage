@@ -1,0 +1,8 @@
+# edi in dev: the AS2 listener behind the AS2 edge (deploy/gateway/as2-*.yaml, Gateway passage-as2 on
+# as2.dev.passage.dev), and the workers that send deliveries and the asynchronous MDNs the listener stores.
+# Partner transports still need transports.secretName (the AS2 signing keys) before AS2 or SFTP can be configured.
+transports:
+  workers: true
+  as2:
+    enabled: true
+    publicUrl: https://as2.dev.passage.dev

@@ -44,6 +44,20 @@ spec:
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.eam.request, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.tms.load, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.tms.tender, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.tms.freightbill, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.tms.tracking, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.tms.landedcost, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.tms.gate, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.tms.goodsintransit, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
       - resource: {type: group, name: passage-connect, patternType: literal}
@@ -289,6 +303,59 @@ spec:
     transforms.outbox.table.field.event.payload: payload
     transforms.outbox.route.by.field: aggregate_type
     transforms.outbox.route.topic.replacement: passage.eam.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Transport writes aggregate_type load, tender, freightbill, tracking, landedcost, gate and goodsintransit to its outbox;
+# the route below makes each one passage.tms.<aggregate_type>, the AsyncAPI channels in services/transport/events/asyncapi.yaml.
+# dev.passage.tms.load.released.v1 goes to passage.tms.load and the tender outcomes to passage.tms.tender, the topics
+# workflow-ts reads (deploy/kafka/workflow-ts-consumer.yaml). The ACLs above are literal per aggregate_type (a new one
+# needs an entry) and never cover passage.workflow.tender.dlq.
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_transport has REPLICATION; the dev Postgres init grants it CONNECT on passage_transport only and revokes CONNECT from PUBLIC there.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-transport
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-transport:username}
+    database.password: ${secrets:kafka/debezium-cdc-transport:password}
+    database.dbname: passage_transport
+    topic.prefix: passage.tms
+    slot.name: passage_outbox_transport
+    publication.name: passage_outbox_transport
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox,enrich
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: aggregate_type
+    transforms.outbox.route.topic.replacement: passage.tms.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher

@@ -84,7 +84,51 @@ channels:
     messages:
       reconciliationDiff:
         $ref: '#/components/messages/ReconciliationDiff'
+  # Consumed by the postings consumer (#480, `inventory consume`, group and service principal inventory-postings,
+  # dead-letter topic passage.inventory.postings.dlq). The payloads are the producers' (their asyncapi.yaml); the
+  # shared fixtures in testdata/catchweight-flow are checked against both sides.
+  receivingReceipt:
+    address: passage.receiving.receipt
+    messages:
+      receiptPosted:
+        $ref: '#/components/messages/ReceiptPostedConsumed'
+      receiptCorrected:
+        $ref: '#/components/messages/ReceiptCorrectedConsumed'
+  salesOrderProgress:
+    address: passage.sales.orderprogress
+    messages:
+      orderProgressRecorded:
+        $ref: '#/components/messages/OrderProgressRecordedConsumed'
+  fulfillmentPackingSlip:
+    address: passage.fulfillment.packingslip
+    messages:
+      packingSlipCancelled:
+        $ref: '#/components/messages/PackingSlipCancelledConsumed'
 operations:
+  receiveReceiptPosted:
+    action: receive
+    channel: { $ref: '#/channels/receivingReceipt' }
+    messages:
+      - $ref: '#/channels/receivingReceipt/messages/receiptPosted'
+    summary: Book each receipt line at RECEIVED (origin RECEIPT_LINE), in the product's inventory unit
+  receiveReceiptCorrected:
+    action: receive
+    channel: { $ref: '#/channels/receivingReceipt' }
+    messages:
+      - $ref: '#/channels/receivingReceipt/messages/receiptCorrected'
+    summary: Offset the booked receipt line by the correction delta, or by what it holds on a cancellation
+  receiveOrderProgressRecorded:
+    action: receive
+    channel: { $ref: '#/channels/salesOrderProgress' }
+    messages:
+      - $ref: '#/channels/salesOrderProgress/messages/orderProgressRecorded'
+    summary: Issue each DELIVERED line at DEDUCTED (origin SALES_LINE) at the row's running average
+  receivePackingSlipCancelled:
+    action: receive
+    channel: { $ref: '#/channels/fulfillmentPackingSlip' }
+    messages:
+      - $ref: '#/channels/fulfillmentPackingSlip/messages/packingSlipCancelled'
+    summary: Book the exact mirror of each delivery line booked for the cancelled slip
   publishTransactionPosted:
     action: send
     channel: { $ref: '#/channels/transactionPosted' }
@@ -135,6 +179,43 @@ operations:
     summary: A daily inventory-to-ledger run found a non-zero difference (FR-16.12, AC-16.9); a matched run publishes nothing, a same-day re-run that still differs publishes again for the same run id
 components:
   messages:
+    ReceiptPostedConsumed:
+      name: dev.passage.receiving.receipt.posted.v1
+      title: Receipt posted (consumed)
+      summary: >-
+        Receiving posted a receipt. Read: receipt_id, receipt_number, legal_entity_id, posting_date, currency and per line
+        line_no, product_id, unit, qty, serials, inventory_status, amount, unit_price, site_id, warehouse_id, cw_qty. A
+        catch-weight line books qty (the weight) and cw_qty; a plain line's qty is converted into the product's inventory
+        unit by the product service and valued at amount (INV-PST-001 no conversion, INV-PST-002 none configured).
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/ConsumedPayload' }
+    ReceiptCorrectedConsumed:
+      name: dev.passage.receiving.receipt.corrected.v1
+      title: Receipt corrected (consumed)
+      summary: >-
+        Receiving corrected (CORRECTION) or cancelled (CANCELLATION) a posted receipt. Read: receipt_id, receipt_number,
+        legal_entity_id, posting_date, kind, correction_seq and per line line_no, product_id, qty_delta, cw_qty_delta. The
+        booked line gives product, dimensions, unit factor and cost (INV-PST-003 not booked, INV-PST-004 mismatch).
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/ConsumedPayload' }
+    OrderProgressRecordedConsumed:
+      name: dev.passage.sales.orderprogress.recorded.v1
+      title: Order progress recorded (consumed)
+      summary: >-
+        Sales recorded a delivery or invoice report; only DELIVERED moves stock. Read: progress_id, order_id,
+        legal_entity_id, kind, source_ref, currency and per line line_id, line_no, quantity, product_id, unit, site_id,
+        warehouse_id, reported_weight.
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/ConsumedPayload' }
+    PackingSlipCancelledConsumed:
+      name: dev.passage.fulfillment.packingslip.cancelled.v1
+      title: Packing slip cancelled (consumed)
+      summary: >-
+        Fulfillment cancelled a posted packing slip. Read: packing_slip_id, packing_slip_number, reversal_id, order_id,
+        legal_entity_id, posting_date and per line order_line_id, qty. The delivery booked under the slip number gives
+        quantity, cases and value; a delivery not booked yet is retried with back-off before the event is parked.
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/ConsumedPayload' }
     TransactionPosted:
       title: Inventory transaction posted
       summary: An inventory transaction was registered or moved to a new status; carries the dimension, quantity and posted value.
@@ -296,6 +377,12 @@ components:
       payload:
         $ref: '#/components/schemas/ReconciliationDiffData'
   schemas:
+    ConsumedPayload:
+      type: object
+      description: >-
+        An event another service publishes; its schema is the producer's (services/receiving, services/sales and
+        services/fulfillment events/asyncapi.yaml). Members the postings consumer does not read are ignored.
+      additionalProperties: true
     OwnershipChangedData:
       type: object
       required: [journalId, legalEntityId, vendorId, postingDate, currency, totalAmount, ledgerEntryId, lines]
