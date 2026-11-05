@@ -1,0 +1,27 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: apicurio-database
+  namespace: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: apicurio-database
+    creationPolicy: Owner
+    template:
+      data:
+        # Apicurio Registry's SQL storage (deploy/kafka/registry.yaml): the apicurio-postgres Application,
+        # role passage_app, whose password the database reads from the same Vault key.
+        JDBC_URL: jdbc:postgresql://postgres.kafka.svc:5432/apicurio
+        USERNAME: passage_app
+        PASSWORD: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/apicurio-postgres/app-password
+        property: value

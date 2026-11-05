@@ -15,6 +15,11 @@ release may change public APIs.
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev
   chart with helm. The analytics, eam, hr, iot-edge, projects, shopfloor and transport charts now take
   `image.digest`. Syncing still needs a live cluster (#213).
+- Event backbone completion in dev Argo CD (#106): `apicurio-postgres` (the `deploy/postgres` chart gains
+  `cdc.enabled: false` for a plain database) and the `apicurio-database` ExternalSecret give Apicurio Registry its
+  SQL storage, and `kafka-consumer-users` syncs the receiving and scheduling consumer KafkaUsers and dead-letter
+  topics. `test-argocd` now asserts the backbone and Temporal sync order, that every directory manifest is applied,
+  and that Strimzi cluster labels and every connector or workload Secret reference resolve to a synced ExternalSecret.
 - Keycloak CI login tests (#80, wave 02 AC3) in `services/identity/keycloak_login_test.go`: OIDC authorization code
   with PKCE and TOTP (enrolment, then the OTP form), identity's `JWTVerifier` accepting the token with the duty
   claims, deprovisioning (a disabled user loses refresh and login), and federated login through two Keycloak stand-in

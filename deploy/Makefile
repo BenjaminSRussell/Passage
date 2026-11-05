@@ -75,6 +75,7 @@ validate-gateway-schema:
 test-gateway: validate-gateway-schema
 	$(PYTHON) -m unittest scripts/test_gateway.py -v
 
-# Argo CD Applications: structure, sync policy, chart coverage; renders every dev chart when helm is on PATH.
+# Argo CD Applications: structure, sync policy, chart coverage, event backbone and Temporal order, directory manifest
+# coverage and Secret references; renders every dev chart when helm is on PATH.
 test-argocd:
 	$(PYTHON) -m unittest scripts/test_argocd_apps.py -v

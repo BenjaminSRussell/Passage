@@ -1,3 +1,6 @@
+{{- if and (not .Values.cdc.enabled) (not .Values.clientApps) }}
+{{- fail "clientApps is required when cdc.enabled is false (an empty from list would admit every pod)" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -9,12 +12,14 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
+        {{- if .Values.cdc.enabled }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.cdc.kafkaNamespace }}
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
+        {{- end }}
         {{- range .Values.clientApps }}
         - podSelector:
             matchLabels:
