@@ -98,6 +98,7 @@ export function stateTone(status: string): BadgeTone {
     case "POSTED":
       return "success";
     case "PENDING":
+    case "TENDERED":
     case "ARRIVED":
     case "PICKED_UP":
     case "IN_TRANSIT":

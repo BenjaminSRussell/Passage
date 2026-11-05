@@ -37,7 +37,9 @@ release may change public APIs.
   version as ETag); a load in another status, such as one already released, is 409 TMS-0136, so a load is released
   once. The release response carries `loadStatus` and `loadVersion`. A tender start also tenders the load (TENDERED
   loads included, for the workflow's start after a release); an accepted tender makes the load ACCEPTED and a failed
-  one (every carrier declined or timed out) PLANNED again. The moves are checked in `domain.NextLoadStatus`.
+  one (every carrier declined or timed out) PLANNED again. The moves are checked in `domain.NextLoadStatus`. The web
+  tender form gains "Release to the tender workflow" for holders of `transport.load.tender`: it shows the load's
+  status and version, releases with `If-Match` and one `Idempotency-Key`, and shows the resulting status.
 - Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
   in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev
