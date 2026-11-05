@@ -1220,6 +1220,9 @@
       {"resource": "/v1/hr/jobs", "methods": ["POST"]},
       {"resource": "/v1/hr/workers/*/compensation", "methods": ["GET"]}
     ]},
+    "HcmCompApprove": {"permissions": [
+      {"resource": "/v1/hr/compensation/cycles/*/approve", "methods": ["POST"]}
+    ]},
     "HcmIncidentAdmin": {"permissions": [
       {"resource": "/v1/hr/incidents", "methods": ["GET"]},
       {"resource": "/v1/hr/incidents/*", "methods": ["GET"]},

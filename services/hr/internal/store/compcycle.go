@@ -20,17 +20,18 @@ import (
 )
 
 const (
-	CodeCycleNotFound  = "HCM-CMP-NOT-FOUND"
-	CodeCycleState     = "HCM-CMP-STATE"
-	CodeCompNotAnnual  = "HCM-CMP-006"
-	CodeCompNoEmploy   = "HCM-CMP-007"
-	CodeCompStale      = "HCM-CMP-008"
-	CodeWorksheetEmpty = "HCM-CMP-009"
-	cycleManagerInput  = "MANAGER_INPUT"
-	cycleApproval      = "APPROVAL"
-	cycleApplied       = "APPLIED"
-	worksheetDraft     = "DRAFT"
-	worksheetSubmitted = "SUBMITTED"
+	CodeCycleNotFound   = "HCM-CMP-NOT-FOUND"
+	CodeCycleState      = "HCM-CMP-STATE"
+	CodeCompNotAnnual   = "HCM-CMP-006"
+	CodeCompNoEmploy    = "HCM-CMP-007"
+	CodeCompStale       = "HCM-CMP-008"
+	CodeWorksheetEmpty  = "HCM-CMP-009"
+	CodeCycleUnapproved = "HCM-CMP-010"
+	cycleManagerInput   = "MANAGER_INPUT"
+	cycleApproval       = "APPROVAL"
+	cycleApplied        = "APPLIED"
+	worksheetDraft      = "DRAFT"
+	worksheetSubmitted  = "SUBMITTED"
 )
 
 type CycleBudget struct {
@@ -48,10 +49,14 @@ type CompCycle struct {
 	GuidelineMatrix []domain.GuidelineRow `json:"guidelineMatrix"`
 	Budgets         []CycleBudget         `json:"budgets"`
 	Status          string                `json:"status"`
+	CreatedBy       *string               `json:"createdBy,omitempty"`
+	ApprovedBy      *string               `json:"approvedBy,omitempty"`
+	ApprovedAt      *time.Time            `json:"approvedAt,omitempty"`
 	AppliedAt       *time.Time            `json:"appliedAt,omitempty"`
 }
 
-const cycleSelect = `select id::text, name, kind, to_char(effective_date, 'YYYY-MM-DD'), currency, allow_over_budget, guideline_matrix, status, applied_at from hr_comp_cycle`
+const cycleSelect = `select id::text, name, kind, to_char(effective_date, 'YYYY-MM-DD'), currency, allow_over_budget, guideline_matrix, status,
+	created_by, approved_by, approved_at, applied_at from hr_comp_cycle`
 
 func loadCycle(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (CompCycle, error) {
 	q := cycleSelect + ` where tenant_id = $1 and id = $2`
@@ -60,7 +65,8 @@ func loadCycle(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 	}
 	var c CompCycle
 	var matrix []byte
-	err := tx.QueryRow(ctx, q, tenantID, id).Scan(&c.ID, &c.Name, &c.Kind, &c.EffectiveDate, &c.Currency, &c.AllowOverBudget, &matrix, &c.Status, &c.AppliedAt)
+	err := tx.QueryRow(ctx, q, tenantID, id).Scan(&c.ID, &c.Name, &c.Kind, &c.EffectiveDate, &c.Currency, &c.AllowOverBudget, &matrix, &c.Status,
+		&c.CreatedBy, &c.ApprovedBy, &c.ApprovedAt, &c.AppliedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, problem(http.StatusNotFound, CodeCycleNotFound, "compensation cycle not found")
 	}
@@ -68,6 +74,7 @@ func loadCycle(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (
 		return c, err
 	}
 	c.AppliedAt = utcPtr(c.AppliedAt)
+	c.ApprovedAt = utcPtr(c.ApprovedAt)
 	if err := json.Unmarshal(matrix, &c.GuidelineMatrix); err != nil {
 		return c, err
 	}
@@ -109,8 +116,9 @@ func (s *Postgres) CreateCompCycle(ctx context.Context, in CompCycle, idempotenc
 			return err
 		}
 		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into hr_comp_cycle (tenant_id, id, name, kind, effective_date, currency, allow_over_budget, guideline_matrix, status, idempotency_key)
-			values ($1, $2, $3, $4, $5::date, $6, $7, $8, 'PLANNING', $9)`, p.TenantID, id, in.Name, in.Kind, in.EffectiveDate, in.Currency, in.AllowOverBudget, matrix, key); err != nil {
+		if _, err := tx.Exec(ctx, `insert into hr_comp_cycle (tenant_id, id, name, kind, effective_date, currency, allow_over_budget, guideline_matrix, status, idempotency_key, created_by)
+			values ($1, $2, $3, $4, $5::date, $6, $7, $8, 'PLANNING', $9, nullif($10, ''))`,
+			p.TenantID, id, in.Name, in.Kind, in.EffectiveDate, in.Currency, in.AllowOverBudget, matrix, key, p.UserID); err != nil {
 			return err
 		}
 		for _, b := range in.Budgets {
@@ -453,15 +461,82 @@ func (s *Postgres) SubmitWorksheet(ctx context.Context, cycleID, managerID strin
 				return problem(http.StatusUnprocessableEntity, domain.CodeCompOverBudget, err.(*domain.Error).Detail)
 			}
 		}
-		if _, err := tx.Exec(ctx, `update hr_comp_worksheet_row set status = 'SUBMITTED' where tenant_id = $1 and cycle_id = $2 and manager_worker_id = $3 and status = 'DRAFT'
+		if _, err := tx.Exec(ctx, `update hr_comp_worksheet_row set status = 'SUBMITTED', submitted_by = nullif($5, '') where tenant_id = $1 and cycle_id = $2 and manager_worker_id = $3 and status = 'DRAFT'
 				and ($4::uuid[] is null or worker_id = any($4))`,
-			p.TenantID, cycleID, managerID, onlyWorkers); err != nil {
+			p.TenantID, cycleID, managerID, onlyWorkers, p.UserID); err != nil {
 			return err
 		}
 		out, err = listWorksheet(ctx, tx, p.TenantID, cycleID, managerID)
 		return err
 	})
 	return out, err
+}
+
+// ApproveCompCycle records the approval of a cycle in APPROVAL. Segregation of
+// duties: the approver is a named user who did not create the cycle, submit
+// any of its worksheets, or appear on a submitted row as the worker or the
+// proposing manager. Approving again as the same user returns the cycle
+// unchanged; a second approver is HCM-CMP-STATE.
+func (s *Postgres) ApproveCompCycle(ctx context.Context, cycleID string) (CompCycle, bool, error) {
+	p := principal(ctx)
+	var out CompCycle
+	approved := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		approved = false
+		c, err := loadCycle(ctx, tx, p.TenantID, cycleID, true)
+		if err != nil {
+			return err
+		}
+		if c.ApprovedBy != nil {
+			if *c.ApprovedBy == p.UserID {
+				out = c
+				return nil
+			}
+			return problem(http.StatusConflict, CodeCycleState, "the cycle has already been approved by another user")
+		}
+		if c.Status != cycleApproval {
+			return problem(http.StatusConflict, CodeCycleState, "a cycle is approved in APPROVAL; this one is "+c.Status)
+		}
+		if all, err := scopeIsAll(ctx, tx); err != nil {
+			return err
+		} else if !all {
+			return problem(http.StatusForbidden, "AUTH-0003", "approving a cycle needs access to every legal entity")
+		}
+		var submitters []string
+		var onCycle bool
+		var submitted int
+		if err := tx.QueryRow(ctx, `select coalesce(array_agg(distinct r.submitted_by) filter (where r.submitted_by is not null), '{}'),
+				coalesce(bool_or(w.user_id::text = $3 or m.user_id::text = $3), false), count(*)
+			from hr_comp_worksheet_row r
+			join worker w on w.tenant_id = r.tenant_id and w.id = r.worker_id
+			join worker m on m.tenant_id = r.tenant_id and m.id = r.manager_worker_id
+			where r.tenant_id = $1 and r.cycle_id = $2 and r.status = 'SUBMITTED'`, p.TenantID, cycleID, p.UserID).Scan(&submitters, &onCycle, &submitted); err != nil {
+			return err
+		}
+		if submitted == 0 {
+			return problem(http.StatusUnprocessableEntity, CodeWorksheetEmpty, "the cycle has no submitted worksheet rows to approve")
+		}
+		creator := ""
+		if c.CreatedBy != nil {
+			creator = *c.CreatedBy
+		}
+		if err := domain.CheckCycleApprover(domain.CycleApproval{Approver: p.UserID, Creator: creator, Submitters: submitters, OnCycle: onCycle}); err != nil {
+			return problem(http.StatusForbidden, domain.CodeCompSoD, err.(*domain.Error).Detail)
+		}
+		if _, err := tx.Exec(ctx, `update hr_comp_cycle set approved_by = $3, approved_at = now(), updated_at = now() where tenant_id = $1 and id = $2`,
+			p.TenantID, cycleID, p.UserID); err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, "compensationcycle", cycleID, hrevents.CompensationCycleApproved, p.TenantID, hrevents.CompensationCycleApprovedData{
+			CycleID: cycleID, EffectiveDate: c.EffectiveDate, ApprovedBy: p.UserID, Rows: submitted,
+		}); err != nil {
+			return err
+		}
+		approved = true
+		out, err = loadCycle(ctx, tx, p.TenantID, cycleID, false)
+		return err
+	})
+	return out, approved && err == nil, err
 }
 
 func (s *Postgres) ApplyCompCycle(ctx context.Context, cycleID string) (CompCycle, []string, error) {
@@ -480,6 +555,9 @@ func (s *Postgres) ApplyCompCycle(ctx context.Context, cycleID string) (CompCycl
 			return err
 		} else if !all {
 			return problem(http.StatusForbidden, "AUTH-0003", "applying a cycle needs access to every legal entity")
+		}
+		if c.ApprovedBy == nil {
+			return problem(http.StatusConflict, CodeCycleUnapproved, "the cycle must be approved before it is applied")
 		}
 		at, err := time.Parse("2006-01-02", c.EffectiveDate)
 		if err != nil {

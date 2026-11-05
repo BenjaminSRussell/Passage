@@ -1267,6 +1267,17 @@ test_hr_performance_duties_reach_only_their_routes if {
 	not allowed("hr.performance.manage", "POST", "/v1/hr/me/goals/g-1/progress")
 }
 
+test_hr_comp_cycle_approval_is_segregated_from_comp_admin if {
+	allowed("HcmCompApprove", "POST", "/v1/hr/compensation/cycles/c-1/approve")
+	not allowed("HcmCompApprove", "POST", "/v1/hr/compensation/cycles/c-1/apply")
+	not allowed("HcmCompApprove", "POST", "/v1/hr/compensation/cycles")
+	not allowed("HcmCompApprove", "PUT", "/v1/hr/compensation/cycles/c-1/worksheets/m-1")
+	not allowed("HcmCompApprove", "POST", "/v1/hr/compensation/cycles/c-1/worksheets/m-1/submit")
+	allowed("HcmCompAdmin", "POST", "/v1/hr/compensation/cycles/c-1/apply")
+	not allowed("HcmCompAdmin", "POST", "/v1/hr/compensation/cycles/c-1/approve")
+	not allowed("MssApprove", "POST", "/v1/hr/compensation/cycles/c-1/approve")
+}
+
 test_compliance_legal_hold_duties_reach_only_their_routes if {
 	allowed("compliance.legal_hold.place", "POST", "/v1/privacy/holds")
 	not allowed("compliance.legal_hold.place", "GET", "/v1/privacy/holds")

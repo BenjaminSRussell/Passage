@@ -33,6 +33,45 @@ type workerDetail struct {
 	PII store.PIIView `json:"pii"`
 }
 
+// validateWorker checks a worker request, writing problems to fields under
+// prefix. With nameOptional an empty legalName is allowed (a hire from an
+// offer takes the candidate's name).
+func validateWorker(req createWorkerRequest, nameOptional bool, prefix string, fields map[string]string) store.WorkerInput {
+	req.PersonnelNumber = strings.ToUpper(strings.TrimSpace(req.PersonnelNumber))
+	if !personnelNumber.MatchString(req.PersonnelNumber) {
+		fields[prefix+"personnelNumber"] = "must be 1 to 20 characters of A-Z, 0-9 or -"
+	}
+	if !contains(workerTypes, req.WorkerType) {
+		fields[prefix+"workerType"] = "must be EMPLOYEE or CONTRACTOR"
+	}
+	if !ids.Valid(req.PartyPersonID) {
+		fields[prefix+"partyPersonId"] = "must be a UUID"
+	}
+	legalName := strings.TrimSpace(req.LegalName)
+	if (legalName == "" && !nameOptional) || utf8.RuneCountInString(legalName) > 200 {
+		fields[prefix+"legalName"] = "must be 1 to 200 characters"
+	}
+	nationalID := strings.TrimSpace(req.NationalID)
+	if nationalID == "" || utf8.RuneCountInString(nationalID) > 32 {
+		fields[prefix+"nationalId"] = "is required and must be at most 32 characters"
+	}
+	if req.UserID != nil && !ids.Valid(*req.UserID) {
+		fields[prefix+"userId"] = "must be a UUID"
+	}
+	if req.BankAccount != nil && utf8.RuneCountInString(*req.BankAccount) > 34 {
+		fields[prefix+"bankAccount"] = "must be at most 34 characters"
+	}
+	in := store.WorkerInput{
+		Worker: store.Worker{PersonnelNumber: req.PersonnelNumber, WorkerType: req.WorkerType, PartyPersonID: req.PartyPersonID,
+			LegalName: legalName, PreferredName: req.PreferredName, UserID: req.UserID},
+		NationalID: nationalID,
+	}
+	if req.BankAccount != nil {
+		in.BankAccount = strings.TrimSpace(*req.BankAccount)
+	}
+	return in
+}
+
 func (a *API) createWorker(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -43,41 +82,10 @@ func (a *API) createWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	req.PersonnelNumber = strings.ToUpper(strings.TrimSpace(req.PersonnelNumber))
-	if !personnelNumber.MatchString(req.PersonnelNumber) {
-		fields["personnelNumber"] = "must be 1 to 20 characters of A-Z, 0-9 or -"
-	}
-	if !contains(workerTypes, req.WorkerType) {
-		fields["workerType"] = "must be EMPLOYEE or CONTRACTOR"
-	}
-	if !ids.Valid(req.PartyPersonID) {
-		fields["partyPersonId"] = "must be a UUID"
-	}
-	legalName := strings.TrimSpace(req.LegalName)
-	if legalName == "" || utf8.RuneCountInString(legalName) > 200 {
-		fields["legalName"] = "must be 1 to 200 characters"
-	}
-	nationalID := strings.TrimSpace(req.NationalID)
-	if nationalID == "" || utf8.RuneCountInString(nationalID) > 32 {
-		fields["nationalId"] = "is required and must be at most 32 characters"
-	}
-	if req.UserID != nil && !ids.Valid(*req.UserID) {
-		fields["userId"] = "must be a UUID"
-	}
-	if req.BankAccount != nil && utf8.RuneCountInString(*req.BankAccount) > 34 {
-		fields["bankAccount"] = "must be at most 34 characters"
-	}
+	in := validateWorker(req, false, "", fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
-	}
-	in := store.WorkerInput{
-		Worker: store.Worker{PersonnelNumber: req.PersonnelNumber, WorkerType: req.WorkerType, PartyPersonID: req.PartyPersonID,
-			LegalName: legalName, PreferredName: req.PreferredName, UserID: req.UserID},
-		NationalID: nationalID,
-	}
-	if req.BankAccount != nil {
-		in.BankAccount = strings.TrimSpace(*req.BankAccount)
 	}
 	created, inserted, err := a.store.CreateWorker(r.Context(), in, r.Header.Get(idempotencyKey))
 	if err != nil {

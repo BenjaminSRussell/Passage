@@ -16,6 +16,10 @@ release may change public APIs.
   is also a chart. fulfillment calls it through `:carrier-rates`, `:carrier-label` and `:carrier-track` on a
   shipment (`CARRIER_GATEWAY_URL`). New service-only duties: `carrier.rate.quote`, `carrier.label.create` and
   `carrier.tracking.read`. They are granted to fulfillment (all three) and transport (rates and tracking).
+- HR compensation cycle approval with segregation of duties (#266): `POST /v1/hr/compensation/cycles/{id}/approve`
+  under the new `HcmCompApprove` duty; the approver may not be the cycle's creator, a worksheet submitter, or the worker
+  or proposing manager on a submitted row, and apply now needs the approval (`HCM-CMP-010`). Hire from an offer can
+  create the worker in the same transaction with `newWorker`.
 - Production orders against the real ledger (#478, W21 AC4): `internal/ledgertest` builds and runs the ledger service
   on a throwaway schema and production books and reconciles WIP through the real `ledgerclient` with signed service
   tokens (skipped without `PASSAGE_TEST_DATABASE_URL` or under `-short`). A demo-plant seed (`go run ./cmd/demoplant`

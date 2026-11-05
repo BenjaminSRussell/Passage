@@ -156,6 +156,11 @@ func pgCode(err error, code string) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == code
 }
 
+func pgUnique(err error, name string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == name
+}
+
 func pgConstraint(err error, name string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == exclusionViolation && pgErr.ConstraintName == name
@@ -219,38 +224,12 @@ func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotency
 				return err
 			}
 		}
-		nationalID, err := s.sealer.Seal(p.TenantID, fieldNationalID, in.NationalID)
-		if err != nil {
-			return err
-		}
-		var bank []byte
-		if in.BankAccount != "" {
-			if bank, err = s.sealer.Seal(p.TenantID, fieldBankAccount, in.BankAccount); err != nil {
-				return err
-			}
-		}
-		workerID := ids.New()
-		w, err = scanWorker(tx.QueryRow(ctx, `insert into worker (tenant_id, id, personnel_number, worker_type, party_person_id, legal_name, preferred_name, user_id, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+workerColumns,
-			p.TenantID, workerID, in.PersonnelNumber, in.WorkerType, in.PartyPersonID, in.LegalName, in.PreferredName, in.UserID, key))
-		if err != nil {
+		var err error
+		if w, err = s.createWorkerTx(ctx, tx, p, in, key); err != nil {
 			return err
 		}
 		inserted = true
-		if _, err := tx.Exec(ctx, `insert into worker_pii (tenant_id, worker_id, national_id_sealed, bank_account_sealed) values ($1, $2, $3, $4)`,
-			p.TenantID, w.ID, nationalID, bank); err != nil {
-			return err
-		}
-		changed := []string{"national_id"}
-		if bank != nil {
-			changed = append(changed, "bank_account")
-		}
-		if err := audit(ctx, tx, p, "p3_change", w.ID, changed, "", ""); err != nil {
-			return err
-		}
-		return enqueue(ctx, tx, "worker", w.ID, hrevents.WorkerCreated, p.TenantID, hrevents.WorkerCreatedData{
-			ID: w.ID, PersonnelNumber: w.PersonnelNumber, WorkerType: w.WorkerType, PartyPersonID: w.PartyPersonID,
-		})
+		return nil
 	})
 	if idempotencyRace(err) {
 		return Worker{}, false, idempotencyInFlight()
@@ -263,6 +242,41 @@ func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotency
 		return Worker{}, false, idempotencyReuse()
 	}
 	return w, inserted, err
+}
+
+// createWorkerTx inserts the worker and its sealed PII, audits the PII write
+// and enqueues worker.created, all in tx.
+func (s *Postgres) createWorkerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in WorkerInput, key *string) (Worker, error) {
+	nationalID, err := s.sealer.Seal(p.TenantID, fieldNationalID, in.NationalID)
+	if err != nil {
+		return Worker{}, err
+	}
+	var bank []byte
+	if in.BankAccount != "" {
+		if bank, err = s.sealer.Seal(p.TenantID, fieldBankAccount, in.BankAccount); err != nil {
+			return Worker{}, err
+		}
+	}
+	w, err := scanWorker(tx.QueryRow(ctx, `insert into worker (tenant_id, id, personnel_number, worker_type, party_person_id, legal_name, preferred_name, user_id, idempotency_key)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+workerColumns,
+		p.TenantID, ids.New(), in.PersonnelNumber, in.WorkerType, in.PartyPersonID, in.LegalName, in.PreferredName, in.UserID, key))
+	if err != nil {
+		return Worker{}, err
+	}
+	if _, err := tx.Exec(ctx, `insert into worker_pii (tenant_id, worker_id, national_id_sealed, bank_account_sealed) values ($1, $2, $3, $4)`,
+		p.TenantID, w.ID, nationalID, bank); err != nil {
+		return Worker{}, err
+	}
+	changed := []string{"national_id"}
+	if bank != nil {
+		changed = append(changed, "bank_account")
+	}
+	if err := audit(ctx, tx, p, "p3_change", w.ID, changed, "", ""); err != nil {
+		return Worker{}, err
+	}
+	return w, enqueue(ctx, tx, "worker", w.ID, hrevents.WorkerCreated, p.TenantID, hrevents.WorkerCreatedData{
+		ID: w.ID, PersonnelNumber: w.PersonnelNumber, WorkerType: w.WorkerType, PartyPersonID: w.PartyPersonID,
+	})
 }
 
 // GetWorker returns the non-PII view of a worker.

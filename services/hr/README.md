@@ -520,6 +520,9 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-ABS-STATE` | 422 | The request's status does not allow this decision or cancellation |
 | `HCM-ABS-SELF-APPROVAL` | 403 | An approver tried to decide their own request |
 | `HCM-ABS-NOT-OWN` | 403 | An employee-only caller acted on another worker's absence |
+| `HCM-CMP-010` | 409 | The compensation cycle is applied before an `HcmCompApprove` user approved it |
+| `HCM-CMP-SOD` | 403 | The cycle approver created the cycle, submitted one of its worksheets, or is the worker or proposing manager on a submitted row |
+| `HCM-OFR-004` | 422 | A hire from an offer has neither `workerId` nor `newWorker`, or the candidate was erased and `newWorker.legalName` is missing |
 | `HCM-BEN-001` | 422 | Enrollment outside the open window or the life event's 30 days |
 | `HCM-BEN-002` | 422 | Worker not eligible for the plan on the effective date; the detail gives the reason |
 | `HCM-BEN-003` | 422 | The option is not offered by the plan |
@@ -580,7 +583,7 @@ internal/domain/   pure rules: effective dating, hierarchy, accrual, PII sealing
 internal/store/    pgx repositories, RLS-scoped transactions, outbox writes
 internal/api/      HTTP handlers, DTOs, validation, duties
 internal/events/   event type constants and payloads
-migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql, 0007_pii_reseal_grant.sql, 0008_incidents_loans_checklists.sql, 0009_questionnaires.sql, 0010_jobs_compensation_actions.sql, 0011_recruitment_comp_cycles.sql, 0012_performance.sql (applied in order by dbx.Migrate)
+migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql, 0007_pii_reseal_grant.sql, 0008_incidents_loans_checklists.sql, 0009_questionnaires.sql, 0010_jobs_compensation_actions.sql, 0011_recruitment_comp_cycles.sql, 0012_performance.sql, 0013_comp_cycle_approval.sql (applied in order by dbx.Migrate)
 testdata/          hr-benefit-100.json (AC-42.5 fixture)
 api/openapi.yaml   OpenAPI 3.1 for every endpoint above
 events/asyncapi.yaml  AsyncAPI 3 for the eight events published
