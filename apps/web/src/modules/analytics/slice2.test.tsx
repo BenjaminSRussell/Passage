@@ -65,15 +65,15 @@ describe("data-quality scorecard", () => {
     expect(within(table).getByText("No data-quality rules yet")).toBeInTheDocument();
   });
 
-  it("shows the problem and retries when the caller lacks CatalogSteward", async () => {
+  it("shows the problem and retries when the caller lacks analytics.catalog.steward", async () => {
     let attempt = 0;
     server.handler = (url) => {
-      if (++attempt <= 2) return json(403, { code: "AUTH-0003", detail: "missing duty CatalogSteward" });
+      if (++attempt <= 2) return json(403, { code: "AUTH-0003", detail: "missing duty analytics.catalog.steward" });
       return json(200, { items: url.pathname.endsWith("scores") ? [] : [taxRule] });
     };
     render("/analytics/data-quality");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty CatalogSteward (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty analytics.catalog.steward (AUTH-0003)");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     fireEvent.click(within(alert.closest("div") as HTMLElement).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("vendor_tax_id")).toBeInTheDocument();
@@ -210,9 +210,9 @@ describe("archive partitions", () => {
     const first = render("/analytics/archive");
     expect(within(await findTable({ name: "Archive partitions" })).getByText("No archive partitions")).toBeInTheDocument();
     first.unmount();
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ArchiveAdmin" });
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty analytics.archive.admin" });
     render("/analytics/archive");
-    expect(await findAlert()).toHaveTextContent("missing duty ArchiveAdmin (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.archive.admin (AUTH-0003)");
   });
 
   it("restores a dropped partition after confirmation", async () => {

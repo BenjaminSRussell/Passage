@@ -68,7 +68,9 @@ type Report struct {
 	SubmittedBy   string
 	APOpenItemID  string
 	ReimbursedAt  *time.Time
-	Lines         []ReportLine
+	// GLEntryID is the journal entry of the reimbursement liability; empty until it is posted.
+	GLEntryID string
+	Lines     []ReportLine
 }
 
 // ReportLine is one persisted line with the policy results of its last evaluation.
@@ -101,7 +103,7 @@ func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const reportColumns = `id::text, legal_entity_id::text, worker_id::text, purpose, currency::text, status,
   total_amount::text, reimbursable_amount::text, company_paid_amount::text, version, created_at, submitted_at,
-  created_by, submitted_by, coalesce(ap_open_item_id::text, ''), reimbursed_at`
+  created_by, submitted_by, coalesce(ap_open_item_id::text, ''), reimbursed_at, coalesce(gl_entry_id, '')`
 
 const lineColumns = `id::text, report_id::text, line_no, category, txn_date, amount::text, merchant,
   attendees, has_receipt, justification, paid_by, policy_results`
@@ -488,7 +490,7 @@ func scanReport(r pgx.Row) (Report, error) {
 	var total, reimbursable, companyPaid string
 	if err := r.Scan(&rep.ID, &rep.LegalEntityID, &rep.WorkerID, &rep.Purpose, &rep.Currency, &rep.Status,
 		&total, &reimbursable, &companyPaid, &rep.Version, &rep.CreatedAt, &rep.SubmittedAt,
-		&rep.CreatedBy, &rep.SubmittedBy, &rep.APOpenItemID, &rep.ReimbursedAt); err != nil {
+		&rep.CreatedBy, &rep.SubmittedBy, &rep.APOpenItemID, &rep.ReimbursedAt, &rep.GLEntryID); err != nil {
 		return Report{}, err
 	}
 	var err error

@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: carrier-gateway
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    # Never two pods at once: the replay cache and label store are per process.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: carrier-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: carrier-gateway
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's node user; numeric so the kubelet can check runAsNonRoot.
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: carrier-gateway
+          image: {{ include "carrier-gateway.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: HTTP_ADDR
+              value: ":8080"
+            - name: CARRIER_ADAPTERS
+              value: {{ .Values.adapters | quote }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.servicePublicKeys | quote }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

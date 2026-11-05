@@ -18,10 +18,10 @@ import (
 // routesRemainder mounts the short pick action warehouse setting and the
 // backorder shipment (FR-28.8).
 func (a *API) routesRemainder(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/warehouse-settings", a.listWarehouseSettings)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/warehouse-settings/{warehouseId}", a.getWarehouseSetting)
-	r.With(authz.RequireDuty("WarehouseRelease")).Put("/v1/fulfillment/warehouse-settings/{warehouseId}", a.saveWarehouseSetting)
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/shipments/{id}:backorder-remainder", a.backorderRemainder)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/warehouse-settings", a.listWarehouseSettings)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/warehouse-settings/{warehouseId}", a.getWarehouseSetting)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Put("/v1/fulfillment/warehouse-settings/{warehouseId}", a.saveWarehouseSetting)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Post("/v1/fulfillment/shipments/{id}:backorder-remainder", a.backorderRemainder)
 }
 
 type warehouseSettingRequest struct {

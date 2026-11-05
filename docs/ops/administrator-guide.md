@@ -14,7 +14,7 @@ Operator actions are gated by duty (PRD 9.50.17). Grant the smallest set.
 
 | Duty | Who | Covers |
 |---|---|---|
-| PlatformAdmin | platform operator (break-glass for failover) | tenant provisioning and decommission (second approver), failover, license install, game day |
+| platform.global.admin | platform operator (break-glass for failover) | tenant provisioning and decommission (second approver), failover, license install, game day |
 | PlatformView | SRE, support | region status, SLO status, capacity estimate |
 | ReleaseManager | release manager | promote a release by digest, pause a ring, trigger rollback |
 | OnCallResponder | SRE on-call | restart, scale, replay, incident updates |
@@ -27,9 +27,9 @@ Separation of duties (PRD 9.50.17):
 
 | Never together | Severity | Rule |
 |---|---|---|
-| PlatformAdmin and any tenant business duty | HIGH | OPS-001: operators do not post business documents |
-| PlatformAdmin and LicenseIssuer | HIGH | whoever installs a license must not be able to sign one |
-| PlatformAdmin and TenantAdmin | MEDIUM | the platform operator does not administer a customer tenant |
+| platform.global.admin and any tenant business duty | HIGH | OPS-001: operators do not post business documents |
+| platform.global.admin and LicenseIssuer | HIGH | whoever installs a license must not be able to sign one |
+| platform.global.admin and TenantAdmin | MEDIUM | the platform operator does not administer a customer tenant |
 | ReleaseManager and code approval of the same change | MEDIUM | CHG-001: four-eyes on what is released |
 | CutoverDecisionOwner and the owner of a checklist item | MEDIUM | the go/no-go is not decided by whoever delivered the item |
 
@@ -68,7 +68,7 @@ Check the region state before any change:
   committed-transaction loss (FR-50.5).
 - The command is rejected when target lag exceeds `FAILOVER_MAX_LAG_S` (300 s), with OPS-1701. Overriding
   needs `--accept-data-loss` and a second approver.
-- Confirm with a second, distinct PlatformAdmin within 5 min. Without it the command does not run (OPS-1702).
+- Confirm with a second, distinct platform.global.admin holder within 5 min. Without it the command does not run (OPS-1702).
 - During failover the fenced region answers 503 with `Retry-After: 30` (OPS-1703). Clients retry
   idempotent requests with the same `Idempotency-Key`, so nothing posts twice (BR-50.2).
 - After promotion, verify the ledger hash chain for each tenant. A break (OPS-1704) is Sev-1: keep user

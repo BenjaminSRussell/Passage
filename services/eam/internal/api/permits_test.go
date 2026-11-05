@@ -101,7 +101,7 @@ func TestHTTP_PermitFlowAC4411(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New(store.New(pool), nil).Routes()
-	all := "EamAssetMaintain,EamSetupAdmin,EamPlanner,EamPermitIssuer,EamTechnician,EamInquire"
+	all := "eam.asset.maintain,eam.setup.admin,eam.work.plan,eam.permit.issue,eam.work-order.execute,eam.inquire"
 	send := func(user, method, path, body, key string, extra map[string]string) *httptest.ResponseRecorder {
 		hdr := headers(all)
 		hdr["X-Passage-User"] = user

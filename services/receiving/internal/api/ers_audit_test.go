@@ -130,7 +130,7 @@ func userDuty(name, key, user string, extra ...string) headers {
 }
 
 func (rg *rig) policyMaker() headers {
-	return userDuty("MatchingPolicyMaintain", rg.key(), "policy-admin")
+	return userDuty("receiving.matching-policy.maintain", rg.key(), "policy-admin")
 }
 
 func (rg *rig) enableErs(t *testing.T, enabled bool) {
@@ -157,7 +157,7 @@ func (rg *rig) ersRun(t *testing.T, want int) ersRunJSON {
 
 func (rg *rig) manualInvoice(t *testing.T, number, receiptID string, qty int, user string) *httpResult {
 	t.Helper()
-	rec := rg.call(http.MethodPost, invoicesPath, invoiceBody(number, receiptID, qty, ""), userDuty("VendorInvoicePost", rg.key(), user))
+	rec := rg.call(http.MethodPost, invoicesPath, invoiceBody(number, receiptID, qty, ""), userDuty("receiving.vendor-invoice.post", rg.key(), user))
 	return &httpResult{code: rec.Code, body: rec.Body.String()}
 }
 
@@ -179,7 +179,7 @@ func (h *httpResult) invoice(t *testing.T, want int) auditedInvoiceJSON {
 }
 
 func (rg *rig) release(invoiceID, user string) (int, string) {
-	rec := rg.call(http.MethodPost, invoicesBase+invoiceID+releaseSuffix, fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID), userDuty("InvoiceAuditRelease", rg.key(), user))
+	rec := rg.call(http.MethodPost, invoicesBase+invoiceID+releaseSuffix, fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID), userDuty("receiving.invoice-audit.release", rg.key(), user))
 	return rec.Code, rec.Body.String()
 }
 
@@ -187,7 +187,7 @@ func grirStatus(t *testing.T, rg *rig) string {
 	t.Helper()
 	page := decode[struct {
 		Items []struct{ Status string }
-	}](t, rg.call(http.MethodGet, grirPath, "", duty("APInquire", "")), http.StatusOK)
+	}](t, rg.call(http.MethodGet, grirPath, "", duty("receiving.ap.inquire", "")), http.StatusOK)
 	if len(page.Items) != 1 {
 		t.Fatalf("grir items %+v", page.Items)
 	}
@@ -225,11 +225,11 @@ func TestErs_SettlesAPostedReceiptAtThePurchaseOrderPriceExactlyOnce(t *testing.
 	}
 	bill := lastOfType(t, rg, "dev.passage.receiving.ersselfbill.issued.v1")
 	assertDocumented(t, bill)
-	doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+s.InvoiceID, "", duty("APInquire", "", "X-Passage-User", "alice"))
+	doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+s.InvoiceID, "", duty("receiving.ap.inquire", "", "X-Passage-User", "alice"))
 	if doc.Code != http.StatusOK || !bytes.Contains(doc.Body.Bytes(), []byte("%PDF-1.4")) || !bytes.Contains(doc.Body.Bytes(), []byte(s.InvoiceNumber)) {
 		t.Fatalf("self-bill %d %s", doc.Code, doc.Body.String())
 	}
-	if rec := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+s.InvoiceID, "", duty("VendorInvoicePost", "", "X-Passage-User", "alice")); rec.Code != http.StatusForbidden {
+	if rec := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+s.InvoiceID, "", duty("receiving.vendor-invoice.post", "", "X-Passage-User", "alice")); rec.Code != http.StatusForbidden {
 		t.Fatalf("wrong duty read the self-bill: %d", rec.Code)
 	}
 	if grirStatus(t, rg) != "CLEARED" {
@@ -348,7 +348,7 @@ func TestErs_RejectionsPostNothing(t *testing.T) {
 		{"order not a uuid", nil, runBody("", `"purchaseOrderId":"x"`), nil, http.StatusBadRequest, "COM-0001"},
 		{"foreign ledger", nil, strings.Replace(runBody("", `"vendorId":"`+vendorID+`"`), ledgerID, poID, 1), nil, http.StatusUnprocessableEntity, "RCV-VAL-001"},
 		{"legal entity outside the caller's scope", nil, runBody("", `"vendorId":"`+vendorID+`"`), func(rg *rig) headers { return rg.apPosterFor(ledgerID) }, http.StatusForbidden, "AUTH-0003"},
-		{"caller without the posting duty", nil, runBody("", `"vendorId":"`+vendorID+`"`), func(rg *rig) headers { return duty("ReceivingPost", rg.key()) }, http.StatusForbidden, "AUTH-0003"},
+		{"caller without the posting duty", nil, runBody("", `"vendorId":"`+vendorID+`"`), func(rg *rig) headers { return duty("receiving.receipt.post", rg.key()) }, http.StatusForbidden, "AUTH-0003"},
 		{"purchase order lookup down", func(p *api.Ports) { p.PurchaseOrders = domain.FakePurchaseOrders{Err: errors.New("down")} }, runBody("", `"vendorId":"`+vendorID+`"`), nil, http.StatusServiceUnavailable, "COM-0503"},
 		{"purchase order port missing", func(p *api.Ports) { p.PurchaseOrders = nil }, runBody("", `"vendorId":"`+vendorID+`"`), nil, http.StatusServiceUnavailable, "COM-0503"},
 		{"ledger down", func(p *api.Ports) { p.Ledger = &domain.FakeLedger{Err: errors.New("down")} }, runBody("", `"vendorId":"`+vendorID+`"`), nil, http.StatusInternalServerError, "COM-0500"},
@@ -512,10 +512,10 @@ func TestErsAndManualInvoiceRacingForOneReceiptPostOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			if i%2 == 0 {
-				statuses[i] = rg.call(http.MethodPost, ersRunPath, runBody("", `"vendorId":"`+vendorID+`"`), duty("VendorInvoicePost", fmt.Sprintf("race-ers-%d", i))).Code
+				statuses[i] = rg.call(http.MethodPost, ersRunPath, runBody("", `"vendorId":"`+vendorID+`"`), duty("receiving.vendor-invoice.post", fmt.Sprintf("race-ers-%d", i))).Code
 				return
 			}
-			statuses[i] = rg.call(http.MethodPost, invoicesPath, invoiceBody(fmt.Sprintf("INV-%d", i), r.ID, 4, ""), duty("VendorInvoicePost", fmt.Sprintf("race-man-%d", i))).Code
+			statuses[i] = rg.call(http.MethodPost, invoicesPath, invoiceBody(fmt.Sprintf("INV-%d", i), r.ID, 4, ""), duty("receiving.vendor-invoice.post", fmt.Sprintf("race-man-%d", i))).Code
 		}()
 	}
 	wg.Wait()
@@ -546,7 +546,7 @@ func TestAuditBlock_HoldsTheInvoiceUntilAnAuditorReleasesIt(t *testing.T) {
 	if sampled := evts[len(evts)-1]; sampled.Type != "dev.passage.payables.invoice.sampled.v1" || !strings.Contains(string(sampled.Data), `"sample_rate_pct":"100"`) || !strings.Contains(string(sampled.Data), `"total":"10"`) {
 		t.Fatalf("event %s %s", sampled.Type, sampled.Data)
 	}
-	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-2", r.ID, 1, ""), userDuty("VendorInvoicePost", rg.key(), "alice")), http.StatusUnprocessableEntity, "AP-QTY-001")
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-2", r.ID, 1, ""), userDuty("receiving.vendor-invoice.post", rg.key(), "alice")), http.StatusUnprocessableEntity, "AP-QTY-001")
 
 	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, adjustmentBody(held.ID, "DEBIT", "DN-1", adjLine(1, "1.00")), rg.apPosterFor(legalEntityID)), http.StatusConflict, "AP-AUD-001")
 
@@ -598,15 +598,15 @@ func TestAuditRelease_DutyIdentityAndScopeChecks(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"the poster's duty is not the release duty", path, body, userDuty("VendorInvoicePost", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
-		{"the policy duty is not the release duty", path, body, userDuty("MatchingPolicyMaintain", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
-		{"the releaser must not be the poster", path, body, userDuty("InvoiceAuditRelease", rg.key(), "alice"), http.StatusForbidden, "AP-AUD-003"},
-		{"a release needs a user", path, body, userDuty("InvoiceAuditRelease", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
-		{"legal entity outside the caller's scope", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("InvoiceAuditRelease", rg.key(), "bob", entityHeader, legalEntityID), http.StatusForbidden, "AUTH-0003"},
-		{"legal entity of another invoice owner", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("InvoiceAuditRelease", rg.key(), "bob", entityHeader, legalEntityID+","+ledgerID), http.StatusUnprocessableEntity, "RCV-VAL-001"},
-		{"legal entity missing", path, `{}`, userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
-		{"id not a uuid", invoicesBase + "x" + releaseSuffix, body, userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
-		{"unknown invoice", invoicesBase + poID + releaseSuffix, body, userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusNotFound, "RCV-NF-005"},
+		{"the poster's duty is not the release duty", path, body, userDuty("receiving.vendor-invoice.post", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
+		{"the policy duty is not the release duty", path, body, userDuty("receiving.matching-policy.maintain", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
+		{"the releaser must not be the poster", path, body, userDuty("receiving.invoice-audit.release", rg.key(), "alice"), http.StatusForbidden, "AP-AUD-003"},
+		{"a release needs a user", path, body, userDuty("receiving.invoice-audit.release", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
+		{"legal entity outside the caller's scope", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("receiving.invoice-audit.release", rg.key(), "bob", entityHeader, legalEntityID), http.StatusForbidden, "AUTH-0003"},
+		{"legal entity of another invoice owner", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("receiving.invoice-audit.release", rg.key(), "bob", entityHeader, legalEntityID+","+ledgerID), http.StatusUnprocessableEntity, "RCV-VAL-001"},
+		{"legal entity missing", path, `{}`, userDuty("receiving.invoice-audit.release", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"id not a uuid", invoicesBase + "x" + releaseSuffix, body, userDuty("receiving.invoice-audit.release", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"unknown invoice", invoicesBase + poID + releaseSuffix, body, userDuty("receiving.invoice-audit.release", rg.key(), "bob"), http.StatusNotFound, "RCV-NF-005"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			problemCode(t, rg.call(http.MethodPost, tc.path, tc.body, tc.hdr), tc.status, tc.code)
@@ -679,7 +679,7 @@ func TestAuditBlock_DefaultRateIsZeroAndRatesAreKeptPerLegalEntity(t *testing.T)
 	if got := rg.manualInvoice(t, "INV-1", r.ID, 1, "alice").invoice(t, http.StatusCreated); got.Status != "POSTED" {
 		t.Fatalf("with no policy the invoice is %s", got.Status)
 	}
-	other := rg.call(http.MethodPut, auditPolicyPath, fmt.Sprintf(`{"legalEntityId":%q,"sampleRatePct":100}`, ledgerID), userDuty("MatchingPolicyMaintain", rg.key(), "admin", entityHeader, legalEntityID+","+ledgerID))
+	other := rg.call(http.MethodPut, auditPolicyPath, fmt.Sprintf(`{"legalEntityId":%q,"sampleRatePct":100}`, ledgerID), userDuty("receiving.matching-policy.maintain", rg.key(), "admin", entityHeader, legalEntityID+","+ledgerID))
 	if other.Code != http.StatusOK {
 		t.Fatalf("policy of another entity: %d %s", other.Code, other.Body.String())
 	}
@@ -710,13 +710,13 @@ func TestPolicyEndpoints_ValidateAndAuthorise(t *testing.T) {
 		{"three decimals", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":"12.345"}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
 		{"rate missing", http.MethodPut, auditPolicyPath, `{` + entity + `}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
 		{"entity not a uuid", http.MethodPut, auditPolicyPath, `{"legalEntityId":"x","sampleRatePct":5}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
-		{"no user", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":5}`, userDuty("MatchingPolicyMaintain", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
-		{"wrong duty", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":5}`, userDuty("VendorInvoicePost", rg.key(), "u"), http.StatusForbidden, "AUTH-0003"},
+		{"no user", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":5}`, userDuty("receiving.matching-policy.maintain", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
+		{"wrong duty", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":5}`, userDuty("receiving.vendor-invoice.post", rg.key(), "u"), http.StatusForbidden, "AUTH-0003"},
 		{"entity outside scope", http.MethodPut, auditPolicyPath, `{"legalEntityId":"` + ledgerID + `","sampleRatePct":5}`, rg.policyMaker(), http.StatusForbidden, "AUTH-0003"},
 		{"enabled missing", http.MethodPut, ersVendorPath, `{` + entity + `}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
 		{"vendor not a uuid", http.MethodPut, "/v1/receiving/ers-vendors/x", `{` + entity + `,"enabled":true}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
-		{"ers wrong duty", http.MethodPut, ersVendorPath, `{` + entity + `,"enabled":true}`, userDuty("VendorInvoicePost", rg.key(), "u"), http.StatusForbidden, "AUTH-0003"},
-		{"ers no user", http.MethodPut, ersVendorPath, `{` + entity + `,"enabled":true}`, userDuty("MatchingPolicyMaintain", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
+		{"ers wrong duty", http.MethodPut, ersVendorPath, `{` + entity + `,"enabled":true}`, userDuty("receiving.vendor-invoice.post", rg.key(), "u"), http.StatusForbidden, "AUTH-0003"},
+		{"ers no user", http.MethodPut, ersVendorPath, `{` + entity + `,"enabled":true}`, userDuty("receiving.matching-policy.maintain", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
 		{"ers entity outside scope", http.MethodPut, ersVendorPath, `{"legalEntityId":"` + ledgerID + `","enabled":true}`, rg.policyMaker(), http.StatusForbidden, "AUTH-0003"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -799,8 +799,8 @@ func TestInvoicePostingAndErsRunRecordTheirActor(t *testing.T) {
 	r := rg.posted(t, "PS-1", 10, 4)
 	noUser := func(name string) headers { return userDuty(name, rg.key(), "") }
 
-	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), noUser("VendorInvoicePost")), http.StatusUnauthorized, "AUTH-0001")
-	problemCode(t, rg.call(http.MethodPost, ersRunPath, runBody("", `"vendorId":"`+vendorID+`"`), noUser("VendorInvoicePost")), http.StatusUnauthorized, "AUTH-0001")
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), noUser("receiving.vendor-invoice.post")), http.StatusUnauthorized, "AUTH-0001")
+	problemCode(t, rg.call(http.MethodPost, ersRunPath, runBody("", `"vendorId":"`+vendorID+`"`), noUser("receiving.vendor-invoice.post")), http.StatusUnauthorized, "AUTH-0001")
 
 	if len(rg.ledger.Entries) != 1 || grirStatus(t, rg) != "OPEN" {
 		t.Fatalf("a request without an actor posted: ledger entries %d GR/IR %s", len(rg.ledger.Entries), grirStatus(t, rg))
@@ -816,7 +816,7 @@ func TestAuditBlock_ClosedPeriodIsRefusedWhetherOrNotTheInvoiceIsDrawn(t *testin
 			r := rg.posted(t, "PS-1", 10, 4)
 			periods.set(domain.PeriodClosed)
 
-			problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 4, ""), userDuty("VendorInvoicePost", rg.key(), "alice")), http.StatusUnprocessableEntity, "PER-AP-001")
+			problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 4, ""), userDuty("receiving.vendor-invoice.post", rg.key(), "alice")), http.StatusUnprocessableEntity, "PER-AP-001")
 
 			if len(rg.ledger.Entries) != 1 || grirStatus(t, rg) != "OPEN" {
 				t.Fatalf("ledger entries %d GR/IR %s: a refused invoice must reserve nothing", len(rg.ledger.Entries), grirStatus(t, rg))
@@ -827,7 +827,7 @@ func TestAuditBlock_ClosedPeriodIsRefusedWhetherOrNotTheInvoiceIsDrawn(t *testin
 
 func (rg *rig) reject(invoiceID, user, reason string) (int, string) {
 	body := fmt.Sprintf(`{"legalEntityId":%q,"reason":%q}`, legalEntityID, reason)
-	rec := rg.call(http.MethodPost, invoicesBase+invoiceID+":reject-audit-block", body, userDuty("InvoiceAuditRelease", rg.key(), user))
+	rec := rg.call(http.MethodPost, invoicesBase+invoiceID+":reject-audit-block", body, userDuty("receiving.invoice-audit.release", rg.key(), user))
 	return rec.Code, rec.Body.String()
 }
 
@@ -889,14 +889,14 @@ func TestAuditReject_ValidationDutyAndSegregation(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"a reason is required", fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
-		{"a blank reason is no reason", fmt.Sprintf(`{"legalEntityId":%q,"reason":"   "}`, legalEntityID), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
-		{"the reason is bounded", fmt.Sprintf(`{"legalEntityId":%q,"reason":%q}`, legalEntityID, strings.Repeat("x", 501)), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
-		{"the poster's duty is not enough", good, userDuty("VendorInvoicePost", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
-		{"the poster cannot reject", good, userDuty("InvoiceAuditRelease", rg.key(), "alice"), http.StatusForbidden, "AP-AUD-003"},
-		{"the poster cannot reject in other letters", good, userDuty("InvoiceAuditRelease", rg.key(), " ALICE "), http.StatusForbidden, "AP-AUD-003"},
-		{"a reject needs a user", good, userDuty("InvoiceAuditRelease", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
-		{"scope", strings.Replace(good, legalEntityID, ledgerID, 1), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
+		{"a reason is required", fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID), userDuty("receiving.invoice-audit.release", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"a blank reason is no reason", fmt.Sprintf(`{"legalEntityId":%q,"reason":"   "}`, legalEntityID), userDuty("receiving.invoice-audit.release", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"the reason is bounded", fmt.Sprintf(`{"legalEntityId":%q,"reason":%q}`, legalEntityID, strings.Repeat("x", 501)), userDuty("receiving.invoice-audit.release", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"the poster's duty is not enough", good, userDuty("receiving.vendor-invoice.post", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
+		{"the poster cannot reject", good, userDuty("receiving.invoice-audit.release", rg.key(), "alice"), http.StatusForbidden, "AP-AUD-003"},
+		{"the poster cannot reject in other letters", good, userDuty("receiving.invoice-audit.release", rg.key(), " ALICE "), http.StatusForbidden, "AP-AUD-003"},
+		{"a reject needs a user", good, userDuty("receiving.invoice-audit.release", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
+		{"scope", strings.Replace(good, legalEntityID, ledgerID, 1), userDuty("receiving.invoice-audit.release", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			problemCode(t, rg.call(http.MethodPost, path, tc.body, tc.hdr), tc.status, tc.code)
@@ -905,7 +905,7 @@ func TestAuditReject_ValidationDutyAndSegregation(t *testing.T) {
 			}
 		})
 	}
-	problemCode(t, rg.call(http.MethodPost, invoicesBase+poID+":reject-audit-block", good, userDuty("InvoiceAuditRelease", rg.key(), "bob")), http.StatusNotFound, "RCV-NF-005")
+	problemCode(t, rg.call(http.MethodPost, invoicesBase+poID+":reject-audit-block", good, userDuty("receiving.invoice-audit.release", rg.key(), "bob")), http.StatusNotFound, "RCV-NF-005")
 }
 
 func TestPolicyChangesEmitEventsWithOldAndNewValues(t *testing.T) {
@@ -1043,16 +1043,16 @@ func TestConfirmErsPrice_RefusesBadInputAndOutsiders(t *testing.T) {
 		return rg.call(http.MethodPut, receiptsPath+"/"+r.ID+path, body, hdr)
 	}
 	ok := fmt.Sprintf(`{"legalEntityId":%q,"unitPrice":2.6}`, legalEntityID)
-	buyer := func() headers { return userDuty("ErsPriceConfirm", rg.key(), "buyer") }
+	buyer := func() headers { return userDuty("receiving.ers-price.confirm", rg.key(), "buyer") }
 
-	problemCode(t, put("/lines/1/ers-price-confirmation", ok, duty("VendorInvoicePost", rg.key(), "X-Passage-User", "buyer")), http.StatusForbidden, "AUTH-0003")
-	problemCode(t, put("/lines/1/ers-price-confirmation", ok, withoutUser(duty("ErsPriceConfirm", rg.key()))), http.StatusUnauthorized, "AUTH-0001")
+	problemCode(t, put("/lines/1/ers-price-confirmation", ok, duty("receiving.vendor-invoice.post", rg.key(), "X-Passage-User", "buyer")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, put("/lines/1/ers-price-confirmation", ok, withoutUser(duty("receiving.ers-price.confirm", rg.key()))), http.StatusUnauthorized, "AUTH-0001")
 	problemCode(t, put("/lines/1/ers-price-confirmation", `{"legalEntityId":"`+legalEntityID+`","unitPrice":-1}`, buyer()), http.StatusBadRequest, "COM-0001")
 	problemCode(t, put("/lines/0/ers-price-confirmation", ok, buyer()), http.StatusBadRequest, "COM-0001")
 	problemCode(t, put("/lines/9/ers-price-confirmation", ok, buyer()), http.StatusNotFound, "RCV-NF-001")
 	problemCode(t, put("/lines/1/ers-price-confirmation", strings.Replace(ok, legalEntityID, "99999999-9999-4999-8999-999999999990", 1), buyer()), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, put("/lines/1/ers-price-confirmation", strings.Replace(ok, "2.6", "2.5", 1), buyer()), http.StatusConflict, "AP-ERS-002")
-	problemCode(t, put("/lines/1/ers-price-confirmation", ok, userDuty("ErsPriceConfirm", rg.key(), "test-user")), http.StatusForbidden, "AP-ERS-004")
+	problemCode(t, put("/lines/1/ers-price-confirmation", ok, userDuty("receiving.ers-price.confirm", rg.key(), "test-user")), http.StatusForbidden, "AP-ERS-004")
 }
 
 func TestConfirmErsPrice_NeedsAnErsVendor(t *testing.T) {
@@ -1068,7 +1068,7 @@ func TestErs_RefusesAPriceConfirmedByTheUserRunningTheSettlement(t *testing.T) {
 	rg.confirmErsPrice = ""
 	rg.enableErs(t, true)
 	direct := rg.direct(t, "PS-1", 10, 4)
-	posterHeaders := duty("ReceivingPost", rg.key(), "If-Match", `"`+strconv.Itoa(direct.Version)+`"`, "X-Passage-User", "receiver")
+	posterHeaders := duty("receiving.receipt.post", rg.key(), "If-Match", `"`+strconv.Itoa(direct.Version)+`"`, "X-Passage-User", "receiver")
 	r := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+direct.ID+":post", "", posterHeaders), http.StatusOK)
 	rg.confirmPriceAs(t, r.ID, 1, "2.60", "test-user", http.StatusOK)
 

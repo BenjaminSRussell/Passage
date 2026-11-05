@@ -65,7 +65,7 @@ func newLease(t *testing.T, h http.Handler) store.Lease {
 	t.Helper()
 	body := `{"legalEntityId":"` + testLE + `","leaseNumber":"L-9","commencementDate":"2026-01-01","termMonths":60,
 		"paymentsPerYear":1,"paymentAmount":"10000","paymentTiming":"arrears","ibrRate":"0.05","currency":"USD"}`
-	rec := call(h, http.MethodPost, "/v1/leases", body, "LeaseMaintain", true)
+	rec := call(h, http.MethodPost, "/v1/leases", body, "assets.lease.maintain", true)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("create lease status = %d etag %q body %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
@@ -88,13 +88,13 @@ func TestModifyLease_PreconditionsValidationAndHappyPath(t *testing.T) {
 		}
 		return do(h, req{method: http.MethodPost, path: path, body: body, duties: duties, key: key, headers: headers})
 	}
-	if rec := modify(body, `"1"`, "AssetView", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without LeaseMaintain status = %d", rec.Code)
+	if rec := modify(body, `"1"`, "assets.asset.view", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.lease.maintain status = %d", rec.Code)
 	}
-	if rec := modify(body, `"1"`, "LeaseMaintain", false); rec.Code != http.StatusBadRequest {
+	if rec := modify(body, `"1"`, "assets.lease.maintain", false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("without Idempotency-Key status = %d", rec.Code)
 	}
-	if rec := modify(body, "", "LeaseMaintain", true); rec.Code != http.StatusPreconditionRequired {
+	if rec := modify(body, "", "assets.lease.maintain", true); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("without If-Match status = %d", rec.Code)
 	}
 	cases := map[string]struct{ body, field string }{
@@ -107,15 +107,15 @@ func TestModifyLease_PreconditionsValidationAndHappyPath(t *testing.T) {
 		"rate not a decimal":        {`{"effectivePeriod":3,"paymentAmount":"12000","scopeChange":true,"ibrRate":"six"}`, "ibrRate"},
 	}
 	for name, tc := range cases {
-		rec := modify(tc.body, `"1"`, "LeaseMaintain", true)
+		rec := modify(tc.body, `"1"`, "assets.lease.maintain", true)
 		if rec.Code != http.StatusBadRequest || problem(t, rec).Errors[tc.field] == "" {
 			t.Errorf("%s: status %d body %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	if rec := modify(body, `"7"`, "LeaseMaintain", true); rec.Code != http.StatusPreconditionFailed {
+	if rec := modify(body, `"7"`, "assets.lease.maintain", true); rec.Code != http.StatusPreconditionFailed {
 		t.Fatalf("stale If-Match status = %d", rec.Code)
 	}
-	rec := modify(`{"effectivePeriod":4,"paymentAmount":"12000","termMonths":84,"scopeChange":true,"ibrRate":"0.06"}`, `"1"`, "LeaseMaintain", true)
+	rec := modify(`{"effectivePeriod":4,"paymentAmount":"12000","termMonths":84,"scopeChange":true,"ibrRate":"0.06"}`, `"1"`, "assets.lease.maintain", true)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"2"` {
 		t.Fatalf("modify status = %d etag %q body %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
@@ -126,10 +126,10 @@ func TestModifyLease_PreconditionsValidationAndHappyPath(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"messages":["AST-0516`) || !strings.Contains(rec.Body.String(), `"status":"Modified"`) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
-	if get := call(h, http.MethodGet, "/v1/leases/"+lease.ID, "", "LeaseMaintain", false); get.Header().Get("ETag") != `"2"` {
+	if get := call(h, http.MethodGet, "/v1/leases/"+lease.ID, "", "assets.lease.maintain", false); get.Header().Get("ETag") != `"2"` {
 		t.Fatalf("get lease etag = %q", get.Header().Get("ETag"))
 	}
-	if rec := do(h, req{method: http.MethodPost, path: "/v1/leases/x/modify", body: body, duties: "LeaseMaintain", key: true,
+	if rec := do(h, req{method: http.MethodPost, path: "/v1/leases/x/modify", body: body, duties: "assets.lease.maintain", key: true,
 		headers: map[string]string{"If-Match": `"1"`}}); rec.Code != http.StatusNotFound {
 		t.Fatalf("malformed lease id status = %d", rec.Code)
 	}
@@ -140,18 +140,18 @@ func TestCreateLease_RateMethod(t *testing.T) {
 	h := server(f)
 	body := `{"legalEntityId":"` + testLE + `","leaseNumber":"L-E","commencementDate":"2026-01-01","termMonths":12,
 		"paymentsPerYear":12,"paymentAmount":"1000","paymentTiming":"arrears","ibrRate":"0.05","currency":"USD","rateMethod":"Effective"}`
-	rec := call(h, http.MethodPost, "/v1/leases", body, "LeaseMaintain", true)
+	rec := call(h, http.MethodPost, "/v1/leases", body, "assets.lease.maintain", true)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"rateMethod":"Effective"`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
-	nominal := call(h, http.MethodPost, "/v1/leases", strings.Replace(body, `"Effective"`, `"Nominal"`, 1), "LeaseMaintain", true)
+	nominal := call(h, http.MethodPost, "/v1/leases", strings.Replace(body, `"Effective"`, `"Nominal"`, 1), "assets.lease.maintain", true)
 	var eff, nom store.Lease
 	_ = json.Unmarshal(rec.Body.Bytes(), &eff)
 	_ = json.Unmarshal(nominal.Body.Bytes(), &nom)
 	if !eff.Liability.GreaterThan(nom.Liability) {
 		t.Fatalf("effective liability %s should exceed nominal %s", eff.Liability, nom.Liability)
 	}
-	bad := call(h, http.MethodPost, "/v1/leases", strings.Replace(body, `"Effective"`, `"Simple"`, 1), "LeaseMaintain", true)
+	bad := call(h, http.MethodPost, "/v1/leases", strings.Replace(body, `"Effective"`, `"Simple"`, 1), "assets.lease.maintain", true)
 	if bad.Code != http.StatusBadRequest || problem(t, bad).Errors["rateMethod"] == "" {
 		t.Fatalf("unknown rate method: status %d body %s", bad.Code, bad.Body.String())
 	}
@@ -161,13 +161,13 @@ func TestCountSession_ValidationScopeAndDuties(t *testing.T) {
 	h := server(newFake())
 	le := testLE
 	body := `{"legalEntityId":"` + le + `","location":" Warehouse 1 ","countedDate":"2026-04-10","barcodes":[" BC-1 ","BC-2","BC-1"]}`
-	if rec := call(h, http.MethodPost, "/v1/assets/count-sessions", body, "AssetView", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetCount status = %d", rec.Code)
+	if rec := call(h, http.MethodPost, "/v1/assets/count-sessions", body, "assets.asset.view", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.asset.count status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodPost, "/v1/assets/count-sessions", body, "AssetCount", false); rec.Code != http.StatusBadRequest {
+	if rec := call(h, http.MethodPost, "/v1/assets/count-sessions", body, "assets.asset.count", false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("without Idempotency-Key status = %d", rec.Code)
 	}
-	rec := call(h, http.MethodPost, "/v1/assets/count-sessions", body, "AssetCount", true)
+	rec := call(h, http.MethodPost, "/v1/assets/count-sessions", body, "assets.asset.count", true)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -187,27 +187,27 @@ func TestCountSession_ValidationScopeAndDuties(t *testing.T) {
 		"too many scans":        {`{"legalEntityId":"` + le + `","location":"W","barcodes":[` + strings.Join(many, ",") + `]}`, "barcodes"},
 	}
 	for name, tc := range cases {
-		rec := call(h, http.MethodPost, "/v1/assets/count-sessions", tc.body, "AssetCount", true)
+		rec := call(h, http.MethodPost, "/v1/assets/count-sessions", tc.body, "assets.asset.count", true)
 		if rec.Code != http.StatusBadRequest || problem(t, rec).Errors[tc.field] == "" {
 			t.Errorf("%s: status %d body %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	other := do(h, req{method: http.MethodPost, path: "/v1/assets/count-sessions", body: body, duties: "AssetCount", key: true,
+	other := do(h, req{method: http.MethodPost, path: "/v1/assets/count-sessions", body: body, duties: "assets.asset.count", key: true,
 		headers: map[string]string{"X-Passage-Legal-Entity": ids.New()}})
 	if other.Code != http.StatusForbidden {
 		t.Fatalf("count outside the caller's legal entity status = %d", other.Code)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions?legalEntityId="+le+"&limit=10", "", "AssetCount", false); rec.Code != http.StatusOK ||
+	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions?legalEntityId="+le+"&limit=10", "", "assets.asset.count", false); rec.Code != http.StatusOK ||
 		lastCountFilter.LegalEntityID != le || lastCountFilter.Limit != 10 {
 		t.Fatalf("list status = %d filter %+v", rec.Code, lastCountFilter)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions?legalEntityId=x", "", "AssetView", false); rec.Code != http.StatusBadRequest {
+	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions?legalEntityId=x", "", "assets.asset.view", false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad filter status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions", "", "LeaseMaintain", false); rec.Code != http.StatusForbidden {
-		t.Fatalf("list without AssetView or AssetCount status = %d", rec.Code)
+	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions", "", "assets.lease.maintain", false); rec.Code != http.StatusForbidden {
+		t.Fatalf("list without assets.asset.view or assets.asset.count status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions/"+ids.New(), "", "AssetView", false); rec.Code != http.StatusNotFound ||
+	if rec := call(h, http.MethodGet, "/v1/assets/count-sessions/"+ids.New(), "", "assets.asset.view", false); rec.Code != http.StatusNotFound ||
 		problem(t, rec).Code != store.CodeCountSessionNotFound {
 		t.Fatalf("unknown session status = %d", rec.Code)
 	}
@@ -216,10 +216,10 @@ func TestCountSession_ValidationScopeAndDuties(t *testing.T) {
 func TestInsuranceReport_FiltersAndDefaults(t *testing.T) {
 	h := server(newFake())
 	le := testLE
-	if rec := call(h, http.MethodGet, "/v1/assets/insurance-report?legalEntityId="+le, "LeaseMaintain", "LeaseMaintain", false); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetView status = %d", rec.Code)
+	if rec := call(h, http.MethodGet, "/v1/assets/insurance-report?legalEntityId="+le, "assets.lease.maintain", "assets.lease.maintain", false); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.asset.view status = %d", rec.Code)
 	}
-	rec := call(h, http.MethodGet, "/v1/assets/insurance-report?legalEntityId="+le+"&asOf=2026-04-20&insuranceType=Fleet&expiringWithinDays=30", "", "AssetInsuranceMaintain", false)
+	rec := call(h, http.MethodGet, "/v1/assets/insurance-report?legalEntityId="+le+"&asOf=2026-04-20&insuranceType=Fleet&expiringWithinDays=30", "", "assets.insurance.maintain", false)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"asOf":"2026-04-20"`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -227,7 +227,7 @@ func TestInsuranceReport_FiltersAndDefaults(t *testing.T) {
 		lastReport.Limit != 50 {
 		t.Fatalf("store received %+v", lastReport)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/insurance-report?legalEntityId="+le, "", "AssetView", false); rec.Code != http.StatusOK || lastReport.ExpiringWithinDays != nil ||
+	if rec := call(h, http.MethodGet, "/v1/assets/insurance-report?legalEntityId="+le, "", "assets.asset.view", false); rec.Code != http.StatusOK || lastReport.ExpiringWithinDays != nil ||
 		lastReport.AsOf.IsZero() {
 		t.Fatalf("defaults: status %d filter %+v", rec.Code, lastReport)
 	}
@@ -238,7 +238,7 @@ func TestInsuranceReport_FiltersAndDefaults(t *testing.T) {
 		"expiringWithinDays": "/v1/assets/insurance-report?legalEntityId=" + le + "&expiringWithinDays=400",
 	}
 	for field, path := range cases {
-		rec := call(h, http.MethodGet, path, "", "AssetView", false)
+		rec := call(h, http.MethodGet, path, "", "assets.asset.view", false)
 		if rec.Code != http.StatusBadRequest || problem(t, rec).Errors[field] == "" {
 			t.Errorf("%s: status %d body %s", field, rec.Code, rec.Body.String())
 		}

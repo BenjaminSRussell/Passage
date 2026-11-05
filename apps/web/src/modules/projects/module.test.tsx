@@ -88,10 +88,10 @@ describe("projects module", () => {
     expect(projects.routes.every((r) => r.element !== null)).toBe(true);
   });
 
-  it("gates nav by the service duties: inquiry for reading, ProjMaintain for creating", () => {
+  it("gates nav by the service duties: inquiry for reading, projects.maintain for creating", () => {
     expect(projects.nav.every((n) => n.to.startsWith("/projects"))).toBe(true);
-    expect(projects.nav.find((n) => n.to === "/projects/list")?.duty).toBe("ProjInquire");
-    expect(projects.nav.find((n) => n.to === "/projects/new")?.duty).toBe("ProjMaintain");
+    expect(projects.nav.find((n) => n.to === "/projects/list")?.duty).toBe("projects.inquire");
+    expect(projects.nav.find((n) => n.to === "/projects/new")?.duty).toBe("projects.maintain");
   });
 
   it("is auto-discovered by the registry", () => {
@@ -171,9 +171,9 @@ describe("projects list", () => {
   });
 
   it("shows an alert when the list cannot load", async () => {
-    handler = () => problem(403, "AUTH-0003", "missing duty ProjInquire");
+    handler = () => problem(403, "AUTH-0003", "missing duty projects.inquire");
     renderAt("/projects/list");
-    expect(await screen.findByText(/missing duty ProjInquire \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty projects.inquire \(AUTH-0003\)/)).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Projects" })).not.toBeInTheDocument();
   });
 });

@@ -61,9 +61,14 @@ var serviceGrants = map[string]map[string][]string{
 		"revrec": {"revrec.allocation.read"},
 		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
+	// fulfillment and transport reach carriers only through carrier-gateway (#482); transport buys no labels.
 	"fulfillment": {
-		"sales":     {"sales.order.record-delivery"},
-		"inventory": {"inventory.issue.claim"},
+		"sales":           {"sales.order.record-delivery"},
+		"inventory":       {"inventory.issue.claim"},
+		"carrier-gateway": {"carrier.rate.quote", "carrier.label.create", "carrier.tracking.read"},
+	},
+	"transport": {
+		"carrier-gateway": {"carrier.rate.quote", "carrier.tracking.read"},
 	},
 	"batch": {
 		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
@@ -75,8 +80,8 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":  {"inventory.ownership-change.read"},
 		"party":      {"party.read"},
 		"org":        {"org.read"},
-		"tax":        {"Calculate tax", "tax.transaction.record"},
-		"compliance": {"compliance.legal_hold.check"},
+		"tax":        {"tax.tax.calculate", "tax.transaction.record"},
+		"compliance": {"compliance.legal-hold.check"},
 	},
 	"tax": {
 		"ledger": {"ledger.balance.read"},
@@ -84,8 +89,8 @@ var serviceGrants = map[string]map[string][]string{
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},
-		"tax":    {"Calculate withholding tax"},
-		"party":  {"party.vendor_bank.reveal"},
+		"tax":    {"tax.withholding.calculate"},
+		"party":  {"party.vendor-bank.reveal"},
 	},
 	"close": {
 		"ledger": {"ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"},
@@ -101,6 +106,9 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"costing": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
+	},
+	"inventory": {
+		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
 	},
 	"eam": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},
@@ -122,6 +130,10 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"payroll": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
+	},
+	// expense posts the reimbursement liability of approved reports (#472) and reads nothing back.
+	"expense": {
+		"ledger": {"ledger.entry.post"},
 	},
 	"sales": {
 		"product":     {"product.configuration.read"},
@@ -146,7 +158,7 @@ var serviceGrants = map[string]map[string][]string{
 		"engineering": {"engineering.eco.workflow"},
 		"quality":     {"quality.capa.execute"},
 		"transport":   {"transport.tender.execute"},
-		"party":       {"party.approve"},
+		"party":       {"party.approve", "party.merge.execute"},
 	},
 	"party": {
 		"numbering": {"numbering.sequence.allocate"},
@@ -158,19 +170,22 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory": {"inventory.issue.claim"},
 	},
 	"hr": {
-		"compliance": {"compliance.legal_hold.check"},
+		"compliance": {"compliance.legal-hold.check"},
 		"numbering":  {"numbering.sequence.allocate"},
 	},
 	"product": {
 		"org": {"org.read"},
 	},
 	"migration": {
-		"party":       {"party.import.write"},
-		"product":     {"product.import.write"},
-		"receivables": {"receivables.import.write"},
+		"party":       {"party.import.write", "party.import.read"},
+		"product":     {"product.import.write", "product.import.read"},
+		"receivables": {"receivables.import.write", "receivables.import.read"},
+		"engineering": {"engineering.import.write", "engineering.import.read"},
 	},
 	"migration-factory": {
-		"receivables": {"receivables.import.write", "ARView"},
+		"receivables": {"receivables.import.write", "receivables.view"},
+		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
+		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"integration-hub": {
 		"migration": {"migration.outbound.render", "migration.xref.record"},
@@ -195,6 +210,22 @@ func ServiceGrantTable() map[string]map[string][]string {
 }
 
 func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
+
+// tenantLevelDuties act on tenant-level data that no single legal entity owns
+// (a party merge moves roles in every entity). A token carrying one names no
+// legal entity and carries no other duty, and every other token names one
+// entity, so a tenant-level duty never rides in an entity-scoped token (#450).
+var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}}
+
+func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
+	n := 0
+	for _, d := range duties {
+		if _, ok := tenantLevelDuties[d]; ok {
+			n++
+		}
+	}
+	return n > 0 && n == len(duties), n > 0 && n < len(duties)
+}
 
 // ServiceClaims is the signed payload: iss calls aud for tenant tid in legal
 // entity le on behalf of end user act, holding only the service's own duties.
@@ -281,19 +312,28 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 
 // MintDuties is Mint restricted to the given duties: the token carries the
 // intersection of duties and the service's grant for aud, never more than the
-// grant. A nil duties means the whole grant.
+// grant. A nil duties means the whole grant less its tenant-level duties, which
+// are signed only when asked for by name.
 func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, only []string) (string, error) {
 	duties := serviceGrant(s.name, aud)
-	if only != nil {
+	if only == nil {
+		duties = slices.DeleteFunc(slices.Clone(duties), func(d string) bool { _, ok := tenantLevelDuties[d]; return ok })
+	} else {
 		duties = slices.DeleteFunc(slices.Clone(duties), func(d string) bool { return !slices.Contains(only, d) })
 	}
 	if len(duties) == 0 {
 		return "", fmt.Errorf("%w: %s -> %s", ErrNoServiceGrant, s.name, aud)
 	}
 	le, ok := s.legalEntityFor(p, legalEntity, duties)
+	if tenantLevel, mixed := tenantLevelToken(duties); mixed {
+		return "", fmt.Errorf("%w: %s -> %s mixes tenant-level and legal-entity duties; restrict it with MintDuties", ErrNoServiceGrant, s.name, aud)
+	} else if tenantLevel {
+		// A tenant-level token is minted only for a tenant administrator with no legal-entity claim, and names no entity.
+		le, ok = "", legalEntity == "" && IsTenantAdmin(p)
+	}
 	tid, tok := canonicalUUID(p.TenantID)
 	if !ok || !tok || tid == ids.Nil {
-		return "", errors.New("service token needs a tenant and one legal entity within the end user's scope")
+		return "", errors.New("service token needs a tenant and one legal entity within the end user's scope (none, for a tenant administrator, on a tenant-level duty)")
 	}
 	if p.UserID == "" {
 		return "", errors.New("service token needs the end user as act")
@@ -337,7 +377,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 
 var readDuties = map[string]struct{}{
 	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.account.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
-	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal_hold.check": {},
+	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal-hold.check": {},
 }
 
 func onlyReads(duties []string) bool {
@@ -520,8 +560,12 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 	if tid, ok := canonicalUUID(c.Tid); !ok || tid != c.Tid || tid == ids.Nil {
 		return ServiceClaims{}, ErrServiceToken
 	}
-	if le, ok := canonicalUUID(c.Le); !ok || le != c.Le || le == ids.Nil {
+	if tenantLevel, mixed := tenantLevelToken(c.Duties); mixed || tenantLevel != (c.Le == "") {
 		return ServiceClaims{}, ErrServiceToken
+	} else if !tenantLevel {
+		if le, ok := canonicalUUID(c.Le); !ok || le != c.Le || le == ids.Nil {
+			return ServiceClaims{}, ErrServiceToken
+		}
 	}
 	grant := serviceGrant(c.Iss, c.Aud)
 	if len(c.Duties) == 0 || slices.ContainsFunc(c.Duties, func(d string) bool { return d == DutyAllScope || !slices.Contains(grant, d) }) {

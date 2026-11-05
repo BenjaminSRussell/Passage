@@ -196,13 +196,13 @@ describe("sealed RFQ pages", () => {
 
   it("shows a refused scoring with its code", async () => {
     stubFetch((url, init) => {
-      if ((init as RequestInit).method === "PUT") return problem(403, "AUTH-0003", "missing duty RFQAward");
+      if ((init as RequestInit).method === "PUT") return problem(403, "AUTH-0003", "missing duty procurement.rfq.award");
       if (url.includes("/compare")) return json(comparison);
       return json(opened, 200, { ETag: '"5"' });
     });
     renderAt(`/purchasing/rfqs/${RFQ_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Save scores" }));
-    expect(await screen.findByText("missing duty RFQAward (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty procurement.rfq.award (AUTH-0003)")).toBeInTheDocument();
   });
 
   it("marks sealed RFQs in the list", async () => {

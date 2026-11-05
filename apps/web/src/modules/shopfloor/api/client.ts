@@ -570,6 +570,32 @@ export function getOee(
   );
 }
 
+/** One event of the live OEE stream: the resource's bucket that holds the server's now. */
+export interface OeeTile {
+  resourceId: string;
+  bucketStart: string;
+  bucketEnd: string;
+  computedAt: string;
+  /** Null while the bucket has no planned time or the resource has no machine. */
+  bucket: OeeBucket | null;
+}
+
+/** The Server-Sent Events URL of a resource's live OEE tile (AC-25.4). */
+export function oeeStreamUrl(resourceId: string, bucket: OeeBucketSize = "15m"): string {
+  return `${base}/oee/stream${query({ resourceId, bucket })}`;
+}
+
+/** Parses the data of an `oee` event; null when it is not an OeeTile. */
+export function parseOeeTile(data: string): OeeTile | null {
+  try {
+    const t = JSON.parse(data) as Partial<OeeTile> | null;
+    if (!t || typeof t.resourceId !== "string" || typeof t.bucketStart !== "string" || typeof t.computedAt !== "string") return null;
+    return { resourceId: t.resourceId, bucketStart: t.bucketStart, bucketEnd: t.bucketEnd ?? "", computedAt: t.computedAt, bucket: t.bucket ?? null };
+  } catch {
+    return null;
+  }
+}
+
 /** Exports approved, not yet exported pay lines in the range as one batch. */
 export function exportPay(range: { from: string; to: string }, key: string = newKey()): Promise<PayExport> {
   return post<PayExport>("/pay:export", range, key);

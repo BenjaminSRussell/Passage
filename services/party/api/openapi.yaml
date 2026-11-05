@@ -73,6 +73,7 @@ paths:
     get:
       operationId: getParty
       x-passage-duty: party.read
+      x-passage-duty-alternatives: [party.import.read]
       description: A merged party answers with its survivor (at most 5 hops), requestedId and redirected true. dob is returned only to callers holding pii.read; others see "••••" when it is set.
       responses:
         '200':
@@ -179,29 +180,106 @@ paths:
   /v1/party/parties/{id}:merge:
     parameters:
       - { name: id, in: path, required: true, description: Surviving party id., schema: { type: string, format: uuid } }
+      - { name: Idempotency-Key, in: header, required: false, description: A replay with the same key and body returns the original request with 202 and emits nothing; the same key with another body is 409 idempotency_key_reuse. Scoped to the surviving party., schema: { type: string } }
     post:
-      operationId: mergeParties
-      summary: Merge a duplicate party into the surviving party.
+      operationId: requestPartyMerge
+      summary: Request a merge of a duplicate party into the surviving party; nothing is merged until another user approves it.
       x-passage-duty: party.merge
-      description: Needs duty party.merge from a tenant.administer caller with no legal-entity claim, else 403 AUTH-0003. Merges within the caller's tenant only; a party id from another tenant is 404. Customer and vendor roles and invoice-account references move to the survivor in one transaction, the merged party becomes status merged, and dev.passage.party.party.merged.v1 is emitted. Both parties must be the same type; the same party twice, an already-merged party, or a repeat of a completed merge is 409 PTY-MERGE-CONFLICT. Both holding a role in the same legal entity is 409 PTY-MERGE-ROLE-CONFLICT. rules names a survivorship rule per merge field (keepWinner, keepLoser, newest, nonEmpty); an unknown field or rule is 422 PTY-PARTY-INVALID.
+      x-passage-gateway-duty: party.write
+      description: >-
+        Gateway (policies/authz) - the route is opened by party.write; party.merge is a flag duty the handler checks, from a
+        tenant.administer caller with no legal-entity claim (403 AUTH-0003 otherwise). The call records a merge_request
+        (status pending, requestedBy = the caller) and emits dev.passage.party.merge.requested.v1, which starts the workflow-ts merge
+        approval. A user other than the requester, holding party.merge.approve and tenant.administer with no legal-entity claim and
+        holding neither payment-proposal.approve nor payment-run.execute, decides it at POST /v1/workflows/party-merges/{id}:approve or
+        :reject; workflow-ts then calls POST /v1/party/merge-requests/{id}:approve, which merges (customer and vendor roles and
+        invoice-account references move to the survivor, the merged party becomes status merged, dev.passage.party.party.merged.v1).
+        The parties are checked now and again on approval. Within the caller's tenant only; a party id from another tenant is 404.
+        A malformed id or mergedPartyId, or an unknown survivorship field or rule (keepWinner, keepLoser, newest, nonEmpty), is 422
+        PTY-PARTY-INVALID. The same party twice, different types, or an already-merged party is 409 PTY-MERGE-CONFLICT; both holding a
+        role in the same legal entity is 409 PTY-MERGE-ROLE-CONFLICT; an open request for the same pair is 409 PTY-MERGE-PENDING
+        (errors.mergeRequestId names it).
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/MergeRequest' }
       responses:
-        '200':
-          description: The merge record.
+        '202':
+          description: The pending merge request.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MergeResult' }
+              schema: { $ref: '#/components/schemas/MergeApproval' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { $ref: '#/components/responses/Problem' }
-        '422': { $ref: '#/components/responses/Problem' }
+        '409': { description: 'PTY-MERGE-CONFLICT, PTY-MERGE-ROLE-CONFLICT, PTY-MERGE-PENDING or idempotency_key_reuse.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PARTY-INVALID: malformed id, mergedPartyId or survivorship rule.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/merge-requests/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getMergeRequest
+      x-passage-duty: party.read
+      responses:
+        '200': { description: The merge request., content: { application/json: { schema: { $ref: '#/components/schemas/MergeApproval' } } } }
+        '401': { description: 'AUTH-0001: no principal or blank X-Passage-User.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-MERGE-REQUEST-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/merge-requests/{id}:approve:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approveMergeRequest
+      x-passage-duty: party.merge.execute
+      description: >-
+        Executes the held merge in one transaction (see :merge) and records the approver; dev.passage.party.party.merged.v1 announces it. Only the workflow-ts merge approval calls it: a workflow-ts service token with the service-only duty
+        party.merge.execute that names no legal entity, act = the approver workflow-ts authenticated. Any other caller, a person
+        included, is 403 AUTH-0003. The approver may not be the requester (403 PTY-MERGE-SELF-APPROVAL; the table refuses it too).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
+      responses:
+        '200':
+          description: The decided request. The same approver repeating the same decision gets 200 with the stored request and nothing is merged twice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MergeApproval' }
+        '401': { description: 'AUTH-0001: missing, invalid or replayed service token.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003 (not the workflow-ts merge token) or PTY-MERGE-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: 'PTY-MERGE-REQUEST-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-MERGE-DECIDED: already decided differently or by someone else. PTY-MERGE-STALE: the parties changed since the request (merged, a role conflict, or gone); nothing is merged and the request stays pending for a rejection.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-REASON-TOO-LONG: decision reason exceeds 500 Unicode characters.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/merge-requests/{id}:reject:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectMergeRequest
+      x-passage-duty: party.merge.execute
+      description: >-
+        Closes the request without merging and emits dev.passage.party.merge.rejected.v1. Only the workflow-ts merge approval calls it: a workflow-ts service token with the service-only duty
+        party.merge.execute that names no legal entity, act = the approver workflow-ts authenticated. Any other caller, a person
+        included, is 403 AUTH-0003. The approver may not be the requester (403 PTY-MERGE-SELF-APPROVAL; the table refuses it too).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
+      responses:
+        '200':
+          description: The decided request. The same approver repeating the same decision gets 200 with the stored request and nothing is merged twice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MergeApproval' }
+        '401': { description: 'AUTH-0001: missing, invalid or replayed service token.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003 (not the workflow-ts merge token) or PTY-MERGE-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: 'PTY-MERGE-REQUEST-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-MERGE-DECIDED: already decided differently or by someone else.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-REASON-TOO-LONG: decision reason exceeds 500 Unicode characters.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/parties/{id}/vendors:
     parameters:
       - { name: id, in: path, required: true, description: Party id., schema: { type: string, format: uuid } }
@@ -266,18 +344,32 @@ paths:
     get:
       operationId: getVendor
       x-passage-duty: party.read
+      x-passage-duty-alternatives: [party.import.read]
       description: The vendor role, including vendorGroupId.
       responses:
         '200': { description: The vendor role., content: { application/json: { schema: { $ref: '#/components/schemas/Vendor' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: 'PTY-VENDOR-NOT-FOUND (unknown id, another tenant or legal entity).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/customers/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: Customer role id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getCustomer
+      x-passage-duty: party.read
+      x-passage-duty-alternatives: [party.import.read]
+      description: The customer role in the caller's legal entities, with its version as the ETag. The migration loader reads the roles it loaded through this route (service duty party.import.read) to reconcile a run.
+      responses:
+        '200': { description: The customer role., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Customer' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CUSTOMER-NOT-FOUND (unknown id, another tenant or legal entity).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/vendors/{id}/bank-accounts:
     parameters:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
     post:
       operationId: addVendorBankAccount
-      x-passage-duty: party.vendor_bank.write
+      x-passage-duty: party.vendor-bank.write
       description: Stores a bank account; account and routing numbers are encrypted per tenant and field. Needs X-Passage-User. 503 PTY-BANK-ENCRYPTION-UNAVAILABLE when no field encryption keys are configured.
       requestBody:
         required: true
@@ -305,7 +397,7 @@ paths:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
     get:
       operationId: revealVendorBankAccounts
-      x-passage-duty: party.vendor_bank.reveal
+      x-passage-duty: party.vendor-bank.reveal
       description: Bank accounts with accountNumber and routingNumber decrypted. Each call is logged with the user and vendor id.
       responses:
         '200': { description: 'bankAccounts, unmasked.', content: { application/json: { schema: { type: object, required: [bankAccounts], properties: { bankAccounts: { type: array, items: { $ref: '#/components/schemas/BankAccount' } } } } } } }
@@ -362,7 +454,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     put:
       operationId: setProtectedFields
-      x-passage-duty: party.approval_policy.write
+      x-passage-duty: party.approval-policy.write
       description: Replaces the set of fields that need approval in this legal entity. fields is required; [] is an explicit unprotect-all, and a missing or null fields is 422. Only credit_limit is protectable today; changes already pending stay decidable. Every change enqueues dev.passage.party.protectedfields.updated.v1 with before, after and the actor. A credit limit request by the user who last unprotected the field within 24 hours is still held for approval. The legal entity id is not validated against the org service (party keeps no legal entity table); a scoped caller can only address its own.
       requestBody:
         required: true
@@ -673,16 +765,21 @@ components:
         rules:
           type: object
           additionalProperties: { type: string, enum: [keepWinner, keepLoser, newest, nonEmpty] }
-    MergeResult:
+    MergeApproval:
       type: object
-      required: [mergeId, survivorPartyId, mergedPartyId, rolesMoved, referencesRewritten, resolved]
+      required: [id, survivorPartyId, mergedPartyId, rules, status, requestedBy, decidedBy, reason, mergeId, requestedAt, decidedAt]
       properties:
-        mergeId: { type: string }
+        id: { type: string, format: uuid }
         survivorPartyId: { type: string, format: uuid }
         mergedPartyId: { type: string, format: uuid }
-        rolesMoved: { type: integer }
-        referencesRewritten: { type: integer }
-        resolved: { type: object, additionalProperties: { type: string } }
+        rules: { type: object, additionalProperties: { type: string, enum: [keepWinner, keepLoser, newest, nonEmpty] } }
+        status: { type: string, enum: [pending, approved, rejected] }
+        requestedBy: { type: string }
+        decidedBy: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+        mergeId: { type: string, format: uuid, nullable: true, description: The party_merge record, set once approved. }
+        requestedAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time, nullable: true }
     Decision:
       type: object
       additionalProperties: false

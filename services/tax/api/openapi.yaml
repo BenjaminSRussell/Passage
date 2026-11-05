@@ -23,7 +23,7 @@ paths:
   /v1/tax/calculate:
     post:
       operationId: calculateTax
-      x-passage-duty: Calculate tax
+      x-passage-duty: tax.tax.calculate
       summary: Stateless tax calculation of one document
       description: >-
         With a provider name the call goes to that provider and falls back to the internal engine on a
@@ -47,7 +47,7 @@ paths:
   /v1/tax/withholding/calculate:
     post:
       operationId: calculateWithholding
-      x-passage-duty: Calculate withholding tax
+      x-passage-duty: tax.withholding.calculate
       summary: Stateless withholding tax calculation
       requestBody:
         required: true

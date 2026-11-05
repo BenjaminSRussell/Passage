@@ -8,8 +8,8 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-/** Saving a rule needs this duty (the service enforces it); reading needs WarehouseView. */
-const DUTY_SAVE = "WarehouseRelease";
+/** Saving a rule needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
+const DUTY_SAVE = "fulfillment.warehouse.release";
 
 const columns: DataTableColumn<ReleaseRule>[] = [
   { key: "warehouseId", header: "Warehouse", mono: true },
@@ -174,7 +174,7 @@ export function ReleaseRulesPage() {
           </form>
         </Card>
       ) : (
-        <p className={styles.note}>Changing a release rule needs the WarehouseRelease duty.</p>
+        <p className={styles.note}>Changing a release rule needs the fulfillment.warehouse.release duty.</p>
       )}
     </div>
   );

@@ -93,30 +93,30 @@ func decodeReport(t *testing.T, rec *httptest.ResponseRecorder) (reportBody, map
 func TestEffectivePermissionsEndpoint(t *testing.T) {
 	app, tenantA, tenantB := setup(t)
 	router := newEffectiveRouter(t, app)
-	const view = "View effective permissions"
+	const view = "identity.effective-permission.view"
 	path := "/v1/identity/users/" + userID + "/effective-permissions"
 
-	grantRole(t, app, tenantA, "View vendors", "", "now() - interval '1 day', null")
-	grantRole(t, app, tenantA, "Maintain users", "", "now() - interval '2 days', now() - interval '1 day'")
-	grantRole(t, app, tenantA, "View audit log", legalA, "now() - interval '1 day', null")
-	grantRole(t, app, tenantB, "Maintain vendors", "", "now() - interval '1 day', null")
+	grantRole(t, app, tenantA, "party.vendor.view", "", "now() - interval '1 day', null")
+	grantRole(t, app, tenantA, "identity.user.maintain", "", "now() - interval '2 days', now() - interval '1 day'")
+	grantRole(t, app, tenantA, "audit.log.view", legalA, "now() - interval '1 day', null")
+	grantRole(t, app, tenantB, "party.vendor.maintain", "", "now() - interval '1 day', null")
 
 	t.Run("tenant-wide active duties only, unknown roles ignored", func(t *testing.T) {
 		body, rows := decodeReport(t, getReport(router, tenantA, path, view))
-		if len(body.Duties) != 1 || body.Duties[0] != "View vendors" {
-			t.Fatalf("duties = %v, want [View vendors]", body.Duties)
+		if len(body.Duties) != 1 || body.Duties[0] != "party.vendor.view" {
+			t.Fatalf("duties = %v, want [party.vendor.view]", body.Duties)
 		}
 		if len(body.IgnoredRoles) != 1 || body.IgnoredRoles[0] != "tenant_admin" {
 			t.Fatalf("ignoredRoles = %v", body.IgnoredRoles)
 		}
-		if got := rows["GET /v1/vendors{,/**}"]; !got.Allow || got.Duty != "View vendors" {
-			t.Errorf("GET vendors = %+v, want allowed by View vendors", got)
+		if got := rows["GET /v1/vendors{,/**}"]; !got.Allow || got.Duty != "party.vendor.view" {
+			t.Errorf("GET vendors = %+v, want allowed by party.vendor.view", got)
 		}
-		if got := rows["POST /v1/vendors{,/**}"]; got.Allow || got.DutyMissing != "Maintain vendors" {
-			t.Errorf("POST vendors = %+v, want denied missing Maintain vendors", got)
+		if got := rows["POST /v1/vendors{,/**}"]; got.Allow || got.DutyMissing != "party.vendor.maintain" {
+			t.Errorf("POST vendors = %+v, want denied missing party.vendor.maintain", got)
 		}
-		if got := rows["GET /v1/identity/users{,/**}"]; got.Allow || got.DutyMissing != "Maintain users" {
-			t.Errorf("expired Maintain users must not grant: %+v", got)
+		if got := rows["GET /v1/identity/users{,/**}"]; got.Allow || got.DutyMissing != "identity.user.maintain" {
+			t.Errorf("expired identity.user.maintain must not grant: %+v", got)
 		}
 		if got := rows["GET /v1/audit{,/**}"]; got.Allow {
 			t.Errorf("legal-entity-scoped duty leaked into tenant-wide report: %+v", got)
@@ -126,9 +126,9 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 	t.Run("legal entity adds its scoped duties", func(t *testing.T) {
 		body, rows := decodeReport(t, getReport(router, tenantA, path+"?legalEntityId="+legalA, view))
 		if len(body.Duties) != 2 || len(body.IgnoredRoles) != 2 {
-			t.Fatalf("duties = %v ignored = %v, want View audit log, View vendors and ap_clerk, tenant_admin", body.Duties, body.IgnoredRoles)
+			t.Fatalf("duties = %v ignored = %v, want audit.log.view, party.vendor.view and ap_clerk, tenant_admin", body.Duties, body.IgnoredRoles)
 		}
-		if got := rows["GET /v1/audit{,/**}"]; !got.Allow || got.Duty != "View audit log" {
+		if got := rows["GET /v1/audit{,/**}"]; !got.Allow || got.Duty != "audit.log.view" {
 			t.Errorf("GET audit = %+v", got)
 		}
 		_, other := decodeReport(t, getReport(router, tenantA, path+"?legalEntityId="+legalB, view))
@@ -139,7 +139,7 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 
 	t.Run("report is tenant-isolated", func(t *testing.T) {
 		body, _ := decodeReport(t, getReport(router, tenantB, path, view))
-		if len(body.Duties) != 1 || body.Duties[0] != "Maintain vendors" {
+		if len(body.Duties) != 1 || body.Duties[0] != "party.vendor.maintain" {
 			t.Fatalf("tenant B duties = %v", body.Duties)
 		}
 		if rec := getReport(router, testkit.TenantID(3), path, view); rec.Code != http.StatusNotFound {
@@ -147,8 +147,8 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 		}
 	})
 
-	t.Run("Maintain users holder is accepted like OPA", func(t *testing.T) {
-		if rec := getReport(router, tenantA, path, "Maintain users"); rec.Code != http.StatusOK {
+	t.Run("identity.user.maintain holder is accepted like OPA", func(t *testing.T) {
+		if rec := getReport(router, tenantA, path, "identity.user.maintain"); rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 		}
 	})
@@ -185,7 +185,7 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 			want int
 		}{
 			"no duty":            {getReport(router, tenantA, path), http.StatusForbidden},
-			"wrong duty":         {getReport(router, tenantA, path, "View vendors"), http.StatusForbidden},
+			"wrong duty":         {getReport(router, tenantA, path, "party.vendor.view"), http.StatusForbidden},
 			"bad user id":        {getReport(router, tenantA, "/v1/identity/users/not-a-uuid/effective-permissions", view), http.StatusBadRequest},
 			"bad legal entity":   {getReport(router, tenantA, path+"?legalEntityId=x", view), http.StatusBadRequest},
 			"unknown user":       {getReport(router, tenantA, "/v1/identity/users/20000000-0000-0000-0000-0000000000ff/effective-permissions", view), http.StatusNotFound},
@@ -213,10 +213,10 @@ func TestEffectivePermissionsThroughTenantMiddleware_AllScopeIsReadOnly(t *testi
 		return rec
 	}
 
-	if rec := call(http.MethodGet, "View effective permissions,"+tenant.DutyAllScope); rec.Code != http.StatusOK {
+	if rec := call(http.MethodGet, "identity.effective-permission.view,"+tenant.DutyAllScope); rec.Code != http.StatusOK {
 		t.Fatalf("GET with ALL and the duty: %d %s", rec.Code, rec.Body)
 	}
-	if rec := call(http.MethodGet, "View effective permissions"); rec.Code != http.StatusForbidden {
+	if rec := call(http.MethodGet, "identity.effective-permission.view"); rec.Code != http.StatusForbidden {
 		t.Fatalf("GET with ALL but no all-scope duty: %d %s", rec.Code, rec.Body)
 	}
 	if rec := call(http.MethodGet, tenant.DutyAllScope); rec.Code != http.StatusForbidden {

@@ -47,13 +47,13 @@ func TestTerminateLease_PreconditionsValidationAndHappyPath(t *testing.T) {
 		}
 		return do(h, req{method: http.MethodPost, path: path, body: body, duties: duties, key: key, headers: headers})
 	}
-	if rec := terminate(body, `"1"`, "AssetView", true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without LeaseMaintain status = %d", rec.Code)
+	if rec := terminate(body, `"1"`, "assets.asset.view", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.lease.maintain status = %d", rec.Code)
 	}
-	if rec := terminate(body, `"1"`, "LeaseMaintain", false); rec.Code != http.StatusBadRequest {
+	if rec := terminate(body, `"1"`, "assets.lease.maintain", false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("without Idempotency-Key status = %d", rec.Code)
 	}
-	if rec := terminate(body, "", "LeaseMaintain", true); rec.Code != http.StatusPreconditionRequired {
+	if rec := terminate(body, "", "assets.lease.maintain", true); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("without If-Match status = %d", rec.Code)
 	}
 	long := `{"afterPeriod":2,"reason":"` + strings.Repeat("x", 501) + `"}`
@@ -63,15 +63,15 @@ func TestTerminateLease_PreconditionsValidationAndHappyPath(t *testing.T) {
 		"payment text":     {`{"afterPeriod":2,"terminationPayment":"lots"}`, "terminationPayment"},
 		"reason too long":  {long, "reason"},
 	} {
-		rec := terminate(tc.body, `"1"`, "LeaseMaintain", true)
+		rec := terminate(tc.body, `"1"`, "assets.lease.maintain", true)
 		if rec.Code != http.StatusBadRequest || problem(t, rec).Errors[tc.field] == "" {
 			t.Errorf("%s: status %d body %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	if rec := terminate(body, `"7"`, "LeaseMaintain", true); rec.Code != http.StatusPreconditionFailed {
+	if rec := terminate(body, `"7"`, "assets.lease.maintain", true); rec.Code != http.StatusPreconditionFailed {
 		t.Fatalf("stale If-Match status = %d", rec.Code)
 	}
-	rec := terminate(body, `"1"`, "LeaseMaintain", true)
+	rec := terminate(body, `"1"`, "assets.lease.maintain", true)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"2"` {
 		t.Fatalf("terminate status = %d etag %q body %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
@@ -82,10 +82,10 @@ func TestTerminateLease_PreconditionsValidationAndHappyPath(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	// A terminated lease cannot be terminated again.
-	if rec := terminate(body, `"2"`, "LeaseMaintain", true); rec.Code != http.StatusUnprocessableEntity || problem(t, rec).Code != domain.CodeLeaseTermination {
+	if rec := terminate(body, `"2"`, "assets.lease.maintain", true); rec.Code != http.StatusUnprocessableEntity || problem(t, rec).Code != domain.CodeLeaseTermination {
 		t.Fatalf("second termination status = %d body %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, req{method: http.MethodPost, path: "/v1/leases/x/terminate", body: body, duties: "LeaseMaintain", key: true,
+	if rec := do(h, req{method: http.MethodPost, path: "/v1/leases/x/terminate", body: body, duties: "assets.lease.maintain", key: true,
 		headers: map[string]string{"If-Match": `"1"`}}); rec.Code != http.StatusNotFound {
 		t.Fatalf("malformed lease id status = %d", rec.Code)
 	}

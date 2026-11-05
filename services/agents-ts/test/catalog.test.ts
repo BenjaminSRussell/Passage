@@ -10,7 +10,7 @@ describe("agent catalog (FR-47.5 to FR-47.7, FR-47.10)", () => {
     for (const a of catalog) {
       expect(a.version).toBe(1);
       expect(a.modelId).toBe("claude-test-model");
-      // 9.47.5: starting a run needs AgentInvoke plus the agent's duty.
+      // 9.47.5: starting a run needs agents.invoke plus the agent's duty.
       expect(a.requiredDuties[0]).toBe(AGENT_INVOKE_DUTY);
       expect(a.requiredDuties.length).toBeGreaterThan(1);
     }

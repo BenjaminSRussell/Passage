@@ -83,7 +83,7 @@ function renderPage(element: React.ReactNode, path: string) {
   return render(
     <MemoryRouter initialEntries={[`/org/${path}`]}>
       <Routes>
-        <Route element={<OrgLayout duties={["org.switcher.all_scope"]} />}>
+        <Route element={<OrgLayout duties={["org.switcher.all-scope"]} />}>
           <Route path={`/org/${path}`} element={element} />
         </Route>
       </Routes>

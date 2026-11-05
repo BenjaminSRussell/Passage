@@ -143,15 +143,15 @@ describe("service module", () => {
   });
 
   it("gates every nav entry by a PRD duty", () => {
-    const prdDuties = new Set(["SvcInquire", "SvcCaseCreate", "ActivityMaintain", "KbRead", "CaseMaintain", "CaseSetupAdmin", "SvcClaimMaintain"]);
+    const prdDuties = new Set(["fieldservice.inquire", "fieldservice.service-case.create", "fieldservice.activity.maintain", "fieldservice.knowledge-article.read", "fieldservice.case.maintain", "fieldservice.case-setup.admin", "fieldservice.supplier-claim.maintain"]);
     expect(service.nav.every((n) => n.to.startsWith("/service/") && prdDuties.has(n.duty ?? ""))).toBe(true);
-    expect(service.nav.find((n) => n.to === "/service/knowledge")?.duty).toBe("KbRead");
-    expect(service.nav.find((n) => n.to === "/service/activities")?.duty).toBe("ActivityMaintain");
-    expect(service.nav.find((n) => n.to === "/service/cases/new")?.duty).toBe("SvcCaseCreate");
-    expect(service.nav.find((n) => n.to === "/service/case-management")?.duty).toBe("CaseMaintain");
-    expect(service.nav.find((n) => n.to === "/service/case-setup")?.duty).toBe("CaseSetupAdmin");
-    expect(service.nav.find((n) => n.to === "/service/supplier-claims")?.duty).toBe("SvcClaimMaintain");
-    expect(service.nav.find((n) => n.to === "/service/case-mailbox")?.duty).toBe("CaseMaintain");
+    expect(service.nav.find((n) => n.to === "/service/knowledge")?.duty).toBe("fieldservice.knowledge-article.read");
+    expect(service.nav.find((n) => n.to === "/service/activities")?.duty).toBe("fieldservice.activity.maintain");
+    expect(service.nav.find((n) => n.to === "/service/cases/new")?.duty).toBe("fieldservice.service-case.create");
+    expect(service.nav.find((n) => n.to === "/service/case-management")?.duty).toBe("fieldservice.case.maintain");
+    expect(service.nav.find((n) => n.to === "/service/case-setup")?.duty).toBe("fieldservice.case-setup.admin");
+    expect(service.nav.find((n) => n.to === "/service/supplier-claims")?.duty).toBe("fieldservice.supplier-claim.maintain");
+    expect(service.nav.find((n) => n.to === "/service/case-mailbox")?.duty).toBe("fieldservice.case.maintain");
   });
 
   it("is auto-discovered by the registry", () => {
@@ -621,7 +621,7 @@ describe("service KPIs", () => {
     first.unmount();
 
     let failing = true;
-    handler = () => (failing ? { status: 403, body: { code: "COM-0403", detail: "missing duty SvcInquire" } } : { status: 200, body: kpis });
+    handler = () => (failing ? { status: 403, body: { code: "COM-0403", detail: "missing duty fieldservice.inquire" } } : { status: 200, body: kpis });
     renderAt("/service/kpis");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the service KPIs");

@@ -10,7 +10,42 @@ const (
 	CodeCompOutsideGuideline = "HCM-CMP-001"
 	CodeCompOverBudget       = "HCM-CMP-002"
 	CodeCompMatrix           = "HCM-CMP-003"
+	// CodeCompSoD is a cycle approval by someone who may not approve it: the
+	// cycle's creator, a submitter of one of its worksheets, or a worker whose
+	// own pay change is on the cycle.
+	CodeCompSoD = "HCM-CMP-SOD"
 )
+
+// CycleApproval is what the segregation-of-duties check needs about a cycle:
+// who created it, who submitted its worksheets, and whether the approver is a
+// worker, or the proposing manager, on one of the submitted rows.
+type CycleApproval struct {
+	Approver   string
+	Creator    string
+	Submitters []string
+	OnCycle    bool
+}
+
+// CheckCycleApprover enforces segregation of duties on a compensation cycle
+// approval: the approver must be a named user who did not create the cycle,
+// did not submit any of its worksheets, and is neither a worker nor the
+// proposing manager on any submitted row.
+func CheckCycleApprover(a CycleApproval) error {
+	switch {
+	case a.Approver == "":
+		return &Error{Code: CodeCompSoD, Detail: "a compensation cycle is approved by a named user"}
+	case a.Approver == a.Creator:
+		return &Error{Code: CodeCompSoD, Detail: "the user who created the cycle cannot approve it"}
+	case a.OnCycle:
+		return &Error{Code: CodeCompSoD, Detail: "a worker or proposing manager on the cycle cannot approve it"}
+	}
+	for _, s := range a.Submitters {
+		if s == a.Approver {
+			return &Error{Code: CodeCompSoD, Detail: "a user who submitted a worksheet on the cycle cannot approve it"}
+		}
+	}
+	return nil
+}
 
 var (
 	hundred       = decimal.NewFromInt(100)

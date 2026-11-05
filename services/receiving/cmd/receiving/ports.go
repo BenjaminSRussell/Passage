@@ -16,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/ocr"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/partydata"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
@@ -103,6 +104,12 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 		slog.Warn("TAX_URL is empty: ERS settlement skips every receipt as TAX_NOT_DETERMINED unless faked", "flag", "PASSAGE_ALLOW_FAKES")
 	} else {
 		slog.Warn("TAX_URL is empty: ERS settlement skips every receipt as TAX_NOT_DETERMINED")
+	}
+	if ports.Extractor, err = ocr.New(getenv("OCR_PROVIDER")); err != nil {
+		return api.Ports{}, err
+	}
+	if ports.Extractor == nil {
+		slog.Warn("OCR_PROVIDER is empty: OCR invoice captures answer 503 until a provider is set (\"local\" reads PDF text layers)")
 	}
 	if ports.LegalEntityCountry, err = domain.ParseLegalEntityCountries(getenv("LEGAL_ENTITY_COUNTRIES")); err != nil {
 		return api.Ports{}, err

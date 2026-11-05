@@ -897,18 +897,27 @@ func checkHireFits(ctx context.Context, tx pgx.Tx, tenantID string, req Requisit
 	return nil
 }
 
+// HireInput converts an accepted offer. WorkerID names an existing worker;
+// without it NewWorker creates the worker in the same transaction, taking the
+// candidate's name when NewWorker.LegalName is empty.
 type HireInput struct {
 	WorkerID       string
+	NewWorker      *WorkerInput
 	LegalEntityID  string
 	EmploymentType string
 	FTEShare       string
 	CompPlanID     string
 }
 
+// CodeOfferNoWorker is a hire from an offer with neither a worker nor the
+// details to create one, or one whose candidate was erased and gave no name.
+const CodeOfferNoWorker = "HCM-OFR-004"
+
 func (s *Postgres) HireFromOffer(ctx context.Context, id string, in HireInput) (PersonnelAction, error) {
 	p := principal(ctx)
 	var out PersonnelAction
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		in := in // a created worker's id is set on this copy only
 		offer, req, err := lockOffer(ctx, tx, p.TenantID, id)
 		if err != nil {
 			return err
@@ -928,6 +937,27 @@ func (s *Postgres) HireFromOffer(ctx context.Context, id string, in HireInput) (
 		}
 		if in.LegalEntityID != req.LegalEntityID {
 			return problem(http.StatusUnprocessableEntity, CodeOfferEntity, "the hire must be in the requisition's legal entity "+req.LegalEntityID)
+		}
+		if in.WorkerID == "" {
+			if in.NewWorker == nil {
+				return problem(http.StatusUnprocessableEntity, CodeOfferNoWorker, "a hire from an offer needs a workerId or a newWorker to create")
+			}
+			nw := *in.NewWorker
+			if nw.LegalName == "" {
+				cand, err := s.scanCandidate(p, tx.QueryRow(ctx, candidateSelect+` where tenant_id = $1 and id = $2`, p.TenantID, offer.CandidateID))
+				if err != nil {
+					return err
+				}
+				if cand.FullName == nil {
+					return problem(http.StatusUnprocessableEntity, CodeOfferNoWorker, "the candidate was erased; give newWorker.legalName")
+				}
+				nw.LegalName = *cand.FullName
+			}
+			created, err := s.createWorkerTx(ctx, tx, p, nw, nil)
+			if err != nil {
+				return err
+			}
+			in.WorkerID, in.NewWorker = created.ID, nil
 		}
 		if err := checkHireFits(ctx, tx, p.TenantID, req, in, start); err != nil {
 			return err
@@ -950,5 +980,8 @@ func (s *Postgres) HireFromOffer(ctx context.Context, id string, in HireInput) (
 		_, err = tx.Exec(ctx, `update hr_candidate set stage = 'HIRED', stage_changed_at = $3 where tenant_id = $1 and id = $2`, p.TenantID, offer.CandidateID, s.now())
 		return err
 	})
+	if pgUnique(err, "worker_tenant_id_personnel_number_key") {
+		return PersonnelAction{}, problem(http.StatusConflict, CodeWorkerDuplicate, "a worker with this personnel number already exists")
+	}
 	return out, err
 }

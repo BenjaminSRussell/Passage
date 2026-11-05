@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/api"
@@ -75,6 +76,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	// LEDGER_URL is optional: without it the parallel-run replay and the rollback compensations
+	// answer 503 MIG-1530; with it the service signing key is required.
+	ledger, err := ledgerclient.FromEnv(getenv, target.ServiceName)
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -89,5 +96,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if addr == "" {
 		addr = ":8080"
 	}
-	return httpx.Serve(ctx, addr, api.New(store.New(pool)).WithTarget(receivables).Routes())
+	srv := api.New(store.New(pool)).WithTarget(receivables)
+	if ledger != nil {
+		srv = srv.WithLedger(ledger)
+	}
+	return httpx.Serve(ctx, addr, srv.Routes())
 }

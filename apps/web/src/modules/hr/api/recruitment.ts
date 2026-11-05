@@ -68,8 +68,19 @@ export interface NewOffer {
   startDate: string;
 }
 
+/** The POST /v1/hr/workers body, created in the hire transaction; legalName defaults to the candidate's name. */
+export interface NewWorkerOnHire {
+  personnelNumber: string;
+  workerType: string;
+  partyPersonId: string;
+  nationalId: string;
+  legalName?: string;
+}
+
+/** Give workerId for an existing worker, or newWorker (needs hr.worker.maintain) to create one. */
 export interface HireFromOffer {
-  workerId: string;
+  workerId?: string;
+  newWorker?: NewWorkerOnHire;
   legalEntityId: string;
   employmentType: string;
   fteShare?: string;
@@ -155,6 +166,9 @@ export interface CompCycle {
   guidelineMatrix: GuidelineRow[];
   budgets: CycleBudget[];
   status: CycleStatus;
+  createdBy?: string;
+  approvedBy?: string;
+  approvedAt?: string;
   appliedAt?: string;
   actionIds?: string[];
 }
@@ -207,6 +221,11 @@ export function createCompCycle(input: NewCompCycle, key: string = newKey()): Pr
 
 export function advanceCompCycle(cycleId: string, to: CycleMove): Promise<CompCycle> {
   return move<CompCycle>(`/compensation/cycles/${seg(cycleId)}/advance`, to);
+}
+
+/** Segregated approval: the approver did not create the cycle, submit a worksheet or appear on a row (HCM-CMP-SOD). */
+export function approveCompCycle(cycleId: string): Promise<CompCycle> {
+  return send<CompCycle>(`/compensation/cycles/${seg(cycleId)}/approve`, { method: "POST" });
 }
 
 export function applyCompCycle(cycleId: string): Promise<CompCycle> {

@@ -332,8 +332,8 @@ const decisionLabel: Record<CapexDecision, string> = {
 
 /**
  * The decisions offered in each status (BR-37.12). The service re-checks the
- * move, the duty (CapexRequestApprove; reopen is the requester's
- * CapexRequestCreate) and that the approver did not create or request it.
+ * move, the duty (assets.capex-request.approve; reopen is the requester's
+ * assets.capex-request.create) and that the approver did not create or request it.
  */
 export function decisionsFor(status: CapexStatus): DecisionAction[] {
   switch (status) {

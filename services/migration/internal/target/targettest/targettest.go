@@ -1,6 +1,7 @@
-// Package targettest fakes the party, product and receivables import APIs for tests: it verifies the service token
-// the loader signs (issuer, audience, actor, duties, legal entity, single use), keeps what was created and can fail
-// or refuse calls on demand. It follows the documented request and answer shapes of the three services.
+// Package targettest fakes the party, product, receivables and engineering import APIs and their read-back routes for
+// tests: it verifies the service token the loader signs (issuer, audience, actor, duties, legal entity, single use),
+// keeps what was created and can fail or refuse calls on demand. It follows the documented request and answer shapes
+// of the four services.
 package targettest
 
 import (
@@ -29,8 +30,8 @@ type Call struct {
 
 // Fakes is the three services.
 type Fakes struct {
-	Signer                               *tenant.ServiceSigner
-	PartyURL, ProductURL, ReceivablesURL string
+	Signer                                               *tenant.ServiceSigner
+	PartyURL, ProductURL, ReceivablesURL, EngineeringURL string
 
 	mu    sync.Mutex
 	calls []Call
@@ -49,6 +50,8 @@ type Fakes struct {
 	Vendors    map[string]map[string]any
 	Products   map[string]*Product
 	OpenItems  map[string]map[string]any // legacyKey -> row
+	Boms       map[string]map[string]any // version id -> body as engineering answers it
+	Routes     map[string]map[string]any
 	itemIDs    map[string]string
 	idem       map[string]string // service|key -> answer body
 	accounts   map[string]bool
@@ -81,6 +84,7 @@ func Start(t testing.TB) *Fakes {
 		Signer: signer, Fail503: map[string]int{}, Always503: map[string]bool{}, SettledKeys: map[string]bool{},
 		Parties: map[string]*Party{}, Customers: map[string]map[string]any{}, Vendors: map[string]map[string]any{},
 		Products: map[string]*Product{}, OpenItems: map[string]map[string]any{}, itemIDs: map[string]string{}, idem: map[string]string{}, accounts: map[string]bool{},
+		Boms: map[string]map[string]any{}, Routes: map[string]map[string]any{},
 	}
 	serve := func(service string, h func(w http.ResponseWriter, r *http.Request, c Call)) string {
 		verifier := tenant.NewServiceVerifier(service, map[string]ed25519.PublicKey{"migration": pub})
@@ -113,6 +117,15 @@ func Start(t testing.TB) *Fakes {
 			}
 			f.calls[len(f.calls)-1].Claims = claims
 			c.Claims = claims
+			// Like the real routes: a read needs the service's import.read duty, a write its import.write duty.
+			need := service + ".import.write"
+			if r.Method == http.MethodGet {
+				need = service + ".import.read"
+			}
+			if !slices.Contains(claims.Duties, need) {
+				problem(w, http.StatusForbidden, "AUTH-0003", "missing duty "+need, nil)
+				return
+			}
 			h(w, r, c)
 		}))
 		t.Cleanup(srv.Close)
@@ -121,6 +134,7 @@ func Start(t testing.TB) *Fakes {
 	f.PartyURL = serve("party", f.party)
 	f.ProductURL = serve("product", f.product)
 	f.ReceivablesURL = serve("receivables", f.receivables)
+	f.EngineeringURL = serve("engineering", f.engineering)
 	return f
 }
 
@@ -186,6 +200,8 @@ var accepted = map[string][]string{
 	"product-patch": {"name", "description", "searchName", "lifecycleState"},
 	"batch":         {"legalEntityId", "importSource", "atomic", "items"},
 	"opening-row":   {"legacyKey", "documentNumber", "customerId", "kind", "side", "documentDate", "dueDate", "currency", "originalAmount", "openAmount", "cashDiscountDate", "cashDiscountAmount"},
+	"bom":           {"id", "productId", "siteId", "effectiveFrom", "effectiveTo", "fromQty", "toQty", "status", "lines", "usage", "category"},
+	"route":         {"productId", "siteId", "routeCode", "versionNo", "effectiveFrom", "effectiveTo", "operations"},
 }
 
 // strict answers 400 for a field the route does not decode and reports whether it did.
@@ -212,6 +228,35 @@ func str(m map[string]any, k string) string {
 func (f *Fakes) party(w http.ResponseWriter, r *http.Request, c Call) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/party/"), "/"), "/")
 	switch {
+	case r.Method == http.MethodGet && len(parts) == 2 && parts[0] == "parties":
+		p := f.Parties[parts[1]]
+		if p == nil {
+			problem(w, http.StatusNotFound, "PTY-PARTY-NOT-FOUND", "party not found", nil)
+			return
+		}
+		out := map[string]any{"id": p.ID, "version": p.Version, "status": "active"}
+		for k, v := range p.Body {
+			out[k] = v
+		}
+		if _, ok := out["dob"]; ok {
+			out["dob"] = "****-**-**"
+		}
+		reply(w, http.StatusOK, out)
+	case r.Method == http.MethodGet && len(parts) == 2 && (parts[0] == "customers" || parts[0] == "vendors"):
+		roles := map[string]map[string]map[string]any{"customers": f.Customers, "vendors": f.Vendors}[parts[0]]
+		role := roles[parts[1]]
+		if role == nil || role["legalEntityId"] != c.Claims.Le {
+			problem(w, http.StatusNotFound, "PTY-NOT-FOUND", "not found", nil)
+			return
+		}
+		out := map[string]any{}
+		for k, v := range role {
+			out[k] = v
+		}
+		if s, ok := out["currencyCode"].(string); ok {
+			out["currencyCode"] = strings.ToUpper(s)
+		}
+		reply(w, http.StatusOK, out)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/party/parties":
 		if f.replayed(w, "party", r) || strict(w, "party", c.Body) {
 			return
@@ -281,6 +326,16 @@ func (f *Fakes) party(w http.ResponseWriter, r *http.Request, c Call) {
 func (f *Fakes) product(w http.ResponseWriter, r *http.Request, c Call) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/product/"), "/"), "/")
 	switch {
+	case r.Method == http.MethodGet && len(parts) == 2 && parts[0] == "products":
+		p := f.Products[parts[1]]
+		if p == nil {
+			problem(w, http.StatusNotFound, "COM-0001", "product not found", nil)
+			return
+		}
+		// The product service answers with Go field names and upper-cases the unit of measure.
+		reply(w, http.StatusOK, map[string]any{"ID": p.ID, "ProductNumber": str(p.Body, "productNumber"), "Name": str(p.Body, "name"), "Description": str(p.Body, "description"),
+			"SearchName": str(p.Body, "searchName"), "BaseUOM": strings.ToUpper(str(p.Body, "baseUom")), "DimensionGroupID": str(p.Body, "dimensionGroupId"),
+			"Subtype": str(p.Body, "subtype"), "ProductType": str(p.Body, "productType"), "LifecycleState": p.State, "Version": p.Version})
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/product/products":
 		// Like the product store: a repeated Idempotency-Key answers the product as it is now (whatever the body),
 		// and a fresh create answers Version 0 because the store does not read the new row back.
@@ -361,6 +416,26 @@ func (f *Fakes) product(w http.ResponseWriter, r *http.Request, c Call) {
 }
 
 func (f *Fakes) receivables(w http.ResponseWriter, r *http.Request, c Call) {
+	if id, ok := strings.CutPrefix(r.URL.Path, "/v1/receivables/open-items/"); ok && r.Method == http.MethodGet {
+		for key, itemID := range f.itemIDs {
+			row := f.OpenItems[key]
+			if itemID != id || row == nil {
+				continue
+			}
+			// Receivables stores a credit-side item with negative amounts.
+			sign := ""
+			if str(row, "side") == "CREDIT" {
+				sign = "-"
+			}
+			reply(w, http.StatusOK, map[string]any{"id": id, "legalEntityId": c.Claims.Le, "customerId": str(row, "customerId"), "documentNumber": str(row, "documentNumber"),
+				"documentDate": str(row, "documentDate"), "dueDate": str(row, "dueDate"), "currency": str(row, "currency"), "side": str(row, "side"),
+				"amount": sign + str(row, "originalAmount"), "openAmount": sign + str(row, "openAmount"), "cashDiscountAmount": "0", "status": "OPEN", "version": 1,
+				"importSource": "x", "legacyKey": key})
+			return
+		}
+		problem(w, http.StatusNotFound, "AR-OPEN-ITEM-NOT-FOUND", "open item not found", nil)
+		return
+	}
 	if r.Method != http.MethodPost || r.URL.Path != "/v1/receivables/open-items:batch" {
 		problem(w, http.StatusNotFound, "COM-0404", "no such route", nil)
 		return
@@ -404,4 +479,44 @@ func (f *Fakes) receivables(w http.ResponseWriter, r *http.Request, c Call) {
 		results[i] = res
 	}
 	reply(w, http.StatusOK, map[string]any{"batchId": "b", "legalEntityId": c.Claims.Le, "importSource": str(c.Body, "importSource"), "results": results})
+}
+
+// engineering creates draft BOM and route versions under ids it assigns and reads them back.
+func (f *Fakes) engineering(w http.ResponseWriter, r *http.Request, c Call) {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/engineering/"), "/"), "/")
+	store := map[string]map[string]map[string]any{"bom-versions": f.Boms, "route-versions": f.Routes}[parts[0]]
+	switch {
+	case store == nil:
+		problem(w, http.StatusNotFound, "COM-0404", "no such route", nil)
+	case r.Method == http.MethodGet && len(parts) == 2:
+		v := store[parts[1]]
+		if v == nil {
+			problem(w, http.StatusNotFound, "ENG-NOT-FOUND", "version not found", nil)
+			return
+		}
+		reply(w, http.StatusOK, v)
+	case r.Method == http.MethodPost && len(parts) == 1:
+		route := map[string]string{"bom-versions": "bom", "route-versions": "route"}[parts[0]]
+		if f.replayed(w, "engineering", r) || strict(w, route, c.Body) {
+			return
+		}
+		if route == "bom" && str(c.Body, "status") != "draft" {
+			problem(w, http.StatusForbidden, "AUTH-0003", "an import caller creates draft BOM versions only", nil)
+			return
+		}
+		if str(c.Body, "productId") == "" || str(c.Body, "effectiveFrom") == "" {
+			problem(w, http.StatusBadRequest, "COM-0001", "request failed validation", map[string]string{"productId": "is required"})
+			return
+		}
+		id := fmt.Sprintf("00000000-0000-7000-b000-%012d", len(f.Boms)+len(f.Routes)+1)
+		out := map[string]any{"id": id, "status": "draft", "version": 1}
+		for k, v := range c.Body {
+			out[k] = v
+		}
+		store[id] = out
+		f.remember("engineering", r, out)
+		reply(w, http.StatusCreated, out)
+	default:
+		problem(w, http.StatusNotFound, "COM-0404", "no such route", nil)
+	}
 }

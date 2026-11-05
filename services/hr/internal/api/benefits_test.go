@@ -10,7 +10,7 @@ import (
 )
 
 // TestBenefitRoutesRequireTheirDuty: every benefit route answers 403 before
-// any validation or store call without its duty; an employee (EssBenefits)
+// any validation or store call without its duty; an employee (hr.benefits.self)
 // cannot author plans, simulate or end enrollments.
 func TestBenefitRoutesRequireTheirDuty(t *testing.T) {
 	id := testkit.TenantID(8)

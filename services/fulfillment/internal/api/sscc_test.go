@@ -135,7 +135,7 @@ func TestSSCCRegister_RejectsBadInput(t *testing.T) {
 
 func TestSSCCRegister_RequiresWarehouseView(t *testing.T) {
 	fs := &fakeStore{}
-	rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/sscc-register", "", map[string]string{"X-Passage-Duties": "WarehousePick"})
+	rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/sscc-register", "", map[string]string{"X-Passage-Duties": "fulfillment.warehouse.pick"})
 	if rec.Code != http.StatusForbidden || fs.ssccCalls != 0 {
 		t.Fatalf("status = %d calls = %d, want 403 and no read", rec.Code, fs.ssccCalls)
 	}

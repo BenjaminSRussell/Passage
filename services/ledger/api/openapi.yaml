@@ -2741,7 +2741,7 @@ paths:
           in: query
           required: false
           description: >-
-            When true, leaves out the year-end closing entries that the close service posted (recorded from the
+            When true (false is the default), leaves out the year-end closing entries that the close service posted (recorded from the
             verified service token, not from the request body: an entry another caller tags year_end_closing stays in)
             and the entries that reverse them, so a re-run of a year-end close nets to nothing. The response echoes
             excludesYearEndClosing: true; an older ledger ignores the parameter and does not echo it. Cannot be combined

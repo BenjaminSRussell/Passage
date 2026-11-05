@@ -63,7 +63,7 @@ describe("consolidation module", () => {
       "/consolidation/reclassification",
       "/consolidation/group-journals",
     ]);
-    expect(consolidation.nav.map((n) => n.duty)).toEqual(["ConsolidationView", ...Array(8).fill("ConsolidationRun"), "ConsolidationJournal"]);
+    expect(consolidation.nav.map((n) => n.duty)).toEqual(["consolidation.view", ...Array(8).fill("consolidation.run"), "consolidation.journal.maintain"]);
   });
 
   it("links the workspace to each tool", () => {
@@ -223,11 +223,11 @@ describe("currency translation page", () => {
   });
 
   it("shows a refusal in an alert", async () => {
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty ConsolidationRun" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty consolidation.run" } });
     renderAt("/consolidation/translation");
     fireEvent.click(screen.getByRole("button", { name: "Translate unit" }));
     await waitFor(() => expect(screen.getByText("The unit was not translated")).toBeInTheDocument());
-    expect(screen.getByText("The unit was not translated").closest("[role=alert]")).toHaveTextContent("missing duty ConsolidationRun (AUTH-0003)");
+    expect(screen.getByText("The unit was not translated").closest("[role=alert]")).toHaveTextContent("missing duty consolidation.run (AUTH-0003)");
     expect(screen.queryByRole("table", { name: "Translated statement" })).not.toBeInTheDocument();
   });
 

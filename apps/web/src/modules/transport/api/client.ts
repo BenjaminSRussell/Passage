@@ -878,7 +878,7 @@ export function getScreeningHold(id: string, signal?: AbortSignal): Promise<Scre
   return send<ScreeningHold>(`/screening-holds/${encodeURIComponent(id)}`, {}, signal);
 }
 
-/** Releases a POTENTIAL_MATCH or SCREENING_PENDING hold with a reason (TRADE_COMPLIANCE_RELEASE); a BLOCKED party is refused (TMS-0133). */
+/** Releases a POTENTIAL_MATCH or SCREENING_PENDING hold with a reason (transport.screening-hold.release); a BLOCKED party is refused (TMS-0133). */
 export function releaseScreeningHold(id: string, reason: string): Promise<ScreeningHold> {
   return post<ScreeningHold>(`/screening-holds/${encodeURIComponent(id)}:release`, { reason });
 }

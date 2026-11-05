@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -19,6 +20,21 @@ func (a *API) WithCustomers(customers store.CustomerStore) *API {
 
 func (a *API) registerCustomers(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/parties/{id}/customer", a.createCustomer)
+	r.With(authz.RequireAnyDuty(dutyRead, dutyImportRead)).Get("/v1/party/customers/{id}", a.getCustomer)
+}
+
+// getCustomer reads one customer role in the caller's legal entities.
+func (a *API) getCustomer(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	customer, err := a.customers.GetCustomer(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	w.Header().Set("ETag", `"`+strconv.Itoa(customer.Version)+`"`)
+	httpx.JSON(w, http.StatusOK, customer)
 }
 
 func (a *API) createCustomer(w http.ResponseWriter, r *http.Request) {

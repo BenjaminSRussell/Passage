@@ -79,7 +79,7 @@ const columns: DataTableColumn<ScreeningHit>[] = [
 const initial: ScreenValues = { type: "PARTY", id: "", name: "", address: "", country: "", entries: "" };
 
 /**
- * Screen a party or document on demand (FR-48.19, duty TradeComplianceView).
+ * Screen a party or document on demand (FR-48.19, duty compliance.trade-screening.view).
  * New hits are stored OPEN for the workbench; the tenant's threshold applies.
  * Until the list store is loaded daily, paste the list entries to check.
  */

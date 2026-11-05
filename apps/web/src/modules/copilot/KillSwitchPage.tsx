@@ -8,7 +8,7 @@ import { useLoad } from "./useLoad";
 export interface KillSwitchPageProps {
   load?: (signal: AbortSignal) => Promise<KillSwitchStatus>;
   toggle?: (cmd: KillSwitchCommand) => Promise<KillSwitchResult>;
-  /** Defaults to the signed-in user's duties; PlatformAdmin may also use the global switch. */
+  /** Defaults to the signed-in user's duties; platform.global.admin may also use the global switch. */
   duties?: readonly string[];
 }
 
@@ -41,12 +41,12 @@ function Entry({ term, children, mono = false }: { term: string; children: strin
 /**
  * Agent kill switch (FR-47.12, AC-47.6; 9.47.6 agent administration). Shows
  * whether agent runs for the caller's tenant are halted and lets an
- * AgentAdmin halt or resume them; a PlatformAdmin can also use the global
+ * agents.admin halt or resume them; a platform.global.admin holder can also use the global
  * switch. Every toggle is confirmed first.
  */
 export function KillSwitchPage({ load = getKillSwitch, toggle = (cmd) => setKillSwitch(cmd), duties }: KillSwitchPageProps) {
   const principalDuties = usePrincipalDuties();
-  const canGlobal = (duties ?? principalDuties).includes("PlatformAdmin");
+  const canGlobal = (duties ?? principalDuties).includes("platform.global.admin");
   const state = useLoad(load, "kill-switch");
   const [pending, setPending] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);

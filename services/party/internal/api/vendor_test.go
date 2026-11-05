@@ -107,10 +107,10 @@ func TestVendorRoutes_RefusalsAndValidation(t *testing.T) {
 		{"unknown field", http.MethodPost, "/v1/party/parties/" + knownID + "/vendor", `{"vendorGroup":"x"}`, "party.write", true, http.StatusBadRequest, ""},
 		{"get needs party.read", http.MethodGet, "/v1/party/vendors/" + knownID, "", "party.write", true, http.StatusForbidden, ""},
 		{"bank write needs its own duty", http.MethodPost, "/v1/party/vendors/" + knownID + "/bank-accounts", bankBody, "party.write", true, http.StatusForbidden, ""},
-		{"bank account number too short", http.MethodPost, "/v1/party/vendors/" + knownID + "/bank-accounts", `{"accountHolder":"A","bankCountry":"DE","currencyCode":"EUR","accountNumber":"12"}`, "party.vendor_bank.write", true, http.StatusUnprocessableEntity, `"accountNumber"`},
-		{"bank country must be iso", http.MethodPost, "/v1/party/vendors/" + knownID + "/bank-accounts", `{"accountHolder":"A","bankCountry":"DEU","currencyCode":"EUR","accountNumber":"DE89370400440532013000"}`, "party.vendor_bank.write", true, http.StatusUnprocessableEntity, `"bankCountry"`},
+		{"bank account number too short", http.MethodPost, "/v1/party/vendors/" + knownID + "/bank-accounts", `{"accountHolder":"A","bankCountry":"DE","currencyCode":"EUR","accountNumber":"12"}`, "party.vendor-bank.write", true, http.StatusUnprocessableEntity, `"accountNumber"`},
+		{"bank country must be iso", http.MethodPost, "/v1/party/vendors/" + knownID + "/bank-accounts", `{"accountHolder":"A","bankCountry":"DEU","currencyCode":"EUR","accountNumber":"DE89370400440532013000"}`, "party.vendor-bank.write", true, http.StatusUnprocessableEntity, `"bankCountry"`},
 		{"reveal needs its own duty", http.MethodGet, "/v1/party/vendors/" + knownID + "/bank-accounts:reveal", "", "party.read", true, http.StatusForbidden, ""},
-		{"reveal is not granted by bank write", http.MethodGet, "/v1/party/vendors/" + knownID + "/bank-accounts:reveal", "", "party.vendor_bank.write", true, http.StatusForbidden, ""},
+		{"reveal is not granted by bank write", http.MethodGet, "/v1/party/vendors/" + knownID + "/bank-accounts:reveal", "", "party.vendor-bank.write", true, http.StatusForbidden, ""},
 	} {
 		rec := do(r, tc.method, tc.path, tc.body, tc.duties, tc.tenant)
 		if rec.Code != tc.want || !strings.Contains(rec.Body.String(), tc.wantBody) {
@@ -127,7 +127,7 @@ const bankBody = `{"accountHolder":"Acme GmbH","bankCountry":"de","currencyCode"
 func TestVendorRoutes_BankAccountsMaskedUnlessRevealDuty(t *testing.T) {
 	f := &fakeVendors{}
 	r := vendorRouter(f)
-	rec := do(r, http.MethodPost, "/v1/party/vendors/"+knownID+"/bank-accounts", bankBody, "party.vendor_bank.write", true)
+	rec := do(r, http.MethodPost, "/v1/party/vendors/"+knownID+"/bank-accounts", bankBody, "party.vendor-bank.write", true)
 	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), "DE89") || !strings.Contains(rec.Body.String(), `"accountLast4":"3000"`) || f.banked.AccountNumber != "DE89370400440532013000" || f.banked.BankCountry != "DE" {
 		t.Fatalf("add: %d %s %+v", rec.Code, rec.Body, f.banked)
 	}
@@ -135,14 +135,14 @@ func TestVendorRoutes_BankAccountsMaskedUnlessRevealDuty(t *testing.T) {
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "accountNumber") || f.reveal {
 		t.Fatalf("masked: %d %s reveal=%t", rec.Code, rec.Body, f.reveal)
 	}
-	rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.vendor_bank.reveal", true)
+	rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.vendor-bank.reveal", true)
 	if rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("reveal Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
 	}
 	if rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.read", true); rec.Code != http.StatusForbidden || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("refused reveal: %d Cache-Control %q", rec.Code, rec.Header().Get("Cache-Control"))
 	}
-	rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.vendor_bank.reveal", true)
+	rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts:reveal", "", "party.vendor-bank.reveal", true)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"accountNumber":"DE89370400440532013000"`) || !f.reveal {
 		t.Fatalf("reveal: %d %s reveal=%t", rec.Code, rec.Body, f.reveal)
 	}

@@ -13,7 +13,7 @@ import (
 )
 
 // CodeOwnDecision refuses an approver decision on an item the same user requested
-// (MssApprove "own items blocked", 8.43.17). Listed in the service README.
+// (hr.team.approve "own items blocked", 8.43.17). Listed in the service README.
 const CodeOwnDecision = "EXP-SOD-001"
 
 // Command is the common input of a state-changing custom method (decide, pay, return,
@@ -53,7 +53,7 @@ func checkVersion(c Command, current int, code, what string) error {
 	return nil
 }
 
-// decider returns the principal for an approver decision. The MssApprove own-items rule
+// decider returns the principal for an approver decision. The hr.team.approve own-items rule
 // (8.43.17) compares user ids, so a decision needs an authenticated user.
 func decider(ctx context.Context) (tenant.Principal, error) {
 	p, err := principal(ctx)

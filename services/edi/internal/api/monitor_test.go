@@ -19,9 +19,9 @@ func TestMonitorRoutes_RequireOperateDuty(t *testing.T) {
 		{http.MethodPost, "/edi/v1/interchanges/" + someID + ":reprocess?dryRun=true"},
 		{http.MethodGet, "/edi/v1/partners/sla"},
 	} {
-		// EDI_ADMIN alone does not open the monitor (PRD §6.35.17).
-		if rec := call(t, tc.method, tc.path, "", "EDI_ADMIN", nil); rec.Code != http.StatusForbidden {
-			t.Errorf("%s %s with EDI_ADMIN: %d, want 403", tc.method, tc.path, rec.Code)
+		// edi.admin alone does not open the monitor (PRD §6.35.17).
+		if rec := call(t, tc.method, tc.path, "", "edi.admin", nil); rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s with edi.admin: %d, want 403", tc.method, tc.path, rec.Code)
 		}
 	}
 }
@@ -38,7 +38,7 @@ func TestListMessages_RejectsBadFilters(t *testing.T) {
 	}
 	for field, query := range cases {
 		t.Run(field, func(t *testing.T) {
-			rec := call(t, http.MethodGet, "/edi/v1/messages?"+query, "", "EDI_OPERATE", nil)
+			rec := call(t, http.MethodGet, "/edi/v1/messages?"+query, "", "edi.operate", nil)
 			if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}
@@ -50,7 +50,7 @@ func TestListMessages_RejectsBadFilters(t *testing.T) {
 }
 
 func TestGetMessage_MalformedIDIsNotFound(t *testing.T) {
-	rec := call(t, http.MethodGet, "/edi/v1/messages/not-an-id", "", "EDI_OPERATE", nil)
+	rec := call(t, http.MethodGet, "/edi/v1/messages/not-an-id", "", "edi.operate", nil)
 	if rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -71,15 +71,15 @@ func TestCursor_RoundTripAndTampering(t *testing.T) {
 
 func TestReprocess_ValidatesBeforeStore(t *testing.T) {
 	path := "/edi/v1/interchanges/" + someID + ":reprocess"
-	rec := call(t, http.MethodPost, path, "", "EDI_OPERATE", nil)
+	rec := call(t, http.MethodPost, path, "", "edi.operate", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeIdempotencyKey {
 		t.Fatalf("no key: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(t, http.MethodPost, path+"?dryRun=maybe", "", "EDI_OPERATE", nil)
+	rec = call(t, http.MethodPost, path+"?dryRun=maybe", "", "edi.operate", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 		t.Fatalf("bad dryRun: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(t, http.MethodPost, "/edi/v1/interchanges/not-an-id:reprocess", "", "EDI_OPERATE", map[string]string{"Idempotency-Key": "k"})
+	rec = call(t, http.MethodPost, "/edi/v1/interchanges/not-an-id:reprocess", "", "edi.operate", map[string]string{"Idempotency-Key": "k"})
 	if rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
 		t.Fatalf("bad id: %d %s", rec.Code, rec.Body.String())
 	}
@@ -148,7 +148,7 @@ func TestReprocessPlan(t *testing.T) {
 
 func TestPartnerSLA_ValidatesWindow(t *testing.T) {
 	for _, q := range []string{"days=0", "days=366", "days=ten"} {
-		rec := call(t, http.MethodGet, "/edi/v1/partners/sla?"+q, "", "EDI_OPERATE", nil)
+		rec := call(t, http.MethodGet, "/edi/v1/partners/sla?"+q, "", "edi.operate", nil)
 		if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 			t.Fatalf("%s: %d %s", q, rec.Code, rec.Body.String())
 		}

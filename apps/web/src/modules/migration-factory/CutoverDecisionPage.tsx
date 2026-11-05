@@ -199,7 +199,7 @@ export function CutoverDecisionPage() {
       setDone(
         result.decision
           ? `${result.decision.decision === "GO" ? "GO" : "NO_GO"} recorded with ${result.decision.approvers.join(" and ")} as approvers.`
-          : "Your approval of the GO is recorded. It becomes the decision when a second, different CutoverManager approves it.",
+          : "Your approval of the GO is recorded. It becomes the decision when a second, different migration.cutover.manage holder approves it.",
       );
       state.reload();
     } catch (error) {
@@ -260,7 +260,7 @@ export function CutoverDecisionPage() {
           {pendingGo && !gone && !readiness.rolledBack ? (
             <Alert tone="info" title="GO waiting for a second approver">
               {pendingGo.approver} approved a GO on {formatDateTime(pendingGo.approvedAt)} with the evidence shown in the checklist. A different
-              CutoverManager records the GO by approving it below; a no-go recorded instead voids this approval.
+              migration.cutover.manage records the GO by approving it below; a no-go recorded instead voids this approval.
               {pendingGo.waivers && pendingGo.waivers.length > 0
                 ? ` Waived as staged and not posted: ${pendingGo.waivers.map((w) => `${w.pack} (${w.reason})`).join("; ")}.`
                 : ""}
@@ -296,7 +296,7 @@ export function CutoverDecisionPage() {
                     ? "You are recorded as the approver of this no-go."
                     : approving
                       ? `You approve the GO ${pendingGo.approver} approved, with the same evidence. The GO is recorded with both of you as approvers.`
-                      : "A GO needs two different CutoverManagers. Yours is recorded as the first approval; a second CutoverManager then approves it."}
+                      : "A GO needs two different migration.cutover.manage holders. Yours is recorded as the first approval; a second migration.cutover.manage holder then approves it."}
                 </p>
                 <FormField id="decision-reason" label="Reason" hint="Required for a no-go." optional={values.decision === "GO"} error={errors.reason}>
                   {(control) => (
@@ -381,7 +381,7 @@ export function CutoverDecisionPage() {
           description={
             pendingGo
               ? `This records the GO once, with ${pendingGo.approver} and you as approvers. It is checked against the factory's pack runs and parallel runs again when it is stored.`
-              : "This records your approval of a GO. It becomes the decision when a second, different CutoverManager approves it, and is checked against the factory's pack runs and parallel runs again then."
+              : "This records your approval of a GO. It becomes the decision when a second, different migration.cutover.manage holder approves it, and is checked against the factory's pack runs and parallel runs again then."
           }
           confirmLabel={pendingGo ? "Record GO" : "Approve GO"}
           cancelLabel="Cancel"

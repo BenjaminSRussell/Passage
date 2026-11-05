@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	dutyLearningAdmin   = "HcmLearningAdmin"
-	dutyRecruitMaintain = "HcmRecruitMaintain"
+	dutyLearningAdmin   = "hr.learning.admin"
+	dutyRecruitMaintain = "hr.recruiting.maintain"
 )
 
 func TestTeamViewsDoNotExposeIdentityLinks(t *testing.T) {
@@ -302,7 +302,7 @@ func TestManagerWorksheetShowsAndAcceptsOnlyDirectReports(t *testing.T) {
 	}
 
 	if rec := o.as(o.users["mgr"], http.MethodGet, sheet, "", dutyEssBase); rec.Code != http.StatusForbidden {
-		t.Fatalf("without MssApprove: status %d, want 403", rec.Code)
+		t.Fatalf("without hr.team.approve: status %d, want 403", rec.Code)
 	}
 	if rec := o.as(o.users["mgr"], http.MethodGet, "/v1/hr/compensation/cycles/"+cycle.ID+"/worksheets/"+o.workers["mgr"].ID, "", dutyMssApprove); rec.Code != http.StatusForbidden {
 		t.Fatalf("a manager on the admin worksheet route: status %d, want 403", rec.Code)

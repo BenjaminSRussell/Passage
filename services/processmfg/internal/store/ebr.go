@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -107,6 +109,10 @@ type Record struct {
 	Content        json.RawMessage   `json:"content,omitempty"`
 	SealedDocument *string           `json:"sealedDocument,omitempty"`
 	Exceptions     []RecordException `json:"exceptions,omitempty"`
+	// ApprovalSignatureID is the QA signature (meaning approved) behind the
+	// approval; nil for a record approved before signatures were made here.
+	ApprovalSignatureID *string     `json:"approvalSignatureId,omitempty"`
+	Signatures          []Signature `json:"signatures,omitempty"`
 }
 
 // RecordFilter narrows the record list.
@@ -123,13 +129,35 @@ type NewException struct {
 	Severity    string
 }
 
-// ExceptionDisposition is the reviewer's decision on one exception, backed by
-// the signature the caller obtained (FR-24.22; the signature service is not
-// built yet, so the id is stored as given).
+// ExceptionDisposition is the reviewer's decision on one exception, signed
+// with the meaning reviewed (FR-24.22).
 type ExceptionDisposition struct {
 	Disposition string
 	Comment     string
-	SignatureID string
+	Sign        Signing
+}
+
+// Signing is what a Part 11 signature is made from: the signer's printed name,
+// the method the re-authenticator verified (never the client's claim) and the
+// hash the re-authentication was bound to. The store recomputes the hash under
+// the row lock and refuses the signing when the record changed (PMF-0013).
+type Signing struct {
+	PrintedName string
+	Method      string
+	RecordHash  []byte
+}
+
+// Signature is one Part 11 signature of a batch record (11.50): signer,
+// printed name, meaning, time, the verified method and the signed hash.
+type Signature struct {
+	ID          string    `json:"id"`
+	ExceptionID *string   `json:"exceptionId,omitempty"`
+	Meaning     string    `json:"meaning"`
+	SignerID    string    `json:"signerId"`
+	PrintedName string    `json:"printedName"`
+	Method      string    `json:"method"`
+	RecordHash  string    `json:"recordHash"`
+	SignedAt    time.Time `json:"signedAt"`
 }
 
 // ---- profiles ----
@@ -341,11 +369,157 @@ func loadRecord(ctx context.Context, tx pgx.Tx, id, lock string) (Record, error)
 	if err != nil {
 		return r, err
 	}
-	if err := tx.QueryRow(ctx, `select content, sealed_document from electronic_batch_record where id = $1`, id).Scan(&r.Content, &r.SealedDocument); err != nil {
+	if err := tx.QueryRow(ctx, `select content, sealed_document, approval_signature_id::text from electronic_batch_record where id = $1`, id).
+		Scan(&r.Content, &r.SealedDocument, &r.ApprovalSignatureID); err != nil {
 		return r, err
 	}
-	r.Exceptions, err = loadExceptions(ctx, tx, id)
+	if r.Exceptions, err = loadExceptions(ctx, tx, id); err != nil {
+		return r, err
+	}
+	r.Signatures, err = loadSignatures(ctx, tx, id)
 	return r, err
+}
+
+func loadSignatures(ctx context.Context, tx pgx.Tx, recordID string) ([]Signature, error) {
+	rows, err := tx.Query(ctx, `select id, exception_id::text, meaning, signer_id, printed_name, method, encode(record_hash, 'hex'), signed_at
+		from ebr_signature where record_id = $1 order by signed_at, id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Signature{}
+	for rows.Next() {
+		var s Signature
+		if err := rows.Scan(&s.ID, &s.ExceptionID, &s.Meaning, &s.SignerID, &s.PrintedName, &s.Method, &s.RecordHash, &s.SignedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// dispositionSigned is what a reviewer signs when deciding an exception: the
+// record at the version read, the exception as raised and the decision.
+type dispositionSigned struct {
+	Meaning     string          `json:"meaning"`
+	RecordID    string          `json:"recordId"`
+	Version     int             `json:"version"`
+	BatchID     string          `json:"batchId"`
+	Content     json.RawMessage `json:"content"`
+	ExceptionID string          `json:"exceptionId"`
+	SourceType  string          `json:"sourceType"`
+	SourceID    string          `json:"sourceId"`
+	Description string          `json:"description"`
+	Severity    string          `json:"severity"`
+	Disposition string          `json:"disposition"`
+	Comment     string          `json:"comment"`
+}
+
+// DispositionHash is the SHA-256 of the canonical JSON a reviewer signs to
+// decide exceptionID of r with disposition and comment (FR-24.22).
+func DispositionHash(r Record, exceptionID, disposition, comment string) ([]byte, error) {
+	for _, e := range r.Exceptions {
+		if e.ID == exceptionID {
+			return domain.RecordHash(dispositionSigned{Meaning: domain.MeaningReviewed, RecordID: r.ID, Version: r.Version, BatchID: r.BatchID,
+				Content: r.Content, ExceptionID: e.ID, SourceType: e.SourceType, SourceID: e.SourceID, Description: e.Description,
+				Severity: e.Severity, Disposition: disposition, Comment: comment})
+		}
+	}
+	return nil, notFound(CodeExceptionNotFound, "exception", exceptionID)
+}
+
+type approvalException struct {
+	ID              string  `json:"id"`
+	Disposition     string  `json:"disposition"`
+	Comment         string  `json:"comment"`
+	SignatureID     *string `json:"signatureId"`
+	DispositionedBy *string `json:"dispositionedBy"`
+}
+
+type approvalSigned struct {
+	Meaning    string              `json:"meaning"`
+	RecordID   string              `json:"recordId"`
+	Version    int                 `json:"version"`
+	BatchID    string              `json:"batchId"`
+	Content    json.RawMessage     `json:"content"`
+	Exceptions []approvalException `json:"exceptions"`
+}
+
+// ApprovalHash is the SHA-256 of the canonical JSON QA signs to approve r: the
+// record at the version read, its content and every exception decision.
+func ApprovalHash(r Record) ([]byte, error) {
+	ex := make([]approvalException, len(r.Exceptions))
+	for i, e := range r.Exceptions {
+		ex[i] = approvalException{ID: e.ID, Disposition: e.Disposition, Comment: e.DispositionComment, SignatureID: e.SignatureID, DispositionedBy: e.DispositionedBy}
+	}
+	return domain.RecordHash(approvalSigned{Meaning: domain.MeaningApproved, RecordID: r.ID, Version: r.Version, BatchID: r.BatchID, Content: r.Content, Exceptions: ex})
+}
+
+// insertSignature checks the signed hash against current (PMF-0013) and
+// appends the signature of the caller.
+func insertSignature(ctx context.Context, tx pgx.Tx, r Record, exceptionID *string, meaning string, in Signing, current []byte) (string, error) {
+	if in.Method == "" {
+		return "", errors.New("signing without a re-authentication method")
+	}
+	if err := domain.CheckSignatureValid(in.RecordHash, current); err != nil {
+		return "", httpx.NewProblem(http.StatusConflict, domain.CodeSignatureInvalid,
+			"the batch record changed after it was read for signing; read it again and sign what it now holds")
+	}
+	p := principal(ctx)
+	id := ids.New()
+	_, err := tx.Exec(ctx, `insert into ebr_signature (tenant_id, id, legal_entity_id, record_id, exception_id, meaning, signer_id, printed_name, method, record_hash)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, p.TenantID, id, r.LegalEntityID, r.ID, exceptionID, meaning, p.UserID, in.PrintedName, in.Method, current)
+	return id, err
+}
+
+// SignerLockout returns the re-authentication failures of signer (BR-24.14).
+func (s *Postgres) SignerLockout(ctx context.Context, signer string) (domain.Lockout, error) {
+	var l domain.Lockout
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var until *time.Time
+		err := tx.QueryRow(ctx, `select failures, locked_until from ebr_signer_lockout where signer_id = $1`, signer).Scan(&l.Failures, &until)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if until != nil {
+			l.LockedUntil = *until
+		}
+		return err
+	})
+	return l, err
+}
+
+// RecordReauthResult counts a failed re-authentication of signer (the third
+// in a row locks signing for 15 minutes) or clears the count on success, and
+// returns the lockout as it now stands. It commits on its own, so a failure
+// is counted even though the signing it belonged to is refused.
+func (s *Postgres) RecordReauthResult(ctx context.Context, signer string, failed bool, now time.Time) (domain.Lockout, error) {
+	var l domain.Lockout
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		p := principal(ctx)
+		if _, err := tx.Exec(ctx, `insert into ebr_signer_lockout (tenant_id, signer_id) values ($1, $2) on conflict do nothing`, p.TenantID, signer); err != nil {
+			return err
+		}
+		var until *time.Time
+		if err := tx.QueryRow(ctx, `select failures, locked_until from ebr_signer_lockout where signer_id = $1 for update`, signer).Scan(&l.Failures, &until); err != nil {
+			return err
+		}
+		if until != nil {
+			l.LockedUntil = *until
+		}
+		if failed {
+			l.Fail(now)
+		} else {
+			l.Succeed()
+		}
+		var lockedUntil *time.Time
+		if !l.LockedUntil.IsZero() {
+			lockedUntil = &l.LockedUntil
+		}
+		_, err := tx.Exec(ctx, `update ebr_signer_lockout set failures = $2, locked_until = $3, updated_at = now() where signer_id = $1`, signer, l.Failures, lockedUntil)
+		return err
+	})
+	return l, err
 }
 
 func recordEvent(r Record) pmfevents.BatchRecordData {
@@ -563,8 +737,9 @@ func (s *Postgres) RaiseException(ctx context.Context, recordID string, in NewEx
 
 // DispositionException records the decision on one open exception of a record
 // in review with the signature behind it (BR-24.15). A decision is final
-// (PMF-0125). The signature id is stored as given and is not verified: the
-// signature service (FR-24.22) is not built.
+// (PMF-0125). The decision is signed by the caller with the meaning reviewed:
+// the signature is appended to ebr_signature over the hash recomputed here
+// under the row lock (PMF-0013 when the record changed since it was read).
 func (s *Postgres) DispositionException(ctx context.Context, recordID, exceptionID string, in ExceptionDisposition, version int, idem Idem) (Record, bool, error) {
 	var out Record
 	changed := false
@@ -598,8 +773,16 @@ func (s *Postgres) DispositionException(ctx context.Context, recordID, exception
 				fmt.Sprintf("exception %s is already decided; a decision is final (raise another exception to record a correction)", exceptionID))
 		}
 		p := principal(ctx)
+		current, err := DispositionHash(r, exceptionID, in.Disposition, in.Comment)
+		if err != nil {
+			return err
+		}
+		sigID, err := insertSignature(ctx, tx, r, &exceptionID, domain.MeaningReviewed, in.Sign, current)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `update ebr_exception set disposition = $3, disposition_comment = nullif($4, ''), signature_id = $5, dispositioned_by = $6, dispositioned_at = now()
-			where record_id = $1 and id = $2`, recordID, exceptionID, in.Disposition, in.Comment, in.SignatureID, p.UserID); err != nil {
+			where record_id = $1 and id = $2`, recordID, exceptionID, in.Disposition, in.Comment, sigID, p.UserID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update electronic_batch_record set version = version + 1, updated_at = now() where id = $1`, recordID); err != nil {
@@ -611,7 +794,7 @@ func (s *Postgres) DispositionException(ctx context.Context, recordID, exception
 		}
 		if err := enqueue(ctx, tx, "batchrecord", recordID, pmfevents.BatchRecordExceptionDisposed, pmfevents.BatchRecordExceptionData{
 			RecordID: recordID, ExceptionID: exceptionID, LegalEntityID: r.LegalEntityID, BatchID: r.BatchID, SourceType: src, Severity: sev,
-			Disposition: in.Disposition, SignatureID: in.SignatureID}); err != nil {
+			Disposition: in.Disposition, SignatureID: sigID}); err != nil {
 			return err
 		}
 		if out, err = loadRecord(ctx, tx, recordID, ""); err != nil {
@@ -628,8 +811,9 @@ func (s *Postgres) DispositionException(ctx context.Context, recordID, exception
 // limits must have its exception, so a value recorded after the last compile is
 // refused (PMF-0121) until the record is compiled again. The approver must not
 // have raised or decided an exception of the record nor created its batch order
-// (PMF-0124, PRD 4.24.17).
-func (s *Postgres) ApproveRecord(ctx context.Context, id string, version int, idem Idem) (Record, bool, error) {
+// (PMF-0124, PRD 4.24.17). The approval is signed by the approver with the
+// meaning approved, over the hash recomputed under the row lock (PMF-0013).
+func (s *Postgres) ApproveRecord(ctx context.Context, id string, version int, sign Signing, idem Idem) (Record, bool, error) {
 	var out Record
 	changed := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -683,8 +867,16 @@ func (s *Postgres) ApproveRecord(ctx context.Context, id string, version int, id
 		if err := domain.CheckApproverIndependent(approver, reviewers, orderCreator); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update electronic_batch_record set status = 'approved', approved_by = $2, approved_at = now(), version = version + 1, updated_at = now() where id = $1`,
-			id, approver); err != nil {
+		current, err := ApprovalHash(r)
+		if err != nil {
+			return err
+		}
+		sigID, err := insertSignature(ctx, tx, r, nil, domain.MeaningApproved, sign, current)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `update electronic_batch_record set status = 'approved', approved_by = $2, approved_at = now(), approval_signature_id = $3,
+			version = version + 1, updated_at = now() where id = $1`, id, approver, sigID); err != nil {
 			return err
 		}
 		if out, err = loadRecord(ctx, tx, id, ""); err != nil {
@@ -700,10 +892,11 @@ func (s *Postgres) ApproveRecord(ctx context.Context, id string, version int, id
 }
 
 // sealedDocument is what is hashed: the record, the content that was approved
-// and its exceptions with their decisions. Times are UTC. SignaturesVerified
-// says whether the signature ids were checked against the signature service;
-// until that service exists (FR-24.22) it is false, so the sealed record never
-// claims more than was checked.
+// and its exceptions with their decisions, and every Part 11 signature of the
+// record. Times are UTC. SignaturesVerified is true only when every decision
+// and the approval name a signature made here and each of those rests on a
+// verified re-authentication (not the development stand-in), so the sealed
+// record never claims more than was checked.
 type sealedDocument struct {
 	RecordID           string            `json:"recordId"`
 	LegalEntityID      string            `json:"legalEntityId"`
@@ -720,6 +913,26 @@ type sealedDocument struct {
 	SignaturesVerified bool              `json:"signaturesVerified"`
 	Content            json.RawMessage   `json:"content"`
 	Exceptions         []RecordException `json:"exceptions"`
+	ApprovalSignature  *string           `json:"approvalSignatureId"`
+	Signatures         []Signature       `json:"signatures"`
+}
+
+// signaturesVerified reports whether every exception decision and the
+// approval of r are backed by a signature of r with a verified method.
+func signaturesVerified(r Record) bool {
+	verified := map[string]bool{}
+	for _, s := range r.Signatures {
+		verified[s.ID] = domain.VerifiedMethod(s.Method)
+	}
+	if r.ApprovalSignatureID == nil || !verified[*r.ApprovalSignatureID] {
+		return false
+	}
+	for _, e := range r.Exceptions {
+		if e.SignatureID == nil || !verified[*e.SignatureID] {
+			return false
+		}
+	}
+	return true
 }
 
 func utcPtr(t *time.Time) *time.Time {
@@ -761,10 +974,16 @@ func (s *Postgres) SealRecord(ctx context.Context, id string, version int, idem 
 			e.DispositionedAt = utcPtr(e.DispositionedAt)
 			exceptions[i] = e
 		}
+		signatures := make([]Signature, len(r.Signatures))
+		for i, sg := range r.Signatures {
+			sg.SignedAt = sg.SignedAt.UTC()
+			signatures[i] = sg
+		}
 		doc := sealedDocument{RecordID: r.ID, LegalEntityID: r.LegalEntityID, BatchOrderID: r.BatchOrderID, BatchID: r.BatchID,
 			BatchNumber: r.BatchNumber, ItemID: r.ItemID, ProfileID: r.ProfileID, CompiledAt: r.CompiledAt.UTC(),
 			ApprovedBy: *r.ApprovedBy, ApprovedAt: r.ApprovedAt.UTC(), SealedBy: p.UserID, SealedAt: sealedAt,
-			SignaturesVerified: false, Content: r.Content, Exceptions: exceptions}
+			SignaturesVerified: signaturesVerified(r), Content: r.Content, Exceptions: exceptions,
+			ApprovalSignature: r.ApprovalSignatureID, Signatures: signatures}
 		canon, err := domain.CanonicalJSON(doc)
 		if err != nil {
 			return err
@@ -792,4 +1011,54 @@ func (s *Postgres) SealRecord(ctx context.Context, id string, version int, idem 
 func HashHex(document string) string {
 	sum := sha256.Sum256([]byte(document))
 	return hex.EncodeToString(sum[:])
+}
+
+// RenderRecordPDF renders a sealed record as a PDF (FR-24.21): a header with
+// the batch, the approval, the seal and the content hash, then the sealed JSON
+// document itself, indented, so the rendering shows exactly what was hashed.
+// The sealed JSON stays the record of authority; the PDF is derived from it
+// alone and is the same bytes every time. It is not PDF/A-2b (see
+// domain.RenderTextPDF and NOT-IMPLEMENTED.md).
+func RenderRecordPDF(r Record) ([]byte, error) {
+	if r.Status != RecordSealed || r.SealedDocument == nil || r.ContentHash == nil {
+		return nil, httpx.NewProblem(http.StatusConflict, CodeRecordState,
+			fmt.Sprintf("batch record of batch %s is %s; only a sealed record is rendered", r.BatchNumber, r.Status))
+	}
+	var doc sealedDocument
+	if err := json.Unmarshal([]byte(*r.SealedDocument), &doc); err != nil {
+		return nil, fmt.Errorf("sealed document of record %s: %w", r.ID, err)
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, []byte(*r.SealedDocument), "", "  "); err != nil {
+		return nil, fmt.Errorf("sealed document of record %s: %w", r.ID, err)
+	}
+	verified := "NO - at least one decision or the approval is not backed by a verified re-authentication"
+	if doc.SignaturesVerified {
+		verified = "yes"
+	}
+	lines := []string{
+		"ELECTRONIC BATCH RECORD - batch " + doc.BatchNumber,
+		"",
+		"Record        " + doc.RecordID,
+		"Legal entity  " + doc.LegalEntityID,
+		"Batch order   " + doc.BatchOrderID,
+		"Batch         " + doc.BatchID + " (" + doc.BatchNumber + ")",
+		"Item          " + doc.ItemID,
+		"Compiled at   " + doc.CompiledAt.UTC().Format(time.RFC3339),
+		"Approved by   " + doc.ApprovedBy + " at " + doc.ApprovedAt.UTC().Format(time.RFC3339),
+		"Sealed by     " + doc.SealedBy + " at " + doc.SealedAt.UTC().Format(time.RFC3339),
+		"SHA-256       " + *r.ContentHash + " (of the sealed JSON below, exactly as stored)",
+		"Signatures verified: " + verified,
+		"",
+		"Signatures (21 CFR 11.50):",
+	}
+	for _, s := range doc.Signatures {
+		lines = append(lines, fmt.Sprintf("  %s  %s (%s)  meaning %s  method %s  hash %s", s.SignedAt.UTC().Format(time.RFC3339), s.PrintedName, s.SignerID, s.Meaning, s.Method, s.RecordHash))
+	}
+	if len(doc.Signatures) == 0 {
+		lines = append(lines, "  none")
+	}
+	lines = append(lines, "", "Sealed document:")
+	lines = append(lines, strings.Split(pretty.String(), "\n")...)
+	return domain.RenderTextPDF("Batch record "+doc.BatchNumber, lines), nil
 }

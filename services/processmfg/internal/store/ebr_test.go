@@ -58,7 +58,37 @@ func recordValues(t *testing.T, s *store.Postgres, b store.Batch, key, potency s
 	return res.Batch
 }
 
-func sig() string { return ids.New() }
+// noSign is a signing for a command that is refused before it is signed.
+var noSign = store.Signing{PrintedName: "Nobody", Method: "password", RecordHash: make([]byte, 32)}
+
+// signApprove is QA's signing of the record as it stands (meaning approved),
+// with the method a real step-up verifier would report.
+func signApprove(t *testing.T, s *store.Postgres, ctx context.Context, id, method string) store.Signing {
+	t.Helper()
+	r, err := s.GetRecord(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := store.ApprovalHash(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store.Signing{PrintedName: "Quinn QA", Method: method, RecordHash: h}
+}
+
+// signDispose is a reviewer's signing of a decision (meaning reviewed).
+func signDispose(t *testing.T, s *store.Postgres, ctx context.Context, id, exceptionID, disposition, comment string) store.Signing {
+	t.Helper()
+	r, err := s.GetRecord(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := store.DispositionHash(r, exceptionID, disposition, comment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store.Signing{PrintedName: "Rita Reviewer", Method: "password+otp", RecordHash: h}
+}
 
 // asUser is tenant 1 with the whole scope acting as user. planner-1 (ctxFor)
 // creates the batch orders of these tests, so it can never approve their records.
@@ -158,7 +188,7 @@ func TestRecord_CompileReviewApproveSeal(t *testing.T) {
 
 	// A value recorded after the compile blocks approval until compiled again.
 	b = recordValues(t, s, b, "rec-2", "20")
-	if _, _, err := s.ApproveRecord(ctx, rec.ID, 2, store.Idem{Key: "ap-stale", Fingerprint: "s"}); problemCode(err) != store.CodeRecordStale {
+	if _, _, err := s.ApproveRecord(ctx, rec.ID, 2, noSign, store.Idem{Key: "ap-stale", Fingerprint: "s"}); problemCode(err) != store.CodeRecordStale {
 		t.Fatalf("approve out of date: %v", err)
 	}
 	rec, _, err = s.CompileRecord(ctx, b.ID, store.Idem{Key: "c-3", Fingerprint: "3"})
@@ -166,7 +196,7 @@ func TestRecord_CompileReviewApproveSeal(t *testing.T) {
 		t.Fatalf("recompile after second value %+v err=%v", rec, err)
 	}
 
-	if _, _, err := s.ApproveRecord(ctx, rec.ID, rec.Version, store.Idem{Key: "ap-open", Fingerprint: "o"}); problemCode(err) != domain.CodeEBRExceptions {
+	if _, _, err := s.ApproveRecord(ctx, rec.ID, rec.Version, noSign, store.Idem{Key: "ap-open", Fingerprint: "o"}); problemCode(err) != domain.CodeEBRExceptions {
 		t.Fatalf("approve with open exceptions: %v", err)
 	}
 
@@ -178,13 +208,17 @@ func TestRecord_CompileReviewApproveSeal(t *testing.T) {
 	if _, _, err := s.RaiseException(ctx, rec.ID, store.NewException{Description: "late", Severity: "minor"}, 1, store.Idem{Key: "x-stale", Fingerprint: "xs"}); problemCode(err) != store.CodeVersionConflict {
 		t.Fatalf("stale raise: %v", err)
 	}
-	if _, _, err := s.DispositionException(ctx, rec.ID, ids.New(), store.ExceptionDisposition{Disposition: "accepted", SignatureID: sig()}, rec.Version, store.Idem{Key: "d-miss", Fingerprint: "dm"}); problemCode(err) != store.CodeExceptionNotFound {
+	if _, _, err := s.DispositionException(ctx, rec.ID, ids.New(), store.ExceptionDisposition{Disposition: "accepted", Sign: noSign}, rec.Version, store.Idem{Key: "d-miss", Fingerprint: "dm"}); problemCode(err) != store.CodeExceptionNotFound {
 		t.Fatalf("missing exception: %v", err)
 	}
 	reviewer := asUser("reviewer-1")
+	if _, _, err := s.DispositionException(reviewer, rec.ID, rec.Exceptions[0].ID, store.ExceptionDisposition{Disposition: "accepted", Comment: "reviewed",
+		Sign: signDispose(t, s, reviewer, rec.ID, rec.Exceptions[0].ID, "rejected", "reviewed")}, rec.Version, store.Idem{Key: "d-hash", Fingerprint: "dh"}); problemCode(err) != domain.CodeSignatureInvalid {
+		t.Fatalf("decision signed over another decision: %v", err)
+	}
 	for i, e := range rec.Exceptions {
 		d := []string{"accepted", "deviation-raised", "rejected"}[i]
-		rec, changed, err = s.DispositionException(reviewer, rec.ID, e.ID, store.ExceptionDisposition{Disposition: d, Comment: "reviewed", SignatureID: sig()}, rec.Version,
+		rec, changed, err = s.DispositionException(reviewer, rec.ID, e.ID, store.ExceptionDisposition{Disposition: d, Comment: "reviewed", Sign: signDispose(t, s, reviewer, rec.ID, e.ID, d, "reviewed")}, rec.Version,
 			store.Idem{Key: "d-" + e.ID, Fingerprint: e.ID})
 		if err != nil || !changed {
 			t.Fatalf("disposition %d: %+v err=%v", i, rec, err)
@@ -199,7 +233,7 @@ func TestRecord_CompileReviewApproveSeal(t *testing.T) {
 		}
 	}
 	// A signed decision is final: it is not overwritten, by the store or the database.
-	if _, _, err := s.DispositionException(reviewer, rec.ID, rec.Exceptions[0].ID, store.ExceptionDisposition{Disposition: "rejected", SignatureID: sig()}, rec.Version,
+	if _, _, err := s.DispositionException(reviewer, rec.ID, rec.Exceptions[0].ID, store.ExceptionDisposition{Disposition: "rejected", Sign: noSign}, rec.Version,
 		store.Idem{Key: "d-again", Fingerprint: "da"}); problemCode(err) != store.CodeExceptionDecided {
 		t.Fatalf("decide again: %v", err)
 	}
@@ -209,10 +243,10 @@ func TestRecord_CompileReviewApproveSeal(t *testing.T) {
 
 	// Segregation of duties (PRD 4.24.17): whoever reviewed the record, or
 	// created its batch order (planner-1), does not approve it.
-	if _, _, err := s.ApproveRecord(reviewer, rec.ID, rec.Version, store.Idem{Key: "ap-rev", Fingerprint: "ar"}); problemCode(err) != domain.CodeEBRSegregation {
+	if _, _, err := s.ApproveRecord(reviewer, rec.ID, rec.Version, noSign, store.Idem{Key: "ap-rev", Fingerprint: "ar"}); problemCode(err) != domain.CodeEBRSegregation {
 		t.Fatalf("reviewer approves: %v", err)
 	}
-	if _, _, err := s.ApproveRecord(ctx, rec.ID, rec.Version, store.Idem{Key: "ap-own", Fingerprint: "ao"}); problemCode(err) != domain.CodeEBRSegregation {
+	if _, _, err := s.ApproveRecord(ctx, rec.ID, rec.Version, noSign, store.Idem{Key: "ap-own", Fingerprint: "ao"}); problemCode(err) != domain.CodeEBRSegregation {
 		t.Fatalf("order creator (who also raised an exception) approves: %v", err)
 	}
 	qa := asUser("qa-1")
@@ -225,26 +259,30 @@ func TestRecord_CompileReviewApproveSeal(t *testing.T) {
 	if _, _, err := s.SealRecord(qa, rec.ID, rec.Version, store.Idem{Key: "seal-early", Fingerprint: "se"}); problemCode(err) != store.CodeRecordState {
 		t.Fatalf("seal before approval: %v", err)
 	}
-	if _, _, err := s.ApproveRecord(qa, rec.ID, rec.Version-1, store.Idem{Key: "ap-v", Fingerprint: "av"}); problemCode(err) != store.CodeVersionConflict {
+	if _, _, err := s.ApproveRecord(qa, rec.ID, rec.Version-1, noSign, store.Idem{Key: "ap-v", Fingerprint: "av"}); problemCode(err) != store.CodeVersionConflict {
 		t.Fatalf("approve stale version: %v", err)
 	}
-	app, changed, err := s.ApproveRecord(qa, rec.ID, rec.Version, store.Idem{Key: "ap-1", Fingerprint: "a"})
+	// A signature over a hash that is not the record's is refused (PMF-0013).
+	if _, _, err := s.ApproveRecord(qa, rec.ID, rec.Version, noSign, store.Idem{Key: "ap-hash", Fingerprint: "ah"}); problemCode(err) != domain.CodeSignatureInvalid {
+		t.Fatalf("approve over another hash: %v", err)
+	}
+	app, changed, err := s.ApproveRecord(qa, rec.ID, rec.Version, signApprove(t, s, qa, rec.ID, "password+otp"), store.Idem{Key: "ap-1", Fingerprint: "a"})
 	if err != nil || !changed || app.Status != store.RecordApproved || app.ApprovedBy == nil || *app.ApprovedBy != "qa-1" || app.ApprovedAt == nil {
 		t.Fatalf("approve %+v err=%v", app, err)
 	}
-	if _, changed, err := s.ApproveRecord(qa, rec.ID, rec.Version, store.Idem{Key: "ap-1", Fingerprint: "a"}); err != nil || changed || len(outboxEvents(t, admin, pmfevents.BatchRecordApproved)) != 1 {
+	if _, changed, err := s.ApproveRecord(qa, rec.ID, rec.Version, noSign, store.Idem{Key: "ap-1", Fingerprint: "a"}); err != nil || changed || len(outboxEvents(t, admin, pmfevents.BatchRecordApproved)) != 1 {
 		t.Fatalf("approve replay changed=%v err=%v", changed, err)
 	}
 	if _, _, err := s.RaiseException(ctx, rec.ID, store.NewException{Description: "after", Severity: "minor"}, app.Version, store.Idem{Key: "x-late", Fingerprint: "xl"}); problemCode(err) != store.CodeRecordState {
 		t.Fatalf("raise after approval: %v", err)
 	}
-	if _, _, err := s.DispositionException(reviewer, rec.ID, app.Exceptions[0].ID, store.ExceptionDisposition{Disposition: "accepted", SignatureID: sig()}, app.Version, store.Idem{Key: "d-late", Fingerprint: "dl"}); problemCode(err) != store.CodeRecordState {
+	if _, _, err := s.DispositionException(reviewer, rec.ID, app.Exceptions[0].ID, store.ExceptionDisposition{Disposition: "accepted", Sign: noSign}, app.Version, store.Idem{Key: "d-late", Fingerprint: "dl"}); problemCode(err) != store.CodeRecordState {
 		t.Fatalf("disposition after approval: %v", err)
 	}
 	if _, _, err := s.CompileRecord(ctx, b.ID, store.Idem{Key: "c-late", Fingerprint: "cl"}); problemCode(err) != store.CodeRecordState {
 		t.Fatalf("compile after approval: %v", err)
 	}
-	if _, _, err := s.ApproveRecord(qa, rec.ID, app.Version, store.Idem{Key: "ap-2", Fingerprint: "a2"}); problemCode(err) != store.CodeRecordState {
+	if _, _, err := s.ApproveRecord(qa, rec.ID, app.Version, noSign, store.Idem{Key: "ap-2", Fingerprint: "a2"}); problemCode(err) != store.CodeRecordState {
 		t.Fatalf("approve twice: %v", err)
 	}
 	// The database keeps an approved record's content and lets it move only to sealed.
@@ -283,14 +321,42 @@ func TestRecord_CompileReviewApproveSeal(t *testing.T) {
 			Disposition string `json:"disposition"`
 			SignatureID string `json:"signatureId"`
 		} `json:"exceptions"`
+		ApprovalSignatureID string `json:"approvalSignatureId"`
+		Signatures          []struct {
+			ID          string `json:"id"`
+			Meaning     string `json:"meaning"`
+			SignerID    string `json:"signerId"`
+			PrintedName string `json:"printedName"`
+			Method      string `json:"method"`
+			RecordHash  string `json:"recordHash"`
+		} `json:"signatures"`
 	}
 	// What is sealed is what was approved: the release that followed the approval
-	// is not in it. Times are UTC, and the document says the signature ids were
-	// not verified (there is no signature service yet).
+	// is not in it. Times are UTC, and every decision and the approval are
+	// backed by a signature made with a verified re-authentication.
 	if err := json.Unmarshal([]byte(*sealed.SealedDocument), &doc); err != nil || doc.RecordID != rec.ID || doc.ApprovedBy != "qa-1" || len(doc.Exceptions) != 3 ||
 		doc.Exceptions[0].Disposition == "" || doc.Exceptions[0].SignatureID == "" || doc.Content.Batch.Disposition != "quarantine" ||
-		!strings.HasSuffix(doc.ApprovedAt, "Z") || !strings.HasSuffix(doc.SealedAt, "Z") || doc.SignaturesVerified == nil || *doc.SignaturesVerified {
+		!strings.HasSuffix(doc.ApprovedAt, "Z") || !strings.HasSuffix(doc.SealedAt, "Z") || doc.SignaturesVerified == nil || !*doc.SignaturesVerified {
 		t.Fatalf("sealed document %v %+v", err, doc)
+	}
+	if len(doc.Signatures) != 4 || doc.ApprovalSignatureID == "" || app.ApprovalSignatureID == nil || *app.ApprovalSignatureID != doc.ApprovalSignatureID {
+		t.Fatalf("signatures %+v approval %q", doc.Signatures, doc.ApprovalSignatureID)
+	}
+	for i, sg := range doc.Signatures {
+		want := map[bool]string{true: "approved", false: "reviewed"}[i == 3]
+		if sg.Meaning != want || len(sg.RecordHash) != 64 || sg.Method == "" || (i < 3 && (sg.SignerID != "reviewer-1" || doc.Exceptions[i].SignatureID != sg.ID)) ||
+			(i == 3 && (sg.SignerID != "qa-1" || sg.ID != doc.ApprovalSignatureID || sg.PrintedName != "Quinn QA")) {
+			t.Fatalf("signature %d %+v", i, sg)
+		}
+	}
+	// Signatures are append-only, even for the table owner.
+	for name, stmt := range map[string]string{
+		"rewrite a signature": `update ebr_signature set signer_id = 'someone' where record_id = $1`,
+		"delete a signature":  `delete from ebr_signature where record_id = $1`,
+	} {
+		if _, err := admin.Exec(context.Background(), stmt, rec.ID); err == nil {
+			t.Fatalf("%s: the database accepted it", name)
+		}
 	}
 	if string(app.Content) == "" || !jsonEqual(t, string(app.Content), *sealed.SealedDocument) {
 		t.Fatal("sealed content differs from the approved content")
@@ -364,13 +430,25 @@ func TestRecord_CleanBatchAndProfileWithoutGate(t *testing.T) {
 	if _, _, err := s.RegisterBatch(ctx, store.NewBatch{LegalEntityID: entityA, ItemID: item, BatchNumber: "BORN-AVAILABLE", Disposition: "available"}, store.Idem{Key: "born", Fingerprint: "b"}); problemCode(err) != domain.CodeEBRNotApproved {
 		t.Fatalf("register as available under a profile: %v", err)
 	}
-	app, _, err := s.ApproveRecord(asUser("qa-1"), rec.ID, rec.Version, store.Idem{Key: "ap-b", Fingerprint: "ab"})
+	app, _, err := s.ApproveRecord(asUser("qa-1"), rec.ID, rec.Version, signApprove(t, s, ctx, rec.ID, domain.AuthDevUnverified), store.Idem{Key: "ap-b", Fingerprint: "ab"})
 	if err != nil || app.Status != store.RecordApproved {
 		t.Fatalf("approve clean record %+v err=%v", app, err)
 	}
 	// The stored hash must be the SHA-256 of the stored document.
 	if _, err := admin.Exec(context.Background(), `update electronic_batch_record set status = 'sealed', sealed_at = now(), sealed_document = '{}', content_hash = sha256('other') where id = $1`, rec.ID); err == nil {
 		t.Fatal("sealed with a hash of another document")
+	}
+
+	if app.ApprovalSignatureID == nil || len(app.Signatures) != 1 || app.Signatures[0].Method != domain.AuthDevUnverified {
+		t.Fatalf("approval signature %+v", app.Signatures)
+	}
+	sealedDev, _, err := s.SealRecord(asUser("qa-1"), rec.ID, app.Version, store.Idem{Key: "seal-b", Fingerprint: "sb"})
+	if err != nil || !strings.Contains(*sealedDev.SealedDocument, `"signaturesVerified":false`) {
+		t.Fatalf("dev-signed record seals as verified: %v", err)
+	}
+	pdf, err := store.RenderRecordPDF(sealedDev)
+	if err != nil || !strings.HasPrefix(string(pdf), "%PDF-") || !strings.Contains(string(pdf), *sealedDev.ContentHash) || !strings.Contains(string(pdf), "dev-unverified") {
+		t.Fatalf("pdf of the sealed record: %v", err)
 	}
 
 	item2, b2 := ebrBatch(t, s, "EBR-C")
@@ -415,7 +493,7 @@ func approvedBatch(t *testing.T, s *store.Postgres, item, orderID, number string
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.ApproveRecord(asUser("qa-1"), rec.ID, rec.Version, store.Idem{Key: "ap-" + number, Fingerprint: number}); err != nil {
+	if _, _, err := s.ApproveRecord(asUser("qa-1"), rec.ID, rec.Version, signApprove(t, s, ctx, rec.ID, "password"), store.Idem{Key: "ap-" + number, Fingerprint: number}); err != nil {
 		t.Fatal(err)
 	}
 	cur, _ := s.GetBatch(ctx, b.ID)

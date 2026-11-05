@@ -11,7 +11,7 @@ describe("purchasing module", () => {
 
   it("gives every nav entry a route and a PRD duty", () => {
     const paths = new Set(purchasing.routes.map((r) => r.path));
-    const duties = new Set(["PurchaseOrderInquire", "RequisitionCreate", "PurchaseOrderMaintain", "TradeAgreementMaintain", "AgreementMaintain", "RFQMaintain", "ProcurementPolicyMaintain"]);
+    const duties = new Set(["procurement.purchase-order.inquire", "procurement.requisition.create", "procurement.purchase-order.maintain", "procurement.trade-agreement.maintain", "procurement.agreement.maintain", "procurement.rfq.maintain", "procurement.policy.maintain"]);
     for (const n of purchasing.nav) {
       expect(paths.has(n.to)).toBe(true);
       expect(duties.has(n.duty ?? "")).toBe(true);

@@ -54,13 +54,14 @@ func newLiveRigWith(t *testing.T, env connector.Env, drop, profile string) *live
 	if err := os.MkdirAll(filepath.Join(l.drop, "acme"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := target.Config{PartyURL: l.fakes.PartyURL, ProductURL: l.fakes.ProductURL, ReceivablesURL: l.fakes.ReceivablesURL, Signer: l.fakes.Signer, Concurrency: 1, Sleep: func(context.Context, time.Duration) error { return nil }}
+	cfg := target.Config{PartyURL: l.fakes.PartyURL, ProductURL: l.fakes.ProductURL, ReceivablesURL: l.fakes.ReceivablesURL, EngineeringURL: l.fakes.EngineeringURL, Signer: l.fakes.Signer, Concurrency: 1, Sleep: func(context.Context, time.Duration) error { return nil }}
 	router := httpx.NewRouter()
 	l.api = api.New(l.store, api.NotConfigured).
 		WithConnections(testKeys(t), &recordingProber{}).
 		WithExtraction(env).
 		WithTargets(func(_ context.Context, run api.TargetRun) (domain.TargetLoader, domain.TargetReader, error) {
-			return target.New(cfg, target.Run{SourceSystem: run.SourceSystem, LegalEntityID: run.LegalEntityID, Xref: l.store.Xref()}), nil, nil
+			loader := target.New(cfg, target.Run{SourceSystem: run.SourceSystem, LegalEntityID: run.LegalEntityID, Xref: l.store.Xref()})
+			return loader, loader.Reader(), nil
 		})
 	l.api.Register(router)
 	l.r = router
@@ -97,6 +98,7 @@ type liveRun struct {
 			SourceKey string
 			Rejects   []struct{ Code, Detail string }
 		}
+		Reconciliation *domain.ReconcileReport `json:"reconciliation"`
 	}
 }
 
@@ -119,17 +121,17 @@ const (
 		{"source":"Acct","target":"accountNumber","type":"string","required":true},
 		{"rule":"const","value":"EUR","target":"currencyCode","type":"string"},
 		{"rule":"const","value":"00000000-0000-7000-8000-00000000d001","target":"vendorGroupId","type":"string"}]}`
-	bomMap = `{"entity":"bom","version":1,"fields":[{"source":"Name","target":"name","type":"string"}]}`
+	apMap = `{"entity":"ap_open_item","version":1,"fields":[{"source":"Name","target":"name","type":"string"}]}`
 )
 
 func TestLive_FileBindingRunsThroughThePipelineIntoTheOwningServicesAndRerunsIdempotently(t *testing.T) {
 	l := newLiveRig(t)
 	l.file("parties.csv", "id,Name\nP1,Acme GmbH\nP2,Beta AG\nP3,\n")
 	l.file("vendors.csv", "id,Party,Acct\nV1,P1,V-100\nV2,P2,V-200\nV3,P9,V-300\n")
-	l.file("boms.csv", "id,Name\nB1,Table\n")
+	l.file("aps.csv", "id,Name\nB1,Table\n")
 	l.bind("party", "parties.csv", `"id"`)
 	l.bind("vendor", "vendors.csv", `"id"`)
-	l.bind("bom", "boms.csv", `"id"`)
+	l.bind("ap_open_item", "aps.csv", `"id"`)
 
 	// Parties: two load, the nameless row is refused by the mapping before it reaches the target.
 	got, rec := l.run(partyMap, true)
@@ -158,19 +160,31 @@ func TestLive_FileBindingRunsThroughThePipelineIntoTheOwningServicesAndRerunsIde
 	}
 
 	// An entity with no target API is rejected row by row, never dropped.
-	got, rec = l.run(bomMap, true)
+	got, rec = l.run(apMap, true)
 	if got.Run.Counts["created"] != 0 || got.Run.Counts["rejected"] != 1 || got.Run.Rejects[0].Rejects[0].Code != target.CodeNotAvailable {
-		t.Fatalf("bom run = %+v (%s)", got.Run, rec.Body)
+		t.Fatalf("ap run = %+v (%s)", got.Run, rec.Body)
 	}
 
-	// The same extract again changes nothing in the targets.
-	before := len(l.fakes.Calls(""))
+	// The same extract again changes nothing in the targets; the run only reads the two parties back to reconcile.
+	writes := func() int {
+		n := 0
+		for _, c := range l.fakes.Calls("") {
+			if c.Method != http.MethodGet {
+				n++
+			}
+		}
+		return n
+	}
+	before := writes()
 	got, _ = l.run(partyMap, true)
 	if got.Run.Counts["unchanged"] != 2 || got.Run.Counts["created"] != 0 || len(l.fakes.Parties) != 2 {
 		t.Fatalf("rerun = %+v", got.Run)
 	}
-	if after := len(l.fakes.Calls("")); after != before {
-		t.Fatalf("an unchanged rerun made %d calls", after-before)
+	if after := writes(); after != before {
+		t.Fatalf("an unchanged rerun made %d writes", after-before)
+	}
+	if rec := got.Run.Reconciliation; rec == nil || !rec.OK() || rec.Source != 2 || rec.Target != 2 {
+		t.Fatalf("rerun reconciliation = %+v, want both parties read back and tied out", rec)
 	}
 
 	// A changed row updates the same party under its recorded version; it does not create another.

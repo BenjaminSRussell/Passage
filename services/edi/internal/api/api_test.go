@@ -70,7 +70,7 @@ func problemCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 
 func TestMapsTest_MapsValid850(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"raw": sample850(t, "1")})
-	rec := call(t, http.MethodPost, "/edi/v1/maps:test", string(body), "EDI_ADMIN", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/maps:test", string(body), "edi.admin", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -111,7 +111,7 @@ func TestMapsTest_MapsValid850(t *testing.T) {
 
 func TestMapsTest_CountMismatchIsRejected(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"raw": sample850(t, "2")})
-	rec := call(t, http.MethodPost, "/edi/v1/maps:test", string(body), "EDI_ADMIN", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/maps:test", string(body), "edi.admin", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -128,7 +128,7 @@ func TestMapsTest_RequiresDuty(t *testing.T) {
 }
 
 func TestMapsTest_SyntaxErrorIsProblem(t *testing.T) {
-	rec := call(t, http.MethodPost, "/edi/v1/maps:test", `{"raw":"not an interchange"}`, "EDI_ADMIN", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/maps:test", `{"raw":"not an interchange"}`, "edi.admin", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeSyntax {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -136,7 +136,7 @@ func TestMapsTest_SyntaxErrorIsProblem(t *testing.T) {
 
 func TestCreatePartner_RequiresIdempotencyKey(t *testing.T) {
 	body := `{"name":"Demo distributor","isaQualifier":"ZZ","isaId":"DISTRIBUTOR","environment":"TEST"}`
-	rec := call(t, http.MethodPost, "/edi/v1/partners", body, "EDI_ADMIN", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/partners", body, "edi.admin", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeIdempotencyKey {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -144,7 +144,7 @@ func TestCreatePartner_RequiresIdempotencyKey(t *testing.T) {
 
 func TestCreatePartner_ValidatesProfile(t *testing.T) {
 	body := `{"name":"","isaQualifier":"z","isaId":"","environment":"STAGING"}`
-	rec := call(t, http.MethodPost, "/edi/v1/partners", body, "EDI_ADMIN", map[string]string{"Idempotency-Key": "k1"})
+	rec := call(t, http.MethodPost, "/edi/v1/partners", body, "edi.admin", map[string]string{"Idempotency-Key": "k1"})
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -157,14 +157,14 @@ func TestCreatePartner_ValidatesProfile(t *testing.T) {
 
 func TestCreatePartner_RejectsUnknownFields(t *testing.T) {
 	body := `{"name":"x","isaQualifier":"ZZ","isaId":"A","environment":"TEST","surprise":1}`
-	rec := call(t, http.MethodPost, "/edi/v1/partners", body, "EDI_ADMIN", map[string]string{"Idempotency-Key": "k2"})
+	rec := call(t, http.MethodPost, "/edi/v1/partners", body, "edi.admin", map[string]string{"Idempotency-Key": "k2"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", rec.Code)
 	}
 }
 
 func TestInbound_RejectsBadEnvironment(t *testing.T) {
-	rec := call(t, http.MethodPost, "/edi/v1/inbound/x12?environment=QA", "ISA", "EDI_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/inbound/x12?environment=QA", "ISA", "edi.operate", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", rec.Code)
 	}
@@ -172,7 +172,7 @@ func TestInbound_RejectsBadEnvironment(t *testing.T) {
 
 func TestInbound_SyntaxErrorBeforeStore(t *testing.T) {
 	// A nil store proves the parse fails before any partner lookup.
-	rec := call(t, http.MethodPost, "/edi/v1/inbound/x12", "GS*PO~", "EDI_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/inbound/x12", "GS*PO~", "edi.operate", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeSyntax {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -189,7 +189,7 @@ func TestMapsTest_UnsupportedSetIsReportedAsAnIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := json.Marshal(map[string]string{"raw": raw})
-	rec := call(t, http.MethodPost, "/edi/v1/maps:test", string(body), "EDI_ADMIN", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/maps:test", string(body), "edi.admin", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -229,22 +229,24 @@ func TestOutbound_ValidatesBeforeStore(t *testing.T) {
 		{"unknown request field", outboundPath, `{"transactionSet":"856","document":{},"x":1}`, key, http.StatusBadRequest, "COM-0001"},
 		{"document fails the 856 rules", outboundPath, `{"transactionSet":"856","document":{"shipmentId":"L1"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
 		{"unknown document field", outboundPath, `{"transactionSet":"810","document":{"number":"1","colour":"red"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
+		{"document fails the 820 rules", outboundPath, `{"transactionSet":"820","document":{"traceNumber":"T1","amount":"10"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
+		{"document fails the 214 rules", outboundPath, `{"transactionSet":"214","document":{"proNumber":"P1"}}`, key, http.StatusUnprocessableEntity, CodeOutbound},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := call(t, http.MethodPost, c.path, c.body, "EDI_OPERATE", c.headers)
+			rec := call(t, http.MethodPost, c.path, c.body, "edi.operate", c.headers)
 			if rec.Code != c.status || problemCode(t, rec) != c.code {
 				t.Fatalf("status %d body %s, want %d %s", rec.Code, rec.Body.String(), c.status, c.code)
 			}
 		})
 	}
-	if rec := call(t, http.MethodPost, outboundPath, `{}`, "EDI_ADMIN", key); rec.Code != http.StatusForbidden {
-		t.Fatalf("EDI_ADMIN alone must not send documents: %d", rec.Code)
+	if rec := call(t, http.MethodPost, outboundPath, `{}`, "edi.admin", key); rec.Code != http.StatusForbidden {
+		t.Fatalf("edi.admin alone must not send documents: %d", rec.Code)
 	}
 }
 
 func TestInterchanges_RejectsUnknownDirection(t *testing.T) {
-	rec := call(t, http.MethodGet, "/edi/v1/interchanges?direction=SIDEWAYS", "", "EDI_OPERATE", nil)
+	rec := call(t, http.MethodGet, "/edi/v1/interchanges?direction=SIDEWAYS", "", "edi.operate", nil)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"direction"`) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}

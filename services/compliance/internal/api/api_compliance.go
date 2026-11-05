@@ -18,9 +18,9 @@ import (
 
 // Privacy, certification and export governance duties (PRD §9.48.5, §9.48.17).
 const (
-	DutyPrivacyIntake  = "PrivacyIntake"
-	DutyPrivacyOfficer = "PrivacyOfficer"
-	DutyComplianceView = "ComplianceView"
+	DutyPrivacyIntake  = "compliance.privacy-request.create"
+	DutyPrivacyOfficer = "compliance.privacy-request.process"
+	DutyComplianceView = "compliance.view"
 )
 
 const (

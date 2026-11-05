@@ -20,7 +20,7 @@ const (
 )
 
 func principal(scope string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tid, LegalEntityID: scope, UserID: "user-1", Duties: map[string]struct{}{"EDI_OPERATE": {}}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tid, LegalEntityID: scope, UserID: "user-1", Duties: map[string]struct{}{"edi.operate": {}}})
 }
 
 func signerAndVerifier(t *testing.T, aud string) (*tenant.ServiceSigner, *tenant.ServiceVerifier) {

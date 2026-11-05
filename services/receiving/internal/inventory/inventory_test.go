@@ -223,7 +223,7 @@ func signedClient(t *testing.T, handler func(w http.ResponseWriter, r *http.Requ
 }
 
 func endUserCtx(scope string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope, UserID: "user-1", Duties: map[string]struct{}{"ReceivingPost": {}}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope, UserID: "user-1", Duties: map[string]struct{}{"receiving.receipt.post": {}}})
 }
 
 func TestSigned_ReadsSendOnlyTheOwnershipChangeDutyForTheSettlementEntity(t *testing.T) {

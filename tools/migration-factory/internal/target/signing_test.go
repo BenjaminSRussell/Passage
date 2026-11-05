@@ -57,7 +57,7 @@ func TestServiceGrantForTheFactoryIsSeeded(t *testing.T) {
 	if grant == nil {
 		t.Skip("handoff H-S8-1: platform/go/tenant serviceGrants has no \"migration-factory\" entry yet")
 	}
-	want := []string{"receivables.import.write", "ARView"}
+	want := []string{"receivables.import.write", "receivables.view"}
 	if len(grant) != len(want) {
 		t.Errorf("the grant for migration-factory -> receivables must hold exactly %v (least privilege), got %v", want, grant)
 	}
@@ -66,7 +66,17 @@ func TestServiceGrantForTheFactoryIsSeeded(t *testing.T) {
 			t.Errorf("the grant for migration-factory -> receivables lacks %s: %v", duty, grant)
 		}
 	}
-	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 1 {
-		t.Errorf("migration-factory is granted only receivables today, got %v", other)
+	ledger := tenant.ServiceGrantTable()[target.ServiceName]["ledger"]
+	wantLedger := []string{"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"}
+	if len(ledger) != len(wantLedger) {
+		t.Errorf("the grant for migration-factory -> ledger must hold exactly %v (least privilege), got %v", wantLedger, ledger)
+	}
+	for _, duty := range wantLedger {
+		if !slices.Contains(ledger, duty) {
+			t.Errorf("the grant for migration-factory -> ledger lacks %s: %v", duty, ledger)
+		}
+	}
+	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 2 {
+		t.Errorf("migration-factory is granted only receivables and ledger (replay, compensations), got %v", other)
 	}
 }

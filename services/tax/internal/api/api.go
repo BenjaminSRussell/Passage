@@ -25,9 +25,9 @@ import (
 
 const (
 	readyTimeout  = 500 * time.Millisecond
-	dutyCalculate = "Calculate tax"
+	dutyCalculate = "tax.tax.calculate"
 
-	dutyWithholding = "Calculate withholding tax"
+	dutyWithholding = "tax.withholding.calculate"
 )
 
 type Pinger interface {

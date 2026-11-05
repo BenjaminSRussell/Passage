@@ -91,6 +91,8 @@ var contract = map[string][]string{
 	"product":      productFields,
 	"item":         productFields,
 	"ar_open_item": slices.Concat([]string{"customerId", "customerKey"}, openItemFields),
+	"bom":          slices.Concat([]string{"productId", "productKey", "lines"}, bomFields),
+	"route":        slices.Concat([]string{"productId", "productKey", "operations", "versionNo"}, routeFields),
 }
 
 // UnknownTargets lists the mapping targets of entity that its loader would not send anywhere: a misspelt or

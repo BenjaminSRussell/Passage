@@ -1,5 +1,5 @@
 // Returnable packaging movements and balance corrections (FR-28.16): list on open, filter,
-// empty and error states, and the correction form for a caller holding ReturnablePackagingMaintain.
+// empty and error states, and the correction form for a caller holding fulfillment.returnable-packaging.maintain.
 import { findAlert, findStatus, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -33,7 +33,7 @@ function movement(id: string, patch: Partial<ReturnableMovement> = {}): Returnab
 }
 
 const calls = (path: string, method = "GET") => server.calls.filter((c) => c.method === method && c.url.pathname === path);
-const maintain = ["WarehouseView", "ReturnablePackagingMaintain"];
+const maintain = ["fulfillment.warehouse.view", "fulfillment.returnable-packaging.maintain"];
 
 describe("Returnable packaging movements", () => {
   it("lists the newest movements with signed quantities and links a slip", async () => {
@@ -56,7 +56,7 @@ describe("Returnable packaging movements", () => {
     expect(cells[1].slice(3, 6)).toEqual(["Shipped", "+10", "10"]);
     expect(within(rows[1]).getByRole("link", { name: "Packing slip" })).toHaveAttribute("href", `/fulfillment/packing-slips/${SLIP}`);
     expect(calls(MOVEMENTS)[0].url.searchParams.get("limit")).toBe(String(MOVEMENT_LIMIT));
-    // Without ReturnablePackagingMaintain there is no correction form.
+    // Without fulfillment.returnable-packaging.maintain there is no correction form.
     expect(screen.queryByRole("button", { name: "Correct balance" })).toBeNull();
     expect(pageViolations(container)).toEqual([]);
   });
@@ -148,7 +148,7 @@ describe("Correct a returnable balance", () => {
 
   it("hides the form from a caller who receives returns but cannot correct balances", async () => {
     server.handler = (url) => (url.pathname === MOVEMENTS ? json(200, { items: [] }) : undefined);
-    renderAt("/fulfillment/returnable-movements", ["WarehouseView", "WarehouseReceive"]);
+    renderAt("/fulfillment/returnable-movements", ["fulfillment.warehouse.view", "fulfillment.warehouse.receive"]);
     await screen.findByText("No returnable packaging movements yet");
     expect(screen.queryByRole("button", { name: "Correct balance" })).toBeNull();
   });

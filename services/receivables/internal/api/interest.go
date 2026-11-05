@@ -14,7 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 )
 
-const dutyInterest = "InterestPost"
+const dutyInterest = "receivables.interest.post"
 
 type interestRequest struct {
 	LegalEntityID   string          `json:"legalEntityId"`

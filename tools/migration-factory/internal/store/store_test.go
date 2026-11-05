@@ -35,7 +35,7 @@ func TestRunOpenItems_ConcurrentRunsLoadEachRecordOnce(t *testing.T) {
 	}
 	st := New(pool)
 	tenantID := testkit.TenantID(7)
-	ctx := testkit.Ctx(tenantID, "MigrationRun")
+	ctx := testkit.Ctx(tenantID, "migration.factory.run")
 	var records []domain.Record
 	for i := 0; i < 50; i++ {
 		records = append(records, domain.Record{LegacyID: fmt.Sprintf("BSIK-%03d", i), Party: "V1", Account: "160000", Currency: "EUR", Amount: decimal.RequireFromString("99.99")})

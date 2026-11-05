@@ -43,7 +43,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const DISPATCHER = ["SvcInquire", "SvcWoMaintain", "SvcDispatch"];
+const DISPATCHER = ["fieldservice.inquire", "fieldservice.work-order.maintain", "fieldservice.technician.dispatch"];
 
 function renderAt(path: string, duties: readonly string[] = DISPATCHER) {
   return render(
@@ -230,17 +230,17 @@ describe("technicians", () => {
     expect(await findAlert()).toHaveTextContent("SWO-000004: SVC-DSP-003 technician lacks skill HVAC");
   });
 
-  it("shows a technician read-only, without create or save, to a user without SvcDispatch", async () => {
+  it("shows a technician read-only, without create or save, to a user without fieldservice.technician.dispatch", async () => {
     handler = (url) =>
       url.pathname.endsWith(TECH) ? { status: 200, body: technician(), etag: '"1"' } : { status: 200, body: { items: [technician()] } };
-    const view = renderAt(`/service/technicians/${TECH}`, ["SvcInquire"]);
+    const view = renderAt(`/service/technicians/${TECH}`, ["fieldservice.inquire"]);
     expect(await screen.findByRole("heading", { name: "Technician ANA" })).toBeInTheDocument();
     expect(screen.getByText("America/Chicago")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save technician" })).not.toBeInTheDocument();
     expect(pageViolations(view.container)).toEqual([]);
     view.unmount();
 
-    renderAt("/service/technicians", ["SvcInquire"]);
+    renderAt("/service/technicians", ["fieldservice.inquire"]);
     expect(await screen.findByRole("heading", { name: "Technicians" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "New technician" })).not.toBeInTheDocument();
   });
@@ -280,13 +280,13 @@ async function openBoard() {
 }
 
 describe("dispatch board", () => {
-  it("is view only for a user without SvcDispatch", async () => {
+  it("is view only for a user without fieldservice.technician.dispatch", async () => {
     handler = () => ({ status: 200, body: board() });
-    renderAt("/service/dispatch", ["SvcInquire"]);
+    renderAt("/service/dispatch", ["fieldservice.inquire"]);
     fireEvent.change(await screen.findByLabelText(/^Territory/), { target: { value: TERR } });
     fireEvent.click(screen.getByRole("button", { name: "Show board" }));
     await screen.findByRole("heading", { name: "ANA · Ana Ruiz" });
-    expect(screen.getByText(/need the SvcDispatch duty/)).toBeInTheDocument();
+    expect(screen.getByText(/need the fieldservice.technician.dispatch duty/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Assign" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unassign SWO-000004" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Publish day" })).not.toBeInTheDocument();
@@ -438,9 +438,9 @@ describe("work order scheduling", () => {
 });
 
 describe("module", () => {
-  it("registers the dispatch screens, gated on SvcInquire", () => {
+  it("registers the dispatch screens, gated on fieldservice.inquire", () => {
     const paths = service.routes.map((r) => r.path);
     for (const p of ["/service/dispatch", "/service/technicians", "/service/technicians/new", "/service/technicians/:id"]) expect(paths).toContain(p);
-    expect(service.nav.filter((n) => ["/service/dispatch", "/service/technicians"].includes(n.to)).map((n) => n.duty)).toEqual(["SvcInquire", "SvcInquire"]);
+    expect(service.nav.filter((n) => ["/service/dispatch", "/service/technicians"].includes(n.to)).map((n) => n.duty)).toEqual(["fieldservice.inquire", "fieldservice.inquire"]);
   });
 });

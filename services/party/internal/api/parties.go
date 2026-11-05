@@ -108,7 +108,7 @@ func (a *API) getParty(w http.ResponseWriter, r *http.Request) {
 	if redirected {
 		res.RequestedID, res.Redirected = requestedID, true
 	}
-	respond(w, r, http.StatusOK, res)
+	respondRead(w, r, res)
 }
 
 func (a *API) patchParty(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +165,15 @@ func respond(w http.ResponseWriter, r *http.Request, status int, res partyRespon
 	}
 	res.DOB = domain.MaskDOB(res.DOB, caller.HasDuty(dutyPII))
 	httpx.JSON(w, status, res)
+}
+
+// respondRead answers a GET: a caller admitted by party.read or party.import.read gets the record, with the date of
+// birth masked unless it holds pii.read.
+func respondRead(w http.ResponseWriter, r *http.Request, res partyResponse) {
+	caller, _ := tenant.FromContext(r.Context())
+	w.Header().Set("ETag", `"`+strconv.Itoa(res.Version)+`"`)
+	res.DOB = domain.MaskDOB(res.DOB, caller.HasDuty(dutyPII))
+	httpx.JSON(w, http.StatusOK, res)
 }
 
 func failParty(w http.ResponseWriter, r *http.Request, err error) {

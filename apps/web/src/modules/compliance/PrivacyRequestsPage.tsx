@@ -42,7 +42,7 @@ const columns: DataTableColumn<SubjectRequest>[] = [
 ];
 
 /**
- * Privacy requests (PRD §9.48.6, duty PrivacyOfficer): GDPR and CCPA subject
+ * Privacy requests (PRD §9.48.6, duty compliance.privacy-request.process): GDPR and CCPA subject
  * requests, nearest deadline first, filtered by state and type (FR-48.10).
  */
 export function PrivacyRequestsPage() {

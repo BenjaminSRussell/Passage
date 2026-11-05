@@ -144,7 +144,7 @@ describe("Short picks and backorders", () => {
   it("shows a load error with a retry", async () => {
     let fail = true;
     server.handler = (url) =>
-      url.pathname !== BACKORDERS ? undefined : fail ? json(403, { code: "COM-0403", detail: "missing duty WarehouseView" }) : json(200, { items: [backorder("0195f0a0-0000-7000-8000-0000000000c1")] });
+      url.pathname !== BACKORDERS ? undefined : fail ? json(403, { code: "COM-0403", detail: "missing duty fulfillment.warehouse.view" }) : json(200, { items: [backorder("0195f0a0-0000-7000-8000-0000000000c1")] });
     renderAt("/fulfillment/backorders");
     const alert = await findAlert();
     expect(alert.textContent).toContain("Could not load the backorders");

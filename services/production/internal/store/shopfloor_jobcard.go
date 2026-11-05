@@ -271,3 +271,50 @@ func latestShopfloorCard(ctx context.Context, tx pgx.Tx, tenantID, registrationI
 	c.reversedByAdjust = c.reversed && strings.HasPrefix(*revKey, shopfloorJobCardRevKey)
 	return c, err
 }
+
+// DutyShopfloorJobCard is the duty of the service principal that posts shop-floor job
+// cards (the registration consumer, service:production-shopfloor). Only it may look up
+// an order's legal entity across legal entities.
+const DutyShopfloorJobCard = "production.jobcard.shopfloor"
+
+// ShopfloorOrderLegalEntity returns the legal entity of the production order a shop-floor
+// registration names. The registration consumer runs as a tenant-level principal (the
+// shop floor has no legal entity), so it reads only this one column across legal entities
+// and then posts the job card as a principal pinned to that legal entity. ok is false when
+// the tenant has no such order or orderRef is not a UUID. Any other caller is refused.
+func (s *Postgres) ShopfloorOrderLegalEntity(ctx context.Context, orderRef string) (string, bool, error) {
+	orderID, ok := ids.Canonical(orderRef)
+	if !ok {
+		return "", false, nil
+	}
+	return s.shopfloorLegalEntity(ctx, `select legal_entity_id::text from production_order where tenant_id = $1 and id = $2`, orderID)
+}
+
+// ShopfloorCardLegalEntity returns the legal entity of the job card a shop-floor
+// registration posted, for a registration.corrected event (which names no order). ok is
+// false when the registration posted no card. The caller rule is ShopfloorOrderLegalEntity's.
+func (s *Postgres) ShopfloorCardLegalEntity(ctx context.Context, registrationID string) (string, bool, error) {
+	regID, ok := ids.Canonical(registrationID)
+	if !ok {
+		return "", false, nil
+	}
+	return s.shopfloorLegalEntity(ctx, `select legal_entity_id::text from production_journal where tenant_id = $1 and idempotency_key = $2 limit 1`, shopfloorJobCardKey+regID)
+}
+
+func (s *Postgres) shopfloorLegalEntity(ctx context.Context, query, arg string) (string, bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	if p.LegalEntityID != "" || !p.HasDuty(DutyShopfloorJobCard) {
+		return "", false, fmt.Errorf("%w: the legal entity lookup needs the tenant-level %s principal", ErrJobCardRefused, DutyShopfloorJobCard)
+	}
+	var le string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, query, p.TenantID, arg).Scan(&le)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	return le, err == nil, err
+}

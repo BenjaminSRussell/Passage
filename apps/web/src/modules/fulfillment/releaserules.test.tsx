@@ -14,7 +14,7 @@ const LE = "0195f0a0-0000-7000-8000-0000000000aa";
 const calls = (method: string, suffix: string) => server.calls.filter((c) => c.method === method && c.url.pathname.endsWith(suffix));
 const header = (call: { init: RequestInit }, name: string) => new Headers(call.init.headers).get(name);
 
-const SUPERVISOR = ["WarehouseView", "WarehouseRelease"];
+const SUPERVISOR = ["fulfillment.warehouse.view", "fulfillment.warehouse.release"];
 
 const rules: ReleaseRule[] = [
   { warehouseId: WH, legalEntityId: LE, horizonDays: 2, requireFullAtp: true, waveMaxLines: 200, waveMaxOrders: 50, version: 0, updatedAt: null },
@@ -96,12 +96,12 @@ describe("release rules page (FR-28.1, FR-28.13)", () => {
     expect(header(calls("PUT", WH2)[0], "If-Match")).toBe('"3"');
     unmount();
 
-    renderAt("/fulfillment/release-rules", ["WarehouseView"]);
+    renderAt("/fulfillment/release-rules", ["fulfillment.warehouse.view"]);
     const table = await findTable({ name: "Release rules" });
     expect(within(table).getByText("Partial ATP allowed")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save rule" })).not.toBeInTheDocument();
     expect(within(table).queryByRole("button", { name: WH2 })).not.toBeInTheDocument();
-    expect(screen.getByText(/needs the WarehouseRelease duty/)).toBeInTheDocument();
+    expect(screen.getByText(/needs the fulfillment.warehouse.release duty/)).toBeInTheDocument();
   });
 
   it("shows the empty state and the error with retry", async () => {

@@ -271,7 +271,7 @@ func (s *Postgres) ListBenefitPlans(ctx context.Context, after string, limit int
 }
 
 // benCheckOwn refuses an employee-only caller acting on another worker's
-// benefits (EssBenefits is own data, 8.42.17).
+// benefits (hr.benefits.self is own data, 8.42.17).
 func benCheckOwn(ownOnly bool, callerUserID string, workerUser *string) error {
 	if !ownOnly {
 		return nil

@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	DutyLegalHoldPlace   = "compliance.legal_hold.place"
-	DutyLegalHoldRelease = "compliance.legal_hold.release"
-	DutyLegalHoldRead    = "compliance.legal_hold.read"
-	DutyLegalHoldCheck   = "compliance.legal_hold.check"
+	DutyLegalHoldPlace   = "compliance.legal-hold.place"
+	DutyLegalHoldRelease = "compliance.legal-hold.release"
+	DutyLegalHoldRead    = "compliance.legal-hold.read"
+	DutyLegalHoldCheck   = "compliance.legal-hold.check"
 	DutyErasureRequest   = "compliance.erasure.request"
 	DutyRetentionRead    = "compliance.retention.read"
 

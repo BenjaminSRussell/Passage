@@ -15,15 +15,15 @@ import (
 )
 
 const (
-	dutySettle = "ARSettle"
-	dutyRefund = "ARRefund"
+	dutySettle = "receivables.payment.settle"
+	dutyRefund = "receivables.payment.refund"
 )
 
 var downPaymentStatuses = map[string]bool{domain.DownRequested: true, domain.DownReceived: true, domain.DownCleared: true,
 	domain.DownReleased: true, domain.DownCancelled: true}
 
 // downPaymentActionDuty maps each custom method to its §5.30.17 duty: money in
-// is ARPaymentPost, clearing against items is ARSettle, a refund is ARRefund.
+// is receivables.payment.post, clearing against items is receivables.payment.settle, a refund is receivables.payment.refund.
 var downPaymentActionDuty = map[string]string{"receive": dutyPayment, "cancel": dutyPayment, "clear": dutySettle, "release": dutyRefund}
 
 // downPaymentRoutes mounts down payments and security deposits (FR-30.21).

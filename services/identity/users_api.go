@@ -18,7 +18,7 @@ import (
 const maxQuery = 100
 
 // UsersAPI serves the read-only user directory of the caller's tenant. Users belong to the tenant, not to a
-// legal entity, so every caller holding Maintain users sees the whole tenant; the optional legalEntityId filter
+// legal entity, so every caller holding identity.user.maintain sees the whole tenant; the optional legalEntityId filter
 // narrows to users with an active assignment for that entity, and is further bounded by the caller's own scope.
 type UsersAPI struct {
 	pool *pgxpool.Pool

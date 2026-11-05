@@ -13,7 +13,7 @@ import (
 
 // TestSkillRoutesRequireTheirDuty: every skill route answers 403 before any
 // validation or store call without its duty, and a read-only HR partner
-// (HcmWorkerInquire, HcmOrgInquire) cannot write the catalog, ratings,
+// (hr.worker.inquire, hr.org.inquire) cannot write the catalog, ratings,
 // certificates or position profiles.
 func TestSkillRoutesRequireTheirDuty(t *testing.T) {
 	id := testkit.TenantID(8)

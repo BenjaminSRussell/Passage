@@ -90,7 +90,7 @@ func CertDeviations(lines []TestLine, values map[string]CertValue) []string {
 
 // CertificateStatus returns the gate status for a required certificate type (BR-33.13).
 // The latest receipt of the required type decides. A waiver overrides a missing or
-// NOK certificate; the caller must check QM_USAGE_DECISION and ValidateCertWaiver.
+// NOK certificate; the caller must check quality.usage.decide and ValidateCertWaiver.
 func CertificateStatus(required string, receipts []CertReceipt, waived bool) string {
 	if required == "" || required == CertNone {
 		return CertNotRequired

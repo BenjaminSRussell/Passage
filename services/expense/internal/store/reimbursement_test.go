@@ -68,7 +68,7 @@ func approvedEvents(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []rei
 	return out
 }
 
-func TestDecideReport_ApprovalPublishesTheStoredReimbursableAmountOnce(t *testing.T) {
+func TestDecideReport_ApprovalPublishesTheStoredReimbursableAmountOnceTheLiabilityIsBooked(t *testing.T) {
 	s, ctx, le, pool := setup(t, 21)
 	sam, dana := asUser(ctx, "sam"), asUser(ctx, "dana")
 	l := line("TRAVEL", "Hotel", 80)
@@ -94,6 +94,26 @@ func TestDecideReport_ApprovalPublishesTheStoredReimbursableAmountOnce(t *testin
 	again, replayed, err := s.DecideReport(dana, rep.ID, true, commitDay, c)
 	if err != nil || !replayed || again.Status != "APPROVED" {
 		t.Fatalf("replay = %+v replayed=%v err=%v; want the stored outcome", again, replayed, err)
+	}
+	if got := approvedEvents(t, ctx, pool); len(got) != 0 {
+		t.Fatalf("published %v before the liability was in the general ledger", got)
+	}
+	due, more, err := s.DueGLReports(dana, le, 10)
+	if err != nil || more || len(due) != 1 || due[0].ID != rep.ID || due[0].ApprovedOn != "2025-03-04" || !due[0].Reimbursable.Equal(decimal.NewFromInt(80)) ||
+		len(due[0].ByCategory) != 1 || !due[0].ByCategory["TRAVEL"].Equal(decimal.NewFromInt(80)) {
+		t.Fatalf("due = %+v more=%v err=%v; want the approved report with its TRAVEL line", due, more, err)
+	}
+	for pass := 1; pass <= 2; pass++ {
+		booked, err := s.MarkGLBooked(dana, rep.ID, "je-1")
+		if err != nil || booked != (pass == 1) {
+			t.Fatalf("book pass %d = %v, %v", pass, booked, err)
+		}
+	}
+	if due, _, _ := s.DueGLReports(dana, le, 10); len(due) != 0 {
+		t.Fatalf("due after booking = %+v", due)
+	}
+	if got, _ := s.GetReport(dana, rep.ID); got.GLEntryID != "je-1" || got.Status != "APPROVED" {
+		t.Fatalf("report = %+v; want APPROVED with the journal entry", got)
 	}
 	got := approvedEvents(t, ctx, pool)
 	want := reimbursement.ReportApproved{ReportID: rep.ID, LegalEntityID: le, WorkerID: rep.WorkerID, Currency: "USD", Amount: "80.00", ApprovedOn: "2025-03-04"}
@@ -132,6 +152,9 @@ func TestDecideReport_RejectionAndNothingToReimburse(t *testing.T) {
 	if got := approvedEvents(t, ctx, pool); len(got) != 0 {
 		t.Fatalf("published %v for a report with nothing to reimburse", got)
 	}
+	if due, _, err := s.DueGLReports(dana, le, 10); err != nil || len(due) != 0 {
+		t.Fatalf("due = %+v, %v; a rejected report or one with nothing to reimburse has no liability", due, err)
+	}
 }
 
 func TestMarkReimbursed_PaysOnlyWhatTheApprovedReportAsksFor(t *testing.T) {
@@ -151,6 +174,7 @@ func TestMarkReimbursed_PaysOnlyWhatTheApprovedReportAsksFor(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*reimbursement.OpenItemSettled){
 		"other payee":             func(d *reimbursement.OpenItemSettled) { d.VendorID = ids.New() },
+		"other registered worker": func(d *reimbursement.OpenItemSettled) { d.VendorID, d.PayeeWorkerID = ids.New(), ids.New() },
 		"overpaid":                func(d *reimbursement.OpenItemSettled) { d.OpenAmount = "-0.01" },
 		"more open than approved": func(d *reimbursement.OpenItemSettled) { d.OpenAmount = "80.01" },
 		"other money":             func(d *reimbursement.OpenItemSettled) { d.Currency = "EUR" },
@@ -171,6 +195,7 @@ func TestMarkReimbursed_PaysOnlyWhatTheApprovedReportAsksFor(t *testing.T) {
 		t.Fatalf("status after refused events = %s; want APPROVED", got.Status)
 	}
 
+	settled.VendorID, settled.PayeeWorkerID = ids.New(), rep.WorkerID
 	partial := settled
 	partial.Status, partial.OpenAmount, partial.SettledAmount = "PARTIALLY_SETTLED", "30", "50"
 	if marked, err := s.MarkReimbursed(ctx, partial); marked || err != nil {

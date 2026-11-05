@@ -3,7 +3,7 @@ GO_MODULES := $(shell find platform/go services tools/rlscheck -name go.mod -not
 TS_PACKAGES := $(shell find apps services -maxdepth 2 -name package.json -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 PY_PACKAGES := $(shell find services -maxdepth 2 -name pyproject.toml -exec dirname {} \; 2>/dev/null)
 
-.PHONY: test test-go test-ts test-py test-e2e vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local
+.PHONY: test test-go test-ts test-py test-e2e bench-ledger vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local
 
 test: test-go test-ts test-py check-deploy-local
 
@@ -19,6 +19,10 @@ test-ts:
 # Playwright + axe suite for apps/web; needs `npx playwright install chromium` once. Not part of `make test`.
 test-e2e:
 	cd apps/web && npx playwright test
+
+# Local ledger posting/balance-read benchmark, a proxy for wave 11 AC4 (#476); not part of `make test`.
+bench-ledger:
+	services/ledger/scripts/bench-local.sh
 
 test-py:
 	@for p in $(PY_PACKAGES); do echo "== pytest $$p"; (cd $$p && python3 -m pytest -q ) || exit 1; done

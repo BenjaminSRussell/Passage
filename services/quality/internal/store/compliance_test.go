@@ -170,7 +170,7 @@ func TestPostgres_StabilityStudyRoundTrip(t *testing.T) {
 	if _, _, err := s.CreateStudy(ctx, orphan, ""); problemStatus(err) != http.StatusNotFound {
 		t.Fatalf("an unknown test group must be 404, got %v", err)
 	}
-	other := testkit.Ctx(testkit.TenantID(2), "QM_VIEW")
+	other := testkit.Ctx(testkit.TenantID(2), "quality.view")
 	if theirs, err := s.ListStudies(other, StudyFilter{Limit: 10}); err != nil || len(theirs) != 0 {
 		t.Fatalf("tenant 2 sees no study of tenant 1: %d %v", len(theirs), err)
 	}

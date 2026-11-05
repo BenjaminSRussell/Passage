@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	dutyAdmin    = "LocalizationAdmin"
+	dutyAdmin    = "localization.admin"
 	codeNotFound = "LOC-0506"
 )
 

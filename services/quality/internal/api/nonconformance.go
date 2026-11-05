@@ -17,8 +17,8 @@ import (
 
 // Duties of the nonconformance screens (section 6.33.17).
 const (
-	dutyNCR  = "QM_NCR_MAINTAIN"
-	dutyCAPA = "QM_CAPA_MAINTAIN"
+	dutyNCR  = "quality.ncr.maintain"
+	dutyCAPA = "quality.capa.maintain"
 
 	dutyCAPAExecute = "quality.capa.execute"
 )

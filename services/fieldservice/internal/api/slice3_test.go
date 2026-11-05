@@ -83,7 +83,7 @@ func TestSlice3_ValidationBeforeStore(t *testing.T) {
 			`{"title":"t","language":"en","solution":"s","applicability":{"itemIds":["pump"]}}`, key, []string{dutyKbAuthor}, http.StatusBadRequest, problemCodeValid, "applicability.itemIds"},
 		{"article author must be a user id", http.MethodPost, "/v1/service/knowledge/articles", article,
 			key, []string{dutyKbAuthor}, http.StatusForbidden, "AUTH-0003", ""},
-		{"publish needs KbPublish", http.MethodPost, "/v1/service/knowledge/articles/" + uuid1 + ":publish", "",
+		{"publish needs fieldservice.knowledge-article.publish", http.MethodPost, "/v1/service/knowledge/articles/" + uuid1 + ":publish", "",
 			map[string]string{"If-Match": `"1"`}, []string{dutyKbAuthor}, http.StatusForbidden, "AUTH-0003", ""},
 		{"search limit above 20", http.MethodGet, "/v1/service/knowledge/articles/search?q=pump&limit=21", "",
 			nil, []string{dutyKbRead}, http.StatusBadRequest, problemCodeValid, "limit"},

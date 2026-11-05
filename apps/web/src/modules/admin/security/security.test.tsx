@@ -35,11 +35,11 @@ async function fill(label: string, value: string) {
 
 const report = {
   userId: USER,
-  duties: ["Maintain security roles"],
+  duties: ["identity.security-role.maintain"],
   ignoredRoles: ["Legacy role"],
   permissions: [
-    { resource: "/v1/authz/assignments", method: "POST", allow: true, duty: "Maintain security roles" },
-    { resource: "/v1/fx/rates", method: "POST", allow: false, dutyMissing: "Maintain exchange rates" },
+    { resource: "/v1/authz/assignments", method: "POST", allow: true, duty: "identity.security-role.maintain" },
+    { resource: "/v1/fx/rates", method: "POST", allow: false, dutyMissing: "fx.rate.maintain" },
     { resource: "/v1/fx/rates", method: "GET", allow: false },
   ],
 };
@@ -48,16 +48,16 @@ describe("admin security nav", () => {
   it("gates each security entry on its duty", () => {
     const duties = Object.fromEntries(admin.nav.filter((n) => n.to.startsWith("/admin/security")).map((n) => [n.to, n.duty]));
     expect(duties).toEqual({
-      "/admin/security/permissions": "View effective permissions",
-      "/admin/security/assignments": "Maintain security roles",
-      "/admin/security/legal-entities": "Maintain legal entities",
-      "/admin/security/users": "Maintain users",
-      "/admin/security/roles": "Maintain security roles",
+      "/admin/security/permissions": "identity.effective-permission.view",
+      "/admin/security/assignments": "identity.security-role.maintain",
+      "/admin/security/legal-entities": "identity.legal-entity.maintain",
+      "/admin/security/users": "identity.user.maintain",
+      "/admin/security/roles": "identity.security-role.maintain",
     });
     const shown = (held: string[]) => visibleNav(admin.nav, held).map((n) => n.to).filter((to) => to.startsWith("/admin/security"));
     expect(shown([])).toEqual([]);
-    expect(shown(["Maintain security roles"])).toEqual(["/admin/security/assignments", "/admin/security/roles"]);
-    expect(shown(["Maintain users"])).toEqual(["/admin/security/users"]);
+    expect(shown(["identity.security-role.maintain"])).toEqual(["/admin/security/assignments", "/admin/security/roles"]);
+    expect(shown(["identity.user.maintain"])).toEqual(["/admin/security/users"]);
   });
 });
 
@@ -78,9 +78,9 @@ describe("effective permissions page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     const table = await screen.findByRole("table", { name: "Route permissions" });
     expect(server.calls[0].url.search).toBe(`?legalEntityId=${ENTITY}`);
-    expect(within(screen.getByRole("list", { name: "Duties in effect" })).getByText("Maintain security roles")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Duties in effect" })).getByText("identity.security-role.maintain")).toBeInTheDocument();
     expect(screen.getByText(/Legacy role/)).toBeInTheDocument();
-    expect(within(table).getByText("Missing: Maintain exchange rates")).toBeInTheDocument();
+    expect(within(table).getByText("Missing: fx.rate.maintain")).toBeInTheDocument();
     expect(within(table).getByText("No duty grants this route")).toBeInTheDocument();
     expect(screen.getByText("Showing 3 of 3 routes.")).toBeInTheDocument();
 
@@ -140,8 +140,8 @@ describe("effective permissions page", () => {
 
 const future = "2999-01-01T00:00:00Z";
 const assignments = [
-  { assignmentId: A1, userId: USER, role: "Maintain security roles", validFrom: "2026-01-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z", grantedBy: "admin", reason: "cover" },
-  { assignmentId: A2, userId: USER, role: "View exchange rates", legalEntityId: ENTITY, validFrom: "2026-01-01T00:00:00Z", validTo: "2026-02-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z" },
+  { assignmentId: A1, userId: USER, role: "identity.security-role.maintain", validFrom: "2026-01-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z", grantedBy: "admin", reason: "cover" },
+  { assignmentId: A2, userId: USER, role: "fx.rate.view", legalEntityId: ENTITY, validFrom: "2026-01-01T00:00:00Z", validTo: "2026-02-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z" },
 ];
 
 function assignmentsServer(extra?: (url: URL, method: string) => ReturnType<typeof json> | undefined) {
@@ -173,7 +173,7 @@ describe("role assignments page", () => {
     const { container } = renderAt("/admin/security/assignments");
     await find(USER);
     const table = await screen.findByRole("table", { name: "Role assignments" });
-    expect(await within(table).findByText("Maintain security roles")).toBeInTheDocument();
+    expect(await within(table).findByText("identity.security-role.maintain")).toBeInTheDocument();
     const list = server.calls.find((c) => c.url.pathname === "/api/v1/authz/assignments");
     expect(list?.url.search).toBe(`?userId=${USER}&active=true`);
     expect(within(table).getByText("Tenant-wide")).toBeInTheDocument();
@@ -188,18 +188,18 @@ describe("role assignments page", () => {
   it("lists by role without an active filter", async () => {
     assignmentsServer();
     renderAt("/admin/security/assignments");
-    await fill("Find by role", "View exchange rates");
+    await fill("Find by role", "fx.rate.view");
     fireEvent.click(screen.getByLabelText("Only assignments in effect now"));
     fireEvent.click(screen.getByRole("button", { name: "Find assignments" }));
     await screen.findByRole("table", { name: "Role assignments" });
-    expect(server.calls.find((c) => c.url.pathname === "/api/v1/authz/assignments")?.url.search).toBe("?role=View+exchange+rates");
+    expect(server.calls.find((c) => c.url.pathname === "/api/v1/authz/assignments")?.url.search).toBe("?role=fx.rate.view");
   });
 
   it("ends an assignment only after confirmation and can be cancelled", async () => {
     assignmentsServer((url, method) => (url.pathname === `/api/v1/authz/assignments/${A1}/end` && method === "POST" ? json(200, { ...assignments[0], validTo: "2026-03-01T00:00:00Z" }) : undefined));
     renderAt("/admin/security/assignments");
     await find(USER);
-    const endButton = await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` });
+    const endButton = await screen.findByRole("button", { name: `End identity.security-role.maintain for user ${USER}` });
     fireEvent.click(endButton);
     const dialog = screen.getByRole("alertdialog", { name: "End this assignment?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Keep assignment" }));
@@ -207,7 +207,7 @@ describe("role assignments page", () => {
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
     fireEvent.click(endButton);
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End assignment" }));
-    expect(await screen.findByText("Maintain security roles ended")).toBeInTheDocument();
+    expect(await screen.findByText("identity.security-role.maintain ended")).toBeInTheDocument();
     expect(server.calls.some((c) => c.method === "POST" && c.url.pathname.endsWith("/end"))).toBe(true);
   });
 
@@ -218,7 +218,7 @@ describe("role assignments page", () => {
     await find(USER);
     await screen.findByText("Scheduled");
     expect(screen.getAllByRole("button", { name: /^(End|Cancel) / })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: `Cancel Maintain security roles for user ${USER}` }));
+    fireEvent.click(screen.getByRole("button", { name: `Cancel identity.security-role.maintain for user ${USER}` }));
     expect(screen.getByRole("alertdialog", { name: "Cancel this assignment?" })).toBeInTheDocument();
   });
 
@@ -226,7 +226,7 @@ describe("role assignments page", () => {
     assignmentsServer((url) => (url.pathname.endsWith("/end") ? json(409, { code: "IDN-ASSIGNMENT-ENDED", detail: "ended" }) : undefined));
     renderAt("/admin/security/assignments");
     await find(USER);
-    fireEvent.click(await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` }));
+    fireEvent.click(await screen.findByRole("button", { name: `End identity.security-role.maintain for user ${USER}` }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End assignment" }));
     expect(await screen.findByText("This assignment has already ended")).toBeInTheDocument();
   });
@@ -276,7 +276,7 @@ describe("role assignments page", () => {
     assignmentsServer((_url, method) => (method === "POST" ? json(403, { code: "IAM-0416", detail: "self" }) : undefined));
     renderAt("/admin/security/assignments");
     await fill("User to assign", USER);
-    await fill("Role to assign", "Maintain security roles");
+    await fill("Role to assign", "identity.security-role.maintain");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
     expect(await screen.findByText("You cannot grant a role to yourself")).toBeInTheDocument();
   });
@@ -285,7 +285,7 @@ describe("role assignments page", () => {
     assignmentsServer((_url, method) => (method === "POST" ? json(409, { code: "IDN-ASSIGNMENT-OVERLAP", detail: "overlap" }) : undefined));
     renderAt("/admin/security/assignments");
     await fill("User to assign", USER);
-    await fill("Role to assign", "Maintain security roles");
+    await fill("Role to assign", "identity.security-role.maintain");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
     expect(await screen.findByText("This overlaps an existing assignment")).toBeInTheDocument();
     assignmentsServer((_url, method) => (method === "POST" ? json(422, { code: "IDN-LEGAL-ENTITY-INACTIVE", detail: "inactive" }) : undefined));
@@ -298,7 +298,7 @@ describe("role assignments page", () => {
     assignmentsServer((_url, method) => (method === "POST" ? json(400, { code: "COM-0400", detail: "bad", errors: { validFrom: "Too far in the past." } }) : undefined));
     renderAt("/admin/security/assignments");
     await fill("User to assign", USER);
-    await fill("Role to assign", "Maintain security roles");
+    await fill("Role to assign", "identity.security-role.maintain");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
     expect(await screen.findByText("Too far in the past.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText("Valid from")).toHaveFocus());
@@ -343,7 +343,7 @@ describe("legal entities page", () => {
       if (method === "POST") return json(201, { ...entityPage.items[0], code: "NL01", displayName: "Netherlands" });
       return url.pathname === "/api/v1/legal-entities" ? json(200, { items: [] }) : undefined;
     };
-    const { container } = renderAt("/admin/security/legal-entities", ["Maintain legal entities"]);
+    const { container } = renderAt("/admin/security/legal-entities", ["identity.legal-entity.maintain"]);
     fireEvent.click(await screen.findByRole("button", { name: "Create legal entity" }));
     expect(await screen.findByText("Enter a name.")).toBeInTheDocument();
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
@@ -357,7 +357,7 @@ describe("legal entities page", () => {
 
   it("counts the name in trimmed UTF-8 bytes", async () => {
     server.handler = () => json(200, { items: [] });
-    renderAt("/admin/security/legal-entities", ["Maintain legal entities"]);
+    renderAt("/admin/security/legal-entities", ["identity.legal-entity.maintain"]);
     await fill("Code", "DE01");
     await fill("Name", "é".repeat(101));
     fireEvent.click(await screen.findByRole("button", { name: "Create legal entity" }));
@@ -367,7 +367,7 @@ describe("legal entities page", () => {
 
   it("reports a duplicate code", async () => {
     server.handler = (_url, method) => (method === "POST" ? json(409, { code: "IDN-LEGAL-ENTITY-EXISTS", detail: "exists" }) : json(200, { items: [] }));
-    renderAt("/admin/security/legal-entities", ["Maintain legal entities"]);
+    renderAt("/admin/security/legal-entities", ["identity.legal-entity.maintain"]);
     await fill("Code", "DE01");
     await fill("Name", "Germany");
     fireEvent.click(screen.getByRole("button", { name: "Create legal entity" }));
@@ -391,19 +391,19 @@ describe("role assignments follow-ups", () => {
     assignmentsServer((_url, method) => (method === "POST" ? json(403, { code: "IAM-0403", detail: "a tenant-wide assignment needs access to all legal entities" }) : undefined));
     renderAt("/admin/security/assignments");
     await fill("User to assign", USER);
-    await fill("Role to assign", "Maintain security roles");
+    await fill("Role to assign", "identity.security-role.maintain");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
     const reason = await screen.findByText("a tenant-wide assignment needs access to all legal entities");
-    expect(reason.parentElement).toHaveTextContent(/Maintain security roles" duty or an all-entities scope/);
+    expect(reason.parentElement).toHaveTextContent(/identity.security-role.maintain" duty or an all-entities scope/);
   });
 
   it("shows the server reason for an operator-only 403", async () => {
-    assignmentsServer((_url, method) => (method === "POST" ? json(403, { code: "IAM-0403", detail: "Maintain tenants can only be granted in the operator tenant" }) : undefined));
+    assignmentsServer((_url, method) => (method === "POST" ? json(403, { code: "IAM-0403", detail: "identity.tenant.maintain can only be granted in the operator tenant" }) : undefined));
     renderAt("/admin/security/assignments");
     await fill("User to assign", USER);
-    await fill("Role to assign", "Maintain tenants");
+    await fill("Role to assign", "identity.tenant.maintain");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
-    expect(await screen.findByText("Maintain tenants can only be granted in the operator tenant")).toBeInTheDocument();
+    expect(await screen.findByText("identity.tenant.maintain can only be granted in the operator tenant")).toBeInTheDocument();
   });
 
   it("refetches the list after assigning and after ending and moves focus to the results heading", async () => {
@@ -415,16 +415,16 @@ describe("role assignments follow-ups", () => {
     const listCalls = () => server.calls.filter((c) => c.method === "GET" && c.url.pathname === "/api/v1/authz/assignments" && !c.url.searchParams.get("after")).length;
     renderAt("/admin/security/assignments");
     await find(USER);
-    const endButton = await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` });
+    const endButton = await screen.findByRole("button", { name: `End identity.security-role.maintain for user ${USER}` });
     expect(listCalls()).toBe(1);
     await fill("User to assign", USER);
     await fill("Role to assign", "Approve invoices");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
-    await screen.findByText("Maintain security roles assigned");
+    await screen.findByText("identity.security-role.maintain assigned");
     await waitFor(() => expect(listCalls()).toBe(2));
     fireEvent.click(endButton);
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End assignment" }));
-    await screen.findByText("Maintain security roles ended");
+    await screen.findByText("identity.security-role.maintain ended");
     await waitFor(() => expect(listCalls()).toBe(3));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Assignments" })).toHaveFocus());
   });
@@ -437,7 +437,7 @@ describe("role assignments follow-ups", () => {
     assignmentsServer();
     renderAt("/admin/security/assignments");
     await find(USER);
-    const endButton = await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` });
+    const endButton = await screen.findByRole("button", { name: `End identity.security-role.maintain for user ${USER}` });
     const stubbed = globalThis.fetch;
     globalThis.fetch = (async (input: string, init?: RequestInit) =>
       init?.method === "POST" ? pending.then((r) => new Response(JSON.stringify(r.body), { status: r.status })) : stubbed(input, init)) as typeof fetch;
@@ -445,7 +445,7 @@ describe("role assignments follow-ups", () => {
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End assignment" }));
     await waitFor(() => expect(endButton).toBeDisabled());
     finish(json(200, { ...assignments[0], validTo: "2026-03-01T00:00:00Z" }));
-    await screen.findByText("Maintain security roles ended");
+    await screen.findByText("identity.security-role.maintain ended");
     globalThis.fetch = stubbed;
   });
 
@@ -456,7 +456,7 @@ describe("role assignments follow-ups", () => {
     await fill("Role to assign", "Approve invoices");
     await fill("Reason", `  ${"a".repeat(500)}  `);
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
-    await screen.findByText("Maintain security roles assigned");
+    await screen.findByText("identity.security-role.maintain assigned");
     expect(server.calls.find((c) => c.method === "POST")?.body).toMatchObject({ reason: "a".repeat(500) });
     await fill("Reason", "é".repeat(251));
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
@@ -467,7 +467,7 @@ describe("role assignments follow-ups", () => {
     assignmentsServer();
     const { container } = renderAt("/admin/security/assignments");
     await find(USER);
-    fireEvent.click(await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` }));
+    fireEvent.click(await screen.findByRole("button", { name: `End identity.security-role.maintain for user ${USER}` }));
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Keep assignment" }));

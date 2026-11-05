@@ -17,8 +17,8 @@ import (
 )
 
 // dutyCategoryMaintain maintains category managers and vendor assignments (FR-17.20, PRD
-// 3.17.17). Reading them is open to PurchaseOrderInquire too.
-const dutyCategoryMaintain = "CategoryMaintain"
+// 3.17.17). Reading them is open to procurement.purchase-order.inquire too.
+const dutyCategoryMaintain = "procurement.category.maintain"
 
 // maxCategoryLen bounds a category name (the column check is the same).
 const maxCategoryLen = 200

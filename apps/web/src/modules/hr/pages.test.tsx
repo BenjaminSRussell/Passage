@@ -105,31 +105,34 @@ describe("hr module", () => {
     }
     expect(hr.routes.every((r) => r.element !== null)).toBe(true);
     expect(hr.nav).toEqual([
-      { label: "Workers", to: "/hr/workers", duty: "HcmWorkerInquire" },
-      { label: "Positions", to: "/hr/positions", duty: "HcmOrgInquire" },
-      { label: "Absence plans", to: "/hr/absence/plans", duty: "HcmAbsenceAdmin" },
-      { label: "Absence requests", to: "/hr/absence/requests", duty: "EssAbsence" },
-      { label: "Benefit plans", to: "/hr/benefits/plans", duty: "HcmSetupAdmin" },
-      { label: "Skills", to: "/hr/skills", duty: "HcmWorkerInquire" },
-      { label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" },
-      { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" },
-      { label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" },
-      { label: "Personnel actions", to: "/hr/actions", duty: "HcmActionMaintain" },
-      { label: "Jobs", to: "/hr/jobs", duty: "HcmOrgInquire" },
-      { label: "Compensation plans", to: "/hr/compensation/plans", duty: "HcmCompAdmin" },
-      { label: "Compensation cycles", to: "/hr/compensation/cycles", duty: "HcmCompAdmin" },
-      { label: "Requisitions", to: "/hr/requisitions", duty: "HcmRecruitMaintain" },
-      { label: "Incidents", to: "/hr/incidents", duty: "HcmIncidentAdmin" },
-      { label: "Report an incident", to: "/hr/incidents/new", duty: "HcmIncidentReport" },
-      { label: "Outstanding loans", to: "/hr/loaned-items", duty: "HcmWorkerInquire" },
-      { label: "Checklist templates", to: "/hr/checklist-templates", duty: "HcmSetupAdmin" },
-      { label: "Tasks", to: "/hr/tasks", duty: "HcmWorkerInquire" },
-      { label: "Questionnaires", to: "/hr/questionnaires", duty: "HcmQuestionnaireAdmin" },
-      { label: "My questionnaires", to: "/hr/my/questionnaires", duty: "EssQuestionnaire" },
+      { label: "Workers", to: "/hr/workers", duty: "hr.worker.inquire" },
+      { label: "Positions", to: "/hr/positions", duty: "hr.org.inquire" },
+      { label: "Absence plans", to: "/hr/absence/plans", duty: "hr.absence.admin" },
+      { label: "Absence requests", to: "/hr/absence/requests", duty: "hr.absence.self" },
+      { label: "Benefit plans", to: "/hr/benefits/plans", duty: "hr.setup.admin" },
+      { label: "Skills", to: "/hr/skills", duty: "hr.worker.inquire" },
+      { label: "Skill search", to: "/hr/skills/search", duty: "hr.org.inquire" },
+      { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "hr.worker.inquire" },
+      { label: "Courses", to: "/hr/courses", duty: "hr.learning.admin" },
+      { label: "Personnel actions", to: "/hr/actions", duty: "hr.action.maintain" },
+      { label: "Jobs", to: "/hr/jobs", duty: "hr.org.inquire" },
+      { label: "Compensation plans", to: "/hr/compensation/plans", duty: "hr.compensation.admin" },
+      { label: "Compensation cycles", to: "/hr/compensation/cycles", duty: "hr.compensation.admin" },
+      { label: "Requisitions", to: "/hr/requisitions", duty: "hr.recruiting.maintain" },
+      { label: "Incidents", to: "/hr/incidents", duty: "hr.incident.admin" },
+      { label: "Report an incident", to: "/hr/incidents/new", duty: "hr.incident.report" },
+      { label: "Outstanding loans", to: "/hr/loaned-items", duty: "hr.worker.inquire" },
+      { label: "Checklist templates", to: "/hr/checklist-templates", duty: "hr.setup.admin" },
+      { label: "Tasks", to: "/hr/tasks", duty: "hr.worker.inquire" },
+      { label: "Questionnaires", to: "/hr/questionnaires", duty: "hr.questionnaire.admin" },
+      { label: "My questionnaires", to: "/hr/my/questionnaires", duty: "hr.questionnaire.self" },
       { label: "My goals", to: "/hr/my/goals", duty: "hr.performance.self" },
       { label: "My reviews", to: "/hr/my/reviews", duty: "hr.performance.self" },
-      { label: "My profile", to: "/hr/my/profile", duty: "EssBase" },
-      { label: "My team", to: "/hr/my/team", duty: "MssBase" },
+      { label: "My profile", to: "/hr/my/profile", duty: "hr.profile.self" },
+      { label: "My absence", to: "/hr/my/absence", duty: "hr.absence.self" },
+      { label: "My team", to: "/hr/my/team", duty: "hr.team.manage" },
+      { label: "Team changes", to: "/hr/my/team/changes", duty: "hr.team.approve" },
+      { label: "Profile changes", to: "/hr/profile-changes", duty: "hr.worker.maintain" },
     ]);
     expect(loadModules().map((m) => m.id)).toContain("hr");
   });
@@ -265,11 +268,11 @@ describe("worker detail", () => {
   });
 
   it("explains a reveal the user has no duty for", async () => {
-    fakeWorker((url) => (url.pathname.endsWith("/pii") ? json(403, { code: "AUTH-0003", detail: "missing duty HcmPIIRead" }) : undefined));
+    fakeWorker((url) => (url.pathname.endsWith("/pii") ? json(403, { code: "AUTH-0003", detail: "missing duty hr.pii.read" }) : undefined));
     renderAt(`/hr/workers/${ADA}`);
     fireEvent.change(await screen.findByLabelText("Reason for reveal"), { target: { value: "audit sample review" } });
     fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
-    expect(await screen.findByText("missing duty HcmPIIRead (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty hr.pii.read (AUTH-0003)")).toBeInTheDocument();
     expect(screen.getByText("***-**-6789")).toBeInTheDocument();
   });
 

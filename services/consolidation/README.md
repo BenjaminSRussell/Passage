@@ -18,8 +18,8 @@ Nothing is persisted, no run is versioned and no event is published yet.
 | Balance check per rule, CNS-0903 | `internal/domain/eliminate.go` | built, tests |
 | Ownership validation (never above 100.00 % on any date), CNS-0904 | `internal/domain/ownership.go` | built, tests |
 | IAS 21 translation and CTA with NCI share, FR-40.8 / BR-40.6, AC-40.6 (38,000.00) | `internal/domain/translate.go` | built, unit tests |
-| Elimination preview `POST /v1/consol/eliminations:preview` (duty `ConsolidationRun`) | `internal/api` | built, tests |
-| Translation preview `POST /v1/consol/translations:preview` (duty `ConsolidationRun`) | `internal/api` | built, tests |
+| Elimination preview `POST /v1/consol/eliminations:preview` (duty `consolidation.run`) | `internal/api` | built, tests |
+| Translation preview `POST /v1/consol/translations:preview` (duty `consolidation.run`) | `internal/api` | built, tests |
 | Counters on `/metrics` (admin port) | `internal/api` | built, tests |
 | Web workspace: `/consolidation`, `/consolidation/eliminations`, `/consolidation/translation` | `apps/web/src/modules/consolidation` | built, vitest |
 
@@ -49,7 +49,7 @@ nothing is stored or published.
 | OpenAPI matches the mounted routes and duties | `internal/api/contract_test.go` | built, test |
 | Web pages: `/consolidation/profit-in-inventory`, `/consolidation/ic-differences`, `/consolidation/investments`, `/consolidation/validation` | `apps/web/src/modules/consolidation` | built, vitest |
 
-All slice-2 previews need duty `ConsolidationRun`: they are steps of a
+All slice-2 previews need duty `consolidation.run`: they are steps of a
 consolidation run (`equity-method-run` runs inside it, PRD 7.40.16).
 
 ## What slice 3 adds
@@ -62,11 +62,11 @@ web page. Still nothing is stored, posted or published.
 |---|---|---|
 | E6 dividends within the group: parent share from dividend income, NCI share from NCI equity, the whole dividend from dividends declared, at the dividend-date rate, FR-40.9 | `internal/domain/dividends.go` | built, unit tests |
 | Per-rule rounding line (`ROUNDING`) that keeps a rule balanced after per-line rounding; a residual above half a minor unit per line is a defect and fails with CNS-0903, BR-40.9 | `internal/domain/dividends.go` (`BalanceRule`) | built, unit tests; used by E6 (E1–E5 balance by construction) |
-| Dividend preview `POST /v1/consol/dividends:preview` (duty `ConsolidationRun`) | `internal/api/slice3.go` | built, tests |
+| Dividend preview `POST /v1/consol/dividends:preview` (duty `consolidation.run`) | `internal/api/slice3.go` | built, tests |
 | Reclassification rules run in order: entity-level DebitBalanceVendors, CreditBalanceCustomers and RemainingTerm (default 12 months, per open item due date) per party, group-level SignBased; thresholds, unique codes, versions, level checked against type, each rule balanced; entity-level lines reverse on the first day of the next period, FR-40.17, BR-40.14, AC-40.13 | `internal/domain/reclass.go` | built, unit tests |
-| Reclassification dry run `POST /v1/consol/reclassification-runs:preview` (duty `ConsolidationRun`) | `internal/api/slice3.go` | built, tests |
+| Reclassification dry run `POST /v1/consol/reclassification-runs:preview` (duty `consolidation.run`) | `internal/api/slice3.go` | built, tests |
 | Top-side group journal invariants (document type, reason and attachment, two or more lines, one side per line at the minor unit, balanced or CNS-0903), approval at or above the threshold (default 100,000.00, CNS-0909), periods a carried-forward journal posts in to fiscal year end and Cumulative past it, FR-40.19, BR-40.18 | `internal/domain/groupjournal.go` | built, unit tests |
-| Group journal check `POST /v1/consol/group-journals:preview` (duty `ConsolidationJournal`; CNS-0909 is a warning because nothing is posted) | `internal/api/slice3.go` | built, tests |
+| Group journal check `POST /v1/consol/group-journals:preview` (duty `consolidation.journal.maintain`; CNS-0909 is a warning because nothing is posted) | `internal/api/slice3.go` | built, tests |
 | Web pages: `/consolidation/dividends`, `/consolidation/reclassification`, `/consolidation/group-journals` | `apps/web/src/modules/consolidation` | built, vitest |
 
 ## Stored runs (wave 40 AC4)
@@ -83,8 +83,8 @@ difference goes to CTA (IAS 21.47). Rules version `consol-rules-2`.
 
 | Area | Code | Status |
 |---|---|---|
-| `POST /v1/consol/runs` (duty `ConsolidationRun`, `Idempotency-Key` required): run header (group, period, currency, version, status `completed`, inputs hash, `created_by`), unit balances, eliminations and statement lines inserted in one transaction | `internal/store`, `internal/api/runs.go` | built, tests |
-| `GET /v1/consol/runs` (filter `groupId`, `period`, newest first, cursor), `GET /v1/consol/runs/{id}` (balances and eliminations), `GET /v1/consol/runs/{id}/statements` (duty `ConsolidationView`) | `internal/api/runs.go` | built, tests |
+| `POST /v1/consol/runs` (duty `consolidation.run`, `Idempotency-Key` required): run header (group, period, currency, version, status `completed`, inputs hash, `created_by`), unit balances, eliminations and statement lines inserted in one transaction | `internal/store`, `internal/api/runs.go` | built, tests |
+| `GET /v1/consol/runs` (filter `groupId`, `period`, newest first, cursor), `GET /v1/consol/runs/{id}` (balances and eliminations), `GET /v1/consol/runs/{id}/statements` (duty `consolidation.view`) | `internal/api/runs.go` | built, tests |
 | Rerun of a group, period and currency is the next version; stored rows are never updated or deleted (triggers raise 55000; `passage_app` has INSERT and SELECT only) | `migrations/0001_runs.sql`, `0002_grants.sql` | built, tests |
 | Event `dev.passage.consol.run.completed.v1` through the outbox in the run's transaction | `internal/events` | built, test |
 | Row-level security on the tenant GUC `passage.tenant_id`; the group is a column and a filter, not a legal-entity policy. All four run routes are all-entity only (403 CNS-0923 for a legal-entity-scoped caller) until group membership is stored | `migrations/0001_runs.sql` | built, tests as `passage_app` |

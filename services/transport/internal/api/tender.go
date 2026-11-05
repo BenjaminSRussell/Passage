@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/store"
 )
@@ -154,6 +155,11 @@ func (a *API) listTenders(w http.ResponseWriter, r *http.Request) {
 		fields["status"] = "must be one of " + strings.Join(tenderStatuses, ", ")
 	}
 	checkOptionalID(fields, "loadId", f.LoadID)
+	// The workflow service lists only to adopt the open tender of one load
+	// (TMS-0114 on start), so its duty reaches the list only with a loadId.
+	if p, _ := tenant.FromContext(r.Context()); f.LoadID == "" && !p.HasDuty(DutyTender) {
+		fields["loadId"] = "is required for the workflow service"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return

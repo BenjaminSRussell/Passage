@@ -33,18 +33,18 @@ import (
 
 // Duties (privilege codes from PRD 7.37.17).
 const (
-	DutyView          = "AssetView"
-	DutyMaintain      = "AssetMaintain"
-	DutyDispose       = "AssetDispose"
-	DutyLeaseMaintain = "LeaseMaintain"
-	DutyDepreciate    = "AssetDepreciate"
-	DutyPostJournal   = "AssetPostJournal"
+	DutyView          = "assets.asset.view"
+	DutyMaintain      = "assets.asset.maintain"
+	DutyDispose       = "assets.asset.dispose"
+	DutyLeaseMaintain = "assets.lease.maintain"
+	DutyDepreciate    = "assets.asset.depreciate"
+	DutyPostJournal   = "assets.journal.post"
 	// DutyInsuranceMaintain covers insurance policies and index series (FR-37.15).
-	DutyInsuranceMaintain = "AssetInsuranceMaintain"
+	DutyInsuranceMaintain = "assets.insurance.maintain"
 	// DutyCapexCreate covers capital appropriation requests and their submission (FR-37.17).
-	DutyCapexCreate = "CapexRequestCreate"
+	DutyCapexCreate = "assets.capex-request.create"
 	// DutyCount covers physical inventory count sessions (FR-37.11).
-	DutyCount = "AssetCount"
+	DutyCount = "assets.asset.count"
 )
 
 const (

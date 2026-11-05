@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	dutyQuestionnaireAdmin = "HcmQuestionnaireAdmin"
-	dutyEssQuestionnaire   = "EssQuestionnaire"
+	dutyQuestionnaireAdmin = "hr.questionnaire.admin"
+	dutyEssQuestionnaire   = "hr.questionnaire.self"
 )
 
 type questionnaireRequest struct {
@@ -43,7 +43,7 @@ func scheduleRoute(next func(http.ResponseWriter, *http.Request, string)) http.H
 	return idRoute(store.CodeScheduleNotFound, "questionnaire schedule not found", next)
 }
 
-// createQuestionnaire is POST /v1/hr/questionnaires (HcmQuestionnaireAdmin).
+// createQuestionnaire is POST /v1/hr/questionnaires (hr.questionnaire.admin).
 func (a *API) createQuestionnaire(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -104,7 +104,7 @@ func (a *API) getQuestionnaire(w http.ResponseWriter, r *http.Request, id string
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// createSchedule is POST /v1/hr/questionnaires/schedules (HcmQuestionnaireAdmin).
+// createSchedule is POST /v1/hr/questionnaires/schedules (hr.questionnaire.admin).
 func (a *API) createSchedule(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -148,7 +148,7 @@ func (a *API) createSchedule(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, status, out)
 }
 
-// openSchedules is GET /v1/hr/questionnaires/schedules/open (EssQuestionnaire).
+// openSchedules is GET /v1/hr/questionnaires/schedules/open (hr.questionnaire.self).
 func (a *API) openSchedules(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -172,7 +172,7 @@ func (a *API) getSchedule(w http.ResponseWriter, r *http.Request, id string) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// submitAnswers is POST /v1/hr/questionnaires/schedules/{id}/answers (EssQuestionnaire).
+// submitAnswers is POST /v1/hr/questionnaires/schedules/{id}/answers (hr.questionnaire.self).
 func (a *API) submitAnswers(w http.ResponseWriter, r *http.Request, id string) {
 	var req answerRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -193,7 +193,7 @@ func (a *API) submitAnswers(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 // scheduleResults is GET /v1/hr/questionnaires/schedules/{id}/results?by=department
-// (HcmQuestionnaireAdmin).
+// (hr.questionnaire.admin).
 func (a *API) scheduleResults(w http.ResponseWriter, r *http.Request, id string) {
 	by := r.URL.Query().Get("by")
 	if by != "" && by != "department" {

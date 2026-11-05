@@ -102,7 +102,7 @@ func validateLoan(workerID string, req loanRequest) (store.LoanedItem, map[strin
 	return in, fields
 }
 
-// issueLoanedItem is POST /v1/hr/workers/{id}/loaned-items (HcmWorkerMaintain).
+// issueLoanedItem is POST /v1/hr/workers/{id}/loaned-items (hr.worker.maintain).
 func (a *API) issueLoanedItem(w http.ResponseWriter, r *http.Request, workerID string) {
 	var req loanRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -138,7 +138,7 @@ func (a *API) listWorkerLoans(w http.ResponseWriter, r *http.Request, workerID s
 	httpx.JSON(w, http.StatusOK, listResponse[store.LoanedItem]{Items: items})
 }
 
-// outstandingLoans is GET /v1/hr/loaned-items/outstanding?dueBy= (HcmWorkerInquire).
+// outstandingLoans is GET /v1/hr/loaned-items/outstanding?dueBy= (hr.worker.inquire).
 func (a *API) outstandingLoans(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -161,7 +161,7 @@ func loanRoute(next func(http.ResponseWriter, *http.Request, string)) http.Handl
 	return idRoute(store.CodeLoanNotFound, "loaned item not found", next)
 }
 
-// closeLoanedItem is POST /v1/hr/loaned-items/{id}/close (HcmWorkerMaintain).
+// closeLoanedItem is POST /v1/hr/loaned-items/{id}/close (hr.worker.maintain).
 func (a *API) closeLoanedItem(w http.ResponseWriter, r *http.Request, id string) {
 	var req loanCloseRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -232,7 +232,7 @@ func validateTemplate(req templateRequest) (store.ChecklistTemplate, map[string]
 	return tpl, fields
 }
 
-// createChecklistTemplate is POST /v1/hr/checklist-templates (HcmSetupAdmin).
+// createChecklistTemplate is POST /v1/hr/checklist-templates (hr.setup.admin).
 func (a *API) createChecklistTemplate(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -260,7 +260,7 @@ func (a *API) createChecklistTemplate(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, status, out)
 }
 
-// listChecklistTemplates is GET /v1/hr/checklist-templates?kind= (HcmSetupAdmin).
+// listChecklistTemplates is GET /v1/hr/checklist-templates?kind= (hr.setup.admin).
 func (a *API) listChecklistTemplates(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -279,7 +279,7 @@ func (a *API) listChecklistTemplates(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, listResponse[store.ChecklistTemplate]{Items: items})
 }
 
-// startChecklist is POST /v1/hr/workers/{id}/checklists (HcmActionMaintain).
+// startChecklist is POST /v1/hr/workers/{id}/checklists (hr.action.maintain).
 func (a *API) startChecklist(w http.ResponseWriter, r *http.Request, workerID string) {
 	var req startChecklistRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -343,7 +343,7 @@ func (a *API) getChecklist(w http.ResponseWriter, r *http.Request, id string) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// completeChecklist is POST /v1/hr/checklists/{id}/complete (HcmActionMaintain).
+// completeChecklist is POST /v1/hr/checklists/{id}/complete (hr.action.maintain).
 func (a *API) completeChecklist(w http.ResponseWriter, r *http.Request, id string) {
 	out, changed, err := a.store.CompleteChecklist(r.Context(), id)
 	if err != nil {
@@ -357,7 +357,7 @@ func (a *API) completeChecklist(w http.ResponseWriter, r *http.Request, id strin
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// listOwnedTasks is GET /v1/hr/tasks?ownerWorkerId=&status= (HcmWorkerInquire).
+// listOwnedTasks is GET /v1/hr/tasks?ownerWorkerId=&status= (hr.worker.inquire).
 func (a *API) listOwnedTasks(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -383,7 +383,7 @@ func (a *API) listOwnedTasks(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, listResponse[store.WorkerTask]{Items: items})
 }
 
-// finishTask is POST /v1/hr/tasks/{id}/finish (HcmActionMaintain).
+// finishTask is POST /v1/hr/tasks/{id}/finish (hr.action.maintain).
 func (a *API) finishTask(w http.ResponseWriter, r *http.Request, id string) {
 	var req finishTaskRequest
 	if err := httpx.Decode(r, &req); err != nil {

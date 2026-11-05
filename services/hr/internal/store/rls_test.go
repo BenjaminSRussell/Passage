@@ -205,7 +205,24 @@ func TestRowLevelSecurity(t *testing.T) {
 		t.Error("tenant 2 read tenant 1's incident")
 	}
 
+	// Self-service: an address change sealed on its row, approved into the vault as the app role.
+	addrChange, err := s.RequestProfileChange(one, w.ID, ProfileChangeInput{Kind: domain.ChangeHomeAddress,
+		Address: domain.Address{Line1: "1 Main St", City: "Springfield", PostalCode: "62701", Country: "US"}})
+	if err != nil {
+		t.Fatalf("request address change: %v", err)
+	}
+	hr := tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(1), UserID: "hr-test", Duties: testkit.ScopeDuties("")})
+	if got, _, err := s.DecideProfileChange(hr, addrChange.ID, domain.DecisionApprove, "", ""); err != nil || got.Status != domain.ChangeApproved {
+		t.Fatalf("approve address change: %+v %v", got, err)
+	}
+	if _, err := s.RequestProfileChange(one, w.ID, ProfileChangeInput{Kind: domain.ChangePreferredName, PreferredName: "R"}); err != nil {
+		t.Fatalf("preferred name change: %v", err)
+	}
+
 	two := scoped(testkit.TenantID(2), "")
+	if _, _, err := s.DecideProfileChange(two, addrChange.ID, domain.DecisionReject, "", ""); err == nil {
+		t.Error("tenant 2 decided tenant 1's profile change")
+	}
 	if _, err := s.GetCourse(two, crs.ID); err == nil {
 		t.Error("tenant 2 read tenant 1's course")
 	}
@@ -230,7 +247,7 @@ func TestRowLevelSecurity(t *testing.T) {
 		"hr_skill", "worker_skill", "hr_certification", "position_skill_requirement",
 		"hr_course", "hr_course_skill_outcome", "hr_course_session", "hr_course_registration",
 		"hr_incident", "hr_incident_counter", "hr_loaned_item", "hr_checklist_template", "hr_checklist_template_task", "hr_checklist", "hr_worker_task",
-		"hr_questionnaire", "hr_questionnaire_schedule", "hr_questionnaire_responded", "hr_questionnaire_session"} {
+		"hr_questionnaire", "hr_questionnaire_schedule", "hr_questionnaire_responded", "hr_questionnaire_session", "hr_profile_change"} {
 		if n := count(two, table); n != 0 {
 			t.Errorf("tenant 2 sees %d rows in %s", n, table)
 		}

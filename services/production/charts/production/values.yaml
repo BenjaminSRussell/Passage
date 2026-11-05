@@ -35,3 +35,17 @@ consumer:
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 500m, memory: 256Mi }
+
+# The shop-floor job card consumer (#481): registration.posted and .corrected into job cards at the
+# worker cost rate, as service:production-shopfloor.
+shopfloorConsumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: production-shopfloor
+    username: production-shopfloor-consumer
+    secret: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }

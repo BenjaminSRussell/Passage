@@ -67,8 +67,8 @@ describe("projects module routes", () => {
   it("registers setup, plans and WBS pages and gates their nav by inquiry", () => {
     const paths = projects.routes.map((r) => r.path);
     for (const path of ["/projects/groups", "/projects/posting-profiles", "/projects/:id/plans", "/projects/:id/plans/:planId"]) expect(paths).toContain(path);
-    expect(projects.nav.find((n) => n.to === "/projects/groups")?.duty).toBe("ProjInquire");
-    expect(projects.nav.find((n) => n.to === "/projects/posting-profiles")?.duty).toBe("ProjInquire");
+    expect(projects.nav.find((n) => n.to === "/projects/groups")?.duty).toBe("projects.inquire");
+    expect(projects.nav.find((n) => n.to === "/projects/posting-profiles")?.duty).toBe("projects.inquire");
   });
 });
 
@@ -126,9 +126,9 @@ describe("project groups", () => {
   });
 
   it("shows a load failure and retries", async () => {
-    handler = () => problem(403, "AUTH-0003", "missing duty ProjInquire");
+    handler = () => problem(403, "AUTH-0003", "missing duty projects.inquire");
     renderAt("/projects/groups");
-    expect(await screen.findByText(/missing duty ProjInquire \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty projects.inquire \(AUTH-0003\)/)).toBeInTheDocument();
     handler = () => ({ status: 200, body: { items: [group()] } });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "ENG" })).toBeInTheDocument();

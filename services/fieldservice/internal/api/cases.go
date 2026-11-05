@@ -17,9 +17,9 @@ import (
 
 // Duties of generic case management (PRD 8.45.5 and 8.45.6).
 const (
-	dutyCaseSetup    = "CaseSetupAdmin"
-	dutyGenCreate    = "CaseCreate"
-	dutyGenMaintain  = "CaseMaintain"
+	dutyCaseSetup    = "fieldservice.case-setup.admin"
+	dutyGenCreate    = "fieldservice.case.create"
+	dutyGenMaintain  = "fieldservice.case.maintain"
 	defaultReopenDay = 14
 	defaultPriority  = 3
 	maxCaseReason    = 500
@@ -87,7 +87,7 @@ type caseAssociationRequest struct {
 }
 
 func (a *API) registerCases(r chi.Router) {
-	setupRead := authz.Require(anyDuty{dutyGenMaintain, dutyGenCreate, dutyCaseSetup}, "CaseMaintain, CaseCreate or CaseSetupAdmin", "")
+	setupRead := authz.Require(anyDuty{dutyGenMaintain, dutyGenCreate, dutyCaseSetup}, "fieldservice.case.maintain, fieldservice.case.create or fieldservice.case-setup.admin", "")
 	r.With(authz.RequireDuty(dutyCaseSetup)).Post("/v1/case-processes", a.createCaseProcess)
 	r.With(setupRead).Get("/v1/case-processes", a.listCaseProcesses)
 	r.With(authz.RequireDuty(dutyCaseSetup)).Post("/v1/case-categories", a.createCaseCategory)

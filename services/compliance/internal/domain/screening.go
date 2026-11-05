@@ -317,7 +317,7 @@ func cleared(cs []Clearance, s Subject, e ListEntry) bool {
 
 // DecideHit applies an officer decision to an OPEN hit. A false positive needs a
 // reason and a decider; the decider must not be empty, and the caller enforces that
-// the decider holds TradeComplianceOfficer.
+// the decider holds compliance.trade-screening.decide.
 func DecideHit(state HitState, d Decision, reason, decidedBy string) (HitState, error) {
 	if state != HitOpen {
 		return state, &Error{Code: CodeHitState, Detail: fmt.Sprintf("hit is %s; only OPEN hits can be decided", state)}

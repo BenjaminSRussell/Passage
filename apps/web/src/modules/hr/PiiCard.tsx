@@ -6,7 +6,7 @@ import styles from "./pages.module.css";
 
 /**
  * Masked national ID and bank account with an audited reveal (FR-42.1,
- * PRD 8.42.6): the reveal needs HcmPIIRead and a reason of at least ten
+ * PRD 8.42.6): the reveal needs hr.pii.read and a reason of at least ten
  * characters, which the service writes to the audit log.
  */
 export function PiiCard({ workerId, masked }: { workerId: string; masked: PIIView }) {

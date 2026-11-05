@@ -146,6 +146,8 @@ type ApplyResult struct {
 type Store interface {
 	CreateOpenItem(ctx context.Context, in OpenItem) (OpenItem, error)
 	ListOpenItems(ctx context.Context, f OpenItemFilter, limit int) ([]OpenItem, error)
+	// GetOpenItem reads one open item; row-level security keeps it to the caller's legal entities.
+	GetOpenItem(ctx context.Context, id string) (OpenItem, error)
 	AgingRows(ctx context.Context) ([]domain.AgingRow, error)
 	CreatePayment(ctx context.Context, in Payment, idempotencyKey string) (Payment, error)
 	ListPayments(ctx context.Context, f PaymentFilter, limit int) ([]Payment, error)
@@ -332,6 +334,16 @@ func (s *Postgres) ListOpenItems(ctx context.Context, f OpenItemFilter, limit in
 		return rows.Err()
 	})
 	return items, err
+}
+
+func (s *Postgres) GetOpenItem(ctx context.Context, id string) (OpenItem, error) {
+	var out OpenItem
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanOpenItem(tx.QueryRow(ctx, `select `+openItemColumns+` from open_item where id = $1`, id))
+		return notFound(err, CodeOpenItemNotFound, "open item not found")
+	})
+	return out, err
 }
 
 // AgingRows returns the open amount per currency and due date across every open

@@ -1072,6 +1072,9 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, no
 		if l.ConfirmedReceiptDate != nil {
 			line.ConfirmedReceiptDate = *l.ConfirmedReceiptDate
 		}
+		if l.CatchWeight != nil {
+			line.CatchWeight = &salesevents.CatchWeightSpec{Nominal: l.CatchWeight.Nominal.String(), Min: l.CatchWeight.Min.String(), Max: l.CatchWeight.Max.String()}
+		}
 		lines = append(lines, line)
 	}
 	data := salesevents.OrderConfirmedData{

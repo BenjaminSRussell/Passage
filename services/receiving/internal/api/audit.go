@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	dutyInvoiceAuditRelease = "InvoiceAuditRelease"
-	dutyErsPriceConfirm     = "ErsPriceConfirm"
+	dutyInvoiceAuditRelease = "receiving.invoice-audit.release"
+	dutyErsPriceConfirm     = "receiving.ers-price.confirm"
 )
 
 type auditPolicyRequest struct {

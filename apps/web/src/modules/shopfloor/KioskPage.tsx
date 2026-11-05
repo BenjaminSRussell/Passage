@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader } from "../../shell/ui";
-import { badgeLogin, createRegistrations, describeProblem, newKey, type KioskSession, type Problem, type RegistrationInput } from "./api/client";
+import { badgeLogin, describeProblem, newKey, type KioskSession, type Problem, type RegistrationInput } from "./api/client";
 import { formatDateTime } from "./format";
 import { KIOSK_DEVICE_ID, KioskJobs } from "./KioskJobs";
+import { KioskSyncStatus } from "./KioskSyncStatus";
+import { kioskQueue, OfflineQueueFullError, submitOrQueue } from "./offlineQueue";
 import styles from "./pages.module.css";
 
 export { KIOSK_DEVICE_ID };
@@ -12,7 +14,8 @@ type Notice = { tone: "success" | "info"; text: string } | null;
 /**
  * Shared kiosk: a worker scans a badge (FR-25.1), clocks in or out (FR-25.2),
  * starts and stops jobs and bundles while clocked in (FR-25.3), and is signed
- * out after the idle timeout the service returns.
+ * out after the idle timeout the service returns. A punch the kiosk cannot send because the
+ * network is down is saved on the device and synced in order when it is back (D5).
  */
 export function KioskPage() {
   const [badge, setBadge] = useState("");
@@ -23,6 +26,7 @@ export function KioskPage() {
   const [busy, setBusy] = useState(false);
   // A clock action that failed keeps its client UUID, so retrying it can never punch twice.
   const pending = useRef<RegistrationInput | null>(null);
+  const queue = kioskQueue();
 
   const signOut = useCallback((text?: string) => {
     setSession(null);
@@ -84,12 +88,13 @@ export function KioskPage() {
     setFailure(null);
     setNotice(null);
     try {
-      await createRegistrations([item]);
+      const out = await submitOrQueue(queue, [item]);
       pending.current = null;
       setSession({ ...session, clockedInAt: kind === "clock-in" ? item.startedAt : null });
-      setNotice({ tone: "success", text: `${kind === "clock-in" ? "Clocked in" : "Clocked out"} at ${formatDateTime(item.startedAt)}.` });
+      const done = `${kind === "clock-in" ? "Clocked in" : "Clocked out"} at ${formatDateTime(item.startedAt)}.`;
+      setNotice(out.queued ? { tone: "info", text: `${done} Saved on this kiosk; it syncs when the network is back.` } : { tone: "success", text: done });
     } catch (error) {
-      setFailure(describeProblem(error));
+      setFailure(error instanceof OfflineQueueFullError ? { code: error.code, message: error.message, fields: {} } : describeProblem(error));
     } finally {
       setBusy(false);
     }
@@ -98,6 +103,7 @@ export function KioskPage() {
   return (
     <div className={styles.stack}>
       <PageHeader title="Kiosk" description="Scan your badge to clock in or out. The kiosk signs you out after a few minutes without input." />
+      <KioskSyncStatus queue={queue} />
       {notice ? (
         <Alert tone={notice.tone} live="status">
           {notice.text}

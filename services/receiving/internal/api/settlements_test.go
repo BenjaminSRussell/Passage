@@ -283,8 +283,8 @@ func TestPlanSettlement_ValidationAuthAndScope(t *testing.T) {
 			}
 		})
 	}
-	problemCode(t, rg.call(http.MethodPost, planRunPath, planBody(), duty("ReceivingPost", "k", entityHeader, legalEntityID)), http.StatusForbidden, "AUTH-0003")
-	problemCode(t, rg.call(http.MethodPost, planRunPath, planBody(), duty("VendorInvoicePost", "k", entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, planRunPath, planBody(), duty("receiving.receipt.post", "k", entityHeader, legalEntityID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, planRunPath, planBody(), duty("receiving.vendor-invoice.post", "k", entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodPost, planRunPath, planBody(), headers{"Idempotency-Key": "k"}), http.StatusUnauthorized, "AUTH-0001")
 	if len(rg.ledger.Entries) != 0 {
 		t.Fatal("an invalid or unauthorised run reached the ledger")
@@ -293,7 +293,7 @@ func TestPlanSettlement_ValidationAuthAndScope(t *testing.T) {
 
 func TestPlanSettlement_RunReplaysByIdempotencyKeyAndEmitsDocumentedEvent(t *testing.T) {
 	rg := planRig(domain.PeriodOpen, plansForPO())
-	hdr := duty("VendorInvoicePost", "run-1", entityHeader, legalEntityID)
+	hdr := duty("receiving.vendor-invoice.post", "run-1", entityHeader, legalEntityID)
 	first := rg.call(http.MethodPost, planRunPath, planBody(), hdr)
 
 	replay := rg.call(http.MethodPost, planRunPath, planBody(), hdr)
@@ -400,8 +400,8 @@ func TestConsignmentSettlement_ValidationAuthAndScope(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"legalEntityId"`) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
-	problemCode(t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), duty("ReceivingPost", "k", entityHeader, legalEntityID)), http.StatusForbidden, "AUTH-0003")
-	problemCode(t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), duty("VendorInvoicePost", "k", entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), duty("receiving.receipt.post", "k", entityHeader, legalEntityID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), duty("receiving.vendor-invoice.post", "k", entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), headers{}), http.StatusUnauthorized, "AUTH-0001")
 	if len(rg.ledger.Entries) != 0 {
 		t.Fatal("an invalid or unauthorised run reached the ledger")

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -417,7 +418,19 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 
 	batch := &pgx.Batch{}
-	for _, wl := range ne.lines {
+	// Combinations are shared by every ledger of the tenant, and posting is only
+	// serialized per ledger: insert each new combination once, in id order, so
+	// two ledgers posting the same new combinations cannot deadlock on them.
+	combos := make([]*writeLine, 0, len(ne.lines))
+	seen := make(map[string]bool, len(ne.lines))
+	for i := range ne.lines {
+		if id := string(ne.lines[i].valid.CombinationID); !seen[id] {
+			seen[id] = true
+			combos = append(combos, &ne.lines[i])
+		}
+	}
+	slices.SortFunc(combos, func(x, y *writeLine) int { return bytes.Compare(x.valid.CombinationID, y.valid.CombinationID) })
+	for _, wl := range combos {
 		dims := wl.valid.Dimensions
 		if dims == nil {
 			dims = map[string]string{}

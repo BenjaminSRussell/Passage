@@ -288,7 +288,9 @@ func decodeCursor(raw string) (string, bool) {
 
 func (a *API) getContract(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !ids.Valid(id) {
+	orderID := r.URL.Query().Get("orderId")
+	// An allocation-only reader names the order as a UUID, so the contract is never read for a malformed or empty one.
+	if !ids.Valid(id) || (allocationOnly(r) && !ids.Valid(orderID)) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found"))
 		return
 	}
@@ -297,7 +299,7 @@ func (a *API) getContract(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	if allocationOnly(r) && !strings.EqualFold(c.OrderID, r.URL.Query().Get("orderId")) {
+	if allocationOnly(r) && !strings.EqualFold(c.OrderID, orderID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found"))
 		return
 	}

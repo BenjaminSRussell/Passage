@@ -31,7 +31,7 @@ func lockboxBody(t *testing.T, content string) string {
 func TestImportLockbox_CreatesOnePaymentPerCheck(t *testing.T) {
 	f := &fakeStore{}
 	h := router(f)
-	rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", lockboxBody(t, lockboxSampleFile), "ARImport", nil)
+	rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", lockboxBody(t, lockboxSampleFile), "receivables.payment-file.import", nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
 	}
@@ -55,10 +55,10 @@ func TestImportLockbox_CreatesOnePaymentPerCheck(t *testing.T) {
 func TestImportLockbox_RefusesDuplicateFile(t *testing.T) {
 	h := router(&fakeStore{})
 	body := lockboxBody(t, lockboxSampleFile)
-	if rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", body, "ARImport", nil); rec.Code != http.StatusCreated {
+	if rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", body, "receivables.payment-file.import", nil); rec.Code != http.StatusCreated {
 		t.Fatalf("first import status = %d", rec.Code)
 	}
-	rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", body, "ARImport", nil)
+	rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", body, "receivables.payment-file.import", nil)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), store.CodeLockboxDuplicate) {
 		t.Fatalf("duplicate import: status %d body %s", rec.Code, rec.Body)
 	}
@@ -67,7 +67,7 @@ func TestImportLockbox_RefusesDuplicateFile(t *testing.T) {
 func TestImportLockbox_MalformedFileReportsLine(t *testing.T) {
 	h := router(&fakeStore{})
 	bad := strings.Replace(lockboxSampleFile, "125000", "1250.00", 1)
-	rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", lockboxBody(t, bad), "ARImport", nil)
+	rec := do(h, http.MethodPost, "/v1/receivables/lockbox/imports", lockboxBody(t, bad), "receivables.payment-file.import", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
 	}
@@ -85,11 +85,11 @@ func TestImportLockbox_Validation(t *testing.T) {
 		duties string
 		status int
 	}{
-		{"without the import duty", lockboxBody(t, lockboxSampleFile), "ARView", http.StatusForbidden},
-		{"empty content", lockboxBody(t, "  "), "ARImport", http.StatusBadRequest},
-		{"bad legal entity", `{"legalEntityId":"nope","receivedDate":"2027-03-05","content":"x"}`, "ARImport", http.StatusBadRequest},
-		{"bad type code", `{"legalEntityId":"` + testLE + `","receivedDate":"2027-03-05","typeCodes":["1950"],"content":"x"}`, "ARImport", http.StatusBadRequest},
-		{"debit type code", `{"legalEntityId":"` + testLE + `","receivedDate":"2027-03-05","typeCodes":["475"],"content":"x"}`, "ARImport", http.StatusBadRequest},
+		{"without the import duty", lockboxBody(t, lockboxSampleFile), "receivables.view", http.StatusForbidden},
+		{"empty content", lockboxBody(t, "  "), "receivables.payment-file.import", http.StatusBadRequest},
+		{"bad legal entity", `{"legalEntityId":"nope","receivedDate":"2027-03-05","content":"x"}`, "receivables.payment-file.import", http.StatusBadRequest},
+		{"bad type code", `{"legalEntityId":"` + testLE + `","receivedDate":"2027-03-05","typeCodes":["1950"],"content":"x"}`, "receivables.payment-file.import", http.StatusBadRequest},
+		{"debit type code", `{"legalEntityId":"` + testLE + `","receivedDate":"2027-03-05","typeCodes":["475"],"content":"x"}`, "receivables.payment-file.import", http.StatusBadRequest},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestImportLockbox_Validation(t *testing.T) {
 
 func TestWorklist_ReturnsRankedRows(t *testing.T) {
 	h := router(&fakeStore{})
-	rec := do(h, http.MethodGet, "/v1/receivables/worklist?legalEntityId="+testLE+"&asOf=2027-03-31", "", "ARView", nil)
+	rec := do(h, http.MethodGet, "/v1/receivables/worklist?legalEntityId="+testLE+"&asOf=2027-03-31", "", "receivables.view", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
 	}
@@ -123,7 +123,7 @@ func TestWorklist_ReturnsRankedRows(t *testing.T) {
 
 func TestWorklist_RequiresLegalEntity(t *testing.T) {
 	h := router(&fakeStore{})
-	rec := do(h, http.MethodGet, "/v1/receivables/worklist", "", "ARView", nil)
+	rec := do(h, http.MethodGet, "/v1/receivables/worklist", "", "receivables.view", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}

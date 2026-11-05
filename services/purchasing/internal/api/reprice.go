@@ -17,7 +17,7 @@ import (
 // Subsequent price change (FR-17.22, BR-17.18, AC-17.16). POST
 // /purchase-orders/{id}:reprice previews or applies the run on one PO; POST
 // /purchase-orders:reprice runs it over a page of POs. Preview is read-only and
-// needs PurchaseOrderInquire; apply needs PurchaseOrderConfirm (PRD 3.17.17)
+// needs procurement.purchase-order.inquire; apply needs procurement.purchase-order.confirm (PRD 3.17.17)
 // and an Idempotency-Key, and on one PO also If-Match.
 
 // repriceAction is the PO custom method name.
@@ -315,8 +315,8 @@ func (a *API) applyReprice(ctx context.Context, cur store.PurchaseOrder, ifMatch
 	return res, out.Order.RowVersion, nil
 }
 
-// requireRepriceDuty checks PurchaseOrderInquire for a preview and
-// PurchaseOrderConfirm for apply (PRD 3.17.17).
+// requireRepriceDuty checks procurement.purchase-order.inquire for a preview and
+// procurement.purchase-order.confirm for apply (PRD 3.17.17).
 func requireRepriceDuty(p tenant.Principal, apply bool) error {
 	duty := dutyPurchaseOrderInquire
 	if apply {

@@ -109,7 +109,7 @@ func TestChangeOrder_CreateValidatesKeysAndNumbers(t *testing.T) {
 		t.Fatalf("no user identity: %d", rec.Code)
 	}
 	if rec := postCO(t, h, controller, scopeChange("P-CO", node), "k0"); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without ProjMaintain: %d", rec.Code)
+		t.Fatalf("create without projects.maintain: %d", rec.Code)
 	}
 	bad := `{"projectId":"p-co","type":"CLAIM_VENDOR","title":"","lines":[
 		{"costImpact":"12,5","revenueImpact":"1e3","effortHoursDelta":"8","scheduleDaysDelta":0}]}`
@@ -190,7 +190,7 @@ func TestChangeOrder_LifecycleAndSegregationOfDuties(t *testing.T) {
 		t.Fatalf("submit without If-Match: %d", rec.Code)
 	}
 	if rec := move(t, h, manager, co.ID, "approve", 1, ""); rec.Code != http.StatusForbidden {
-		t.Fatalf("approve without ProjChangeOrderApprove: %d", rec.Code)
+		t.Fatalf("approve without projects.change-order.approve: %d", rec.Code)
 	}
 	if rec := move(t, h, controller, co.ID, "approve", 1, ""); rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != domain.CodeChangeOrderState {
 		t.Fatalf("approve a DRAFT: %d %s", rec.Code, rec.Body.String())
@@ -260,7 +260,7 @@ func TestChangeOrder_ApplyAC4112(t *testing.T) {
 	move(t, h, manager, co.ID, "submit", 1, "")
 	move(t, h, controller, co.ID, "approve", 2, "")
 	if rec := move(t, h, manager, co.ID, "apply", 3, ""); rec.Code != http.StatusForbidden {
-		t.Fatalf("apply without ProjChangeOrderApprove: %d", rec.Code)
+		t.Fatalf("apply without projects.change-order.approve: %d", rec.Code)
 	}
 
 	rec := move(t, h, controller, co.ID, "apply", 3, "")

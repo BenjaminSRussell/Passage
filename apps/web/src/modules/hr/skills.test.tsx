@@ -123,9 +123,9 @@ describe("skill routes", () => {
   it("registers the catalog, create form, search and expiring inquiry with their duties", () => {
     const paths = hr.routes.map((r) => r.path);
     for (const path of ["/hr/skills", "/hr/skills/new", "/hr/skills/search", "/hr/certifications/expiring"]) expect(paths).toContain(path);
-    expect(hr.nav).toContainEqual({ label: "Skills", to: "/hr/skills", duty: "HcmWorkerInquire" });
-    expect(hr.nav).toContainEqual({ label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" });
-    expect(hr.nav).toContainEqual({ label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" });
+    expect(hr.nav).toContainEqual({ label: "Skills", to: "/hr/skills", duty: "hr.worker.inquire" });
+    expect(hr.nav).toContainEqual({ label: "Skill search", to: "/hr/skills/search", duty: "hr.org.inquire" });
+    expect(hr.nav).toContainEqual({ label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "hr.worker.inquire" });
   });
 });
 
@@ -145,9 +145,9 @@ describe("skill catalog", () => {
     expect(await screen.findByText("No skills yet")).toBeInTheDocument();
     unmount();
 
-    handler = (url) => (url.pathname === "/api/v1/hr/skills" ? json(403, { code: "AUTH-0003", detail: "missing duty HcmWorkerInquire" }) : undefined);
+    handler = (url) => (url.pathname === "/api/v1/hr/skills" ? json(403, { code: "AUTH-0003", detail: "missing duty hr.worker.inquire" }) : undefined);
     renderAt("/hr/skills");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty HcmWorkerInquire (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.worker.inquire (AUTH-0003)"));
     const before = gets("/api/v1/hr/skills").length;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(gets("/api/v1/hr/skills").length).toBeGreaterThan(before));
@@ -418,9 +418,9 @@ describe("skill search", () => {
     expect(await screen.findByText("Nobody matches")).toBeInTheDocument();
     unmount();
 
-    handler = (url) => (url.pathname === "/api/v1/hr/skills/search" ? json(403, { code: "AUTH-0003", detail: "missing duty HcmOrgInquire" }) : undefined);
+    handler = (url) => (url.pathname === "/api/v1/hr/skills/search" ? json(403, { code: "AUTH-0003", detail: "missing duty hr.org.inquire" }) : undefined);
     renderAt("/hr/skills/search?skills=WELDING&asOf=2026-06-01");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty HcmOrgInquire (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.org.inquire (AUTH-0003)"));
   });
 });
 

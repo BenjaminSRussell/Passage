@@ -27,7 +27,7 @@ func heldParties(statuses ...string) []domain.PartyScreening {
 
 // TestScreeningHold_AC3416 is AC-34.16 against Postgres: a POTENTIAL_MATCH holds
 // the load, the tender is refused with TMS-0133 and nothing is stored; after a
-// TRADE_COMPLIANCE_RELEASE user releases it with a reason, tendering proceeds
+// transport.screening-hold.release user releases it with a reason, tendering proceeds
 // and the hold shows user and reason.
 func TestScreeningHold_AC3416(t *testing.T) {
 	s, _ := setup(t)

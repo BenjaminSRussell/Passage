@@ -292,7 +292,7 @@ func (c *Conflict) Resolve() error {
 }
 
 // AcceptRisk records accepted risk with a reason. Only OPEN LOW and MEDIUM
-// conflicts qualify (BR-48.1); the SoDAdmin duty is enforced by the API.
+// conflicts qualify (BR-48.1); the compliance.sod.admin duty is enforced by the API.
 func (c *Conflict) AcceptRisk(reason string) error {
 	switch {
 	case c.State != StateOpen:

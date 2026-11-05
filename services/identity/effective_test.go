@@ -52,12 +52,12 @@ func everyNthDuty(c *Catalogue, n int) []string {
 func parityPrincipals(c *Catalogue) map[string][]string {
 	return map[string][]string{
 		"no-duties":       nil,
-		"viewer":          {"View vendors"},
-		"viewer-and-edit": {"View vendors", "Maintain vendors", "View vendors"},
+		"viewer":          {"party.vendor.view"},
+		"viewer-and-edit": {"party.vendor.view", "party.vendor.maintain", "party.vendor.view"},
 		"finance":         {"ledger.journal.read", "reporting.statement.view", "ledger.journal.post", "inventory.read"},
 		"unknown-only":    {"not-a-seeded-duty"},
 		"flags-only":      {"ledger.journal.postdirect", "budget.override", "pii.read"},
-		"identity-admin":  {"Maintain users", "View effective permissions", "Maintain security roles"},
+		"identity-admin":  {"identity.user.maintain", "identity.effective-permission.view", "identity.security-role.maintain"},
 		"broad":           everyNthDuty(c, 3),
 	}
 }

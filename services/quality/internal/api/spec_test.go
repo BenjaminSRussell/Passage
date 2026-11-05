@@ -62,7 +62,7 @@ func TestSpecs_MatchRoutes(t *testing.T) {
 			t.Errorf("openapi.yaml does not document %s %s", method, route)
 			return nil
 		}
-		if route != "/readyz" && !strings.Contains(block[at:], "x-passage-duty: QM_") {
+		if route != "/readyz" && !strings.Contains(block[at:], "x-passage-duty: quality.") {
 			t.Errorf("%s %s has no x-passage-duty", method, route)
 		}
 		return nil

@@ -72,7 +72,7 @@ func TestRelease_CorrectedRecordLoadsAndReconcilesTheRun(t *testing.T) {
 		t.Fatalf("pack.reconciled events = %d, want the run's and the reconciling release's", n)
 	}
 	// The stored run reads back the same.
-	got := decode[runDetailDTO](t, do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "MigrationView"}))
+	got := decode[runDetailDTO](t, do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "migration.factory.view"}))
 	if got.Status != "RECONCILED" || got.Version != 3 || got.Quarantined[1].Released == nil || got.Quarantined[1].Released.Account != "2100" {
 		t.Fatalf("read back %+v %+v", got.runDTO, got.Quarantined)
 	}
@@ -171,8 +171,8 @@ func TestParallelRun_DiffExplainSignOff(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("explain again: %d %q", rec.Code, rec.Header().Get("Idempotent-Replayed"))
 	}
-	if rec := do(t, h, request{method: "POST", path: signOff, tenant: tenantA, duties: "MigrationRun,MigrationView", user: "bob", body: `{}`}); rec.Code != http.StatusForbidden {
-		t.Fatalf("sign-off needs MigrationReview: %d", rec.Code)
+	if rec := do(t, h, request{method: "POST", path: signOff, tenant: tenantA, duties: "migration.factory.run,migration.factory.view", user: "bob", body: `{}`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("sign-off needs migration.factory.review: %d", rec.Code)
 	}
 	rec = do(t, h, request{method: "POST", path: signOff, tenant: tenantA, duties: allDuties, user: "bob", body: `{"version":2}`})
 	if rec.Code != http.StatusOK {
@@ -185,17 +185,17 @@ func TestParallelRun_DiffExplainSignOff(t *testing.T) {
 		t.Fatalf("stored explanation rows = %d", n)
 	}
 
-	list := decode[struct{ Items []parallelDTO }](t, do(t, h, request{method: "GET", path: base + "?state=SIGNED_OFF", tenant: tenantA, duties: "MigrationView"}))
+	list := decode[struct{ Items []parallelDTO }](t, do(t, h, request{method: "GET", path: base + "?state=SIGNED_OFF", tenant: tenantA, duties: "migration.factory.view"}))
 	if len(list.Items) != 1 || list.Items[0].Variances != nil {
 		t.Fatalf("list %+v", list.Items)
 	}
-	if l := decode[struct{ Items []parallelDTO }](t, do(t, h, request{method: "GET", path: base + "?state=REVIEW", tenant: tenantA, duties: "MigrationView"})); len(l.Items) != 0 {
+	if l := decode[struct{ Items []parallelDTO }](t, do(t, h, request{method: "GET", path: base + "?state=REVIEW", tenant: tenantA, duties: "migration.factory.view"})); len(l.Items) != 0 {
 		t.Fatalf("state filter %+v", l.Items)
 	}
-	if rec := do(t, h, request{method: "GET", path: base + "/" + run.ParallelRunID, tenant: tenantB, duties: "MigrationView"}); rec.Code != http.StatusNotFound {
+	if rec := do(t, h, request{method: "GET", path: base + "/" + run.ParallelRunID, tenant: tenantB, duties: "migration.factory.view"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("other tenant read: %d", rec.Code)
 	}
-	if l := decode[struct{ Items []parallelDTO }](t, do(t, h, request{method: "GET", path: base, tenant: tenantB, duties: "MigrationView"})); len(l.Items) != 0 {
+	if l := decode[struct{ Items []parallelDTO }](t, do(t, h, request{method: "GET", path: base, tenant: tenantB, duties: "migration.factory.view"})); len(l.Items) != 0 {
 		t.Fatalf("tenant B lists tenant A runs: %+v", l.Items)
 	}
 }
@@ -235,7 +235,7 @@ func TestProjectWIP_OpeningLinesReconcilePerProject(t *testing.T) {
 
 	opening := func(project, query string) openingDTO {
 		t.Helper()
-		rec := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/projects/" + project + "/opening" + query, tenant: tenantA, duties: "MigrationView"})
+		rec := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/projects/" + project + "/opening" + query, tenant: tenantA, duties: "migration.factory.view"})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("opening %s: %d %s", project, rec.Code, rec.Body)
 		}
@@ -256,10 +256,10 @@ func TestProjectWIP_OpeningLinesReconcilePerProject(t *testing.T) {
 	if fp.Status != "OPENING_MISMATCH" || fp.LineCount != 0 {
 		t.Fatalf("BR-49.12: PRJ-FP %+v", fp)
 	}
-	if rec := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/projects/PRJ-NONE/opening", tenant: tenantA, duties: "MigrationView"}); rec.Code != http.StatusNotFound {
+	if rec := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/projects/PRJ-NONE/opening", tenant: tenantA, duties: "migration.factory.view"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown project: %d", rec.Code)
 	}
-	if rec := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/projects/PRJ-TM/opening", tenant: tenantB, duties: "MigrationView"}); rec.Code != http.StatusNotFound {
+	if rec := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/projects/PRJ-TM/opening", tenant: tenantB, duties: "migration.factory.view"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("other tenant: %d", rec.Code)
 	}
 

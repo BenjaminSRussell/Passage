@@ -63,6 +63,21 @@ func (s *Postgres) StoreRoll(ctx context.Context, in RollInput) (RollResult, boo
 	return out, replayed, err
 }
 
+// RollReplay returns the result a committed roll stored under key without
+// claiming the key, so a retry is answered from the record even after the
+// version left Open (activation fixes its calculations, not its replies).
+// found is false when the key is unused; a key used for another request is 422.
+func (s *Postgres) RollReplay(ctx context.Context, key string, fingerprint any) (RollResult, bool, error) {
+	var out RollResult
+	var found bool
+	err := s.tenantTx(ctx, func(tx pgx.Tx, p tenant.Principal) error {
+		var err error
+		out, found, err = storedReplay[RollResult](ctx, tx, p.TenantID, key, rollScope, fingerprint)
+		return err
+	})
+	return out, found, err
+}
+
 func nullableUUID(id string) *string {
 	if id == "" {
 		return nil

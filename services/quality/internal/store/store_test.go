@@ -25,7 +25,7 @@ func setup(t *testing.T) (*Postgres, *pgxpool.Pool, context.Context) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	return New(pool), pool, testkit.Ctx(testkit.TenantID(1), "QM_ORDER_MAINTAIN")
+	return New(pool), pool, testkit.Ctx(testkit.TenantID(1), "quality.order.maintain")
 }
 
 func problemStatus(err error) int {
@@ -220,7 +220,7 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 		t.Fatalf("only %d tables checked", tables)
 	}
 
-	other := testkit.Ctx(testkit.TenantID(2), "QM_ORDER_MAINTAIN")
+	other := testkit.Ctx(testkit.TenantID(2), "quality.order.maintain")
 	for i, c := range []context.Context{ctx, ctx, other} {
 		if _, _, err := s.CreateTestGroup(c, domain.TestGroup{Code: "GRP-" + string(rune('A'+i)), Tests: []domain.TestLine{
 			{TestID: ids.New(), Kind: domain.KindAttribute, PassingOutcomes: []string{ids.New()}},

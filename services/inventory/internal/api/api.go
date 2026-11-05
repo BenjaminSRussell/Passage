@@ -22,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
@@ -57,6 +58,10 @@ type API struct {
 	posted atomic.Int64
 	onhand atomic.Int64
 	fail   atomic.Int64
+	// gl and ledger book posted journals in the general ledger (WithGL); nil when LEDGER_URL is unset.
+	gl       store.GLBooks
+	ledger   ledgerclient.Ledger
+	glBooked atomic.Int64
 }
 
 // New builds the API with the posting parameters from configuration.
@@ -89,6 +94,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerStatusSteps(r)
 	a.registerReconciliation(r)
 	a.registerReturnReceipts(r)
+	a.registerGL(r)
 }
 
 // Metrics serves the counters for the admin port.
@@ -231,7 +237,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if !slices.Contains(domain.KeyedJournalTypes, domain.JournalType(req.JournalType)) {
-		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE or TRANSFER"
+		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE, TRANSFER or BOM"
 	}
 	date, err := time.Parse("2006-01-02", req.PostingDate)
 	if err != nil {
@@ -544,4 +550,5 @@ func (a *API) metrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP inventory_journals_posted_total Journals posted.\n# TYPE inventory_journals_posted_total counter\ninventory_journals_posted_total %d\n", a.posted.Load())
 	fmt.Fprintf(w, "# HELP inventory_onhand_queries_total On-hand inquiries answered.\n# TYPE inventory_onhand_queries_total counter\ninventory_onhand_queries_total %d\n", a.onhand.Load())
 	fmt.Fprintf(w, "# HELP inventory_requests_failed_total Requests answered with a failure.\n# TYPE inventory_requests_failed_total counter\ninventory_requests_failed_total %d\n", a.fail.Load())
+	fmt.Fprintf(w, "# HELP inventory_gl_entries_booked_total Journal entries the general ledger confirmed.\n# TYPE inventory_gl_entries_booked_total counter\ninventory_gl_entries_booked_total %d\n", a.glBooked.Load())
 }

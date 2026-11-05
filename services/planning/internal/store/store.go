@@ -372,9 +372,12 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key, planEntity, approvedFirmed); err != nil {
 			return err
 		}
-		// One round trip per kind of output row instead of one per row; COPY is
-		// not used because it is not supported on tables with forced RLS.
-		batch := &pgx.Batch{}
+		// Rows go out in pipelined batches of runBatchRows instead of one round
+		// trip per row; COPY is not used because it is not supported on tables
+		// with forced RLS. The batches are bounded because one batch of a 50k-item
+		// plan (about 9 million rows) held its queued arguments in memory and ran
+		// the process out of memory on a 15 GB host (#479).
+		batch := &chunkedBatch{ctx: ctx, tx: tx, batch: &pgx.Batch{}, rows: runBatchRows}
 		counts := planevents.PlannedCounts{}
 		orderIDs := make([]string, len(r.Orders))
 		for i := range r.Orders {
@@ -391,9 +394,11 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			if err != nil {
 				return err
 			}
-			batch.Queue(`insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response, legal_entity_id)
+			if err := batch.queue(`insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response, legal_entity_id)
 				values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid)`, p.TenantID, autoFirm.batch.ID, autoFirmKeyPrefix+versionID, r.Hash,
-				autoFirm.batch.Grouping, autoFirm.batch.Firmed, body, planEntity)
+				autoFirm.batch.Grouping, autoFirm.batch.Firmed, body, planEntity); err != nil {
+				return err
+			}
 		}
 		for i, o := range r.Orders {
 			var futures *string
@@ -413,32 +418,40 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			if g, ok := autoFirm.groupOf(orderIDs[i]); ok {
 				status, batchID, targetType, targetID = "firmed", &autoFirm.batch.ID, &g.TargetType, &g.TargetID
 			}
-			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
+			if err := batch.queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
 				status, firmed_batch_id, firmed_target_type, firmed_target_id, vendor_id, quota_arrangement_id, quota_source_id, planning_priority, buffer_zone, warehouse_id)
 				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16,
 				nullif($17, '')::uuid, nullif($18, '')::uuid, nullif($19, '')::uuid, $20::numeric, nullif($21, ''), nullif($22, '')::uuid)`,
 				p.TenantID, orderIDs[i], versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
-				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID, priorityText(o.PlanningPriority), o.BufferZone, o.WarehouseID)
+				status, batchID, targetType, targetID, o.VendorID, o.QuotaArrangementID, o.QuotaSourceID, priorityText(o.PlanningPriority), o.BufferZone, o.WarehouseID); err != nil {
+				return err
+			}
 		}
 		for _, pg := range r.Pegging {
-			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty, warehouse_id)
+			if err := batch.queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty, warehouse_id)
 				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9::numeric, nullif($10, '')::uuid)`,
-				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String(), pg.WarehouseID)
+				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String(), pg.WarehouseID); err != nil {
+				return err
+			}
 		}
 		messageIDs := make([]string, len(r.Messages))
 		for i, m := range r.Messages {
 			messageIDs[i] = ids.New()
-			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id)
+			if err := batch.queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id)
 				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, nullif($11, '')::uuid)`,
-				p.TenantID, messageIDs[i], versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID)
+				p.TenantID, messageIDs[i], versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID); err != nil {
+				return err
+			}
 		}
 		for _, n := range r.Net {
-			batch.Queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement, warehouse_id)
+			if err := batch.queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement, warehouse_id)
 				values ($1, $2, $3, $4, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, nullif($11, '')::uuid)`,
 				p.TenantID, ids.New(), versionID, n.ItemID, dayDate(req.AsOf, n.Day), n.Gross.String(), n.ScheduledReceipts.String(),
-				n.PlannedReceipts.String(), n.PAB.String(), n.Net.String(), n.WarehouseID)
+				n.PlannedReceipts.String(), n.PAB.String(), n.Net.String(), n.WarehouseID); err != nil {
+				return err
+			}
 		}
-		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+		if err := batch.flush(); err != nil {
 			return err
 		}
 		carried, err := carryDecisions(ctx, tx, p.TenantID, previousID, versionID)
@@ -508,6 +521,37 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		return Version{}, false, idempotencyReuse()
 	}
 	return v, replayed, err
+}
+
+// runBatchRows is the number of rows a plan run queues before it sends them.
+const runBatchRows = 10000
+
+// chunkedBatch queues statements in a pgx batch and sends it inside tx
+// whenever it holds rows statements, so memory stays bounded however many rows
+// a run writes. The statements run in the order queued.
+type chunkedBatch struct {
+	ctx   context.Context
+	tx    pgx.Tx
+	batch *pgx.Batch
+	rows  int
+}
+
+func (c *chunkedBatch) queue(sql string, args ...any) error {
+	c.batch.Queue(sql, args...)
+	if c.batch.Len() >= c.rows {
+		return c.flush()
+	}
+	return nil
+}
+
+// flush sends the queued statements, if any.
+func (c *chunkedBatch) flush() error {
+	if c.batch.Len() == 0 {
+		return nil
+	}
+	b := c.batch
+	c.batch = &pgx.Batch{}
+	return c.tx.SendBatch(c.ctx, b).Close()
 }
 
 // purgeVersions deletes the versions of a plan numbered at or below cut with

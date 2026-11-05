@@ -63,7 +63,7 @@ type LoadResult struct {
 // safe default, since an unscoped row answers every legal entity.
 func XrefLegalEntityScoped(entity string) bool {
 	switch entity {
-	case "party", "product", "item":
+	case "party", "product", "item", "bom", "route":
 		return false
 	}
 	return true
@@ -87,6 +87,39 @@ type RowLegalEntityReader interface {
 
 type TargetReader interface {
 	Read(ctx context.Context, entity string) ([]Record, error)
+}
+
+// ProjectingReader is a TargetReader that reads the owning services' own records back, so it sees only part of what
+// was sent and in the target's form (a resolved id for a legacy key, an upper-cased code, a signed amount). Reads says
+// whether the entity can be read back at all (a run of an entity it cannot read is not reconciled), and Project maps a
+// row, mapped or read back, onto the fields the two sides share, in one canonical form. Reconciliation then compares
+// Project(mapped row) with the read-back record restricted to the fields that projection kept: a value the target
+// dropped or changed fails it, a default the target added does not.
+type ProjectingReader interface {
+	TargetReader
+	Reads(entity string) bool
+	Project(entity string, fields map[string]any) map[string]any
+}
+
+// projectForReconcile applies a ProjectingReader's projection to both sides of a reconciliation.
+func projectForReconcile(r ProjectingReader, entity string, mapped, target []Record) ([]Record, []Record) {
+	src := make([]Record, len(mapped))
+	keep := make(map[string]map[string]any, len(mapped))
+	for i, m := range mapped {
+		src[i] = Record{Key: m.Key, Fields: r.Project(entity, m.Fields)}
+		keep[m.Key] = src[i].Fields
+	}
+	tgt := make([]Record, len(target))
+	for i, t := range target {
+		fields := map[string]any{}
+		for k := range keep[t.Key] {
+			if v, ok := t.Fields[k]; ok {
+				fields[k] = v
+			}
+		}
+		tgt[i] = Record{Key: t.Key, Fields: fields}
+	}
+	return src, tgt
 }
 
 type XrefKey struct{ SourceSystem, Entity, SourceKey string }
@@ -350,12 +383,18 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 		}
 	}
 	// A delta or a run that holds rows back covers only part of the source, so it is not tied out to the target.
-	if p.Reader != nil && !spec.DryRun && spec.OnlyKeys == nil && spec.Since == "" && !spec.HoldExisting {
+	projecting, _ := p.Reader.(ProjectingReader)
+	readable := p.Reader != nil && (projecting == nil || projecting.Reads(spec.Entity))
+	if readable && !spec.DryRun && spec.OnlyKeys == nil && spec.Since == "" && !spec.HoldExisting {
 		target, err := p.Reader.Read(ctx, spec.Entity)
 		if err != nil {
 			return rep, fmt.Errorf("read target %s: %w", spec.Entity, err)
 		}
-		rec := Reconcile(mapped, onlyKeys(target, mapped), reconcileSample, reconcileSeed)
+		source, target := mapped, onlyKeys(target, mapped)
+		if projecting != nil {
+			source, target = projectForReconcile(projecting, spec.Entity, source, target)
+		}
+		rec := Reconcile(source, target, reconcileSample, reconcileSeed)
 		rep.Reconciliation = &rec
 		failed = failed || !rec.OK()
 	}

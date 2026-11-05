@@ -16,8 +16,8 @@ import (
 )
 
 // DutyGate is the gate guard's duty for check-in, seal, check-out and the gate
-// log (§6.34.17). The gate log holds driver PII, so TMS_VIEW does not read it.
-const DutyGate = "TMS_GATE"
+// log (§6.34.17). The gate log holds driver PII, so transport.view does not read it.
+const DutyGate = "transport.gate.operate"
 
 // walkInAllowed is the walk_in_allowed site default (§6.34.13). Site settings
 // are not modelled yet, so every site accepts walk-ins (NOT-IMPLEMENTED.md).

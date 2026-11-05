@@ -286,8 +286,10 @@ func TestPurgeSkipsHeldCandidatesAndStopsOnAnUnansweredCheck(t *testing.T) {
 	}
 }
 
-func allScope() context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "user-test", Duties: testkit.ScopeDuties("")})
+func allScope() context.Context { return allScopeAs("user-test") }
+
+func allScopeAs(user string) context.Context {
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: user, Duties: testkit.ScopeDuties("")})
 }
 
 func TestCompensationCycleBudgetBlocksAndAppliesAC4213(t *testing.T) {
@@ -349,6 +351,11 @@ func TestCompensationCycleBudgetBlocksAndAppliesAC4213(t *testing.T) {
 	}
 	_, _, err = f.s.ApplyCompCycle(f.ctx, cycle.ID)
 	requireCode(t, err, "AUTH-0003")
+	_, _, err = f.s.ApplyCompCycle(allScope(), cycle.ID)
+	requireCode(t, err, CodeCycleUnapproved)
+	if _, _, err := f.s.ApproveCompCycle(allScopeAs("approver-1"), cycle.ID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
 	if _, err := f.s.pool.Exec(context.Background(), `update hr_comp_cycle_budget set budget_amount = 1 where cycle_id = $1`, cycle.ID); err != nil {
 		t.Fatal(err)
 	}

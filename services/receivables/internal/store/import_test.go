@@ -303,6 +303,13 @@ func TestOpeningImport_PerRowErrorsAndAtomicMode(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("stored %d items, want 2", len(items))
 	}
+	// GetOpenItem reads one back by id (the migration loader's reconciliation read); an unknown id is not found.
+	if got, err := s.GetOpenItem(ctx, items[0].ID); err != nil || got.ID != items[0].ID || got.DocumentNumber != items[0].DocumentNumber || !got.OpenAmount.Equal(items[0].OpenAmount) {
+		t.Fatalf("get = %+v, %v", got, err)
+	}
+	if _, err := s.GetOpenItem(ctx, "00000000-0000-4000-8000-000000000999"); err == nil || !strings.Contains(err.Error(), "open item not found") {
+		t.Fatalf("unknown id: %v", err)
+	}
 
 	before := countOutbox(t, s, ctx, rcvevents.OpenItemsImported)
 	atomic := openingBatch(openingRow("7", "INVOICE", "DEBIT", "9.00", "9.00"), clash)

@@ -20,7 +20,7 @@ func TestPunchoutParse_CXMLReturnsLinesAndIssues(t *testing.T) {
 		"format": "CXML", "document": doc,
 		"supplier": map[string]any{"currencies": []string{"USD"}, "tolerancePct": "5"},
 	})
-	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", string(body), "PUR_REQUISITION_CREATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", string(body), "edi.requisition.create", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -44,7 +44,7 @@ func TestPunchoutParse_OCIForm(t *testing.T) {
 	body := `{"format":"oci","fields":{"NEW_ITEM-VENDORMAT[1]":"X","NEW_ITEM-QUANTITY[1]":"1",` +
 		`"NEW_ITEM-PRICE[1]":"3.00","NEW_ITEM-CURRENCY[1]":"USD","NEW_ITEM-UNIT[1]":"EA"},` +
 		`"supplier":{"currencies":["USD"]}}`
-	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", body, "PUR_REQUISITION_CREATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", body, "edi.requisition.create", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"supplierPartId":"X"`) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -61,7 +61,7 @@ func TestPunchoutParse_Validation(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", tc.body, "PUR_REQUISITION_CREATE", nil)
+			rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", tc.body, "edi.requisition.create", nil)
 			if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}
@@ -70,7 +70,7 @@ func TestPunchoutParse_Validation(t *testing.T) {
 }
 
 func TestPunchoutParse_RequiresDuty(t *testing.T) {
-	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", `{"format":"OCI"}`, "EDI_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", `{"format":"OCI"}`, "edi.operate", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403", rec.Code)
 	}
@@ -82,7 +82,7 @@ func TestSelfBillingMatch_ReportsDifferenceAndUnbilled(t *testing.T) {
 	    {"id":"S1","deliveryNote":"DN1","poLine":"1","item":"I","quantity":"2","unitPrice":"10.00","taxRatePct":"21","shippedOn":"2026-10-01"},
 	    {"id":"S2","deliveryNote":"DN2","poLine":"1","item":"I","quantity":"1","unitPrice":"5.00","taxRatePct":"21","shippedOn":"2026-09-01"}],
 	  "lines":[{"line":"1","deliveryNote":"DN1","poLine":"1","item":"I","quantity":"2","unitPrice":"10.05","tax":"4.20"}]}`
-	rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", body, "SELF_BILLING_RECONCILE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", body, "edi.self-billing.reconcile", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -101,7 +101,7 @@ func TestSelfBillingMatch_ReportsDifferenceAndUnbilled(t *testing.T) {
 
 func TestSelfBillingMatch_BadInput(t *testing.T) {
 	body := `{"asOf":"31/10/2026","shipments":[{"id":"S1","quantity":"x"}]}`
-	rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", body, "SELF_BILLING_RECONCILE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", body, "edi.self-billing.reconcile", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -118,7 +118,7 @@ func TestSelfBillingMatch_ParameterRanges(t *testing.T) {
 		{`{"shipments":[{"quantity":"1","shippedOn":"2026-10-01"}]}`, "shipments[0].id"},
 		{`{"lines":[{"quantity":"1"}]}`, "lines[0].line"},
 	} {
-		rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", tc.body, "SELF_BILLING_RECONCILE", nil)
+		rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", tc.body, "edi.self-billing.reconcile", nil)
 		if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation || !strings.Contains(rec.Body.String(), `"`+tc.field+`"`) {
 			t.Errorf("%s: status %d: %s", tc.body, rec.Code, rec.Body.String())
 		}
@@ -126,7 +126,7 @@ func TestSelfBillingMatch_ParameterRanges(t *testing.T) {
 }
 
 func TestSelfBillingMatch_RequiresDuty(t *testing.T) {
-	rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", `{}`, "EDI_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/self-billing:match", `{}`, "edi.operate", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403", rec.Code)
 	}
@@ -134,7 +134,7 @@ func TestSelfBillingMatch_RequiresDuty(t *testing.T) {
 
 func TestPunchoutParse_UnreadableDocumentIsSyntax(t *testing.T) {
 	body := `{"format":"CXML","document":"<cXML payloadID=\"p\"><Request><OrderRequest/></Request></cXML>","supplier":{"currencies":["USD"]}}`
-	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", body, "PUR_REQUISITION_CREATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/punchout/returns:parse", body, "edi.requisition.create", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeSyntax {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -147,7 +147,7 @@ const ublBody = `{"id":"INV-1","issueDate":"2026-10-01","dueDate":"2026-10-31","
  "lines":[{"id":"1","name":"Widget","unitCode":"C62","quantity":"3","unitPrice":"10.00","category":"S","percent":"21"}]}`
 
 func TestUBLBuild_ValidInvoiceReturnsXML(t *testing.T) {
-	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", ublBody, "EINV_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", ublBody, "edi.einvoice.operate", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -165,7 +165,7 @@ func TestUBLBuild_ValidInvoiceReturnsXML(t *testing.T) {
 
 func TestUBLBuild_MissingIBANIsBlocked(t *testing.T) {
 	body := strings.Replace(ublBody, `"iban":"DE89370400440532013000",`, "", 1)
-	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", body, "EINV_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", body, "edi.einvoice.operate", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -184,7 +184,7 @@ func TestUBLBuild_MissingIBANIsBlocked(t *testing.T) {
 
 func TestUBLBuild_DocumentAllowanceLowersVAT(t *testing.T) {
 	body := strings.Replace(ublBody, `"lines":[`, `"allowanceCharges":[{"reason":"Discount","amount":"10.00","category":"S","percent":"21"}],"lines":[`, 1)
-	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", body, "EINV_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", body, "edi.einvoice.operate", nil)
 	// 30.00 - 10.00 = 20.00 taxable, 4.20 VAT, 24.20 payable.
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `PayableAmount currencyID=\"EUR\"\u003e24.20`) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -192,7 +192,7 @@ func TestUBLBuild_DocumentAllowanceLowersVAT(t *testing.T) {
 }
 
 func TestUBLBuild_RequiresDuty(t *testing.T) {
-	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", ublBody, "EDI_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", ublBody, "edi.operate", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403", rec.Code)
 	}
@@ -200,7 +200,7 @@ func TestUBLBuild_RequiresDuty(t *testing.T) {
 
 func TestUBLBuild_BadDecimalIsValidation(t *testing.T) {
 	body := strings.Replace(ublBody, `"quantity":"3"`, `"quantity":"three"`, 1)
-	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", body, "EINV_OPERATE", nil)
+	rec := call(t, http.MethodPost, "/edi/v1/peppol/invoices:build", body, "edi.einvoice.operate", nil)
 	if rec.Code != http.StatusBadRequest || problemCode(t, rec) != CodeValidation {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}

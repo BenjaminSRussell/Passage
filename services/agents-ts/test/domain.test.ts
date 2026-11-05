@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildActionRecord, OUTPUT_CAP_BYTES } from "../src/domain/audit.js";
-import { addUsage, assertCanStartRun, assertRunWithinCap, budgetStatus, estimateTokens, outputBudgetForCall, type TokenBudget } from "../src/domain/budget.js";
+import { addUsage, assertCanStartRun, assertPromptWithinCap, assertRunWithinCap, budgetStatus, estimateTokens, outputBudgetForCall, type TokenBudget } from "../src/domain/budget.js";
 import { canCallTool, selfApprovalBlocked } from "../src/domain/authz.js";
 import { compareMoney, scaled6, sumMoney } from "../src/domain/money.js";
 import { CASH_APP_MAX_INVOICES_DEFAULT, checkCashApplication, decideDisposition, isApprovalExpired, validatePolicy, type ModePolicy, type Proposal } from "../src/domain/policy.js";
@@ -160,6 +160,15 @@ describe("token budgets (FR-47.11)", () => {
     expect(outputBudgetForCall(400, 0, 100)).toBe(300);
     expect(() => outputBudgetForCall(400, 0, 400)).toThrow("AGT-0202");
     expect(() => outputBudgetForCall(400, 450, 1)).toThrow("AGT-0202");
+  });
+
+  it("bounds the prompt by UTF-8 bytes of all parts together, so CJK and emoji cannot slip under the cap", () => {
+    expect(() => assertPromptWithinCap(["abcd", "ef"], 6)).not.toThrow();
+    expect(() => assertPromptWithinCap(["abcd", "efg"], 6)).toThrow("AGT-0202");
+    // 3 CJK characters are 9 bytes and an emoji is 4: chars/4 would say 2 tokens.
+    expect(estimateTokens("請求書😀")).toBe(2);
+    expect(() => assertPromptWithinCap(["請求書😀"], 12)).toThrow("13 bytes");
+    expect(() => assertPromptWithinCap(["請求書😀"], 13)).not.toThrow();
   });
 
   it("estimates tokens at four characters each and accumulates usage", () => {

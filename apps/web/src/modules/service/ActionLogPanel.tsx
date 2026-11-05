@@ -21,9 +21,9 @@ import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 /** The duty the service enforces on the action log (PRD 8.45.17). */
-export const DUTY_TECHNICIAN = "SvcTechnician";
+export const DUTY_TECHNICIAN = "fieldservice.work-order.execute";
 /** Office staff key actions in for a technician only when they also hold this duty (the service refuses others with SVC-SYNC-003). */
-export const DUTY_WORK_ORDER = "SvcWoMaintain";
+export const DUTY_WORK_ORDER = "fieldservice.work-order.maintain";
 
 const WORKED = ["DISPATCHED", "TRAVELING", "IN_PROGRESS", "ON_HOLD", "COMPLETED"];
 

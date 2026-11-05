@@ -116,7 +116,7 @@ Opening balances: the customer controller signs the opening trial balance before
    source system (`POST /api/v1/migration/parallel-runs`, idempotent by period and system).
 2. Every variance is classified: EXPECTED by a rule (RND-001: at most 0.01 per document), EXPLAINED by a
    reviewer's reason, or UNEXPLAINED.
-3. A reviewer with MigrationReview explains each remaining variance. The user who started the run cannot
+3. A reviewer with migration.factory.review explains each remaining variance. The user who started the run cannot
    explain its variances or sign it off (MIG-001, answered as MIG-0008).
 4. Sign-off needs 0 unexplained variances and explained variances of at most 0.1% of the period's revenue
    (MIG-1509). The run is then SIGNED_OFF (go/no-go item 2). The customer controller owns the sign-off; the
@@ -125,7 +125,7 @@ Opening balances: the customer controller signs the opening trial balance before
 
 ## 6. Cutover
 
-Generate the runbook with `POST /api/v1/cutover/plans/generate` (CutoverManager), passing the measured
+Generate the runbook with `POST /api/v1/cutover/plans/generate` (migration.cutover.manage), passing the measured
 step durations of the last rehearsal. Rehearse it in the sandbox first; lab 4.3 is the mock cutover and lab
 4.4 the timed rollback rehearsal. Each step owner starts and completes their step on the runbook screen; the
 timer shows elapsed against planned, amber at 110% and red at 125% (CUT-1602). Step durations measured in a
@@ -145,7 +145,7 @@ rehearsal are the planned durations of the next plan.
 Any open go/no-go item is NO-GO. A waived item needs the CutoverDecisionOwner's signature, and items 1 to 4,
 8 and 9 cannot be waived ([go-live checklist](go-live-checklist.md)).
 
-Rollback: on NO-GO, or at the abort deadline with items still open, the CutoverManager executes the rollback
+Rollback: on NO-GO, or at the abort deadline with items still open, the migration.cutover.manage holder executes the rollback
 with two distinct approvers (CUT-1603). It runs once and follows the rollback plan generated with the
 runbook: stop Passage access, restore legacy write access, resume the coexistence adapters, export the
 postings since T-0 and re-key them. The Passage postings since T-0 go with the rollback and

@@ -12,12 +12,12 @@ describe("mobile-flows module", () => {
     expect(mobileFlows.routes[0].path).toBe("/mobile-flows");
     expect(mobileFlows.routes.every((r) => r.element != null && r.path?.startsWith("/mobile-flows"))).toBe(true);
     expect(mobileFlows.nav).toEqual([
-      { label: "Flow designer", to: "/mobile-flows", duty: "WMS_MOBILE_ADMIN" },
-      { label: "Printers", to: "/mobile-flows/printers", duty: "WMS_PRINT" },
-      { label: "Printer status", to: "/mobile-flows/printer-status", duty: "WMS_PRINT" },
-      { label: "Routing rules", to: "/mobile-flows/routing-rules", duty: "WMS_PRINT" },
-      { label: "Print jobs", to: "/mobile-flows/print-jobs", duty: "WMS_PRINT" },
-      { label: "Offline conflicts", to: "/mobile-flows/conflicts", duty: "WMS_WORK_SUPERVISE" },
+      { label: "Flow designer", to: "/mobile-flows", duty: "warehouse.mobile-flow.admin" },
+      { label: "Printers", to: "/mobile-flows/printers", duty: "print.job.submit" },
+      { label: "Printer status", to: "/mobile-flows/printer-status", duty: "print.job.submit" },
+      { label: "Routing rules", to: "/mobile-flows/routing-rules", duty: "print.job.submit" },
+      { label: "Print jobs", to: "/mobile-flows/print-jobs", duty: "print.job.submit" },
+      { label: "Offline conflicts", to: "/mobile-flows/conflicts", duty: "warehouse.offline-conflict.resolve" },
     ]);
   });
 

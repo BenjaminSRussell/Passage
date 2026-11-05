@@ -54,7 +54,7 @@ func TestInquiries_Rejects(t *testing.T) {
 	}
 	for _, p := range []string{"open-orders-by-vendor?", "overdue-lines?", "price-history?productId=" + product + "&"} {
 		if rec := h.do(call{method: "GET", path: "/v1/procurement/inquiries/" + p, duties: []string{dutyRequisitionCreate}}); rec.Code != http.StatusForbidden {
-			t.Fatalf("%s without PurchaseOrderInquire: %d", p, rec.Code)
+			t.Fatalf("%s without procurement.purchase-order.inquire: %d", p, rec.Code)
 		}
 		// A legal entity outside the caller's scope is refused before the store is asked.
 		h.fake.lastInquiry = store.InquiryFilter{}

@@ -26,7 +26,7 @@ var (
 )
 
 // anyDuty allows a request when the principal holds at least one of the duties.
-// Reads of insurance, capex and run data are open to AssetView (PRD 7.37.17:
+// Reads of insurance, capex and run data are open to assets.asset.view (PRD 7.37.17:
 // GET /assets/*) and to the duty that maintains the record.
 type anyDuty []string
 

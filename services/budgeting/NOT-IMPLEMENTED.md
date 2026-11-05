@@ -36,7 +36,7 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 to 4 do not buil
 | Assigned amounts fed from the owning services | FR-38.21, FR-37.17 | handoff | `:assign` takes the plan, actual and commitment the owner reports; the push from fixedassets (capex requests, assets under construction, wave 37) and projects (wave 41) belongs to those services. |
 | Program types table (`program.types`: levels, budget categories, plan / budget profiles) | 7.38.13 | partial | One built-in Capex type: 6 levels and the categories Capex, Opex-related and Contingency. The configurable table comes with the settings service. |
 | Program budget changes, program close and the program budget letter (PDF) | FR-38.21, 7.38.14 | later slice of PSG-38 | The program budget is set at creation; changing it needs the same check as a position (not below Σ top-level positions). |
-| Segregation of duties InvestmentProgramMaintain vs CapexRequestApprove on assigned requests | 7.38.17 | handoff | Rego policy belongs in `policies/` (edge-identity owns it). |
+| Segregation of duties InvestmentProgramMaintain vs assets.capex-request.approve on assigned requests | 7.38.17 | handoff | Rego policy belongs in `policies/` (edge-identity owns it). |
 | Management reporting cubes via CDC to the lakehouse | FR-38.12 | handoff | Star schema is owned by wave 46 and the analytics service. |
 | Retention: check results 7 years, monthly partitions | 7.38.19 | later slice of PSG-38 | Results are recorded in `budget_check_result`; partitioning and the purge job are a migration on a larger table. |
 | ETag on reads; If-Match on custom methods (`:relieve` takes no If-Match yet) | Platform kernel | later slice of PSG-38 | Slice 1 has no versioned read. Relief uses the row version under lock. |

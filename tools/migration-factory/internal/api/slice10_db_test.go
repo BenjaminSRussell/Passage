@@ -66,7 +66,7 @@ func TestBankBalances_LoadReconcileAndRerunLoadsNothing(t *testing.T) {
 		t.Fatalf("the refused run must not be stored: %d runs", n)
 	}
 	// Another tenant sees none of it and may load the same extract.
-	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "MigrationView"}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "migration.factory.view"}); r.Code != http.StatusNotFound {
 		t.Fatalf("other tenant reads the run: %d", r.Code)
 	}
 	if r := do(t, h, request{method: "POST", path: bankPath, tenant: tenantB, duties: allDuties, body: bankBody("1000", "", cleanBank...)}); r.Code != http.StatusCreated || decode[runDetailDTO](t, r).RecordsLoaded != 3 {
@@ -106,7 +106,7 @@ func TestBankBalances_QuarantineKeepsRunLoadedAndRequestIsChecked(t *testing.T) 
 			t.Errorf("%s: %d %s", name, r.Code, r.Body)
 		}
 	}
-	if r := do(t, h, request{method: "POST", path: bankPath, tenant: tenantA, duties: "MigrationView", body: bankBody("1000", "", cleanBank...)}); r.Code != http.StatusForbidden {
-		t.Errorf("without MigrationRun: %d", r.Code)
+	if r := do(t, h, request{method: "POST", path: bankPath, tenant: tenantA, duties: "migration.factory.view", body: bankBody("1000", "", cleanBank...)}); r.Code != http.StatusForbidden {
+		t.Errorf("without migration.factory.run: %d", r.Code)
 	}
 }

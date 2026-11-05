@@ -14,6 +14,10 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
 
+// HandleExpenseReportApproved creates the open item of an approved expense report. Expense publishes the
+// event once the report's liability (Dr expense, Cr AP control) is in the general ledger. The payee is the
+// vendor the employee-vendor register maps the worker to; without a mapping the item names the worker and
+// stays PAYEE_UNVERIFIED until one is registered.
 func HandleExpenseReportApproved(ctx context.Context, items *store.Postgres, evt events.Event) error {
 	if evt.Type != reimbursement.ReportApprovedType {
 		return fmt.Errorf("%w: type %q", ErrInvalidEvent, evt.Type)
@@ -38,9 +42,9 @@ func HandleExpenseReportApproved(ctx context.Context, items *store.Postgres, evt
 		return fmt.Errorf("%w: approvedOn %q", ErrInvalidEvent, d.ApprovedOn)
 	}
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: evt.TenantID, LegalEntityID: d.LegalEntityID, UserID: "system:expense.report.approved"})
-	_, _, err = items.CreateFromInvoice(ctx, store.OpenItem{
-		LegalEntityID: d.LegalEntityID, VendorID: d.WorkerID, SourceInvoiceID: d.ReportID, InvoiceNumber: reimbursement.InvoicePrefix + d.ReportID[:8],
-		InvoiceDate: d.ApprovedOn, DueDate: d.ApprovedOn, DueDateSource: store.DueDateDefaulted, Currency: d.Currency, Amount: amount, DiscountAmount: decimal.Zero, PayeeUnverified: true,
-	})
+	_, _, err = items.CreateReimbursement(ctx, store.OpenItem{
+		LegalEntityID: d.LegalEntityID, SourceInvoiceID: d.ReportID, InvoiceNumber: reimbursement.InvoicePrefix + d.ReportID[:8],
+		InvoiceDate: d.ApprovedOn, DueDate: d.ApprovedOn, DueDateSource: store.DueDateDefaulted, Currency: d.Currency, Amount: amount, DiscountAmount: decimal.Zero,
+	}, d.WorkerID)
 	return err
 }

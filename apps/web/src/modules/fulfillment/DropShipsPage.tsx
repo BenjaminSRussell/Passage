@@ -9,7 +9,7 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-const DUTY_CREATE = "WarehouseRelease";
+const DUTY_CREATE = "fulfillment.warehouse.release";
 
 const TONES: Record<DropShipStatus, BadgeTone> = { OPEN: "info", PARTIALLY_CONFIRMED: "warning", CONFIRMED: "success", CANCELLED: "neutral" };
 const LABELS: Record<DropShipStatus, string> = { OPEN: "Open", PARTIALLY_CONFIRMED: "Partly confirmed", CONFIRMED: "Confirmed", CANCELLED: "Cancelled" };

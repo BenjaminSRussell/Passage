@@ -34,7 +34,7 @@ func TestAttempts_AreOperatorDutyOnly(t *testing.T) {
 	h := storedRouter(&fakeStore{})
 	resolve := "/v1/product-costing/versions/" + someID + "/activation-attempt/resolve"
 	body := `{"version":1,"outcome":"not-posted","reason":"checked"}`
-	for _, duty := range []string{view, maintain, activate, "CostingCalculate", "CostingSystem"} {
+	for _, duty := range []string{view, maintain, activate, "productcost.calculate", "productcost.variance.compute"} {
 		if rec := attemptCall(h, http.MethodGet, "/v1/product-costing/activation-attempts", "", duty, "ops", ""); rec.Code != http.StatusForbidden {
 			t.Errorf("list with %s: %d, want 403", duty, rec.Code)
 		}

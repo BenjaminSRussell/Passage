@@ -90,6 +90,18 @@ describe("Bedrock adapter (FR-47.13)", () => {
     expect(body.toolConfig.tools[0]?.toolSpec.inputSchema.json.properties.tool.enum).toEqual(ALLOWED);
   });
 
+  it("caps Converse maxTokens at the run's remaining hold, never above its own configured limit", async () => {
+    const seen: Seen[] = [];
+    const make = (maxTokens?: number) =>
+      createBedrockProvider({ credentials: CREDS, region: "eu-central-1", modelId: "m", maxTokens, fetchFn: fakeFetch(200, converseAnswer, seen), now: () => FIXED });
+    await make().complete({ system: "s", user: "u", allowedTools: ALLOWED, maxOutputTokens: 300 });
+    await make().complete({ system: "s", user: "u", allowedTools: ALLOWED, maxOutputTokens: 5_000 });
+    await make().complete({ system: "s", user: "u", allowedTools: ALLOWED });
+    await make(200).complete({ system: "s", user: "u", allowedTools: ALLOWED, maxOutputTokens: 300 });
+    const limits = seen.map((r) => (JSON.parse(String(r.init.body)) as { inferenceConfig: { maxTokens: number } }).inferenceConfig.maxTokens);
+    expect(limits).toEqual([300, 1024, 1024, 200]);
+  });
+
   it("maps a provider outage to AGT-0206 and never leaks the secret", async () => {
     const bedrock = createBedrockProvider({
       credentials: CREDS,

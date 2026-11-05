@@ -132,7 +132,7 @@ func (c Correction) CompleteStep(step int, notes, user string, now time.Time) (C
 }
 
 // CheckEffectiveness records the effectiveness check once it is due. The checker
-// must not be the user who completed D7 (QM_CAPA_MAINTAIN segregation of duties).
+// must not be the user who completed D7 (quality.capa.maintain segregation of duties).
 func (c Correction) CheckEffectiveness(result, note, user string, now time.Time) (Correction, error) {
 	note = strings.TrimSpace(note)
 	if result != Effective && result != NotEffective {

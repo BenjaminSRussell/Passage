@@ -11,8 +11,8 @@ import (
 )
 
 // dutyPolicyMaintain saves the purchasing policy (FR-17.13); reading it needs
-// PurchaseOrderInquire or this duty.
-const dutyPolicyMaintain = "ProcurementPolicyMaintain"
+// procurement.purchase-order.inquire or this duty.
+const dutyPolicyMaintain = "procurement.policy.maintain"
 
 // policyBody is the PUT body. Every flag is required so a save never changes a
 // setting by omission.

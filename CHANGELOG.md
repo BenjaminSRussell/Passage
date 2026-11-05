@@ -10,6 +10,50 @@ release may change public APIs.
 
 ### Added
 
+- Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
+  in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
+  ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev
+  chart with helm. The analytics, eam, hr, iot-edge, projects, shopfloor and transport charts now take
+  `image.digest`. Syncing still needs a live cluster (#213).
+- Keycloak CI login tests (#80, wave 02 AC3) in `services/identity/keycloak_login_test.go`: OIDC authorization code
+  with PKCE and TOTP (enrolment, then the OTP form), identity's `JWTVerifier` accepting the token with the duty
+  claims, deprovisioning (a disabled user loses refresh and login), and federated login through two Keycloak stand-in
+  IdPs (OIDC and SAML) with the post-broker second factor. The realm export gains a FORCE hardcoded `tenant_id` mapper
+  per IdP placeholder and a pinned single-use OTP policy; new realm tests check both.
+- HR employee and manager self-service (#267). Employees change their own preferred name at once, and their home
+  address and bank account with approval, through `/v1/hr/me/profile-changes`. The new value stays sealed until a
+  manager (address changes of direct reports) or HR (`hr.worker.maintain`, any change) approves it into the PII
+  vault with an audit row. Web screens: update my details, my absence, team changes, profile changes.
+
+- carrier-gateway TypeScript service (#482, wave 28 AC4) in `services/carrier-gateway-ts`. It has a carrier adapter
+  interface, a deterministic sandbox carrier with no credentials, rate shopping, idempotent labels and tracking. Its
+  `/v1/carrier` API takes signed service tokens. The adapter contract is replayed against a recorded fixture. There
+  is also a chart. fulfillment calls it through `:carrier-rates`, `:carrier-label` and `:carrier-track` on a
+  shipment (`CARRIER_GATEWAY_URL`). New service-only duties: `carrier.rate.quote`, `carrier.label.create` and
+  `carrier.tracking.read`. They are granted to fulfillment (all three) and transport (rates and tracking).
+- HR compensation cycle approval with segregation of duties (#266): `POST /v1/hr/compensation/cycles/{id}/approve`
+  under the new `HcmCompApprove` duty; the approver may not be the cycle's creator, a worksheet submitter, or the worker
+  or proposing manager on a submitted row, and apply now needs the approval (`HCM-CMP-010`). Hire from an offer can
+  create the worker in the same transaction with `newWorker`.
+- Production orders against the real ledger (#478, W21 AC4): `internal/ledgertest` builds and runs the ledger service
+  on a throwaway schema and production books and reconciles WIP through the real `ledgerclient` with signed service
+  tokens (skipped without `PASSAGE_TEST_DATABASE_URL` or under `-short`). A demo-plant seed (`go run ./cmd/demoplant`
+  in `services/production`) writes five orders across the lifecycle and can book them in a ledger; see the
+  production README.
+- Opt-in 50k-item MRP run through the planning API on Postgres 16 (#479, wave 22 AC2):
+  `PASSAGE_PLANNING_API_SCALE_ITEMS=50000 go test -run TestRunAPI_ScalePostgres ./internal/api/` in
+  `services/planning`. Measured 8 min 4 s end to end on a shared 4-vCPU VM, only without the router's 30 s
+  request timeout; numbers and caveats in `services/planning/README.md`. The plan-run route now accepts
+  bodies up to 128 MiB and `RunPlan` sends its rows in batches of 10,000 (one unbounded batch ran out of
+  memory at 50k items). ADR-0002 (Proposed) records the frePPLe comparison decision for AC4.
+- Wave 25 gaps (#481): production's `consume-shopfloor` consumer (principal `production-shopfloor`) posts
+  closed shop-floor job-stops as job cards at the worker cost rate, pinned to the order's legal entity, and
+  re-books them on `registration.corrected`; the web kiosk's IndexedDB offline queue replays punches and job
+  actions once, in order, when back online (Playwright `kiosk-offline.spec.ts`); `GET /v1/shopfloor/oee/stream`
+  pushes the live OEE tile as Server-Sent Events, shown on the OEE page for a selected machine.
+- Local ledger performance benchmark as a proxy for wave 11 AC4 (#476): `make bench-ledger` posts balanced
+  entries and reads trial balances against a throwaway Postgres 16 cluster and reports lines/s and p50/p95/p99;
+  results and the hardware caveat are in `services/ledger/README.md`. It does not meet or replace AC4.
 - Per-vendor-group AP control comparison (#421): party vendor groups with a short `code`
   (`POST/GET /v1/party/vendor-groups`, `vendorGroupCode` on the vendor, `vendorgroup.created.v1`), the
   `VENDGRP` ledger dimension (`addDimensionAttributes` on `PATCH /v1/ledger/ledgers/{id}`), receiving
@@ -38,6 +82,13 @@ release may change public APIs.
   role and `passage_eam` database in the dev Postgres) as `service:scheduling-downtime`, holding
   only `scheduling.downtime.apply`, and books a downtime capacity override idempotently (#44).
   `kafka.ConfigFromEnv` now holds the consumer's Kafka settings for both services.
+
+### Fixed
+
+- Production GL posting sent the journal number as the ledger `documentId`, which the ledger refuses (it must be a
+  UUID); it now sends the journal id (the order id for a settlement) and carries the number as line text (#478).
+- Ledger posting no longer deadlocks (`40P01`) when two ledgers of one tenant post the same new dimension
+  combinations at once: each new combination is inserted once, in id order (found by the #476 benchmark).
 
 ### Security
 

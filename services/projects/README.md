@@ -63,30 +63,30 @@ baseline), and the risks and issues register (list by score, add, edit and statu
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/projects` | ProjMaintain | `Idempotency-Key` required (≤ 255 chars); 201 created, 200 on replay with `Idempotent-Replayed: true`. A sub-project inherits omitted group, customer and contract from its parent (FR-41.1) |
-| GET | `/v1/projects` | ProjInquire | `stage`, `projectType`, `limit` (1–100), `cursor` |
-| GET | `/v1/projects/{id}` | ProjInquire | `ETag: "<version>"` |
-| POST | `/v1/projects/{id}/transitions` | ProjManage | body `{"to": "..."}`; `If-Match: "<version>"` required |
-| GET | `/v1/projects/groups` | ProjInquire | every project group of the tenant |
-| PUT | `/v1/projects/groups/{groupId}` | ProjSetupAdmin | no `If-Match` creates (201); replacing needs `If-Match` (428 without, 412 when stale) |
-| GET | `/v1/projects/posting-profiles` | ProjInquire | ordered by key |
-| PUT | `/v1/projects/posting-profiles` | ProjSetupAdmin | key in the body: (group, category, property), (group, \*, \*) or (\*, \*, \*); `If-Match` as for groups |
-| POST | `/v1/projects/posting-profiles/resolve` | ProjInquire | concrete key; returns the row the FR-41.5 fallback picks, or PROJ-POST-001 |
-| GET | `/v1/projects/{id}/plans` | ProjInquire | plan versions by sequence; 404 for an unknown project |
-| POST | `/v1/projects/{id}/plans` | ProjPlan | `Idempotency-Key` required; body `{"kind", "copyFromVersionId"?}` (rules below) |
-| GET | `/v1/projects/{id}/plans/{ver}/wbs` | ProjInquire | plan version, nodes (WBS-code order) and dependencies; `ETag` = plan version |
-| PUT | `/v1/projects/{id}/plans/{ver}/wbs` | ProjPlan | replaces every node and dependency; `If-Match` required; clears scheduled dates |
-| POST | `/v1/projects/{id}/plans/{ver}/schedule` | ProjPlan | CPM run; stores early/late dates, slack, critical flag; writes `wbs.scheduled` |
-| POST | `/v1/projects/change-orders` | ProjMaintain | `Idempotency-Key` required; DRAFT with impact lines; number CO-0001… per project |
-| GET | `/v1/projects/change-orders?projectId=` | ProjInquire | change order log, `type` and `status` filters; totals, no lines |
-| GET | `/v1/projects/change-orders/{coId}` | ProjInquire | with lines; `ETag` |
-| POST | `/v1/projects/change-orders/{coId}/submit` | ProjMaintain | `If-Match`; optional body `{"customerApprovalRef"}` |
-| POST | `/v1/projects/change-orders/{coId}/approve` | ProjChangeOrderApprove | `If-Match`; approver ≠ creator; optional `customerApprovalRef` |
-| POST | `/v1/projects/change-orders/{coId}/reject` | ProjChangeOrderApprove | `If-Match`; decider ≠ creator |
-| POST | `/v1/projects/change-orders/{coId}/apply` | ProjChangeOrderApprove | `If-Match`; BR-41.13 (below); second apply PROJ-CO-001 |
-| GET | `/v1/projects/{id}/risks` | ProjInquire | highest score first; `kind`, `status` filters |
-| POST | `/v1/projects/{id}/risks` | ProjPlan | `Idempotency-Key` required; starts OPEN |
-| PUT | `/v1/projects/{id}/risks/{riskId}` | ProjPlan | `If-Match`; fields and status |
+| POST | `/v1/projects` | projects.maintain | `Idempotency-Key` required (≤ 255 chars); 201 created, 200 on replay with `Idempotent-Replayed: true`. A sub-project inherits omitted group, customer and contract from its parent (FR-41.1) |
+| GET | `/v1/projects` | projects.inquire | `stage`, `projectType`, `limit` (1–100), `cursor` |
+| GET | `/v1/projects/{id}` | projects.inquire | `ETag: "<version>"` |
+| POST | `/v1/projects/{id}/transitions` | projects.manage | body `{"to": "..."}`; `If-Match: "<version>"` required |
+| GET | `/v1/projects/groups` | projects.inquire | every project group of the tenant |
+| PUT | `/v1/projects/groups/{groupId}` | projects.setup.admin | no `If-Match` creates (201); replacing needs `If-Match` (428 without, 412 when stale) |
+| GET | `/v1/projects/posting-profiles` | projects.inquire | ordered by key |
+| PUT | `/v1/projects/posting-profiles` | projects.setup.admin | key in the body: (group, category, property), (group, \*, \*) or (\*, \*, \*); `If-Match` as for groups |
+| POST | `/v1/projects/posting-profiles/resolve` | projects.inquire | concrete key; returns the row the FR-41.5 fallback picks, or PROJ-POST-001 |
+| GET | `/v1/projects/{id}/plans` | projects.inquire | plan versions by sequence; 404 for an unknown project |
+| POST | `/v1/projects/{id}/plans` | projects.plan | `Idempotency-Key` required; body `{"kind", "copyFromVersionId"?}` (rules below) |
+| GET | `/v1/projects/{id}/plans/{ver}/wbs` | projects.inquire | plan version, nodes (WBS-code order) and dependencies; `ETag` = plan version |
+| PUT | `/v1/projects/{id}/plans/{ver}/wbs` | projects.plan | replaces every node and dependency; `If-Match` required; clears scheduled dates |
+| POST | `/v1/projects/{id}/plans/{ver}/schedule` | projects.plan | CPM run; stores early/late dates, slack, critical flag; writes `wbs.scheduled` |
+| POST | `/v1/projects/change-orders` | projects.maintain | `Idempotency-Key` required; DRAFT with impact lines; number CO-0001… per project |
+| GET | `/v1/projects/change-orders?projectId=` | projects.inquire | change order log, `type` and `status` filters; totals, no lines |
+| GET | `/v1/projects/change-orders/{coId}` | projects.inquire | with lines; `ETag` |
+| POST | `/v1/projects/change-orders/{coId}/submit` | projects.maintain | `If-Match`; optional body `{"customerApprovalRef"}` |
+| POST | `/v1/projects/change-orders/{coId}/approve` | projects.change-order.approve | `If-Match`; approver ≠ creator; optional `customerApprovalRef` |
+| POST | `/v1/projects/change-orders/{coId}/reject` | projects.change-order.approve | `If-Match`; decider ≠ creator |
+| POST | `/v1/projects/change-orders/{coId}/apply` | projects.change-order.approve | `If-Match`; BR-41.13 (below); second apply PROJ-CO-001 |
+| GET | `/v1/projects/{id}/risks` | projects.inquire | highest score first; `kind`, `status` filters |
+| POST | `/v1/projects/{id}/risks` | projects.plan | `Idempotency-Key` required; starts OPEN |
+| PUT | `/v1/projects/{id}/risks/{riskId}` | projects.plan | `If-Match`; fields and status |
 
 `GET /healthz` is the kernel liveness check; `GET /readyz` pings the database (503 when it is down).
 Browser calls use `/api/v1/projects/...`; the BFF rewrites them to `/v1/projects/...`.

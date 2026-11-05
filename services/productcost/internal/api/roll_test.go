@@ -11,11 +11,12 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/engineering"
+	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 )
 
 const (
 	rollPath  = "/v1/product-costing/versions/" + someID + "/roll"
-	calculate = "CostingCalculate"
+	calculate = "productcost.calculate"
 	rollLE    = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6e01"
 	parentID  = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6c01"
 	childID   = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6c02"
@@ -69,7 +70,7 @@ func TestRollStoredVersion_ReadsStructureFromEngineeringAndRefusesItInTheRequest
 	h := rollRouter(f, eng)
 	site := ids.New()
 	if rec := (call{http.MethodPost, rollPath, rollBody(site, ""), view, "k", ""}).do(h); rec.Code != http.StatusForbidden {
-		t.Fatalf("without CostingCalculate: %d", rec.Code)
+		t.Fatalf("without productcost.calculate: %d", rec.Code)
 	}
 	for name, c := range map[string]call{
 		"no key":        {http.MethodPost, rollPath, rollBody(site, ""), calculate, "", ""},
@@ -161,5 +162,23 @@ func TestRollStoredVersion_RefusesAnotherLegalEntityAndAVersionThatIsNotOpenBefo
 		if len(eng.asked) != 0 || tc.f.roll != nil {
 			t.Errorf("%s: reached engineering or stored a roll", name)
 		}
+	}
+}
+
+func TestRollStoredVersion_ARetryOfACommittedRollReplaysAfterActivation(t *testing.T) {
+	stored := store.RollResult{VersionID: someID, SiteID: ids.New(), ItemCount: 1, StoredCount: 1, Errors: []store.RollError{}}
+	f := &fakeStore{versionLE: rollLE, versionStatus: domain.VersionActive, rollReplay: &stored}
+	eng := parentBOM()
+	rec := call{http.MethodPost, rollPath, rollBody(stored.SiteID, ""), calculate, "roll-1", rollLE}.do(rollRouter(f, eng))
+	if rec.Code != http.StatusCreated || rec.Header().Get(headerReplayed) != "true" || !strings.Contains(rec.Body.String(), `"storedCount":1`) {
+		t.Fatalf("retry after activation: %d %s, want the stored 201", rec.Code, rec.Body.String())
+	}
+	if f.rollReplayKey != "roll-1" || len(eng.asked) != 0 || f.roll != nil {
+		t.Fatalf("a replay read engineering or rolled again (key %q)", f.rollReplayKey)
+	}
+	f.rollReplay = nil
+	rec = call{http.MethodPost, rollPath, rollBody(stored.SiteID, ""), calculate, "roll-2", rollLE}.do(rollRouter(f, eng))
+	if code, _ := problemCode(t, rec); rec.Code != http.StatusUnprocessableEntity || code != domain.CodeVersionNotRollable {
+		t.Fatalf("a new key on an active version: %d %s", rec.Code, rec.Body.String())
 	}
 }

@@ -22,7 +22,7 @@ import (
 )
 
 // Duties of the slice-5 routes (8.43.17). Requests and the card pool use the EssExpense
-// duty (expense.report.write); decisions need MssApprove; recording the AP payment and
+// duty (expense.report.write); decisions need hr.team.approve; recording the AP payment and
 // cash returns is ExpenseAdmin's; card import keeps expense.card.import.
 const (
 	dutyApprove      = "expense.approve"

@@ -146,7 +146,7 @@ describe("screening holds", () => {
 
     handler = (url, init) => {
       if (url.pathname === `/api/v1/transport/screening-holds/${HOLD}` && !init.method) return json(200, hold());
-      if (url.pathname.endsWith(":release")) return problem(403, "AUTH-0003", "missing duty TRADE_COMPLIANCE_RELEASE");
+      if (url.pathname.endsWith(":release")) return problem(403, "AUTH-0003", "missing duty transport.screening-hold.release");
       return undefined;
     };
     renderAt(`/transport/screening-holds/${HOLD}`);
@@ -154,7 +154,7 @@ describe("screening holds", () => {
     fill("Reason", "cleared");
     fireEvent.click(screen.getByRole("button", { name: "Release hold" }));
     expect(await screen.findByText("The hold was not released")).toBeInTheDocument();
-    expect(screen.getByText(/TRADE_COMPLIANCE_RELEASE/)).toBeInTheDocument();
+    expect(screen.getByText(/transport.screening-hold.release/)).toBeInTheDocument();
   });
 
   it("shows the error state of a missing hold", async () => {

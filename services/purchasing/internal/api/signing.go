@@ -19,8 +19,8 @@ import (
 )
 
 // dutySigningLimitApprove decides signing limit requests and recertifies limits (FR-17.17, PRD
-// 3.17.17). Raising a request needs RequisitionCreate; reading is open to PurchaseOrderInquire.
-const dutySigningLimitApprove = "SigningLimitApprove"
+// 3.17.17). Raising a request needs procurement.requisition.create; reading is open to procurement.purchase-order.inquire.
+const dutySigningLimitApprove = "procurement.signing-limit.approve"
 
 // maxSigningNoteLen bounds a request reason and a decision note (the column checks are the same).
 const maxSigningNoteLen = 1000

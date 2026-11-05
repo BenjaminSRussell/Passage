@@ -52,7 +52,7 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
     // A quantity above plan is allowed up to the over-delivery tolerance (BR-28.7); the
     // tolerances are read only when one is entered.
     const over = open.filter((l) => DECIMAL.test((values[l.id] ?? "").trim()) && compareDecimal(values[l.id].trim(), l.qtyPlanned) > 0);
-    // null: the list could not be read (for example without WarehouseView); the service then decides alone.
+    // null: the list could not be read (for example without fulfillment.warehouse.view); the service then decides alone.
     let tolerances: Awaited<ReturnType<typeof listDeliveryTolerances>> | null = [];
     if (over.length > 0) {
       setBusy(true);

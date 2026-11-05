@@ -243,6 +243,10 @@ components:
               inventory_status: { type: string, enum: [AVAILABLE, QUARANTINE, BLOCKED] }
               amount: { type: string, description: "decimal string, receipt currency" }
               amount_acct: { type: string, description: "decimal string, accounting currency (amount times the receipt exchange rate)" }
+              cw_qty: { type: integer, minimum: 1, description: "catch-weight lines only (FR-24.7): the case count; qty is then the actual weight in unit" }
+              cw_nominal: { type: string, description: "catch-weight lines only: nominal weight per case, decimal string in unit" }
+              cw_min: { type: string, description: "catch-weight lines only: minimum weight per case, decimal string in unit" }
+              cw_max: { type: string, description: "catch-weight lines only: maximum weight per case, decimal string in unit" }
     ReceiptCorrectedData:
       type: object
       required: [receipt_id, receipt_number, kind, correction_seq, ledger_entry_id, currency, lines]

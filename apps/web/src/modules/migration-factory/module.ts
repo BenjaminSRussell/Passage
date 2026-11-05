@@ -49,13 +49,13 @@ const migrationFactory: PassageModule = {
     { path: "/migration-factory/cutover/:id/go-no-go", element: createElement(CutoverDecisionPage), handle: { title: "Go/no-go decision" } },
   ],
   nav: [
-    { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },
-    { label: "Pack catalog", to: "/migration-factory/packs", duty: "MigrationView" },
-    { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "MigrationView" },
-    { label: "Tolerances", to: "/migration-factory/tolerances", duty: "MigrationView" },
+    { label: "Pack runs", to: "/migration-factory", duty: "migration.factory.view" },
+    { label: "Pack catalog", to: "/migration-factory/packs", duty: "migration.factory.view" },
+    { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "migration.factory.view" },
+    { label: "Tolerances", to: "/migration-factory/tolerances", duty: "migration.factory.view" },
     // Any signed-in user may resolve a legacy id (9.49.5).
     { label: "Legacy reference", to: "/migration-factory/xref" },
-    { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "CutoverManager" },
+    { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "migration.cutover.manage" },
   ],
 };
 

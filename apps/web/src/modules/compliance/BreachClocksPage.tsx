@@ -67,7 +67,7 @@ const columns: DataTableColumn<BreachClock>[] = [
 
 /**
  * Breach notification clocks (PRD §9.48.6 Security incidents, duty
- * SecurityIncidentManage): the deadlines per regime of a confirmed
+ * compliance.security-incident.manage): the deadlines per regime of a confirmed
  * personal-data breach, counted from awareness (FR-48.29, BR-48.18).
  */
 export function BreachClocksPage() {

@@ -16,7 +16,7 @@ const analytics: PassageModule = {
   description:
     "Governed metrics, dashboards, the explorer and its exports, the daily reconciliation of metrics against the ledger, data-quality rules, scheduled reports and their deliveries, catalog lineage and archive partitions.",
   routes: [
-    { path: "/analytics", element: createElement(MetricsPage), handle: { title: "Governed metrics", duty: "AnalyticsView" } },
+    { path: "/analytics", element: createElement(MetricsPage), handle: { title: "Governed metrics", duty: "analytics.view" } },
     { path: "/analytics/metrics", element: createElement(MetricsPage) },
     { path: "/analytics/metrics/:id", element: createElement(MetricDetailPage), handle: { title: "Governed metric" } },
     { path: "/analytics/dashboards", element: createElement(DashboardsPage), handle: { title: "Dashboards" } },
@@ -36,15 +36,15 @@ const analytics: PassageModule = {
     { path: "/analytics/archive/:id", element: createElement(ArchivePartitionPage), handle: { title: "Archive partition" } },
   ],
   nav: [
-    { label: "Governed metrics", to: "/analytics/metrics", duty: "AnalyticsView" },
-    { label: "Dashboards", to: "/analytics/dashboards", duty: "AnalyticsView" },
-    { label: "Explorer", to: "/analytics/explorer", duty: "AnalyticsView" },
-    { label: "Exports", to: "/analytics/exports", duty: "AnalyticsExport" },
-    { label: "Metric reconciliation", to: "/analytics/reconciliation", duty: "FinanceView" },
-    { label: "Data quality", to: "/analytics/data-quality", duty: "CatalogSteward" },
-    { label: "Scheduled reports", to: "/analytics/schedules", duty: "AnalyticsAuthor" },
-    { label: "Lineage", to: "/analytics/lineage", duty: "CatalogView" },
-    { label: "Archive partitions", to: "/analytics/archive", duty: "ArchiveAdmin" },
+    { label: "Governed metrics", to: "/analytics/metrics", duty: "analytics.view" },
+    { label: "Dashboards", to: "/analytics/dashboards", duty: "analytics.view" },
+    { label: "Explorer", to: "/analytics/explorer", duty: "analytics.view" },
+    { label: "Exports", to: "/analytics/exports", duty: "analytics.export" },
+    { label: "Metric reconciliation", to: "/analytics/reconciliation", duty: "analytics.finance.view" },
+    { label: "Data quality", to: "/analytics/data-quality", duty: "analytics.catalog.steward" },
+    { label: "Scheduled reports", to: "/analytics/schedules", duty: "analytics.author" },
+    { label: "Lineage", to: "/analytics/lineage", duty: "analytics.catalog.view" },
+    { label: "Archive partitions", to: "/analytics/archive", duty: "analytics.archive.admin" },
   ],
 };
 

@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { holdsDuty } from "../../shell/dutyGate";
+import { usePrincipalDuties } from "../../shell/principal";
 import { buttonClassName, Button, Card, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { advanceCompCycle, applyCompCycle, getCompCycle, listCompCycles, type CompCycle, type CycleBudget, type CycleMove, type GuidelineRow } from "./api/recruitment";
+import { advanceCompCycle, applyCompCycle, approveCompCycle, getCompCycle, listCompCycles, type CompCycle, type CycleBudget, type CycleMove, type GuidelineRow } from "./api/recruitment";
 import { UUID, dayOf } from "./format";
 import styles from "./pages.module.css";
 import { BackLink, ConfirmAction, Entry, Facts, humanize, ListPage, Loaded, Status, TextField, useAction } from "./parts";
@@ -53,9 +55,12 @@ const FORWARD: Record<string, { to: CycleMove; label: string; done: string }> = 
   MANAGER_INPUT: { to: "APPROVAL", label: "Send to approval", done: "The cycle is waiting for approval." },
 };
 
+export const DUTY_COMP_APPROVE = "hr.compensation.approve";
+
 export function CompCycleDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const canApprove = holdsDuty(usePrincipalDuties(), DUTY_COMP_APPROVE);
   const state = useLoad((signal) => getCompCycle(id, signal), id);
   const action = useAction(state.reload);
   const [manager, setManager] = useState("");
@@ -66,6 +71,7 @@ export function CompCycleDetailPage() {
       {(cycle) => {
         const forward = FORWARD[cycle.status];
         const live = cycle.status !== "APPLIED" && cycle.status !== "CANCELED";
+        const awaitingApproval = cycle.status === "APPROVAL" && !cycle.approvedBy;
         return (
           <div className={styles.stack}>
             <PageHeader title={cycle.name} meta={<Status value={cycle.status} />} actions={<BackLink to="/hr/compensation/cycles">Back to cycles</BackLink>} />
@@ -79,6 +85,17 @@ export function CompCycleDetailPage() {
                       {forward.label}
                     </Button>
                   ) : null}
+                  {awaitingApproval && canApprove ? (
+                    <ConfirmAction
+                      label="Approve cycle"
+                      variant="primary"
+                      title="Approve this cycle?"
+                      description="You can approve only a cycle you didn't create, submit a worksheet on, or appear on as a worker or proposing manager."
+                      confirmLabel="Approve cycle"
+                      busy={action.busy === "approve"}
+                      onConfirm={() => void action.run("approve", () => approveCompCycle(cycle.id), "The cycle was approved and can now be applied.")}
+                    />
+                  ) : null}
                   {cycle.status === "APPROVAL" ? (
                     <ConfirmAction
                       label="Apply cycle"
@@ -86,6 +103,7 @@ export function CompCycleDetailPage() {
                       title="Apply this cycle?"
                       description="This creates a pay-change action for every approved proposal and can't be undone."
                       confirmLabel="Apply cycle"
+                      disabled={awaitingApproval}
                       busy={action.busy === "apply"}
                       onConfirm={() =>
                         void action.run("apply", () => applyCompCycle(cycle.id), (applied) => `The cycle was applied and created ${applied.actionIds?.length ?? 0} pay-change actions.`)
@@ -114,6 +132,9 @@ export function CompCycleDetailPage() {
                   {cycle.currency}
                 </Entry>
                 <Entry term="Over budget">{cycle.allowOverBudget ? "Allowed" : "Not allowed"}</Entry>
+                {cycle.status === "APPROVAL" || cycle.approvedBy ? (
+                  <Entry term="Approval">{cycle.approvedBy ? `Approved by ${cycle.approvedBy}${cycle.approvedAt ? ` on ${dayOf(cycle.approvedAt)}` : ""}` : "Waiting for an independent approver; it can't be applied until then."}</Entry>
+                ) : null}
                 {cycle.appliedAt ? (
                   <Entry term="Applied" mono>
                     {dayOf(cycle.appliedAt)}

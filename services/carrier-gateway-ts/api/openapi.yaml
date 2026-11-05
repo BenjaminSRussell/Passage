@@ -1,0 +1,222 @@
+openapi: 3.1.0
+info:
+  title: Passage carrier gateway
+  version: 0.1.0
+  description: >
+    Rate shopping, label purchase and tracking between Passage services and the
+    carriers (wave 28 AC4, #482). Service-to-service only: every /v1 operation
+    needs an X-Passage-Service-Token (platform/go/tenant format) addressed to
+    carrier-gateway and carrying the operation's x-passage-duty. Granted to
+    fulfillment (all three duties) and transport (rates and tracking).
+    Money is a decimal string with two places; weights are kilograms (three
+    places) and dimensions centimetres (one place).
+servers:
+  - url: http://carrier-gateway:8080
+security:
+  - serviceToken: []
+paths:
+  /healthz:
+    get:
+      operationId: health
+      security: []
+      responses:
+        "200": { description: Alive }
+  /v1/carrier/carriers:
+    get:
+      operationId: listCarriers
+      summary: The configured carriers and their services
+      x-passage-duty: carrier.rate.quote
+      responses:
+        "200":
+          description: Carriers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string }
+                        sandbox: { type: boolean }
+                        services: { type: array, items: { type: object, properties: { code: { type: string }, name: { type: string } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/carrier/rates:
+    post:
+      operationId: rateShop
+      summary: Rates from every named carrier (all when none), cheapest first, then fastest
+      description: >
+        A carrier that refuses (unknown service, destination not served) or is down
+        is listed in failures; the others still answer. Read-only, no Idempotency-Key.
+      x-passage-duty: carrier.rate.quote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/Shipment" }
+                - type: object
+                  properties:
+                    carriers: { $ref: "#/components/schemas/Codes" }
+                    services: { $ref: "#/components/schemas/Codes" }
+      responses:
+        "200":
+          description: Rates and failures
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, failures]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Rate" } }
+                  failures: { type: array, items: { $ref: "#/components/schemas/CarrierFailure" } }
+        "400": { description: CGW-0400 validation (errors names each field), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "415": { $ref: "#/components/responses/Problem" }
+        "422": { description: CGW-0101 a named carrier is not configured, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/carrier/labels:
+    post:
+      operationId: createLabel
+      summary: Buy a label, once per Idempotency-Key
+      description: >
+        The key is scoped to the token's tenant, legal entity and issuer. A repeat
+        with the same request returns the stored label with 200 and created false;
+        a repeat with a different request is 422 CGW-0422.
+      x-passage-duty: carrier.label.create
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, pattern: '^[\x21-\x7e]{1,128}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: "#/components/schemas/Shipment" }
+                - type: object
+                  required: [carrier, service]
+                  properties:
+                    carrier: { type: string, pattern: '^[A-Za-z0-9_-]{1,32}$' }
+                    service: { type: string, pattern: '^[A-Za-z0-9_-]{1,32}$' }
+                    reference: { type: string, maxLength: 60 }
+      responses:
+        "201": { description: Label bought, content: { application/json: { schema: { $ref: "#/components/schemas/Label" } } } }
+        "200": { description: The label this key already bought, content: { application/json: { schema: { $ref: "#/components/schemas/Label" } } } }
+        "400": { description: CGW-0400 validation, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { description: "CGW-0101 unknown carrier, CGW-0102 unknown service, CGW-0103 not served, CGW-0422 key reused for a different request", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: CGW-0428 Idempotency-Key missing, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "503": { description: CGW-0105 the carrier is unavailable (retry with the same key), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/carrier/tracking/{carrier}/{trackingNumber}:
+    get:
+      operationId: track
+      summary: The carrier's tracking events for a tracking number, oldest first
+      x-passage-duty: carrier.tracking.read
+      parameters:
+        - { name: carrier, in: path, required: true, schema: { type: string, pattern: '^[a-z0-9-]{2,32}$' } }
+        - { name: trackingNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$' } }
+      responses:
+        "200": { description: Tracking, content: { application/json: { schema: { $ref: "#/components/schemas/Tracking" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "CGW-0104 the carrier does not know the number, CGW-0404 no such route", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: CGW-0101 unknown carrier, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "503": { description: CGW-0105, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+components:
+  securitySchemes:
+    serviceToken: { type: apiKey, in: header, name: X-Passage-Service-Token }
+  responses:
+    Problem:
+      description: "CGW-0401 token missing or invalid, CGW-0403 token lacks the duty, CGW-0415 not JSON"
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+  schemas:
+    Codes: { type: array, minItems: 1, maxItems: 20, items: { type: string, pattern: '^[A-Za-z0-9_-]{1,32}$' } }
+    Address:
+      type: object
+      required: [street1, city, postalCode, country]
+      properties:
+        name: { type: string, maxLength: 60 }
+        street1: { type: string, maxLength: 100 }
+        city: { type: string, maxLength: 60 }
+        postalCode: { type: string, maxLength: 16 }
+        state: { type: string, maxLength: 3 }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+    Parcel:
+      type: object
+      required: [weightKg, lengthCm, widthCm, heightCm]
+      properties:
+        weightKg: { type: string, pattern: '^(0|[1-9]\d{0,6})(\.\d{1,3})?$', description: above 0, at most 1000 }
+        lengthCm: { type: string, pattern: '^(0|[1-9]\d{0,6})(\.\d)?$', description: above 0, at most 300 }
+        widthCm: { type: string, pattern: '^(0|[1-9]\d{0,6})(\.\d)?$' }
+        heightCm: { type: string, pattern: '^(0|[1-9]\d{0,6})(\.\d)?$' }
+    Shipment:
+      type: object
+      required: [shipFrom, shipTo, parcels]
+      properties:
+        shipFrom: { $ref: "#/components/schemas/Address" }
+        shipTo: { $ref: "#/components/schemas/Address" }
+        parcels: { type: array, minItems: 1, maxItems: 50, items: { $ref: "#/components/schemas/Parcel" } }
+    Rate:
+      type: object
+      required: [carrier, service, amount, currency, transitDays, billableWeightKg]
+      properties:
+        carrier: { type: string }
+        service: { type: string }
+        amount: { type: string }
+        currency: { type: string }
+        transitDays: { type: integer, minimum: 0 }
+        billableWeightKg: { type: string }
+    CarrierFailure:
+      type: object
+      properties:
+        carrier: { type: string }
+        code: { type: string, enum: [UNKNOWN_SERVICE, NOT_SERVICEABLE, NOT_FOUND, UNAVAILABLE] }
+        message: { type: string }
+    Label:
+      type: object
+      required: [carrier, service, trackingNumber, amount, currency, format, document, createdAt, created]
+      properties:
+        carrier: { type: string }
+        service: { type: string }
+        trackingNumber: { type: string }
+        amount: { type: string }
+        currency: { type: string }
+        format: { type: string, enum: [ZPL] }
+        document: { type: string, format: byte }
+        createdAt: { type: string, format: date-time }
+        created: { type: boolean }
+    Tracking:
+      type: object
+      required: [carrier, trackingNumber, status, events]
+      properties:
+        carrier: { type: string }
+        trackingNumber: { type: string }
+        status: { $ref: "#/components/schemas/TrackingStatus" }
+        events:
+          type: array
+          items:
+            type: object
+            required: [eventKey, status, description, eventTime]
+            properties:
+              eventKey: { type: string, maxLength: 128 }
+              status: { $ref: "#/components/schemas/TrackingStatus" }
+              description: { type: string, maxLength: 500 }
+              eventTime: { type: string, format: date-time }
+    TrackingStatus: { type: string, enum: [LABELLED, IN_TRANSIT, DELIVERED, EXCEPTION] }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }

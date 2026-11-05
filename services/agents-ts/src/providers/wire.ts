@@ -52,22 +52,30 @@ export function proposeTool(allowedTools: readonly string[]): ProposeToolSpec {
  */
 export class ProviderError extends AgentError {
   readonly outage: boolean;
+  /**
+   * True only when the model certainly did not run for this request: the provider answered with
+   * an HTTP error status (4xx, 429, 5xx) or the connection was never made (ECONNREFUSED,
+   * ENOTFOUND). The run then releases its budget hold with zero. False when that cannot be known,
+   * such as a timeout or a connection dropped mid-response: the hold is kept for the sweep.
+   */
+  readonly unbilled: boolean;
 
-  constructor(message: string, outage: boolean) {
+  constructor(message: string, outage: boolean, unbilled = false) {
     super("AGT-0206", message);
     this.name = "ProviderError";
     this.outage = outage;
+    this.unbilled = unbilled;
   }
 }
 
 /** The provider is down or unreachable (counts towards failover). */
-export function providerUnavailable(detail: string): ProviderError {
-  return new ProviderError(detail, true);
+export function providerUnavailable(detail: string, unbilled = false): ProviderError {
+  return new ProviderError(detail, true, unbilled);
 }
 
 /** The provider answered, but refused the request or gave an unusable answer (no failover). */
-export function providerRejected(detail: string): ProviderError {
-  return new ProviderError(detail, false);
+export function providerRejected(detail: string, unbilled = false): ProviderError {
+  return new ProviderError(detail, false, unbilled);
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

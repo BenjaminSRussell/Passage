@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	dutyBankWrite  = "party.vendor_bank.write"
-	dutyBankReveal = "party.vendor_bank.reveal"
+	dutyBankWrite  = "party.vendor-bank.write"
+	dutyBankReveal = "party.vendor-bank.reveal"
 )
 
 func (a *API) WithVendors(vendors store.VendorStore) *API {
@@ -27,7 +27,7 @@ func (a *API) WithVendors(vendors store.VendorStore) *API {
 func (a *API) registerVendors(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/parties/{id}/vendor", a.createVendor)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/parties/{id}/vendors", a.listPartyVendors)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendors/{id}", a.getVendor)
+	r.With(authz.RequireAnyDuty(dutyRead, dutyImportRead)).Get("/v1/party/vendors/{id}", a.getVendor)
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/vendor-groups", a.createVendorGroup)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendor-groups", a.listVendorGroups)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/vendor-groups/{id}", a.getVendorGroup)

@@ -235,7 +235,7 @@ func TestReturnableAging_RejectsBadParameters(t *testing.T) {
 
 func TestReports_RequireWarehouseView(t *testing.T) {
 	for _, path := range []string{"/v1/fulfillment/backorders", "/v1/fulfillment/returnable-packaging/aging"} {
-		rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "WarehousePick"})
+		rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "fulfillment.warehouse.pick"})
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("%s: status = %d body = %s, want 403", path, rec.Code, rec.Body.String())
 		}

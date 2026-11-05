@@ -285,7 +285,7 @@ func hitByID(ctx context.Context, tx pgx.Tx, id string, lock bool) (ScreeningHit
 }
 
 // DecideHit clears an OPEN hit as a false positive or confirms it (FR-48.19).
-// The decider is the calling user, who holds TradeComplianceOfficer (enforced
+// The decider is the calling user, who holds compliance.trade-screening.decide (enforced
 // by the API); the reason is required. A repeated Idempotency-Key replays the
 // first answer; a stale expected version is 412.
 func (s *Postgres) DecideHit(ctx context.Context, id string, expected int, in DecisionInput, key string, now time.Time) (ScreeningHit, error) {

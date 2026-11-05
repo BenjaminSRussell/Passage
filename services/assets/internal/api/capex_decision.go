@@ -13,8 +13,8 @@ import (
 )
 
 // DutyCapexApprove covers the approver's decisions on capex requests and their
-// release and closing (FR-37.17, PRD 7.37.17 CapexRequestApprove).
-const DutyCapexApprove = "CapexRequestApprove"
+// release and closing (FR-37.17, PRD 7.37.17 assets.capex-request.approve).
+const DutyCapexApprove = "assets.capex-request.approve"
 
 const (
 	maxDecisionComment = 1000

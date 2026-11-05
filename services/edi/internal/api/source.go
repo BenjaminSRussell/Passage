@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
@@ -33,7 +34,13 @@ func (a *API) putTradeProfile(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	if fields := p.Validate(); len(fields) > 0 {
+	fields := p.Validate()
+	if _, bad := fields["legalEntityId"]; !bad {
+		if caller, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(caller, p.LegalEntityID) {
+			fields["legalEntityId"] = "must be a legal entity of the caller"
+		}
+	}
+	if len(fields) > 0 {
 		httpx.Fail(w, r, validation(fields))
 		return
 	}

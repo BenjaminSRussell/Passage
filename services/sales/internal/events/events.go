@@ -327,6 +327,17 @@ type ConfirmedLine struct {
 	AtpQty string `json:"atp_qty"`
 	// ConfigurationID is the saved configuration of a configured line; absent otherwise.
 	ConfigurationID *string `json:"configuration_id,omitempty"`
+	// CatchWeight is the per-case weight spec of a catch-weight line (FR-24.7);
+	// Quantity is then a count of cases, not weight. Absent otherwise.
+	CatchWeight *CatchWeightSpec `json:"catch_weight,omitempty"`
+}
+
+// CatchWeightSpec is a catch-weight line's nominal, minimum and maximum
+// weight per case, decimal strings in the product's inventory weight unit.
+type CatchWeightSpec struct {
+	Nominal string `json:"nominal"`
+	Min     string `json:"min"`
+	Max     string `json:"max"`
 }
 
 // OrderConfirmedData is the data member of order.confirmed.v1.
@@ -551,6 +562,11 @@ type ProgressLine struct {
 	DeliveredQty string `json:"delivered_qty"`
 	InvoicedQty  string `json:"invoiced_qty"`
 	LineStatus   string `json:"line_status"`
+	// Catch-weight lines only (FR-24.7): on a DELIVERED report, the weight it
+	// delivered (the reported actualWeight, else cases x nominal) and the
+	// line's delivered weight so far. Quantities stay in cases.
+	ReportedWeight  string `json:"reported_weight,omitempty"`
+	DeliveredWeight string `json:"delivered_weight,omitempty"`
 }
 
 // OrderProgressData is the data member of orderprogress.recorded.v1.

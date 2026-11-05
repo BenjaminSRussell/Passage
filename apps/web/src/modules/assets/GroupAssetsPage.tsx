@@ -265,7 +265,7 @@ function MemberPicker({ legalEntityId, classCode, selected, onChange, error }: {
   );
 }
 
-/** Create a group asset on a tax book and assign its members (FR-37.16, duty AssetConfigure). */
+/** Create a group asset on a tax book and assign its members (FR-37.16, duty assets.asset.configure). */
 export function NewGroupAssetPage() {
   const navigate = useNavigate();
   const [values, setValues] = useState<GroupValues>(() => ({

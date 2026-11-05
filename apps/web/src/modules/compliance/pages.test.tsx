@@ -327,9 +327,9 @@ describe("Country packs", () => {
   });
 
   it("shows a load failure", async () => {
-    handler = () => problem(403, "AUTH-0003", "missing duty LocalizationAdmin");
+    handler = () => problem(403, "AUTH-0003", "missing duty localization.admin");
     renderAt("/compliance/packs");
-    expect((await findAlert()).textContent).toContain("missing duty LocalizationAdmin (AUTH-0003)");
+    expect((await findAlert()).textContent).toContain("missing duty localization.admin (AUTH-0003)");
   });
 
   it("shows a pack's contents and runs the install and tax-id checks", async () => {

@@ -24,7 +24,7 @@ paths:
     post:
       operationId: createProject
       summary: Create a project (stage CREATED)
-      x-passage-duty: ProjMaintain
+      x-passage-duty: projects.maintain
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -69,7 +69,7 @@ paths:
     get:
       operationId: listProjects
       summary: List projects (cursor pagination)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - name: stage
           in: query
@@ -115,7 +115,7 @@ paths:
     get:
       operationId: getProject
       summary: Read a project
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
       responses:
@@ -138,7 +138,7 @@ paths:
     post:
       operationId: transitionProject
       summary: Move a project to another stage (CREATED → IN_PROCESS → FINISHED, IN_PROCESS ⇄ ON_HOLD)
-      x-passage-duty: ProjManage
+      x-passage-duty: projects.manage
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/IfMatch'
@@ -176,7 +176,7 @@ paths:
     get:
       operationId: listProjectGroups
       summary: List project groups
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       responses:
         '200':
           description: All project groups of the tenant
@@ -198,7 +198,7 @@ paths:
     put:
       operationId: putProjectGroup
       summary: Create a project group (no If-Match) or replace it (If-Match with its version)
-      x-passage-duty: ProjSetupAdmin
+      x-passage-duty: projects.setup.admin
       parameters:
         - name: groupId
           in: path
@@ -246,7 +246,7 @@ paths:
     get:
       operationId: listPostingProfiles
       summary: List posting profiles (FR-41.5)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       responses:
         '200':
           description: All posting profiles of the tenant
@@ -269,7 +269,7 @@ paths:
       summary: >-
         Create (no If-Match) or replace (If-Match) the posting profile of one key. The key is concrete
         (group, category, property), the group fallback (group, *, *) or the catch-all (*, *, *).
-      x-passage-duty: ProjSetupAdmin
+      x-passage-duty: projects.setup.admin
       parameters:
         - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
@@ -311,7 +311,7 @@ paths:
     post:
       operationId: resolvePostingProfile
       summary: Resolve the profile for a concrete key with the fallback order (group,category,property) → (group,*,*) → (*,*,*)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       requestBody:
         required: true
         content:
@@ -341,7 +341,7 @@ paths:
     get:
       operationId: listPlanVersions
       summary: List the plan versions of a project in sequence order
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
       responses:
@@ -369,7 +369,7 @@ paths:
         Add a plan version: an empty or copied WORKING plan (one per project), a BASELINE copied from
         WORKING (one per project, locked), or a SIMULATION copied from WORKING or BASELINE. A wrong
         kind or source is PROJ-PLAN-001.
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -416,7 +416,7 @@ paths:
     get:
       operationId: getWbs
       summary: Read a plan version with its WBS nodes and dependencies
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/PlanVersionId'
@@ -442,7 +442,7 @@ paths:
         Replace every node and dependency of a plan version (bulk). Malformed nodes are 400,
         a duplicate code PROJ-WBS-002, a cycle PROJ-WBS-001, a locked plan PROJ-PLAN-002.
         Scheduled dates are cleared.
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/PlanVersionId'
@@ -484,7 +484,7 @@ paths:
         Run the CPM scheduler (forward and backward pass, standard Monday-to-Friday calendar) and
         store early and late dates, slack and the critical flag per node; emits wbs.scheduled.
         A locked plan is PROJ-PLAN-002. Rerunning on an unchanged WBS gives the same result.
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/PlanVersionId'
@@ -520,7 +520,7 @@ paths:
         are not content). Not a SIMULATION, a simulation copied before ancestors were recorded,
         or a project without a WORKING plan is PROJ-PLAN-001; a transferred simulation is
         PROJ-PLAN-002.
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/PlanVersionId'
@@ -555,7 +555,7 @@ paths:
         finds the simulation locked (PROJ-PLAN-002), so the transfer is idempotent by state and
         takes no Idempotency-Key (see NOT-IMPLEMENTED.md). A merged dependency cycle is
         PROJ-WBS-001. No event is published.
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/PlanVersionId'
@@ -594,7 +594,7 @@ paths:
     post:
       operationId: createChangeOrder
       summary: Create a DRAFT change order or claim with impact lines (FR-41.18)
-      x-passage-duty: ProjMaintain
+      x-passage-duty: projects.maintain
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -643,7 +643,7 @@ paths:
     get:
       operationId: listChangeOrders
       summary: Change order log of one project, in number order, without lines (§8.41.14)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - name: projectId
           in: query
@@ -684,7 +684,7 @@ paths:
     get:
       operationId: getChangeOrder
       summary: One change order with its impact lines
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ChangeOrderId'
       responses:
@@ -707,7 +707,7 @@ paths:
     post:
       operationId: submitChangeOrder
       summary: Submit a DRAFT change order (optionally attaching the customer approval reference)
-      x-passage-duty: ProjMaintain
+      x-passage-duty: projects.maintain
       parameters:
         - $ref: '#/components/parameters/ChangeOrderId'
         - $ref: '#/components/parameters/IfMatch'
@@ -749,7 +749,7 @@ paths:
     post:
       operationId: approveChangeOrder
       summary: Approve a SUBMITTED change order; the approver must not be its creator
-      x-passage-duty: ProjChangeOrderApprove
+      x-passage-duty: projects.change-order.approve
       parameters:
         - $ref: '#/components/parameters/ChangeOrderId'
         - $ref: '#/components/parameters/IfMatch'
@@ -791,7 +791,7 @@ paths:
     post:
       operationId: rejectChangeOrder
       summary: Reject a SUBMITTED change order; the decider must not be its creator
-      x-passage-duty: ProjChangeOrderApprove
+      x-passage-duty: projects.change-order.approve
       parameters:
         - $ref: '#/components/parameters/ChangeOrderId'
         - $ref: '#/components/parameters/IfMatch'
@@ -834,7 +834,7 @@ paths:
         order becomes APPLIED and immutable; changeorder.applied (budget delta for wave-38
         budget control) and project.updated are written to the outbox. A second apply is
         PROJ-CO-001 whatever If-Match carries, so a retry after a lost response is safe.
-      x-passage-duty: ProjChangeOrderApprove
+      x-passage-duty: projects.change-order.approve
       parameters:
         - $ref: '#/components/parameters/ChangeOrderId'
         - $ref: '#/components/parameters/IfMatch'
@@ -870,7 +870,7 @@ paths:
     get:
       operationId: listRisks
       summary: Risk and issue register of a project, highest score first (FR-41.20)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - name: kind
@@ -905,7 +905,7 @@ paths:
     post:
       operationId: createRisk
       summary: Add an OPEN risk or issue
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -953,7 +953,7 @@ paths:
       operationId: updateRisk
       summary: Replace a risk or issue (fields and status)
       description: OPEN → MITIGATED | CLOSED, MITIGATED → OPEN | CLOSED; a CLOSED entry is final (PROJ-RISK-001).
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - name: riskId
@@ -1000,7 +1000,7 @@ paths:
     get:
       operationId: listForecastModels
       summary: Forecast models of a project by name, with line counts and totals, without lines (FR-41.20)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
       responses:
@@ -1028,7 +1028,7 @@ paths:
         Create a forecast model with its lines (FR-41.20). Lines are validated against the project
         currency (amounts rounded half-even to the minor unit) and the WORKING plan's WBS codes (400);
         a second model with the same name is 422 PROJ-FC-001.
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1078,7 +1078,7 @@ paths:
         A forecast model with its lines and forecast vs actual by period and transaction type
         (§8.41.5). Actuals are the project's recorded transactions summed by calendar month;
         variances are actual minus forecast.
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/ForecastModelId'
@@ -1101,7 +1101,7 @@ paths:
     put:
       operationId: replaceForecastModel
       summary: Rename a forecast model and replace all of its lines (If-Match on the model version)
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/ForecastModelId'
@@ -1141,7 +1141,7 @@ paths:
       operationId: activateForecastModel
       summary: Designate the forecast model that drives GL revenue recognition (D4c)
       description: Makes the model the project's active one (any other stops being active). The GL estimate to complete is the cost of its lines after the period.
-      x-passage-duty: ProjPlan
+      x-passage-duty: projects.plan
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - $ref: '#/components/parameters/ForecastModelId'
@@ -1170,7 +1170,7 @@ paths:
     get:
       operationId: listCategories
       summary: Project categories, by id (§8.41.4 ProjectCategory)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       responses:
         '200':
           description: Categories
@@ -1193,7 +1193,7 @@ paths:
       operationId: putCategory
       summary: Create a category (no If-Match, 201) or rename it (If-Match, 200)
       description: The transaction type of an existing category cannot change (422 PROJ-CAT-001).
-      x-passage-duty: ProjSetupAdmin
+      x-passage-duty: projects.setup.admin
       parameters:
         - name: categoryId
           in: path
@@ -1250,7 +1250,7 @@ paths:
         currency (422 PROJ-TXN-002); the category must exist with the transaction's
         type (422 PROJ-TXN-003). Posting to the universal journal is not built yet
         (journalId stays empty; see NOT-IMPLEMENTED.md D2b).
-      x-passage-duty: ProjJournalMaintain
+      x-passage-duty: projects.journal.maintain
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -1291,7 +1291,7 @@ paths:
     get:
       operationId: getTransactionBilling
       summary: Why a transaction is or is not billed in a window (BR-41.3)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/TransactionId'
         - name: from
@@ -1330,7 +1330,7 @@ paths:
     get:
       operationId: listTransactions
       summary: One page of a project's transactions, newest date first (keyset cursor)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
         - name: limit
@@ -1381,7 +1381,7 @@ paths:
         requested types (all when none). A FIXED_PRICE project bills only ON_ACCOUNT
         lines on billable milestones scheduled to finish by `to`; other project types
         do not bill (422 PROJ-PROP-004). Nothing selected is 422 PROJ-PROP-002.
-      x-passage-duty: ProjBillingMaintain
+      x-passage-duty: projects.billing.maintain
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -1426,7 +1426,7 @@ paths:
     get:
       operationId: listInvoiceProposals
       summary: One page of the invoice proposals of a project, newest first, without lines (keyset cursor)
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - name: projectId
           in: query
@@ -1478,7 +1478,7 @@ paths:
     get:
       operationId: getInvoiceProposal
       summary: An invoice proposal with its lines
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - $ref: '#/components/parameters/ProposalId'
       responses:
@@ -1501,7 +1501,7 @@ paths:
     post:
       operationId: approveInvoiceProposal
       summary: Approve a DRAFT proposal that has lines (DRAFT → APPROVED)
-      x-passage-duty: ProjBillingMaintain
+      x-passage-duty: projects.billing.maintain
       parameters:
         - $ref: '#/components/parameters/ProposalId'
         - $ref: '#/components/parameters/IfMatch'
@@ -1531,7 +1531,7 @@ paths:
     post:
       operationId: cancelInvoiceProposal
       summary: Cancel a DRAFT or APPROVED proposal; its transactions return to the pool
-      x-passage-duty: ProjBillingMaintain
+      x-passage-duty: projects.billing.maintain
       parameters:
         - $ref: '#/components/parameters/ProposalId'
         - $ref: '#/components/parameters/IfMatch'
@@ -1562,7 +1562,7 @@ paths:
       operationId: removeInvoiceProposalLine
       summary: Take a transaction off a DRAFT or APPROVED proposal (FR-41.6)
       description: The transaction returns to the pool and the totals are recomputed; an APPROVED proposal goes back to DRAFT.
-      x-passage-duty: ProjBillingMaintain
+      x-passage-duty: projects.billing.maintain
       parameters:
         - $ref: '#/components/parameters/ProposalId'
         - $ref: '#/components/parameters/TransactionId'
@@ -1608,7 +1608,7 @@ paths:
         period booked) or PROJ-GL-007 (forecast model currency differs). The legal entity is pinned to the ledger of its first posting: another ledger is
         409 PROJ-GL-005, and a ledger the entity does not own is 422 PROJ-GL-006. At most 200 transactions and 200 projects per run (`more`). Signs only
         ledger.entry.post.
-      x-passage-duty: ProjGlPost
+      x-passage-duty: projects.gl.post
       requestBody:
         required: true
         content:
@@ -1698,7 +1698,7 @@ paths:
         pendingEstimates are estimate bookings the ledger has not confirmed; unbookedEstimates (with periodTo) are fixed-price projects with cost whose
         estimate for that period or a later one is not booked. reconciled is true when every compared difference is zero and all three are empty. The
         ledger must be the one the entity is pinned to (409 PROJ-GL-005); a ledger balance in another currency is 422 PROJ-GL-008.
-      x-passage-duty: ProjInquire
+      x-passage-duty: projects.inquire
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }

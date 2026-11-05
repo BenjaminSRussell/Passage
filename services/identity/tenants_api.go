@@ -36,7 +36,7 @@ type TenantsAPI struct {
 }
 
 // NewTenantsAPI serves tenant provisioning for the platform operator on the ordinary application pool. Only
-// callers of operatorTenantID holding Maintain tenants are served. Create scopes its transaction to the new
+// callers of operatorTenantID holding identity.tenant.maintain are served. Create scopes its transaction to the new
 // tenant id so the tenant row passes its own RLS check; list and get read through the identity_operator policy,
 // so identity_operator must hold operatorTenantID (seeded by the migrator).
 func NewTenantsAPI(pool *pgxpool.Pool, operatorTenantID string) *TenantsAPI {

@@ -51,6 +51,8 @@
   value: {{ .Values.serviceUrls.compliance | default (printf "http://compliance-compliance.%s.svc:8080" .Release.Namespace) | quote }}
 - name: LEGAL_ENTITY_COUNTRIES
   value: {{ .Values.legalEntityCountries | quote }}
+- name: OCR_PROVIDER
+  value: {{ .Values.ocrProvider | quote }}
 - name: POSTING_LEDGER_ID
   value: {{ .Values.postingProfile.ledgerId | quote }}
 - name: POSTING_ACCOUNT_INVENTORY

@@ -33,6 +33,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 | `GET /v1/engineering/calendars/{id}/days`, `GET /v1/engineering/resources/{id}`, `GET /v1/engineering/resources`, `GET /v1/engineering/resource-groups`, `GET /v1/engineering/capabilities` | `engineering.read` |
 | `POST /v1/engineering/route-versions/{id}:activate` | `engineering.route.write` |
 | `POST/GET /v1/engineering/organizations`, nomenclatures, categories, versions; `PUT /identifiers`; `POST/GET` release policies, sessions, readiness policies, document types, documents, eBOM imports | `engineering.bom.write` / `engineering.read` |
+| `POST /v1/engineering/bom-versions`, `POST /v1/engineering/route-versions` (drafts only) and `GET` of one `bom-versions/{id}` or `route-versions/{id}` | `engineering.import.write` / `engineering.import.read`: service-only duties of the migration loader (`service:migration-loader`), for legacy BOM and route loads and their reconciliation (#475) |
 | `POST /v1/engineering/release-lines/{id}:accept`, `:reject`; `POST /released-products/{id}/checks/{key}:sign` | `engineering.release.accept` |
 | `POST /v1/engineering/documents/{id}:sign` | `engineering.doc.sign` (fail-closed re-authentication seam bound to the document and record hash, meaning, timestamp, record id, audit record queued in the same transaction) |
 

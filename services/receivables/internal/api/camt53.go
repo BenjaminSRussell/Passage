@@ -20,7 +20,7 @@ import (
 // maxStatementBytes bounds one camt.053 upload, below httpx.Decode's body cap like a lockbox file.
 const maxStatementBytes = maxLockboxBytes
 
-// bankStatementRoutes mounts the camt.053 import (FR-30.5): ARImport imports, ARView reads.
+// bankStatementRoutes mounts the camt.053 import (FR-30.5): receivables.payment-file.import imports, receivables.view reads.
 func (a *API) bankStatementRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyImport)).Post("/bank-statements/imports", a.importBankStatement)
 	r.With(authz.RequireDuty(dutyView)).Get("/bank-statements/imports", a.listBankStatementImports)

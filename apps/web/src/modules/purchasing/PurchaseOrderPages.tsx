@@ -890,7 +890,7 @@ interface ActionChoice {
 /**
  * The custom methods each approval status allows (BR-17.2). Cancel is offered
  * until the order is finalized or cancelled; the service also refuses it once
- * anything is received or invoiced. Approve and reject need PurchaseOrderConfirm.
+ * anything is received or invoiced. Approve and reject need procurement.purchase-order.confirm.
  */
 export function purchaseOrderActions(status: ApprovalStatus): ActionChoice[] {
   const cancel: ActionChoice = { action: "cancel", label: "Cancel order", variant: "danger" };

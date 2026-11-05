@@ -36,7 +36,7 @@ type fixture struct {
 func setup(t *testing.T) fixture {
 	t.Helper()
 	pool := testkit.DB(t)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EamPlanner", "EamPlanAdmin", "EamCounterRegister")
+	ctx := testkit.Ctx(testkit.TenantID(1), "eam.work.plan", "eam.plan.admin", "eam.counter.register")
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

@@ -269,6 +269,7 @@ handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/production/        entrypoint: config, dbx.Connect, optional dbx.Migrate, httpx router, admin /metrics
+cmd/demoplant/         demo-plant seed (see "Demo plant")
 internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF and edit guards),
                        quantity.go (BR-21.2, BR-21.8), explode.go (FR-21.1), cost.go (FR-21.3, BR-21.6),
                        journal.go (proposals, tolerances, posting profiles, postings, settlement),
@@ -288,6 +289,8 @@ internal/store/        Postgres repositories (pgx), tenant-scoped transactions, 
                        subcontract.go (purchase requests at release, subcontract operations inquiry),
                        operation.go (finish and reopen)
 internal/api/          HTTP handlers, request validation, platform authz duties
+internal/demoplant/    the demo-plant data set and its seeding
+internal/ledgertest/   test helper: builds and runs the real ledger service for integration tests
 internal/events/       event types and payloads
 migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
                        variances), 0003_rework_asbuilt.sql (rework reference, rework variance account,
@@ -331,11 +334,45 @@ python3 -I internal/domain/testdata/gen_prod_orders_50.py                  # reg
 python3 -I internal/store/testdata/gen_costing_50.py                       # regenerate the AC2 database fixture
 ```
 
+The `RealLedger` tests (W21 AC4, #478) also build `services/ledger/cmd/ledger` from this tree (or use the binary in
+`PASSAGE_TEST_LEDGER_BIN`), run it on a throwaway schema of the same server with period control off and only
+production's service key trusted, and book and reconcile WIP through the real `ledgerclient` over HTTP with signed
+service tokens. They skip with the other database tests, and under `-short`.
+
 Database tests skip when `PASSAGE_TEST_DATABASE_URL` is unset; the RLS test also needs a
 non-superuser `passage_app` role (`PASSAGE_TEST_APP_DATABASE_URL`). The domain tests are pure and
 include `pgregory.net/rapid` property tests for the state machine, report-as-finished limits,
 phantom explosion, backflush rounding, the settlement identity, proportional consumption,
 drift-free RAF receipts and the variances clearing the posted WIP in every currency precision.
+
+## Demo plant
+
+`cmd/demoplant` seeds a small demo plant (W21 AC4, #478) for demos and manual testing: an All x All posting profile
+(WIP 1450, inventory 1400, finished goods 1410, labor and overhead absorption 5510 and 5520, variances 5610 to 5640)
+and five orders of 100 units, each 3 units of raw material per unit at 10.00 and 0.5 h per unit at 30.00 labor and
+10.00 overhead:
+
+| Order | Status | WIP left |
+|---|---|---|
+| bracket-estimated | Estimated | 0.00 |
+| bracket-released | Released | 0.00 |
+| housing-in-progress | Started, 305 picked at 10.20, 46 h reported | 4,951.00 |
+| housing-partial-raf | ReportedAsFinished, 60 of 100 | 1,951.00 |
+| gearbox-ended | Ended after 60 of 100 | 0.00 (1,890.00 quantity and 61.00 price variance) |
+
+```
+DATABASE_URL=postgres://... go run ./cmd/demoplant -migrate                # seed tenant ...0001, legal entity ...00e1
+DATABASE_URL=postgres://... LEDGER_URL=http://ledger:8080 PASSAGE_SERVICE_SIGNING_KEY=... \
+  go run ./cmd/demoplant -ledger-id <ledger UUID>                           # also book the WIP and print the reconciliation
+```
+
+Flags: `-tenant`, `-legal-entity`, `-currency` (USD), `-posting-date` (today), `-prefix` (`demo-plant`), `-migrate`,
+`-ledger-id`. It writes through the store as user `demo-plant-seed`, so run it with the owner or the app role of the
+production database, never against a live tenant. Every write carries an idempotency key built from `-prefix`: a rerun
+leaves existing orders as they are and books nothing twice, and an existing All x All profile is kept. A run stopped
+part way leaves the orders it reached; seed again with a new `-prefix` for a fresh set. Booking needs a ledger of the
+legal entity whose chart holds the accounts above, and the ledger must trust production's service key. The output is
+the JSON result: orders with their numbers and statuses, the GL run and the WIP reconciliation.
 
 ## Duties
 
@@ -592,6 +629,12 @@ Slice 25:
   such rows are visible to all-entity callers only), and ignores purchase and transfer orders. It runs as service principal
   `production-planning` (seeded) and refuses to start if that principal is missing from the service
   principal table.
+- Shop-floor labor (#481, AC-25.1). `production consume-shopfloor` (chart value
+  `shopfloorConsumer.enabled`) follows the shop floor's `registration.posted` and `.corrected` and
+  posts each closed job-stop as a job card at the worker cost rate (BR-25.9), re-booking it on a
+  correction. It runs as service principal `production-shopfloor` (duty
+  `production.jobcard.shopfloor`), reads the order's legal entity first and posts pinned to it;
+  refusals are dead-lettered to `passage.shopfloor.registration.dlq`, other failures retried with backoff.
 - `GET /v1/production/planned-intake` (status, site, keyset paging) and `GET …/{id}`;
   `POST …/{id}:convert` creates the production order under the planned order's `target_id` with the
   row's legal entity, product, site, quantity, delivery date and warehouse, originType `PlannedOrder`,

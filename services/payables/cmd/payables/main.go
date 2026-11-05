@@ -104,7 +104,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rates).WithPaymentRuns(items, poster, profiles).
-		WithVendorBanks(banks, keys).WithWithholding(withholding, items, profiles).WithVendorGroupDimension(groupDim)
+		WithVendorBanks(banks, keys).WithWithholding(withholding, items, profiles).WithVendorGroupDimension(groupDim).WithEmployeeVendors(items)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

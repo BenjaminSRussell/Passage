@@ -161,12 +161,7 @@ jobs:
       matrix:
         # excluded until clean: services/close engineering fx migration org party payables tax,
         # tools/connectors.
-        # Also excluded here: platform/go, batch, identity, product, receiving — 25 issues
-        # that accumulated while reusable CI was dark, including SA1019 on
-        # chi middleware.RealIP (IP spoofing) in platform/go/httpx/httpx.go:59.
-        # Tracked in #485 (lint debt) and #487 (RealIP spoofing); restore those modules when
-        # the findings are fixed; do not hide new drift.
-        module: [services/audit, services/metadata, services/numbering, services/platform-health, tools/importexport, tools/rlscheck]
+        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/numbering, services/platform-health, services/product, services/receiving, tools/importexport, tools/rlscheck]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -305,6 +300,8 @@ jobs:
           cache: false
       - run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
       - run: pip install pyyaml==6.0.2 && PATH="$(go env GOPATH)/bin:$PATH" make -C deploy test-gateway
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - run: make -C deploy test-argocd
       - name: Install Kyverno CLI
         env:
           KYVERNO_VERSION: 1.19.2

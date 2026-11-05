@@ -109,7 +109,7 @@ func mustAssign(t *testing.T, s *Postgres, ctx context.Context, positionID, work
 }
 
 // TestWorkerPIIMaskedByDefaultAndEveryReadAudited covers FR-42.1 and AC-42.7:
-// the national ID is masked without HcmPIIRead, the stored value is not
+// the national ID is masked without hr.pii.read, the stored value is not
 // plaintext, and every read (masked or revealed) writes an audit row.
 func TestWorkerPIIMaskedByDefaultAndEveryReadAudited(t *testing.T) {
 	s, ctx := newStore(t)

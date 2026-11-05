@@ -18,12 +18,12 @@ import (
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
 
-// RFQ duties (PRD 3.17.17): RFQMaintain creates, sends, records replies,
-// closes and cancels; RFQAward awards. Reading an RFQ and its comparison
+// RFQ duties (PRD 3.17.17): procurement.rfq.maintain creates, sends, records replies,
+// closes and cancels; procurement.rfq.award awards. Reading an RFQ and its comparison
 // needs either.
 const (
-	dutyRFQMaintain = "RFQMaintain"
-	dutyRFQAward    = "RFQAward"
+	dutyRFQMaintain = "procurement.rfq.maintain"
+	dutyRFQAward    = "procurement.rfq.award"
 )
 
 // maxRFQLines caps the lines of one RFQ, as for requisitions.
@@ -322,7 +322,7 @@ func (a *API) getRFQ(w http.ResponseWriter, r *http.Request) {
 }
 
 // rfqAction handles POST /rfqs/{id}:send|close|cancel|award. Each needs
-// Idempotency-Key and If-Match; award needs RFQAward, the others RFQMaintain.
+// Idempotency-Key and If-Match; award needs procurement.rfq.award, the others procurement.rfq.maintain.
 func (a *API) rfqAction(w http.ResponseWriter, r *http.Request) {
 	p, err := principal(r.Context())
 	if err != nil {
@@ -665,7 +665,7 @@ func (a *API) compareRFQ(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, cmp)
 }
 
-// scoreRFQVendor handles PUT /rfqs/{id}/scores/{vendorId} (duty RFQAward):
+// scoreRFQVendor handles PUT /rfqs/{id}/scores/{vendorId} (duty procurement.rfq.award):
 // the buyer's 1–10 scores of an invited vendor on the RFQ's criteria, which
 // the WEIGHTED_SCORE ranking uses (FR-17.19). If-Match is the RFQ version; a
 // sealed RFQ is scored only after its deadline (403 PRC-RFQ-004).

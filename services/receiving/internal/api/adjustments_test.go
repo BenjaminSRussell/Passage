@@ -20,7 +20,7 @@ const (
 )
 
 func (rg *rig) apPosterFor(entity string) headers {
-	return duty("VendorInvoicePost", rg.key(), entityHeader, entity)
+	return duty("receiving.vendor-invoice.post", rg.key(), entityHeader, entity)
 }
 
 type adjustmentJSON struct {
@@ -144,7 +144,7 @@ func TestAdjustment_StandardCostLinePostsToPriceVariance(t *testing.T) {
 func TestAdjustment_IdempotentByKeyAndByDocumentNumber(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
 	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.6", "")
-	hdr := duty("VendorInvoicePost", "same-key", entityHeader, legalEntityID)
+	hdr := duty("receiving.vendor-invoice.post", "same-key", entityHeader, legalEntityID)
 	body := adjustmentBody(inv.ID, "DEBIT", "DN-1", adjLine(1, "3.50"))
 	first := rg.call(http.MethodPost, adjustmentsPath, body, hdr)
 	entries := len(rg.ledger.Entries)
@@ -154,7 +154,7 @@ func TestAdjustment_IdempotentByKeyAndByDocumentNumber(t *testing.T) {
 	if first.Code != http.StatusCreated || replay.Code != http.StatusCreated || replay.Header().Get("Idempotent-Replayed") != "true" || replay.Body.String() != first.Body.String() || len(rg.ledger.Entries) != entries {
 		t.Fatalf("first %d replay %d %s entries %d", first.Code, replay.Code, replay.Header(), len(rg.ledger.Entries))
 	}
-	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("VendorInvoicePost", "other-key", entityHeader, legalEntityID)), http.StatusConflict, "AP-DUP-001")
+	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("receiving.vendor-invoice.post", "other-key", entityHeader, legalEntityID)), http.StatusConflict, "AP-DUP-001")
 	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, strings.Replace(body, `"DN-1"`, `" dn-1 "`, 1), rg.apPosterFor(legalEntityID)), http.StatusConflict, "AP-DUP-001")
 	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, strings.Replace(body, `3.50`, `4.00`, 1), hdr), http.StatusUnprocessableEntity, "COM-0409")
 	if len(rg.ledger.Entries) != entries {
@@ -221,11 +221,11 @@ func TestAdjustment_AuthAndScope(t *testing.T) {
 	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.6", "")
 	body := adjustmentBody(inv.ID, "DEBIT", "DN-1", adjLine(1, "1.00"))
 
-	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("ReceivingPost", "k", entityHeader, legalEntityID)), http.StatusForbidden, "AUTH-0003")
-	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("VendorInvoicePost", "k", entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("receiving.receipt.post", "k", entityHeader, legalEntityID)), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("receiving.vendor-invoice.post", "k", entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
 	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, headers{"Idempotency-Key": "k"}), http.StatusUnauthorized, "AUTH-0001")
-	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, headers{"X-Passage-Tenant": tenantTwo(), "X-Passage-Duties": "VendorInvoicePost", "Idempotency-Key": "k", entityHeader: legalEntityID}), http.StatusNotFound, "RCV-NF-005")
-	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("VendorInvoicePost", "", entityHeader, legalEntityID)), http.StatusBadRequest, "COM-0001")
+	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, headers{"X-Passage-Tenant": tenantTwo(), "X-Passage-Duties": "receiving.vendor-invoice.post", "Idempotency-Key": "k", entityHeader: legalEntityID}), http.StatusNotFound, "RCV-NF-005")
+	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, body, duty("receiving.vendor-invoice.post", "", entityHeader, legalEntityID)), http.StatusBadRequest, "COM-0001")
 }
 
 func tenantTwo() string { return "00000000-0000-0000-0000-000000000002" }

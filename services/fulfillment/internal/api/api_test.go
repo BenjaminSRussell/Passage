@@ -137,7 +137,7 @@ func do(t *testing.T, h http.Handler, method, path, body string, headers map[str
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Passage-Tenant", tenant)
-	req.Header.Set("X-Passage-Duties", "WarehouseRelease,WarehouseView,WarehousePick,WarehousePack,PackingSlipPost")
+	req.Header.Set("X-Passage-Duties", "fulfillment.warehouse.release,fulfillment.warehouse.view,fulfillment.warehouse.pick,fulfillment.warehouse.pack,fulfillment.packing-slip.post")
 	req.Header.Set("X-Passage-User", "00000000-0000-0000-0000-000000000009")
 	for k, v := range headers {
 		req.Header.Set(k, v)

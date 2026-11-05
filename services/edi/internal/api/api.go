@@ -85,27 +85,27 @@ func New(s *store.Store) *API {
 func (a *API) Routes() http.Handler {
 	r := httpx.NewRouter()
 	r.Route("/edi/v1", func(r chi.Router) {
-		r.With(authz.RequireDuty("EDI_ADMIN")).Post("/partners", a.createPartner)
-		r.With(authz.RequireDuty("EDI_ADMIN")).Get("/partners", a.listPartners)
-		r.With(authz.RequireDuty("EDI_ADMIN")).Get("/partners/{id}", a.getPartner)
-		r.With(authz.RequireDuty("EDI_ADMIN")).Put("/partners/{id}/trade-profile", a.putTradeProfile)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/partners/{id}/outbound:from-source", a.outboundFromSource)
+		r.With(authz.RequireDuty("edi.admin")).Post("/partners", a.createPartner)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners", a.listPartners)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}", a.getPartner)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/trade-profile", a.putTradeProfile)
+		r.With(authz.RequireDuty("edi.operate")).Post("/partners/{id}/outbound:from-source", a.outboundFromSource)
 		if a.AllowBodyOutbound {
-			r.With(authz.RequireDuty("EDI_OPERATE")).Post("/partners/{id}/outbound", a.createOutbound)
+			r.With(authz.RequireDuty("edi.operate")).Post("/partners/{id}/outbound", a.createOutbound)
 		}
-		r.With(authz.RequireDuty("EDI_ADMIN")).Post("/maps:test", a.mapsTest)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/inbound/x12", a.receiveX12)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges", a.listInterchanges)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges/{id}", a.getInterchange)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges/{id}/payload", a.getPayload)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/interchanges/{id}:reprocess", a.reprocessInterchange)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/interchanges:reprocess", a.bulkReprocess)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages", a.listMessages)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages/{id}", a.getMessage)
-		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/partners/sla", a.partnerSLA)
-		r.With(authz.RequireDuty("PUR_REQUISITION_CREATE")).Post("/punchout/returns:parse", a.punchoutParse)
-		r.With(authz.RequireDuty("SELF_BILLING_RECONCILE")).Post("/self-billing:match", a.selfBillingMatch)
-		r.With(authz.RequireDuty("EINV_OPERATE")).Post("/peppol/invoices:build", a.ublBuild)
+		r.With(authz.RequireDuty("edi.admin")).Post("/maps:test", a.mapsTest)
+		r.With(authz.RequireDuty("edi.operate")).Post("/inbound/x12", a.receiveX12)
+		r.With(authz.RequireDuty("edi.operate")).Get("/interchanges", a.listInterchanges)
+		r.With(authz.RequireDuty("edi.operate")).Get("/interchanges/{id}", a.getInterchange)
+		r.With(authz.RequireDuty("edi.operate")).Get("/interchanges/{id}/payload", a.getPayload)
+		r.With(authz.RequireDuty("edi.operate")).Post("/interchanges/{id}:reprocess", a.reprocessInterchange)
+		r.With(authz.RequireDuty("edi.operate")).Post("/interchanges:reprocess", a.bulkReprocess)
+		r.With(authz.RequireDuty("edi.operate")).Get("/messages", a.listMessages)
+		r.With(authz.RequireDuty("edi.operate")).Get("/messages/{id}", a.getMessage)
+		r.With(authz.RequireDuty("edi.operate")).Get("/partners/sla", a.partnerSLA)
+		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/returns:parse", a.punchoutParse)
+		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Post("/self-billing:match", a.selfBillingMatch)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/peppol/invoices:build", a.ublBuild)
 	})
 	return r
 }
@@ -544,7 +544,7 @@ type outboundRequest struct {
 	Document       json.RawMessage `json:"document"`
 }
 
-// createOutbound builds an 855, 856 or 810 from a caller-supplied canonical
+// createOutbound builds an 855, 856, 810, 820 or 214 from a caller-supplied canonical
 // document. It is mounted only when AllowBodyOutbound is set (tests and
 // development); production documents come from outboundFromSource.
 func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {

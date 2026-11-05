@@ -31,38 +31,38 @@ func TestSlice5Routes_RejectBeforeStore(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"round needs plan admin", http.MethodPost, "/v1/eam/rounds", round("WEEKLY", site, stop), headers("EamPlanner"), 403, "AUTH-0003"},
-		{"round needs idempotency key", http.MethodPost, "/v1/eam/rounds", round("WEEKLY", site, stop), noKey("EamPlanAdmin"), 400, "idempotency_key_required"},
-		{"round rejects a lowercase code", http.MethodPost, "/v1/eam/rounds", round("weekly", site, stop), headers("EamPlanAdmin"), 400, "EAM-VAL-001"},
-		{"round needs a site", http.MethodPost, "/v1/eam/rounds", round("WEEKLY", "plant", stop), headers("EamPlanAdmin"), 400, "EAM-VAL-001"},
+		{"round needs plan admin", http.MethodPost, "/v1/eam/rounds", round("WEEKLY", site, stop), headers("eam.work.plan"), 403, "AUTH-0003"},
+		{"round needs idempotency key", http.MethodPost, "/v1/eam/rounds", round("WEEKLY", site, stop), noKey("eam.plan.admin"), 400, "idempotency_key_required"},
+		{"round rejects a lowercase code", http.MethodPost, "/v1/eam/rounds", round("weekly", site, stop), headers("eam.plan.admin"), 400, "EAM-VAL-001"},
+		{"round needs a site", http.MethodPost, "/v1/eam/rounds", round("WEEKLY", "plant", stop), headers("eam.plan.admin"), 400, "EAM-VAL-001"},
 		{"round stop needs an asset UUID", http.MethodPost, "/v1/eam/rounds",
-			round("WEEKLY", site, `{"sequence":1,"assetId":"P-1","jobType":"INSPECT"}`), headers("EamPlanAdmin"), 400, "EAM-VAL-001"},
+			round("WEEKLY", site, `{"sequence":1,"assetId":"P-1","jobType":"INSPECT"}`), headers("eam.plan.admin"), 400, "EAM-VAL-001"},
 		{"round rejects unknown fields", http.MethodPost, "/v1/eam/rounds",
-			`{"code":"WEEKLY","name":"W","siteId":"` + site + `","stops":[],"color":"red"}`, headers("EamPlanAdmin"), 400, "EAM-VAL-001"},
-		{"round list needs inquire", http.MethodGet, "/v1/eam/rounds", ``, headers("EamPlanAdmin"), 403, "AUTH-0003"},
-		{"round list rejects a bad cursor", http.MethodGet, "/v1/eam/rounds?cursor=x", ``, headers("EamInquire"), 400, "EAM-VAL-001"},
-		{"round read needs a UUID", http.MethodGet, "/v1/eam/rounds/WEEKLY", ``, headers("EamInquire"), 400, "EAM-VAL-001"},
-		{"round order needs planner", http.MethodPost, "/v1/eam/rounds/" + id + "/work-orders", `{}`, headers("EamPlanAdmin"), 403, "AUTH-0003"},
-		{"round order needs idempotency key", http.MethodPost, "/v1/eam/rounds/" + id + "/work-orders", `{}`, noKey("EamPlanner"), 400, "idempotency_key_required"},
-		{"round order rejects a bad currency", http.MethodPost, "/v1/eam/rounds/" + id + "/work-orders", `{"currency":"usd"}`, headers("EamPlanner"), 400, "EAM-VAL-001"},
+			`{"code":"WEEKLY","name":"W","siteId":"` + site + `","stops":[],"color":"red"}`, headers("eam.plan.admin"), 400, "EAM-VAL-001"},
+		{"round list needs inquire", http.MethodGet, "/v1/eam/rounds", ``, headers("eam.plan.admin"), 403, "AUTH-0003"},
+		{"round list rejects a bad cursor", http.MethodGet, "/v1/eam/rounds?cursor=x", ``, headers("eam.inquire"), 400, "EAM-VAL-001"},
+		{"round read needs a UUID", http.MethodGet, "/v1/eam/rounds/WEEKLY", ``, headers("eam.inquire"), 400, "EAM-VAL-001"},
+		{"round order needs planner", http.MethodPost, "/v1/eam/rounds/" + id + "/work-orders", `{}`, headers("eam.plan.admin"), 403, "AUTH-0003"},
+		{"round order needs idempotency key", http.MethodPost, "/v1/eam/rounds/" + id + "/work-orders", `{}`, noKey("eam.work.plan"), 400, "idempotency_key_required"},
+		{"round order rejects a bad currency", http.MethodPost, "/v1/eam/rounds/" + id + "/work-orders", `{"currency":"usd"}`, headers("eam.work.plan"), 400, "EAM-VAL-001"},
 		{"work order API refuses ROUND", http.MethodPost, "/v1/eam/work-orders", `{"assetId":"` + id + `","workOrderType":"ROUND","currency":"USD"}`,
-			headers("EamPlanner"), 400, "EAM-VAL-001"},
-		{"stop outcome needs technician", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/1", `{"outcome":"DONE"}`, headers("EamPlanner"), 403, "AUTH-0003"},
-		{"stop outcome needs idempotency key", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/1", `{"outcome":"DONE"}`, noKey("EamTechnician"), 400, "idempotency_key_required"},
-		{"stop sequence is a number", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/first", `{"outcome":"DONE"}`, headers("EamTechnician"), 400, "EAM-VAL-001"},
-		{"stop sequence is at most 50", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/51", `{"outcome":"DONE"}`, headers("EamTechnician"), 400, "EAM-VAL-001"},
-		{"stop outcome is DONE or SKIPPED", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/1", `{"outcome":"PARTIAL"}`, headers("EamTechnician"), 400, "EAM-VAL-001"},
-		{"overdue window is 1-72 h", http.MethodGet, "/v1/eam/work-orders/emergency-overdue?hours=73", ``, headers("EamInquire"), 400, "EAM-VAL-001"},
-		{"overdue needs inquire", http.MethodGet, "/v1/eam/work-orders/emergency-overdue", ``, headers("EamPlanner"), 403, "AUTH-0003"},
-		{"plan reviews need inquire", http.MethodGet, "/v1/eam/assets/plan-reviews", ``, headers("EamAssetMaintain"), 403, "AUTH-0003"},
-		{"cost needs a window", http.MethodGet, "/v1/eam/kpis/cost?from=2026-01-01T00:00:00Z", ``, headers("EamInquire"), 400, "EAM-VAL-001"},
-		{"cost window runs forward", http.MethodGet, "/v1/eam/kpis/cost?from=2026-02-01T00:00:00Z&to=2026-01-01T00:00:00Z", ``, headers("EamInquire"), 400, "EAM-VAL-001"},
-		{"cost rejects a date without time", http.MethodGet, "/v1/eam/kpis/cost?from=2026-01-01&to=2026-02-01", ``, headers("EamInquire"), 400, "EAM-VAL-001"},
+			headers("eam.work.plan"), 400, "EAM-VAL-001"},
+		{"stop outcome needs technician", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/1", `{"outcome":"DONE"}`, headers("eam.work.plan"), 403, "AUTH-0003"},
+		{"stop outcome needs idempotency key", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/1", `{"outcome":"DONE"}`, noKey("eam.work-order.execute"), 400, "idempotency_key_required"},
+		{"stop sequence is a number", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/first", `{"outcome":"DONE"}`, headers("eam.work-order.execute"), 400, "EAM-VAL-001"},
+		{"stop sequence is at most 50", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/51", `{"outcome":"DONE"}`, headers("eam.work-order.execute"), 400, "EAM-VAL-001"},
+		{"stop outcome is DONE or SKIPPED", http.MethodPost, "/v1/eam/work-orders/" + id + "/stops/1", `{"outcome":"PARTIAL"}`, headers("eam.work-order.execute"), 400, "EAM-VAL-001"},
+		{"overdue window is 1-72 h", http.MethodGet, "/v1/eam/work-orders/emergency-overdue?hours=73", ``, headers("eam.inquire"), 400, "EAM-VAL-001"},
+		{"overdue needs inquire", http.MethodGet, "/v1/eam/work-orders/emergency-overdue", ``, headers("eam.work.plan"), 403, "AUTH-0003"},
+		{"plan reviews need inquire", http.MethodGet, "/v1/eam/assets/plan-reviews", ``, headers("eam.asset.maintain"), 403, "AUTH-0003"},
+		{"cost needs a window", http.MethodGet, "/v1/eam/kpis/cost?from=2026-01-01T00:00:00Z", ``, headers("eam.inquire"), 400, "EAM-VAL-001"},
+		{"cost window runs forward", http.MethodGet, "/v1/eam/kpis/cost?from=2026-02-01T00:00:00Z&to=2026-01-01T00:00:00Z", ``, headers("eam.inquire"), 400, "EAM-VAL-001"},
+		{"cost rejects a date without time", http.MethodGet, "/v1/eam/kpis/cost?from=2026-01-01&to=2026-02-01", ``, headers("eam.inquire"), 400, "EAM-VAL-001"},
 		{"cost rejects a bad asset type", http.MethodGet, "/v1/eam/kpis/cost?from=2026-01-01T00:00:00Z&to=2026-02-01T00:00:00Z&assetType=pump", ``,
-			headers("EamInquire"), 400, "EAM-VAL-001"},
-		{"backlog rejects a bad site", http.MethodGet, "/v1/eam/kpis/backlog?site=PLANT", ``, headers("EamInquire"), 400, "EAM-VAL-001"},
+			headers("eam.inquire"), 400, "EAM-VAL-001"},
+		{"backlog rejects a bad site", http.MethodGet, "/v1/eam/kpis/backlog?site=PLANT", ``, headers("eam.inquire"), 400, "EAM-VAL-001"},
 		{"plan line rejects a bad round id", http.MethodPost, "/v1/eam/plans",
-			`{"code":"RD","name":"R","currency":"USD","lines":[{"kind":"ROUND","roundId":"WEEKLY"}]}`, headers("EamPlanAdmin"), 400, "EAM-VAL-001"},
+			`{"code":"RD","name":"R","currency":"USD","lines":[{"kind":"ROUND","roundId":"WEEKLY"}]}`, headers("eam.plan.admin"), 400, "EAM-VAL-001"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,7 +80,7 @@ func TestHTTP_RoundFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New(store.New(pool), nil).Routes()
-	all := "EamAssetMaintain,EamPlanAdmin,EamPlanner,EamTechnician,EamInquire"
+	all := "eam.asset.maintain,eam.plan.admin,eam.work.plan,eam.work-order.execute,eam.inquire"
 	post := func(path, body, key string, extra map[string]string) *httptest.ResponseRecorder {
 		hdr := headers(all)
 		hdr["Idempotency-Key"] = key

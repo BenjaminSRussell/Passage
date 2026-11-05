@@ -23,9 +23,9 @@ import (
 
 // Duties for the slice-2 screens (§9.46.17).
 const (
-	DutyAuthor       = "AnalyticsAuthor"
-	DutyCatalogSteer = "CatalogSteward"
-	DutyArchiveAdmin = "ArchiveAdmin"
+	DutyAuthor       = "analytics.author"
+	DutyCatalogSteer = "analytics.catalog.steward"
+	DutyArchiveAdmin = "analytics.archive.admin"
 )
 
 const (

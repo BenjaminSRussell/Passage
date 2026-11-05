@@ -28,11 +28,11 @@ import (
 const (
 	readyTimeout       = 500 * time.Millisecond
 	idempotencyKey     = "Idempotency-Key"
-	dutySetup          = "QM_SETUP_MAINTAIN"
-	dutyOrder          = "QM_ORDER_MAINTAIN"
-	dutyResults        = "QM_RESULTS_RECORD"
-	dutyDecision       = "QM_USAGE_DECISION"
-	dutyView           = "QM_VIEW"
+	dutySetup          = "quality.setup.maintain"
+	dutyOrder          = "quality.order.maintain"
+	dutyResults        = "quality.result.record"
+	dutyDecision       = "quality.usage.decide"
+	dutyView           = "quality.view"
 	validationDetail   = "request failed validation"
 	maxResultsPerBatch = 1000
 	maxRefLength       = 200

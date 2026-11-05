@@ -50,15 +50,15 @@ describe("transport module", () => {
       "/transport/load-plans",
     ]);
     expect(transport.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
-    expect(transport.nav.every((n) => n.to.startsWith("/transport") && n.duty?.startsWith("TMS_"))).toBe(true);
-    expect(transport.nav.find((n) => n.to === "/transport/carrier-invoices")?.duty).toBe("TMS_RECONCILE");
-    expect(transport.nav.find((n) => n.to === "/transport/tenders")?.duty).toBe("TMS_TENDER");
-    expect(transport.nav.find((n) => n.to === "/transport/voyages")?.duty).toBe("TMS_LANDED_COST");
-    expect(transport.nav.find((n) => n.to === "/transport/loads")?.duty).toBe("TMS_VIEW");
-    expect(transport.nav.find((n) => n.to === "/transport/gate")?.duty).toBe("TMS_GATE");
-    expect(transport.nav.find((n) => n.to === "/transport/goods-in-transit")?.duty).toBe("TMS_LANDED_COST");
-    expect(transport.nav.find((n) => n.to === "/transport/routes")?.duty).toBe("TMS_PLAN");
-    expect(transport.nav.find((n) => n.to === "/transport/screening-holds")?.duty).toBe("TMS_VIEW");
+    expect(transport.nav.every((n) => n.to.startsWith("/transport") && n.duty?.startsWith("transport."))).toBe(true);
+    expect(transport.nav.find((n) => n.to === "/transport/carrier-invoices")?.duty).toBe("transport.freight-bill.reconcile");
+    expect(transport.nav.find((n) => n.to === "/transport/tenders")?.duty).toBe("transport.load.tender");
+    expect(transport.nav.find((n) => n.to === "/transport/voyages")?.duty).toBe("transport.landed-cost.maintain");
+    expect(transport.nav.find((n) => n.to === "/transport/loads")?.duty).toBe("transport.view");
+    expect(transport.nav.find((n) => n.to === "/transport/gate")?.duty).toBe("transport.gate.operate");
+    expect(transport.nav.find((n) => n.to === "/transport/goods-in-transit")?.duty).toBe("transport.landed-cost.maintain");
+    expect(transport.nav.find((n) => n.to === "/transport/routes")?.duty).toBe("transport.load.plan");
+    expect(transport.nav.find((n) => n.to === "/transport/screening-holds")?.duty).toBe("transport.view");
   });
 
   it("is auto-discovered by the registry", () => {

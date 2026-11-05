@@ -66,7 +66,7 @@ type Plan struct {
 	// history is read with the readiness view.
 	LatestDecision *Decision
 	// PendingRollback is the first approval of a rollback in the current go/no-go decision round,
-	// waiting for a second, different CutoverManager (CUT-1603); nil when none.
+	// waiting for a second, different migration.cutover.manage (CUT-1603); nil when none.
 	PendingRollback *RollbackApproval
 	// RehearsalPlanID is the earlier plan whose measured durations this plan was generated from
 	// (FR-49.6 "durations from the last rehearsal"); empty when none. RehearsalCarried counts the
@@ -113,7 +113,7 @@ func (p *Plan) PrepareRollback(by string, pending *RollbackApproval) (approvers 
 		return []string{by}, false, nil
 	}
 	if pending.Approver == by {
-		return nil, false, fmt.Errorf("%w: CUT-1603 you have already approved this rollback; it needs a second approval by a different CutoverManager", ErrTransition)
+		return nil, false, fmt.Errorf("%w: CUT-1603 you have already approved this rollback; it needs a second approval by a different migration.cutover.manage", ErrTransition)
 	}
 	return []string{pending.Approver, by}, true, nil
 }

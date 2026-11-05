@@ -65,16 +65,16 @@ func connectionDeps(getenv func(string) string) (*fieldcrypt.Keys, *probe.Prober
 }
 
 // targetConfig reads the owning services' base URLs (MIG_TARGET_PARTY_URL, MIG_TARGET_PRODUCT_URL,
-// MIG_TARGET_RECEIVABLES_URL) and the service signing key the loader's calls are signed with. The key must belong to
+// MIG_TARGET_RECEIVABLES_URL, MIG_TARGET_ENGINEERING_URL) and the service signing key the loader's calls are signed with. The key must belong to
 // the service named "migration" (PASSAGE_SERVICE_NAME), the caller the service grants are written for. An address
 // without a key stops the service: loading unsigned would be refused by every target.
 func targetConfig(getenv func(string) string) (target.Config, error) {
-	cfg := target.Config{PartyURL: getenv("MIG_TARGET_PARTY_URL"), ProductURL: getenv("MIG_TARGET_PRODUCT_URL"), ReceivablesURL: getenv("MIG_TARGET_RECEIVABLES_URL")}
+	cfg := target.Config{PartyURL: getenv("MIG_TARGET_PARTY_URL"), ProductURL: getenv("MIG_TARGET_PRODUCT_URL"), ReceivablesURL: getenv("MIG_TARGET_RECEIVABLES_URL"), EngineeringURL: getenv("MIG_TARGET_ENGINEERING_URL")}
 	signer, err := tenant.ServiceSignerFromEnv(getenv)
 	if err != nil {
 		return target.Config{}, err
 	}
-	for name, raw := range map[string]string{"MIG_TARGET_PARTY_URL": cfg.PartyURL, "MIG_TARGET_PRODUCT_URL": cfg.ProductURL, "MIG_TARGET_RECEIVABLES_URL": cfg.ReceivablesURL} {
+	for name, raw := range map[string]string{"MIG_TARGET_PARTY_URL": cfg.PartyURL, "MIG_TARGET_PRODUCT_URL": cfg.ProductURL, "MIG_TARGET_RECEIVABLES_URL": cfg.ReceivablesURL, "MIG_TARGET_ENGINEERING_URL": cfg.EngineeringURL} {
 		if raw == "" {
 			continue
 		}
@@ -82,7 +82,7 @@ func targetConfig(getenv func(string) string) (target.Config, error) {
 			return target.Config{}, fmt.Errorf("%s must be an http or https base address such as http://party:8080", name)
 		}
 	}
-	anyURL := cfg.PartyURL != "" || cfg.ProductURL != "" || cfg.ReceivablesURL != ""
+	anyURL := cfg.PartyURL != "" || cfg.ProductURL != "" || cfg.ReceivablesURL != "" || cfg.EngineeringURL != ""
 	switch {
 	case signer == nil && anyURL:
 		return target.Config{}, errors.New("MIG_TARGET_*_URL is set but no service signing key is (PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
@@ -128,7 +128,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 		// With the owning services' addresses and a signing key, runs extract from the entity binding and load
 		// through their APIs. Without them POST /migration-runs keeps answering 501 MIG-BACKEND-NOT-CONFIGURED.
 		a = a.WithTargets(func(_ context.Context, run api.TargetRun) (domain.TargetLoader, domain.TargetReader, error) {
-			return target.New(targets, target.Run{SourceSystem: run.SourceSystem, LegalEntityID: run.LegalEntityID, Xref: st.Xref()}), nil, nil
+			// The loader reads back what it loaded through the owning services' detail routes (the *.import.read
+			// duties), so a full run is reconciled against the target.
+			l := target.New(targets, target.Run{SourceSystem: run.SourceSystem, LegalEntityID: run.LegalEntityID, Xref: st.Xref()})
+			return l, l.Reader(), nil
 		})
 	}
 	router := httpx.NewRouter()

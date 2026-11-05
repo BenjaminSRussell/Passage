@@ -12,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/api"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
@@ -114,6 +115,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	s := store.New(pool).WithRules(cfg.rules)
 	a := api.New(s, cfg.post)
+	// Optional: without LEDGER_URL the GL sweep answers 503 INV-GL-005; with it, a signing key is required.
+	ledger, err := ledgerclient.FromEnv(getenv, "inventory")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		a.WithGL(s, ledger)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

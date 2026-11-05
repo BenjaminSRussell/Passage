@@ -398,12 +398,12 @@ paths:
         an authenticated user (401 AUTH-0001), and the user who submitted the report may not
         decide it (403 EXP-SOD-001); a report that does not record its creator and submitter
         (created before the approval migration) is refused with 403 EXP-REP-005. An approval
-        with a reimbursable amount writes dev.passage.expense.report.approved.v1 to the outbox,
-        carrying the stored reimbursable amount, in the same transaction; payables creates the
-        employee's AP open item. The open item is paid by a payment run only once its payee
-        resolves in the vendor master, which no employee does yet (see NOT-IMPLEMENTED), so the
-        report stays APPROVED until then. A report with nothing to
-        reimburse becomes PAID at once.
+        with a reimbursable amount records the approval date and waits for
+        POST /v1/expense/gl-postings, which posts its liability to the general ledger and only
+        then writes dev.passage.expense.report.approved.v1 for payables, so AP never pays a
+        reimbursement whose AP control credit is not booked. The open item is paid by a payment
+        run once the worker is in the payables employee-vendor register; the report stays
+        APPROVED until then. A report with nothing to reimburse becomes PAID at once.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/IfMatch'
@@ -419,6 +419,67 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExpenseReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/gl-postings:
+    post:
+      operationId: postReimbursementLiabilities
+      x-passage-duty: expense.gl.post
+      description: >-
+        Posts the reimbursement liability of every approved report of the legal entity
+        (legalEntityId, defaulting to the caller's scope; outside it is a 403 AUTH-0004) that is
+        not in the general ledger yet, oldest approval first, up to 200 per call (more is true
+        when others are due): Dr the expense account of each category of the employee-paid
+        lines, Cr the AP control account for the reimbursable amount, dated the approval day,
+        source expense_report with the report id as document id and Idempotency-Key
+        expense-report-{reportId}, so a retry returns the entry posted first. Ledger and accounts
+        come from the server-side profile in EXPENSE_GL_PROFILES (none for the legal entity is a
+        422 EXP-GL-003; no ledger is a 503 EXP-GL-001). The call is signed with the expense
+        service token (duty ledger.entry.post). Each posted report records the journal entry
+        (glEntryId) and, when APPROVED, writes dev.passage.expense.report.approved.v1 in the same
+        transaction. A report whose category has no expense account (EXP-GL-004), whose lines do
+        not add up to the reimbursable amount (EXP-GL-006) or that the ledger refuses (its code,
+        or EXP-GL-005) is listed in failed and stays due; a ledger that does not answer ends the
+        call with a 502 EXP-GL-002 whose errors.booked names the reports booked so far. Reports
+        PAID before this posting existed are booked without a new event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The reports booked and those left due.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, failed, more]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [reportId, currency, amount, postingDate, journalEntryId]
+                      properties:
+                        reportId: { type: string, format: uuid }
+                        currency: { type: string }
+                        amount: { type: string }
+                        postingDate: { type: string, format: date }
+                        journalEntryId: { type: string }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      required: [reportId, code, detail]
+                      properties:
+                        reportId: { type: string, format: uuid }
+                        code: { type: string }
+                        detail: { type: string }
+                  more: { type: boolean }
         default: { $ref: '#/components/responses/Problem' }
   /v1/expense/cash-advances:
     get:
@@ -1149,6 +1210,7 @@ components:
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         submittedAt: { type: [string, 'null'], format: date-time }
+        glEntryId: { type: string, description: Journal entry of the reimbursement liability; absent until POST /v1/expense/gl-postings booked it. }
         lines: { type: array, items: { $ref: '#/components/schemas/ReportLine' }, description: Empty in list pages. }
     ReportPage:
       type: object

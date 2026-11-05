@@ -422,13 +422,13 @@ export function CutoverPlanDetailPage() {
             <form className={styles.form} onSubmit={askRollback} noValidate>
               <p className={`${styles.note} ${styles.wide}`}>
                 Stops Passage access, restores legacy write access and exports the postings made since T-0 as journal and document files for
-                re-keying in the legacy system. Two different CutoverManagers must approve (CUT-1603): your approval is recorded under your own
+                re-keying in the legacy system. Two different migration.cutover.manage holders must approve (CUT-1603): your approval is recorded under your own
                 sign-in, and the rollback runs when a second person approves.
               </p>
               {plan.pendingRollback ? (
                 <div className={styles.wide}>
                   <Alert tone="warning" title="Waiting for a second approver">
-                    {plan.pendingRollback.approver} approved this rollback on {formatDateTime(plan.pendingRollback.approvedAt)}. A different CutoverManager
+                    {plan.pendingRollback.approver} approved this rollback on {formatDateTime(plan.pendingRollback.approvedAt)}. A different migration.cutover.manage
                     approves it here to run it, with the postings since T-0 entered below. A go/no-go decision recorded before then voids this approval.
                   </Alert>
                 </div>
@@ -477,7 +477,7 @@ export function CutoverPlanDetailPage() {
           description={
             plan?.pendingRollback
               ? `Passage access stops and the legacy system takes postings again. ${postingSummary(postings.length)} This can't be undone from this screen.`
-              : `Your approval is recorded; the rollback runs when a different CutoverManager approves it. ${postingSummary(postings.length)}`
+              : `Your approval is recorded; the rollback runs when a different migration.cutover.manage holder approves it. ${postingSummary(postings.length)}`
           }
           confirmLabel={plan?.pendingRollback ? "Roll back" : "Approve"}
           cancelLabel="Keep cutover"

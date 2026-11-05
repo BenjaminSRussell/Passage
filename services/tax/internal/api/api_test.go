@@ -20,7 +20,7 @@ import (
 
 const (
 	calculatePath = "/v1/tax/calculate"
-	duty          = "Calculate tax"
+	duty          = "tax.tax.calculate"
 	workedBody    = `{"currency":"EUR","direction":"output","document_date":"2026-03-15","party":{"tax_group":"G"},` +
 		`"lines":[{"line_ref":"L1","amount":"119.00","item_tax_group":"I","price_includes_tax":true}],` +
 		`"config":{"default_rounding":"per_document","groups":{"G":["VAT"]},"item_groups":{"I":["VAT"]},` +

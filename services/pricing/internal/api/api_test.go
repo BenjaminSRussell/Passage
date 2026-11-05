@@ -21,7 +21,7 @@ import (
 
 const (
 	legalEntity = "00000000-0000-0000-0001-000000000001"
-	allDuties   = "pricing.view,pricing.maintain,pricing.journal.post,pricing.rebate.maintain,pricing.rebate.view,pricing.commission.maintain,pricing.commission.view,pricing.fund.maintain,pricing.rebate.claim.approve,pricing.contract.accrue"
+	allDuties   = "pricing.view,pricing.maintain,pricing.journal.post,pricing.rebate.maintain,pricing.rebate.view,pricing.commission.maintain,pricing.commission.view,pricing.fund.maintain,pricing.rebate-claim.approve,pricing.contract.accrue"
 )
 
 // fakeStore mirrors the Postgres store's rules (overlap via domain.Conflict, state, version).

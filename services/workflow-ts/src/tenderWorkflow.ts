@@ -112,12 +112,30 @@ export async function tenderWorkflow(input: TenderInput): Promise<TenderState> {
     return Object.assign(state, { status: "stalled" as const });
   };
 
-  let tender = follow(
-    await activities.startTender({ ...ref, loadId: input.loadId, carriers: input.carriers, currency: input.currency, timeoutMin: input.timeoutMin, idempotencyKey: `tender:${workflowInfo().firstExecutionRunId}` }),
-  );
+  // True when transport has been unreachable for MAX_OUTAGE_MS and the run should stall; otherwise waits and returns false.
+  let outageSince: number | undefined;
+  const rideOutOutage = async (error: unknown): Promise<boolean> => {
+    if (!outage(error)) throw error;
+    outageSince ??= Date.now();
+    if (Date.now() - outageSince >= MAX_OUTAGE_MS) return true;
+    await sleep(input.outageRetryMs ?? OUTAGE_RETRY_MS);
+    return false;
+  };
+
+  // The start is idempotent on the first execution run id, so retrying it after an outage returns the same tender.
+  let tender: TenderView | undefined;
+  while (!tender) {
+    try {
+      tender = follow(
+        await activities.startTender({ ...ref, loadId: input.loadId, carriers: input.carriers, currency: input.currency, timeoutMin: input.timeoutMin, idempotencyKey: `tender:${workflowInfo().firstExecutionRunId}` }),
+      );
+    } catch (error) {
+      if (await rideOutOutage(error)) return stall("transport_unreachable");
+    }
+  }
+  outageSince = undefined;
 
   let stuckSweeps = 0;
-  let outageSince: number | undefined;
   while (tender.status === "PENDING") {
     try {
       if (tender.overdue) {
@@ -140,12 +158,7 @@ export async function tenderWorkflow(input: TenderInput): Promise<TenderState> {
       tender = follow(await activities.getTender({ ...ref, tenderId: tender.id }));
       outageSince = undefined;
     } catch (error) {
-      if (!outage(error)) throw error;
-      outageSince ??= Date.now();
-      if (Date.now() - outageSince >= MAX_OUTAGE_MS) {
-        return stall("transport_unreachable");
-      }
-      await sleep(input.outageRetryMs ?? OUTAGE_RETRY_MS);
+      if (await rideOutOutage(error)) return stall("transport_unreachable");
     }
   }
 

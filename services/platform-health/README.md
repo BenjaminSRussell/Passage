@@ -24,11 +24,11 @@ Local cluster: `make -C deploy deploy-local` (see `docs/runbooks/delivery/deploy
 
 ## API
 
-`POST /v1/hello-ledger/entries` (optional `Idempotency-Key`), `GET /v1/hello-ledger/entries`, `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. `POST /v1/platform/releases` (operator tenant only; duty per environment and action, optional `Idempotency-Key`) records a promote or rollback and `GET /v1/platform/releases?service=&env=` (duty `View platform releases`) lists them. Contract: `api/openapi.yaml`.
+`POST /v1/hello-ledger/entries` (optional `Idempotency-Key`), `GET /v1/hello-ledger/entries`, `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. `POST /v1/platform/releases` (operator tenant only; duty per environment and action, optional `Idempotency-Key`) records a promote or rollback and `GET /v1/platform/releases?service=&env=` (duty `platform.release.view`) lists them. Contract: `api/openapi.yaml`.
 
 ## Releases
 
-`platform_release` is append-only and `platform_environment` (seeded dev, stage, prod) is read-only for `passage_app`. Releases are platform-level, not customer data: rows are stored and read under the nil system tenant server-side, so any caller holding `View platform releases` sees every release.
+`platform_release` is append-only and `platform_environment` (seeded dev, stage, prod) is read-only for `passage_app`. Releases are platform-level, not customer data: rows are stored and read under the nil system tenant server-side, so any caller holding `platform.release.view` sees every release.
 
 Writes are accepted only when the caller's tenant equals `PLATFORM_OPERATOR_TENANT_ID`; when it is unset every write is 403. Each row stores the caller's tenant and user (`recorded_by_tenant`, `recorded_by_user`) for audit.
 
@@ -36,11 +36,11 @@ The handler checks the duty by environment and action because route-level OPA ca
 
 | Request | Duty |
 |---|---|
-| promote to dev or stage | `Maintain platform releases` |
-| promote to prod | `Approve production promotion` |
-| any rollback | `Rollback environment` |
+| promote to dev or stage | `platform.release.maintain` |
+| promote to prod | `platform.promotion.approve` |
+| any rollback | `platform.environment.rollback` |
 
-Recording is an audit record of what was deployed, not the approval. The approval for a prod promotion or rollback is the reviewed pull request that merges the change to `deploy/envs/**` on protected `main`. The CI recording credential therefore holds `View platform releases` (to read the registry cursor), `Maintain platform releases`, `Approve production promotion` and `Rollback environment`, and that credential exists only in the `platform-release` GitHub Environment, which is restricted to `main`. Humans holding these duties can still record by hand. `actor` (the recording user) in the list response is returned only to the operator tenant; other tenants get it empty.
+Recording is an audit record of what was deployed, not the approval. The approval for a prod promotion or rollback is the reviewed pull request that merges the change to `deploy/envs/**` on protected `main`. The CI recording credential therefore holds `platform.release.view` (to read the registry cursor), `platform.release.maintain`, `platform.promotion.approve` and `platform.environment.rollback`, and that credential exists only in the `platform-release` GitHub Environment, which is restricted to `main`. Humans holding these duties can still record by hand. `actor` (the recording user) in the list response is returned only to the operator tenant; other tenants get it empty.
 
 `Idempotency-Key` is scoped per caller tenant. Replaying a key with the same payload returns the original row (201, no new event); a different payload is 409 `COM-0409`.
 

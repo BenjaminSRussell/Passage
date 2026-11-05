@@ -33,7 +33,7 @@ func newHarness(t *testing.T, legalEntity string) (*harness, *target.Loader) {
 	t.Helper()
 	h := &harness{f: targettest.Start(t), xref: domain.NewMemXref()}
 	cfg := target.Config{
-		PartyURL: h.f.PartyURL, ProductURL: h.f.ProductURL, ReceivablesURL: h.f.ReceivablesURL, Signer: h.f.Signer,
+		PartyURL: h.f.PartyURL, ProductURL: h.f.ProductURL, ReceivablesURL: h.f.ReceivablesURL, EngineeringURL: h.f.EngineeringURL, Signer: h.f.Signer,
 		Concurrency: 1,
 		Sleep: func(_ context.Context, d time.Duration) error {
 			h.mu.Lock()
@@ -83,7 +83,7 @@ func TestParty_CreatesUnderTheReservedIDThenPatchesUnderItsVersion(t *testing.T)
 		t.Fatalf("Idempotency-Key = %q", call.Header.Get("Idempotency-Key"))
 	}
 	c := call.Claims
-	if c.Iss != "migration" || c.Aud != "party" || c.Act != "service:migration-loader" || c.Le != le1 || c.Tid != testkit.TenantID(1) || strings.Join(c.Duties, ",") != "party.import.write" {
+	if c.Iss != "migration" || c.Aud != "party" || c.Act != "service:migration-loader" || c.Le != le1 || c.Tid != testkit.TenantID(1) || strings.Join(c.Duties, ",") != "party.import.write,party.import.read" {
 		t.Fatalf("token claims = %+v", c)
 	}
 
@@ -348,7 +348,7 @@ func TestOpenItems_OneRequestPerLegalEntityWithPerRowResults(t *testing.T) {
 		t.Fatalf("calls = %d, want one per legal entity", len(calls))
 	}
 	first := calls[0]
-	if first.Claims.Le != le1 || first.Body["importSource"] != system || first.Body["atomic"] != false || first.Claims.Aud != "receivables" || strings.Join(first.Claims.Duties, ",") != "receivables.import.write" {
+	if first.Claims.Le != le1 || first.Body["importSource"] != system || first.Body["atomic"] != false || first.Claims.Aud != "receivables" || strings.Join(first.Claims.Duties, ",") != "receivables.import.write,receivables.import.read" {
 		t.Fatalf("first call = %+v", first)
 	}
 	sent := first.Body["items"].([]any)
@@ -384,7 +384,7 @@ func TestOpenItems_ARefusedBatchAndAnOutageRejectEveryRow(t *testing.T) {
 
 func TestEntitiesWithoutATargetAPIAreRejectedNotDropped(t *testing.T) {
 	h, l := newHarness(t, le1)
-	for _, entity := range []string{"bom", "route", "ap_open_item", "anything"} {
+	for _, entity := range []string{"ap_open_item", "price_list", "anything"} {
 		res := load(t, l, entity, item("K1", false, 0, map[string]any{"x": 1}), item("K2", false, 0, nil))
 		for _, r := range res {
 			if r.Code != target.CodeNotAvailable || !strings.Contains(r.Detail, entity) {
@@ -459,7 +459,9 @@ func TestUnknownTargetsNamesOnlyFieldsNoLoaderSends(t *testing.T) {
 		{"item", []string{"productNumber", "attr.colour", "attr.", "lifecycleState"}, "attr."},
 		{"product", []string{"customerKey"}, "customerKey"},
 		{"ar_open_item", []string{"customerKey", "cashDiscountAmount", "attr.x"}, "attr.x"},
-		{"bom", []string{"anything"}, ""},
+		{"bom", []string{"productKey", "lines", "effectiveFrom", "anything"}, "anything"},
+		{"route", []string{"productId", "operations", "routeCode", "siteId", "versionNo"}, ""},
+		{"price_list", []string{"anything"}, ""},
 	} {
 		if got := strings.Join(target.UnknownTargets(c.entity, c.targets), ","); got != c.want {
 			t.Errorf("%s %v = %q, want %q", c.entity, c.targets, got, c.want)

@@ -171,6 +171,7 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 		}
 		var diff []domain.FieldChange
 		results := make([]ProgressLineResult, 0, len(in.Lines))
+		evLines := make([]salesevents.ProgressLine, 0, len(in.Lines))
 		for _, req := range in.Lines {
 			l := byNo[req.LineNo]
 			if l == nil {
@@ -205,6 +206,16 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			l.DeliveredQty, l.InvoicedQty, l.LineStatus = next.Delivered, next.Invoiced, next.Status
 			results = append(results, ProgressLineResult{LineID: l.ID, LineNo: l.LineNo, Quantity: req.Quantity,
 				DeliveredQty: next.Delivered, InvoicedQty: next.Invoiced, LineStatus: next.Status})
+			ev := salesevents.ProgressLine{LineID: l.ID, LineNo: l.LineNo, Quantity: req.Quantity.String(),
+				DeliveredQty: next.Delivered.String(), InvoicedQty: next.Invoiced.String(), LineStatus: next.Status}
+			if in.Kind == domain.ProgressDelivered && l.CatchWeight != nil && l.ActualWeight != nil {
+				reported := req.Quantity.Mul(l.CatchWeight.Nominal)
+				if req.ActualWeight != nil {
+					reported = *req.ActualWeight
+				}
+				ev.ReportedWeight, ev.DeliveredWeight = reported.String(), l.ActualWeight.String()
+			}
+			evLines = append(evLines, ev)
 		}
 		after := make([]domain.LineProgress, len(o.Lines))
 		for i, l := range o.Lines {
@@ -237,11 +248,6 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13)`,
 			p.TenantID, id, o.LegalEntityID, o.ID, in.Kind, in.SourceRef, string(raw), status, version, in.IdempotencyKey, in.RequestHash, in.Actor, now); err != nil {
 			return err
-		}
-		evLines := make([]salesevents.ProgressLine, 0, len(results))
-		for _, r := range results {
-			evLines = append(evLines, salesevents.ProgressLine{LineID: r.LineID, LineNo: r.LineNo, Quantity: r.Quantity.String(),
-				DeliveredQty: r.DeliveredQty.String(), InvoicedQty: r.InvoicedQty.String(), LineStatus: r.LineStatus})
 		}
 		if err := enqueue(ctx, tx, "order", o.ID, salesevents.OrderProgressRecorded, p.TenantID, salesevents.OrderProgressData{
 			ProgressID: id, OrderID: o.ID, LegalEntityID: o.LegalEntityID, Kind: in.Kind, SourceRef: in.SourceRef, Lines: evLines,

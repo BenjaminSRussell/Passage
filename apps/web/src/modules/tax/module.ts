@@ -7,7 +7,7 @@ const tax: PassageModule = {
   title: "Tax",
   description: "Tax codes, rates and the rules that apply them.",
   routes: [{ path: "/tax", element: createElement(TaxHome) }],
-  nav: [{ label: "Tax configuration", to: "/tax", duty: "Maintain tax codes" }],
+  nav: [{ label: "Tax configuration", to: "/tax", duty: "tax.code.maintain" }],
 };
 
 export default tax;

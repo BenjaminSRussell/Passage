@@ -48,7 +48,7 @@ The distributor claims at most as many queued messages as it sends concurrently 
 
 Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 
-OPA duties `Maintain workflows`, `Approve workflow`, `Maintain batch jobs`, `View batch history`, `Maintain message templates`, `Maintain notification settings`, `View outbound messages` and `Send notifications` authorize the `/v1/workflows`, `/v1/workitems`, `/v1/batch` and `/v1/notify` paths.
+OPA duties `workflow.definition.maintain`, `workflow.workitem.approve`, `batch.job.maintain`, `batch.history.view`, `notify.template.maintain`, `notify.setting.maintain`, `notify.message.view` and `notify.message.send` authorize the `/v1/workflows`, `/v1/workitems`, `/v1/batch` and `/v1/notify` paths.
 
 ## Error codes
 

@@ -64,11 +64,28 @@ func validStatus(s string) bool {
 // maxQty is the largest quantity numeric(18,6) holds.
 func maxQty() decimal.Decimal { return decimal.New(1, 12) }
 
-// API holds the store.
-type API struct{ store store.Store }
+// API holds the store, the step-up verifier of signings and the clock.
+type API struct {
+	store  store.Store
+	reauth Reauthenticator
+	now    func() time.Time
+}
 
-// New returns the handler set.
-func New(s store.Store) *API { return &API{store: s} }
+// New returns the handler set. Signing fails closed until WithReauth binds a
+// verifier.
+func New(s store.Store) *API { return &API{store: s, reauth: FailClosedReauth{}, now: time.Now} }
+
+// WithReauth binds the step-up verifier of batch record signatures.
+func (a *API) WithReauth(r Reauthenticator) *API {
+	a.reauth = r
+	return a
+}
+
+// WithClock sets the clock of the signing lockout (tests).
+func (a *API) WithClock(now func() time.Time) *API {
+	a.now = now
+	return a
+}
 
 // Register mounts every route on r. /healthz comes from httpx.NewRouter.
 func (a *API) Register(r chi.Router) {
@@ -118,8 +135,12 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		switch de.Code {
 		case domain.CodeInvalid:
 			status = http.StatusBadRequest
-		case domain.CodeSameBatch:
+		case domain.CodeSameBatch, domain.CodeSignatureInvalid:
 			status = http.StatusConflict
+		case domain.CodeSignatureRejected:
+			status = http.StatusForbidden
+		case domain.CodeSignatureLocked:
+			status = http.StatusLocked
 		}
 		err = httpx.NewProblem(status, de.Code, de.Detail)
 	}

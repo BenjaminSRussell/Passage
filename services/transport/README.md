@@ -51,72 +51,72 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | /v1/transport/rate-cards | TMS_RATE_APPROVE | Effective-dated card; overlap per carrier, service and basis is TMS-0102; `Idempotency-Key` optional |
-| GET | /v1/transport/rate-cards | TMS_RATE | Filter by `carrierId`, `serviceId` |
-| POST | /v1/transport/shipments/{id}:rate | TMS_RATE | One quote per carrier service with the card valid on the ship date, ranked, with explain trace; not cached yet |
-| POST | /v1/transport/freight-bills | TMS_RECONCILE | Expected charges for a load; `Idempotency-Key` optional |
-| GET | /v1/transport/freight-bills | TMS_VIEW | Newest first, at most 500; filter by `matchStatus`, `carrierId` |
-| GET | /v1/transport/freight-bills/{id} | TMS_VIEW | The bill, its carrier invoice and the per-charge comparison once matched |
-| POST | /v1/transport/carrier-invoices | TMS_RECONCILE | Matched to the named bill in the same transaction; no bill makes it UNEXPECTED_INVOICE |
-| GET | /v1/transport/carrier-invoices | TMS_RECONCILE | Newest first, at most 500; `matchStatus=UNEXPECTED_INVOICE` is the exception queue |
-| GET | /v1/transport/carrier-invoices/{id} | TMS_RECONCILE | |
+| POST | /v1/transport/rate-cards | transport.rate-card.approve | Effective-dated card; overlap per carrier, service and basis is TMS-0102; `Idempotency-Key` optional |
+| GET | /v1/transport/rate-cards | transport.rate-card.maintain | Filter by `carrierId`, `serviceId` |
+| POST | /v1/transport/shipments/{id}:rate | transport.rate-card.maintain | One quote per carrier service with the card valid on the ship date, ranked, with explain trace; not cached yet |
+| POST | /v1/transport/freight-bills | transport.freight-bill.reconcile | Expected charges for a load; `Idempotency-Key` optional |
+| GET | /v1/transport/freight-bills | transport.view | Newest first, at most 500; filter by `matchStatus`, `carrierId` |
+| GET | /v1/transport/freight-bills/{id} | transport.view | The bill, its carrier invoice and the per-charge comparison once matched |
+| POST | /v1/transport/carrier-invoices | transport.freight-bill.reconcile | Matched to the named bill in the same transaction; no bill makes it UNEXPECTED_INVOICE |
+| GET | /v1/transport/carrier-invoices | transport.freight-bill.reconcile | Newest first, at most 500; `matchStatus=UNEXPECTED_INVOICE` is the exception queue |
+| GET | /v1/transport/carrier-invoices/{id} | transport.freight-bill.reconcile | |
 
 ## Endpoints (slice 2)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | /v1/transport/loads/{id}:tender | TMS_TENDER, or the service-only `transport.tender.execute` from the `workflow-ts` issuer | Carriers in rank order with optional quoted rates; `timeoutMin` 5 to 1440 (default 120); one open tender per load (TMS-0114); `Idempotency-Key` optional |
-| GET | /v1/transport/tenders | TMS_TENDER | Tender board, newest first, at most 500; filter by `status`, `loadId`; `overdue` flags a pending attempt past its deadline |
-| POST | /v1/transport/tenders:expire | TMS_TENDER, or the service-only `transport.tender.execute` | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call); it expires only tenders in the caller's legal entities, so schedule it as an all-entity principal |
-| GET | /v1/transport/tenders/{id} | TMS_TENDER, or the service-only `transport.tender.execute` | One tender with its attempts |
-| POST | /v1/transport/tenders/{id}:respond | TMS_CARRIER_RESPOND | `{carrierId, accept}`; late is TMS-0105, wrong carrier TMS-0113; the same response again returns the tender unchanged |
-| POST | /v1/transport/tracking-events | TMS_TRACK_INGEST | EDI 214 codes X3, AF, X1, D1; source + ref is the idempotency key (201 stored, 200 replay with `Idempotent-Replayed: true`) |
-| GET | /v1/transport/tracking-events | TMS_VIEW | With `loadId`: that load's events by occurred_at; without: the newest 500 received |
-| GET | /v1/transport/loads/{id}/tracking | TMS_VIEW | Timeline plus the projected state of every reported stop |
-| POST | /v1/transport/voyages | TMS_LANDED_COST | Legs, containers (ISO 6346, TMS-0124), folios, cost lines, receipt lines; starts ESTIMATED; `Idempotency-Key` optional |
-| GET | /v1/transport/voyages | TMS_LANDED_COST | Newest first, at most 500, without documents; filter by `status` |
-| GET | /v1/transport/voyages/{id} | TMS_LANDED_COST | |
-| POST | /v1/transport/landed-cost/voyages/{id}:allocate | TMS_LANDED_COST | Allocates every cost line, posts the voyage and publishes `landedcost.posted`; a POSTED voyage is returned unchanged |
+| POST | /v1/transport/loads/{id}:tender | transport.load.tender, or the service-only `transport.tender.execute` from the `workflow-ts` issuer | Carriers in rank order with optional quoted rates; `timeoutMin` 5 to 1440 (default 120); one open tender per load (TMS-0114); `Idempotency-Key` optional |
+| GET | /v1/transport/tenders | transport.load.tender, or the service-only `transport.tender.execute` with `loadId` (the workflow adopting an open tender after TMS-0114) | Tender board, newest first, at most 500; filter by `status`, `loadId`; `overdue` flags a pending attempt past its deadline |
+| POST | /v1/transport/tenders:expire | transport.load.tender, or the service-only `transport.tender.execute` | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call); it expires only tenders in the caller's legal entities, so schedule it as an all-entity principal |
+| GET | /v1/transport/tenders/{id} | transport.load.tender, or the service-only `transport.tender.execute` | One tender with its attempts |
+| POST | /v1/transport/tenders/{id}:respond | transport.tender.respond | `{carrierId, accept}`; late is TMS-0105, wrong carrier TMS-0113; the same response again returns the tender unchanged |
+| POST | /v1/transport/tracking-events | transport.tracking-event.ingest | EDI 214 codes X3, AF, X1, D1; source + ref is the idempotency key (201 stored, 200 replay with `Idempotent-Replayed: true`) |
+| GET | /v1/transport/tracking-events | transport.view | With `loadId`: that load's events by occurred_at; without: the newest 500 received |
+| GET | /v1/transport/loads/{id}/tracking | transport.view | Timeline plus the projected state of every reported stop |
+| POST | /v1/transport/voyages | transport.landed-cost.maintain | Legs, containers (ISO 6346, TMS-0124), folios, cost lines, receipt lines; starts ESTIMATED; `Idempotency-Key` optional |
+| GET | /v1/transport/voyages | transport.landed-cost.maintain | Newest first, at most 500, without documents; filter by `status` |
+| GET | /v1/transport/voyages/{id} | transport.landed-cost.maintain | |
+| POST | /v1/transport/landed-cost/voyages/{id}:allocate | transport.landed-cost.maintain | Allocates every cost line, posts the voyage and publishes `landedcost.posted`; a POSTED voyage is returned unchanged |
 
 ## Endpoints (slice 3)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | /v1/transport/loads:build | TMS_PLAN | Shipments grouped by ship-from site, ship-to region, mode and pickup date, packed first-fit decreasing by weight; never over capacity (BR-34.8); too large TMS-0115, already planned TMS-0116; `Idempotency-Key` optional |
-| GET | /v1/transport/loads | TMS_VIEW | Newest first, at most 500; filter by `status` |
-| GET | /v1/transport/loads/{id} | TMS_VIEW | The load with its DG checks, newest first (at most 20) |
-| POST | /v1/transport/loads/{id}:dg-check | TMS_PLAN | ADR or 49CFR check of the request's DG lines; stored with findings and shipping-paper lines; a FAIL blocks tendering |
-| POST | /v1/transport/loads/{id}:screen | TMS_PLAN | Screens the parties through the `ScreeningProvider` hook; HOLD on a hit or timeout (TMS-0133), WARN when cross-border and no provider (TMS-0134); not stored |
-| GET | /v1/transport/transfer-rules/{incoterm} | TMS_VIEW | Default goods-in-transit transfer event for an Incoterms 2020 rule (BR-34.11) |
-| POST | /v1/transport/freight-bills/{id}:approve | TMS_RECONCILE_APPROVE | MATCHED, VARIANCE or DISPUTED to APPROVED; a reason is required except for MATCHED; `If-Match` required; publishes `freightbill.approved` |
-| POST | /v1/transport/freight-bills/{id}:dispute | TMS_RECONCILE | VARIANCE to DISPUTED with a reason; `If-Match` required |
+| POST | /v1/transport/loads:build | transport.load.plan | Shipments grouped by ship-from site, ship-to region, mode and pickup date, packed first-fit decreasing by weight; never over capacity (BR-34.8); too large TMS-0115, already planned TMS-0116; `Idempotency-Key` optional |
+| GET | /v1/transport/loads | transport.view | Newest first, at most 500; filter by `status` |
+| GET | /v1/transport/loads/{id} | transport.view | The load with its DG checks, newest first (at most 20) |
+| POST | /v1/transport/loads/{id}:dg-check | transport.load.plan | ADR or 49CFR check of the request's DG lines; stored with findings and shipping-paper lines; a FAIL blocks tendering |
+| POST | /v1/transport/loads/{id}:screen | transport.load.plan | Screens the parties through the `ScreeningProvider` hook; HOLD on a hit or timeout (TMS-0133), WARN when cross-border and no provider (TMS-0134); not stored |
+| GET | /v1/transport/transfer-rules/{incoterm} | transport.view | Default goods-in-transit transfer event for an Incoterms 2020 rule (BR-34.11) |
+| POST | /v1/transport/freight-bills/{id}:approve | transport.freight-bill.approve | MATCHED, VARIANCE or DISPUTED to APPROVED; a reason is required except for MATCHED; `If-Match` required; publishes `freightbill.approved` |
+| POST | /v1/transport/freight-bills/{id}:dispute | transport.freight-bill.reconcile | VARIANCE to DISPUTED with a reason; `If-Match` required |
 
 ## Endpoints (slice 4)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | /v1/transport/gate/check-in | TMS_GATE | Direction, carrier SCAC, trailer, optional seal and load, driver name and license, appointment id with its time (or a walk-in); ON_TIME within `toleranceMin` (default 60), else EARLY or LATE with TMS-0127; a trailer already in the site's yard is TMS-0118; publishes `gate.checkedin`; `Idempotency-Key` optional |
-| POST | /v1/transport/gate/check-out | TMS_GATE | `{visitId, sealNo, checkOutAt?, hourlyRate?}`; seal mismatch or an outbound visit without a seal is 422 TMS-0129 and logged as CHECK_OUT_BLOCKED; detention per BR-34.13 (TMS-0126); `Idempotency-Key` optional |
-| GET | /v1/transport/gate/visits | TMS_GATE | Gate log, newest check-in first, at most 500; filter by `siteId`, `status`, `carrierScac`, `date` (UTC day) |
-| GET | /v1/transport/gate/visits/{id} | TMS_GATE | The visit with its gate log rows in the order written |
-| POST | /v1/transport/gate/visits/{id}:seal | TMS_GATE | Records the seal applied at load confirmation while IN_YARD; logged as SEALED |
-| POST | /v1/transport/goods-in-transit | TMS_LANDED_COST | `{voyageId, incoterm, siteId, receiptLines?}` on an ESTIMATED voyage; origin Incoterms only (TMS-0120 otherwise); each line's estimate per cost type is its BR-34.6 share; a line is on one order (TMS-0119); `Idempotency-Key` optional |
-| GET | /v1/transport/goods-in-transit | TMS_LANDED_COST | Newest first, at most 500; filter by `voyageId`, `status` |
-| GET | /v1/transport/goods-in-transit/{id} | TMS_LANDED_COST | |
-| POST | /v1/transport/goods-in-transit/{id}:ship | TMS_LANDED_COST | `{shippedAt?}`; PENDING to IN_TRANSIT (TMS-0121) and publishes `goodsintransit.shipped`; an IN_TRANSIT order is returned unchanged |
+| POST | /v1/transport/gate/check-in | transport.gate.operate | Direction, carrier SCAC, trailer, optional seal and load, driver name and license, appointment id with its time (or a walk-in); ON_TIME within `toleranceMin` (default 60), else EARLY or LATE with TMS-0127; a trailer already in the site's yard is TMS-0118; publishes `gate.checkedin`; `Idempotency-Key` optional |
+| POST | /v1/transport/gate/check-out | transport.gate.operate | `{visitId, sealNo, checkOutAt?, hourlyRate?}`; seal mismatch or an outbound visit without a seal is 422 TMS-0129 and logged as CHECK_OUT_BLOCKED; detention per BR-34.13 (TMS-0126); `Idempotency-Key` optional |
+| GET | /v1/transport/gate/visits | transport.gate.operate | Gate log, newest check-in first, at most 500; filter by `siteId`, `status`, `carrierScac`, `date` (UTC day) |
+| GET | /v1/transport/gate/visits/{id} | transport.gate.operate | The visit with its gate log rows in the order written |
+| POST | /v1/transport/gate/visits/{id}:seal | transport.gate.operate | Records the seal applied at load confirmation while IN_YARD; logged as SEALED |
+| POST | /v1/transport/goods-in-transit | transport.landed-cost.maintain | `{voyageId, incoterm, siteId, receiptLines?}` on an ESTIMATED voyage; origin Incoterms only (TMS-0120 otherwise); each line's estimate per cost type is its BR-34.6 share; a line is on one order (TMS-0119); `Idempotency-Key` optional |
+| GET | /v1/transport/goods-in-transit | transport.landed-cost.maintain | Newest first, at most 500; filter by `voyageId`, `status` |
+| GET | /v1/transport/goods-in-transit/{id} | transport.landed-cost.maintain | |
+| POST | /v1/transport/goods-in-transit/{id}:ship | transport.landed-cost.maintain | `{shippedAt?}`; PENDING to IN_TRANSIT (TMS-0121) and publishes `goodsintransit.shipped`; an IN_TRANSIT order is returned unchanged |
 
 ## Endpoints (slice 5)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | /v1/transport/loads/{id}:screen | TMS_PLAN | Now stores a HOLD as a screening hold (one OPEN per load; screening again refreshes its party results) and returns `holdId`; CLEAR and WARN never clear it |
-| GET | /v1/transport/screening-holds | TMS_VIEW | Screening holds inquiry, newest first, at most 500; filter by `status` (OPEN, RELEASED) and `loadId` |
-| GET | /v1/transport/screening-holds/{id} | TMS_VIEW | The hold with its party results and release |
-| POST | /v1/transport/screening-holds/{id}:release | TRADE_COMPLIANCE_RELEASE | `{reason}` (1 to 500); user and reason stay on the hold; a BLOCKED party is 422 TMS-0133; released by someone else or for another reason 409 TMS-0122; the same release again returns the hold |
-| POST | /v1/transport/routes:optimize | TMS_PLAN | Depot, stops (window in minutes, service time, weight, volume, pallets), vehicles; `timeLimitS` 5 to 25 (default 20), `latenessPerMin` default 50; 201 with the stored plan, 200 `replayed` for the same request; dropped stops warn TMS-0104; optimizer missing or failing 503 TMS-0123 |
-| GET | /v1/transport/routes | TMS_PLAN | Plan summaries, newest first, at most 500 |
-| GET | /v1/transport/routes/{id} | TMS_PLAN | The plan with its request, routes and dropped stops |
-| POST | /v1/transport/load-plans:stack | TMS_PLAN | Trailer and up to 200 pallets; placements bottom to top, unplaced pallets, floor positions, layers, load sequence and kingpin / rear-axle estimate; not stored; 503 TMS-0123 without an optimizer |
+| POST | /v1/transport/loads/{id}:screen | transport.load.plan | Now stores a HOLD as a screening hold (one OPEN per load; screening again refreshes its party results) and returns `holdId`; CLEAR and WARN never clear it |
+| GET | /v1/transport/screening-holds | transport.view | Screening holds inquiry, newest first, at most 500; filter by `status` (OPEN, RELEASED) and `loadId` |
+| GET | /v1/transport/screening-holds/{id} | transport.view | The hold with its party results and release |
+| POST | /v1/transport/screening-holds/{id}:release | transport.screening-hold.release | `{reason}` (1 to 500); user and reason stay on the hold; a BLOCKED party is 422 TMS-0133; released by someone else or for another reason 409 TMS-0122; the same release again returns the hold |
+| POST | /v1/transport/routes:optimize | transport.load.plan | Depot, stops (window in minutes, service time, weight, volume, pallets), vehicles; `timeLimitS` 5 to 25 (default 20), `latenessPerMin` default 50; 201 with the stored plan, 200 `replayed` for the same request; dropped stops warn TMS-0104; optimizer missing or failing 503 TMS-0123 |
+| GET | /v1/transport/routes | transport.load.plan | Plan summaries, newest first, at most 500 |
+| GET | /v1/transport/routes/{id} | transport.load.plan | The plan with its request, routes and dropped stops |
+| POST | /v1/transport/load-plans:stack | transport.load.plan | Trailer and up to 200 pallets; placements bottom to top, unplaced pallets, floor positions, layers, load sequence and kingpin / rear-axle estimate; not stored; 503 TMS-0123 without an optimizer |
 
 `POST /loads/{id}:tender` refuses a load with an OPEN screening hold with 422 TMS-0133
 and stores no tender (BR-34.17, AC-34.16). `POST /shipments/{id}:rate` answers from a
@@ -129,8 +129,8 @@ without it optimize and load-plan calls are 503 TMS-0123. `TMS_RATING_CACHE_MIN`
 the rate-shop cache window (values outside 0 to 60 are clamped; a non-number stops the
 service at start).
 
-TMS_GATE also guards the gate log reads: the visits carry driver names and license ids
-(personal data, 90-day retention), so TMS_VIEW does not read them. The gate log rows and
+transport.gate.operate also guards the gate log reads: the visits carry driver names and license ids
+(personal data, 90-day retention), so transport.view does not read them. The gate log rows and
 the `gate.checkedin` event carry no driver PII; the application role may only insert and
 read `gate_event`, and a trigger refuses updates and deletes.
 
@@ -243,7 +243,7 @@ go test ./internal/store/
 - BR-34.17 screening: every party through the provider with a 5 s timeout; POTENTIAL_MATCH,
   BLOCKED, an error, a timeout or an unknown status hold the load; the hook never clears.
   A HOLD is stored; the load cannot be tendered while it is OPEN (TMS-0133, AC-34.16). A
-  TRADE_COMPLIANCE_RELEASE user releases POTENTIAL_MATCH and SCREENING_PENDING holds
+  transport.screening-hold.release user releases POTENTIAL_MATCH and SCREENING_PENDING holds
   with a reason, kept with the user and time; a BLOCKED party stays held until the list
   changes. One OPEN hold per load (partial unique index).
 - FR-34.2 / BR-34.1 route optimization: the request is normalized (defaults: speed 60

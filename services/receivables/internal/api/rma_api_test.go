@@ -24,8 +24,8 @@ func TestPostRMACredit_Validation(t *testing.T) {
 		status int
 		field  string
 	}{
-		{"payment duty is not enough", rmaBody(testLE, "400.00", "60.00", "340.00"), "ARPaymentPost", http.StatusForbidden, ""},
-		{"view duty is not enough", rmaBody(testLE, "400.00", "60.00", "340.00"), "ARView", http.StatusForbidden, ""},
+		{"payment duty is not enough", rmaBody(testLE, "400.00", "60.00", "340.00"), "receivables.payment.post", http.StatusForbidden, ""},
+		{"view duty is not enough", rmaBody(testLE, "400.00", "60.00", "340.00"), "receivables.view", http.StatusForbidden, ""},
 		{"legal entity outside the caller's scope", rmaBody("00000000-0000-0000-0000-0000000000ff", "400.00", "60.00", "340.00"), "ar.rmacredit.post", http.StatusForbidden, ""},
 		{"missing invoice number", strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), `"invoiceNumber":"INV-30001"`, `"invoiceNumber":""`, 1), "ar.rmacredit.post", http.StatusBadRequest, "invoiceNumber"},
 		{"bad posting date", strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), "2027-03-01", "03/01/2027", 1), "ar.rmacredit.post", http.StatusBadRequest, "postingDate"},
@@ -70,19 +70,19 @@ func TestRMACreditOperatorRoutes(t *testing.T) {
 		name, method, path, body, duties string
 		status                           int
 	}{
-		{"list needs ARView", http.MethodGet, "/v1/receivables/rma-credits", "", "ARImport", http.StatusForbidden},
-		{"list parked", http.MethodGet, "/v1/receivables/rma-credits?status=PENDING&parked=true", "", "ARView", http.StatusOK},
-		{"list bad status", http.MethodGet, "/v1/receivables/rma-credits?status=OPEN", "", "ARView", http.StatusBadRequest},
-		{"list bad parked", http.MethodGet, "/v1/receivables/rma-credits?parked=yes", "", "ARView", http.StatusBadRequest},
-		{"list other legal entity", http.MethodGet, "/v1/receivables/rma-credits?legalEntityId=00000000-0000-0000-0000-0000000000ff", "", "ARView", http.StatusForbidden},
-		{"retry needs ARPaymentPost", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ARView", http.StatusForbidden},
+		{"list needs receivables.view", http.MethodGet, "/v1/receivables/rma-credits", "", "receivables.payment-file.import", http.StatusForbidden},
+		{"list parked", http.MethodGet, "/v1/receivables/rma-credits?status=PENDING&parked=true", "", "receivables.view", http.StatusOK},
+		{"list bad status", http.MethodGet, "/v1/receivables/rma-credits?status=OPEN", "", "receivables.view", http.StatusBadRequest},
+		{"list bad parked", http.MethodGet, "/v1/receivables/rma-credits?parked=yes", "", "receivables.view", http.StatusBadRequest},
+		{"list other legal entity", http.MethodGet, "/v1/receivables/rma-credits?legalEntityId=00000000-0000-0000-0000-0000000000ff", "", "receivables.view", http.StatusForbidden},
+		{"retry needs receivables.payment.post", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "receivables.view", http.StatusForbidden},
 		{"retry service duty is not enough", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ar.rmacredit.post", http.StatusForbidden},
-		{"retry bad date", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"03/01/2027"}`, "ARPaymentPost", http.StatusBadRequest},
-		{"retry unknown action", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":post", "", "ARPaymentPost", http.StatusNotFound},
-		{"retry re-dated", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"2027-04-01"}`, "ARPaymentPost", http.StatusOK},
-		{"retry as is", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ARPaymentPost", http.StatusOK},
-		{"sweep needs ARPaymentPost", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "ARView", http.StatusForbidden},
-		{"sweep", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "ARPaymentPost", http.StatusOK},
+		{"retry bad date", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"03/01/2027"}`, "receivables.payment.post", http.StatusBadRequest},
+		{"retry unknown action", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":post", "", "receivables.payment.post", http.StatusNotFound},
+		{"retry re-dated", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"2027-04-01"}`, "receivables.payment.post", http.StatusOK},
+		{"retry as is", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "receivables.payment.post", http.StatusOK},
+		{"sweep needs receivables.payment.post", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "receivables.view", http.StatusForbidden},
+		{"sweep", http.MethodPost, "/v1/receivables/rma-credits:sweep", "", "receivables.payment.post", http.StatusOK},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,7 +96,7 @@ func TestRMACreditOperatorRoutes(t *testing.T) {
 	for _, path := range []string{"/v1/receivables/rma-credits/" + id + ":retry", "/v1/receivables/rma-credits:sweep"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(""))
 		req.Header.Set("X-Passage-Tenant", testTenant)
-		req.Header.Set("X-Passage-Duties", "ARPaymentPost")
+		req.Header.Set("X-Passage-Duties", "receivables.payment.post")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest && rec.Code != http.StatusForbidden {

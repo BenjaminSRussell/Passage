@@ -1,0 +1,6 @@
+apiVersion: v2
+name: carrier-gateway
+description: Passage carrier gateway (carrier adapters, rate shopping, labels, tracking; wave 28 AC4)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

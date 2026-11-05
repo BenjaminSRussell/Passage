@@ -115,7 +115,7 @@ const (
 	closingPath = "/v1/fx/rate-types/CLOSING"
 	closingBody = `{"name":"Closing","allowInverse":true,"provider":"ecb"}`
 	createBody  = `{"code":"CLOSING","name":"Closing","allowInverse":true,"provider":"ecb"}`
-	allDuties   = "View exchange rates,Maintain exchange rates"
+	allDuties   = "fx.rate.view,fx.rate.maintain"
 )
 
 func TestRateTypes(t *testing.T) {
@@ -129,19 +129,19 @@ func TestRateTypes(t *testing.T) {
 	}{
 		{"create ok", http.MethodPost, typesPath, createBody, allDuties, tenantID, &fakeStore{}, 201, `"code":"CLOSING"`, 1},
 		{"create existing code", http.MethodPost, typesPath, createBody, allDuties, tenantID, &fakeStore{types: map[string]store.RateType{"CLOSING": {Code: "CLOSING", Name: "Old"}}}, 409, "FX_RATE_TYPE_EXISTS", 1},
-		{"create without Maintain exchange rates", http.MethodPost, typesPath, createBody, "View exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
+		{"create without fx.rate.maintain", http.MethodPost, typesPath, createBody, "fx.rate.view", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
 		{"create unknown field", http.MethodPost, typesPath, `{"code":"X","name":"x","extra":1}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
 		{"create empty code", http.MethodPost, typesPath, `{"name":"x"}`, allDuties, tenantID, &fakeStore{}, 400, "FX_RATE_INVALID", 1},
 		{"create store failure", http.MethodPost, typesPath, createBody, allDuties, tenantID, &fakeStore{err: errors.New("pg secret")}, 500, "COM-0500", 1},
 		{"put ok", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{types: map[string]store.RateType{"CLOSING": {ID: "id-CLOSING", Code: "CLOSING", Name: "Old"}}}, 200, `"name":"Closing"`, 1},
 		{"put unknown code", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{}, 404, "FX_RATE_TYPE_UNKNOWN", 1},
-		{"put without Maintain exchange rates", http.MethodPut, closingPath, closingBody, "View exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
+		{"put without fx.rate.maintain", http.MethodPut, closingPath, closingBody, "fx.rate.view", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
 		{"put unknown field", http.MethodPut, closingPath, `{"name":"x","extra":1}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
 		{"put wrong type", http.MethodPut, closingPath, `{"name":"x","allowInverse":"yes"}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
 		{"put empty name", http.MethodPut, closingPath, `{}`, allDuties, tenantID, &fakeStore{types: map[string]store.RateType{"CLOSING": {Code: "CLOSING", Name: "Old"}}}, 400, "FX_RATE_INVALID", 1},
 		{"put store failure", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{err: errors.New("pg secret")}, 500, "COM-0500", 1},
 		{"get unknown", http.MethodGet, "/v1/fx/rate-types/NOPE", "", allDuties, tenantID, &fakeStore{}, 404, "FX_RATE_TYPE_UNKNOWN", 0},
-		{"get without View exchange rates", http.MethodGet, closingPath, "", "Maintain exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
+		{"get without fx.rate.view", http.MethodGet, closingPath, "", "fx.rate.maintain", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
 		{"list without tenant", http.MethodGet, typesPath, "", "", "", &fakeStore{}, 401, "AUTH-0001", 0},
 		{"list malformed tenant", http.MethodGet, typesPath, "", allDuties, "not-a-uuid", &fakeStore{}, 401, "AUTH-0001", 0},
 	}

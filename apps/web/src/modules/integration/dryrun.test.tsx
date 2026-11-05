@@ -55,9 +55,9 @@ const submit = (name: string) => fireEvent.click(screen.getByRole("button", { na
 describe("dry-run screens are registered", () => {
   it("routes and nav entries exist with the duties the service enforces", () => {
     const nav = Object.fromEntries(integration.nav.map((n) => [n.to, n.duty]));
-    expect(nav["/integration/punchout"]).toBe("PUR_REQUISITION_CREATE");
-    expect(nav["/integration/self-billing"]).toBe("SELF_BILLING_RECONCILE");
-    expect(nav["/integration/peppol"]).toBe("EINV_OPERATE");
+    expect(nav["/integration/punchout"]).toBe("edi.requisition.create");
+    expect(nav["/integration/self-billing"]).toBe("edi.self-billing.reconcile");
+    expect(nav["/integration/peppol"]).toBe("edi.einvoice.operate");
   });
 });
 

@@ -211,7 +211,7 @@ describe("Go/no-go decision page", () => {
     fireEvent.change(screen.getByLabelText("Evidence for Attested load_test"), { target: { value: "https://e/load" } });
     await userEvent.click(screen.getByRole("button", { name: "Record decision" }));
     let dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("second, different CutoverManager");
+    expect(dialog).toHaveTextContent("second, different migration.cutover.manage");
     await userEvent.click(within(dialog).getByRole("button", { name: "Approve GO" }));
     expect(await screen.findByText(/CUT-1607 GO refused.*\(MIG-0001\)/)).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
@@ -225,7 +225,7 @@ describe("Go/no-go decision page", () => {
     expect(await screen.findByText(/Your approval of the GO is recorded/)).toBeInTheDocument();
   });
 
-  it("lets a second CutoverManager approve a pending GO with its evidence", async () => {
+  it("lets a second migration.cutover.manage holder approve a pending GO with its evidence", async () => {
     const attestedMet = items("MET").map((i) => (i.source === "attested" ? { ...i, status: "MET" as const, detail: "Confirmed: https://e/load" } : i));
     const go: GoNoGoDecision = { ...noGo, decision: "GO", approvers: ["alice", "bob"], decidedBy: "bob", reason: undefined, planVersion: 3, checklist: attestedMet };
     let decided = false;

@@ -16,7 +16,7 @@ import (
 )
 
 // dutyCoA generates certificates of analysis (section 6.33.17).
-const dutyCoA = "QM_COA"
+const dutyCoA = "quality.coa.generate"
 
 // --- stability study lifecycle (FR-33.16) -----------------------------------
 
@@ -65,7 +65,7 @@ func (a *API) transitionStudy(w http.ResponseWriter, r *http.Request) {
 
 // checkReceipt is called by receiving for each receipt line of a PO line and
 // batch before it creates a receiving quality order. The answer uses up the
-// covered quantity, so it takes an Idempotency-Key and QM_ORDER_MAINTAIN.
+// covered quantity, so it takes an Idempotency-Key and quality.order.maintain.
 // skip=true means no receiving order (QM-0128); otherwise receiving creates a
 // PURCHASE_RECEIPT order for normalQty.
 func (a *API) checkReceipt(w http.ResponseWriter, r *http.Request) {

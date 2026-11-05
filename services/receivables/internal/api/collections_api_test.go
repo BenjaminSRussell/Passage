@@ -73,11 +73,11 @@ func TestOpenDispute_Validation(t *testing.T) {
 		status  int
 		field   string
 	}{
-		{"missing key", body("PRICE", "500.00"), nil, "CollectionsMaintain", http.StatusBadRequest, ""},
-		{"without duty", body("PRICE", "500.00"), key, "ARView", http.StatusForbidden, ""},
-		{"lower-case reason", body("price", "500.00"), key, "CollectionsMaintain", http.StatusBadRequest, "reasonCode"},
-		{"zero amount", body("PRICE", "0"), key, "CollectionsMaintain", http.StatusBadRequest, "disputedAmount"},
-		{"valid", body("PRICE", "500.00"), key, "CollectionsMaintain", http.StatusCreated, ""},
+		{"missing key", body("PRICE", "500.00"), nil, "receivables.collection.maintain", http.StatusBadRequest, ""},
+		{"without duty", body("PRICE", "500.00"), key, "receivables.view", http.StatusForbidden, ""},
+		{"lower-case reason", body("price", "500.00"), key, "receivables.collection.maintain", http.StatusBadRequest, "reasonCode"},
+		{"zero amount", body("PRICE", "0"), key, "receivables.collection.maintain", http.StatusBadRequest, "disputedAmount"},
+		{"valid", body("PRICE", "500.00"), key, "receivables.collection.maintain", http.StatusCreated, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,21 +96,21 @@ func TestDisputeActions_RequireIfMatchAndValidResolution(t *testing.T) {
 	cf := &collectionsFake{}
 	h := router(cf)
 	base := "/v1/receivables/disputes/" + testDispute
-	if rec := do(h, http.MethodPost, base+":review", "", "CollectionsMaintain", nil); rec.Code != http.StatusPreconditionRequired {
+	if rec := do(h, http.MethodPost, base+":review", "", "receivables.collection.maintain", nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("review without If-Match: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, base+":review", "", "CollectionsMaintain", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK || cf.disputeTo != "UNDER_REVIEW" {
+	if rec := do(h, http.MethodPost, base+":review", "", "receivables.collection.maintain", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK || cf.disputeTo != "UNDER_REVIEW" {
 		t.Fatalf("review: %d to %q", rec.Code, cf.disputeTo)
 	}
 	bad := `{"resolution":"MAYBE"}`
-	if rec := do(h, http.MethodPost, base+":resolve", bad, "CollectionsMaintain", map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusBadRequest {
+	if rec := do(h, http.MethodPost, base+":resolve", bad, "receivables.collection.maintain", map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad resolution: %d", rec.Code)
 	}
-	rec := do(h, http.MethodPost, base+":resolve", `{"resolution":"CREDIT","note":"credit memo CM-7"}`, "CollectionsMaintain", map[string]string{"If-Match": `"2"`})
+	rec := do(h, http.MethodPost, base+":resolve", `{"resolution":"CREDIT","note":"credit memo CM-7"}`, "receivables.collection.maintain", map[string]string{"If-Match": `"2"`})
 	if rec.Code != http.StatusOK || cf.disputeTo != "RESOLVED_CREDIT" || rec.Header().Get("ETag") != `"3"` {
 		t.Fatalf("resolve: %d to %q etag %q", rec.Code, cf.disputeTo, rec.Header().Get("ETag"))
 	}
-	if rec := do(h, http.MethodPost, base+":escalate", "", "CollectionsMaintain", map[string]string{"If-Match": `"3"`}); rec.Code != http.StatusNotFound {
+	if rec := do(h, http.MethodPost, base+":escalate", "", "receivables.collection.maintain", map[string]string{"If-Match": `"3"`}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown action: %d", rec.Code)
 	}
 }
@@ -119,12 +119,12 @@ func TestCreatePromise_Validation(t *testing.T) {
 	h := router(&collectionsFake{})
 	key := map[string]string{"Idempotency-Key": "p-1"}
 	body := `{"legalEntityId":"` + testLE + `","openItemId":"` + testItem + `","amount":"200.00","promiseDate":"2099-04-10"}`
-	if rec := do(h, http.MethodPost, "/v1/receivables/promises", body, "CollectionsMaintain", key); rec.Code != http.StatusCreated {
+	if rec := do(h, http.MethodPost, "/v1/receivables/promises", body, "receivables.collection.maintain", key); rec.Code != http.StatusCreated {
 		t.Fatalf("valid promise: %d %s", rec.Code, rec.Body.String())
 	}
 	for _, date := range []string{"10/04/2027", "2020-01-01"} {
 		bad := strings.Replace(body, "2099-04-10", date, 1)
-		if rec := do(h, http.MethodPost, "/v1/receivables/promises", bad, "CollectionsMaintain", key); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "promiseDate") {
+		if rec := do(h, http.MethodPost, "/v1/receivables/promises", bad, "receivables.collection.maintain", key); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "promiseDate") {
 			t.Fatalf("promise date %s: %d %s", date, rec.Code, rec.Body.String())
 		}
 	}
@@ -135,22 +135,22 @@ func TestDunningRun_CreateReviewIssue(t *testing.T) {
 	h := router(cf)
 	key := map[string]string{"Idempotency-Key": "r-1"}
 	bad := `{"legalEntityId":"` + testLE + `","runDate":"2027-03-31","graceDays":99}`
-	if rec := do(h, http.MethodPost, "/v1/receivables/dunning-runs", bad, "DunningRun", key); rec.Code != http.StatusBadRequest {
+	if rec := do(h, http.MethodPost, "/v1/receivables/dunning-runs", bad, "receivables.dunning.run", key); rec.Code != http.StatusBadRequest {
 		t.Fatalf("grace 99: %d", rec.Code)
 	}
 	good := `{"legalEntityId":"` + testLE + `","runDate":"2027-03-31"}`
-	rec := do(h, http.MethodPost, "/v1/receivables/dunning-runs", good, "DunningRun", key)
+	rec := do(h, http.MethodPost, "/v1/receivables/dunning-runs", good, "receivables.dunning.run", key)
 	if rec.Code != http.StatusCreated || cf.runGrace != 5 || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("create: %d grace %d etag %q", rec.Code, cf.runGrace, rec.Header().Get("ETag"))
 	}
 	run := "/v1/receivables/dunning-runs/" + testRun
-	if rec := do(h, http.MethodPost, run+":issue", "", "DunningRun", nil); rec.Code != http.StatusPreconditionRequired {
+	if rec := do(h, http.MethodPost, run+":issue", "", "receivables.dunning.run", nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("issue without If-Match: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, run+":issue", "", "DunningRun", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK || cf.runTo != "ISSUED" {
+	if rec := do(h, http.MethodPost, run+":issue", "", "receivables.dunning.run", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK || cf.runTo != "ISSUED" {
 		t.Fatalf("issue: %d to %q", rec.Code, cf.runTo)
 	}
-	if rec := do(h, http.MethodGet, run, "", "ARView", nil); rec.Code != http.StatusOK {
+	if rec := do(h, http.MethodGet, run, "", "receivables.view", nil); rec.Code != http.StatusOK {
 		t.Fatalf("get: %d", rec.Code)
 	}
 	if rec := do(h, http.MethodGet, run, "", "", nil); rec.Code != http.StatusForbidden {
@@ -161,18 +161,18 @@ func TestDunningRun_CreateReviewIssue(t *testing.T) {
 func TestInterest_PostNeedsKeyAndValidRate(t *testing.T) {
 	h := router(&collectionsFake{})
 	body := `{"legalEntityId":"` + testLE + `","calculationDate":"2027-03-31","annualRate":"0.0900","basis":"ACT_365"}`
-	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:post", body, "InterestPost", nil); rec.Code != http.StatusBadRequest {
+	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:post", body, "receivables.interest.post", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("post without key: %d", rec.Code)
 	}
 	key := map[string]string{"Idempotency-Key": "i-1"}
-	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:post", body, "InterestPost", key); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "2027-03") {
+	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:post", body, "receivables.interest.post", key); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "2027-03") {
 		t.Fatalf("post: %d %s", rec.Code, rec.Body.String())
 	}
 	over := strings.Replace(body, `"0.0900"`, `"9"`, 1)
-	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:calculate", over, "InterestPost", nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "annualRate") {
+	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:calculate", over, "receivables.interest.post", nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "annualRate") {
 		t.Fatalf("rate 9: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:calculate", body, "ARView", nil); rec.Code != http.StatusForbidden {
+	if rec := do(h, http.MethodPost, "/v1/receivables/interest-notes:calculate", body, "receivables.view", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("calculate without duty: %d", rec.Code)
 	}
 }
@@ -184,21 +184,21 @@ func TestCollectionsLists_ValidateFiltersAndNeedView(t *testing.T) {
 		duties string
 		status int
 	}{
-		{"/v1/receivables/disputes?status=active", "ARView", http.StatusOK},
-		{"/v1/receivables/disputes?status=OPEN&customer=" + testItem, "ARView", http.StatusOK},
-		{"/v1/receivables/disputes?status=CLOSED", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/disputes?openItem=nope", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/disputes", "CollectionsMaintain", http.StatusForbidden},
-		{"/v1/receivables/disputes/" + testDispute, "ARView", http.StatusOK},
-		{"/v1/receivables/disputes/nope", "ARView", http.StatusNotFound},
-		{"/v1/receivables/promises?openItem=" + testItem, "ARView", http.StatusOK},
-		{"/v1/receivables/promises?customer=x", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/dunning-runs?status=ISSUED", "ARView", http.StatusOK},
-		{"/v1/receivables/dunning-runs?status=SENT", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/dunning-runs?limit=0", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/interest-notes", "ARView", http.StatusOK},
-		{"/v1/receivables/interest-notes?customer=x", "ARView", http.StatusBadRequest},
-		{"/v1/receivables/lockbox/imports", "ARView", http.StatusOK},
+		{"/v1/receivables/disputes?status=active", "receivables.view", http.StatusOK},
+		{"/v1/receivables/disputes?status=OPEN&customer=" + testItem, "receivables.view", http.StatusOK},
+		{"/v1/receivables/disputes?status=CLOSED", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/disputes?openItem=nope", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/disputes", "receivables.collection.maintain", http.StatusForbidden},
+		{"/v1/receivables/disputes/" + testDispute, "receivables.view", http.StatusOK},
+		{"/v1/receivables/disputes/nope", "receivables.view", http.StatusNotFound},
+		{"/v1/receivables/promises?openItem=" + testItem, "receivables.view", http.StatusOK},
+		{"/v1/receivables/promises?customer=x", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/dunning-runs?status=ISSUED", "receivables.view", http.StatusOK},
+		{"/v1/receivables/dunning-runs?status=SENT", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/dunning-runs?limit=0", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/interest-notes", "receivables.view", http.StatusOK},
+		{"/v1/receivables/interest-notes?customer=x", "receivables.view", http.StatusBadRequest},
+		{"/v1/receivables/lockbox/imports", "receivables.view", http.StatusOK},
 		{"/v1/receivables/lockbox/imports", "", http.StatusForbidden},
 	}
 	for _, tc := range tests {
@@ -217,13 +217,13 @@ func TestCollectionsLists_ValidateFiltersAndNeedView(t *testing.T) {
 func TestDunningRunAction_UnknownActionAndDuty(t *testing.T) {
 	h := router(&collectionsFake{})
 	run := "/v1/receivables/dunning-runs/" + testRun
-	if rec := do(h, http.MethodPost, run+":print", "", "DunningRun", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusNotFound {
+	if rec := do(h, http.MethodPost, run+":print", "", "receivables.dunning.run", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown action: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, run+":review", "", "ARView", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusForbidden {
-		t.Fatalf("review without DunningRun: %d", rec.Code)
+	if rec := do(h, http.MethodPost, run+":review", "", "receivables.view", map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("review without receivables.dunning.run: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, "/v1/receivables/dunning-runs", `{}`, "ARView", map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without DunningRun: %d", rec.Code)
+	if rec := do(h, http.MethodPost, "/v1/receivables/dunning-runs", `{}`, "receivables.view", map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("create without receivables.dunning.run: %d", rec.Code)
 	}
 }

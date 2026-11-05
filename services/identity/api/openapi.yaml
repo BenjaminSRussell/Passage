@@ -9,7 +9,7 @@ paths:
   /v1/identity/users/{id}/effective-permissions:
     get:
       operationId: getUserEffectivePermissions
-      x-passage-duty: View effective permissions
+      x-passage-duty: identity.effective-permission.view
       description: >-
         Evaluates every route and method in the seeded duty catalogue for the user's active role
         assignments. The role of an assignment holds a duty name until the role catalogue exists;
@@ -20,7 +20,7 @@ paths:
         (issue #83) lands, whereas live authorization reads the JWT duties claim. A caller whose
         legal-entity scope is not all entities receives 403, because row-level security would hide
         tenant-wide and other-entity assignments and the report would be incomplete. Callers holding
-        either View effective permissions or Maintain users are accepted.
+        either identity.effective-permission.view or identity.user.maintain are accepted.
       security:
         - gatewayHeaders: []
       parameters:
@@ -49,10 +49,10 @@ paths:
   /v1/identity/users:
     get:
       operationId: listUsers
-      x-passage-duty: Maintain users
+      x-passage-duty: identity.user.maintain
       description: >-
         Lists the caller's tenant's users by id, keyset-paged. Users belong to the tenant, so every caller holding
-        Maintain users sees all of them; legalEntityId narrows to users with an active role assignment for that
+        identity.user.maintain sees all of them; legalEntityId narrows to users with an active role assignment for that
         legal entity that the caller's own legal-entity scope can see. q is a case-insensitive substring match on display
         name, email and IdP subject.
       security: [{ gatewayHeaders: [] }]
@@ -74,7 +74,7 @@ paths:
   /v1/identity/users/{id}:
     get:
       operationId: getUser
-      x-passage-duty: Maintain users
+      x-passage-duty: identity.user.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
@@ -91,7 +91,7 @@ paths:
   /v1/authz/roles:
     get:
       operationId: listRoles
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       description: Lists the role catalogue. Until roles are first-class a role is an assignable (not service-only) duty and its name is the duty name that role assignments hold. q is a case-insensitive substring filter on the name.
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -107,7 +107,7 @@ paths:
   /v1/authz/roles/{name}:
     get:
       operationId: getRole
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       description: A role with the duties it holds and the routes each duty grants. A service-only duty is not a role (404 IDN-ROLE-NOT-FOUND).
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -123,7 +123,7 @@ paths:
   /v1/authz/duties:
     get:
       operationId: listDuties
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       description: Lists every seeded duty with its route count, sorted by name. q is a case-insensitive substring filter; serviceOnly narrows to service-only or person duties.
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -140,7 +140,7 @@ paths:
   /v1/authz/duties/{name}:
     get:
       operationId: getDuty
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
@@ -155,8 +155,8 @@ paths:
   /v1/tenants:
     post:
       operationId: createTenant
-      x-passage-duty: Maintain tenants
-      description: Operator only. Provisions a tenant; the caller must hold Maintain tenants and belong to the platform operator tenant. Audited and emitted as dev.passage.identity.tenant.created.v1.
+      x-passage-duty: identity.tenant.maintain
+      description: Operator only. Provisions a tenant; the caller must hold identity.tenant.maintain and belong to the platform operator tenant. Audited and emitted as dev.passage.identity.tenant.created.v1.
       security: [{ gatewayHeaders: [] }]
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }]
       requestBody:
@@ -173,7 +173,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listTenants
-      x-passage-duty: Maintain tenants
+      x-passage-duty: identity.tenant.maintain
       description: Operator only. Lists all tenants by id, keyset-paged.
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -190,7 +190,7 @@ paths:
   /v1/tenants/{id}:
     get:
       operationId: getTenant
-      x-passage-duty: Maintain tenants
+      x-passage-duty: identity.tenant.maintain
       description: Operator only.
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -207,7 +207,7 @@ paths:
   /v1/tenants/{id}/admins:
     post:
       operationId: grantTenantAdministrator
-      x-passage-duty: Maintain tenants
+      x-passage-duty: identity.tenant.maintain
       description: Operator only. Grants the tenant-wide tenant.administer duty to an active user of an active tenant other than the operator tenant, and never to the caller. Audited in the target and operator tenants.
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -231,7 +231,7 @@ paths:
   /v1/legal-entities:
     post:
       operationId: createLegalEntity
-      x-passage-duty: Maintain legal entities
+      x-passage-duty: identity.legal-entity.maintain
       description: Creates a legal entity in the caller's tenant. Requires access to all legal entities. Audited and emitted as dev.passage.identity.legalentity.created.v1.
       security: [{ gatewayHeaders: [] }]
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }]
@@ -249,7 +249,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listLegalEntities
-      x-passage-duty: Maintain legal entities
+      x-passage-duty: identity.legal-entity.maintain
       description: Lists the caller's tenant's legal entities that are inside the caller's legal-entity scope.
       security: [{ gatewayHeaders: [] }]
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/After' }]
@@ -262,7 +262,7 @@ paths:
   /v1/legal-entities/{id}:
     get:
       operationId: getLegalEntity
-      x-passage-duty: Maintain legal entities
+      x-passage-duty: identity.legal-entity.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
@@ -279,14 +279,14 @@ paths:
   /v1/authz/assignments:
     post:
       operationId: assignRole
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       description: >-
         Assigns a role (a seeded duty name until the role catalogue exists) to a user, tenant-wide or for one
         legal entity, effective from validFrom (default now) until validTo (default open-ended). The database
         rejects an overlapping assignment of the same role for the same user and legal entity (409
         IDN-ASSIGNMENT-OVERLAP). A tenant-wide assignment needs a request without a legal-entity scope from a
-        caller holding Maintain security roles. validFrom more than five minutes in the past is refused, and a
-        validTo that is not in the future is refused (a window that has already closed grants nothing). A caller cannot grant a role to themselves (403 IAM-0416), Maintain tenants can only be granted
+        caller holding identity.security-role.maintain. validFrom more than five minutes in the past is refused, and a
+        validTo that is not in the future is refused (a window that has already closed grants nothing). A caller cannot grant a role to themselves (403 IAM-0416), identity.tenant.maintain can only be granted
         in the operator tenant (403), and an inactive legal entity is refused (422 IDN-LEGAL-ENTITY-INACTIVE).
         Audited and emitted as dev.passage.identity.roleassignment.assigned.v1.
       security: [{ gatewayHeaders: [] }]
@@ -307,7 +307,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listRoleAssignments
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       description: Lists assignments by user (userId), by role (role), or both; at least one of userId or role is required (400 otherwise). active=true keeps assignments in effect now.
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -328,7 +328,7 @@ paths:
   /v1/authz/assignments/{id}:
     get:
       operationId: getRoleAssignment
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
@@ -344,7 +344,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     delete:
       operationId: revokeRoleAssignment
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       description: Alias of POST .../end; the assignment is end-dated, never deleted. An optional body may carry validTo.
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -369,7 +369,7 @@ paths:
   /v1/authz/assignments/{id}/end:
     post:
       operationId: endRoleAssignment
-      x-passage-duty: Maintain security roles
+      x-passage-duty: identity.security-role.maintain
       description: >-
         End-dates an assignment at validTo (default now, or validFrom for a future-dated assignment, which cancels
         it: the empty range grants nothing). validTo may lag the server clock by up to five minutes, must not
@@ -413,7 +413,7 @@ components:
       name: X-Passage-Duties
       in: header
       required: false
-      description: Comma-separated duties of the caller; View effective permissions or Maintain users is required.
+      description: Comma-separated duties of the caller; identity.effective-permission.view or identity.user.maintain is required.
       schema: { type: string }
     LegalEntityHeader:
       name: X-Passage-Legal-Entity

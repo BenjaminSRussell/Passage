@@ -119,7 +119,7 @@ func TestPlans40_SimulatedYear(t *testing.T) {
 	readJSON(t, "../../testdata/eam-plans-40/expected.json", &want)
 
 	pool := testkit.DB(t)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EamPlanner", "EamPlanAdmin", "EamCounterRegister")
+	ctx := testkit.Ctx(testkit.TenantID(1), "eam.work.plan", "eam.plan.admin", "eam.counter.register")
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

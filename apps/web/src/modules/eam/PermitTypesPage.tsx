@@ -35,7 +35,7 @@ export function validatePermitType(values: TypeValues): { errors: Partial<Record
   };
 }
 
-/** Permit setup (EamSetupAdmin): permit types, and the permit types each job type requires before work starts (BR-44.11). */
+/** Permit setup (eam.setup.admin): permit types, and the permit types each job type requires before work starts (BR-44.11). */
 export function PermitTypesPage() {
   const [round, setRound] = useState(0);
   const types = useLoad((signal) => listPermitTypes(signal), `permit-types|${round}`);

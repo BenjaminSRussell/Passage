@@ -10,7 +10,7 @@ import { api, fixture, guard, loopbackValidate, ownerUrl, receiver, type Api, ty
 
 const T0 = 1_800_000_000;
 // The administrator holds the duties the tests grant to clients: a client can be granted only what its granter holds.
-const ADMIN = ["hub.client.write", "hub.delivery.read", "hub.subscription.write", "sales.order.read", "sales.order.write", "VendorInvoicePost", "Maintain users"];
+const ADMIN = ["hub.client.write", "hub.delivery.read", "hub.subscription.write", "sales.order.read", "sales.order.write", "receiving.vendor-invoice.post", "identity.user.maintain"];
 const EDGE = ["hub.client.consume"];
 
 describe("API client rules", () => {
@@ -20,8 +20,8 @@ describe("API client rules", () => {
       expect(() => validateClientId(bad), bad).toThrow(RangeError);
     }
   });
-  test("scopes are duty names in every catalogue style, 1 to 50", () => {
-    expect(() => validateScopes(["sales.order.read", "VendorInvoicePost", "Maintain users", "ARView", "TMS_TRACK_INGEST", "inventory.ownership-change.read"])).not.toThrow();
+  test("scopes are duty-shaped names, 1 to 50", () => {
+    expect(() => validateScopes(["sales.order.read", "receiving.vendor-invoice.post", "identity.user.maintain", "receivables.view", "transport.tracking-event.ingest", "inventory.ownership-change.read"])).not.toThrow();
     expect(() => validateScopes([])).toThrow(RangeError);
     for (const bad of ["a,b", "1abc", " lead", "trail ", ".dot", "x".repeat(101), "semi;colon"]) {
       expect(() => validateScopes([bad]), bad).toThrow(RangeError);
@@ -113,7 +113,7 @@ describe.skipIf(ownerUrl === undefined)("API clients on Postgres", () => {
       expect(res.status, JSON.stringify(bad)).toBe(400);
     }
     expect((await register(t, { sandboxTenantId: randomUUID() })).status).toBe(201);
-    expect((await register(t, { scopes: ["VendorInvoicePost", "Maintain users"] })).body.scopes).toEqual(["VendorInvoicePost", "Maintain users"]);
+    expect((await register(t, { scopes: ["receiving.vendor-invoice.post", "identity.user.maintain"] })).body.scopes).toEqual(["receiving.vendor-invoice.post", "identity.user.maintain"]);
   });
 
   test("PATCH is versioned, rewrites the quota and writes an updated event; a stale version is 409", async () => {
@@ -132,16 +132,16 @@ describe.skipIf(ownerUrl === undefined)("API clients on Postgres", () => {
     const t = randomUUID();
     const clerk = ["hub.client.write", "hub.delivery.read", "sales.order.read"];
     const denied = await hub.call("POST", "/v1/hub/clients", { tenant: t, duties: clerk }, {
-      clientId: `acme-${randomUUID().slice(0, 8)}`, name: "Acme", scopes: ["sales.order.read", "ledger.journal.post", "Maintain users"], ownerContact: "it@acme.example",
+      clientId: `acme-${randomUUID().slice(0, 8)}`, name: "Acme", scopes: ["sales.order.read", "ledger.journal.post", "identity.user.maintain"], ownerContact: "it@acme.example",
     });
     expect(denied.status).toBe(403);
-    expect(denied.body.detail).toContain("ledger.journal.post, Maintain users");
+    expect(denied.body.detail).toContain("ledger.journal.post, identity.user.maintain");
     expect(denied.body.detail).not.toContain("sales.order.read,");
     expect((await events(t)).length).toBe(0);
     // Registered by an administrator with more duties; the clerk may keep and drop scopes, not add one.
     const c = (await register(t, { scopes: ["sales.order.read", "sales.order.write"] })).body;
     const patch = (scopes: string[], version: number) => hub.call("PATCH", `/v1/hub/clients/${c.id}`, { tenant: t, duties: clerk }, { version, scopes });
-    expect((await patch(["sales.order.read", "sales.order.write", "VendorInvoicePost"], 1)).status).toBe(403);
+    expect((await patch(["sales.order.read", "sales.order.write", "receiving.vendor-invoice.post"], 1)).status).toBe(403);
     expect((await patch(["sales.order.read", "sales.order.write"], 1)).status).toBe(200);
     expect((await patch(["sales.order.write"], 2)).body.scopes).toEqual(["sales.order.write"]);
     // Other fields never need the scopes: a clerk without them can still change the quota.

@@ -10,6 +10,7 @@ import {
   SERVICE_NAME,
   serviceTokenSignerFromEnv,
   PARTY_GRANT,
+  PARTY_MERGE_GRANT,
   TRANSPORT_GRANT,
 } from "../src/serviceToken.js";
 
@@ -38,7 +39,7 @@ describe("service token", () => {
       engineering: [...ENGINEERING_GRANT],
       quality: [...QUALITY_GRANT],
       transport: [...TRANSPORT_GRANT],
-      party: [...PARTY_GRANT],
+      party: [...PARTY_GRANT, ...PARTY_MERGE_GRANT],
     });
   });
 

@@ -23,8 +23,8 @@ paths:
         As this worker sees them. `halted` is true when runs for the caller's
         tenant are stopped for any reason, including a worker that has not
         heard from the kill-switch stream for 10 s (`stale`, fail-closed).
-        Readable with AgentAdmin or PlatformAdmin.
-      x-passage-duty: AgentAdmin
+        Readable with agents.admin or platform.global.admin.
+      x-passage-duty: agents.admin
       responses:
         "200":
           description: Kill switch status.
@@ -37,14 +37,14 @@ paths:
       operationId: toggleKillSwitch
       summary: Halt or resume agent runs for a tenant or globally (AC-47.6)
       description: |
-        TENANT scope needs AgentAdmin and the caller's own tenant (AGT-0403
-        otherwise). GLOBAL scope needs PlatformAdmin (break-glass). Idempotent
+        TENANT scope needs agents.admin and the caller's own tenant (AGT-0403
+        otherwise). GLOBAL scope needs platform.global.admin (break-glass). Idempotent
         by scope: asking for the state the switch is already in returns its
         current toggle and publishes nothing. Otherwise
         dev.passage.agent.killswitch.changed.v1 is published before the
         response, and only then applied to this worker. Versions are strictly
         increasing so workers ignore duplicates.
-      x-passage-duty: AgentAdmin
+      x-passage-duty: agents.admin
       x-passage-approval: none
       requestBody:
         required: true

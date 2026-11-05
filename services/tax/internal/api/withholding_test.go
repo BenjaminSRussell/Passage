@@ -11,7 +11,7 @@ import (
 
 const (
 	withholdingPath = "/v1/tax/withholding/calculate"
-	withholdingDuty = "Calculate withholding tax"
+	withholdingDuty = "tax.withholding.calculate"
 	withholdingBody = `{"currency":"USD","party_type":"vendor","payment_date":"2026-06-30","code":"NEC","gross_amount":"1000.00","paid_to_date":"0",` +
 		`"codes":[{"code":"NEC","jurisdiction":"US","income_type":"nonemployee_compensation","rates":[{"valid_from":"2024-01-01","rate_pct":"24","threshold":"600"}]}]}`
 )

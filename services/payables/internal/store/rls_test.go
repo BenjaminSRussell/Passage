@@ -35,6 +35,13 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			LegalEntity: true,
 		},
 		{
+			Table:       "ap_employee_vendor",
+			Insert:      `insert into ap_employee_vendor (tenant_id, legal_entity_id, worker_id, vendor_id, registered_by) values ($1, $2, $3, $4, 'hana')`,
+			Args:        func(tenantID, entityID string) []any { return []any{tenantID, entityID, ids.New(), ids.New()} },
+			LegalEntity: true,
+			NoUpdate:    true,
+		},
+		{
 			Table: "ap_payment_proposal",
 			Insert: `insert into ap_payment_proposal (tenant_id, id, legal_entity_id, run_date, run_id, due_by, rate_date, legal_entity_currency, payment_method, request_hash, status, created_by)
 				values ($1, $2, $3, '2027-03-31', 'run-1', '2027-03-31', '2027-03-31', 'USD', 'TRANSFER', 'hash', 'DRAFT', 'alice')`,

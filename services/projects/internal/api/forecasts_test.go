@@ -64,7 +64,7 @@ func TestTransfer_PreviewResolveAndLock(t *testing.T) {
 	}
 
 	if rec := as(t, h, []string{DutyInquire}, http.MethodPost, path, `{}`, map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusForbidden {
-		t.Fatalf("transfer without ProjPlan: %d", rec.Code)
+		t.Fatalf("transfer without projects.plan: %d", rec.Code)
 	}
 	if rec := as(t, h, []string{DutyPlan}, http.MethodPost, path, `{}`, nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("transfer without If-Match: %d", rec.Code)
@@ -127,7 +127,7 @@ func TestForecasts_CreateListReplaceAndCompare(t *testing.T) {
 	planner := userCtx("planner-1", DutyPlan, DutyInquire)
 
 	if rec := do(t, h, inquirer, http.MethodPost, "/v1/projects/P-FC/forecasts", forecastBody, key("f1")); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without ProjPlan: %d", rec.Code)
+		t.Fatalf("create without projects.plan: %d", rec.Code)
 	}
 	if rec := do(t, h, planner, http.MethodPost, "/v1/projects/P-FC/forecasts", forecastBody, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("create without key: %d", rec.Code)

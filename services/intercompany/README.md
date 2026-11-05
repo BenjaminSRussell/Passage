@@ -15,9 +15,9 @@ Nothing is persisted and no event is published yet.
 | Area | Code | Status |
 |---|---|---|
 | Due-to / due-from derivation, BR-40.4, AC-40.4, counterparty at the document rate (FR-40.5) | `internal/domain/journal.go` | built, unit and property tests |
-| Journal preview `POST /v1/interco/journals:preview` (duty `IntercompanyPost`) | `internal/api` | built, tests |
+| Journal preview `POST /v1/interco/journals:preview` (duty `intercompany.post`) | `internal/api` | built, tests |
 | Reconciliation classifier, FR-40.6 / BR-40.5, 50 planted mismatches flagged and 50 clean pairs matched (AC-40.5 shape) | `internal/domain/recon.go` | built, unit tests (`TestClassify_PlantedMismatches`) |
-| Reconciliation classify `POST /v1/interco/reconciliations:classify` (duty `IntercompanyReconcile`) | `internal/api` | built, tests |
+| Reconciliation classify `POST /v1/interco/reconciliations:classify` (duty `intercompany.reconcile`) | `internal/api` | built, tests |
 | Mirror saga state logic, FR-40.2 / BR-40.1 | `internal/domain/mirror.go` | built, property test (AC-40.1 / AC-40.2 shape, 1,000 random orders) |
 | Partner policy validation, FR-40.1; tolerance BR-40.3 | `internal/domain/pairing.go` | built, unit tests |
 | IC charge cost-plus pricing, FR-40.13 (AC-40.11 arithmetic) | `internal/domain/charge.go` | built, unit tests |
@@ -38,12 +38,12 @@ stored, posted or published.
 |---|---|---|
 | Transfer price resolution by source transaction date, BR-40.12 (IC-0821; two rows effective on one date are rejected) | `internal/domain/charge_settlement.go` | built, unit tests |
 | Transfer-priced charge pricing (Cost, CostPlus, Table) and Journal-mode legs in lender and borrower, FR-40.13, AC-40.11 (528.00 / 480.00 / 48.00); a table price below cost posts the IC loss as a debit | `internal/domain/charge_settlement.go` | built, unit tests |
-| Charge preview `POST /v1/interco/charges:preview` (duty `IntercompanyPost`) | `internal/api/settlement.go` | built, tests |
+| Charge preview `POST /v1/interco/charges:preview` (duty `intercompany.post`) | `internal/api/settlement.go` | built, tests |
 | Centralized payments: pay and receive on behalf legs with due-to / due-from from the matrix, amount rounded to the minor unit, FR-40.12, AC-40.10 | `internal/domain/centralized.go` | built, unit tests |
-| Centralized payment preview `POST /v1/interco/centralized-payments:preview` (duty `IntercompanyConfigure`) | `internal/api/settlement.go` | built, tests |
+| Centralized payment preview `POST /v1/interco/centralized-payments:preview` (duty `intercompany.configure`) | `internal/api/settlement.go` | built, tests |
 | Planning group run order: buyers before suppliers, each entity once; cycles (strongly connected entities) need an explicit sequence for every member and run in sequence order while edges around them are kept, else IC-0816, FR-40.15 / BR-40.13 | `internal/domain/planning.go` | built, unit tests and rapid properties over acyclic and cyclic partner graphs |
 | IC demand at requested date minus transport lead time (AC-40.16) and stale suppliers of a replanned buyer (IC-0815) | `internal/domain/planning.go` | built, unit tests |
-| Planning sequence `POST /v1/interco/planning-groups:sequence` (duty `IntercompanyPlan`) | `internal/api/planning.go` | built, tests |
+| Planning sequence `POST /v1/interco/planning-groups:sequence` (duty `intercompany.plan`) | `internal/api/planning.go` | built, tests |
 | OpenAPI matches the mounted routes and duties | `internal/api/contract_test.go` | built, test |
 | Web pages: `/intercompany/charges`, `/intercompany/centralized-payments`, `/intercompany/planning` | `apps/web/src/modules/intercompany` | built, vitest |
 
@@ -57,11 +57,11 @@ Still nothing is stored, posted or published.
 | Area | Code | Status |
 |---|---|---|
 | Direct delivery chain check: customer order and IC purchase in the buyer, IC sales order in the seller of an active pairing (else IC-0801), three distinct documents with one quantity; the seller's packing slip posts the buyer's product receipt and customer packing slip at the shipped quantity (partial allowed, never above the IC sales order), FR-40.3, AC-40.3 | `internal/domain/chain.go` | built, unit tests |
-| Chain preview `POST /v1/interco/chains:preview` (duty `IntercompanyView`) | `internal/api/slice3.go` | built, tests |
+| Chain preview `POST /v1/interco/chains:preview` (duty `intercompany.view`) | `internal/api/slice3.go` | built, tests |
 | Transfer-pricing evidence file per entity pair and period as CSV (seller, buyer, period, item, quantity, currency, price, cost, margin, margin %, basis), amounts at the currency minor unit, spreadsheet formula cells neutralised, FR-40.4 (PRD open question 3: CSV) | `internal/domain/transfer.go` | built, unit tests |
-| Evidence export `POST /v1/interco/transfer-pricing/evidence:export` (duty `IntercompanyView`, `text/csv` with a sanitised `Content-Disposition` file name) | `internal/api/slice3.go` | built, tests |
+| Evidence export `POST /v1/interco/transfer-pricing/evidence:export` (duty `intercompany.view`, `text/csv` with a sanitised `Content-Disposition` file name) | `internal/api/slice3.go` | built, tests |
 | Centralized payment reversal on a bank return: every leg flips side in both entities under the original pair id, BR-40.11 | `internal/domain/reversal.go` | built, unit tests |
-| Reversal preview `POST /v1/interco/centralized-payments/reversals:preview` (duty `IntercompanyConfigure`; takes the original payment and its pair id) | `internal/api/slice3.go` | built, tests |
+| Reversal preview `POST /v1/interco/centralized-payments/reversals:preview` (duty `intercompany.configure`; takes the original payment and its pair id) | `internal/api/slice3.go` | built, tests |
 | Reconciliation summary `blocking` flag: true while any item is a Mismatch (FR-40.6 gate for CNS-0901) | `internal/api/api.go` | built, tests |
 | Web pages: `/intercompany/chains`, `/intercompany/transfer-pricing`, reversal on `/intercompany/centralized-payments` | `apps/web/src/modules/intercompany` | built, vitest |
 
@@ -76,12 +76,12 @@ order change against a stored pairing, and the partner screens.
 |---|---|---|
 | Migration `0001_partners.sql`: `outbox`, `idempotency_keys`, `intercompany_partner` (tenant_id first, ENABLE + FORCE RLS with the `dbx.RLSPolicy` tenant policy, percentages numeric, one active pairing per direction as a partial unique index) | `migrations/` | built, store tests incl. RLS as the non-bypass role |
 | Pairings, FR-40.1: seller entity's IC customer and buyer entity's IC vendor, active flag, action policy (defaults auto-create on, auto-post off), pricing policy and markup, BR-40.3 tolerance (price %, date days); the direction never changes | `internal/domain/partner_record.go`, `internal/store/partners.go` | built, unit and store tests |
-| `POST /v1/interco/partners` (duty `IntercompanyConfigure`, `Idempotency-Key` required; a retry replays the stored response, a reused key with another body is IC-0841, a second active pairing for the direction IC-0840) | `internal/api/partners.go` | built, tests (incl. concurrent same-key requests) |
-| `GET /v1/interco/partners` (filters `entity`, `active`, keyset paging `after` / `limit`) and `GET /v1/interco/partners/{id}` with `ETag` (duty `IntercompanyView`) | `internal/api/partners.go` | built, tests |
-| `PATCH /v1/interco/partners/{id}` (duty `IntercompanyConfigure`, `If-Match` required: 428 missing, 412 stale, IC-0843): policy change, activate, deactivate; version + 1 and `dev.passage.interco.partner.updated.v1` with the changed fields; a no-op patch keeps the version | `internal/store/partners.go` | built, tests |
+| `POST /v1/interco/partners` (duty `intercompany.configure`, `Idempotency-Key` required; a retry replays the stored response, a reused key with another body is IC-0841, a second active pairing for the direction IC-0840) | `internal/api/partners.go` | built, tests (incl. concurrent same-key requests) |
+| `GET /v1/interco/partners` (filters `entity`, `active`, keyset paging `after` / `limit`) and `GET /v1/interco/partners/{id}` with `ETag` (duty `intercompany.view`) | `internal/api/partners.go` | built, tests |
+| `PATCH /v1/interco/partners/{id}` (duty `intercompany.configure`, `If-Match` required: 428 missing, 412 stale, IC-0843): policy change, activate, deactivate; version + 1 and `dev.passage.interco.partner.updated.v1` with the changed fields; a no-op patch keeps the version | `internal/store/partners.go` | built, tests |
 | Events `dev.passage.interco.partner.created.v1` / `updated.v1` written through the outbox in the same transaction (not in the PRD event table; added for the saga worker and the sales and procurement services) | `internal/events`, `events/asyncapi.yaml` | built, contract test |
-| IC line pricing from the stored policy, FR-40.4: PriceList, CostPlus with the pairing's markup, TransferPriceTable by the item row effective on the line date (IC-0821), extended amount rounded once to the minor unit, pricing basis returned as the link will record it; an inactive pairing is IC-0801. `POST /v1/interco/partners/{id}/lines:price` (duty `IntercompanyView`; transfer prices are sent with the request) | `internal/domain/line_pricing.go`, `internal/api/partners.go` | built, unit and API tests |
-| Linked order change decision, BR-40.3 / IC-0804: any quantity change, a price move beyond the tolerance % or a date move beyond the tolerance days sends the mirror PO for re-approval, with every breach listed. `POST /v1/interco/partners/{id}/changes:evaluate` (duty `IntercompanyView`) | `internal/domain/order_change.go`, `internal/api/partners.go` | built, unit, rapid and API tests |
+| IC line pricing from the stored policy, FR-40.4: PriceList, CostPlus with the pairing's markup, TransferPriceTable by the item row effective on the line date (IC-0821), extended amount rounded once to the minor unit, pricing basis returned as the link will record it; an inactive pairing is IC-0801. `POST /v1/interco/partners/{id}/lines:price` (duty `intercompany.view`; transfer prices are sent with the request) | `internal/domain/line_pricing.go`, `internal/api/partners.go` | built, unit and API tests |
+| Linked order change decision, BR-40.3 / IC-0804: any quantity change, a price move beyond the tolerance % or a date move beyond the tolerance days sends the mirror PO for re-approval, with every breach listed. `POST /v1/interco/partners/{id}/changes:evaluate` (duty `intercompany.view`) | `internal/domain/order_change.go`, `internal/api/partners.go` | built, unit, rapid and API tests |
 | Web pages: `/intercompany/partners` (list with filter, paging, loading, empty and error states), `/intercompany/partners/new` (create with an Idempotency-Key kept across retries), `/intercompany/partners/:id` (policy, edit with If-Match and conflict reload, activate / deactivate, price a line, check an order change) | `apps/web/src/modules/intercompany` | built, vitest |
 
 Remaining deliverables and acceptance criteria are listed in

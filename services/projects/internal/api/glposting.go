@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	DutyGLPost        = "ProjGlPost"
+	DutyGLPost        = "projects.gl.post"
 	codeGLUnavailable = "PROJ-GL-004"
 )
 

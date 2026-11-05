@@ -17,7 +17,7 @@ import (
 
 const (
 	// dutyClaim is the PRD duty of supplier warranty claims (8.45.5, 8.45.6).
-	dutyClaim       = "SvcClaimMaintain"
+	dutyClaim       = "fieldservice.supplier-claim.maintain"
 	maxClaimSources = 50
 	maxClaimRef     = 100
 	maxFailureCode  = 40
@@ -27,7 +27,7 @@ var claimStatuses = []string{domain.ClaimDraft, domain.ClaimSubmitted, domain.Cl
 	domain.ClaimRejected, domain.ClaimSettled, domain.ClaimClosed}
 
 func (a *API) registerClaims(r chi.Router) {
-	read := authz.Require(anyDuty{dutyClaim, dutyInquire}, "SvcClaimMaintain or SvcInquire", "")
+	read := authz.Require(anyDuty{dutyClaim, dutyInquire}, "fieldservice.supplier-claim.maintain or fieldservice.inquire", "")
 	r.With(authz.RequireDuty(dutyClaim)).Post("/v1/service/supplier-claims", a.createClaim)
 	r.With(read).Get("/v1/service/supplier-claims", a.listClaims)
 	r.With(read).Get("/v1/service/supplier-claims/{id}", a.getClaim)

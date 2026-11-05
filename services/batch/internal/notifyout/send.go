@@ -179,22 +179,22 @@ func (s *SMTPSender) deliver(ctx context.Context, from, to string, raw []byte) e
 	if err != nil {
 		return err
 	}
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	deadline := time.Now().Add(s.timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 	if err := conn.SetDeadline(deadline); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return err
 	}
 	client, err := smtp.NewClient(conn, s.cfg.Host)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return err
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if s.cfg.TLS == TLSStartTLS || s.cfg.TLS == "" {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
 			return errors.New("server does not advertise STARTTLS")
@@ -271,7 +271,7 @@ func (w *WebhookSender) Send(ctx context.Context, msg Message) error {
 	if err != nil {
 		return fmt.Errorf("webhook send: %w", redactURLError(err))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		err := statusError{resp.StatusCode}
 		if permanentStatus(resp.StatusCode) {

@@ -168,7 +168,7 @@ func getPermitType(ctx context.Context, tx pgx.Tx, t, code string) (PermitType, 
 	return pt, notFound(err, "permit type")
 }
 
-// UpsertPermitType creates or replaces a permit type (EamSetupAdmin). Repeating
+// UpsertPermitType creates or replaces a permit type (eam.setup.admin). Repeating
 // the same definition is a no-op, so the call is idempotent by content.
 func (s *Postgres) UpsertPermitType(ctx context.Context, in PermitType) (PermitType, error) {
 	var out PermitType
@@ -358,7 +358,7 @@ func isolationState(ctx context.Context, tx pgx.Tx, t, assetID, permitID string)
 	return points, unlocked, err
 }
 
-// CreateIsolationPoint adds an energy isolation point to an asset (EamAssetMaintain).
+// CreateIsolationPoint adds an energy isolation point to an asset (eam.asset.maintain).
 // A tag code is unique per asset (EAM-DUP-001).
 func (s *Postgres) CreateIsolationPoint(ctx context.Context, assetID string, in IsolationPoint, key string) (IsolationPoint, error) {
 	var out IsolationPoint
@@ -442,7 +442,7 @@ func (s *Postgres) ListIsolationPoints(ctx context.Context, assetID string) ([]I
 	return out, err
 }
 
-// RequestPermit opens a REQUESTED permit for an open work order (EamPlanner).
+// RequestPermit opens a REQUESTED permit for an open work order (eam.work.plan).
 // The validity window must fit the permit type's maximum (BR-44.11), and only
 // one permit of a type may be in force on a work order at a time.
 func (s *Postgres) RequestPermit(ctx context.Context, in PermitRequest, key string) (Permit, error) {

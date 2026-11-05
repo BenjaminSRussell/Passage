@@ -15,10 +15,10 @@ import (
 )
 
 // dutyPurchaseOrderConfirm covers :confirm and the PO approval tasks (PRD 3.17.17).
-const dutyPurchaseOrderConfirm = "PurchaseOrderConfirm"
+const dutyPurchaseOrderConfirm = "procurement.purchase-order.confirm"
 
 // poActionDuty is the duty a PO custom method needs (PRD 3.17.17): approving,
-// rejecting and confirming are PurchaseOrderConfirm; submit and cancel are
+// rejecting and confirming are procurement.purchase-order.confirm; submit and cancel are
 // maintenance.
 func poActionDuty(action string) string {
 	switch action {

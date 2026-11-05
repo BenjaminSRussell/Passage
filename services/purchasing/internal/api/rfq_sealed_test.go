@@ -119,7 +119,7 @@ func TestScoreRFQVendor(t *testing.T) {
 		status           int
 		code             string
 	}{
-		{"RFQMaintain may not score", path, good, rfqMaintainDuty, v3, http.StatusForbidden, ""},
+		{"procurement.rfq.maintain may not score", path, good, rfqMaintainDuty, v3, http.StatusForbidden, ""},
 		{"no If-Match", path, good, rfqAwardDuty, nil, http.StatusPreconditionRequired, codeIfMatchMissing},
 		{"stale If-Match", path, good, rfqAwardDuty, map[string]string{"If-Match": `"2"`}, http.StatusConflict, "PRC-VERSION-CONFLICT"},
 		{"score 11", path, `{"scores":[{"criterionId":"00000000-0000-7000-8000-00000000c101","score":11}]}`, rfqAwardDuty, v3, 422, codeInvalid},

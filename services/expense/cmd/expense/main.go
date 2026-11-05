@@ -12,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/api"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/store"
 	"github.com/BenjaminSRussell/passage/services/expense/migrations"
@@ -58,6 +59,19 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	s := store.New(pool)
 	a := api.New(pool).WithReports(s).WithTravel(s)
+	ledger, err := ledgerclient.FromEnv(getenv, "expense")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		profiles := map[string]api.GLProfile{}
+		if raw := getenv(api.EnvGLProfiles); raw != "" {
+			if profiles, err = api.ParseGLProfiles(raw); err != nil {
+				return err
+			}
+		}
+		a.WithGL(ledger, s, profiles)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

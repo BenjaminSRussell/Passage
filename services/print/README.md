@@ -59,7 +59,7 @@ from this pod; nothing connects inbound to the cluster.
 - **Printer status** (`GET /print/v1/printers/status`): per printer, the state from its last job
   (IDLE, BUSY, READY, ERROR), the queue depth (QUEUED jobs on its queue) and the last error
   (§6.32.14). No device is probed.
-- **Retention purge** (`POST /print/v1/jobs:purge`, WMS_PRINT_ADMIN): deletes the tenant's
+- **Retention purge** (`POST /print/v1/jobs:purge`, print.admin): deletes the tenant's
   PRINTED and FAILED jobs older than `PRINT_JOB_RETENTION_DAYS`; QUEUED jobs are kept (§6.32.19).
   The service also runs it daily at 01:00 UTC for each tenant in `PRINT_PURGE_TENANT_IDS`
   (`internal/jobs`); a failing tenant is logged and retried the next day without stopping the

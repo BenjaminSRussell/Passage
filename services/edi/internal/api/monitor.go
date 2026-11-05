@@ -98,7 +98,7 @@ type messageDetailView struct {
 }
 
 // getMessage returns one message with its envelope and canonical document.
-// Party names in the document are masked without EDI_PII_VIEW (BR-35.12); the
+// Party names in the document are masked without edi.pii.view (BR-35.12); the
 // raw payload is served only as the masked segment tree (getPayload).
 func (a *API) getMessage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -315,14 +315,14 @@ func (a *API) bulkReprocess(w http.ResponseWriter, r *http.Request) {
 }
 
 // piiView reports whether the caller may see personal data unmasked
-// (EDI_PII_VIEW, BR-35.12). Without a principal the data stays masked.
+// (edi.pii.view, BR-35.12). Without a principal the data stays masked.
 func piiView(r *http.Request) bool {
 	p, ok := tenant.FromContext(r.Context())
 	return ok && p.HasDuty(dutyPIIView)
 }
 
 // dutyPIIView unmasks party names, addresses and contacts (PRD §6.35.17).
-const dutyPIIView = "EDI_PII_VIEW"
+const dutyPIIView = "edi.pii.view"
 
 type payloadView struct {
 	InterchangeID string      `json:"interchangeId"`
@@ -334,7 +334,7 @@ type payloadView struct {
 // getPayload serves the raw payload of one interchange as the segment tree of
 // the monitor's raw viewer, with X12 dictionary names for hover (§6.35.6).
 // Party names, addresses and contacts are masked unless the caller holds
-// EDI_PII_VIEW (BR-35.12). The raw text itself is never returned.
+// edi.pii.view (BR-35.12). The raw text itself is never returned.
 func (a *API) getPayload(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !validID(id) {

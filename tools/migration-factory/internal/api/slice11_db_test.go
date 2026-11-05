@@ -83,7 +83,7 @@ func TestOpenOrders_LoadReconcileAndRerunLoadsNothing(t *testing.T) {
 		t.Fatalf("xref rows for SL-1 = %d, want one per order type", n)
 	}
 	// Another tenant sees none of it and may load the same extract.
-	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "MigrationView"}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantB, duties: "migration.factory.view"}); r.Code != http.StatusNotFound {
 		t.Fatalf("other tenant reads the run: %d", r.Code)
 	}
 	if r := do(t, h, request{method: "POST", path: ordersPath, tenant: tenantB, duties: allDuties, body: ordersBody("", cleanOrders...)}); r.Code != http.StatusCreated || decode[runDetailDTO](t, r).RecordsLoaded != 3 {
@@ -127,7 +127,7 @@ func TestOpenOrders_QuarantineKeepsRunLoadedAndRequestIsChecked(t *testing.T) {
 			t.Errorf("%s: status %d %s", name, r.Code, r.Body)
 		}
 	}
-	if r := do(t, h, request{method: "POST", path: ordersPath, tenant: tenantA, duties: "MigrationView", body: ordersBody("", cleanOrders...)}); r.Code != http.StatusForbidden {
+	if r := do(t, h, request{method: "POST", path: ordersPath, tenant: tenantA, duties: "migration.factory.view", body: ordersBody("", cleanOrders...)}); r.Code != http.StatusForbidden {
 		t.Errorf("without the run duty: %d", r.Code)
 	}
 }

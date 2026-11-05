@@ -44,17 +44,17 @@ func call(t *testing.T, h http.Handler, method, path string, body any, duties ..
 
 func TestListAndGetPacks(t *testing.T) {
 	h := newRouter(t)
-	rec := call(t, h, http.MethodGet, "/v1/localization/packs", nil, "LocalizationAdmin")
+	rec := call(t, h, http.MethodGet, "/v1/localization/packs", nil, "localization.admin")
 	var list struct {
 		Items []domain.Pack `json:"items"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); rec.Code != http.StatusOK || err != nil || len(list.Items) != 7 {
 		t.Fatalf("list: %d %v %s", rec.Code, err, rec.Body.String())
 	}
-	if rec := call(t, h, http.MethodGet, "/v1/localization/packs/DE", nil, "LocalizationAdmin"); rec.Code != http.StatusOK {
+	if rec := call(t, h, http.MethodGet, "/v1/localization/packs/DE", nil, "localization.admin"); rec.Code != http.StatusOK {
 		t.Fatalf("get DE: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodGet, "/v1/localization/packs/ZZ", nil, "LocalizationAdmin"); rec.Code != http.StatusNotFound {
+	if rec := call(t, h, http.MethodGet, "/v1/localization/packs/ZZ", nil, "localization.admin"); rec.Code != http.StatusNotFound {
 		t.Fatalf("get ZZ: %d", rec.Code)
 	}
 	if rec := call(t, h, http.MethodGet, "/v1/localization/packs", nil); rec.Code != http.StatusForbidden {
@@ -65,12 +65,12 @@ func TestListAndGetPacks(t *testing.T) {
 func TestInstallCheck(t *testing.T) {
 	h := newRouter(t)
 	ok := call(t, h, http.MethodPost, "/v1/localization/packs/DE/install:check",
-		InstallCheckRequest{EntityCountry: "DE", CalendarOpenPeriodOK: true}, "LocalizationAdmin")
+		InstallCheckRequest{EntityCountry: "DE", CalendarOpenPeriodOK: true}, "localization.admin")
 	if ok.Code != http.StatusOK {
 		t.Fatalf("installable DE: %d %s", ok.Code, ok.Body.String())
 	}
 	wrong := call(t, h, http.MethodPost, "/v1/localization/packs/DE/install:check",
-		InstallCheckRequest{EntityCountry: "FR", CalendarOpenPeriodOK: true}, "LocalizationAdmin")
+		InstallCheckRequest{EntityCountry: "FR", CalendarOpenPeriodOK: true}, "localization.admin")
 	if wrong.Code != http.StatusUnprocessableEntity || !strings.Contains(wrong.Body.String(), domain.CodeCountry) {
 		t.Fatalf("country mismatch: %d %s", wrong.Code, wrong.Body.String())
 	}
@@ -78,10 +78,10 @@ func TestInstallCheck(t *testing.T) {
 
 func TestTaxIDAndMTDValidation(t *testing.T) {
 	h := newRouter(t)
-	if rec := call(t, h, http.MethodPost, "/v1/localization/tax-ids:validate", TaxIDRequest{Scheme: "DE_USTID", Value: "DE123456789"}, "LocalizationAdmin"); rec.Code != http.StatusOK {
+	if rec := call(t, h, http.MethodPost, "/v1/localization/tax-ids:validate", TaxIDRequest{Scheme: "DE_USTID", Value: "DE123456789"}, "localization.admin"); rec.Code != http.StatusOK {
 		t.Fatalf("valid tax id: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodPost, "/v1/localization/tax-ids:validate", TaxIDRequest{Scheme: "DE_USTID", Value: "DE1"}, "LocalizationAdmin"); rec.Code != http.StatusUnprocessableEntity {
+	if rec := call(t, h, http.MethodPost, "/v1/localization/tax-ids:validate", TaxIDRequest{Scheme: "DE_USTID", Value: "DE1"}, "localization.admin"); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid tax id: %d", rec.Code)
 	}
 	raw, err := os.ReadFile("../../../../countrypacks/uk/fixtures/mtd-vat-26a1.json")
@@ -89,11 +89,11 @@ func TestTaxIDAndMTDValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := "/v1/localization/statutory/uk-mtd-vat:validate"
-	if rec := call(t, h, http.MethodPost, path, json.RawMessage(raw), "LocalizationAdmin"); rec.Code != http.StatusOK {
+	if rec := call(t, h, http.MethodPost, path, json.RawMessage(raw), "localization.admin"); rec.Code != http.StatusOK {
 		t.Fatalf("fixture: %d %s", rec.Code, rec.Body.String())
 	}
 	broken := strings.Replace(string(raw), `"netVatDue": 750.00`, `"netVatDue": 1.00`, 1)
-	rec := call(t, h, http.MethodPost, path, json.RawMessage(broken), "LocalizationAdmin")
+	rec := call(t, h, http.MethodPost, path, json.RawMessage(broken), "localization.admin")
 	var p struct {
 		Code   string            `json:"code"`
 		Errors map[string]string `json:"errors"`
@@ -103,7 +103,7 @@ func TestTaxIDAndMTDValidation(t *testing.T) {
 	}
 	// The draft's box1..box9 shape is not HMRC's schema and is refused.
 	legacy := `{"periodKey":"26A1","boxes":{"box1":"1"}}`
-	if rec := call(t, h, http.MethodPost, path, json.RawMessage(legacy), "LocalizationAdmin"); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodPost, path, json.RawMessage(legacy), "localization.admin"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("legacy body: %d", rec.Code)
 	}
 }
@@ -112,7 +112,7 @@ func TestTDSWithholdEndpoint(t *testing.T) {
 	h := newRouter(t)
 	path := "/v1/localization/in/tds:withhold"
 	// AC-48.21: 194J at 10% without PAN withholds 20%.
-	rec := call(t, h, http.MethodPost, path, map[string]any{"section": "194J", "amount": "100000", "panPresent": false}, "LocalizationAdmin")
+	rec := call(t, h, http.MethodPost, path, map[string]any{"section": "194J", "amount": "100000", "panPresent": false}, "localization.admin")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("withhold: %d %s", rec.Code, rec.Body.String())
 	}
@@ -133,12 +133,12 @@ func TestTDSWithholdEndpoint(t *testing.T) {
 		status int
 		want   string
 	}{
-		{"unknown section", map[string]any{"section": "999Z", "amount": "1"}, "LocalizationAdmin", http.StatusUnprocessableEntity, domain.CodeTDSSection},
-		{"missing section", map[string]any{"amount": "1"}, "LocalizationAdmin", http.StatusBadRequest, `"section"`},
-		{"sub-paisa amount", map[string]any{"section": "194J", "amount": "1.005"}, "LocalizationAdmin", http.StatusBadRequest, `"amount"`},
-		{"194C without payee type", map[string]any{"section": "194C", "amount": "40000", "panPresent": true}, "LocalizationAdmin", http.StatusUnprocessableEntity, domain.CodeTDSPayee},
-		{"unknown field", map[string]any{"section": "194J", "amount": "1", "rate": "5"}, "LocalizationAdmin", http.StatusBadRequest, ""},
-		{"wrong duty", map[string]any{"section": "194J", "amount": "1"}, "ComplianceView", http.StatusForbidden, ""},
+		{"unknown section", map[string]any{"section": "999Z", "amount": "1"}, "localization.admin", http.StatusUnprocessableEntity, domain.CodeTDSSection},
+		{"missing section", map[string]any{"amount": "1"}, "localization.admin", http.StatusBadRequest, `"section"`},
+		{"sub-paisa amount", map[string]any{"section": "194J", "amount": "1.005"}, "localization.admin", http.StatusBadRequest, `"amount"`},
+		{"194C without payee type", map[string]any{"section": "194C", "amount": "40000", "panPresent": true}, "localization.admin", http.StatusUnprocessableEntity, domain.CodeTDSPayee},
+		{"unknown field", map[string]any{"section": "194J", "amount": "1", "rate": "5"}, "localization.admin", http.StatusBadRequest, ""},
+		{"wrong duty", map[string]any{"section": "194J", "amount": "1"}, "compliance.view", http.StatusForbidden, ""},
 	} {
 		rec := call(t, h, http.MethodPost, path, tc.body, tc.duty)
 		if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {

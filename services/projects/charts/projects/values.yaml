@@ -2,6 +2,7 @@ image:
   repository: ghcr.io/benjaminsrussell/passage-projects
   # Digest-pinned by Argo CD in deploy/; the tag is a fallback for local k3d.
   tag: "0.1.0"
+  digest: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 2

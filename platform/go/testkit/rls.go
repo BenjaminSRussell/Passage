@@ -207,32 +207,6 @@ func visibleRows(t *testing.T, app *pgxpool.Pool, table, tenantID, scopes string
 	return n
 }
 
-func assertDenied(t *testing.T, app *pgxpool.Pool, verb, sql, tenantID string) {
-	t.Helper()
-	err := inScope(app, tenantID, "*", func(tx pgx.Tx) error {
-		_, err := tx.Exec(context.Background(), sql)
-		return err
-	})
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != insufficientPrivilege || !strings.Contains(pgErr.Message, "permission denied") {
-		t.Errorf("%s as app role: %v, want permission denied", verb, err)
-	}
-}
-
-func execRows(t *testing.T, app *pgxpool.Pool, sql, tenantID string) int {
-	t.Helper()
-	var n int64
-	err := inScope(app, tenantID, "*", func(tx pgx.Tx) error {
-		tag, err := tx.Exec(context.Background(), sql)
-		n = tag.RowsAffected()
-		return err
-	})
-	if err != nil {
-		t.Fatalf("%s as app role: %v", sql, err)
-	}
-	return int(n)
-}
-
 func updatedRows(t *testing.T, app *pgxpool.Pool, table, tenantID, scopes string) int {
 	t.Helper()
 	var n int64

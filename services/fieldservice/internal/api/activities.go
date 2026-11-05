@@ -16,8 +16,8 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/store"
 )
 
-// dutyActivity guards activities on any readable record (PRD 8.45.17 ActivityMaintain).
-const dutyActivity = "ActivityMaintain"
+// dutyActivity guards activities on any readable record (PRD 8.45.17 fieldservice.activity.maintain).
+const dutyActivity = "fieldservice.activity.maintain"
 
 const (
 	maxSubject         = 200

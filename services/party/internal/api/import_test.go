@@ -35,6 +35,13 @@ type fakeCustomers struct {
 	err     error
 }
 
+func (f *fakeCustomers) GetCustomer(_ context.Context, id string) (domain.Customer, error) {
+	if id != knownID {
+		return domain.Customer{}, httpx.NewProblem(http.StatusNotFound, store.CodeCustomerNotFound, "customer not found")
+	}
+	return domain.Customer{ID: knownID, PartyID: importPartyID, AccountNumber: "C-1", CurrencyCode: "EUR", Version: 3}, f.err
+}
+
 func (f *fakeCustomers) CreateCustomer(ctx context.Context, partyID string, in store.NewCustomerRole) (domain.Customer, bool, error) {
 	caller, _ := tenant.FromContext(ctx)
 	f.scopes = tenant.LegalEntityScopeList(caller)
@@ -217,9 +224,9 @@ func TestMigrationLoader_CannotReachOtherRoutes(t *testing.T) {
 	m := newMigrationRig(t)
 	le := testkit.TenantID(7)
 	for name, c := range map[string]struct{ method, path, body string }{
-		"read party":     {http.MethodGet, partiesPath + "/" + knownID, ""},
-		"read vendor":    {http.MethodGet, "/v1/party/vendors/" + knownID, ""},
 		"list vendors":   {http.MethodGet, partiesPath + "/" + knownID + "/vendors", ""},
+		"vendor groups":  {http.MethodGet, "/v1/party/vendor-groups", ""},
+		"bank list":      {http.MethodGet, "/v1/party/vendors/" + knownID + "/bank-accounts", ""},
 		"bank accounts":  {http.MethodPost, "/v1/party/vendors/" + knownID + "/bank-accounts", `{}`},
 		"reveal":         {http.MethodGet, "/v1/party/vendors/" + knownID + "/bank-accounts:reveal", ""},
 		"tax validation": {http.MethodPost, validatePath, `{"type":"EIN","number":"12-3456789"}`},
@@ -230,7 +237,35 @@ func TestMigrationLoader_CannotReachOtherRoutes(t *testing.T) {
 	}
 }
 
-// The loader writes party records but holds no read duty: a create or PATCH
+// party.import.read opens the three detail reads the loader reconciles against, and the date of birth stays masked
+// because the loader holds no pii.read.
+func TestMigrationLoader_ReadsBackPartyCustomerAndVendor(t *testing.T) {
+	m := newMigrationRig(t)
+	le := testkit.TenantID(7)
+	party := m.call(t, le, http.MethodGet, partiesPath+"/"+knownID, "", nil)
+	if party.Code != http.StatusOK || !strings.Contains(party.Body.String(), `"name":"Ada L"`) || strings.Contains(party.Body.String(), "1990-02-03") || party.Header().Get("ETag") != `"4"` {
+		t.Fatalf("party: %d %s etag=%s", party.Code, party.Body, party.Header().Get("ETag"))
+	}
+	customer := m.call(t, le, http.MethodGet, "/v1/party/customers/"+knownID, "", nil)
+	if customer.Code != http.StatusOK || !strings.Contains(customer.Body.String(), `"accountNumber":"C-1"`) || customer.Header().Get("ETag") != `"3"` {
+		t.Fatalf("customer: %d %s", customer.Code, customer.Body)
+	}
+	if rec := m.call(t, le, http.MethodGet, "/v1/party/customers/"+importPartyID, "", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown customer: %d %s", rec.Code, rec.Body)
+	}
+	if rec := m.call(t, le, http.MethodGet, "/v1/party/vendors/"+knownID, "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("vendor: %d %s", rec.Code, rec.Body)
+	}
+	// A person needs party.read for the customer read; party.write alone does not open it.
+	if rec := do(m.handler, http.MethodGet, "/v1/party/customers/"+knownID, "", "party.write", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("party.write customer read: %d", rec.Code)
+	}
+	if rec := do(m.handler, http.MethodGet, "/v1/party/customers/"+knownID, "", "party.read", true); rec.Code != http.StatusOK {
+		t.Fatalf("party.read customer read: %d", rec.Code)
+	}
+}
+
+// The loader's create or PATCH answers with a receipt, never the record: a write
 // answers with a receipt, never the names or personal data it could not GET.
 func TestMigrationLoader_WritesGetAReceiptNotTheRecord(t *testing.T) {
 	m := newMigrationRig(t)

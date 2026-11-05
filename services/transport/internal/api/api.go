@@ -35,21 +35,21 @@ import (
 
 // Duties (PRD §6.34.17).
 const (
-	DutyView        = "TMS_VIEW"
-	DutyRate        = "TMS_RATE"
-	DutyRateApprove = "TMS_RATE_APPROVE"
-	DutyReconcile   = "TMS_RECONCILE"
-	DutyApprove     = "TMS_RECONCILE_APPROVE"
-	DutyPlan        = "TMS_PLAN"
-	DutyTender      = "TMS_TENDER"
+	DutyView        = "transport.view"
+	DutyRate        = "transport.rate-card.maintain"
+	DutyRateApprove = "transport.rate-card.approve"
+	DutyReconcile   = "transport.freight-bill.reconcile"
+	DutyApprove     = "transport.freight-bill.approve"
+	DutyPlan        = "transport.load.plan"
+	DutyTender      = "transport.load.tender"
 	DutyTenderExec  = "transport.tender.execute"
 	workflowService = "workflow-ts"
-	DutyRespond     = "TMS_CARRIER_RESPOND"
-	DutyTrackIngest = "TMS_TRACK_INGEST"
-	DutyLandedCost  = "TMS_LANDED_COST"
+	DutyRespond     = "transport.tender.respond"
+	DutyTrackIngest = "transport.tracking-event.ingest"
+	DutyLandedCost  = "transport.landed-cost.maintain"
 	// DutyTradeRelease releases screening holds (BR-34.17). It conflicts with
 	// SALES_ORDER_MAINTAIN (§6.34.17); role design keeps them apart.
-	DutyTradeRelease = "TRADE_COMPLIANCE_RELEASE"
+	DutyTradeRelease = "transport.screening-hold.release"
 	idempotencyKey   = "Idempotency-Key"
 	validationDetail = "request failed validation"
 	maxCodeLength    = 20
@@ -166,7 +166,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyPlan)).Post(prefix+"/loads/{id}:screen", a.screenLoad)
 	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/transfer-rules/{incoterm}", a.transferRule)
 	r.With(requireTenderOrWorkflow).Post(prefix+"/loads/{id}:tender", a.startTender)
-	r.With(authz.RequireDuty(DutyTender)).Get(prefix+"/tenders", a.listTenders)
+	r.With(requireTenderOrWorkflow).Get(prefix+"/tenders", a.listTenders)
 	r.With(requireTenderOrWorkflow).Post(prefix+"/tenders:expire", a.expireTenders)
 	r.With(requireTenderOrWorkflow).Get(prefix+"/tenders/{id}", a.getTender)
 	r.With(authz.RequireDuty(DutyRespond)).Post(prefix+"/tenders/{id}:respond", a.respondTender)

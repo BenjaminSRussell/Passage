@@ -75,7 +75,7 @@ const (
 	ncrBody   = `{"source":"VENDOR","itemId":"` + ncrItem + `","qty":"4","uom":"EA","problemType":"DIMENSION","severity":"MAJOR","vendorId":"` + ncrVendor + `"}`
 )
 
-const ncrDuties = "QM_VIEW,QM_NCR_MAINTAIN,QM_CAPA_MAINTAIN"
+const ncrDuties = "quality.view,quality.ncr.maintain,quality.capa.maintain"
 
 func decodeNCR(t *testing.T, body string) domain.Nonconformance {
 	t.Helper()
@@ -129,8 +129,8 @@ func TestCreateNonconformance_FieldErrorsAndDuty(t *testing.T) {
 			t.Errorf("%s: %d %s", tc.name, rec.Code, rec.Body.String())
 		}
 	}
-	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/nonconformances", body: ncrBody, duties: "QM_VIEW", key: ids.New()}); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without QM_NCR_MAINTAIN: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/nonconformances", body: ncrBody, duties: "quality.view", key: ids.New()}); rec.Code != http.StatusForbidden {
+		t.Fatalf("create without quality.ncr.maintain: %d", rec.Code)
 	}
 	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/nonconformances", body: ncrBody, duties: ncrDuties}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("create without Idempotency-Key: %d", rec.Code)
@@ -178,8 +178,8 @@ func TestApproveRefuse_IfMatchAndLifecycle(t *testing.T) {
 	if rec := call(h, reqSpec{method: http.MethodPost, path: approve, duties: ncrDuties, ifMatch: `"7"`}); rec.Code != http.StatusPreconditionFailed {
 		t.Fatalf("stale If-Match: %d", rec.Code)
 	}
-	if rec := call(h, reqSpec{method: http.MethodPost, path: approve, duties: "QM_VIEW", ifMatch: `"1"`}); rec.Code != http.StatusForbidden {
-		t.Fatalf("approve without QM_NCR_MAINTAIN: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: approve, duties: "quality.view", ifMatch: `"1"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("approve without quality.ncr.maintain: %d", rec.Code)
 	}
 	rec := call(h, reqSpec{method: http.MethodPost, path: approve, duties: ncrDuties, ifMatch: `"1"`})
 	if rec.Code != http.StatusOK || decodeNCR(t, rec.Body.String()).Status != domain.NCRApproved || rec.Header().Get("ETag") != `"2"` {
@@ -212,8 +212,8 @@ func TestCorrection_8DOverHTTP(t *testing.T) {
 	call(h, reqSpec{method: http.MethodPost, path: base + ":approve", duties: ncrDuties, ifMatch: `"1"`})
 
 	start := reqSpec{method: http.MethodPost, path: base + "/corrections", body: `{"effectivenessCheckDays":30}`, duties: ncrDuties, ifMatch: `"2"`}
-	if rec := call(h, reqSpec{method: http.MethodPost, path: base + "/corrections", body: `{}`, duties: "QM_VIEW,QM_NCR_MAINTAIN", key: "c-1", ifMatch: `"2"`}); rec.Code != http.StatusForbidden {
-		t.Fatalf("start without QM_CAPA_MAINTAIN: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: base + "/corrections", body: `{}`, duties: "quality.view,quality.ncr.maintain", key: "c-1", ifMatch: `"2"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("start without quality.capa.maintain: %d", rec.Code)
 	}
 	if rec := call(h, start); rec.Code != http.StatusBadRequest {
 		t.Fatalf("start without Idempotency-Key: %d", rec.Code)
@@ -256,7 +256,7 @@ func TestCorrection_8DOverHTTP(t *testing.T) {
 	due := time.Now().Add(-time.Hour)
 	n.Correction.EffectivenessDueAt = &due
 	f.ncrs[id] = n
-	if rec := call(h, reqSpec{method: http.MethodGet, path: base, duties: "QM_VIEW"}); !strings.Contains(rec.Body.String(), `"effectivenessCheckDue":true`) {
+	if rec := call(h, reqSpec{method: http.MethodGet, path: base, duties: "quality.view"}); !strings.Contains(rec.Body.String(), `"effectivenessCheckDue":true`) {
 		t.Fatalf("effectiveness check due on read: %s", rec.Body.String())
 	}
 	self := check
@@ -275,26 +275,26 @@ func TestListAndGetNonconformance(t *testing.T) {
 	f := newFake()
 	h := newHandler(f)
 	id := createNCR(t, h).ID
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances?status=APPROVED", duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances?status=APPROVED", duties: "quality.view"})
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), id) {
 		t.Fatalf("approved filter should be empty: %d %s", rec.Code, rec.Body.String())
 	}
 	order := ids.New()
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances?status=NEW&severity=MAJOR&source=VENDOR&qualityOrderId=" + order + "&limit=5", duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances?status=NEW&severity=MAJOR&source=VENDOR&qualityOrderId=" + order + "&limit=5", duties: "quality.view"})
 	if rec.Code != http.StatusOK || f.ncrFilter != (store.NCRFilter{Status: "NEW", Source: "VENDOR", Severity: "MAJOR", QualityOrderID: order, Limit: 5}) {
 		t.Fatalf("filter: %d %+v", rec.Code, f.ncrFilter)
 	}
 	for _, q := range []string{"status=BOGUS", "source=X", "severity=LOW", "qualityOrderId=nope", "limit=0"} {
-		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances?" + q, duties: "QM_VIEW"}); rec.Code != http.StatusBadRequest {
+		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances?" + q, duties: "quality.view"}); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d", q, rec.Code)
 		}
 	}
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances/" + id, duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances/" + id, duties: "quality.view"})
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("get: %d", rec.Code)
 	}
 	for _, missing := range []string{ids.New(), "not-a-uuid"} {
-		rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances/" + missing, duties: "QM_VIEW"})
+		rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/nonconformances/" + missing, duties: "quality.view"})
 		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), domain.CodeNCRMissing) {
 			t.Fatalf("missing NCR %s: %d %s", missing, rec.Code, rec.Body.String())
 		}

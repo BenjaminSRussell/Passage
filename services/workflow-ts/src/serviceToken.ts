@@ -16,12 +16,20 @@ export const TRANSPORT_AUDIENCE = "transport";
 export const TRANSPORT_GRANT = ["transport.tender.execute"] as const;
 export const PARTY_AUDIENCE = "party";
 export const PARTY_GRANT = ["party.approve"] as const;
+/** Tenant-level: a merge moves roles in every legal entity, so this token names none (#450). Go `tenantLevelDuties` mirrors it. */
+export const PARTY_MERGE_GRANT = ["party.merge.execute"] as const;
 
 export interface TokenSubject {
   tenantId: string;
   legalEntityId: string;
   actor: string;
   scope?: readonly string[];
+}
+
+/** The acting user of a tenant-level token: a tenant administrator with no legal-entity claim. */
+export interface TenantTokenSubject {
+  tenantId: string;
+  actor: string;
 }
 
 export function inLegalEntityScope(scope: readonly string[] | undefined, legalEntityId: string): boolean {
@@ -35,6 +43,7 @@ export interface ServiceTokenSigner {
   mintForQuality(subject: TokenSubject): string;
   mintForTransport(subject: TokenSubject): string;
   mintForParty(subject: TokenSubject): string;
+  mintForPartyMerge(subject: TenantTokenSubject): string;
 }
 
 export interface SignerOptions {
@@ -53,13 +62,16 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
   function mint(audience: string, grant: readonly string[], { tenantId, legalEntityId, actor, scope }: TokenSubject, scoped: boolean): string {
     if (!tenantId || !legalEntityId || !actor) throw new TypeError("a service token needs a tenant, one legal entity and the acting user");
     if (scoped && !inLegalEntityScope(scope, legalEntityId)) throw new TypeError("a service token needs a legal entity within the acting user's scope");
+    return sealed(audience, grant, tenantId, legalEntityId, actor);
+  }
+  function sealed(audience: string, grant: readonly string[], tenantId: string, legalEntityId: string | undefined, actor: string): string {
     const iat = Math.floor(now() / 1000);
     const claims = {
       iss: SERVICE_NAME,
       ...(options.keyId ? { kid: options.keyId } : {}),
       aud: audience,
       tid: tenantId,
-      le: legalEntityId,
+      ...(legalEntityId === undefined ? {} : { le: legalEntityId }),
       act: actor,
       duties: [...grant],
       iat,
@@ -76,6 +88,10 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
     mintForQuality: (subject) => mint(QUALITY_AUDIENCE, QUALITY_GRANT, subject, true),
     mintForTransport: (subject) => mint(TRANSPORT_AUDIENCE, TRANSPORT_GRANT, subject, true),
     mintForParty: (subject) => mint(PARTY_AUDIENCE, PARTY_GRANT, subject, true),
+    mintForPartyMerge: ({ tenantId, actor }) => {
+      if (!tenantId || !actor) throw new TypeError("a tenant-level service token needs a tenant and the acting user");
+      return sealed(PARTY_AUDIENCE, PARTY_MERGE_GRANT, tenantId, undefined, actor);
+    },
   };
 }
 

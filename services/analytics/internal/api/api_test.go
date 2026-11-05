@@ -200,6 +200,6 @@ func TestReconciliation_RejectsBadDateBeforeStore(t *testing.T) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 	if rec := do(t, h, http.MethodGet, "/v1/analytics/reconciliation?date=2026-01-31", "", viewer); rec.Code != http.StatusForbidden {
-		t.Fatalf("without FinanceView: status %d, want 403", rec.Code)
+		t.Fatalf("without analytics.finance.view: status %d, want 403", rec.Code)
 	}
 }

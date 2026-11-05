@@ -18,7 +18,7 @@ import (
 const (
 	// dutyTechnician is held by field technicians (PRD 8.45.17); it covers the mobile
 	// action log. It is a new duty: seeded by the policies owner after review.
-	dutyTechnician = "SvcTechnician"
+	dutyTechnician = "fieldservice.work-order.execute"
 
 	maxActions   = 200
 	maxClockSkew = 5 * time.Minute

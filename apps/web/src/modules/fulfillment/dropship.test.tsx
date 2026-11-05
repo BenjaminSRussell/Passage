@@ -24,7 +24,7 @@ function dropShip(over: Partial<DropShip> = {}): DropShip {
 describe("drop-ships list and create form", () => {
   it("lists drop-ships, filters by status and opens one", async () => {
     server.handler = (url) => (url.pathname === LIST ? json(200, { items: [dropShip(), dropShip({ id: U(90), dropShipNumber: "DS-0000002", status: "CONFIRMED", shippedOn: "2026-11-01" })] }) : undefined);
-    const { container } = renderAt("/fulfillment/drop-ships", ["WarehouseView", "WarehouseRelease"]);
+    const { container } = renderAt("/fulfillment/drop-ships", ["fulfillment.warehouse.view", "fulfillment.warehouse.release"]);
     const table = await findTable({ name: "Drop-ships" });
     expect(within(table).getByText("DS-0000002")).toBeInTheDocument();
     expect(within(table).getByText("Confirmed")).toBeInTheDocument();
@@ -51,7 +51,7 @@ describe("drop-ships list and create form", () => {
       if (url.pathname === LIST) return json(200, { items: [] });
       return undefined;
     };
-    renderAt("/fulfillment/drop-ships", ["WarehouseRelease"]);
+    renderAt("/fulfillment/drop-ships", ["fulfillment.warehouse.release"]);
     await screen.findByText("No drop-ships yet");
     fireEvent.click(screen.getByRole("button", { name: "Create drop-ship" }));
     expect(await screen.findAllByText(/as a UUID/)).not.toHaveLength(0);
@@ -74,7 +74,7 @@ describe("drop-ships list and create form", () => {
       if (url.pathname === LIST) return json(200, { items: [] });
       return undefined;
     };
-    renderAt("/fulfillment/drop-ships", ["WarehouseRelease"]);
+    renderAt("/fulfillment/drop-ships", ["fulfillment.warehouse.release"]);
     await screen.findByText("No drop-ships yet");
     const filled = ["Legal entity id", "Order id", "Order line id", "Customer id", "Product id", "Vendor id", "Purchase order id", "Purchase order line id"];
     filled.forEach((label, i) => fireEvent.change(screen.getByLabelText(label), { target: { value: U(i + 1) } }));
@@ -90,7 +90,7 @@ describe("drop-ships list and create form", () => {
       if (url.pathname === LIST) return json(200, { items: [] });
       return undefined;
     };
-    renderAt("/fulfillment/drop-ships", ["WarehouseRelease"]);
+    renderAt("/fulfillment/drop-ships", ["fulfillment.warehouse.release"]);
     await screen.findByText("No drop-ships yet");
     const filled = ["Legal entity id", "Order id", "Order line id", "Customer id", "Product id", "Vendor id", "Purchase order id", "Purchase order line id"];
     filled.forEach((label, i) => fireEvent.change(screen.getByLabelText(label), { target: { value: U(i + 1) } }));
@@ -102,7 +102,7 @@ describe("drop-ships list and create form", () => {
 
   it("hides the create form from a viewer", async () => {
     server.handler = (url) => (url.pathname === LIST ? json(200, { items: [] }) : undefined);
-    renderAt("/fulfillment/drop-ships", ["WarehouseView"]);
+    renderAt("/fulfillment/drop-ships", ["fulfillment.warehouse.view"]);
     expect(await screen.findByText(/once an order line is routed to a vendor/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create drop-ship" })).toBeNull();
   });
@@ -131,7 +131,7 @@ describe("drop-ship detail", () => {
       if (url.pathname === `${LIST}/${ID}`) return json(200, current);
       return undefined;
     };
-    const { container } = renderAt(`/fulfillment/drop-ships/${ID}`, ["WarehouseView", "PurchaseOrderConfirm", "WarehouseRelease"]);
+    const { container } = renderAt(`/fulfillment/drop-ships/${ID}`, ["fulfillment.warehouse.view", "procurement.purchase-order.confirm", "fulfillment.warehouse.release"]);
     await screen.findByText("Vendor confirmation");
     expect(screen.getByText(/for 50\.00 USD at the purchase order cost/)).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -151,7 +151,7 @@ describe("drop-ship detail", () => {
 
   it("refuses a future ship date before calling the service", async () => {
     server.handler = (url) => (url.pathname === `${LIST}/${ID}` ? json(200, dropShip()) : undefined);
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["PurchaseOrderConfirm"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["procurement.purchase-order.confirm"]);
     await screen.findByText("Vendor confirmation");
     fireEvent.change(screen.getByLabelText("Vendor shipped on"), { target: { value: "2999-01-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm shipment" }));
@@ -165,7 +165,7 @@ describe("drop-ship detail", () => {
       if (url.pathname === `${LIST}/${ID}`) return json(200, dropShip());
       return undefined;
     };
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["PurchaseOrderConfirm"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["procurement.purchase-order.confirm"]);
     await screen.findByText("Vendor confirmation");
     fireEvent.click(screen.getByRole("button", { name: "Confirm shipment" }));
     expect(await screen.findByText(/Someone else changed this drop-ship/)).toBeInTheDocument();
@@ -173,7 +173,7 @@ describe("drop-ship detail", () => {
 
   it("hides the confirmation form from a viewer and from a packing slip poster", async () => {
     server.handler = (url) => (url.pathname === `${LIST}/${ID}` ? json(200, dropShip()) : undefined);
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["WarehouseView", "PackingSlipPost"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["fulfillment.warehouse.view", "fulfillment.packing-slip.post"]);
     await screen.findByText(/needs the purchase order confirmation duty/);
     expect(screen.queryByText("Vendor confirmation")).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel drop-ship" })).toBeNull();
@@ -189,7 +189,7 @@ describe("drop-ship detail", () => {
       if (url.pathname === `${LIST}/${ID}`) return json(200, current);
       return undefined;
     };
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["WarehouseRelease"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["fulfillment.warehouse.release"]);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel drop-ship" }));
     expect(calls("POST", ":cancel")).toHaveLength(0);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel drop-ship" }));
@@ -212,7 +212,7 @@ describe("drop-ship detail", () => {
       if (url.pathname === `${LIST}/${ID}`) return json(200, current);
       return undefined;
     };
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["WarehouseView", "PurchaseOrderConfirm", "WarehouseRelease"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["fulfillment.warehouse.view", "procurement.purchase-order.confirm", "fulfillment.warehouse.release"]);
     await screen.findByText("Vendor confirmation");
     expect(screen.getByLabelText("Quantity shipped")).toHaveValue("10");
     fireEvent.change(screen.getByLabelText("Quantity shipped"), { target: { value: "4" } });
@@ -231,7 +231,7 @@ describe("drop-ship detail", () => {
 
   it("previews the amount the next part books as the service rounds it, so the parts add up to the whole line", async () => {
     server.handler = (url) => (url.pathname === `${LIST}/${ID}` ? json(200, dropShip({ qty: "3", unitCost: "0.125", status: "PARTIALLY_CONFIRMED", qtyConfirmed: "1", qtyOpen: "2", version: 2, shippedOn: "2026-11-01", postingDate: "2026-11-01" })) : undefined);
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["PurchaseOrderConfirm"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["procurement.purchase-order.confirm"]);
     await screen.findByText("Vendor confirmation");
     fireEvent.change(screen.getByLabelText("Quantity shipped"), { target: { value: "1" } });
     // 0.125 x 2 = 0.25 confirmed in total, less the 0.13 the first unit booked.
@@ -246,7 +246,7 @@ describe("drop-ship detail", () => {
       if (url.pathname === `${LIST}/${ID}`) return json(200, dropShip());
       return undefined;
     };
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["PurchaseOrderConfirm"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["procurement.purchase-order.confirm"]);
     await screen.findByText("Vendor confirmation");
     fireEvent.change(screen.getByLabelText("Quantity shipped"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm shipment" }));
@@ -270,7 +270,7 @@ describe("drop-ship detail", () => {
       if (url.pathname === `${LIST}/${ID}`) return json(200, current);
       return undefined;
     };
-    renderAt(`/fulfillment/drop-ships/${ID}`, ["WarehouseRelease"]);
+    renderAt(`/fulfillment/drop-ships/${ID}`, ["fulfillment.warehouse.release"]);
     fireEvent.click(await screen.findByRole("button", { name: "Close remainder" }));
     expect(calls("POST", ":close-remainder")).toHaveLength(0);
     fireEvent.click(await screen.findByRole("button", { name: "Close remainder" }));

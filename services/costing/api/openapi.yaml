@@ -595,7 +595,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem", description: "CST-COST-001 no stored standard cost for a recorded receipt" }
-        "422": { $ref: "#/components/responses/Problem", description: "CST-PPV-001 a recorded receipt whose standardUnitCost or currency differs from the stored ACTIVE item cost" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-PPV-001 a recorded receipt whose standardUnitCost or currency differs from the stored ACTIVE item cost; CST-CTX-001 a recorded source line replayed with other content (for example another standardUnitCost); CST-GRIR-001 a recorded invoice whose GR/IR cannot be allocated from the receipt it names" }
   /v1/costing/value-report:
     get:
       operationId: getValueReport
@@ -1914,6 +1914,8 @@ components:
         productId: { type: string, format: uuid }
         siteId: { type: string, format: uuid }
         financialDate: { type: string, format: date }
+        receiptDocumentId: { type: string, minLength: 1, maxLength: 80, description: "Required on a recorded INVOICE, refused otherwise: the receipt document whose recorded PPV row the invoice clears GR/IR from. GR/IR is allocated by remainder (round(cumulative invoiced qty x PO price) less earlier invoices; the invoice completing the receipt takes the rest), so split invoices clear exactly the receipt's GR/IR, and the PPV is round(qty x invoice price) less that. An unrecorded or mismatched receipt, a PO price the receipt's GR/IR was not cleared at, or invoicing beyond the received quantity is 422 CST-GRIR-001. Must not contain a colon." }
+        receiptLineId: { type: string, minLength: 1, maxLength: 64, description: "The receipt line, with receiptDocumentId. Must not contain a colon." }
     PpvResponse:
       type: object
       required: [kind, currency, amount, direction, sourceDocumentId, recorded]
@@ -1921,6 +1923,7 @@ components:
         kind: { type: string }
         currency: { type: string }
         amount: { $ref: "#/components/schemas/Decimal" }
+        grirAmount: { $ref: "#/components/schemas/Decimal", description: "The GR/IR the recorded row clears; absent when only calculated." }
         direction: { type: string, enum: [DR, CR, NONE], description: "DR is an unfavourable debit; CR a credit." }
         sourceDocumentId: { type: string }
         recorded: { type: boolean, description: "True when the PPV cost transaction was appended or replayed." }

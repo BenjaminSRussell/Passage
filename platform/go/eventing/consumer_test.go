@@ -161,7 +161,7 @@ func TestConsumerAppliesOnceAsServicePrincipalForTheEventsTenant(t *testing.T) {
 	if len(h.ran) != 1 {
 		t.Fatalf("handler ran %d times for a duplicate event id, want 1", len(h.ran))
 	}
-	if got := h.who[0]; got.UserID != "service:receiving-ers" || got.TenantID != tenantA || !got.HasDuty("VendorInvoicePost") || got.HasDuty(tenant.DutyAllScope) {
+	if got := h.who[0]; got.UserID != "service:receiving-ers" || got.TenantID != tenantA || !got.HasDuty("receiving.vendor-invoice.post") || got.HasDuty(tenant.DutyAllScope) {
 		t.Fatalf("handler principal = %+v", got)
 	}
 	if len(h.src.committed) != 2 || len(h.dlq.sent) != 0 {

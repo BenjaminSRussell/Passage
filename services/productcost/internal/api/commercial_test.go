@@ -126,21 +126,21 @@ func TestReconcile_OverHTTPAndMetric(t *testing.T) {
 	}
 }
 
-// TestCommercialRoutes_EnforceTheirDuty: the calculations need CostingCalculate
-// and the inquiries (comparison, reconciliation) need CostingView (PRD 7.39.17).
+// TestCommercialRoutes_EnforceTheirDuty: the calculations need productcost.calculate
+// and the inquiries (comparison, reconciliation) need productcost.view (PRD 7.39.17).
 func TestCommercialRoutes_EnforceTheirDuty(t *testing.T) {
 	r := newRouter(t, nil)
 	for p, duty := range map[string]string{
-		"/v1/product-costing/mixed-costs":               "CostingCalculate",
-		"/v1/product-costing/postings:cogs":             "CostingCalculate",
-		"/v1/product-costing/postings:price-difference": "CostingCalculate",
-		"/v1/product-costing/sales-order-estimates":     "CostingCalculate",
-		"/v1/product-costing/comparisons":               "CostingView",
-		"/v1/product-costing/reconciliations":           "CostingView",
+		"/v1/product-costing/mixed-costs":               "productcost.calculate",
+		"/v1/product-costing/postings:cogs":             "productcost.calculate",
+		"/v1/product-costing/postings:price-difference": "productcost.calculate",
+		"/v1/product-costing/sales-order-estimates":     "productcost.calculate",
+		"/v1/product-costing/comparisons":               "productcost.view",
+		"/v1/product-costing/reconciliations":           "productcost.view",
 	} {
-		other := "CostingView"
-		if duty == "CostingView" {
-			other = "CostingCalculate"
+		other := "productcost.view"
+		if duty == "productcost.view" {
+			other = "productcost.calculate"
 		}
 		if rec := do(r, http.MethodPost, p, `{}`, other, true); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), duty) {
 			t.Errorf("%s with only %s: %d %s", p, other, rec.Code, rec.Body.String())

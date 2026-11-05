@@ -31,7 +31,7 @@ type adHocRequest struct {
 }
 
 // adHocEstimate prices a costing model for a quote, internal order or project
-// task (FR-39.13, duty CostingCalculate). Request shape errors are 400; a model
+// task (FR-39.13, duty productcost.calculate). Request shape errors are 400; a model
 // or characteristic the domain refuses is 422 with its CST code.
 func (a *API) adHocEstimate(w http.ResponseWriter, r *http.Request) {
 	if !guard(w, r) {
@@ -93,7 +93,7 @@ func checkVersions(versions []domain.EstimateVersion, fields map[string]string) 
 }
 
 // refreshSalesEstimate recomputes a line's estimate for its configuration and
-// versions it (FR-39.16, BR-39.14, duty CostingCalculate). The pair (lineId,
+// versions it (FR-39.16, BR-39.14, duty productcost.calculate). The pair (lineId,
 // configHash) is the PRD's idempotency key: the same pair returns the same
 // current version unchanged.
 func (a *API) refreshSalesEstimate(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +159,7 @@ type freezeResponse struct {
 }
 
 // freezeSalesEstimate freezes the current estimate at line confirmation
-// (BR-39.14, duty CostingCalculate). Freezing a Frozen version returns it
+// (BR-39.14, duty productcost.calculate). Freezing a Frozen version returns it
 // unchanged; a line without a usable estimate is CST-0763.
 func (a *API) freezeSalesEstimate(w http.ResponseWriter, r *http.Request) {
 	if !guard(w, r) {

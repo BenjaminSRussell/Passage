@@ -42,6 +42,15 @@ func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenI
 func (f *fakeStore) ListOpenItems(context.Context, store.OpenItemFilter, int) ([]store.OpenItem, error) {
 	return []store.OpenItem{{Currency: "USD", DueDate: "2027-03-01", OpenAmount: decimal.RequireFromString("12.00")}}, nil
 }
+func (f *fakeStore) GetOpenItem(_ context.Context, id string) (store.OpenItem, error) {
+	if id != fakeOpenItemID {
+		return store.OpenItem{}, httpx.NewProblem(http.StatusNotFound, store.CodeOpenItemNotFound, "open item not found")
+	}
+	return store.OpenItem{ID: id, DocumentNumber: "D-1", Currency: "USD", OpenAmount: decimal.RequireFromString("12.00"), Version: 2}, nil
+}
+
+const fakeOpenItemID = "22222222-2222-4222-8222-222222222222"
+
 func (f *fakeStore) CreatePayment(_ context.Context, in store.Payment, _ string) (store.Payment, error) {
 	in.ID, in.Version, in.Status = ids.New(), 1, "RECEIVED"
 	f.payment = in
@@ -235,13 +244,13 @@ func TestCreatePayment_Validation(t *testing.T) {
 		status  int
 		field   string
 	}{
-		{"missing idempotency key", validPayment(), nil, "ARPaymentPost", http.StatusBadRequest, ""},
-		{"without the duty", validPayment(), key, "ARView", http.StatusForbidden, ""},
-		{"lockbox source is an importer's job", strings.Replace(validPayment(), `"MANUAL"`, `"LOCKBOX"`, 1), key, "ARPaymentPost", http.StatusBadRequest, "source"},
-		{"zero amount", strings.Replace(validPayment(), `"1250.00"`, `"0"`, 1), key, "ARPaymentPost", http.StatusBadRequest, "amount"},
-		{"unknown payment mode", strings.Replace(validPayment(), `"CHECK"`, `"BARTER"`, 1), key, "ARPaymentPost", http.StatusBadRequest, "paymentMode"},
-		{"bad value date", strings.Replace(validPayment(), `"valueDate":"2027-03-05"`, `"valueDate":"05/03/2027"`, 1), key, "ARPaymentPost", http.StatusBadRequest, "valueDate"},
-		{"valid", validPayment(), key, "ARPaymentPost", http.StatusCreated, ""},
+		{"missing idempotency key", validPayment(), nil, "receivables.payment.post", http.StatusBadRequest, ""},
+		{"without the duty", validPayment(), key, "receivables.view", http.StatusForbidden, ""},
+		{"lockbox source is an importer's job", strings.Replace(validPayment(), `"MANUAL"`, `"LOCKBOX"`, 1), key, "receivables.payment.post", http.StatusBadRequest, "source"},
+		{"zero amount", strings.Replace(validPayment(), `"1250.00"`, `"0"`, 1), key, "receivables.payment.post", http.StatusBadRequest, "amount"},
+		{"unknown payment mode", strings.Replace(validPayment(), `"CHECK"`, `"BARTER"`, 1), key, "receivables.payment.post", http.StatusBadRequest, "paymentMode"},
+		{"bad value date", strings.Replace(validPayment(), `"valueDate":"2027-03-05"`, `"valueDate":"05/03/2027"`, 1), key, "receivables.payment.post", http.StatusBadRequest, "valueDate"},
+		{"valid", validPayment(), key, "receivables.payment.post", http.StatusCreated, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -270,17 +279,17 @@ func TestApplyPayment_RequiresIfMatchAndForwardsPlan(t *testing.T) {
 	path := "/v1/receivables/payments/" + testPay + ":apply"
 	body := `{"settlements":[{"openItemId":"` + testItem + `","amount":"1000.00","cashDiscount":"20.00"}],"onAccount":"0"}`
 
-	if rec := do(h, http.MethodPost, path, body, "ARPaymentPost", nil); rec.Code != http.StatusPreconditionRequired {
+	if rec := do(h, http.MethodPost, path, body, "receivables.payment.post", nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("without If-Match: status = %d, want 428", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, path, body, "ARView", map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusForbidden {
+	if rec := do(h, http.MethodPost, path, body, "receivables.view", map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusForbidden {
 		t.Fatalf("without the duty: status = %d, want 403", rec.Code)
 	}
 	bad := `{"settlements":[{"openItemId":"not-a-uuid","amount":"1.00"}]}`
-	if rec := do(h, http.MethodPost, path, bad, "ARPaymentPost", map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusBadRequest {
+	if rec := do(h, http.MethodPost, path, bad, "receivables.payment.post", map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad item id: status = %d, want 400", rec.Code)
 	}
-	rec := do(h, http.MethodPost, path, body, "ARPaymentPost", map[string]string{"If-Match": `"2"`, "Idempotency-Key": "apply-7"})
+	rec := do(h, http.MethodPost, path, body, "receivables.payment.post", map[string]string{"If-Match": `"2"`, "Idempotency-Key": "apply-7"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -297,24 +306,24 @@ func TestApplyPayment_RequiresIfMatchAndForwardsPlan(t *testing.T) {
 
 func TestCustomMethods_UnknownActionIsNotFound(t *testing.T) {
 	h := router(&fakeStore{})
-	rec := do(h, http.MethodPost, "/v1/receivables/payments/"+testPay+":refund", `{}`, "ARPaymentPost", nil)
+	rec := do(h, http.MethodPost, "/v1/receivables/payments/"+testPay+":refund", `{}`, "receivables.payment.post", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
-	rec = do(h, http.MethodPost, "/v1/receivables/payments/"+testPay, `{}`, "ARPaymentPost", nil)
+	rec = do(h, http.MethodPost, "/v1/receivables/payments/"+testPay, `{}`, "receivables.payment.post", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("no action: status = %d, want 404", rec.Code)
 	}
 }
 
-// The PRD (§5.30.5, §5.30.17) puts :match under ARPaymentPost, not ARView.
+// The PRD (§5.30.5, §5.30.17) puts :match under receivables.payment.post, not receivables.view.
 func TestMatch_NeedsPaymentPostDuty(t *testing.T) {
 	h := router(&fakeStore{})
 	path := "/v1/receivables/payments/" + testPay + ":match"
-	if rec := do(h, http.MethodPost, path, "", "ARView", nil); rec.Code != http.StatusForbidden {
+	if rec := do(h, http.MethodPost, path, "", "receivables.view", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
-	rec := do(h, http.MethodPost, path, "", "ARPaymentPost", nil)
+	rec := do(h, http.MethodPost, path, "", "receivables.payment.post", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"decision":"ON_ACCOUNT"`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -331,11 +340,11 @@ func TestReads_ValidateQueryParameters(t *testing.T) {
 		"/v1/receivables/payments?customer=nope",
 		"/v1/receivables/payments?limit=501",
 	} {
-		if rec := do(h, http.MethodGet, path, "", "ARView", nil); rec.Code != http.StatusBadRequest {
+		if rec := do(h, http.MethodGet, path, "", "receivables.view", nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", path, rec.Code)
 		}
 	}
-	rec := do(h, http.MethodGet, "/v1/receivables/aging?asOf=2027-03-31", "", "ARView", nil)
+	rec := do(h, http.MethodGet, "/v1/receivables/aging?asOf=2027-03-31", "", "receivables.view", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"bucket":"1-30"`) {
 		t.Fatalf("aging: status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -355,9 +364,9 @@ func TestListPayments_ForwardsFiltersAndNeedsView(t *testing.T) {
 	h := router(fs)
 	path := "/v1/receivables/payments?status=ON_ACCOUNT&customer=" + testItem
 	if rec := do(h, http.MethodGet, path, "", "", nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("without ARView: status = %d, want 403", rec.Code)
+		t.Fatalf("without receivables.view: status = %d, want 403", rec.Code)
 	}
-	rec := do(h, http.MethodGet, path, "", "ARView", nil)
+	rec := do(h, http.MethodGet, path, "", "receivables.view", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}

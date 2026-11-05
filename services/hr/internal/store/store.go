@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -86,6 +87,7 @@ type WorkerInput struct {
 type PIIView struct {
 	NationalID  string  `json:"nationalId"`
 	BankAccount *string `json:"bankAccount,omitempty"`
+	HomeAddress *string `json:"homeAddress,omitempty"`
 	Masked      bool    `json:"masked"`
 }
 
@@ -156,6 +158,11 @@ func pgCode(err error, code string) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == code
 }
 
+func pgUnique(err error, name string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == name
+}
+
 func pgConstraint(err error, name string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == exclusionViolation && pgErr.ConstraintName == name
@@ -219,38 +226,12 @@ func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotency
 				return err
 			}
 		}
-		nationalID, err := s.sealer.Seal(p.TenantID, fieldNationalID, in.NationalID)
-		if err != nil {
-			return err
-		}
-		var bank []byte
-		if in.BankAccount != "" {
-			if bank, err = s.sealer.Seal(p.TenantID, fieldBankAccount, in.BankAccount); err != nil {
-				return err
-			}
-		}
-		workerID := ids.New()
-		w, err = scanWorker(tx.QueryRow(ctx, `insert into worker (tenant_id, id, personnel_number, worker_type, party_person_id, legal_name, preferred_name, user_id, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+workerColumns,
-			p.TenantID, workerID, in.PersonnelNumber, in.WorkerType, in.PartyPersonID, in.LegalName, in.PreferredName, in.UserID, key))
-		if err != nil {
+		var err error
+		if w, err = s.createWorkerTx(ctx, tx, p, in, key); err != nil {
 			return err
 		}
 		inserted = true
-		if _, err := tx.Exec(ctx, `insert into worker_pii (tenant_id, worker_id, national_id_sealed, bank_account_sealed) values ($1, $2, $3, $4)`,
-			p.TenantID, w.ID, nationalID, bank); err != nil {
-			return err
-		}
-		changed := []string{"national_id"}
-		if bank != nil {
-			changed = append(changed, "bank_account")
-		}
-		if err := audit(ctx, tx, p, "p3_change", w.ID, changed, "", ""); err != nil {
-			return err
-		}
-		return enqueue(ctx, tx, "worker", w.ID, hrevents.WorkerCreated, p.TenantID, hrevents.WorkerCreatedData{
-			ID: w.ID, PersonnelNumber: w.PersonnelNumber, WorkerType: w.WorkerType, PartyPersonID: w.PartyPersonID,
-		})
+		return nil
 	})
 	if idempotencyRace(err) {
 		return Worker{}, false, idempotencyInFlight()
@@ -263,6 +244,41 @@ func (s *Postgres) CreateWorker(ctx context.Context, in WorkerInput, idempotency
 		return Worker{}, false, idempotencyReuse()
 	}
 	return w, inserted, err
+}
+
+// createWorkerTx inserts the worker and its sealed PII, audits the PII write
+// and enqueues worker.created, all in tx.
+func (s *Postgres) createWorkerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in WorkerInput, key *string) (Worker, error) {
+	nationalID, err := s.sealer.Seal(p.TenantID, fieldNationalID, in.NationalID)
+	if err != nil {
+		return Worker{}, err
+	}
+	var bank []byte
+	if in.BankAccount != "" {
+		if bank, err = s.sealer.Seal(p.TenantID, fieldBankAccount, in.BankAccount); err != nil {
+			return Worker{}, err
+		}
+	}
+	w, err := scanWorker(tx.QueryRow(ctx, `insert into worker (tenant_id, id, personnel_number, worker_type, party_person_id, legal_name, preferred_name, user_id, idempotency_key)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+workerColumns,
+		p.TenantID, ids.New(), in.PersonnelNumber, in.WorkerType, in.PartyPersonID, in.LegalName, in.PreferredName, in.UserID, key))
+	if err != nil {
+		return Worker{}, err
+	}
+	if _, err := tx.Exec(ctx, `insert into worker_pii (tenant_id, worker_id, national_id_sealed, bank_account_sealed) values ($1, $2, $3, $4)`,
+		p.TenantID, w.ID, nationalID, bank); err != nil {
+		return Worker{}, err
+	}
+	changed := []string{"national_id"}
+	if bank != nil {
+		changed = append(changed, "bank_account")
+	}
+	if err := audit(ctx, tx, p, "p3_change", w.ID, changed, "", ""); err != nil {
+		return Worker{}, err
+	}
+	return w, enqueue(ctx, tx, "worker", w.ID, hrevents.WorkerCreated, p.TenantID, hrevents.WorkerCreatedData{
+		ID: w.ID, PersonnelNumber: w.PersonnelNumber, WorkerType: w.WorkerType, PartyPersonID: w.PartyPersonID,
+	})
 }
 
 // GetWorker returns the non-PII view of a worker.
@@ -287,8 +303,8 @@ func (s *Postgres) ReadPII(ctx context.Context, workerID string, reveal bool, re
 	var view PIIView
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var nationalID []byte
-		var bank []byte
-		err := tx.QueryRow(ctx, `select national_id_sealed, bank_account_sealed from worker_pii where tenant_id = $1 and worker_id = $2`, p.TenantID, workerID).Scan(&nationalID, &bank)
+		var bank, address []byte
+		err := tx.QueryRow(ctx, `select national_id_sealed, bank_account_sealed, home_address_sealed from worker_pii where tenant_id = $1 and worker_id = $2`, p.TenantID, workerID).Scan(&nationalID, &bank, &address)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 		}
@@ -315,7 +331,22 @@ func (s *Postgres) ReadPII(ctx context.Context, workerID string, reveal bool, re
 			masked := domain.MaskBank(*bankPlain)
 			view.BankAccount = &masked
 		}
-		action, fields := "p3_read", []string{"national_id", "bank_account"}
+		if address != nil {
+			raw, err := s.sealer.Open(p.TenantID, fieldHomeAddress, address)
+			if err != nil {
+				return err
+			}
+			var a domain.Address
+			if err := json.Unmarshal([]byte(raw), &a); err != nil {
+				return err
+			}
+			shown := a.Summary()
+			if reveal {
+				shown = a.Format()
+			}
+			view.HomeAddress = &shown
+		}
+		action, fields := "p3_read", []string{"national_id", "bank_account", "home_address"}
 		if reveal {
 			action = "p3_reveal"
 		}
@@ -336,8 +367,8 @@ func (s *Postgres) PIIOpenCounts() (legacy, failed int64) {
 var resealBatchSize = 500
 
 type sealedPII struct {
-	workerID         string
-	nationalID, bank []byte
+	workerID                  string
+	nationalID, bank, address []byte
 }
 
 // ResealPII re-seals, under the current fieldcrypt key, every worker_pii value of
@@ -351,14 +382,14 @@ func (s *Postgres) ResealPII(ctx context.Context) (int, error) {
 	for {
 		var batch []sealedPII
 		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `select worker_id::text, national_id_sealed, bank_account_sealed from worker_pii
+			rows, err := tx.Query(ctx, `select worker_id::text, national_id_sealed, bank_account_sealed, home_address_sealed from worker_pii
 				where tenant_id = $1 and worker_id > $2 order by worker_id limit $3 for update`, p.TenantID, after, resealBatchSize)
 			if err != nil {
 				return err
 			}
 			if batch, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (sealedPII, error) {
 				var v sealedPII
-				return v, r.Scan(&v.workerID, &v.nationalID, &v.bank)
+				return v, r.Scan(&v.workerID, &v.nationalID, &v.bank, &v.address)
 			}); err != nil {
 				return err
 			}
@@ -394,11 +425,17 @@ func (s *Postgres) resealRow(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 			return false, err
 		}
 	}
-	if !nidChanged && !bankChanged {
+	address, addressChanged := row.address, false
+	if row.address != nil {
+		if address, addressChanged, err = s.sealer.Reseal(p.TenantID, fieldHomeAddress, row.address); err != nil {
+			return false, err
+		}
+	}
+	if !nidChanged && !bankChanged && !addressChanged {
 		return false, nil
 	}
-	if _, err := tx.Exec(ctx, `update worker_pii set national_id_sealed = $3, bank_account_sealed = $4 where tenant_id = $1 and worker_id = $2`,
-		p.TenantID, row.workerID, nationalID, bank); err != nil {
+	if _, err := tx.Exec(ctx, `update worker_pii set national_id_sealed = $3, bank_account_sealed = $4, home_address_sealed = $5 where tenant_id = $1 and worker_id = $2`,
+		p.TenantID, row.workerID, nationalID, bank, address); err != nil {
 		return false, err
 	}
 	var fields []string
@@ -407,6 +444,9 @@ func (s *Postgres) resealRow(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	if bankChanged {
 		fields = append(fields, "bank_account")
+	}
+	if addressChanged {
+		fields = append(fields, "home_address")
 	}
 	return true, audit(ctx, tx, p, "p3_change", row.workerID, fields, "re-sealed under the current fieldcrypt key; value unchanged", "")
 }

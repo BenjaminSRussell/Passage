@@ -42,12 +42,24 @@ export function addUsage(b: TokenBudget, u: Usage): TokenBudget {
 }
 
 /**
- * BR-47.4: four characters per token when the provider reports no usage. It is also the pre-call
- * estimate of the prompt, so it can undercount dense scripts; that input error is the only way a
- * call overshoots its hold, because output is capped by outputBudgetForCall.
+ * BR-47.4: four characters per token when the provider reports no usage. It also sizes the output
+ * allowance of a call (outputBudgetForCall). It undercounts CJK and emoji text several times over,
+ * so it never bounds the input: assertPromptWithinCap does that by byte length.
  */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+/**
+ * Refuses (AGT-0202) a call whose input could exceed the run's input hold. A token covers at
+ * least one UTF-8 byte, so the byte length of everything sent (system text, prompt, tool schemas)
+ * is an upper bound on input tokens whatever the script.
+ */
+export function assertPromptWithinCap(parts: readonly string[], cap: number): void {
+  const bytes = parts.reduce((sum, part) => sum + Buffer.byteLength(part, "utf8"), 0);
+  if (bytes > cap) {
+    throw new AgentError("AGT-0202", `prompt is ${bytes} bytes, more than the ${cap} input tokens the run cap leaves`);
+  }
 }
 
 /** FR-47.11 per-run cap. Throws AGT-0202 style rejection when a run would exceed it. */

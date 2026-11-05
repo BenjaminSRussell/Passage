@@ -50,7 +50,7 @@ func TestRoutes_RequireTenant(t *testing.T) {
 }
 
 func TestRoutes_RequireDuty(t *testing.T) {
-	rec := call(t, newTestServer(), http.MethodPost, "/v1/eam/assets", `{}`, headers("EamInquire"))
+	rec := call(t, newTestServer(), http.MethodPost, "/v1/eam/assets", `{}`, headers("eam.inquire"))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
@@ -64,13 +64,13 @@ func TestCreateAsset_ValidationAndIdempotency(t *testing.T) {
 		body   string
 		status int
 	}{
-		{"missing idempotency key", map[string]string{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "EamAssetMaintain"},
+		{"missing idempotency key", map[string]string{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "eam.asset.maintain"},
 			`{}`, http.StatusBadRequest},
-		{"criticality out of range", headers("EamAssetMaintain"),
+		{"criticality out of range", headers("eam.asset.maintain"),
 			`{"name":"Pump","assetType":"PUMP","siteId":"` + testkit.TenantID(2) + `","criticality":9}`, http.StatusBadRequest},
-		{"bad asset type", headers("EamAssetMaintain"),
+		{"bad asset type", headers("eam.asset.maintain"),
 			`{"name":"Pump","assetType":"pump","siteId":"` + testkit.TenantID(2) + `","criticality":3}`, http.StatusBadRequest},
-		{"unknown field", headers("EamAssetMaintain"), `{"nope":1}`, http.StatusBadRequest},
+		{"unknown field", headers("eam.asset.maintain"), `{"nope":1}`, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,7 +84,7 @@ func TestCreateAsset_ValidationAndIdempotency(t *testing.T) {
 func TestActivateAsset_RequiresIfMatch(t *testing.T) {
 	h := newTestServer()
 	id := testkit.TenantID(3)
-	rec := call(t, h, http.MethodPost, "/v1/eam/assets/"+id+"/activate", ``, headers("EamAssetMaintain"))
+	rec := call(t, h, http.MethodPost, "/v1/eam/assets/"+id+"/activate", ``, headers("eam.asset.maintain"))
 	if rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("status = %d, want 428", rec.Code)
 	}
@@ -92,7 +92,7 @@ func TestActivateAsset_RequiresIfMatch(t *testing.T) {
 
 func TestWorkOrderStatus_RejectsUnknownStatus(t *testing.T) {
 	h := newTestServer()
-	hdr := headers("EamPlanner")
+	hdr := headers("eam.work.plan")
 	hdr["If-Match"] = `"1"`
 	rec := call(t, h, http.MethodPost, "/v1/eam/work-orders/"+testkit.TenantID(4)+"/status", `{"to":"BOGUS"}`, hdr)
 	if rec.Code != http.StatusBadRequest {
@@ -102,7 +102,7 @@ func TestWorkOrderStatus_RejectsUnknownStatus(t *testing.T) {
 
 func TestKPIs_RequiresWindow(t *testing.T) {
 	h := newTestServer()
-	rec := call(t, h, http.MethodGet, "/v1/eam/kpis?asset="+testkit.TenantID(5), ``, headers("EamInquire"))
+	rec := call(t, h, http.MethodGet, "/v1/eam/kpis?asset="+testkit.TenantID(5), ``, headers("eam.inquire"))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
@@ -122,24 +122,24 @@ func TestValidation_BeforeTheStore(t *testing.T) {
 		status                   int
 	}{
 		{"round orders are not enabled", http.MethodPost, "/v1/eam/work-orders",
-			`{"assetId":"` + asset + `","workOrderType":"ROUND","currency":"USD"}`, headers("EamPlanner"), http.StatusBadRequest},
+			`{"assetId":"` + asset + `","workOrderType":"ROUND","currency":"USD"}`, headers("eam.work.plan"), http.StatusBadRequest},
 		{"priority out of range", http.MethodPost, "/v1/eam/work-orders",
-			`{"assetId":"` + asset + `","workOrderType":"CORRECTIVE","priority":7,"currency":"USD"}`, headers("EamPlanner"), http.StatusBadRequest},
+			`{"assetId":"` + asset + `","workOrderType":"CORRECTIVE","priority":7,"currency":"USD"}`, headers("eam.work.plan"), http.StatusBadRequest},
 		{"downtime only on completion", http.MethodPost, "/v1/eam/work-orders/" + asset + "/status",
-			`{"to":"RELEASED","downtimeMinutes":30}`, withIfMatch("EamTechnician"), http.StatusBadRequest},
+			`{"to":"RELEASED","downtimeMinutes":30}`, withIfMatch("eam.work-order.execute"), http.StatusBadRequest},
 		{"negative downtime", http.MethodPost, "/v1/eam/work-orders/" + asset + "/status",
-			`{"to":"COMPLETED","downtimeMinutes":-1}`, withIfMatch("EamTechnician"), http.StatusBadRequest},
+			`{"to":"COMPLETED","downtimeMinutes":-1}`, withIfMatch("eam.work-order.execute"), http.StatusBadRequest},
 		{"status needs a planner or technician", http.MethodPost, "/v1/eam/work-orders/" + asset + "/status",
-			`{"to":"RELEASED"}`, withIfMatch("EamInquire"), http.StatusForbidden},
+			`{"to":"RELEASED"}`, withIfMatch("eam.inquire"), http.StatusForbidden},
 		{"iot requests come from rules", http.MethodPost, "/v1/eam/requests",
-			`{"assetId":"` + asset + `","source":"IOT","severity":2,"description":"x"}`, headers("EamRequestCreate"), http.StatusBadRequest},
+			`{"assetId":"` + asset + `","source":"IOT","severity":2,"description":"x"}`, headers("eam.request.create"), http.StatusBadRequest},
 		{"labor hours must be a positive decimal", http.MethodPost, "/v1/eam/work-orders/" + asset + "/labor",
-			`{"hours":"0","rate":"45.00"}`, headers("EamTechnician"), http.StatusBadRequest},
-		{"list limit", http.MethodGet, "/v1/eam/work-orders?limit=500", ``, headers("EamInquire"), http.StatusBadRequest},
-		{"list status", http.MethodGet, "/v1/eam/work-orders?status=DONE", ``, headers("EamInquire"), http.StatusBadRequest},
-		{"list cursor", http.MethodGet, "/v1/eam/assets?cursor=abc", ``, headers("EamInquire"), http.StatusBadRequest},
-		{"lists need EamInquire", http.MethodGet, "/v1/eam/assets", ``, headers("EamPlanner"), http.StatusForbidden},
-		{"detail id must be a UUID", http.MethodGet, "/v1/eam/work-orders/WO-1", ``, headers("EamInquire"), http.StatusBadRequest},
+			`{"hours":"0","rate":"45.00"}`, headers("eam.work-order.execute"), http.StatusBadRequest},
+		{"list limit", http.MethodGet, "/v1/eam/work-orders?limit=500", ``, headers("eam.inquire"), http.StatusBadRequest},
+		{"list status", http.MethodGet, "/v1/eam/work-orders?status=DONE", ``, headers("eam.inquire"), http.StatusBadRequest},
+		{"list cursor", http.MethodGet, "/v1/eam/assets?cursor=abc", ``, headers("eam.inquire"), http.StatusBadRequest},
+		{"lists need eam.inquire", http.MethodGet, "/v1/eam/assets", ``, headers("eam.work.plan"), http.StatusForbidden},
+		{"detail id must be a UUID", http.MethodGet, "/v1/eam/work-orders/WO-1", ``, headers("eam.inquire"), http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,7 +158,7 @@ func TestHTTP_ReadingAndWorkOrderFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New(store.New(pool), nil).Routes()
-	all := "EamAssetMaintain,EamCounterRegister,EamPlanner,EamTechnician,EamInquire"
+	all := "eam.asset.maintain,eam.counter.register,eam.work.plan,eam.work-order.execute,eam.inquire"
 	post := func(path, body, key string, extra map[string]string) *httptest.ResponseRecorder {
 		hdr := headers(all)
 		hdr["Idempotency-Key"] = key

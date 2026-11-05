@@ -82,7 +82,7 @@ func TestDropShip_CreateValidatesAndNeedsAKeyAndDuty(t *testing.T) {
 			t.Fatalf("%s: status %d, want a validation error", name, rec.Code)
 		}
 	}
-	if rec := do(t, h, http.MethodPost, path, dropShipBody(nil), map[string]string{"Idempotency-Key": "d-2", "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPost, path, dropShipBody(nil), map[string]string{"Idempotency-Key": "d-2", "X-Passage-Duties": "fulfillment.warehouse.view"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer create: %d, want 403", rec.Code)
 	}
 }
@@ -92,28 +92,28 @@ func TestDropShip_ConfirmNeedsVersionDateAndThePostingDuty(t *testing.T) {
 	path := "/v1/fulfillment/drop-ships/" + ids.New() + ":confirm"
 	today := time.Now().UTC().Format(dateLayout)
 	body := `{"shippedOn":"` + today + `","vendorShipmentRef":"VS-1"}`
-	if rec := do(t, h, http.MethodPost, path, body, map[string]string{"X-Passage-Duties": "PurchaseOrderConfirm", "Idempotency-Key": "c-1"}); rec.Code != http.StatusPreconditionRequired {
+	if rec := do(t, h, http.MethodPost, path, body, map[string]string{"X-Passage-Duties": "procurement.purchase-order.confirm", "Idempotency-Key": "c-1"}); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("no If-Match: %d", rec.Code)
 	}
-	if rec := do(t, h, http.MethodPost, path, `{}`, map[string]string{"X-Passage-Duties": "PurchaseOrderConfirm", "Idempotency-Key": "c-2", "If-Match": `"1"`}); rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
+	if rec := do(t, h, http.MethodPost, path, `{}`, map[string]string{"X-Passage-Duties": "procurement.purchase-order.confirm", "Idempotency-Key": "c-2", "If-Match": `"1"`}); rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
 		t.Fatalf("no date: %d", rec.Code)
 	}
 	future := time.Now().UTC().AddDate(0, 0, 3).Format(dateLayout)
-	if rec := do(t, h, http.MethodPost, path, `{"shippedOn":"`+future+`"}`, map[string]string{"X-Passage-Duties": "PurchaseOrderConfirm", "Idempotency-Key": "c-3", "If-Match": `"1"`}); rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
+	if rec := do(t, h, http.MethodPost, path, `{"shippedOn":"`+future+`"}`, map[string]string{"X-Passage-Duties": "procurement.purchase-order.confirm", "Idempotency-Key": "c-3", "If-Match": `"1"`}); rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
 		t.Fatalf("future date: %d", rec.Code)
 	}
-	rec := do(t, h, http.MethodPost, path, body, map[string]string{"X-Passage-Duties": "PurchaseOrderConfirm", "Idempotency-Key": "c-4", "If-Match": `"1"`})
+	rec := do(t, h, http.MethodPost, path, body, map[string]string{"X-Passage-Duties": "procurement.purchase-order.confirm", "Idempotency-Key": "c-4", "If-Match": `"1"`})
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` || lastConfirm.VendorShipmentRef != "VS-1" || lastConfirm.PostingDate != nil {
 		t.Fatalf("confirm: %d %q %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
 	// Section 5.28.5: the vendor confirmation is a purchasing duty, not a warehouse or packing slip one.
-	for _, duties := range []string{"WarehouseRelease,WarehouseView", "PackingSlipPost,WarehouseView"} {
+	for _, duties := range []string{"fulfillment.warehouse.release,fulfillment.warehouse.view", "fulfillment.packing-slip.post,fulfillment.warehouse.view"} {
 		if rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "c-5" + duties, "If-Match": `"1"`, "X-Passage-Duties": duties}); rec.Code != http.StatusForbidden {
-			t.Fatalf("confirm with %s: %d, want 403 (needs PurchaseOrderConfirm)", duties, rec.Code)
+			t.Fatalf("confirm with %s: %d, want 403 (needs procurement.purchase-order.confirm)", duties, rec.Code)
 		}
 	}
-	if rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "c-6", "If-Match": `"1"`, "X-Passage-Duties": "PurchaseOrderConfirm"}); rec.Code != http.StatusOK {
-		t.Fatalf("confirm with PurchaseOrderConfirm: %d %s", rec.Code, rec.Body.String())
+	if rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "c-6", "If-Match": `"1"`, "X-Passage-Duties": "procurement.purchase-order.confirm"}); rec.Code != http.StatusOK {
+		t.Fatalf("confirm with procurement.purchase-order.confirm: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -150,7 +150,7 @@ func TestDropShip_PartialConfirmQtyAndCloseRemainder(t *testing.T) {
 	path := "/v1/fulfillment/drop-ships/" + id + ":confirm"
 	today := time.Now().UTC().Format(dateLayout)
 	hdr := func(k string) map[string]string {
-		return map[string]string{"X-Passage-Duties": "PurchaseOrderConfirm", "Idempotency-Key": k, "If-Match": `"1"`}
+		return map[string]string{"X-Passage-Duties": "procurement.purchase-order.confirm", "Idempotency-Key": k, "If-Match": `"1"`}
 	}
 	lastConfirm = store.DropShipConfirmInput{}
 	if rec := do(t, h, http.MethodPost, path, `{"shippedOn":"`+today+`","qty":"2.5"}`, hdr("q-1")); rec.Code != http.StatusOK || lastConfirm.Qty == nil || lastConfirm.Qty.String() != "2.5" {
@@ -172,7 +172,7 @@ func TestDropShip_PartialConfirmQtyAndCloseRemainder(t *testing.T) {
 	if rec := do(t, h, http.MethodPost, closePath, "", map[string]string{"Idempotency-Key": "z-1"}); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("close without If-Match: %d", rec.Code)
 	}
-	if rec := do(t, h, http.MethodPost, closePath, "", map[string]string{"Idempotency-Key": "z-2", "If-Match": `"3"`, "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPost, closePath, "", map[string]string{"Idempotency-Key": "z-2", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.view"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("close as a viewer: %d, want 403", rec.Code)
 	}
 	if rec := do(t, h, http.MethodPost, closePath, "", map[string]string{"Idempotency-Key": "z-3", "If-Match": `"3"`}); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"4"` {

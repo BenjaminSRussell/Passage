@@ -42,7 +42,7 @@ Every node set is checked structurally before it is stored: at most 50,000 nodes
 
 ## Web module
 
-`apps/web/src/modules/org/` (id `org`, title Organization) serves `/org`, `/org/legal-entities`, `/org/operating-units`, `/org/sites` and `/org/warehouses`. `LegalEntityProvider` loads the active legal entities once, restores the choice stored under `localStorage` key `passage.org.legalEntity` while it still names an active entity, and offers the read-only `ALL` scope only with the duty `org.switcher.all_scope`. `LegalEntitySwitcher` (label "Legal entity") sits in the module header. Every request goes through `orgFetch`, which sends `X-Passage-LegalEntity: <id>` for one entity, or `X-Passage-LegalEntity-Scope: ALL` on GET for `ALL` and never on a write; the list pages also pass `legalEntityId` as a filter and drop responses from a superseded scope.
+`apps/web/src/modules/org/` (id `org`, title Organization) serves `/org`, `/org/legal-entities`, `/org/operating-units`, `/org/sites` and `/org/warehouses`. `LegalEntityProvider` loads the active legal entities once, restores the choice stored under `localStorage` key `passage.org.legalEntity` while it still names an active entity, and offers the read-only `ALL` scope only with the duty `org.switcher.all-scope`. `LegalEntitySwitcher` (label "Legal entity") sits in the module header. Every request goes through `orgFetch`, which sends `X-Passage-LegalEntity: <id>` for one entity, or `X-Passage-LegalEntity-Scope: ALL` on GET for `ALL` and never on a write; the list pages also pass `legalEntityId` as a filter and drop responses from a superseded scope.
 
 ## API
 

@@ -40,7 +40,7 @@ async function failure(res: Response): Promise<FlowApiError> {
   return new FlowApiError(res.status, code, detail);
 }
 
-/** Creates or updates a DRAFT flow. Requires WMS_MOBILE_ADMIN. */
+/** Creates or updates a DRAFT flow. Requires warehouse.mobile-flow.admin. */
 export async function saveDraft(flow: FlowDraft, idempotencyKey: string): Promise<SavedFlow> {
   const res = await fetch(`${base}/flows`, {
     method: "POST",
@@ -81,7 +81,7 @@ export async function listConflicts(signal?: AbortSignal): Promise<OfflineConfli
 
 /**
  * Resolves one conflict (BR-32.4). "reapply" moves the inventory as scanned with the order link
- * dropped; "reject" discards the transaction. Requires WMS_WORK_SUPERVISE. If-Match carries the
+ * dropped; "reject" discards the transaction. Requires warehouse.offline-conflict.resolve. If-Match carries the
  * conflict version so two supervisors cannot both resolve it.
  */
 export async function resolveConflict(conflict: OfflineConflict, action: ConflictResolution, idempotencyKey: string): Promise<void> {

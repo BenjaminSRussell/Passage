@@ -132,7 +132,7 @@ export function SigningLimitsPage() {
   );
 }
 
-/** One limit with its recertification action (duty SigningLimitApprove in the service). */
+/** One limit with its recertification action (duty procurement.signing-limit.approve in the service). */
 export function SigningLimitDetailPage() {
   const { id = "" } = useParams();
   const resource = useResource(async (signal) => (await getSigningLimit(id, signal)).body, [id]);
@@ -405,7 +405,7 @@ export function SigningLimitRequestCreatePage() {
   );
 }
 
-/** One request with approve and reject while it is PENDING (duty SigningLimitApprove in the service). */
+/** One request with approve and reject while it is PENDING (duty procurement.signing-limit.approve in the service). */
 export function SigningLimitRequestDetailPage() {
   const { id = "" } = useParams();
   const resource = useResource(async (signal) => (await getSigningLimitRequest(id, signal)).body, [id]);

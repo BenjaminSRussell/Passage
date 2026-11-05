@@ -4,7 +4,27 @@
 
 ## Duty names
 
-A duty name is the exact string the owning service passes to `RequireDuty` or `HasDuty`. Styles are mixed (platform duties are prose, purchasing and receiving are PascalCase, ledger, inventory, reporting, close and payables are dotted) and are kept as-is until the unification follow-up (#210) lands.
+A duty name is the exact string the owning service passes to `RequireDuty` or `HasDuty`, and the string a role assignment, a service grant and the web app's nav gates hold.
+
+### Convention (#210)
+
+Every duty is dotted lower-case: `<service>.<object>.<action>`.
+
+- `<service>` is the owning service's duty prefix: usually its directory name without a language suffix (`fieldservice`, `agents` for `agents-ts`, `mcp` for `mcp-ts`), or the prefix it already uses (`procurement` for purchasing, `receivables`, `migration` for both migration and the migration factory, `platform` for platform-health and the platform-wide duties).
+- `<object>` is the business object, singular where it names one thing (`purchase-order`, `legal-hold`, `rate-card`).
+- `<action>` is the verb (`read`, `write`, `view`, `maintain`, `post`, `approve`, `run`, `admin`, `record-delivery`). The `self`, `manage` and `admin` actions of `hr.*` follow the existing `hr.performance.*` split: the employee, the manager and the HR administrator.
+- `<service>.<action>` (two segments) is allowed when the duty covers the whole service rather than one object: `receivables.view`, `projects.manage`, `edi.admin`, `budget.configure`.
+- Each segment is `[a-z][a-z0-9]*`, with `-` between words. No capitals, spaces or underscores.
+
+`TestDutyNamesFollowConvention` (`services/identity/data_json_test.go`) fails on a duty in `data.json`, a service grant or a service principal that does not match this shape.
+
+Not yet three-segment: the payables duties seeded before the convention name the object first and leave out the service (`aging.read`, `payment-run.execute`, `settlement.read`, `vendor-block.manage`), as do `period.*` (close), `open-item.read`, `employee-vendor.maintain` and `pii.read`. They match the shape, so they were not renamed in #210.
+
+The PRD (`docs/prd`, `docs/PRD-full.md`) keeps its own duty identifiers (`WMS_WORK_SUPERVISE`, `ARView`); a service README says which seeded duty implements a PRD duty when the names differ.
+
+### Renames and role assignments
+
+#210 renamed every PascalCase, SCREAMING_CASE and prose duty, and the underscore and four-segment ones (`party.vendor_bank.*`, `compliance.legal_hold.*`, `pricing.rebate.claim.approve`), in one change across `data.json`, the rego tests, the service constants, `platform/go/tenant` (service grants, service principals, `DutyAllScope`, now `org.switcher.all-scope`) and the web app. The old-to-new table is `services/identity/migrations/0010_unify_duty_names.sql`, which also moves every stored role assignment to the new name. There is no alias: a token or role assignment that still carries an old name grants nothing. Outside identity's role assignments, an old name can survive where it was stored or configured outside this repository, which the migration does not reach: the Keycloak duties mapper and client scopes, integration-hub `hub_api_client.scopes`, case-category access duties, and SoD rules entered by users.
 
 `services/identity/opa_contract_test.go` scans every Go service under `services/` and `tools/migration-factory`. It fails when a duty constant or `RequireDuty`/`HasDuty` string literal is missing from `data.json`, and when a call passes an argument it cannot resolve to a constant or literal. Call sites that pass a looked-up duty (route tables, `anyDuty` loops) are listed with a reason in `dynamicDutyArguments`; an entry that no longer matches a call fails the test.
 
@@ -19,7 +39,7 @@ Each permission is a route template matched with `glob.match(pattern, ["/", ":"]
 
 ## Costing route prefixes
 
-`costing` (Wave 20 inventory costing, dotted `costing.*` duties) owns `/v1/costing/...`. `productcost` (Wave 39 product costing, `Costing*` duties) owns `/v1/product-costing/...`, so the two duty families never share a route template (#342). In the web dev proxy only, `/api/v1/product-costing/...` resolves to `PASSAGE_SVC_PRODUCT_COSTING_URL`; `deploy/gateway/httproutes.yaml` has no productcost route yet.
+`costing` (Wave 20 inventory costing, dotted `costing.*` duties) owns `/v1/costing/...`. `productcost` (Wave 39 product costing, `productcost.*` duties) owns `/v1/product-costing/...`, so the two duty families never share a route template (#342). In the web dev proxy only, `/api/v1/product-costing/...` resolves to `PASSAGE_SVC_PRODUCT_COSTING_URL`; `deploy/gateway/httproutes.yaml` has no productcost route yet.
 
 ## Path input
 
@@ -27,7 +47,7 @@ The PEP must pass the decoded `r.URL.Path` with no query string, or the route te
 
 ## Flag duties
 
-`"flag": true` duties (for example `ledger.journal.postdirect`, `budget.override`, `org.hierarchy.backdate`) are checked in a handler on a route another duty already opens. They carry no route permissions. `Maintain tax codes` is a flag until a tax-code read route is mounted. A duty can own routes and still be checked in handlers: `inventory.count.approve` opens `count-sheets/*:approve` and `count-sheets/*/lines/*:recount`, and the inventory handlers also read it with `HasDuty` for over-tolerance `:post`, marking open tags MISSING on `:transfer-tags`, and unmasking blind counts.
+`"flag": true` duties (for example `ledger.journal.postdirect`, `budget.override`, `org.hierarchy.backdate`) are checked in a handler on a route another duty already opens. They carry no route permissions. `tax.code.maintain` is a flag until a tax-code read route is mounted. A duty can own routes and still be checked in handlers: `inventory.count.approve` opens `count-sheets/*:approve` and `count-sheets/*/lines/*:recount`, and the inventory handlers also read it with `HasDuty` for over-tolerance `:post`, marking open tags MISSING on `:transfer-tags`, and unmasking blind counts.
 
 ## Tests
 

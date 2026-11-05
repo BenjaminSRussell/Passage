@@ -175,26 +175,27 @@ describe("batch record review (slice 15)", () => {
     const table = await findTable({ name: "Exceptions" });
     expect(within(table).getAllByText("Open")).toHaveLength(2);
     fireEvent.click(within(table).getAllByRole("button", { name: "Decide" })[0]);
-    expect(screen.getByText(/Signature ids are not verified yet/)).toBeInTheDocument();
+    expect(screen.getAllByText(/signs it electronically under your name/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
-    expect(await screen.findByText("Enter the signature id as a UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Enter your printed name to sign.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Decision"), { target: { value: "deviation-raised" } });
-    fill("Signature id", SIG);
+    fill("Printed name", "Rita Reviewer");
     fill("Comment", "DEV-12");
     fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith(":disposition"))).toBe(true));
     const post = calls.find((c) => c.url.pathname.endsWith(":disposition"))!;
     expect(post.url.pathname).toBe(`/api/v1/production/batch-records/${RECORD}/exceptions/${EXC1}:disposition`);
-    expect(post.body).toEqual({ version: 3, disposition: "deviation-raised", comment: "DEV-12", signatureId: SIG });
+    expect(post.body).toEqual({ version: 3, disposition: "deviation-raised", comment: "DEV-12", printedName: "Rita Reviewer" });
     expect(new Headers(post.init.headers).get("Idempotency-Key")).toBeTruthy();
     await waitFor(() => expect(within(screen.getByRole("table", { name: "Exceptions" })).getByText("Deviation raised")).toBeInTheDocument());
     // A decision is final: only the open exception can still be decided.
     expect(within(screen.getByRole("table", { name: "Exceptions" })).getAllByRole("button", { name: "Decide" })).toHaveLength(1);
     await waitFor(() => expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]));
 
+    fill("Printed name for the approval", "Quinn QA");
     fireEvent.click(screen.getByRole("button", { name: "Approve record" }));
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith(":approve"))).toBe(true));
-    expect(calls.find((c) => c.url.pathname.endsWith(":approve"))!.body).toEqual({ version: 4 });
+    expect(calls.find((c) => c.url.pathname.endsWith(":approve"))!.body).toEqual({ version: 4, printedName: "Quinn QA" });
     expect(await screen.findByRole("button", { name: "Seal record" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve record" })).toBeNull();
   });
@@ -207,6 +208,7 @@ describe("batch record review (slice 15)", () => {
     };
     renderAt(`/processmfg/batch-records/${RECORD}`);
     await screen.findByRole("table", { name: "Exceptions" });
+    fill("Printed name for the approval", "Quinn QA");
     fireEvent.click(screen.getByRole("button", { name: "Approve record" }));
     expect(await findAlert()).toHaveTextContent("PMF-0014");
     fill("What was found", "Foam in the vessel");
@@ -251,6 +253,7 @@ describe("batch record review (slice 15)", () => {
     expect(await screen.findByText("ab".repeat(32))).toBeInTheDocument();
     expect(screen.getByText('{"recordId":"x"}')).toBeInTheDocument();
     expect(screen.getByText(/not a 21 CFR Part 11 signed record/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download the PDF" })).toHaveAttribute("href", `/api/v1/production/batch-records/${RECORD}/pdf`);
     expect(screen.queryByRole("button", { name: "Seal record" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Compile again" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Decide" })).toBeNull();
@@ -283,6 +286,7 @@ describe("batch record review (slice 15)", () => {
     renderAt(`/processmfg/batch-records/${RECORD}`, [READ, RECORD_APPROVE_DUTY]);
     await screen.findByRole("table", { name: "Exceptions" });
     expect(screen.queryByRole("button", { name: "Decide" })).toBeNull();
+    fill("Printed name for the approval", "Quinn QA");
     fireEvent.click(screen.getByRole("button", { name: "Approve record" }));
     expect(await findAlert()).toHaveTextContent("PMF-0124");
   });

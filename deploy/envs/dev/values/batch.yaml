@@ -1,0 +1,12 @@
+# Dev values for the batch Application (deploy/envs/dev/apps/services.yaml). Turns on the SMTP notify adapter
+# with credentials from the ESO ExternalSecret `batch-notify` (ClusterSecretStore `passage`, Vault keys
+# passage/dev/batch/notify/{smtp-host,smtp-port,smtp-user,smtp-password}, property `value`). Until those keys
+# exist, the ExternalSecret stays unready and the pod does not start (an enabled adapter without credentials
+# fails startup by design). The webhook adapter stays off until a receiver URL exists; enabling it adds the
+# `webhook-token` key.
+notify:
+  enabled: true
+  smtp: { enabled: true, from: notify@dev.passage.dev, tls: starttls }
+  webhook: { enabled: false, url: "" }
+  externalSecret:
+    environment: dev

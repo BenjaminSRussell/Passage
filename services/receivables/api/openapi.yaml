@@ -20,7 +20,7 @@ paths:
     get:
       operationId: listOpenItems
       summary: Open items (FBL5N style)
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
@@ -40,11 +40,34 @@ paths:
                     items: { $ref: "#/components/schemas/OpenItem" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/open-items/{ref}:
+    get:
+      operationId: getOpenItem
+      summary: One open item
+      description: |
+        Reads one open item in the caller's legal entities, with its version as the ETag. The migration loader reads
+        the items it loaded through this route to reconcile a run (service duty `receivables.import.read`, which
+        opens nothing else). An unknown id, or one outside the caller's legal entities, is 404 AR-OPEN-ITEM-NOT-FOUND.
+      x-passage-duty: receivables.view
+      x-passage-duty-alternatives: [receivables.import.read]
+      parameters:
+        - { name: ref, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The open item
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/receivables/aging:
     get:
       operationId: agingSnapshot
       summary: Aging snapshot by currency and bucket
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: asOf, in: query, schema: { type: string, format: date } }
       responses:
@@ -66,7 +89,7 @@ paths:
     get:
       operationId: listPayments
       summary: Payments, newest received first
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] } }
         - { name: customer, in: query, schema: { type: string, format: uuid } }
@@ -89,7 +112,7 @@ paths:
     post:
       operationId: createPayment
       summary: Record a manual payment (CHECK, ACH, WIRE, CARD, CASH)
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -113,7 +136,7 @@ paths:
     get:
       operationId: getPayment
       summary: Read a payment
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/PaymentId" }
       responses:
@@ -129,7 +152,7 @@ paths:
     post:
       operationId: matchPayment
       summary: Score candidate settlements for a payment (BR-30.1); changes no state
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { $ref: "#/components/parameters/PaymentId" }
       responses:
@@ -152,7 +175,7 @@ paths:
         discount date and may not exceed the item's discount; write-offs above
         tolerance are 422 AR-0006; a locked item is 409 AR-0002. A repeated
         Idempotency-Key with the same body replays the first response.
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { $ref: "#/components/parameters/PaymentId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -234,7 +257,7 @@ paths:
       operationId: listOpeningImports
       summary: What each import source loaded, per legal entity and currency
       description: Totals of the imported items still in Passage, for the reconciliation against the legacy ledger at cutover.
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -253,7 +276,7 @@ paths:
     get:
       operationId: listLockboxImports
       summary: Imported lockbox files, newest first
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -274,7 +297,7 @@ paths:
       description: |
         Duplicate files are refused by SHA-256 of the content (AR-0003). A malformed
         record is refused with AR-0004 and the line number in `detail`.
-      x-passage-duty: ARImport
+      x-passage-duty: receivables.payment-file.import
       requestBody:
         required: true
         content:
@@ -293,7 +316,7 @@ paths:
     get:
       operationId: collectionsWorklist
       summary: Customers ranked by risk score as of a date (FR-30.6, FR-30.10)
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: asOf, in: query, schema: { type: string, format: date } }
@@ -321,7 +344,7 @@ paths:
         balance confirmation's as-of basis: a debit item is its amount less the settlements, down-payment clearings
         and deductions booked by then; a deduction still being worked that day is its own DEDUCTION line without a due
         date (aged apart from invoices); an unapplied payment is a negative PAYMENT line. Read-only (BR-30.10).
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: customer, in: query, required: true, schema: { type: string, format: uuid } }
@@ -345,7 +368,7 @@ paths:
         dev.passage.receivables.customerbalance.changed.v1 when a balance, overdue amount, dunning level or risk score
         differs from the latest snapshot on or before the date, and a zero row with one event for a customer whose
         items all settled. Balances are those at the time of the run, so asOf may not be in the future.
-      x-passage-duty: ARAgingRun
+      x-passage-duty: receivables.aging.run
       requestBody:
         required: true
         content:
@@ -363,7 +386,7 @@ paths:
     get:
       operationId: listAgingSnapshots
       summary: Stored customer balances for a key date (the latest when omitted), riskiest first
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: asOf, in: query, schema: { type: string, format: date } }
@@ -388,7 +411,7 @@ paths:
     get:
       operationId: listDunningRuns
       summary: Dunning runs, latest run date first, with the count of letters not skipped
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [DRAFT, REVIEWED, ISSUED, CANCELLED] } }
         - { $ref: "#/components/parameters/Limit" }
@@ -407,7 +430,7 @@ paths:
     post:
       operationId: createDunningRun
       summary: Propose a dunning run (DRAFT); letters are previewed, not issued
-      x-passage-duty: DunningRun
+      x-passage-duty: receivables.dunning.run
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -431,7 +454,7 @@ paths:
     get:
       operationId: getDunningRun
       summary: Read a dunning run with its letters and exclusions
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/RunId" }
       responses:
@@ -447,7 +470,7 @@ paths:
     post:
       operationId: reviewDunningRun
       summary: Mark a DRAFT run REVIEWED; requires If-Match
-      x-passage-duty: DunningRun
+      x-passage-duty: receivables.dunning.run
       parameters:
         - { $ref: "#/components/parameters/RunId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -468,7 +491,7 @@ paths:
     post:
       operationId: issueDunningRun
       summary: Issue a REVIEWED run; only issue posts fees and raises levels (AR-0007 unless reviewed)
-      x-passage-duty: DunningRun
+      x-passage-duty: receivables.dunning.run
       parameters:
         - { $ref: "#/components/parameters/RunId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -489,7 +512,7 @@ paths:
     post:
       operationId: cancelDunningRun
       summary: Cancel a run that has not been issued; requires If-Match
-      x-passage-duty: DunningRun
+      x-passage-duty: receivables.dunning.run
       parameters:
         - { $ref: "#/components/parameters/RunId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -510,7 +533,7 @@ paths:
     get:
       operationId: listInterestNotes
       summary: Posted interest notes, latest calculation first
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { $ref: "#/components/parameters/Limit" }
@@ -530,7 +553,7 @@ paths:
     post:
       operationId: calculateInterest
       summary: Preview interest on overdue items (BR-30.5); writes nothing
-      x-passage-duty: InterestPost
+      x-passage-duty: receivables.interest.post
       requestBody:
         required: true
         content:
@@ -551,7 +574,7 @@ paths:
       description: |
         A retry with the same Idempotency-Key replays the stored response; the same
         key with another body is 422 idempotency_key_reuse.
-      x-passage-duty: InterestPost
+      x-passage-duty: receivables.interest.post
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -573,7 +596,7 @@ paths:
     get:
       operationId: listPromises
       summary: Promises to pay, latest promise date first
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: openItem, in: query, schema: { type: string, format: uuid } }
@@ -593,7 +616,7 @@ paths:
     post:
       operationId: createPromise
       summary: Record a promise to pay on an open item; excludes it from dunning and interest while open
-      x-passage-duty: CollectionsMaintain
+      x-passage-duty: receivables.collection.maintain
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -616,7 +639,7 @@ paths:
     get:
       operationId: listDisputes
       summary: Disputes, nearest SLA first
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - name: status
           in: query
@@ -640,7 +663,7 @@ paths:
     post:
       operationId: openDispute
       summary: Open a dispute on an open item; excludes it from dunning and interest
-      x-passage-duty: CollectionsMaintain
+      x-passage-duty: receivables.collection.maintain
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -665,7 +688,7 @@ paths:
     get:
       operationId: getDispute
       summary: Read one dispute
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/DisputeId" }
       responses:
@@ -682,7 +705,7 @@ paths:
     post:
       operationId: reviewDispute
       summary: Move an OPEN dispute to UNDER_REVIEW; requires If-Match
-      x-passage-duty: CollectionsMaintain
+      x-passage-duty: receivables.collection.maintain
       parameters:
         - { $ref: "#/components/parameters/DisputeId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -703,7 +726,7 @@ paths:
     post:
       operationId: resolveDispute
       summary: Resolve a dispute as CREDIT, PAID, WRITE_OFF or REJECTED; requires If-Match
-      x-passage-duty: CollectionsMaintain
+      x-passage-duty: receivables.collection.maintain
       parameters:
         - { $ref: "#/components/parameters/DisputeId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -730,7 +753,7 @@ paths:
     get:
       operationId: listCases
       summary: Collection cases, open first and nearest SLA first (FR-30.18)
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [OPEN, CLOSED] } }
         - { name: category, in: query, schema: { type: string, enum: [COLLECTION, DISPUTE, DEDUCTION] } }
@@ -751,7 +774,7 @@ paths:
     post:
       operationId: createCase
       summary: Open a minimal collection case; the SLA comes from the category (COLLECTION 72 h, DISPUTE 120 h, DEDUCTION 240 h)
-      x-passage-duty: CollectionsMaintain
+      x-passage-duty: receivables.collection.maintain
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -776,7 +799,7 @@ paths:
     get:
       operationId: getCase
       summary: Read one collection case
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/CaseId" }
       responses:
@@ -793,7 +816,7 @@ paths:
     post:
       operationId: assignCase
       summary: Hand an open case to another owner; requires If-Match
-      x-passage-duty: CollectionsMaintain
+      x-passage-duty: receivables.collection.maintain
       parameters:
         - { $ref: "#/components/parameters/CaseId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -825,7 +848,7 @@ paths:
     post:
       operationId: closeCase
       summary: Close an open case with an optional note; requires If-Match. Publishes case.closed.v1.
-      x-passage-duty: CollectionsMaintain
+      x-passage-duty: receivables.collection.maintain
       parameters:
         - { $ref: "#/components/parameters/CaseId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -856,7 +879,7 @@ paths:
     get:
       operationId: listConfirmationRuns
       summary: Balance confirmation runs with their reply counts, newest first (FR-30.20)
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -877,7 +900,7 @@ paths:
         Select customers by their balance as of the key date (|balance| at least the threshold; zero balances
         only with includeZeroBalances; optionally a sample of n seeded by the Idempotency-Key) and record one
         NO_REPLY confirmation per customer and currency (BR-30.13)
-      x-passage-duty: BalanceConfirmationRun
+      x-passage-duty: receivables.balance-confirmation.run
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -899,7 +922,7 @@ paths:
     get:
       operationId: getConfirmationRun
       summary: Read a run with its confirmations
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/ConfirmationRunId" }
       responses:
@@ -914,7 +937,7 @@ paths:
     get:
       operationId: confirmationDifferences
       summary: The difference list for audit; every DISAGREED reply with both balances and its DISPUTE case
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/ConfirmationRunId" }
       responses:
@@ -935,7 +958,7 @@ paths:
       summary: >-
         Record a customer's reply. Replies are immutable: repeating the recorded reply returns it, any other
         reply is 409 AR-CONFIRMATION-REPLIED. DISAGREED opens a DISPUTE case carrying the customer's balance.
-      x-passage-duty: BalanceConfirmationRun
+      x-passage-duty: receivables.balance-confirmation.run
       parameters:
         - { $ref: "#/components/parameters/ConfirmationRunId" }
       requestBody:
@@ -958,7 +981,7 @@ paths:
     get:
       operationId: listDownPayments
       summary: Down payments and security deposits, newest first (FR-30.21)
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [REQUESTED, RECEIVED, CLEARED, RELEASED, CANCELLED] } }
@@ -979,7 +1002,7 @@ paths:
     post:
       operationId: createDownPayment
       summary: Record a down payment or security deposit request (a noted item; nothing posts)
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -1003,7 +1026,7 @@ paths:
     get:
       operationId: getDownPayment
       summary: Read one down payment or deposit with its clearings
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/DownPaymentId" }
       responses:
@@ -1020,7 +1043,7 @@ paths:
     post:
       operationId: receiveDownPayment
       summary: Record the money as received (Dr bank / Cr 2190 or 2195 on downpayment.received.v1); requires If-Match
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { $ref: "#/components/parameters/DownPaymentId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1045,7 +1068,7 @@ paths:
     post:
       operationId: cancelDownPayment
       summary: Withdraw a request that was never paid; requires If-Match
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { $ref: "#/components/parameters/DownPaymentId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1063,7 +1086,7 @@ paths:
         Clear a received down payment against its final invoice, or offset a deposit against an invoice, fee or
         interest item (BR-30.14). The amount defaults to min(remaining, item open); more is 422 AR-0017.
         Publishes downpayment.cleared.v1 with Dr 2190 or 2195 / Cr 1200. Requires If-Match.
-      x-passage-duty: ARSettle
+      x-passage-duty: receivables.payment.settle
       parameters:
         - { $ref: "#/components/parameters/DownPaymentId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1091,7 +1114,7 @@ paths:
     post:
       operationId: releaseDownPayment
       summary: Refund what remains of a received security deposit (Dr 2195 / Cr bank on downpayment.released.v1); requires If-Match
-      x-passage-duty: ARRefund
+      x-passage-duty: receivables.payment.refund
       parameters:
         - { $ref: "#/components/parameters/DownPaymentId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1106,7 +1129,7 @@ paths:
     get:
       operationId: listBankStatementImports
       summary: Imported camt.053 statement files, newest first
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -1132,7 +1155,7 @@ paths:
         (BR-30.7). A file whose SHA-256 is already stored is refused (409 AR-0003); a
         malformed entry is refused with 400 AR-0004 and its line in `detail`. Each
         payment publishes payment.received.v1; the clerk matches it with `:match`.
-      x-passage-duty: ARImport
+      x-passage-duty: receivables.payment-file.import
       requestBody:
         required: true
         content:
@@ -1151,7 +1174,7 @@ paths:
     get:
       operationId: listDeductions
       summary: Deductions, open and matched first, oldest first within them (FR-30.17)
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/DeductionStatus" } }
         - { name: type, in: query, schema: { $ref: "#/components/schemas/DeductionType" } }
@@ -1180,7 +1203,7 @@ paths:
         dunned. A payment, when given, must share the item's legal entity, currency and
         customer (400 AR-DEDUCTION-MISMATCH). Publishes deduction.opened.v1. A repeated
         Idempotency-Key returns the stored deduction; with another body it is 422.
-      x-passage-duty: DeductionMaintain
+      x-passage-duty: receivables.deduction.maintain
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
       requestBody:
@@ -1205,7 +1228,7 @@ paths:
     get:
       operationId: getDeduction
       summary: Read one deduction, with its children when it was split
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { $ref: "#/components/parameters/DeductionId" }
       responses:
@@ -1218,7 +1241,7 @@ paths:
       summary: >-
         Match an OPEN deduction to a wave 26 claim (rebate accrual, promotion fund or chargeback). The whole
         deduction must fit the claim's remaining amount, else 422 AR-0014 (split it first). Requires If-Match.
-      x-passage-duty: DeductionMaintain
+      x-passage-duty: receivables.deduction.maintain
       parameters:
         - { $ref: "#/components/parameters/DeductionId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1249,7 +1272,7 @@ paths:
       summary: >-
         Approve a MATCHED deduction; billing issues the credit note against the claim, which consumes the fund or
         accrual (deduction.resolved.v1, APPROVED). Requires If-Match.
-      x-passage-duty: DeductionMaintain
+      x-passage-duty: receivables.deduction.maintain
       parameters:
         - { $ref: "#/components/parameters/DeductionId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1273,7 +1296,7 @@ paths:
       summary: >-
         Deny an OPEN or MATCHED deduction with a denial reason; its amount is re-billed to the customer as a
         DEDUCTION debit open item due today (rebillItemId). Requires If-Match.
-      x-passage-duty: DeductionMaintain
+      x-passage-duty: receivables.deduction.maintain
       parameters:
         - { $ref: "#/components/parameters/DeductionId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1303,7 +1326,7 @@ paths:
       summary: >-
         Split an OPEN deduction into 2 to 20 OPEN children whose amounts sum to it (else 422 AR-DEDUCTION-SPLIT).
         The parent becomes SPLIT and is returned with its children. Requires If-Match.
-      x-passage-duty: DeductionMaintain
+      x-passage-duty: receivables.deduction.maintain
       parameters:
         - { $ref: "#/components/parameters/DeductionId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1332,8 +1355,8 @@ paths:
       summary: >-
         Write off an OPEN or MATCHED deduction to 6110 (Dr 6110 / Cr 1200 on deduction.resolved.v1). Above
         deduction_write_off_limit (50.00 USD, 45.00 EUR, zero in other currencies) the caller also needs
-        ARWriteOffApprove, else 403 AR-0006. Requires If-Match.
-      x-passage-duty: DeductionMaintain
+        receivables.write-off.approve, else 403 AR-0006. Requires If-Match.
+      x-passage-duty: receivables.deduction.maintain
       parameters:
         - { $ref: "#/components/parameters/DeductionId" }
         - { $ref: "#/components/parameters/IfMatch" }
@@ -1388,7 +1411,7 @@ paths:
     get:
       operationId: listRMACredits
       summary: List RMA credits, newest first (PENDING and parked ones for the operator)
-      x-passage-duty: ARView
+      x-passage-duty: receivables.view
       parameters:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED] } }
@@ -1416,7 +1439,7 @@ paths:
         entity. Posts, oldest first and at most 200 (or `limit`), the unparked PENDING credits whose
         backoff ran out and that are older than 2 minutes. A failure is recorded on the credit
         (backoff, or park on a ledger refusal) and the pass goes on.
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -1444,7 +1467,7 @@ paths:
         ledger key stays the same, so an entry the ledger already holds under it answers an
         idempotency conflict and parks the credit again rather than posting twice. A POSTED credit
         is 409 AR-RMA-STATE.
-      x-passage-duty: ARPaymentPost
+      x-passage-duty: receivables.payment.post
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:

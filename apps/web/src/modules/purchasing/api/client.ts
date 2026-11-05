@@ -942,7 +942,7 @@ export function compareRFQ(id: string, rule?: RankingRule, signal?: AbortSignal)
   return send<RFQComparison>("GET", `/rfqs/${encodeURIComponent(id)}/compare${query({ rule })}`, { signal });
 }
 
-/** Records the buyer's 1–10 scores of one invited vendor (duty RFQAward); version is the RFQ ETag. */
+/** Records the buyer's 1–10 scores of one invited vendor (duty procurement.rfq.award); version is the RFQ ETag. */
 export function scoreRFQVendor(id: string, vendorId: string, version: number, scores: { criterionId: string; score: number }[]) {
   return send<RFQ>("PUT", `/rfqs/${encodeURIComponent(id)}/scores/${encodeURIComponent(vendorId)}`, {
     body: { scores },
@@ -950,7 +950,7 @@ export function scoreRFQVendor(id: string, vendorId: string, version: number, sc
   });
 }
 
-/** Awards lines to replies (duty RFQAward) and creates one DRAFT PO per vendor and currency. */
+/** Awards lines to replies (duty procurement.rfq.award) and creates one DRAFT PO per vendor and currency. */
 export function awardRFQ(id: string, version: number, awards: RFQAward[], idempotencyKey = newIdempotencyKey()) {
   return send<{ rfq: RFQ; purchaseOrders: PurchaseOrder[] }>("POST", `/rfqs/${encodeURIComponent(id)}:award`, {
     body: { awards },
@@ -1166,12 +1166,12 @@ function repricePath(poId: string): string {
   return `/purchase-orders/${encodeURIComponent(poId)}:reprice`;
 }
 
-/** Read-only preview (PurchaseOrderInquire); the ETag is the PO row version to pass to applyReprice. */
+/** Read-only preview (procurement.purchase-order.inquire); the ETag is the PO row version to pass to applyReprice. */
 export function previewReprice(poId: string, signal?: AbortSignal) {
   return send<RepriceResult>("POST", repricePath(poId), { body: { apply: false }, signal });
 }
 
-/** Applies the run as the next PO version (PurchaseOrderConfirm); a stale rowVersion is 412 PRC-PO-009. */
+/** Applies the run as the next PO version (procurement.purchase-order.confirm); a stale rowVersion is 412 PRC-PO-009. */
 export function applyReprice(poId: string, rowVersion: number, idempotencyKey = newIdempotencyKey()) {
   return send<RepriceResult>("POST", repricePath(poId), {
     body: { apply: true },
@@ -1754,7 +1754,7 @@ export function getSigningLimit(id: string, signal?: AbortSignal) {
   return send<SigningLimit>("GET", `/signing-limits/${encodeURIComponent(id)}`, { signal });
 }
 
-/** Moves the recertification date 12 months out; needs SigningLimitApprove. */
+/** Moves the recertification date 12 months out; needs procurement.signing-limit.approve. */
 export function recertifySigningLimit(id: string, version: number, idempotencyKey = newIdempotencyKey()) {
   return send<SigningLimit>("POST", `/signing-limits/${encodeURIComponent(id)}:recertify`, {
     headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
@@ -1773,7 +1773,7 @@ export function createSigningLimitRequest(input: SigningLimitRequestInput, idemp
   return send<SigningLimitRequest>("POST", "/signing-limit-requests", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
 }
 
-/** Approves or rejects a pending request; needs SigningLimitApprove. */
+/** Approves or rejects a pending request; needs procurement.signing-limit.approve. */
 export function decideSigningLimitRequest(
   id: string,
   action: "approve" | "reject",
@@ -2132,7 +2132,7 @@ export function getInboundChange(id: string, signal?: AbortSignal) {
 }
 
 /**
- * Settles a refused change (slice 19; needs PurchaseOrderMaintain): "acknowledge" says the buyer dealt with it by
+ * Settles a refused change (slice 19; needs procurement.purchase-order.maintain): "acknowledge" says the buyer dealt with it by
  * hand, "retry" runs the request again against the order as it is now.
  */
 export function settleInboundChange(id: string, action: "acknowledge" | "retry", note: string, idempotencyKey = newIdempotencyKey()) {

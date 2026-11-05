@@ -360,7 +360,7 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	if !opts.noParty {
 		banks = party.New(partySrv.URL, nil).WithSigner(signer)
 	}
-	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys)
+	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys).WithEmployeeVendors(pg)
 	if !opts.noTax {
 		a.WithWithholding(tax.New(taxSrv.URL, nil).WithSigner(signer), pg, runProfiles)
 	}
@@ -586,8 +586,8 @@ func TestPaymentRun_GenerateFileRevealsBankDetailsFromPartyWithASignedTokenAndSt
 	verifier := tenant.NewServiceVerifier("party", map[string]ed25519.PublicKey{"payables": f.verify})
 	for _, token := range tokens {
 		claims, err := verifier.Verify(token)
-		if err != nil || claims.Aud != "party" || claims.Le != entityA || len(claims.Duties) != 1 || claims.Duties[0] != "party.vendor_bank.reveal" {
-			t.Fatalf("claims %+v err %v: the reveal needs a service token carrying only party.vendor_bank.reveal", claims, err)
+		if err != nil || claims.Aud != "party" || claims.Le != entityA || len(claims.Duties) != 1 || claims.Duties[0] != "party.vendor-bank.reveal" {
+			t.Fatalf("claims %+v err %v: the reveal needs a service token carrying only party.vendor-bank.reveal", claims, err)
 		}
 	}
 	for _, view := range []string{

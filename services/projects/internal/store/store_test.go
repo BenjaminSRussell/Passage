@@ -78,7 +78,7 @@ func problemCode(err error) string {
 
 func TestCreateProject_IdempotencyReplayAndOutbox(t *testing.T) {
 	s, outboxCount := setup(t)
-	ctx := tenantCtx(1, "ProjMaintain")
+	ctx := tenantCtx(1, "projects.maintain")
 	in := sampleProject("PROJ-IDEM")
 
 	first, created, err := s.CreateProject(ctx, in, "key-1")
@@ -101,8 +101,8 @@ func TestCreateProject_IdempotencyReplayAndOutbox(t *testing.T) {
 
 func TestProjects_RowsAreTenantScoped(t *testing.T) {
 	s, _ := setup(t)
-	tenantOne := tenantCtx(1, "ProjMaintain", "ProjInquire")
-	tenantTwo := tenantCtx(2, "ProjInquire")
+	tenantOne := tenantCtx(1, "projects.maintain", "projects.inquire")
+	tenantTwo := tenantCtx(2, "projects.inquire")
 	if _, _, err := s.CreateProject(tenantOne, sampleProject("PROJ-T1"), ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestProjects_RowsAreTenantScoped(t *testing.T) {
 
 func TestTransitionProject_VersionAndStageRules(t *testing.T) {
 	s, outboxCount := setup(t)
-	ctx := tenantCtx(3, "ProjMaintain", "ProjManage")
+	ctx := tenantCtx(3, "projects.maintain", "projects.manage")
 	if _, _, err := s.CreateProject(ctx, sampleProject("PROJ-TR"), ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}

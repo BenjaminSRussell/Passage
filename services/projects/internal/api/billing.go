@@ -15,8 +15,8 @@ import (
 
 // Duties for transactions and billing (PRD §8.41.17).
 const (
-	DutyJournalMaintain = "ProjJournalMaintain"
-	DutyBillingMaintain = "ProjBillingMaintain"
+	DutyJournalMaintain = "projects.journal.maintain"
+	DutyBillingMaintain = "projects.billing.maintain"
 )
 
 // categoryBody is the wire shape of PUT /v1/projects/categories/{categoryId}.
@@ -77,9 +77,9 @@ type proposalList struct {
 }
 
 // registerBilling mounts categories, transactions and invoice proposals.
-// Category setup needs ProjSetupAdmin, recording transactions
-// ProjJournalMaintain, building and editing proposals ProjBillingMaintain and
-// every read ProjInquire (§8.41.17).
+// Category setup needs projects.setup.admin, recording transactions
+// projects.journal.maintain, building and editing proposals projects.billing.maintain and
+// every read projects.inquire (§8.41.17).
 func (a *API) registerBilling(r chi.Router) {
 	r.With(authz.RequireDuty(DutyInquire)).Get("/categories", a.listCategories)
 	r.With(authz.RequireDuty(DutySetup)).Put("/categories/{categoryId}", a.putCategory)

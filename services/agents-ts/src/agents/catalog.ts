@@ -11,8 +11,8 @@ import type { AgentVersion } from "../domain/registry.js";
  * autonomous posting in v1).
  */
 
-/** Starting any agent run needs AgentInvoke plus the agent's own duties (9.47.5, 9.47.17). */
-export const AGENT_INVOKE_DUTY = "AgentInvoke";
+/** Starting any agent run needs agents.invoke plus the agent's own duties (9.47.5, 9.47.17). */
+export const AGENT_INVOKE_DUTY = "agents.invoke";
 
 /** Every prompt tells the model that document text is data (9.47.9 prompt injection risk). */
 export const INJECTION_GUARD =

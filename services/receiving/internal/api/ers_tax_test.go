@@ -50,7 +50,7 @@ func TestErs_DebitsInputTaxIssuesSelfBillAndRecordsTheTransactionFromTheOutbox(t
 	if len(recorder.Txns) != 0 {
 		t.Fatalf("tax was recorded inline, not from the outbox event: %+v", recorder.Txns)
 	}
-	doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+run.Settled[0].InvoiceID, "", duty("APInquire", "", "X-Passage-User", "alice"))
+	doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+run.Settled[0].InvoiceID, "", duty("receiving.ap.inquire", "", "X-Passage-User", "alice"))
 	for _, want := range []string{"VAT19", "rate 19%", "12.38", "SB-00000001", "Acme Supplies GmbH", "Hauptstr 1", "Passage Werke AG", "Date of supply 2026-10-25"} {
 		if doc.Code != http.StatusOK || !bytes.Contains(doc.Body.Bytes(), []byte(want)) {
 			t.Fatalf("self-bill %d lacks %q: %s", doc.Code, want, doc.Body.String())
@@ -211,14 +211,14 @@ func TestErs_AuditReleaseOfATaxedInvoiceWritesTheSelfBillInTheReleaseAndNumbersI
 		t.Fatalf("run %+v", run)
 	}
 	id := run.Settled[0].InvoiceID
-	if doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+id, "", duty("APInquire", "", "X-Passage-User", "alice")); doc.Code != http.StatusNotFound {
+	if doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+id, "", duty("receiving.ap.inquire", "", "X-Passage-User", "alice")); doc.Code != http.StatusNotFound {
 		t.Fatalf("a blocked invoice already has a self-bill: %d", doc.Code)
 	}
 	if code, body := rg.release(id, "auditor"); code != http.StatusOK {
 		t.Fatalf("release %d %s", code, body)
 	}
 	wantLines(t, lastEntry(t, rg), "2100=10", "1400=0.4", "1570=1.98", "2000=-12.38")
-	doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+id, "", duty("APInquire", "", "X-Passage-User", "alice"))
+	doc := rg.call(http.MethodGet, "/v1/receiving/ers-self-bills/"+id, "", duty("receiving.ap.inquire", "", "X-Passage-User", "alice"))
 	for _, want := range []string{"SB-00000001", "VAT19", "rate 19%", "Acme Supplies GmbH", "Date of supply 2026-10-25"} {
 		if doc.Code != http.StatusOK || !bytes.Contains(doc.Body.Bytes(), []byte(want)) {
 			t.Fatalf("released self-bill %d lacks %q: %s", doc.Code, want, doc.Body.String())

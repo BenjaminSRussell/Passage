@@ -16,12 +16,12 @@ import (
 
 // routesLegalEntitySetting mounts the posting settings per legal entity
 // (cogs_at_shipment and asn_enabled, section 5.28.13). Saving needs
-// WarehouseRelease; changing cogs_at_shipment, an accounting policy, also needs
+// fulfillment.warehouse.release; changing cogs_at_shipment, an accounting policy, also needs
 // store.DutyCogsPolicy (checked in the store against the saved value).
 func (a *API) routesLegalEntitySetting(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/legal-entity-settings", a.listLegalEntitySettings)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/legal-entity-settings/{legalEntityId}", a.getLegalEntitySetting)
-	r.With(authz.RequireDuty("WarehouseRelease")).Put("/v1/fulfillment/legal-entity-settings/{legalEntityId}", a.saveLegalEntitySetting)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/legal-entity-settings", a.listLegalEntitySettings)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/legal-entity-settings/{legalEntityId}", a.getLegalEntitySetting)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Put("/v1/fulfillment/legal-entity-settings/{legalEntityId}", a.saveLegalEntitySetting)
 }
 
 type legalEntitySettingRequest struct {

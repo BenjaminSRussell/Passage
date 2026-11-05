@@ -316,7 +316,7 @@ func crsSeat(ctx context.Context, tx pgx.Tx, tenantID, sessionID string, l sessi
 }
 
 // crsCheckOwn refuses an employee-only caller acting on another worker's
-// registration (EssLearning is own data, 8.42.17).
+// registration (hr.learning.self is own data, 8.42.17).
 func crsCheckOwn(ownOnly bool, callerUserID string, workerUser *string) error {
 	if !ownOnly {
 		return nil

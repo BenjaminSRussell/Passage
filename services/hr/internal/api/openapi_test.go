@@ -74,7 +74,8 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 
 	all := []string{dutyWorkerMaintain, dutyWorkerInquire, dutyPIIRead, dutyActionMaintain, dutyOrgMaintain, dutyOrgInquire,
 		dutyAbsenceAdmin, dutyEssAbsence, dutyMssApprove, dutySetupAdmin, dutyEssBenefits,
-		dutyIncidentReport, dutyIncidentAdmin, dutyQuestionnaireAdmin, dutyEssQuestionnaire, dutyPerfManage, dutyPerfSelf}
+		dutyIncidentReport, dutyIncidentAdmin, dutyQuestionnaireAdmin, dutyEssQuestionnaire, dutyPerfManage, dutyPerfSelf,
+		dutyCompAdmin, dutyCompApprove}
 	for op, duty := range documented {
 		if duty == "" {
 			t.Errorf("%s has no x-passage-duty", op)

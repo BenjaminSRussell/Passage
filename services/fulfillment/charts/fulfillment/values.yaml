@@ -25,9 +25,13 @@ config:
 # Inventory holds on packing-slip post (wave 33 AC2). Empty skips the check.
 inventoryUrl: ""
 
+# carrier-gateway (#482) for rate shopping, labels and tracking pulls. Empty answers the carrier routes 503 FUL-0070.
+# Needs serviceIdentity.signingKeySecret; carrier-gateway must list fulfillment's public key.
+carrierGatewayUrl: ""
+
 # Callers (edi reads shipments) present a signed service token verified against these
 # keys, formatted name=base64-public-key and comma separated. signingKeySecret is
-# required with inventoryUrl so fulfillment can read held quantity.
+# required with inventoryUrl or carrierGatewayUrl so fulfillment can read held quantity.
 serviceIdentity:
   publicKeys: ""
   signingKeySecret: ""

@@ -74,85 +74,85 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 
 | Method and path | Duty | Notes |
 |---|---|---|
-| POST `/requisitions` | RequisitionCreate | Idempotency-Key required; max 500 lines; blank estimates default from the preferred vendor's trade agreement, else 0 with warning PRC-REQ-003 |
-| GET `/requisitions` | RequisitionCreate | Newest first; `status`, `mine=true`, `limit` (≤ 200), `cursor` |
-| GET `/requisitions/{id}` | RequisitionCreate | ETag = version |
-| POST `/requisitions/{id}:submit` | RequisitionCreate | Idempotency-Key and If-Match (version) required; requester only; routes approvers |
-| POST `/purchase-orders` | PurchaseOrderMaintain | Idempotency-Key required; missing unit prices come from trade agreements |
-| GET `/purchase-orders` | PurchaseOrderInquire | Newest first; `approvalStatus`, `vendorId`, `limit`, `cursor` |
-| GET `/purchase-orders/{id}` | PurchaseOrderInquire, or the service-only `procurement.purchase-order.lookup` (receiving's signed token, #305) | ETag = row version |
-| PATCH `/purchase-orders/{id}` | PurchaseOrderMaintain | If-Match (row version) required; whole order as on create, `lineNo` names an existing line; see the change rules below |
-| GET `/purchase-order-lines` | PurchaseOrderInquire | Open supply: lines of CONFIRMED POs with quantity left to receive, by delivery date; `warehouseId`, `siteId`, `productId`, `legalEntityId`, `dueFrom`, `dueTo`, `limit`, `cursor` (opaque `<date>|<po id>|<line no>`). Master planning (wave 22) reads it per warehouse |
-| GET `/inbound-changes` | PurchaseOrderInquire | Changes other services asked of purchase orders (slice 18), newest first; `source` (PLANNING_MESSAGE, DROPSHIP_CLOSED), `status` (APPLIED, REFUSED, IGNORED), `purchaseOrderId`, `legalEntityId`, `limit`, `cursor` |
-| GET `/inbound-changes/{id}` | PurchaseOrderInquire | One change |
-| POST `/purchase-orders/{id}:submit` / `:cancel` | PurchaseOrderMaintain | Idempotency-Key and If-Match required |
-| POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | PurchaseOrderConfirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
-| POST `/purchase-orders/{id}:reprice` | PurchaseOrderInquire (preview) / PurchaseOrderConfirm (apply) | Subsequent price change on one CONFIRMED PO; `{"apply": false}` previews (ETag = row version); apply needs If-Match and Idempotency-Key |
-| POST `/purchase-orders:reprice` | PurchaseOrderInquire (preview) / PurchaseOrderConfirm (apply) | The run over a page of CONFIRMED POs (`legalEntityId`, `vendorId`, `tradeAgreementId`, `limit` ≤ 100, `cursor`); apply needs an Idempotency-Key and writes each PO on its own |
-| GET `/purchase-orders/{id}/versions` | PurchaseOrderInquire | Every stored version oldest first, a pending change included |
-| GET `/purchase-orders/{id}/versions/{n}/diff` | PurchaseOrderInquire | RFC 6902 patch from version n−1 to n |
-| GET `/purchase-orders/{id}/invoicing-plans` | PurchaseOrderInquire, or the service-only `procurement.purchase-order.lookup` | Every invoicing plan of the PO in line order |
-| GET `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderInquire | One line's plan; ETag = PO row version |
-| PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match (PO row version) required; replaces the plan, bumps the row version (new ETag) |
-| DELETE `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag |
-| GET `/purchase-orders/{id}/delivery-schedules` | PurchaseOrderInquire | Every delivery schedule of the PO in line order |
-| GET `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderInquire | One line's schedule; ETag = PO row version |
-| PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderMaintain | If-Match (PO row version) required; replaces the rows on a DRAFT or REJECTED PO; Σ qty = line qty (PRC-DS-001) |
-| DELETE `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag |
-| PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule/rows/{seq}/confirmation` | PurchaseOrderMaintain | If-Match required; the vendor's confirmed date on a CONFIRMED PO; writes `deliveryschedule.confirmed.v1`; the same date again is a no-op |
-| GET `/purchase-orders/{id}/service-lines` | PurchaseOrderInquire or the lookup duty | The service lines of the PO with outlines and limits, in line order |
-| GET `/purchase-orders/{id}/lines/{lineNo}/service` | PurchaseOrderInquire or the lookup duty | One line's service specification; ETag = PO row version; 404 PRC-SRV-NOT-FOUND for a plain line |
-| PUT `/purchase-orders/{id}/lines/{lineNo}/service` | PurchaseOrderMaintain | If-Match (PO row version) required; saves the specification on a DRAFT or REJECTED PO (PRC-SRV-001): value limit, expected value, optional contract agreement line, and an outline tree or a `modelId` to copy; writes `servicespec.changed.v1` |
-| DELETE `/purchase-orders/{id}/lines/{lineNo}/service` | PurchaseOrderMaintain | If-Match required; 204 with the new row version as ETag; writes `servicespec.changed.v1` with `removed` |
-| GET `/purchase-orders/{id}/lines/{lineNo}/service/limit-check?unplanned=&entry=` | PurchaseOrderInquire or the lookup duty | Whether an entry of unplanned services fits the value limit and the contract limit (BR-17.19); a refusal is 200 with `allowed` false and `code` PRC-SRV-003, with `remaining` (what can still be entered) either way; changes nothing (wave 18 asks for a service entry sheet) |
-| POST `/model-service-specs`, GET `/model-service-specs`, GET `/model-service-specs/{id}`, PUT `/model-service-specs/{id}` | ProcurementPolicyMaintain (reads also PurchaseOrderInquire) | Model service specifications (FR-17.23, SAP ML10-ML12): a reusable outline in one currency per legal entity; POST needs an Idempotency-Key (409 PRC-SRV-006 for a duplicate code), PUT needs If-Match (412 PRC-SRV-007); writes `modelservicespec.created.v1` and `modelservicespec.changed.v1` |
+| POST `/requisitions` | procurement.requisition.create | Idempotency-Key required; max 500 lines; blank estimates default from the preferred vendor's trade agreement, else 0 with warning PRC-REQ-003 |
+| GET `/requisitions` | procurement.requisition.create | Newest first; `status`, `mine=true`, `limit` (≤ 200), `cursor` |
+| GET `/requisitions/{id}` | procurement.requisition.create | ETag = version |
+| POST `/requisitions/{id}:submit` | procurement.requisition.create | Idempotency-Key and If-Match (version) required; requester only; routes approvers |
+| POST `/purchase-orders` | procurement.purchase-order.maintain | Idempotency-Key required; missing unit prices come from trade agreements |
+| GET `/purchase-orders` | procurement.purchase-order.inquire | Newest first; `approvalStatus`, `vendorId`, `limit`, `cursor` |
+| GET `/purchase-orders/{id}` | procurement.purchase-order.inquire, or the service-only `procurement.purchase-order.lookup` (receiving's signed token, #305) | ETag = row version |
+| PATCH `/purchase-orders/{id}` | procurement.purchase-order.maintain | If-Match (row version) required; whole order as on create, `lineNo` names an existing line; see the change rules below |
+| GET `/purchase-order-lines` | procurement.purchase-order.inquire | Open supply: lines of CONFIRMED POs with quantity left to receive, by delivery date; `warehouseId`, `siteId`, `productId`, `legalEntityId`, `dueFrom`, `dueTo`, `limit`, `cursor` (opaque `<date>|<po id>|<line no>`). Master planning (wave 22) reads it per warehouse |
+| GET `/inbound-changes` | procurement.purchase-order.inquire | Changes other services asked of purchase orders (slice 18), newest first; `source` (PLANNING_MESSAGE, DROPSHIP_CLOSED), `status` (APPLIED, REFUSED, IGNORED), `purchaseOrderId`, `legalEntityId`, `limit`, `cursor` |
+| GET `/inbound-changes/{id}` | procurement.purchase-order.inquire | One change |
+| POST `/purchase-orders/{id}:submit` / `:cancel` | procurement.purchase-order.maintain | Idempotency-Key and If-Match required |
+| POST `/purchase-orders/{id}:approve` / `:reject` / `:confirm` | procurement.purchase-order.confirm | Idempotency-Key and If-Match required; approve and reject stand in for the wave 4 approval task |
+| POST `/purchase-orders/{id}:reprice` | procurement.purchase-order.inquire (preview) / procurement.purchase-order.confirm (apply) | Subsequent price change on one CONFIRMED PO; `{"apply": false}` previews (ETag = row version); apply needs If-Match and Idempotency-Key |
+| POST `/purchase-orders:reprice` | procurement.purchase-order.inquire (preview) / procurement.purchase-order.confirm (apply) | The run over a page of CONFIRMED POs (`legalEntityId`, `vendorId`, `tradeAgreementId`, `limit` ≤ 100, `cursor`); apply needs an Idempotency-Key and writes each PO on its own |
+| GET `/purchase-orders/{id}/versions` | procurement.purchase-order.inquire | Every stored version oldest first, a pending change included |
+| GET `/purchase-orders/{id}/versions/{n}/diff` | procurement.purchase-order.inquire | RFC 6902 patch from version n−1 to n |
+| GET `/purchase-orders/{id}/invoicing-plans` | procurement.purchase-order.inquire, or the service-only `procurement.purchase-order.lookup` | Every invoicing plan of the PO in line order |
+| GET `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | procurement.purchase-order.inquire | One line's plan; ETag = PO row version |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | procurement.purchase-order.maintain | If-Match (PO row version) required; replaces the plan, bumps the row version (new ETag) |
+| DELETE `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan` | procurement.purchase-order.maintain | If-Match required; 204 with the new row version as ETag |
+| GET `/purchase-orders/{id}/delivery-schedules` | procurement.purchase-order.inquire | Every delivery schedule of the PO in line order |
+| GET `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | procurement.purchase-order.inquire | One line's schedule; ETag = PO row version |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | procurement.purchase-order.maintain | If-Match (PO row version) required; replaces the rows on a DRAFT or REJECTED PO; Σ qty = line qty (PRC-DS-001) |
+| DELETE `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule` | procurement.purchase-order.maintain | If-Match required; 204 with the new row version as ETag |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/delivery-schedule/rows/{seq}/confirmation` | procurement.purchase-order.maintain | If-Match required; the vendor's confirmed date on a CONFIRMED PO; writes `deliveryschedule.confirmed.v1`; the same date again is a no-op |
+| GET `/purchase-orders/{id}/service-lines` | procurement.purchase-order.inquire or the lookup duty | The service lines of the PO with outlines and limits, in line order |
+| GET `/purchase-orders/{id}/lines/{lineNo}/service` | procurement.purchase-order.inquire or the lookup duty | One line's service specification; ETag = PO row version; 404 PRC-SRV-NOT-FOUND for a plain line |
+| PUT `/purchase-orders/{id}/lines/{lineNo}/service` | procurement.purchase-order.maintain | If-Match (PO row version) required; saves the specification on a DRAFT or REJECTED PO (PRC-SRV-001): value limit, expected value, optional contract agreement line, and an outline tree or a `modelId` to copy; writes `servicespec.changed.v1` |
+| DELETE `/purchase-orders/{id}/lines/{lineNo}/service` | procurement.purchase-order.maintain | If-Match required; 204 with the new row version as ETag; writes `servicespec.changed.v1` with `removed` |
+| GET `/purchase-orders/{id}/lines/{lineNo}/service/limit-check?unplanned=&entry=` | procurement.purchase-order.inquire or the lookup duty | Whether an entry of unplanned services fits the value limit and the contract limit (BR-17.19); a refusal is 200 with `allowed` false and `code` PRC-SRV-003, with `remaining` (what can still be entered) either way; changes nothing (wave 18 asks for a service entry sheet) |
+| POST `/model-service-specs`, GET `/model-service-specs`, GET `/model-service-specs/{id}`, PUT `/model-service-specs/{id}` | procurement.policy.maintain (reads also procurement.purchase-order.inquire) | Model service specifications (FR-17.23, SAP ML10-ML12): a reusable outline in one currency per legal entity; POST needs an Idempotency-Key (409 PRC-SRV-006 for a duplicate code), PUT needs If-Match (412 PRC-SRV-007); writes `modelservicespec.created.v1` and `modelservicespec.changed.v1` |
 | PUT `/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement` | `procurement.invoicing-plan.settle` | Receiving's service token only (#289; 403 for a person, and identity refuses to assign the service-only duty). Body `settlementRef` and `amount`; flips an OPEN row to INVOICED at the settled amount (a reprice in between is absorbed by the other OPEN rows), idempotent per row and reference, records who settled it in `purchase_invoicing_plan_row_settlement`; bumps the PO row version |
-| GET `/requisition-lines` | PurchaseOrderMaintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
-| POST `/requisition-lines/{id}:split` | PurchaseOrderMaintain | Idempotency-Key and If-Match (the requisition version) required; body `{"quantities": [...]}` cuts one new OPEN line per quantity out of an OPEN line of an APPROVED requisition, the original keeps the rest (FR-17.3); `requisition.split.v1` |
-| POST `/requisitions:consolidate` | PurchaseOrderMaintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
-| POST `/agreements` | AgreementMaintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
-| GET `/agreements` | AgreementMaintain | Newest first; `status`, `vendorId`, `limit`, `cursor`; each row carries `maxPctReleased` |
-| GET `/agreements/{id}` | AgreementMaintain | Lines with released, remaining and % released, plus the PO lines released against them; ETag = version |
-| POST `/agreements/{id}:activate` / `:hold` / `:close` | AgreementMaintain | Idempotency-Key and If-Match (version) required |
-| GET `/pricing/lookup` | PurchaseOrderMaintain | Winner plus candidate explain list; `vendorGroup`/`productGroup` add memberships; `tie` = LATEST_FROM_DATE (default) or LOWEST_PRICE |
-| POST `/trade-agreements` | TradeAgreementMaintain | PRICE relation only in this slice; PRC-TA-002 on an overlapping row |
-| GET `/trade-agreements` | TradeAgreementMaintain | Newest first; `accountId`, `itemId`, `status`, `limit`, `cursor` |
-| GET `/trade-agreements/{id}` | TradeAgreementMaintain | |
-| POST `/rfqs` | RFQMaintain | Idempotency-Key required; DRAFT RFQ with lines (max 500), a future `replyDeadline`, `rankingRule` LOWEST_PRICE (default), LEAD_TIME or WEIGHTED_SCORE, `sealed`, and scoring `criteria` (name, weight; max 20; required for WEIGHTED_SCORE) |
-| GET `/rfqs` | RFQMaintain or RFQAward | Newest first; `status` (comma list), `limit`, `cursor`; rows carry line, vendor and reply counts |
-| GET `/rfqs/{id}` | RFQMaintain or RFQAward | Lines, invitations, replies, criteria and scores (replies and scores hidden while sealed); ETag = version |
-| POST `/rfqs/{id}:send` / `:close` / `:cancel` | RFQMaintain | Idempotency-Key and If-Match (version) required; `:send` takes `vendorIds` |
-| POST `/rfqs/{id}/replies` | RFQMaintain | Idempotency-Key required; one invited vendor's prices for some lines, in one currency; late lines come back with PRC-RFQ-003 warnings |
-| GET `/rfqs/{id}/compare` | RFQMaintain or RFQAward | Ranking per line by the RFQ rule or `rule`, with each scored vendor's weighted score; late replies listed as excluded; 403 PRC-RFQ-004 for a sealed RFQ before its deadline |
-| PUT `/rfqs/{id}/scores/{vendorId}` | RFQAward | If-Match (version) required; `scores` (criterion, 1–10) of an invited vendor; bumps the version |
-| POST `/rfqs/{id}:award` | RFQAward | Idempotency-Key and If-Match required; `awards` (line, reply, override reason); answers the RFQ and the DRAFT POs created |
-| POST `/scheduling-agreements` | AgreementMaintain | Idempotency-Key required; vendor × product × site, currency, unit and unit price, target quantity, validity, release `profile` (PRD defaults), schedule lines (max 500) |
-| GET `/scheduling-agreements` | AgreementMaintain or PurchaseOrderInquire | Release monitor, newest first; `vendorId`, `productId`, `limit`, `cursor`; scheduled, received and open quantity, last release, next release due |
-| GET `/scheduling-agreements/{id}` | AgreementMaintain or PurchaseOrderInquire | Schedule with each line's zone today; ETag = version |
-| PUT `/scheduling-agreements/{id}/schedule` | AgreementMaintain | If-Match (version) required; the whole schedule (`lineNo` names a line, qty 0 removes it, no `lineNo` adds one); answers the agreement with trade-off `warnings` |
-| POST `/scheduling-agreements/{id}:release` | AgreementMaintain | Idempotency-Key required; `kind` FRC or JIT, `runDate` (default today), `cumulativeReset`; 201 for a new release, 200 for the release of the same kind, date and schedule version |
-| GET `/scheduling-agreements/{id}/releases` | AgreementMaintain or PurchaseOrderInquire | Release headers in release order |
-| GET `/scheduling-agreements/{id}/releases/{releaseNo}` | AgreementMaintain or PurchaseOrderInquire | Release documentation with every line |
-| GET `/purchasing-policies` | ProcurementPolicyMaintain or PurchaseOrderInquire | Saved purchasing policies of the caller's legal entities |
-| GET `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain or PurchaseOrderInquire | The policy, or the defaults at version 0; ETag is the version |
-| PUT `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain | If-Match required (0 creates); body has all three flags; writes `policy.changed.v1`; no Idempotency-Key (PUT is idempotent) |
-| POST `/catalogs` | CatalogMaintain | Idempotency-Key required; creates a DRAFT catalog with optional entries; ETag is the version |
-| GET `/catalogs`, `/catalogs/{id}` | CatalogMaintain or PurchaseOrderInquire | List (`status`, `legalEntityId`) and read with the entry count and the first 200 entries (`entriesNextCursor` when there are more) |
-| GET `/catalogs/{id}/entries` | CatalogMaintain or PurchaseOrderInquire | The entries in entry order, a page at a time (`cursor` is the last entry number, `limit` up to 200) |
-| POST `/catalogs/{id}:publish`, `:retire` | CatalogMaintain | Idempotency-Key and If-Match required; publish needs at least one entry (PRC-CAT-001); writes `catalog.published.v1` or `catalog.retired.v1` |
-| POST `/catalogs/{id}/entries`, DELETE `/catalogs/{id}/entries/{entryId}` | CatalogMaintain | If-Match required; DRAFT catalogs only (PRC-CAT-STATE); at most 50,000 entries |
-| POST `/catalogs/{id}/vendor-import` | CatalogMaintain | Idempotency-Key required; stages a vendor file (CSV text or JSON rows, up to 50,000) against a DRAFT or PUBLISHED catalog: each row ACCEPTABLE or ERROR with a reason (PRC-CAT-005) |
-| GET `/catalog-imports`, `/catalog-imports/{id}`, `/catalog-imports/{id}/rows` | CatalogMaintain or PurchaseOrderInquire | Imports (`catalogId`, `status`), one import with row counts, and its rows (`status`, row-number cursor) |
-| POST `/catalog-imports/{id}/decisions` | CatalogMaintain | Idempotency-Key and If-Match required; `acceptAll`, `accept` and `reject` by row number while STAGED |
-| POST `/catalog-imports/{id}:commit`, `:cancel` | CatalogMaintain | Idempotency-Key and If-Match required; commit adds the ACCEPTED rows to the catalog and writes `catalogimport.committed.v1` |
-| GET `/catalog-entries` | RequisitionCreate or CatalogMaintain | The requisition picker: `legalEntityId` (required), `operatingUnitId`, `q`, `category`, `vendorId`, `date` (default today) |
-| POST `/category-vendors`, GET `/category-vendors`, GET `/category-vendors/{id}`, PUT `/category-vendors/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Vendor assignments to a procurement category (FR-17.20): status APPROVED, PROVISIONAL or BLOCKED and a validity window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CAT-013) and keeps the stored `validFrom` when left out; one assignment per vendor and category (409 PRC-CAT-011); writes `categoryvendor.assigned.v1` and `categoryvendor.changed.v1` |
-| POST `/category-managers`, GET `/category-managers`, DELETE `/category-managers/{id}` | CategoryMaintain (reads also PurchaseOrderInquire) | Workers who manage a category (FR-17.20); POST needs an Idempotency-Key (409 PRC-CAT-012 for the same worker twice); writes `categorymanager.assigned.v1` and `categorymanager.removed.v1` |
-| POST `/charge-codes`, GET `/charge-codes`, GET `/charge-codes/{id}`, PUT `/charge-codes/{id}`, POST `/auto-charges`, GET `/auto-charges`, GET `/auto-charges/{id}`, PUT `/auto-charges/{id}` | ProcurementPolicyMaintain (reads also PurchaseOrderInquire) | Charge codes (FR-17.9: calculation, default value, debit ITEM/LEDGER/VENDOR and credit LEDGER/VENDOR sides, allocation rule QTY/AMOUNT/LINES) and auto charges by vendor, vendor group or every vendor with a value, minimum order amount, currency and window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CHG-002 and PRC-CHG-003); a duplicate code is 409 PRC-CHG-001; writes `chargecode.created.v1`, `chargecode.changed.v1`, `autocharge.created.v1` and `autocharge.changed.v1`; a calc change on a code that auto charges use is 409 PRC-CHG-006. A PO charge may carry `chargeCodeId` and the PO body `applyAutoCharges`, which adds each code once per PO (`autoChargeCodes`) |
-| POST `/signing-limit-requests`, GET `/signing-limit-requests`, GET `/signing-limit-requests/{id}` | RequisitionCreate to request; reads need SigningLimitApprove or PurchaseOrderInquire | Requests for a worker's signing limit (FR-17.17) per document type and currency with a spending and an approval limit; POST needs an Idempotency-Key |
-| POST `/signing-limit-requests/{id}:approve`, `:reject` | SigningLimitApprove | Idempotency-Key and If-Match required (412 PRC-SL-005); approving writes or changes the worker's limit and `signinglimit.changed.v1` in one transaction; a decided request is 409 PRC-SL-004; the requester and the worker cannot decide (403 PRC-SL-003) |
-| GET `/signing-limits`, GET `/signing-limits/{id}`, GET `/signing-limits/evaluation` | SigningLimitApprove or PurchaseOrderInquire | Limits (filter by worker, document type, `expired=true`); the evaluation shows what a limit does to an amount as requester and as approver |
-| POST `/signing-limits/{id}:recertify` | SigningLimitApprove | Idempotency-Key and If-Match required; moves `recertifyBy` 12 months past today; the worker cannot recertify their own limit (403 PRC-SL-003); writes `signinglimit.changed.v1` |
+| GET `/requisition-lines` | procurement.purchase-order.maintain | Consolidation queue: OPEN lines of APPROVED requisitions; `sourcing` = NEEDS_SOURCING (no preferred vendor) or HAS_VENDOR, `vendorId`, `limit`, `cursor` |
+| POST `/requisition-lines/{id}:split` | procurement.purchase-order.maintain | Idempotency-Key and If-Match (the requisition version) required; body `{"quantities": [...]}` cuts one new OPEN line per quantity out of an OPEN line of an APPROVED requisition, the original keeps the rest (FR-17.3); `requisition.split.v1` |
+| POST `/requisitions:consolidate` | procurement.purchase-order.maintain | Idempotency-Key required; one DRAFT PO per legal entity × vendor × currency × site × delivery window (`windowDays`, default 7, 1–60); `vendorId` per line overrides the preferred vendor |
+| POST `/agreements` | procurement.agreement.maintain | Idempotency-Key required; purchase agreement, EFFECTIVE unless `status` = DRAFT; max 500 lines |
+| GET `/agreements` | procurement.agreement.maintain | Newest first; `status`, `vendorId`, `limit`, `cursor`; each row carries `maxPctReleased` |
+| GET `/agreements/{id}` | procurement.agreement.maintain | Lines with released, remaining and % released, plus the PO lines released against them; ETag = version |
+| POST `/agreements/{id}:activate` / `:hold` / `:close` | procurement.agreement.maintain | Idempotency-Key and If-Match (version) required |
+| GET `/pricing/lookup` | procurement.purchase-order.maintain | Winner plus candidate explain list; `vendorGroup`/`productGroup` add memberships; `tie` = LATEST_FROM_DATE (default) or LOWEST_PRICE |
+| POST `/trade-agreements` | procurement.trade-agreement.maintain | PRICE relation only in this slice; PRC-TA-002 on an overlapping row |
+| GET `/trade-agreements` | procurement.trade-agreement.maintain | Newest first; `accountId`, `itemId`, `status`, `limit`, `cursor` |
+| GET `/trade-agreements/{id}` | procurement.trade-agreement.maintain | |
+| POST `/rfqs` | procurement.rfq.maintain | Idempotency-Key required; DRAFT RFQ with lines (max 500), a future `replyDeadline`, `rankingRule` LOWEST_PRICE (default), LEAD_TIME or WEIGHTED_SCORE, `sealed`, and scoring `criteria` (name, weight; max 20; required for WEIGHTED_SCORE) |
+| GET `/rfqs` | procurement.rfq.maintain or procurement.rfq.award | Newest first; `status` (comma list), `limit`, `cursor`; rows carry line, vendor and reply counts |
+| GET `/rfqs/{id}` | procurement.rfq.maintain or procurement.rfq.award | Lines, invitations, replies, criteria and scores (replies and scores hidden while sealed); ETag = version |
+| POST `/rfqs/{id}:send` / `:close` / `:cancel` | procurement.rfq.maintain | Idempotency-Key and If-Match (version) required; `:send` takes `vendorIds` |
+| POST `/rfqs/{id}/replies` | procurement.rfq.maintain | Idempotency-Key required; one invited vendor's prices for some lines, in one currency; late lines come back with PRC-RFQ-003 warnings |
+| GET `/rfqs/{id}/compare` | procurement.rfq.maintain or procurement.rfq.award | Ranking per line by the RFQ rule or `rule`, with each scored vendor's weighted score; late replies listed as excluded; 403 PRC-RFQ-004 for a sealed RFQ before its deadline |
+| PUT `/rfqs/{id}/scores/{vendorId}` | procurement.rfq.award | If-Match (version) required; `scores` (criterion, 1–10) of an invited vendor; bumps the version |
+| POST `/rfqs/{id}:award` | procurement.rfq.award | Idempotency-Key and If-Match required; `awards` (line, reply, override reason); answers the RFQ and the DRAFT POs created |
+| POST `/scheduling-agreements` | procurement.agreement.maintain | Idempotency-Key required; vendor × product × site, currency, unit and unit price, target quantity, validity, release `profile` (PRD defaults), schedule lines (max 500) |
+| GET `/scheduling-agreements` | procurement.agreement.maintain or procurement.purchase-order.inquire | Release monitor, newest first; `vendorId`, `productId`, `limit`, `cursor`; scheduled, received and open quantity, last release, next release due |
+| GET `/scheduling-agreements/{id}` | procurement.agreement.maintain or procurement.purchase-order.inquire | Schedule with each line's zone today; ETag = version |
+| PUT `/scheduling-agreements/{id}/schedule` | procurement.agreement.maintain | If-Match (version) required; the whole schedule (`lineNo` names a line, qty 0 removes it, no `lineNo` adds one); answers the agreement with trade-off `warnings` |
+| POST `/scheduling-agreements/{id}:release` | procurement.agreement.maintain | Idempotency-Key required; `kind` FRC or JIT, `runDate` (default today), `cumulativeReset`; 201 for a new release, 200 for the release of the same kind, date and schedule version |
+| GET `/scheduling-agreements/{id}/releases` | procurement.agreement.maintain or procurement.purchase-order.inquire | Release headers in release order |
+| GET `/scheduling-agreements/{id}/releases/{releaseNo}` | procurement.agreement.maintain or procurement.purchase-order.inquire | Release documentation with every line |
+| GET `/purchasing-policies` | procurement.policy.maintain or procurement.purchase-order.inquire | Saved purchasing policies of the caller's legal entities |
+| GET `/purchasing-policies/{legalEntityId}` | procurement.policy.maintain or procurement.purchase-order.inquire | The policy, or the defaults at version 0; ETag is the version |
+| PUT `/purchasing-policies/{legalEntityId}` | procurement.policy.maintain | If-Match required (0 creates); body has all three flags; writes `policy.changed.v1`; no Idempotency-Key (PUT is idempotent) |
+| POST `/catalogs` | procurement.catalog.maintain | Idempotency-Key required; creates a DRAFT catalog with optional entries; ETag is the version |
+| GET `/catalogs`, `/catalogs/{id}` | procurement.catalog.maintain or procurement.purchase-order.inquire | List (`status`, `legalEntityId`) and read with the entry count and the first 200 entries (`entriesNextCursor` when there are more) |
+| GET `/catalogs/{id}/entries` | procurement.catalog.maintain or procurement.purchase-order.inquire | The entries in entry order, a page at a time (`cursor` is the last entry number, `limit` up to 200) |
+| POST `/catalogs/{id}:publish`, `:retire` | procurement.catalog.maintain | Idempotency-Key and If-Match required; publish needs at least one entry (PRC-CAT-001); writes `catalog.published.v1` or `catalog.retired.v1` |
+| POST `/catalogs/{id}/entries`, DELETE `/catalogs/{id}/entries/{entryId}` | procurement.catalog.maintain | If-Match required; DRAFT catalogs only (PRC-CAT-STATE); at most 50,000 entries |
+| POST `/catalogs/{id}/vendor-import` | procurement.catalog.maintain | Idempotency-Key required; stages a vendor file (CSV text or JSON rows, up to 50,000) against a DRAFT or PUBLISHED catalog: each row ACCEPTABLE or ERROR with a reason (PRC-CAT-005) |
+| GET `/catalog-imports`, `/catalog-imports/{id}`, `/catalog-imports/{id}/rows` | procurement.catalog.maintain or procurement.purchase-order.inquire | Imports (`catalogId`, `status`), one import with row counts, and its rows (`status`, row-number cursor) |
+| POST `/catalog-imports/{id}/decisions` | procurement.catalog.maintain | Idempotency-Key and If-Match required; `acceptAll`, `accept` and `reject` by row number while STAGED |
+| POST `/catalog-imports/{id}:commit`, `:cancel` | procurement.catalog.maintain | Idempotency-Key and If-Match required; commit adds the ACCEPTED rows to the catalog and writes `catalogimport.committed.v1` |
+| GET `/catalog-entries` | procurement.requisition.create or procurement.catalog.maintain | The requisition picker: `legalEntityId` (required), `operatingUnitId`, `q`, `category`, `vendorId`, `date` (default today) |
+| POST `/category-vendors`, GET `/category-vendors`, GET `/category-vendors/{id}`, PUT `/category-vendors/{id}` | procurement.category.maintain (reads also procurement.purchase-order.inquire) | Vendor assignments to a procurement category (FR-17.20): status APPROVED, PROVISIONAL or BLOCKED and a validity window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CAT-013) and keeps the stored `validFrom` when left out; one assignment per vendor and category (409 PRC-CAT-011); writes `categoryvendor.assigned.v1` and `categoryvendor.changed.v1` |
+| POST `/category-managers`, GET `/category-managers`, DELETE `/category-managers/{id}` | procurement.category.maintain (reads also procurement.purchase-order.inquire) | Workers who manage a category (FR-17.20); POST needs an Idempotency-Key (409 PRC-CAT-012 for the same worker twice); writes `categorymanager.assigned.v1` and `categorymanager.removed.v1` |
+| POST `/charge-codes`, GET `/charge-codes`, GET `/charge-codes/{id}`, PUT `/charge-codes/{id}`, POST `/auto-charges`, GET `/auto-charges`, GET `/auto-charges/{id}`, PUT `/auto-charges/{id}` | procurement.policy.maintain (reads also procurement.purchase-order.inquire) | Charge codes (FR-17.9: calculation, default value, debit ITEM/LEDGER/VENDOR and credit LEDGER/VENDOR sides, allocation rule QTY/AMOUNT/LINES) and auto charges by vendor, vendor group or every vendor with a value, minimum order amount, currency and window; POST needs an Idempotency-Key, PUT needs If-Match (412 PRC-CHG-002 and PRC-CHG-003); a duplicate code is 409 PRC-CHG-001; writes `chargecode.created.v1`, `chargecode.changed.v1`, `autocharge.created.v1` and `autocharge.changed.v1`; a calc change on a code that auto charges use is 409 PRC-CHG-006. A PO charge may carry `chargeCodeId` and the PO body `applyAutoCharges`, which adds each code once per PO (`autoChargeCodes`) |
+| POST `/signing-limit-requests`, GET `/signing-limit-requests`, GET `/signing-limit-requests/{id}` | procurement.requisition.create to request; reads need procurement.signing-limit.approve or procurement.purchase-order.inquire | Requests for a worker's signing limit (FR-17.17) per document type and currency with a spending and an approval limit; POST needs an Idempotency-Key |
+| POST `/signing-limit-requests/{id}:approve`, `:reject` | procurement.signing-limit.approve | Idempotency-Key and If-Match required (412 PRC-SL-005); approving writes or changes the worker's limit and `signinglimit.changed.v1` in one transaction; a decided request is 409 PRC-SL-004; the requester and the worker cannot decide (403 PRC-SL-003) |
+| GET `/signing-limits`, GET `/signing-limits/{id}`, GET `/signing-limits/evaluation` | procurement.signing-limit.approve or procurement.purchase-order.inquire | Limits (filter by worker, document type, `expired=true`); the evaluation shows what a limit does to an amount as requester and as approver |
+| POST `/signing-limits/{id}:recertify` | procurement.signing-limit.approve | Idempotency-Key and If-Match required; moves `recertifyBy` 12 months past today; the worker cannot recertify their own limit (403 PRC-SL-003); writes `signinglimit.changed.v1` |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -265,7 +265,7 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   compare, scoring and award are 403 PRC-RFQ-004. At the deadline they open; the
   first read or comparison after it stamps `openedAt`/`openedBy` (AC-17.14). A late
   reply to a sealed RFQ is refused (PRC-RFQ-007) instead of flagged. An RFQ may carry
-  up to 20 scoring criteria (unique name, positive weight); holders of RFQAward score
+  up to 20 scoring criteria (unique name, positive weight); holders of procurement.rfq.award score
   each invited vendor 1–10 per criterion while the RFQ is SENT, REPLIES_OPEN or
   CLOSED. A vendor's weighted score is Σ(weight × score) ÷ Σ weight to 4 decimals,
   an unscored criterion counting 0. WEIGHTED_SCORE ranks by it, highest first, an
@@ -491,7 +491,7 @@ quantity. Only a CONFIRMED order takes a change; one in review or cancelled is r
 that stops a change (the received/invoiced floor PRC-PO-007, a line drawn on an agreement PRC-PO-010, a service
 specification above the line, an ambiguous line) never retries and never dead-letters: it is recorded as `REFUSED`
 with its code for a buyer to settle: `POST /inbound-changes/{id}:retry` runs the stored request again against the order as
-it is now (the same planning and change path, as the caller, who needs `PurchaseOrderMaintain`; the row becomes APPLIED or
+it is now (the same planning and change path, as the caller, who needs `procurement.purchase-order.maintain`; the row becomes APPLIED or
 IGNORED and `RETRIED`, or stays REFUSED with the new reason and one more `attempts`), and `:acknowledge` marks it dealt
 with by hand (`ACKNOWLEDGED`, order untouched). Either needs the change to be REFUSED and unsettled (409 PRC-INB-008
 otherwise), writes `inboundchange.resolved.v1` and takes an `Idempotency-Key`; `GET /inbound-changes?status=REFUSED&resolution=NONE`

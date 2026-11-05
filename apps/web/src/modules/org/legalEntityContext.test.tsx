@@ -87,7 +87,7 @@ describe("LegalEntityProvider", () => {
 
   it("restores a persisted ALL when the duty is held", async () => {
     storage.setItem(KEY, "ALL");
-    renderProvider(["org.switcher.all_scope"]);
+    renderProvider(["org.switcher.all-scope"]);
     await waitFor(() => expect(scopeText()).toBe("ALL"));
     expect(optionValues()).toContain("ALL");
   });

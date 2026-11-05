@@ -26,10 +26,10 @@ const (
 	idempotencyKey   = "Idempotency-Key"
 	dutyWrite        = "hello.write"
 	dutyRead         = "hello.read"
-	dutyReleaseWrite = "Maintain platform releases"
-	dutyReleaseRead  = "View platform releases"
-	dutyApproveProd  = "Approve production promotion"
-	dutyRollback     = "Rollback environment"
+	dutyReleaseWrite = "platform.release.maintain"
+	dutyReleaseRead  = "platform.release.view"
+	dutyApproveProd  = "platform.promotion.approve"
+	dutyRollback     = "platform.environment.rollback"
 )
 
 type API struct {

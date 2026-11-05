@@ -1829,6 +1829,97 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/gl-postings:
+    post:
+      operationId: postInventoryJournalsToGL
+      summary: Book the legal entity's posted journals in the general ledger (#477)
+      description: |
+        Sends the stored GL entry of every POSTED journal of the legal entity that the ledger has
+        not confirmed yet, at most 200 per call (more is true when others remain), one ledger
+        entry per journal with Idempotency-Key inventory-journal:{journalId}, source type
+        inventory-journal, posting date = the journal's posting date. Journals with an empty GL
+        entry (TRANSFER, BOM, vendor-owned counts) are not sent. The call is signed with this
+        service's own token (duties ledger.entry.post and ledger.ledger.lookup). The ledger must
+        belong to the legal entity (409 INV-GL-002); the first call pins it, and a later call
+        naming another ledger is 409 INV-GL-003. A failed journal is listed with the ledger's code
+        (or INV-GL-001) and retried by a later call after an exponential backoff (60 s doubling, at
+        most an hour); a refusal the ledger repeats, an entry that cannot balance (INV-GL-004) or
+        the fifth failure parks it until gl-postings:requeue. 503 INV-GL-005 when LEDGER_URL is not
+        configured.
+      x-passage-duty: inventory.gl.post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, ledgerId]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                ledgerId: { type: string, format: uuid, description: The general ledger of the legal entity }
+      responses:
+        '200':
+          description: What this call booked and what failed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ledgerId, booked, failed, more, parked]
+                properties:
+                  ledgerId: { type: string, format: uuid }
+                  booked:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        journalId: { type: string, format: uuid }
+                        entryId: { type: string }
+                        lines: { type: integer }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        journalId: { type: string, format: uuid }
+                        code: { type: string }
+                  more: { type: boolean }
+                  parked: { type: integer, description: Parked postings of the legal entity before this call }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/gl-postings:requeue:
+    post:
+      operationId: requeueParkedInventoryGLPostings
+      summary: Make the legal entity's parked GL postings due again
+      description: Parked postings return to pending with a fresh attempt count and are resent under their own key by the next gl-postings call.
+      x-passage-duty: inventory.gl.post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The number of postings requeued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requeued: { type: integer }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /v1/inventory/reconciliations:
     post:
       operationId: runInventoryReconciliation
@@ -2960,8 +3051,14 @@ components:
         move and the GL entry is empty. The destination must differ from the source and carry a
         site, batch, serial and the product dimensions (config, size, color, style) cannot change, blocked or quarantined status is moved by a
         blocking (INV-JNL-006), a row cannot be both source and destination in one journal, and a
-        transfer cannot be reversed (post one back). It takes no offset account.
-      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE, TRANSFER]
+        transfer cannot be reversed (post one back). It takes no offset account. A BOM journal
+        assembles one parent from its components: the issue lines (negative quantity) post SOLD
+        component issues at their running average, and the one receipt line (positive quantity,
+        cost price 0) posts a PURCHASED parent receipt at the summed component value, so the
+        inventory account does not move and the GL entry is empty. More than one receipt line, a
+        costed receipt line, a component of the parent's own product, or posting without a parent
+        or a component is INV-JNL-007; it takes no offset account and cannot be reversed.
+      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT, OWNERSHIP_CHANGE, TRANSFER, BOM]
     JournalStatus:
       type: string
       enum: [DRAFT, SUBMITTED, APPROVED, POSTING, POSTED, REJECTED, CANCELLED]

@@ -19,7 +19,7 @@ import {
 import styles from "./security.module.css";
 import { ApiFailure, retryAction } from "./support";
 
-const DUTY = "Maintain users";
+const DUTY = "identity.user.maintain";
 
 async function listAllLegalEntities(): Promise<LegalEntity[]> {
   const all: LegalEntity[] = [];
@@ -252,7 +252,7 @@ export function UserDetailPage() {
               <ApiFailure
                 error={assignments.error}
                 title="Could not load the role assignments"
-                duty="Maintain security roles"
+                duty="identity.security-role.maintain"
                 action={retryAction(assignments.error, assignments.isFetching, () => void assignments.refetch())}
               />
             ) : (

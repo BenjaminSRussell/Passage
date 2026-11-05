@@ -119,6 +119,9 @@ export function TeamMemberPage() {
       <p>
         <Link to="/hr/absence/requests">Absence requests for my team</Link>
       </p>
+      <p>
+        <Link to="/hr/my/team/changes">Address changes for my team</Link>
+      </p>
     </div>
   );
 }

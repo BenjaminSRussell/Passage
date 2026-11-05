@@ -19,7 +19,7 @@ func TestGrants_AppRoleLocksAndRewritesButPartnersAreAppendOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := New(app, 30)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EDI_OPERATE")
+	ctx := testkit.Ctx(testkit.TenantID(1), "edi.operate")
 	p, _, err := st.CreatePartner(ctx, "k", "h", profile("GRANTS"))
 	if err != nil {
 		t.Fatal(err)

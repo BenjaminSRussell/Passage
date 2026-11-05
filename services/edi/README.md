@@ -50,7 +50,8 @@ Built in this slice:
   the service grant `edi` -> `fulfillment`/`billing`/`sales` (duties `fulfillment.shipment.read`,
   `billing.invoice.read`, `sales.order.lookup`, nothing else) for the legal entity of the
   partner's trade profile (`PUT /edi/v1/partners/{id}/trade-profile`: legal entity, customer,
-  ship-from/ship-to/bill-to/remit-to names and GLNs, default SCAC). The document must belong to
+  ship-from/ship-to/bill-to/remit-to names and GLNs, default SCAC; the legal entity must be one of the
+  caller's, and RLS shows the profile only to callers scoped to it). The document must belong to
   the profile's legal entity and customer (422 EDI-0011) and be final: shipment shipped with
   shipped containers, invoice posted (409 EDI-0013). It is an explicit API call: the
   `wms.load.shipped` and `invoice.posted` consumers are not built (the shared eventing consumer
@@ -105,7 +106,7 @@ Built in this slice:
   group (GS), transaction (ST) and segment nodes (`internal/domain/tree.go`). Every element
   carries its X12 reference (for example `N102`) and its 004010 dictionary name for hover;
   trailers are left out. The raw text itself is never returned.
-- **PII masking** (BR-35.12): without `EDI_PII_VIEW` the party name (N102), N2 names, every
+- **PII masking** (BR-35.12): without `edi.pii.view` the party name (N102), N2 names, every
   N3 and N4 element and the PER contact name and numbers come back as `***` and are flagged
   `masked`; entity codes, qualifiers and the GLN stay visible. Party names in canonical
   documents (`shipToName`, `billToName`, location `name`) are masked the same way on
@@ -157,6 +158,32 @@ database or publishes an event, so these routes also run without a store.
 - **Web**: "Punchout cart check", "Self-billing match" and "Peppol invoice" screens in
   `apps/web/src/modules/integration`.
 
+## Slice 6 scope (#483)
+
+- **X12 820 and 214** (`internal/domain/x12_820.go`, `x12_214.go`): `Build820` (BPR, TRN,
+  CUR, N1 PR/PE, ENT with RMR IV and DTM 003; BPR02 must equal the RMR04 total) and `Map820`;
+  `Build214` (B10, L11 BM/PO, N1 SF/ST, LX with AT7 and MS1) and `Map214`. Both are outbound
+  sets of `POST /edi/v1/partners/{id}/outbound` (GS01 RA and QM). Goldens
+  `testdata/x12/820-remittance.x12`, `214-status.x12`; inbound fixture `820-inbound-00501.x12`.
+- **EDIFACT** (`internal/domain/edifact.go`): UNA/UNB/UNH/UNT/UNZ codec for syntax 3 and 4
+  with the release character, custom service characters and decimal comma; UNT01/UNT02 and
+  UNZ01/UNZ02 checks. D.96A mappings onto the canonical documents (`edifact_msgs.go`):
+  `MapORDERS`/`BuildORDERS` (Order, with the 850 count and item-reference issues),
+  `BuildDESADV`/`MapDESADV` (ASN, held to the 856 rules) and `BuildINVOIC`/`MapINVOIC`
+  (Invoice, held to the 810 rules). Goldens under `testdata/edifact/`.
+- **CONTRL** (`edifact_contrl.go`): `BuildCONTRL` (UCI 7 or 4, UCM 4 and UCS per rejected
+  message, back to the sender, never requesting a CONTRL), `RejectInterchangeCONTRL`,
+  `ParseCONTRL` and `ContrlAck.Status` onto the interchange ack status.
+- **Transports** (`internal/transport`): the `Sender` interface and `Message`/`Receipt`;
+  AS2 (RFC 4130) client and server with a detached CMS SignedData signature (`cms.go`,
+  stdlib `encoding/asn1`, RSA or ECDSA with SHA-256; checked against `openssl cms` both ways
+  when openssl is installed), synchronous MDN signed on request, MIC check, disposition
+  modifiers (authentication-failed, insufficient-message-security, decryption-failed,
+  unexpected-processing-error); SFTP with a pinned host key, `.part` upload and rename, and
+  an inbound `Pull` that archives each accepted file; an in-memory `Loopback`. Tested over
+  `httptest` and an in-process SSH/SFTP server. Nothing in the service calls the transports
+  yet (see `NOT-IMPLEMENTED.md`).
+
 ## Wave 35 proof
 
 - **Partner simulator round trip** (`internal/api/partnersim_test.go`, AC-35.1): the demo
@@ -179,40 +206,43 @@ Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
-internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders, SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
+internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810/820/214 builders, 820/214 maps, EDIFACT codec with ORDERS/DESADV/INVOIC and CONTRL, SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
+internal/transport/ AS2 (CMS signing, MDN), SFTP and loopback senders
 internal/events/    event type constants and payloads
 migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes)
 api/openapi.yaml    OpenAPI 3.1 for the routes above
 events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1 and message.failed.v1
 charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor)
 testdata/x12/       X12 fixtures for the domain and API tests
+testdata/edifact/   EDIFACT fixtures and goldens (ORDERS in, DESADV, INVOIC, CONTRL out)
+testdata/as2/       a third-party MDN
 ```
 
 ## Endpoints
 
 | Method | Path | Duty | Notes |
 | --- | --- | --- | --- |
-| POST | /edi/v1/partners | EDI_ADMIN | Requires `Idempotency-Key`; replay returns 200 with the stored partner, another body under the key is 422 |
-| GET | /edi/v1/partners?environment= | EDI_ADMIN | `{items}` by name |
-| GET | /edi/v1/partners/{id} | EDI_ADMIN | `ETag` carries the version |
-| PUT | /edi/v1/partners/{id}/trade-profile | EDI_ADMIN | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
-| POST | /edi/v1/partners/{id}/outbound:from-source | EDI_OPERATE | Body `{"transactionSet":"856"\|"810","sourceId"}`; 201 with the X12, repeat 200; 409 EDI-0012 without a profile, 503 EDI-0010 without source services |
-| POST | /edi/v1/partners/{id}/outbound | EDI_OPERATE | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
-| POST | /edi/v1/maps:test | EDI_ADMIN | Body `{"raw": "<X12>"}`; nothing is stored |
-| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | EDI_OPERATE | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
-| GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | EDI_OPERATE | `{items}` newest first, limit 1 to 200 (default 50) |
-| GET | /edi/v1/interchanges/{id} | EDI_OPERATE | Messages with canonical documents (party names masked without `EDI_PII_VIEW`) and the 997 |
-| GET | /edi/v1/interchanges/{id}/payload | EDI_OPERATE | Raw payload as a segment tree; PII masked without `EDI_PII_VIEW` |
-| POST | /edi/v1/interchanges/{id}:reprocess?dryRun= | EDI_OPERATE | Re-map FAILED inbound transactions from the raw payload; `Idempotency-Key` unless `dryRun=true` |
-| POST | /edi/v1/interchanges:reprocess?dryRun= | EDI_OPERATE | Bulk reprocess of 1 to 200 distinct interchange ids; `Idempotency-Key` unless `dryRun=true` |
-| GET | /edi/v1/messages?partnerId=&direction=&status=&transactionSet=&controlNumber=&limit=&cursor= | EDI_OPERATE | `{items, nextCursor}` newest first, limit 1 to 200 (default 50) |
-| GET | /edi/v1/messages/{id} | EDI_OPERATE | One message with envelope and canonical document (party names masked without `EDI_PII_VIEW`) |
-| GET | /edi/v1/partners/sla?days= | EDI_OPERATE | `{days, items}`, days 1 to 365 (default 30) |
-| POST | /edi/v1/punchout/returns:parse | PUR_REQUISITION_CREATE | Dry run of a returned cart (`format` CXML with `document`, or OCI with `fields`); 200 with lines, issues and the total check |
-| POST | /edi/v1/self-billing:match | SELF_BILLING_RECONCILE | Dry run of BR-35.15 over the supplied shipments and self-billed lines; 200 with outcomes and unbilled shipments |
-| POST | /edi/v1/peppol/invoices:build | EINV_OPERATE | Dry run of the UBL build; 200 with `xml` when `valid`, otherwise the blocking issues and no XML |
+| POST | /edi/v1/partners | edi.admin | Requires `Idempotency-Key`; replay returns 200 with the stored partner, another body under the key is 422 |
+| GET | /edi/v1/partners?environment= | edi.admin | `{items}` by name |
+| GET | /edi/v1/partners/{id} | edi.admin | `ETag` carries the version |
+| PUT | /edi/v1/partners/{id}/trade-profile | edi.admin | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
+| POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810","sourceId"}`; 201 with the X12, repeat 200; 409 EDI-0012 without a profile, 503 EDI-0010 without source services |
+| POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
+| POST | /edi/v1/maps:test | edi.admin | Body `{"raw": "<X12>"}`; nothing is stored |
+| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | edi.operate | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
+| GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | edi.operate | `{items}` newest first, limit 1 to 200 (default 50) |
+| GET | /edi/v1/interchanges/{id} | edi.operate | Messages with canonical documents (party names masked without `edi.pii.view`) and the 997 |
+| GET | /edi/v1/interchanges/{id}/payload | edi.operate | Raw payload as a segment tree; PII masked without `edi.pii.view` |
+| POST | /edi/v1/interchanges/{id}:reprocess?dryRun= | edi.operate | Re-map FAILED inbound transactions from the raw payload; `Idempotency-Key` unless `dryRun=true` |
+| POST | /edi/v1/interchanges:reprocess?dryRun= | edi.operate | Bulk reprocess of 1 to 200 distinct interchange ids; `Idempotency-Key` unless `dryRun=true` |
+| GET | /edi/v1/messages?partnerId=&direction=&status=&transactionSet=&controlNumber=&limit=&cursor= | edi.operate | `{items, nextCursor}` newest first, limit 1 to 200 (default 50) |
+| GET | /edi/v1/messages/{id} | edi.operate | One message with envelope and canonical document (party names masked without `edi.pii.view`) |
+| GET | /edi/v1/partners/sla?days= | edi.operate | `{days, items}`, days 1 to 365 (default 30) |
+| POST | /edi/v1/punchout/returns:parse | edi.requisition.create | Dry run of a returned cart (`format` CXML with `document`, or OCI with `fields`); 200 with lines, issues and the total check |
+| POST | /edi/v1/self-billing:match | edi.self-billing.reconcile | Dry run of BR-35.15 over the supplied shipments and self-billed lines; 200 with outcomes and unbilled shipments |
+| POST | /edi/v1/peppol/invoices:build | edi.einvoice.operate | Dry run of the UBL build; 200 with `xml` when `valid`, otherwise the blocking issues and no XML |
 
 The web screens live in `apps/web/src/modules/integration` (partners, interchanges,
 receive, send EDI document, message monitor with single and bulk reprocess, raw
@@ -241,7 +271,9 @@ The fulfillment, billing and sales charts verify edi's token from `serviceIdenti
 ## Dependencies
 
 Allowed set only: platform kernel, chi, pgx/v5, shopspring/decimal, rapid (tests).
-No new third-party dependencies in slices 1 to 5.
+No new third-party dependencies in slices 1 to 5. Slice 6 adds `github.com/pkg/sftp` and
+`golang.org/x/crypto/ssh` for the SFTP transport (the versions treasury already uses); AS2
+signing uses the standard library only.
 
 ## Error codes
 

@@ -4,7 +4,8 @@
 // stateless previews of the expense rules (report policy evaluation,
 // advance settlement, travel variance, per diem, advance aging, requisition
 // window and closure, card feed parsing, lodging cap, mileage and batch card
-// matching). Receipts and AP posting arrive in later slices.
+// matching), and the general ledger posting of approved reports' reimbursement
+// liability. Receipts arrive in a later slice.
 package api
 
 import (
@@ -21,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/domain"
 )
@@ -63,6 +65,10 @@ type API struct {
 	advancesRequested   atomic.Int64
 	requisitionsCreated atomic.Int64
 	cardImports         atomic.Int64
+	glPostings          atomic.Int64
+	ledger              ledgerclient.Ledger
+	glBooks             GLBooks
+	glProfiles          map[string]GLProfile
 }
 
 // New returns the API. db may be nil in tests.
@@ -85,6 +91,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCardImport)).Post("/v1/expense/card-transactions:parse", a.cardFeedParse)
 	a.registerReports(r, duty)
 	a.registerTravel(r, duty)
+	a.registerGL(r)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -106,6 +113,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP expense_reports_decided_total Expense reports approved or rejected.\n# TYPE expense_reports_decided_total counter\nexpense_reports_decided_total %d\n", a.reportsDecided.Load())
 		fmt.Fprintf(w, "# HELP expense_cash_advances_requested_total Cash advances requested.\n# TYPE expense_cash_advances_requested_total counter\nexpense_cash_advances_requested_total %d\n", a.advancesRequested.Load())
 		fmt.Fprintf(w, "# HELP expense_travel_requisitions_created_total Travel requisitions created.\n# TYPE expense_travel_requisitions_created_total counter\nexpense_travel_requisitions_created_total %d\n", a.requisitionsCreated.Load())
+		fmt.Fprintf(w, "# HELP expense_gl_postings_total Reimbursement liabilities posted to the general ledger.\n# TYPE expense_gl_postings_total counter\nexpense_gl_postings_total %d\n", a.glPostings.Load())
 		fmt.Fprintf(w, "# HELP expense_card_imports_total Card feed files imported.\n# TYPE expense_card_imports_total counter\nexpense_card_imports_total %d\n", a.cardImports.Load())
 	})
 }

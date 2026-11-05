@@ -67,7 +67,7 @@ function Level({ node }: { node: SegmentNode }) {
  * The raw payload of an interchange as a segment tree (FR-35.10, PRD §6.35.6):
  * envelopes nest, every element shows its X12 reference and dictionary name on
  * hover. Party names, addresses and contacts come back as "***" unless the
- * user holds EDI_PII_VIEW (BR-35.12); masking is done by the service.
+ * user holds edi.pii.view (BR-35.12); masking is done by the service.
  */
 export function RawPayloadCard({ interchangeId }: { interchangeId: string }) {
   const state = useLoad<PayloadTree>((signal) => getPayload(interchangeId, signal), `payload:${interchangeId}`);
@@ -86,8 +86,8 @@ export function RawPayloadCard({ interchangeId }: { interchangeId: string }) {
         <div className={styles.stack}>
           <p className={styles.note}>
             {state.data.piiMasked
-              ? "Hover an element for its X12 name. Party names, addresses and contacts are shown as *** because you do not hold EDI_PII_VIEW. Trailers (SE, GE, IEA) are left out."
-              : "Hover an element for its X12 name. Personal data is shown in full because you hold EDI_PII_VIEW. Trailers (SE, GE, IEA) are left out."}
+              ? "Hover an element for its X12 name. Party names, addresses and contacts are shown as *** because you do not hold edi.pii.view. Trailers (SE, GE, IEA) are left out."
+              : "Hover an element for its X12 name. Personal data is shown in full because you hold edi.pii.view. Trailers (SE, GE, IEA) are left out."}
           </p>
           <ul className={`${styles.levels} ${styles.tree}`} aria-label="Segment tree">
             <Level node={state.data.tree} />

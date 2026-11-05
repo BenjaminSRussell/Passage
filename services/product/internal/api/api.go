@@ -35,7 +35,9 @@ const (
 	// dutyImport is held by the migration loader service token; it opens only
 	// product create/update, attributes, identifiers, relations, release and the
 	// released-product patch; release and patch stay in its own legal entity.
-	dutyImport       = "product.import.write"
+	dutyImport = "product.import.write"
+	// dutyImportRead lets the migration loader read back a product it loaded, by id, for reconciliation.
+	dutyImportRead   = "product.import.read"
 	dutySetup        = "product.setup.write"
 	dutyConfigure    = "product.configure"
 	dutyGTIN         = "product.gtin.allocate"
@@ -95,7 +97,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Post("/v1/product/products", a.createProduct)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products", a.listProducts)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products:search", a.search)
-	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products/{id}", a.getProduct)
+	r.With(authz.RequireAnyDuty(dutyView, dutyImportRead)).Get("/v1/product/products/{id}", a.getProduct)
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Patch("/v1/product/products/{id}", a.updateProduct)
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyExplode)).Post("/v1/product/products/{id}/variants:explode", a.explode)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products/{id}/variants:lookup", a.lookup)

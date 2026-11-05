@@ -263,6 +263,35 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/employee-vendors/{workerId}:
+    put:
+      operationId: registerEmployeeVendor
+      x-passage-duty: employee-vendor.maintain
+      description: Maps an HR worker to the party vendor that pays their expense reimbursements in one legal entity (legalEntityId, defaulting to the caller's legal-entity scope; outside it is a 403). The vendor must be in the party vendor master (unknown is a 422 AP-EMP-001; party not configured is a 503, unreachable a 502). A worker is mapped once; the same vendor again is a 200 with Idempotent-Replayed true and another vendor is a 409 AP-EMP-002 (remapping is not supported). In the same transaction the worker's OPEN items still waiting for a payee move to the vendor (repointedItems) and leave PAYEE_UNVERIFIED; open items created from approved expense reports afterwards name the vendor and carry the worker in payeeWorkerId. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: workerId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [vendorId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                vendorId: { type: string, format: uuid }
+      responses:
+        '200': { description: The worker was already mapped to this vendor., content: { application/json: { schema: { $ref: '#/components/schemas/EmployeeVendor' } } } }
+        '201': { description: The worker is mapped to the vendor., content: { application/json: { schema: { $ref: '#/components/schemas/EmployeeVendor' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /v1/payables/payment-proposals:
     get:
       operationId: listPaymentProposals
@@ -449,7 +478,7 @@ paths:
       operationId: generatePaymentRunFile
       x-passage-duty: payment-run.execute
       description: |
-        Builds one pain.001.001.09 payment per proposal group (a bank account whose id or fingerprint differs from the one bound at approval is a terminal 422 AP-RUN-017), paying the group net of withheld tax, from the bank details revealed by the party service (GET /v1/party/vendors/{id}/bank-accounts:reveal, signed token with duty party.vendor_bank.reveal) at this step and never persisted in the clear: the one account in the group currency is used. A vendor that is unknown, has no account in the currency, has several, or has no account holder or bank country is a terminal 422 AP-RUN-017; party unreachable (transport failure or 5xx) is a retryable 502 COM-0502, while a party refusal (400, 401, 403, a missing signing key or scope) is a terminal 422 AP-RUN-013 configuration fault. The file is then validated against the XSD and stores the file and the ap_payment rows (one per group; a group can be paid once, ever). Repeating the step returns the stored file untouched. A bank-rule or XSD failure is a terminal 422 (AP-FIL-002, AP-RUN-002, AP-FIL-001, PAY-0001): fail the run. A FAILED run is a 409 (AP-RUN-011).
+        Builds one pain.001.001.09 payment per proposal group (a bank account whose id or fingerprint differs from the one bound at approval is a terminal 422 AP-RUN-017), paying the group net of withheld tax, from the bank details revealed by the party service (GET /v1/party/vendors/{id}/bank-accounts:reveal, signed token with duty party.vendor-bank.reveal) at this step and never persisted in the clear: the one account in the group currency is used. A vendor that is unknown, has no account in the currency, has several, or has no account holder or bank country is a terminal 422 AP-RUN-017; party unreachable (transport failure or 5xx) is a retryable 502 COM-0502, while a party refusal (400, 401, 403, a missing signing key or scope) is a terminal 422 AP-RUN-013 configuration fault. The file is then validated against the XSD and stores the file and the ap_payment rows (one per group; a group can be paid once, ever). Repeating the step returns the stored file untouched. A bank-rule or XSD failure is a terminal 422 (AP-FIL-002, AP-RUN-002, AP-FIL-001, PAY-0001): fail the run. A FAILED run is a 409 (AP-RUN-011).
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -667,7 +696,8 @@ components:
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
         version: { type: integer }
         paymentHold: { type: boolean }
-        payeeUnverified: { type: boolean, description: "True for an item whose payee id (an employee worker id) is not yet verified against the vendor master; with bank bindings on it is left out of proposals until it resolves." }
+        payeeUnverified: { type: boolean, description: "True for an expense reimbursement whose worker the employee-vendor register does not map yet (vendorId is the worker id); with bank bindings on it is left out of proposals until the worker is registered." }
+        payeeWorkerId: { type: string, format: uuid, description: "The worker an expense reimbursement pays, once vendorId is the vendor the employee-vendor register maps them to." }
         valuation:
           type: object
           description: Present when value_in is set. amount is openAmount times rate rounded to the minor unit of currency.
@@ -703,6 +733,16 @@ components:
       properties:
         legalEntityId: { type: string, format: uuid }
         reason: { type: string, description: Ignored. }
+    EmployeeVendor:
+      type: object
+      required: [legalEntityId, workerId, vendorId, registeredBy, registeredAt, repointedItems]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        registeredBy: { type: string }
+        registeredAt: { type: string, format: date-time }
+        repointedItems: { type: integer, description: "OPEN items of the worker this call moved to the vendor" }
     VendorBlock:
       type: object
       required: [vendorId, legalEntityId, blocked]
@@ -782,7 +822,7 @@ components:
         totalWithheld: { type: object, additionalProperties: { type: string }, description: Tax withheld per group currency; never summed across currencies. }
         excludedItems:
           type: array
-          description: Only on the 201 that created the proposal. Open items left out because their payee (for example an expense reimbursement to an employee) is not in the vendor master; reason PAYEE_UNVERIFIED. They stay open and are offered again once the payee resolves.
+          description: Open items left out because their payee (an expense reimbursement to a worker the employee-vendor register does not map) is unverified; reason PAYEE_UNVERIFIED. Kept with the proposal, so the replay and GET return them too. They stay open and are offered again once the worker is registered.
           items:
             type: object
             required: [itemId, vendorId, reason]

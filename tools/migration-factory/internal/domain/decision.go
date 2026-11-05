@@ -172,7 +172,7 @@ type Decision struct {
 	PlanVersion int
 }
 
-// GoApproval is a CutoverManager's approval of a GO in a decision round, waiting for a second,
+// GoApproval is a migration.cutover.manage's approval of a GO in a decision round, waiting for a second,
 // different approver (CUT-1605). Round is the seq the next decision takes; a decision recorded in
 // between moves the round on and voids the approval.
 type GoApproval struct {
@@ -446,8 +446,8 @@ type DecisionStep struct {
 
 // PrepareDecision applies the decision rules that do not depend on the checklist. Approvers are
 // authenticated users only (CUT-1605): a NO_GO is approved by the user recording it; a GO needs two
-// distinct users, so the first CutoverManager's GO is stored as an approval and the GO is recorded
-// when a different CutoverManager approves the same attestations. Nothing is decided on a rolled-back
+// distinct users, so the first migration.cutover.manage's GO is stored as an approval and the GO is recorded
+// when a different migration.cutover.manage holder approves the same attestations. Nothing is decided on a rolled-back
 // plan or after a GO. NO_GO needs a reason and is always possible before a GO ("any open item = NO-GO").
 func (p *Plan) PrepareDecision(in DecisionInput, f ReadinessFacts) (DecisionStep, error) {
 	if p.RolledBack {
@@ -477,7 +477,7 @@ func (p *Plan) PrepareDecision(in DecisionInput, f ReadinessFacts) (DecisionStep
 	case DecisionGo:
 		for _, a := range f.Pending {
 			if a.Approver == by {
-				return DecisionStep{}, fmt.Errorf("%w: CUT-1605 you have already approved this GO; it needs a second approval by a different CutoverManager", ErrTransition)
+				return DecisionStep{}, fmt.Errorf("%w: CUT-1605 you have already approved this GO; it needs a second approval by a different migration.cutover.manage", ErrTransition)
 			}
 		}
 		if len(f.Pending) == 0 {

@@ -98,7 +98,7 @@ describe("Customer statement", () => {
     const first = renderAt(`/receivables/statements?legalEntityId=${LE}&customer=${CUST}&asOf=2027-03-31`);
     expect(await screen.findByText("Nothing open")).toBeInTheDocument();
     first.unmount();
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty ARView" });
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty receivables.view" });
     renderAt(`/receivables/statements?legalEntityId=${LE}&customer=${CUST}`);
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the statement");
@@ -162,7 +162,7 @@ describe("Balance snapshots", () => {
 
   it("shows a refused run and a failed load", async () => {
     server.handler = (url, init) => {
-      if (init.method === "POST") return json(403, { code: "AUTH-0003", detail: "missing duty ARAgingRun" });
+      if (init.method === "POST") return json(403, { code: "AUTH-0003", detail: "missing duty receivables.aging.run" });
       if (url.pathname.endsWith("/aging-snapshots")) return json(200, { items: [] });
       return undefined;
     };
@@ -172,7 +172,7 @@ describe("Balance snapshots", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run snapshot now" }));
     const refused = await findAlert();
     expect(refused).toHaveTextContent("You may not run the snapshot");
-    expect(refused).toHaveTextContent("ARAgingRun");
+    expect(refused).toHaveTextContent("receivables.aging.run");
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/receivables/balance-snapshots");

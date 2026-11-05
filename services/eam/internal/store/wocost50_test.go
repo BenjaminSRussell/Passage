@@ -64,7 +64,7 @@ func TestWorkOrderCost50_ReconcilesAssetKPIAndEvents(t *testing.T) {
 	readJSON(t, "../../testdata/eam-wo-cost-50/expected.json", &want)
 
 	pool := testkit.DB(t)
-	ctx := testkit.Ctx(testkit.TenantID(1), "EamPlanner", "EamTechnician")
+	ctx := testkit.Ctx(testkit.TenantID(1), "eam.work.plan", "eam.work-order.execute")
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}

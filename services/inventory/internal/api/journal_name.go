@@ -90,7 +90,7 @@ func (a *API) createJournalName(w http.ResponseWriter, r *http.Request) {
 	n := domain.NormalizeJournalName(domain.JournalName{LegalEntityID: req.LegalEntityID, Code: req.Code, Description: req.Description,
 		Type: domain.JournalType(req.JournalType), RequiresApproval: req.RequiresApproval, OffsetAccountID: req.OffsetAccountID})
 	if !slices.Contains(domain.KeyedJournalTypes, n.Type) {
-		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE or TRANSFER"
+		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE, TRANSFER or BOM"
 	}
 	if err := n.Validate(); err != nil && fields["journalType"] == "" {
 		field := "code"
@@ -131,7 +131,7 @@ func (a *API) listJournalNames(w http.ResponseWriter, r *http.Request) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if f.JournalType != "" && !slices.Contains(domain.KeyedJournalTypes, domain.JournalType(f.JournalType)) {
-		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE or TRANSFER"
+		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE, TRANSFER or BOM"
 	}
 	if raw := q.Get("active"); raw != "" {
 		b, err := strconv.ParseBool(raw)

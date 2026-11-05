@@ -79,8 +79,8 @@ describe("module registration, slice 4", () => {
   it("registers the approvals list and the mid-quarter test with their duties", () => {
     const paths = assets.routes.map((r) => r.path);
     expect(paths).toEqual(expect.arrayContaining(["/assets/capex/approvals", "/assets/mid-quarter-test"]));
-    expect(assets.nav.find((n) => n.to === "/assets/capex/approvals")?.duty).toBe("CapexRequestApprove");
-    expect(assets.nav.find((n) => n.to === "/assets/mid-quarter-test")?.duty).toBe("AssetDepreciate");
+    expect(assets.nav.find((n) => n.to === "/assets/capex/approvals")?.duty).toBe("assets.capex-request.approve");
+    expect(assets.nav.find((n) => n.to === "/assets/mid-quarter-test")?.duty).toBe("assets.asset.depreciate");
   });
 });
 

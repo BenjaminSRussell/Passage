@@ -126,25 +126,25 @@ func TestBankStatementImport_ValidatesParsesAndForwards(t *testing.T) {
 	body := func(le, content string) string {
 		return `{"legalEntityId":"` + le + `","content":` + jsonString(content) + `}`
 	}
-	if rec := do(h, http.MethodPost, path, body(testLE, validCAMT), "ARView", nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("without ARImport: %d", rec.Code)
+	if rec := do(h, http.MethodPost, path, body(testLE, validCAMT), "receivables.view", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("without receivables.payment-file.import: %d", rec.Code)
 	}
-	rec := do(h, http.MethodPost, path, body("nope", "   "), "ARImport", nil)
+	rec := do(h, http.MethodPost, path, body("nope", "   "), "receivables.payment-file.import", nil)
 	if fields := fieldErrors(t, rec.Body.Bytes()); rec.Code != http.StatusBadRequest || fields["content"] == "" || fields["legalEntityId"] == "" {
 		t.Fatalf("empty content and bad entity: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodPost, path, body(testLE, strings.Repeat("x", maxStatementBytes+1)), "ARImport", nil); rec.Code != http.StatusBadRequest {
+	if rec := do(h, http.MethodPost, path, body(testLE, strings.Repeat("x", maxStatementBytes+1)), "receivables.payment-file.import", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("oversized file: %d", rec.Code)
 	}
 	bad := strings.Replace(validCAMT, ">100.00<", ">10.0.0<", 1)
-	rec = do(h, http.MethodPost, path, body(testLE, bad), "ARImport", nil)
+	rec = do(h, http.MethodPost, path, body(testLE, bad), "receivables.payment-file.import", nil)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"AR-0004"`) || !strings.Contains(rec.Body.String(), "Line 3") {
 		t.Fatalf("malformed entry: %d %s", rec.Code, rec.Body.String())
 	}
 	if f.imported.FileSHA256 != "" {
 		t.Fatal("a malformed file reached the store")
 	}
-	rec = do(h, http.MethodPost, path, body(testLE, validCAMT), "ARImport", nil)
+	rec = do(h, http.MethodPost, path, body(testLE, validCAMT), "receivables.payment-file.import", nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("valid import: %d %s", rec.Code, rec.Body.String())
 	}
@@ -152,7 +152,7 @@ func TestBankStatementImport_ValidatesParsesAndForwards(t *testing.T) {
 	if len(in.Credits) != 1 || in.SkippedCount != 1 || in.StatementCount != 1 || len(in.FileSHA256) != 64 || in.LegalEntityID != testLE {
 		t.Fatalf("forwarded %+v, want one credit, the debit skipped and the file hash", in)
 	}
-	if rec := do(h, http.MethodGet, path, "", "ARView", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
+	if rec := do(h, http.MethodGet, path, "", "receivables.view", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -171,13 +171,13 @@ func TestCreateDeduction_Validation(t *testing.T) {
 		status  int
 		field   string
 	}{
-		{"missing key", body(testItem, "PROMO", "300.00"), nil, "DeductionMaintain", http.StatusBadRequest, "Idempotency-Key"},
-		{"without duty", body(testItem, "PROMO", "300.00"), key, "ARView", http.StatusForbidden, ""},
-		{"no open item", body("x", "PROMO", "300.00"), key, "DeductionMaintain", http.StatusBadRequest, "openItemId"},
-		{"unknown type", body(testItem, "OTHER", "300.00"), key, "DeductionMaintain", http.StatusBadRequest, "type"},
-		{"zero amount", body(testItem, "PROMO", "0"), key, "DeductionMaintain", http.StatusBadRequest, "amount"},
-		{"unknown field", strings.Replace(body(testItem, "PROMO", "300.00"), `"type"`, `"customerId":"x","type"`, 1), key, "DeductionMaintain", http.StatusBadRequest, ""},
-		{"valid", body(testItem, "PROMO", "300.00"), key, "DeductionMaintain", http.StatusCreated, ""},
+		{"missing key", body(testItem, "PROMO", "300.00"), nil, "receivables.deduction.maintain", http.StatusBadRequest, "Idempotency-Key"},
+		{"without duty", body(testItem, "PROMO", "300.00"), key, "receivables.view", http.StatusForbidden, ""},
+		{"no open item", body("x", "PROMO", "300.00"), key, "receivables.deduction.maintain", http.StatusBadRequest, "openItemId"},
+		{"unknown type", body(testItem, "OTHER", "300.00"), key, "receivables.deduction.maintain", http.StatusBadRequest, "type"},
+		{"zero amount", body(testItem, "PROMO", "0"), key, "receivables.deduction.maintain", http.StatusBadRequest, "amount"},
+		{"unknown field", strings.Replace(body(testItem, "PROMO", "300.00"), `"type"`, `"customerId":"x","type"`, 1), key, "receivables.deduction.maintain", http.StatusBadRequest, ""},
+		{"valid", body(testItem, "PROMO", "300.00"), key, "receivables.deduction.maintain", http.StatusCreated, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,18 +206,18 @@ func TestListDeductions_Filters(t *testing.T) {
 	h := router(f)
 	base := "/v1/receivables/deductions"
 	if rec := do(h, http.MethodGet, base, "", "", nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("without ARView: %d", rec.Code)
+		t.Fatalf("without receivables.view: %d", rec.Code)
 	}
 	for _, q := range []string{"?status=CLOSED", "?type=promo", "?customer=x", "?limit=0"} {
-		if rec := do(h, http.MethodGet, base+q, "", "ARView", nil); rec.Code != http.StatusBadRequest {
+		if rec := do(h, http.MethodGet, base+q, "", "receivables.view", nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400", q, rec.Code)
 		}
 	}
-	rec := do(h, http.MethodGet, base+"?status=MATCHED&type=PRICE&customer="+testItem, "", "ARView", nil)
+	rec := do(h, http.MethodGet, base+"?status=MATCHED&type=PRICE&customer="+testItem, "", "receivables.view", nil)
 	if rec.Code != http.StatusOK || f.filter != (store.DeductionFilter{Status: "MATCHED", Type: "PRICE", CustomerID: testItem}) {
 		t.Fatalf("list: %d filter %+v", rec.Code, f.filter)
 	}
-	if rec := do(h, http.MethodGet, base+"/not-a-uuid", "", "ARView", nil); rec.Code != http.StatusNotFound {
+	if rec := do(h, http.MethodGet, base+"/not-a-uuid", "", "receivables.view", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id: %d", rec.Code)
 	}
 }
@@ -235,48 +235,48 @@ func TestDeductionActions_ValidateAndForward(t *testing.T) {
 		field  string
 		check  func(t *testing.T, f *deductionFake)
 	}{
-		{"needs the duty", ":approve", "", "ARView", v3, http.StatusForbidden, "", nil},
-		{"needs If-Match", ":approve", "", "DeductionMaintain", nil, http.StatusPreconditionRequired, "", nil},
-		{"unknown action", ":refund", "", "DeductionMaintain", v3, http.StatusNotFound, "", nil},
-		{"match needs a claim", ":match", `{"claimType":"INVOICE","claimRef":" ","claimRemaining":"-1"}`, "DeductionMaintain", v3, http.StatusBadRequest, "claimRef", nil},
-		{"match needs the remaining amount", ":match", `{"claimType":"PROMOTION_FUND","claimRef":"FUND-7"}`, "DeductionMaintain", v3, http.StatusBadRequest, "claimRemaining", nil},
-		{"match", ":match", `{"claimType":"PROMOTION_FUND","claimRef":" FUND-7 ","claimRemaining":"300.00"}`, "DeductionMaintain", v3, http.StatusOK, "",
+		{"needs the duty", ":approve", "", "receivables.view", v3, http.StatusForbidden, "", nil},
+		{"needs If-Match", ":approve", "", "receivables.deduction.maintain", nil, http.StatusPreconditionRequired, "", nil},
+		{"unknown action", ":refund", "", "receivables.deduction.maintain", v3, http.StatusNotFound, "", nil},
+		{"match needs a claim", ":match", `{"claimType":"INVOICE","claimRef":" ","claimRemaining":"-1"}`, "receivables.deduction.maintain", v3, http.StatusBadRequest, "claimRef", nil},
+		{"match needs the remaining amount", ":match", `{"claimType":"PROMOTION_FUND","claimRef":"FUND-7"}`, "receivables.deduction.maintain", v3, http.StatusBadRequest, "claimRemaining", nil},
+		{"match", ":match", `{"claimType":"PROMOTION_FUND","claimRef":" FUND-7 ","claimRemaining":"300.00"}`, "receivables.deduction.maintain", v3, http.StatusOK, "",
 			func(t *testing.T, f *deductionFake) {
 				if f.action != "match" || f.version != 3 || f.claim.Ref != "FUND-7" || f.claim.Type != "PROMOTION_FUND" || !f.claim.Remaining.Equal(decimal.RequireFromString("300")) {
 					t.Errorf("forwarded %+v v%d", f.claim, f.version)
 				}
 			}},
-		{"approve with a note", ":approve", `{"note":"  fund confirmed  "}`, "DeductionMaintain", v3, http.StatusOK, "",
+		{"approve with a note", ":approve", `{"note":"  fund confirmed  "}`, "receivables.deduction.maintain", v3, http.StatusOK, "",
 			func(t *testing.T, f *deductionFake) {
 				if f.action != "approve" || f.note == nil || *f.note != "fund confirmed" {
 					t.Errorf("forwarded action %q note %v", f.action, f.note)
 				}
 			}},
-		{"deny needs a configured reason", ":deny", `{"reason":"late"}`, "DeductionMaintain", v3, http.StatusBadRequest, "reason", nil},
-		{"deny", ":deny", `{"reason":"NOT_AUTHORIZED","note":" "}`, "DeductionMaintain", v3, http.StatusOK, "",
+		{"deny needs a configured reason", ":deny", `{"reason":"late"}`, "receivables.deduction.maintain", v3, http.StatusBadRequest, "reason", nil},
+		{"deny", ":deny", `{"reason":"NOT_AUTHORIZED","note":" "}`, "receivables.deduction.maintain", v3, http.StatusOK, "",
 			func(t *testing.T, f *deductionFake) {
 				if f.action != "deny" || f.reason != "NOT_AUTHORIZED" || f.note != nil {
 					t.Errorf("forwarded %q %q note %v; a blank note is no note", f.action, f.reason, f.note)
 				}
 			}},
-		{"split needs two parts", ":split", `{"parts":["300.00"]}`, "DeductionMaintain", v3, http.StatusBadRequest, "parts", nil},
-		{"split refuses a negative part", ":split", `{"parts":["400.00","-100.00"]}`, "DeductionMaintain", v3, http.StatusBadRequest, "parts[1]", nil},
-		{"split", ":split", `{"parts":["200.00","100.00"]}`, "DeductionMaintain", v3, http.StatusOK, "",
+		{"split needs two parts", ":split", `{"parts":["300.00"]}`, "receivables.deduction.maintain", v3, http.StatusBadRequest, "parts", nil},
+		{"split refuses a negative part", ":split", `{"parts":["400.00","-100.00"]}`, "receivables.deduction.maintain", v3, http.StatusBadRequest, "parts[1]", nil},
+		{"split", ":split", `{"parts":["200.00","100.00"]}`, "receivables.deduction.maintain", v3, http.StatusOK, "",
 			func(t *testing.T, f *deductionFake) {
 				if f.action != "split" || len(f.parts) != 2 {
 					t.Errorf("forwarded %q %v", f.action, f.parts)
 				}
 			}},
-		{"write-off as a clerk", ":write-off", "", "DeductionMaintain", v3, http.StatusOK, "",
+		{"write-off as a clerk", ":write-off", "", "receivables.deduction.maintain", v3, http.StatusOK, "",
 			func(t *testing.T, f *deductionFake) {
 				if f.action != "write-off" || f.mayApprove {
-					t.Errorf("a clerk without ARWriteOffApprove was forwarded as an approver")
+					t.Errorf("a clerk without receivables.write-off.approve was forwarded as an approver")
 				}
 			}},
-		{"write-off as an approver", ":write-off", "", "DeductionMaintain,ARWriteOffApprove", v3, http.StatusOK, "",
+		{"write-off as an approver", ":write-off", "", "receivables.deduction.maintain,receivables.write-off.approve", v3, http.StatusOK, "",
 			func(t *testing.T, f *deductionFake) {
 				if !f.mayApprove {
-					t.Errorf("ARWriteOffApprove not forwarded")
+					t.Errorf("receivables.write-off.approve not forwarded")
 				}
 			}},
 	}

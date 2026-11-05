@@ -22,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/carrier"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 )
@@ -49,6 +50,8 @@ var (
 type Options struct {
 	ReleaseHorizonDays int
 	RequireFullATP     bool
+	// Carrier is the carrier-gateway client (CARRIER_GATEWAY_URL); nil answers the carrier routes 503 FUL-0070.
+	Carrier carrier.Gateway
 }
 
 // API holds the store and the release parameters.
@@ -70,17 +73,18 @@ func (a *API) SetClock(now func() time.Time) { a.now = now }
 // Routes mounts every fulfillment endpoint on r. Each route carries the duty
 // named by its operation's x-passage-duty.
 func (a *API) Routes(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/releases:run", a.runRelease)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments", a.listShipments)
-	r.With(authz.RequireAnyDuty("WarehouseView", "fulfillment.shipment.read")).Get("/v1/fulfillment/shipments/{id}", a.getShipment)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/packing-slips", a.listPackingSlips)
-	r.With(authz.RequireAnyDuty("WarehouseView", "fulfillment.packing-slip.read")).Get("/v1/fulfillment/packing-slips/{id}", a.getPackingSlip)
-	r.With(authz.RequireDuty("WarehousePick")).Post("/v1/fulfillment/shipments/{id}:confirm-pick", a.confirmPick)
-	r.With(authz.RequireDuty("WarehousePack")).Post("/v1/fulfillment/shipments/{id}/containers", a.packContainer)
-	r.With(authz.RequireDuty("PackingSlipPost")).Post("/v1/fulfillment/shipments/{id}:post-packing-slip", a.postPackingSlip)
-	r.With(authz.RequireDuty("PackingSlipPost")).Post("/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Post("/v1/fulfillment/releases:run", a.runRelease)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/shipments", a.listShipments)
+	r.With(authz.RequireAnyDuty("fulfillment.warehouse.view", "fulfillment.shipment.read")).Get("/v1/fulfillment/shipments/{id}", a.getShipment)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/packing-slips", a.listPackingSlips)
+	r.With(authz.RequireAnyDuty("fulfillment.warehouse.view", "fulfillment.packing-slip.read")).Get("/v1/fulfillment/packing-slips/{id}", a.getPackingSlip)
+	r.With(authz.RequireDuty("fulfillment.warehouse.pick")).Post("/v1/fulfillment/shipments/{id}:confirm-pick", a.confirmPick)
+	r.With(authz.RequireDuty("fulfillment.warehouse.pack")).Post("/v1/fulfillment/shipments/{id}/containers", a.packContainer)
+	r.With(authz.RequireDuty("fulfillment.packing-slip.post")).Post("/v1/fulfillment/shipments/{id}:post-packing-slip", a.postPackingSlip)
+	r.With(authz.RequireDuty("fulfillment.packing-slip.post")).Post("/v1/fulfillment/packing-slips/{id}:cancel", a.cancelPackingSlip)
 	a.routesPacking(r)
 	a.routesWorkbench(r)
+	a.routesCarrier(r)
 	a.routesReleaseRule(r)
 	a.routesDeliveryTolerance(r)
 	a.routesInquiry(r)

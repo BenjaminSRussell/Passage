@@ -138,7 +138,7 @@ const openOrder: WorkOrder = {
 };
 
 describe("permit module wiring", () => {
-  it("registers the permit register, request form, detail and setup pages behind EamInquire", () => {
+  it("registers the permit register, request form, detail and setup pages behind eam.inquire", () => {
     const paths = eam.routes.map((r) => r.path);
     for (const path of ["/eam/permits", "/eam/permits/new", "/eam/permits/:id", "/eam/permit-types"]) expect(paths).toContain(path);
     expect(eam.nav.filter((n) => n.to.startsWith("/eam/permit")).map((n) => n.label)).toEqual(["Permits", "Permit types"]);
@@ -206,9 +206,9 @@ describe("permit register", () => {
   });
 
   it("shows the load error with a retry", async () => {
-    handler = (url, init) => (isGet("/permits")(url, init) ? json(403, { code: "AUTH-0003", detail: "missing duty EamInquire" }) : undefined);
+    handler = (url, init) => (isGet("/permits")(url, init) ? json(403, { code: "AUTH-0003", detail: "missing duty eam.inquire" }) : undefined);
     renderAt("/eam/permits");
-    expect(await findAlert()).toHaveTextContent("missing duty EamInquire (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty eam.inquire (AUTH-0003)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 

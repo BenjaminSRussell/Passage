@@ -232,10 +232,6 @@ func (a *API) rollStoredVersion(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeLegalEntityScope, "legal entity "+v.LegalEntityID+" is outside your scope"))
 		return
 	}
-	if v.Status != domain.VersionOpen {
-		storeFailure(w, r, &domain.CodedError{Code: domain.CodeVersionNotRollable, Detail: "version " + v.Code + " is " + v.Status + "; only an Open version can be rolled"})
-		return
-	}
 	if opts.Mode == "" {
 		opts.Mode = domain.ModeMultilevel
 	}
@@ -247,6 +243,24 @@ func (a *API) rollStoredVersion(w http.ResponseWriter, r *http.Request) {
 		asOf = a.now().UTC().Format(time.DateOnly)
 		req.AsOf = asOf
 	}
+	fingerprint := struct {
+		ID  string
+		Req storedRollRequest
+	}{id, req}
+	// A retry of a committed roll replays its stored 201 before the Open check and
+	// the engineering read: activating the version must not turn the retry into 422.
+	if res, found, err := a.store.RollReplay(r.Context(), key, fingerprint); err != nil || found {
+		if err != nil {
+			storeFailure(w, r, err)
+			return
+		}
+		created(w, res, true)
+		return
+	}
+	if v.Status != domain.VersionOpen {
+		storeFailure(w, r, &domain.CodedError{Code: domain.CodeVersionNotRollable, Detail: "version " + v.Code + " is " + v.Status + "; only an Open version can be rolled"})
+		return
+	}
 	src, err := a.readCatalog(r.Context(), v.LegalEntityID, req, asOf)
 	if err != nil {
 		a.rollInputFailure(w, r, id, err)
@@ -255,10 +269,7 @@ func (a *API) rollStoredVersion(w http.ResponseWriter, r *http.Request) {
 	run := domain.MassRoll(src.catalog, opts)
 	res, replayed, err := a.store.StoreRoll(r.Context(), store.RollInput{
 		VersionID: id, SiteID: req.SiteID, Key: key, Options: opts, Roots: req.ItemIDs, Sources: src.sources, Run: run,
-		Fingerprint: struct {
-			ID  string
-			Req storedRollRequest
-		}{id, req},
+		Fingerprint: fingerprint,
 	})
 	if err != nil {
 		storeFailure(w, r, err)

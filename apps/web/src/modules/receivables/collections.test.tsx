@@ -468,7 +468,7 @@ describe("Interest", () => {
   it("shows a refused post", async () => {
     server.handler = (url) => {
       if (url.pathname.endsWith(":calculate")) return json(200, preview);
-      return json(403, { code: "AUTH-0003", detail: "missing duty InterestPost" });
+      return json(403, { code: "AUTH-0003", detail: "missing duty receivables.interest.post" });
     };
     renderAt("/receivables/interest-notes/new");
     fill("Legal entity id", LE);

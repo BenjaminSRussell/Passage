@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	dutySheetMaintain = "ServiceEntryMaintain"
-	dutySheetAccept   = "ServiceEntryAccept"
+	dutySheetMaintain = "receiving.service-entry.maintain"
+	dutySheetAccept   = "receiving.service-entry.accept"
 	maxSheetText      = 200
 )
 

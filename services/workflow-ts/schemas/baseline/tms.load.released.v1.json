@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.passage.dev/dev.passage.tms.load.released.v1.json",
+  "description": "A planner released a load for tendering. Published only by transport. Transport MUST fill data.releasedBy and data.legalEntityScope from the gateway-verified principal of the release request (X-Passage-User and X-Passage-Legal-Entity), never from the request body or the load row, and MUST NOT publish the event when the load's legal entity is outside that scope. workflow-ts mints the tender's scoped=true transport token from these two fields, so they are the only evidence of the releasing user's scope.",
+  "type": "object",
+  "required": ["specversion", "id", "source", "type", "tenantid", "data"],
+  "properties": {
+    "specversion": { "type": "string", "enum": ["1.0"] },
+    "id": { "type": "string" },
+    "source": { "type": "string", "enum": ["/passage/tms/transport"] },
+    "type": { "type": "string", "enum": ["dev.passage.tms.load.released.v1"] },
+    "subject": { "type": "string", "description": "load id" },
+    "time": { "type": "string" },
+    "tenantid": { "type": "string", "description": "tenant of the verified principal" },
+    "datacontenttype": { "type": "string" },
+    "dataschema": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["loadId", "legalEntityId", "releasedBy", "legalEntityScope", "carriers"],
+      "properties": {
+        "loadId": { "type": "string" },
+        "legalEntityId": { "type": "string", "description": "the load's legal entity; must be in legalEntityScope" },
+        "releasedBy": { "type": "string", "description": "user id of the verified principal that released the load (X-Passage-User), not a body field" },
+        "legalEntityScope": {
+          "type": "array",
+          "description": "legal entities of the verified principal (X-Passage-Legal-Entity), not a body field",
+          "items": { "type": "string" }
+        },
+        "carriers": {
+          "type": "array",
+          "description": "carriers in rank order, each once",
+          "items": {
+            "type": "object",
+            "required": ["carrierId"],
+            "properties": {
+              "carrierId": { "type": "string" },
+              "rateQuoted": { "type": "string" }
+            }
+          }
+        },
+        "currency": { "type": "string" },
+        "timeoutMin": { "type": "number" }
+      }
+    }
+  }
+}

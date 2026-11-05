@@ -11,6 +11,7 @@ import {
 import { getMyProfile } from "./api/selfService";
 import { dash, dayOf } from "./format";
 import styles from "./pages.module.css";
+import { ProfileChangesCard } from "./ProfileChangesCard";
 import { useLoad } from "./useLoad";
 
 function Entry({
@@ -94,6 +95,7 @@ export function MyProfilePage() {
           <Entry term="Bank account" mono>
             {me.pii.bankAccount ?? dash}
           </Entry>
+          <Entry term="Home address">{me.pii.homeAddress ?? dash}</Entry>
           <Entry term="Created" mono>
             {dayOf(me.createdAt)}
           </Entry>
@@ -119,8 +121,9 @@ export function MyProfilePage() {
           </Entry>
         </dl>
       </Card>
+      <ProfileChangesCard onApplied={state.reload} />
       <p>
-        <Link to="/hr/absence/requests">My absence requests</Link>
+        <Link to="/hr/my/absence">My absence</Link>
       </p>
     </div>
   );

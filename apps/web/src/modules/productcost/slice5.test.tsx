@@ -187,10 +187,10 @@ describe("cost components page", () => {
   });
 
   it("explains a failed load", async () => {
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty CostingView" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty productcost.view" } });
     renderAt("/productcost/cost-components");
     expect(await findAlert()).toHaveTextContent("Could not load cost components");
-    expect(screen.getByRole("alert")).toHaveTextContent("missing duty CostingView (AUTH-0003)");
+    expect(screen.getByRole("alert")).toHaveTextContent("missing duty productcost.view (AUTH-0003)");
   });
 });
 

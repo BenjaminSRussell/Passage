@@ -26,6 +26,13 @@ type postedLineData struct {
 	InventoryStatus string   `json:"inventory_status"`
 	Amount          string   `json:"amount"`
 	AmountAcct      string   `json:"amount_acct"`
+	// Catch-weight lines only (FR-24.7): qty is the actual weight in unit and
+	// cw_qty the case count, with the per-case spec, so inventory can book
+	// the weight and the count together.
+	CWQty     int    `json:"cw_qty,omitempty"`
+	CWNominal string `json:"cw_nominal,omitempty"`
+	CWMin     string `json:"cw_min,omitempty"`
+	CWMax     string `json:"cw_max,omitempty"`
 }
 
 type receiptPostedData struct {
@@ -195,10 +202,14 @@ func receiptPostedEvent(tenantID string, r store.Receipt, amounts []store.LineAm
 			serials = []string{}
 		}
 		a := byLine[l.LineNo]
-		data.Lines = append(data.Lines, postedLineData{
+		line := postedLineData{
 			LineNo: l.LineNo, POLineID: l.POLineID, POLineNo: l.POLineNo, ProductID: l.ProductID, Unit: l.Unit, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials,
 			LocationID: l.LocationID, InventoryStatus: l.InventoryStatus, Amount: a.Amount.String(), AmountAcct: a.AmountAcct.String(),
-		})
+		}
+		if l.CWQty > 0 {
+			line.CWQty, line.CWNominal, line.CWMin, line.CWMax = l.CWQty, l.CWNominal.String(), l.CWMin.String(), l.CWMax.String()
+		}
+		data.Lines = append(data.Lines, line)
 	}
 	return newEvent("receiving", "receipt", "posted", r.ID, tenantID, data)
 }

@@ -302,7 +302,7 @@ export interface ElevatedPlan {
   endsAt: string;
   reviewDueAt: string;
   needsApproval: boolean;
-  approverDuty?: "BreakGlassApprove" | "PlatformAdmin";
+  approverDuty?: "compliance.break-glass.approve" | "platform.global.admin";
   requiresPostReview: boolean;
 }
 

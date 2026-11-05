@@ -40,6 +40,25 @@ type CustomerStore interface {
 	// CreateCustomer adds the customer role to partyID in the caller's single
 	// legal entity. The bool is false for an idempotent replay.
 	CreateCustomer(ctx context.Context, partyID string, in NewCustomerRole) (domain.Customer, bool, error)
+	// GetCustomer reads one customer role; row-level security keeps it to the caller's legal entities.
+	GetCustomer(ctx context.Context, customerID string) (domain.Customer, error)
+}
+
+func (s *Postgres) GetCustomer(ctx context.Context, customerID string) (domain.Customer, error) {
+	caller, _ := tenant.FromContext(ctx)
+	id, err := canonicalID(customerID)
+	if err != nil {
+		return domain.Customer{}, notFound(CodeCustomerNotFound, "customer not found")
+	}
+	var c domain.Customer
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		c, err = scanCustomer(tx.QueryRow(ctx, `select `+customerColumns+` from customer_role where tenant_id = $1 and id = $2`, caller.TenantID, id))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Customer{}, notFound(CodeCustomerNotFound, "customer not found")
+	}
+	return c, err
 }
 
 func scanCustomer(row pgx.Row) (domain.Customer, error) {

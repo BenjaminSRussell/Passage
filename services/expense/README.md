@@ -14,7 +14,7 @@ Slice 5 persists cash advances, travel requisitions and card feed imports
   the per-request maximum 2,000.00 (`EXP-ADV-001`), while the worker has a PAID or
   PARTIALLY_SETTLED advance still open after its due date (`EXP-ADV-002`; the due date
   itself is in time), and when the requisition belongs to another worker or legal
-  entity or is REJECTED or CLOSED (`EXP-ADV-004`). An approver (MssApprove) approves or
+  entity or is REJECTED or CLOSED (`EXP-ADV-004`). An approver (hr.team.approve) approves or
   rejects it; an expense administrator records the AP prepayment that paid it, which
   sets paid = amount, moves it to PAID and writes
   `dev.passage.expense.cashadvance.paid.v1` to the outbox in the same transaction, and
@@ -158,6 +158,9 @@ PASSAGE_ENV=dev SERVICE_NAME=expense DATABASE_URL=postgres://... \
   HTTP_ADDR=:8080 go run ./cmd/expense
 ```
 
+Optional: `LEDGER_URL` with the service signing key and `EXPENSE_GL_PROFILES` turn on the
+reimbursement liability posting (see below).
+
 ## Test
 
 ```
@@ -190,6 +193,8 @@ the row-level security test is not skipped. `TestAppRole_CrossTenantRLS` also ne
 | POST   | /v1/expense/reports/{id}/lines         | expense.report.write |
 | DELETE | /v1/expense/reports/{id}/lines/{lineId}| expense.report.write |
 | POST   | /v1/expense/reports/{id}/submit        | expense.report.write |
+| POST   | /v1/expense/reports/{id}/decide        | expense.approve      |
+| POST   | /v1/expense/gl-postings                | expense.gl.post      |
 | GET    | /v1/expense/cash-advances              | expense.report.write |
 | POST   | /v1/expense/cash-advances              | expense.report.write |
 | GET    | /v1/expense/cash-advances/{id}         | expense.report.write |
@@ -236,6 +241,9 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | EXP-SOD-001 | 403 | The requester of an advance or requisition may not decide it  |
 | EXP-CARD-002 | 409 | Feed file already imported                                   |
 | EXP-POL-001, EXP-REC-001, EXP-TR-002 | 422 | Submit refused: the code of the first unsatisfied policy result |
+| EXP-GL-001 | 503 | The general ledger is not configured (no LEDGER_URL)         |
+| EXP-GL-002 | 502 | The general ledger did not answer; errors.booked names the reports booked first |
+| EXP-GL-003 | 422 | No GL posting profile for the legal entity (EXPENSE_GL_PROFILES) |
 | COM-0503  | 503  | Report, advance, requisition or card persistence not configured |
 | COM-0500  | 500  | Unexpected failure                                             |
 
@@ -245,15 +253,36 @@ justified), `EXP-POL-002` (WARN), `EXP-REC-001` (REQUIRE_RECEIPT) or `EXP-TR-002
 (BLOCK, category needs a travel requisition the report lacks); the variance
 check returns `EXP-TR-001` when justification is required; the settlement preview
 returns `EXP-ADV-003` when any advance was applied; the aging check returns
-`EXP-ADV-002` when new advances are blocked.
+`EXP-ADV-002` when new advances are blocked. A report left due by `POST /gl-postings`
+is listed in `failed` with `EXP-GL-004` (a category with no expense account),
+`EXP-GL-006` (employee-paid lines that do not add up to the reimbursable amount), or
+the ledger's own code (`EXP-GL-005` when it gave none).
 
 Duties: `expense.report.write` is the EssExpense duty for the reports and the previews
 (card matching is part of the ESS expense report screen, 8.43.6);
 `expense.card.import` is the ExpenseAdmin duty for card feeds (PRD 8.43.16 puts card
-import with ExpenseAdmin); `expense.approve` is MssApprove (advance and requisition
+import with ExpenseAdmin); `expense.approve` is hr.team.approve (advance and requisition
 decisions); `expense.advance.admin` is the ExpenseAdmin duty for recording the AP
 payment and cash returns of advances (8.43.17 "advance returns"). Requests, requisitions
-and the card pool use `expense.report.write`.
+and the card pool use `expense.report.write`. `expense.gl.post` runs the reimbursement
+liability posting (a GL accountant or a scheduled job); the ledger call itself is signed
+with the expense service token, whose only ledger grant is `ledger.entry.post`.
+
+## Reimbursement liability (#472)
+
+Approving a report with a reimbursable amount records the approval date and leaves the
+report APPROVED with no journal. `POST /v1/expense/gl-postings` books Dr the expense
+account of each category of the employee-paid lines, Cr the AP control account, for
+every such report not yet booked, dated the approval day, with Idempotency-Key
+`expense-report-{reportId}` (source `expense_report`, document id = report id); then, in
+the transaction that records the entry id, it writes
+`dev.passage.expense.report.approved.v1`. Payables only learns of a report once its AP
+control credit exists, so the payment run's AP control debit always has a matching
+credit. Ledger and accounts come from `EXPENSE_GL_PROFILES`, a JSON array of
+`{"legalEntityId", "ledgerId", "apControlAccount", "expenseAccounts": {"<CATEGORY>": "<account>"}}`;
+the AP control account must be the one payables' posting profile pays from. Without
+`LEDGER_URL` (and the service signing key `ledgerclient.FromEnv` reads) nothing is
+booked and approved reports never reach AP.
 
 ## Dependencies
 

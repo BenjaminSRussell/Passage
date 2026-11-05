@@ -47,7 +47,10 @@ charts/processmfg     Helm chart (helm lint)
 DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/processmfg
 ```
 
-`DATABASE_URL` is required. `HTTP_ADDR` defaults to `:8080`. The gateway sets
+`DATABASE_URL` is required. `HTTP_ADDR` defaults to `:8080`. Batch record signing (21 CFR
+Part 11) answers 503 PMF-0135 until a step-up re-authentication verifier is bound;
+`PASSAGE_ENV=dev` binds a stand-in whose signatures record the method `dev-unverified`, so a
+record sealed with them says `signaturesVerified: false`. The gateway sets
 `X-Passage-Tenant`, `X-Passage-User`, `X-Passage-Duties` and `X-Passage-Legal-Entity`.
 
 ## Test
@@ -132,9 +135,10 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/production/batch-records` | `production.batch-record.write` | Compile the electronic batch record of a batch from its batch order and quality record, or refresh it while in review; one exception per recorded value outside its limits (BR-24.15); writes `batchrecord.compiled` and `batchrecord.exceptionraised` |
 | GET | `/v1/production/batch-records`, `/{id}` | `production.batch-order.read` | Records by status, batch and item; the detail carries the content, the exceptions and, once sealed, the sealed document and its hash |
 | POST | `/v1/production/batch-records/{id}/exceptions` | `production.batch-record.write` | Raise an exception by hand on a record in review |
-| POST | `/v1/production/batch-records/{id}/exceptions/{exceptionId}:disposition` | `production.batch-record.write` | The review step: accept, raise a deviation or reject an open exception with the signature id behind the decision; a decision is final (409 PMF-0125). **The signature id is not verified** (no signature service yet; see NOT-IMPLEMENTED.md); writes `batchrecord.exceptiondispositioned` |
-| POST | `/v1/production/batch-records/{id}:approve` | `production.batch-record.approve` | Approve by exception: every exception decided and signed (422 PMF-0014), no value recorded since the last compile (409 PMF-0121), and the approver neither raised nor decided an exception of the record nor created its batch order (422 PMF-0124); writes `batchrecord.approved` (BR-24.15, AC-24.16) |
-| POST | `/v1/production/batch-records/{id}:seal` | `production.batch-record.approve` | Seal an approved record: the canonical JSON document of the approved content (sorted keys, compact, UTC times, `signaturesVerified: false`) is stored with its SHA-256 and the database refuses any later change; writes `batchrecord.sealed` (FR-24.21) |
+| POST | `/v1/production/batch-records/{id}/exceptions/{exceptionId}:disposition` | `production.batch-record.write` | The review step: accept, raise a deviation or reject an open exception, signed by the call (meaning reviewed: printed name, step-up assertion in `X-Passage-Reauth-Assertion`, the BR-24.14 lockout, 403 PMF-0010, 423 PMF-0011, 409 PMF-0013 when the record changed, 503 PMF-0135 without a verifier); a decision is final (409 PMF-0125); writes `batchrecord.exceptiondispositioned` |
+| POST | `/v1/production/batch-records/{id}:approve` | `production.batch-record.approve` | Approve by exception: every exception decided and signed (422 PMF-0014), no value recorded since the last compile (409 PMF-0121), and the approver neither raised nor decided an exception of the record nor created its batch order (422 PMF-0124); signed by the call with the meaning approved, like a decision; writes `batchrecord.approved` (BR-24.15, AC-24.16) |
+| GET | `/v1/production/batch-records/{id}/pdf` | `production.batch-order.read` | A sealed record rendered as a PDF from its sealed JSON; not PDF/A-2b yet (NOT-IMPLEMENTED.md) |
+| POST | `/v1/production/batch-records/{id}:seal` | `production.batch-record.approve` | Seal an approved record: the canonical JSON document of the approved content (sorted keys, compact, UTC times, every signature, and `signaturesVerified` true only when every decision and the approval rest on a verified re-authentication) is stored with its SHA-256 and the database refuses any later change; writes `batchrecord.sealed` (FR-24.21) |
 | POST | `/v1/production/batch-requirements:check-stored` | `production.batch-order.read` | Check registered batches against the stored rules of the legal entity (default the caller's) for the item, customer and group in force on the ship date; on-hand quantity per batch from the caller (FR-24.19, AC-24.14). Precedence per field: customer over group over item default; within a scope the rule that started last, then the one defined last. Customer and group ids are party/sales references checked for form only; ship date and expiry are calendar days compared without time-zone conversion |
 | POST | `/v1/production/rework-orders:preview` | `production.batch-order.write` | Rework batch order plan: output batch, disposition, quality order, variance type, genealogy (FR-24.18) |
 | POST | `/v1/production/rework-orders` | `production.batch-order.write` | Create a rework batch order from a stored batch: plan, rework formula of the batch's item, batch order, link (FR-24.18; PMF-0132 one open rework per batch) |

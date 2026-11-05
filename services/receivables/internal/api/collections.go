@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	dutyCollections = "CollectionsMaintain"
+	dutyCollections = "receivables.collection.maintain"
 	maxOwner        = 120
 	maxNote         = 2000
 )

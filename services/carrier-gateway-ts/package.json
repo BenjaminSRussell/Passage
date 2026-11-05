@@ -1,0 +1,20 @@
+{
+  "name": "@passage/carrier-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Carrier gateway: carrier adapter interface, deterministic sandbox carrier, rate shopping, labels and tracking behind signed service tokens (wave 28 AC4).",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "typescript": "5.9.3",
+    "vitest": "2.1.9"
+  }
+}

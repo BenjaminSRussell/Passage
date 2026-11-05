@@ -33,7 +33,7 @@ Built in slice 6:
   `vendorrebateclaim.created`. Nothing accrued is 422 PRC-0043; a fully claimed period is 409
   PRC-0015; an over-claimed period produces a negative claim settled by VENDOR_INVOICE; otherwise
   the claim settles by CREDIT_NOTE (default) or PAYMENT_DEDUCTION. `:approve` (duty
-  `pricing.rebate.claim.approve`, versioned, `Idempotency-Key`) refuses the claim's creator (403
+  `pricing.rebate-claim.approve`, versioned, `Idempotency-Key`) refuses the claim's creator (403
   PRC-0046) and writes `vendorrebateclaim.approved` for w19 AP. The Vendor rebate claims inquiry
   filters by agreement, vendor, period and status.
 - **Broker contracts and royalty agreements** (FR-26.16, FR-26.17): `/broker-contracts` pays a broker
@@ -248,7 +248,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/rebates/vendor-claims?agreementId=&vendorId=&period=&status=` | pricing.rebate.view | Vendor rebate claims inquiry, newest first |
 | POST | `/v1/pricing/rebates/vendor-claims` | pricing.rebate.maintain | body `{agreementId, period, settlementMode}`; RC-n; PRC-0043 / PRC-0015; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/rebates/vendor-claims/{id}` | pricing.rebate.view | |
-| POST | `/v1/pricing/rebates/vendor-claims/{id}:approve` | pricing.rebate.claim.approve | body `{version}`; not by the creator (PRC-0046); `Idempotency-Key` honoured |
+| POST | `/v1/pricing/rebates/vendor-claims/{id}:approve` | pricing.rebate-claim.approve | body `{version}`; not by the creator (PRC-0046); `Idempotency-Key` honoured |
 | GET | `/v1/pricing/broker-contracts?legalEntityId=&brokerVendorId=&status=` | pricing.rebate.view | latest start first |
 | POST | `/v1/pricing/broker-contracts` | pricing.rebate.maintain | `Idempotency-Key` honoured; ACTIVE at version 1; accounts default 6210 / 2175; 403 AUTH-0003 outside the caller's legal entities |
 | GET | `/v1/pricing/broker-contracts/{id}` | pricing.rebate.view | PRC-0058 when unknown |
@@ -267,7 +267,7 @@ testdata/               fixtures
 | GET | `/v1/pricing/contract-claims?contractKind=&contractId=&vendorId=&period=&status=` | pricing.rebate.view | Broker and royalty claims inquiry |
 | POST | `/v1/pricing/contract-claims` | pricing.rebate.maintain | body `{contractKind, contractId, period}`; BC-n / RY-n per legal entity; PRC-0043 / PRC-0015 / PRC-0062; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/contract-claims/{id}` | pricing.rebate.view | |
-| POST | `/v1/pricing/contract-claims/{id}:approve` | pricing.rebate.claim.approve | body `{version}`; not by the creator nor without a user identity (PRC-0046); `Idempotency-Key` honoured |
+| POST | `/v1/pricing/contract-claims/{id}:approve` | pricing.rebate-claim.approve | body `{version}`; not by the creator nor without a user identity (PRC-0046); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/rebates/agreements/{id}:retro-recompute` | pricing.rebate.maintain | `Idempotency-Key` required (names the run); body `{lines}` of posted invoices before the activation |
 | GET | `/v1/pricing/commission/sales-groups?legalEntityId=` | pricing.commission.view | |
 | POST | `/v1/pricing/commission/sales-groups` | pricing.commission.maintain | `Idempotency-Key` honoured; reps with shares summing to 100 |

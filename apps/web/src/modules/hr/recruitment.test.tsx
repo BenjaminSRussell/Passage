@@ -102,7 +102,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     expect(pageViolations(first.container)).toEqual([]);
     first.unmount();
 
-    api.handler = routes({ [key]: problem(403, "AUTH-0003", "missing duty HcmRecruitMaintain") });
+    api.handler = routes({ [key]: problem(403, "AUTH-0003", "missing duty hr.recruiting.maintain") });
     const second = renderAt(path);
     expect((await findAlert()).textContent).toContain("You don't have access to do this.");
     expect(pageViolations(second.container)).toEqual([]);
@@ -279,9 +279,96 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     expect(screen.queryByRole("button", { name: "Hire from offer" })).toBeNull();
   });
 
-  it("applies a cycle only after a confirmation and reports the actions created", async () => {
+  it("keeps Apply disabled and hides Approve without hr.compensation.approve until the cycle is approved", async () => {
+    api.handler = routes({ [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle()) });
+    const { container } = renderAt(`/hr/compensation/cycles/${CYCLE}`, ["hr.compensation.admin"]);
+    const apply = await screen.findByRole("button", { name: "Apply cycle" });
+    expect((apply as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Approve cycle" })).toBeNull();
+    expect(screen.getByText(/Waiting for an independent approver/)).toBeTruthy();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("approves a cycle after a confirmation and then enables Apply", async () => {
+    let approved = false;
+    const done = () => cycle({ approvedBy: "approver-1", approvedAt: "2026-11-05T10:00:00Z" });
+    api.handler = routes({
+      [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: () => json(200, approved ? done() : cycle()),
+      [`POST /api/v1/hr/compensation/cycles/${CYCLE}/approve`]: () => {
+        approved = true;
+        return json(200, done());
+      },
+    });
+    renderAt(`/hr/compensation/cycles/${CYCLE}`, ["hr.compensation.admin", "hr.compensation.approve"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve cycle" }));
+    expect(api.posts("/approve")).toHaveLength(0);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve cycle" }));
+    expect((await findStatus()).textContent).toContain("The cycle was approved");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Apply cycle" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: "Approve cycle" })).toBeNull();
+    expect(screen.getByText(/Approved by approver-1/)).toBeTruthy();
+  });
+
+  it.each([
+    [problem(403, "HCM-CMP-SOD", "the user who created the cycle cannot approve it"), "You can't approve this cycle"],
+    [problem(409, "HCM-CMP-STATE", "the cycle has already been approved by another user"), "conflicts with the current state"],
+  ])("explains a refused approval (%#)", async (reply, text) => {
     api.handler = routes({
       [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle()),
+      [`POST /api/v1/hr/compensation/cycles/${CYCLE}/approve`]: reply,
+    });
+    renderAt(`/hr/compensation/cycles/${CYCLE}`, ["hr.compensation.approve"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve cycle" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve cycle" }));
+    expect((await findAlert()).textContent).toContain(text);
+  });
+
+  it("creates the worker with the hire when the user holds hr.worker.maintain", async () => {
+    const hired = { id: id(70), actionType: "HIRE", workerId: id(2), effectiveDate: "2026-12-01", status: "PENDING", payload: {}, submittedBy: "u", submittedAt: "2026-10-31T10:00:00Z" };
+    api.handler = routes({
+      [`GET /api/v1/hr/offers/${OFFER}`]: json(200, offer()),
+      [`POST /api/v1/hr/offers/${OFFER}/hire`]: json(201, hired),
+      [`GET /api/v1/hr/actions/${id(70)}`]: json(200, hired),
+    });
+    const { container } = renderAt(`/hr/offers/${OFFER}`, ["hr.action.maintain", "hr.worker.maintain"]);
+    fireEvent.change(await screen.findByLabelText("Worker record"), { target: { value: "new" } });
+    expect(screen.queryByLabelText("Worker id")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
+    expect(await screen.findAllByText("Enter the national id, at most 32 characters.")).not.toHaveLength(0);
+    expect(api.posts("/hire")).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "wrk-9" } });
+    fireEvent.change(screen.getByLabelText("Party person id"), { target: { value: id(8) } });
+    fireEvent.change(screen.getByLabelText("National id"), { target: { value: "123-45-6789" } });
+    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/hr/actions/${id(70)}`));
+    expect(api.posts("/hire")[0]?.body).toEqual({
+      newWorker: { personnelNumber: "WRK-9", workerType: "EMPLOYEE", partyPersonId: id(8), nationalId: "123-45-6789" },
+      legalEntityId: id(5),
+      employmentType: "FULL_TIME",
+    });
+  });
+
+  it("offers no new-worker option without hr.worker.maintain", async () => {
+    api.handler = routes({ [`GET /api/v1/hr/offers/${OFFER}`]: json(200, offer()) });
+    renderAt(`/hr/offers/${OFFER}`, ["hr.action.maintain"]);
+    expect(await screen.findByLabelText("Worker id")).toBeTruthy();
+    expect(screen.queryByLabelText("Worker record")).toBeNull();
+  });
+
+  it("validates the new worker on a hire", () => {
+    const base = { workerId: "", legalEntityId: id(5), employmentType: "FULL_TIME", fteShare: "", compPlanId: "" };
+    const bad = validateHire({ ...base, workerMode: "new", personnelNumber: "!", partyPersonId: "x", nationalId: "", legalName: "x".repeat(201) });
+    expect(Object.keys(bad.errors).sort()).toEqual(["legalName", "nationalId", "partyPersonId", "personnelNumber"]);
+    const ok = validateHire({ ...base, workerMode: "new", personnelNumber: "w-1", workerType: "CONTRACTOR", partyPersonId: id(8), nationalId: "1", legalName: " Pat " });
+    expect(ok.input?.newWorker).toEqual({ personnelNumber: "W-1", workerType: "CONTRACTOR", partyPersonId: id(8), nationalId: "1", legalName: "Pat" });
+    expect(ok.input?.workerId).toBeUndefined();
+  });
+
+  it("applies a cycle only after a confirmation and reports the actions created", async () => {
+    api.handler = routes({
+      [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle({ approvedBy: "approver-1" })),
       [`POST /api/v1/hr/compensation/cycles/${CYCLE}/apply`]: json(200, { ...cycle({ status: "APPLIED" }), actionIds: [id(71), id(72)] }),
     });
     renderAt(`/hr/compensation/cycles/${CYCLE}`);

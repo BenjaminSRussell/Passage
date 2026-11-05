@@ -48,7 +48,7 @@ describe("decision routes", () => {
   function post(path: string, body: unknown, headers: Record<string, string> = {}) {
     return fetch(`${base}${path}`, {
       method: "POST",
-      headers: { "X-Passage-Tenant": TENANT, "X-Passage-User": "alice", "X-Passage-Legal-Entity": `${OTHER_LE},${LE.toUpperCase()}`, "X-Passage-Duties": "engineering.eco.approve,QM_CAPA_MAINTAIN", ...headers },
+      headers: { "X-Passage-Tenant": TENANT, "X-Passage-User": "alice", "X-Passage-Legal-Entity": `${OTHER_LE},${LE.toUpperCase()}`, "X-Passage-Duties": "engineering.eco.approve,quality.capa.maintain", ...headers },
       body: JSON.stringify(body),
     });
   }
@@ -68,7 +68,7 @@ describe("decision routes", () => {
     ["no tenant", { "X-Passage-Tenant": "" }, 401],
     ["no user", { "X-Passage-User": "" }, 401],
     ["a service token", { "X-Passage-Service-Token": "x.y" }, 401],
-    ["no approve duty", { "X-Passage-Duties": "QM_CAPA_MAINTAIN" }, 403],
+    ["no approve duty", { "X-Passage-Duties": "quality.capa.maintain" }, 403],
     ["the creator", { "X-Passage-User": "rita" }, 403],
     ["another tenant", { "X-Passage-Tenant": OTHER_TENANT }, 404],
     ["a legal entity outside the user's scope", { "X-Passage-Legal-Entity": OTHER_LE }, 403],
@@ -164,6 +164,56 @@ describe("decision routes", () => {
 
   it("answers 404 when no party change approval runs", async () => {
     expect((await post(`/v1/workflows/party-changes/${CHANGE}:approve`, {}, approver)).status).toBe(404);
+    expect(signals).toEqual([]);
+  });
+
+  const MERGE = "00000000-0000-0000-0000-0000000000d1";
+  const mergeWorkflow = `approval:party-merge:${MERGE}`;
+  const mergeApprover = { "X-Passage-Duties": "party.merge.approve,tenant.administer", "X-Passage-Legal-Entity": "" };
+  const pendingMerge = { requestId: `party-merge:${MERGE}`, entityType: "party_merge", tenantId: TENANT, mergeRequestId: MERGE, requester: "rita", status: "pending", levelId: "data-steward", approver: "alice", history: [] };
+
+  it("signals a merge decision for the authenticated tenant-wide approver with no legal-entity scope", async () => {
+    readings.set(mergeWorkflow, pendingMerge);
+    expect((await post(`/v1/workflows/party-merges/${MERGE}:approve`, { actor: "mallory", scope: [LE] }, mergeApprover)).status).toBe(202);
+    expect((await post(`/v1/workflows/party-merges/${MERGE}:reject`, {}, mergeApprover)).status).toBe(202);
+    expect((await post(`/v1/workflows/party-merges/${MERGE}:delegate`, { delegate: "rita" }, mergeApprover)).status).toBe(400);
+    expect((await post(`/v1/workflows/party-merges/${MERGE}:delegate`, { delegate: "dana" }, mergeApprover)).status).toBe(202);
+    expect(signals).toEqual([
+      { workflowId: mergeWorkflow, name: "approval-decision", args: [{ action: "approve", actor: "alice", scope: [] }] },
+      { workflowId: mergeWorkflow, name: "approval-decision", args: [{ action: "reject", actor: "alice", scope: [] }] },
+      { workflowId: mergeWorkflow, name: "approval-decision", args: [{ action: "delegate", actor: "alice", scope: [], delegate: "dana" }] },
+    ]);
+  });
+
+  it.each([
+    ["the requester (segregation of duties)", {}, { ...mergeApprover, "X-Passage-User": "rita" }, 403, "PTY-MERGE-SELF-APPROVAL"],
+    ["a payment-run approver (segregation of duties)", {}, { ...mergeApprover, "X-Passage-Duties": "party.merge.approve,tenant.administer,payment-proposal.approve" }, 403, "PTY-MERGE-SOD"],
+    ["a payment-run executor (segregation of duties)", {}, { ...mergeApprover, "X-Passage-Duties": "party.merge.approve,tenant.administer,payment-run.execute" }, 403, "PTY-MERGE-SOD"],
+    ["a party change approver", {}, { ...mergeApprover, "X-Passage-Duties": "party.approve,tenant.administer" }, 403, "AUTH-0003"],
+    ["the merge requester duty", {}, { ...mergeApprover, "X-Passage-Duties": "party.merge,tenant.administer" }, 403, "AUTH-0003"],
+    ["an approver who is not a tenant administrator", {}, { ...mergeApprover, "X-Passage-Duties": "party.merge.approve" }, 403, "AUTH-0003"],
+    ["an approver with a legal-entity claim", {}, { ...mergeApprover, "X-Passage-Legal-Entity": LE }, 403, "AUTH-0003"],
+    ["someone who is not the current approver", {}, { ...mergeApprover, "X-Passage-User": "bob" }, 403, "WF-0403"],
+    ["a service token", {}, { ...mergeApprover, "X-Passage-Service-Token": "x.y" }, 401, "AUTH-0001"],
+    ["another tenant", {}, { ...mergeApprover, "X-Passage-Tenant": OTHER_TENANT }, 404, "WF-0404"],
+    ["a decided approval (replayed decision)", { status: "approved" }, mergeApprover, 409, "WF-0409"],
+    ["an approval that is not a merge", { mergeRequestId: undefined }, mergeApprover, 404, "WF-0404"],
+  ])("refuses a merge decision from %s and signals nothing", async (_name, override, headers, status, code) => {
+    readings.set(mergeWorkflow, { ...pendingMerge, ...override });
+    const response = await post(`/v1/workflows/party-merges/${MERGE}:approve`, {}, headers);
+    expect(response.status).toBe(status);
+    expect(((await response.json()) as { code: string }).code).toBe(code);
+    expect(signals).toEqual([]);
+  });
+
+  it("keeps merge and party change approvals apart", async () => {
+    readings.set(mergeWorkflow, pendingMerge);
+    readings.set(`approval:${MERGE}`, { ...pendingMerge, requestId: MERGE });
+    expect((await post(`/v1/workflows/party-changes/${MERGE}:approve`, {}, approver)).status).toBe(404);
+    readings.set(`approval:party-merge:${CHANGE}`, pendingChange);
+    expect((await post(`/v1/workflows/party-merges/${CHANGE}:approve`, {}, mergeApprover)).status).toBe(404);
+    readings.delete(mergeWorkflow);
+    expect((await post(`/v1/workflows/party-merges/${MERGE}:approve`, {}, mergeApprover)).status).toBe(404);
     expect(signals).toEqual([]);
   });
 

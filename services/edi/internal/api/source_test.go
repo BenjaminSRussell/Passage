@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
@@ -89,7 +90,7 @@ func sourceHandler(t *testing.T, f *fakeSources) (http.Handler, *pgxpool.Pool, s
 	a := New(store.New(pool, 30))
 	a.Sources = f
 	h := a.Routes()
-	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"})
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "p"})
 	var p store.Partner
 	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("partner: %d %s", rec.Code, rec.Body.String())
@@ -97,15 +98,18 @@ func sourceHandler(t *testing.T, f *fakeSources) (http.Handler, *pgxpool.Pool, s
 	return h, pool, p.ID
 }
 
+// srcScope makes the caller a user of the profile's legal entity: the trade profile is legal-entity scoped (RLS, #486).
+var srcScope = map[string]string{tenant.HeaderLegalEntity: srcLE}
+
 func fromSource(t *testing.T, h http.Handler, partner, set, id string) *httptest.ResponseRecorder {
 	t.Helper()
 	body := `{"transactionSet":"` + set + `","sourceId":"` + id + `"}`
-	return do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", body, "EDI_OPERATE", nil)
+	return do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", body, "edi.operate", srcScope)
 }
 
 func putProfile(t *testing.T, h http.Handler, partner, body string) {
 	t.Helper()
-	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", body, "EDI_ADMIN", nil); rec.Code != http.StatusOK {
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", body, "edi.admin", srcScope); rec.Code != http.StatusOK {
 		t.Fatalf("profile: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -227,26 +231,29 @@ func TestFromSource_NeedsProfileSourcesAndOptInBodyRoute(t *testing.T) {
 	if rec := fromSource(t, h, partner, "856", srcShipment); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeNoTradeProfile || len(f.reads) != 0 {
 		t.Fatalf("no profile: %d %s reads=%v", rec.Code, rec.Body.String(), f.reads)
 	}
-	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound", `{"transactionSet":"856","document":{}}`, "EDI_OPERATE", map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound", `{"transactionSet":"856","document":{}}`, "edi.operate", map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("the request-body route is off by default: %d", rec.Code)
 	}
-	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", `{"transactionSet":"856","sourceId":"`+srcShipment+`"}`, "EDI_ADMIN", nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("EDI_OPERATE is required: %d", rec.Code)
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", `{"transactionSet":"856","sourceId":"`+srcShipment+`"}`, "edi.admin", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("edi.operate is required: %d", rec.Code)
 	}
 
 	bare := New(store.New(testkit.DB(t), 30))
-	if rec := do(t, bare.Routes(), http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", `{"transactionSet":"856","sourceId":"`+srcShipment+`"}`, "EDI_OPERATE", nil); rec.Code != http.StatusServiceUnavailable || problemCode(t, rec) != CodeSourceDown {
+	if rec := do(t, bare.Routes(), http.MethodPost, "/edi/v1/partners/"+partner+"/outbound:from-source", `{"transactionSet":"856","sourceId":"`+srcShipment+`"}`, "edi.operate", nil); rec.Code != http.StatusServiceUnavailable || problemCode(t, rec) != CodeSourceDown {
 		t.Fatalf("no source services configured: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestTradeProfile_ValidatesAndIsPerTenant(t *testing.T) {
 	h, _, partner := sourceHandler(t, newFake())
-	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", strings.Replace(profileBody, "0614141000012", "12", 1), "EDI_ADMIN", nil); rec.Code != http.StatusBadRequest {
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", strings.Replace(profileBody, "0614141000012", "12", 1), "edi.admin", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad GLN: %d %s", rec.Code, rec.Body.String())
 	}
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/trade-profile", strings.Replace(profileBody, srcLE, "00000000-0000-0000-0000-0000000000e2", 1), "edi.admin", srcScope); rec.Code != http.StatusBadRequest {
+		t.Fatalf("legal entity outside the caller's scope: %d %s", rec.Code, rec.Body.String())
+	}
 	missing := "00000000-0000-0000-0000-000000000099"
-	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+missing+"/trade-profile", profileBody, "EDI_ADMIN", nil); rec.Code != http.StatusNotFound {
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+missing+"/trade-profile", profileBody, "edi.admin", srcScope); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown partner: %d", rec.Code)
 	}
 	putProfile(t, h, partner, profileBody)

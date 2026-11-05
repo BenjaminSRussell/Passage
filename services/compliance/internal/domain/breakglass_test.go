@@ -27,7 +27,7 @@ func TestPlanElevatedSession_DefaultsAndApproval(t *testing.T) {
 		t.Fatalf("default minutes: got %d", plan.Minutes)
 	}
 	if !plan.NeedsApproval || plan.ApproverDuty != ApproverBreakGlass || plan.RequiresPostReview {
-		t.Fatalf("default path needs a BreakGlassApprove approval: %+v", plan)
+		t.Fatalf("default path needs approval by a compliance.break-glass.approve holder: %+v", plan)
 	}
 	if !plan.EndsAt.Equal(plan.StartsAt.Add(60 * time.Minute)) {
 		t.Fatalf("end must be start + 60 min: %+v", plan)
@@ -63,9 +63,9 @@ func TestPlanElevatedSession_Rejections(t *testing.T) {
 		{"blank role", func(r *ElevatedRequest) { r.Roles = []string{"QualityInspector", "  "} }, CodeBreakGlassRequest},
 		{"no requester", func(r *ElevatedRequest) { r.RequesterID = "" }, CodeBreakGlassRequest},
 		{"review window above 10 days", func(r *ElevatedRequest) { r.ReviewDays = 11 }, CodeBreakGlassRequest},
-		{"self grant padded name", func(r *ElevatedRequest) { r.Roles = []string{" SecurityAdmin "} }, CodeBreakGlassSelfGrant},
-		{"self grant SecurityAdmin", func(r *ElevatedRequest) { r.Roles = []string{"SecurityAdmin"} }, CodeBreakGlassSelfGrant},
-		{"self grant PlatformAdmin mixed", func(r *ElevatedRequest) { r.Roles = []string{"QualityInspector", "PlatformAdmin"} }, CodeBreakGlassSelfGrant},
+		{"self grant padded name", func(r *ElevatedRequest) { r.Roles = []string{" compliance.security.admin "} }, CodeBreakGlassSelfGrant},
+		{"self grant compliance.security.admin", func(r *ElevatedRequest) { r.Roles = []string{"compliance.security.admin"} }, CodeBreakGlassSelfGrant},
+		{"self grant platform.global.admin mixed", func(r *ElevatedRequest) { r.Roles = []string{"QualityInspector", "platform.global.admin"} }, CodeBreakGlassSelfGrant},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,19 +80,19 @@ func TestPlanElevatedSession_Rejections(t *testing.T) {
 }
 
 func TestPlanElevatedSession_OtherUserMayGrantProtectedRole(t *testing.T) {
-	// BR-48.19 blocks self-grant only; a second PlatformAdmin may grant to another user.
+	// BR-48.19 blocks self-grant only; a second platform.global.admin holder may grant to another user.
 	r := baseRequest()
 	r.RequesterID = "admin-2"
 	r.TargetUserID = "u-9"
-	r.Roles = []string{"PlatformAdmin"}
+	r.Roles = []string{"platform.global.admin"}
 	r.SelfActivate = true
 	plan, err := PlanElevatedSession(r)
 	if err != nil {
 		t.Fatalf("grant to another user should plan: %v", err)
 	}
-	// Even with self-activation on, a protected role waits for a second PlatformAdmin.
+	// Even with self-activation on, a protected role waits for a second platform.global.admin.
 	if !plan.NeedsApproval || plan.ApproverDuty != ApproverPlatformAdmin || plan.RequiresPostReview {
-		t.Fatalf("protected role must need PlatformAdmin approval: %+v", plan)
+		t.Fatalf("protected role must need platform.global.admin approval: %+v", plan)
 	}
 }
 

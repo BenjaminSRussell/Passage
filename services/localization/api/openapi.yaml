@@ -9,7 +9,7 @@ paths:
   /v1/localization/packs:
     get:
       operationId: listPacks
-      x-passage-duty: LocalizationAdmin
+      x-passage-duty: localization.admin
       responses:
         "200":
           description: Installed-capable country packs
@@ -26,7 +26,7 @@ paths:
   /v1/localization/packs/{code}:
     get:
       operationId: getPack
-      x-passage-duty: LocalizationAdmin
+      x-passage-duty: localization.admin
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, enum: [US, UK, DE, FR, IN, MX, CA] } }
       responses:
@@ -39,7 +39,7 @@ paths:
   /v1/localization/packs/{code}/install:check:
     post:
       operationId: checkPackInstall
-      x-passage-duty: LocalizationAdmin
+      x-passage-duty: localization.admin
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -68,7 +68,7 @@ paths:
   /v1/localization/tax-ids:validate:
     post:
       operationId: validateTaxId
-      x-passage-duty: LocalizationAdmin
+      x-passage-duty: localization.admin
       requestBody:
         required: true
         content:
@@ -93,7 +93,7 @@ paths:
   /v1/localization/in/tds:withhold:
     post:
       operationId: withholdIndiaTds
-      x-passage-duty: LocalizationAdmin
+      x-passage-duty: localization.admin
       description: >-
         TDS for one payment to a resident deductee under sections 194C, 194J,
         194I, 194H and 194Q (FR-48.27). Crossing the annual threshold also
@@ -131,7 +131,7 @@ paths:
   /v1/localization/statutory/uk-mtd-vat:validate:
     post:
       operationId: validateUkMtdVat
-      x-passage-duty: LocalizationAdmin
+      x-passage-duty: localization.admin
       requestBody:
         required: true
         content:

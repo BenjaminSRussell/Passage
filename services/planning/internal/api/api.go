@@ -40,6 +40,10 @@ const (
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
 	maxItems       = 100000
+	// maxRunBody bounds a plan run's snapshot. The platform default of 4 MiB
+	// holds about 4,000 items of the mrp-50k shape (1 MiB per 1,000 items with
+	// four sales lines each), far short of maxItems; 128 MiB holds 100,000.
+	maxRunBody     = 128 << 20
 	maxClosedDates = 1000
 	maxMarginDays  = 365
 	maxPegDepth    = 20
@@ -602,7 +606,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req runRequest
-	if err := httpx.Decode(r, &req); err != nil {
+	if err := httpx.DecodeLimit(r, &req, maxRunBody); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}

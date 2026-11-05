@@ -322,6 +322,31 @@ func TestPPV_StandardCostExample(t *testing.T) {
 	}
 }
 
+func TestInvoiceGRIR_SplitInvoicesClearExactlyTheReceipt(t *testing.T) {
+	// 3 received at PO 0.335 clear round(1.005) = 1.00; invoiced 1 then 2.
+	receiptQty, receiptGRIR, po := dec("3"), dec("1.00"), dec("0.335")
+	first, err := InvoiceGRIR(receiptQty, receiptGRIR, dec("0"), dec("0"), dec("1"), po, 2)
+	if err != nil || first.StringFixed(2) != "0.34" {
+		t.Fatalf("first invoice GR/IR = %s, %v, want 0.34", first, err)
+	}
+	second, err := InvoiceGRIR(receiptQty, receiptGRIR, dec("1"), first, dec("2"), po, 2)
+	if err != nil || second.StringFixed(2) != "0.66" || !first.Add(second).Equal(receiptGRIR) {
+		t.Fatalf("second invoice GR/IR = %s, %v, want 0.66 so the receipt clears to zero", second, err)
+	}
+	if got := dec("2").Mul(dec("0.345")).RoundBank(2).Sub(second); got.StringFixed(2) != "0.03" {
+		t.Errorf("second invoice PPV = %s, want payable 0.69 less 0.66", got)
+	}
+	for name, tc := range map[string]struct{ prior, qty, po string }{
+		"over-invoiced":  {"1", "3", "0.335"},
+		"other PO price": {"0", "1", "0.40"},
+	} {
+		var de *Error
+		if _, err := InvoiceGRIR(receiptQty, receiptGRIR, dec(tc.prior), dec("0.34"), dec(tc.qty), dec(tc.po), 2); !errors.As(err, &de) || de.Code != CodeGRIRAllocation {
+			t.Errorf("%s: %v, want %s", name, err, CodeGRIRAllocation)
+		}
+	}
+}
+
 func TestCheckPPVInputs(t *testing.T) {
 	if err := CheckPPVInputs(dec("0"), dec("1")); err == nil {
 		t.Error("zero quantity accepted")

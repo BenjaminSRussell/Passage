@@ -23,7 +23,7 @@ describe("quality module", () => {
   });
 
   it("gates every nav entry by a quality duty", () => {
-    expect(quality.nav.every((n) => n.duty?.startsWith("QM_"))).toBe(true);
+    expect(quality.nav.every((n) => n.duty?.startsWith("quality."))).toBe(true);
   });
 
   it("is auto-discovered by the registry", () => {

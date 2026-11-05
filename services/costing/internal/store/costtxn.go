@@ -55,6 +55,10 @@ type CostTransaction struct {
 	FinancialDate          string    `json:"financialDate"`
 	CreatedAt              time.Time `json:"createdAt"`
 	GrirAmount             string    `json:"grirAmount,omitempty"`
+	// GrirReceiptKey and GrirQty are set only by RecordInvoicePPV: the receipt
+	// row an invoice clears GR/IR from and the quantity it invoiced.
+	GrirReceiptKey string `json:"-"`
+	GrirQty        string `json:"-"`
 }
 
 // sameContent compares everything a producer sends; decimals compare by value.
@@ -162,31 +166,31 @@ func (s *Postgres) CostTransactionRecorded(ctx context.Context, sourceKey string
 // a replayed source key must carry the stored content.
 func insertCostTransactions(ctx context.Context, tx pgx.Tx, tenantID string, rows []CostTransaction) (int, error) {
 	n := len(rows)
-	cols := make([][]string, 15)
+	cols := make([][]string, 17)
 	for i := range cols {
 		cols[i] = make([]string, n)
 	}
 	dates := make([]string, n)
 	for i, c := range rows {
 		for j, v := range []string{ids.New(), c.SourceKey, c.LegalEntityID, c.InventoryTransactionID, c.LedgerEntryID, c.ProductID,
-			c.SiteID, c.WarehouseID, c.ValuationType, c.ValuationLedgerID, c.Kind, c.Qty, c.Amount, c.Currency, c.GrirAmount} {
+			c.SiteID, c.WarehouseID, c.ValuationType, c.ValuationLedgerID, c.Kind, c.Qty, c.Amount, c.Currency, c.GrirAmount, c.GrirReceiptKey, c.GrirQty} {
 			cols[j][i] = v
 		}
 		dates[i] = c.FinancialDate
 	}
 	res, err := tx.Query(ctx, `insert into cost_transaction (tenant_id, id, source_key, legal_entity_id, inventory_transaction_id,
 			ledger_entry_id, product_id, site_id, warehouse_id, valuation_type, valuation_ledger_id, kind, qty, amount_acct,
-			currency, financial_date, gr_ir_amount)
+			currency, financial_date, gr_ir_amount, grir_receipt_key, grir_qty)
 		select $1, i.id::uuid, i.sk, i.le::uuid, nullif(i.inv, '')::uuid, nullif(i.je, '')::uuid, i.pr::uuid, i.si::uuid,
 			nullif(i.wh, '')::uuid, i.vt, nullif(i.vl, '')::uuid, i.kind, i.qty::numeric, i.amt::numeric, i.cur, i.fd::date,
-			nullif(i.gi, '')::numeric
+			nullif(i.gi, '')::numeric, nullif(i.rk, ''), nullif(i.gq, '')::numeric
 		from unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
-			$11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[])
-			as i(id, sk, le, inv, je, pr, si, wh, vt, vl, kind, qty, amt, cur, gi, fd)
+			$11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[], $18::text[], $19::text[])
+			as i(id, sk, le, inv, je, pr, si, wh, vt, vl, kind, qty, amt, cur, gi, fd, rk, gq)
 		on conflict (tenant_id, source_key) do nothing
 		returning source_key`,
 		tenantID, cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7], cols[8], cols[9], cols[10],
-		cols[11], cols[12], cols[13], cols[14], dates)
+		cols[11], cols[12], cols[13], cols[14], dates, cols[15], cols[16])
 	if err != nil {
 		return 0, err
 	}

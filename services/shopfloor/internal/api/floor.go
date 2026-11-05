@@ -87,7 +87,7 @@ type oeeItem struct {
 	SourceEvents int             `json:"sourceEvents"`
 }
 
-// registerFloor mounts the machine, downtime, andon, OEE, OEE rollup and payroll export routes.
+// registerFloor mounts the machine, downtime, andon, OEE, live OEE stream, OEE rollup and payroll export routes.
 func (a *API) registerFloor(r chi.Router) {
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/machines", a.createMachine)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/machines", a.listMachines)
@@ -98,6 +98,7 @@ func (a *API) registerFloor(r chi.Router) {
 	r.With(authz.RequireDuty(DutyOEERollup)).Post("/v1/shopfloor/andon:sweep", a.sweepAndon)
 	r.With(authz.RequireDuty(DutyCheckOverride)).Post("/v1/shopfloor/andon/{id}:clear", a.clearAndon)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/oee", a.oee)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/oee/stream", a.oeeStream)
 	r.With(authz.RequireDuty(DutyOEERollup)).Post("/v1/shopfloor/oee:rollup", a.rollupOEE)
 	r.With(authz.RequireDuty(DutyExport)).Post("/v1/shopfloor/pay:export", a.exportPay)
 	r.With(authz.RequireDuty(DutyExport)).Get("/v1/shopfloor/pay-exports", a.listPayExports)
@@ -438,13 +439,7 @@ func (a *API) oee(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, b := range buckets {
-			items = append(items, oeeItem{
-				ResourceID: rid, BucketStart: b.Start,
-				PlannedMin: b.PlannedMinutes, RunMin: b.RunMinutes, DownMin: b.PlannedMinutes.Sub(b.RunMinutes),
-				TotalCount: b.TotalCount, GoodCount: b.GoodCount,
-				Availability: b.Availability, Performance: b.Performance, Quality: b.Quality, OEE: b.OEE.OEE,
-				OverRate: b.OverRate, SourceEvents: b.SourceEvents,
-			})
+			items = append(items, toOEEItem(rid, b))
 		}
 	}
 	httpx.JSON(w, http.StatusOK, itemsResponse[oeeItem]{Items: items})

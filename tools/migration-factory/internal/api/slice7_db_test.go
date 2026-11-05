@@ -65,7 +65,7 @@ func attestations(codes ...string) string {
 func readyPlan(t *testing.T, h http.Handler, admin *pgxpool.Pool) (planDTO, time.Time) {
 	t.Helper()
 	t0 := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: generateBody(t0, 36), user: "manager"}))
+	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage", body: generateBody(t0, 36), user: "manager"}))
 	insertPackRun(t, admin, tenantA, "open_items", "USMF", "RECONCILED", t0.Add(2*time.Hour))
 	insertPackRun(t, admin, tenantA, "gl_balances", "USMF", "RECONCILED", t0.Add(2*time.Hour))
 	insertParallelRun(t, admin, tenantA, "2026-12", "AX2012", "SIGNED_OFF")
@@ -80,12 +80,12 @@ type decisionCall struct {
 
 func (c decisionCall) post(user, body, key string) *httptest.ResponseRecorder {
 	c.t.Helper()
-	return do(c.t, c.h, request{method: "POST", path: c.base, tenant: tenantA, duties: "CutoverManager", body: body, key: key, user: user})
+	return do(c.t, c.h, request{method: "POST", path: c.base, tenant: tenantA, duties: "migration.cutover.manage", body: body, key: key, user: user})
 }
 
 func (c decisionCall) get(t *testing.T) readinessDTO {
 	t.Helper()
-	r := do(t, c.h, request{method: "GET", path: c.base, tenant: tenantA, duties: "CutoverManager", user: "viewer"})
+	r := do(t, c.h, request{method: "GET", path: c.base, tenant: tenantA, duties: "migration.cutover.manage", user: "viewer"})
 	if r.Code != http.StatusOK {
 		t.Fatalf("readiness: %d %s", r.Code, r.Body)
 	}
@@ -98,7 +98,7 @@ func (c decisionCall) get(t *testing.T) readinessDTO {
 func TestGoNoGo_ChecklistFromFactoryData(t *testing.T) {
 	h, admin := dbServer(t)
 	t0 := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: generateBody(t0, 36), user: "manager"}))
+	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage", body: generateBody(t0, 36), user: "manager"}))
 	c := decisionCall{t, h, "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go"}
 
 	rd := c.get(t)
@@ -146,7 +146,7 @@ func TestGoNoGo_ChecklistFromFactoryData(t *testing.T) {
 }
 
 // CUT-1605: approvers are authenticated users. A NO_GO is approved by the user recording it. A GO
-// is approved by one CutoverManager and recorded when a second, different one approves the same
+// is approved by one migration.cutover.manage and recorded when a second, different one approves the same
 // attestations; nobody can name other people as approvers.
 func TestGoNoGo_TwoAuthenticatedApprovers(t *testing.T) {
 	h, admin := dbServer(t)
@@ -245,11 +245,11 @@ func TestGoNoGo_TwoAuthenticatedApprovers(t *testing.T) {
 	if r := c.post("carol", `{"decision":"NO_GO","reason":"late"}`, ""); r.Code != http.StatusConflict || problemCode(t, r) != CodeTransition {
 		t.Fatalf("decision after GO: %d %s", r.Code, r.Body)
 	}
-	got := decode[planDTO](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID, tenant: tenantA, duties: "CutoverManager"}))
+	got := decode[planDTO](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID, tenant: tenantA, duties: "migration.cutover.manage"}))
 	if got.Decision == nil || got.Decision.Decision != "GO" || got.Version != 3 {
 		t.Fatalf("plan read %+v", got)
 	}
-	list := decode[struct{ Items []planDTO }](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans", tenant: tenantA, duties: "CutoverManager"}))
+	list := decode[struct{ Items []planDTO }](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans", tenant: tenantA, duties: "migration.cutover.manage"}))
 	if len(list.Items) != 1 || list.Items[0].Decision == nil || list.Items[0].Decision.Seq != 1 {
 		t.Fatalf("plan list %+v", list.Items)
 	}
@@ -370,7 +370,7 @@ func contains(s []string, v string) bool {
 func TestGoNoGo_RolledBackPlanDutyAndTenant(t *testing.T) {
 	h, _ := dbServer(t)
 	t0 := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: generateBody(t0, 36), user: "manager"}))
+	plan := decode[planDTO](t, do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage", body: generateBody(t0, 36), user: "manager"}))
 	base := "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go"
 	noGo := `{"decision":"NO_GO","reason":"x"}`
 
@@ -378,16 +378,16 @@ func TestGoNoGo_RolledBackPlanDutyAndTenant(t *testing.T) {
 		name, method, tenant, duties string
 		want                         int
 	}{
-		{"read without the duty", "GET", tenantA, "MigrationView", http.StatusForbidden},
-		{"record without the duty", "POST", tenantA, "CutoverStepOwner,MigrationRun", http.StatusForbidden},
-		{"read another tenant's plan", "GET", tenantB, "CutoverManager", http.StatusNotFound},
-		{"record on another tenant's plan", "POST", tenantB, "CutoverManager", http.StatusNotFound},
+		{"read without the duty", "GET", tenantA, "migration.factory.view", http.StatusForbidden},
+		{"record without the duty", "POST", tenantA, "migration.cutover-step.execute,migration.factory.run", http.StatusForbidden},
+		{"read another tenant's plan", "GET", tenantB, "migration.cutover.manage", http.StatusNotFound},
+		{"record on another tenant's plan", "POST", tenantB, "migration.cutover.manage", http.StatusNotFound},
 	} {
 		if r := do(t, h, request{method: c.method, path: base, tenant: c.tenant, duties: c.duties, body: noGo, user: "manager"}); r.Code != c.want {
 			t.Errorf("%s: %d %s", c.name, r.Code, r.Body)
 		}
 	}
-	if r := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/not-a-uuid/go-no-go", tenant: tenantA, duties: "CutoverManager"}); r.Code != http.StatusUnprocessableEntity {
+	if r := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/not-a-uuid/go-no-go", tenant: tenantA, duties: "migration.cutover.manage"}); r.Code != http.StatusUnprocessableEntity {
 		t.Errorf("bad id: %d", r.Code)
 	}
 
@@ -395,10 +395,10 @@ func TestGoNoGo_RolledBackPlanDutyAndTenant(t *testing.T) {
 	if r := rollbackBoth(t, h, "/api/v1/cutover/plans/"+plan.PlanID+"/rollback", rb, ""); r.Code != http.StatusOK {
 		t.Fatalf("rollback: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: base, tenant: tenantA, duties: "CutoverManager", body: noGo, user: "manager"}); r.Code != http.StatusConflict || problemCode(t, r) != CodeTransition {
+	if r := do(t, h, request{method: "POST", path: base, tenant: tenantA, duties: "migration.cutover.manage", body: noGo, user: "manager"}); r.Code != http.StatusConflict || problemCode(t, r) != CodeTransition {
 		t.Fatalf("decision on a rolled-back plan: %d %s", r.Code, r.Body)
 	}
-	rd := decode[readinessDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "CutoverManager"}))
+	rd := decode[readinessDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "migration.cutover.manage"}))
 	if !rd.RolledBack || rd.SystemReady {
 		t.Fatalf("rolled-back readiness %+v", rd)
 	}

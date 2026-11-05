@@ -53,7 +53,7 @@ paths:
     post:
       tags: [orders]
       operationId: sizeSample
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Compute the sample draw for a lot quantity and plan (no side effects)
       requestBody:
         required: true
@@ -74,7 +74,7 @@ paths:
     get:
       tags: [setup]
       operationId: listTestGroups
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Test group versions, newest version of each code first
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -96,7 +96,7 @@ paths:
     post:
       tags: [setup]
       operationId: createTestGroup
-      x-passage-duty: QM_SETUP_MAINTAIN
+      x-passage-duty: quality.setup.maintain
       summary: Create a new immutable version of a test group
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -125,7 +125,7 @@ paths:
     get:
       tags: [setup]
       operationId: getTestGroup
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Read one test group version
       parameters:
         - name: id
@@ -145,7 +145,7 @@ paths:
     get:
       tags: [setup]
       operationId: listInstruments
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Instruments with their calibration status (BR-33.8), soonest due first
       description: With dueWithinDays this is the calibration due list (section 6.33.14) — instruments due within that many days, overdue ones included.
       parameters:
@@ -169,7 +169,7 @@ paths:
     post:
       tags: [setup]
       operationId: createInstrument
-      x-passage-duty: QM_SETUP_MAINTAIN
+      x-passage-duty: quality.setup.maintain
       summary: Register an instrument with a calibration interval (BR-33.8)
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -196,7 +196,7 @@ paths:
     post:
       tags: [setup]
       operationId: calibrateInstrument
-      x-passage-duty: QM_SETUP_MAINTAIN
+      x-passage-duty: quality.setup.maintain
       summary: Record a calibration and move the due date on by the interval (BR-33.8)
       description: Idempotent by value; recording the same calibration time again changes nothing. A time in the future or before the recorded calibration is refused.
       parameters:
@@ -227,7 +227,7 @@ paths:
     get:
       tags: [setup]
       operationId: listAssociations
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Every quality association of the tenant, by sequence
       responses:
         "200":
@@ -247,7 +247,7 @@ paths:
     post:
       tags: [setup]
       operationId: createAssociation
-      x-passage-duty: QM_SETUP_MAINTAIN
+      x-passage-duty: quality.setup.maintain
       summary: Create a quality association (trigger to test group and sampling)
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -274,7 +274,7 @@ paths:
     get:
       tags: [orders]
       operationId: listOrders
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Quality order worklist, newest first (section 6.33.14)
       parameters:
         - name: status
@@ -302,7 +302,7 @@ paths:
     post:
       tags: [orders]
       operationId: createOrder
-      x-passage-duty: QM_ORDER_MAINTAIN
+      x-passage-duty: quality.order.maintain
       summary: Create a quality order (manual, or from the best matching association)
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -335,7 +335,7 @@ paths:
     get:
       tags: [orders]
       operationId: getOrder
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Read a quality order with its test group, results, evaluation and decision
       parameters:
         - { $ref: "#/components/parameters/OrderId" }
@@ -354,7 +354,7 @@ paths:
     post:
       tags: [orders]
       operationId: recordResults
-      x-passage-duty: QM_RESULTS_RECORD
+      x-passage-duty: quality.result.record
       summary: Record a batch of 1 to 1,000 results (variable or attribute)
       description: |
         A pending order (PENDING_DECISION) accepts only retests (retestNo above 0,
@@ -393,7 +393,7 @@ paths:
     post:
       tags: [orders]
       operationId: postUsageDecision
-      x-passage-duty: QM_USAGE_DECISION
+      x-passage-duty: quality.usage.decide
       summary: Post a usage decision whose line quantities sum to the lot quantity
       parameters:
         - { $ref: "#/components/parameters/OrderId" }
@@ -430,7 +430,7 @@ paths:
     get:
       tags: [certificates]
       operationId: listCertificates
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: List an order's certificate receipts and waivers with its gate status
       parameters:
         - { $ref: "#/components/parameters/OrderId" }
@@ -445,7 +445,7 @@ paths:
     post:
       tags: [certificates]
       operationId: recordCertificate
-      x-passage-duty: QM_RESULTS_RECORD
+      x-passage-duty: quality.result.record
       summary: Record an incoming vendor certificate (FR-33.15)
       description: |
         Values are checked against the order's test group (BR-33.13): a required test
@@ -484,7 +484,7 @@ paths:
     post:
       tags: [certificates]
       operationId: waiveCertificate
-      x-passage-duty: QM_USAGE_DECISION
+      x-passage-duty: quality.usage.decide
       summary: Waive the order's required certificate with a reason
       description: |
         The certificate status becomes WAIVED and an accepting decision is no longer
@@ -517,7 +517,7 @@ paths:
     get:
       tags: [samples]
       operationId: listSamples
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: List physical samples, newest first
       parameters:
         - { name: qualityOrderId, in: query, schema: { type: string, format: uuid } }
@@ -541,7 +541,7 @@ paths:
     post:
       tags: [samples]
       operationId: registerSample
-      x-passage-duty: QM_RESULTS_RECORD
+      x-passage-duty: quality.result.record
       summary: Register a physical sample of a quality order (FR-33.20)
       description: |
         The sample takes the order's unit. A RESERVE (retention) sample needs the batch
@@ -576,7 +576,7 @@ paths:
     get:
       tags: [compliance]
       operationId: listComplianceLists
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Compliance list versions by code, newest version first (FR-33.13)
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -598,7 +598,7 @@ paths:
     post:
       tags: [compliance]
       operationId: createComplianceList
-      x-passage-duty: QM_COMPLIANCE_MAINTAIN
+      x-passage-duty: quality.compliance.maintain
       summary: Create the next version of a regulated, restricted or reporting list (FR-33.13)
       description: The service numbers versions per code; the highest version is the one evaluated. Writes dev.passage.quality.compliancelist.created.v1.
       parameters:
@@ -627,7 +627,7 @@ paths:
     get:
       tags: [compliance]
       operationId: getComposition
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: The item's current declared composition
       parameters:
         - $ref: "#/components/parameters/ItemId"
@@ -644,7 +644,7 @@ paths:
     post:
       tags: [compliance]
       operationId: saveComposition
-      x-passage-duty: QM_COMPLIANCE_MAINTAIN
+      x-passage-duty: quality.compliance.maintain
       summary: Save a new version of the item's composition (substances by CAS number and BOM parts by mass fraction)
       parameters:
         - $ref: "#/components/parameters/ItemId"
@@ -673,7 +673,7 @@ paths:
     post:
       tags: [compliance]
       operationId: evaluateCompliance
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Roll the composition up through its parts and evaluate it against every current list for a region (BR-33.11)
       description: |
         Idempotent by value, so no Idempotency-Key is needed. A result version is stored, and
@@ -705,7 +705,7 @@ paths:
     get:
       tags: [stability]
       operationId: listStudies
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Stability studies, newest first
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/StudyStatus" } }
@@ -729,7 +729,7 @@ paths:
     post:
       tags: [stability]
       operationId: createStudy
-      x-passage-duty: QM_STABILITY_MAINTAIN
+      x-passage-duty: quality.stability.maintain
       summary: Plan a stability study and generate its pull schedule (FR-33.16, BR-33.14)
       description: Writes dev.passage.quality.stabilitystudy.created.v1, from which the scheduling workflow starts.
       parameters:
@@ -761,7 +761,7 @@ paths:
     get:
       tags: [stability]
       operationId: getStudy
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: One stability study with its pull points
       parameters:
         - $ref: "#/components/parameters/StudyId"
@@ -780,7 +780,7 @@ paths:
     post:
       tags: [stability]
       operationId: transitionStudy
-      x-passage-duty: QM_STABILITY_MAINTAIN
+      x-passage-duty: quality.stability.maintain
       summary: Move a study PLANNED to ACTIVE, ACTIVE to COMPLETED, or to TERMINATED with a reason (FR-33.16)
       description: |
         COMPLETED and TERMINATED are final. Terminating cancels the pulls still PLANNED;
@@ -813,7 +813,7 @@ paths:
     get:
       tags: [receiving]
       operationId: listReceiptChecks
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Receipt lines checked against source inspection, newest first
       parameters:
         - { name: poLineId, in: query, schema: { type: string, format: uuid } }
@@ -837,7 +837,7 @@ paths:
     post:
       tags: [receiving]
       operationId: checkReceipt
-      x-passage-duty: QM_ORDER_MAINTAIN
+      x-passage-duty: quality.order.maintain
       summary: Check a receipt line against the accepted source inspections of its PO line and batch (FR-33.19, BR-33.16)
       description: |
         Receiving calls this for each receipt line before creating a receiving quality
@@ -874,7 +874,7 @@ paths:
     post:
       tags: [coa]
       operationId: generateCoA
-      x-passage-duty: QM_COA
+      x-passage-duty: quality.coa.generate
       summary: Issue the next certificate of analysis revision of a closed order (FR-33.9, BR-33.10)
       description: |
         The order must be closed by a usage decision that released quantity (accept or
@@ -911,7 +911,7 @@ paths:
     get:
       tags: [coa]
       operationId: listCoAs
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Every CoA revision of an order, the batch chain first, oldest revision first
       parameters:
         - $ref: "#/components/parameters/OrderId"
@@ -934,7 +934,7 @@ paths:
     get:
       tags: [spc]
       operationId: getSpcChart
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: SPC chart for one item and test from first-attempt results (FR-33.11)
       description: |
         Each quality order is one subgroup (variable test, X-bar/R) or one sample (attribute
@@ -959,7 +959,7 @@ paths:
     get:
       tags: [nonconformance]
       operationId: listNonconformances
-      x-passage-duty: QM_VIEW
+      x-passage-duty: quality.view
       summary: Nonconformances, newest first (NCR and CAPA status inquiry)
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/NcrStatus" } }
@@ -985,7 +985,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: createNonconformance
-      x-passage-duty: QM_NCR_MAINTAIN
+      x-passage-duty: quality.ncr.maintain
       summary: Raise a nonconformance (FR-33.7)
       description: |
         Starts in NEW and writes dev.passage.quality.nonconformance.created.v1. With
@@ -1021,7 +1021,7 @@ paths:
     get:
       tags: [nonconformance]
       operationId: getNonconformance
-      x-passage-duty: QM_VIEW or quality.capa.execute
+      x-passage-duty: quality.view or quality.capa.execute
       summary: One nonconformance with its 8D correction
       parameters:
         - $ref: "#/components/parameters/NcrId"
@@ -1040,7 +1040,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: approveNonconformance
-      x-passage-duty: QM_NCR_MAINTAIN
+      x-passage-duty: quality.ncr.maintain
       summary: Approve a NEW nonconformance
       parameters:
         - $ref: "#/components/parameters/NcrId"
@@ -1065,7 +1065,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: refuseNonconformance
-      x-passage-duty: QM_NCR_MAINTAIN
+      x-passage-duty: quality.ncr.maintain
       summary: Refuse a NEW nonconformance with a reason (final)
       parameters:
         - $ref: "#/components/parameters/NcrId"
@@ -1095,7 +1095,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: startCorrection
-      x-passage-duty: QM_CAPA_MAINTAIN or quality.capa.execute
+      x-passage-duty: quality.capa.maintain or quality.capa.execute
       summary: Start the 8D correction of an APPROVED nonconformance (FR-33.8)
       description: |
         Moves the NCR to IN_CORRECTION and opens D1. D3 containment is due two business days
@@ -1135,7 +1135,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: completeCorrectionStep
-      x-passage-duty: QM_CAPA_MAINTAIN or quality.capa.execute
+      x-passage-duty: quality.capa.maintain or quality.capa.execute
       summary: Complete the current 8D step, D1 to D7
       description: Steps complete in order (QM-0173 otherwise). Completing D7 starts the effectiveness timer.
       parameters:
@@ -1166,7 +1166,7 @@ paths:
     post:
       tags: [nonconformance]
       operationId: checkEffectiveness
-      x-passage-duty: QM_CAPA_MAINTAIN or quality.capa.execute
+      x-passage-duty: quality.capa.maintain or quality.capa.execute
       summary: Record the effectiveness check once it is due
       description: |
         Allowed once effectivenessDueAt has passed (QM-0174), by a user other than the one who

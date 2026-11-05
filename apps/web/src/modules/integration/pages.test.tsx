@@ -116,7 +116,7 @@ describe("integration module", () => {
     for (const item of integration.nav) {
       expect(item.to.startsWith("/integration")).toBe(true);
       expect(paths).toContain(item.to);
-      expect(item.duty).toMatch(/^(EDI_(ADMIN|OPERATE)|PUR_REQUISITION_CREATE|SELF_BILLING_RECONCILE|EINV_OPERATE|hub\.delivery\.read)$/);
+      expect(item.duty).toMatch(/^(edi\.(admin|operate)|edi\.requisition\.create|edi\.self-billing\.reconcile|edi\.einvoice\.operate|hub\.delivery\.read)$/);
     }
   });
 });

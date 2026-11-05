@@ -50,7 +50,7 @@ func evaluateThrough(t *testing.T, status int, upstream string, wire bool) (*htt
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	req.Header.Set("X-Passage-Legal-Entity", evalLE)
 	req.Header.Set("X-Passage-User", callerUser)
-	req.Header.Set("X-Passage-Duties", "MatchingPolicyMaintain,PurchaseOrderInquire")
+	req.Header.Set("X-Passage-Duties", "receiving.matching-policy.maintain,procurement.purchase-order.inquire")
 	req.Header.Set("X-Request-Id", "req-42")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -72,7 +72,7 @@ func TestEvaluateTakesPoLinesFromPurchasing(t *testing.T) {
 	for header, want := range map[string]string{
 		"X-Passage-Tenant": testkit.TenantID(1),
 		"X-Passage-User":   callerUser,
-		"X-Passage-Duties": "MatchingPolicyMaintain,PurchaseOrderInquire",
+		"X-Passage-Duties": "procurement.purchase-order.inquire,receiving.matching-policy.maintain",
 		"X-Request-Id":     "req-42",
 	} {
 		if got := seen.Header.Get(header); got != want {
@@ -130,7 +130,7 @@ func TestEvaluateRefusesUnusablePurchaseOrders(t *testing.T) {
 			})
 			r := httpx.NewRouter()
 			a.Register(r)
-			rec := do(r, http.MethodPost, evaluatePath, poBody(`"poLineNo":1`), "MatchingPolicyMaintain", true)
+			rec := do(r, http.MethodPost, evaluatePath, poBody(`"poLineNo":1`), "receiving.matching-policy.maintain", true)
 			if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.code) {
 				t.Fatalf("got %d %s", rec.Code, rec.Body)
 			}
@@ -154,7 +154,7 @@ func TestEvaluateAcceptsApprovedAndConfirmedOrders(t *testing.T) {
 			})
 			r := httpx.NewRouter()
 			a.Register(r)
-			rec := do(r, http.MethodPost, evaluatePath, poBody(`"poLineNo":1`), "MatchingPolicyMaintain", true)
+			rec := do(r, http.MethodPost, evaluatePath, poBody(`"poLineNo":1`), "receiving.matching-policy.maintain", true)
 			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"MATCHED"`) {
 				t.Fatalf("got %d %s", rec.Code, rec.Body)
 			}
@@ -178,7 +178,7 @@ func TestEvaluatePoReferenceValidation(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := do(r, http.MethodPost, evaluatePath, tc.body, "MatchingPolicyMaintain", true)
+			rec := do(r, http.MethodPost, evaluatePath, tc.body, "receiving.matching-policy.maintain", true)
 			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.field) {
 				t.Fatalf("got %d %s", rec.Code, rec.Body)
 			}
@@ -216,7 +216,7 @@ func decodeProblem(t *testing.T, rec *httptest.ResponseRecorder) httpx.Problem {
 func TestEvaluatePoValidationPrecedesLookup(t *testing.T) {
 	lookups, r := purchasingCounter(t)
 	body := strings.Replace(poBody(`"poLineNo":1`), `"qty":10`, `"qty":-10`, 1)
-	rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+	rec := do(r, http.MethodPost, evaluatePath, body, "receiving.matching-policy.maintain", true)
 	if rec.Code != http.StatusBadRequest || lookups.Load() != 0 {
 		t.Fatalf("got status %d after %d purchase order lookups: %s", rec.Code, lookups.Load(), rec.Body)
 	}
@@ -240,7 +240,7 @@ func TestEvaluateRejectsDuplicateAndOverriddenPOLines(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			body := `{"purchaseOrderId":"` + evalPOID + `","currency":"USD","headerTotal":2.5,"lines":[` + tc.lines + `]}`
-			rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+			rec := do(r, http.MethodPost, evaluatePath, body, "receiving.matching-policy.maintain", true)
 			p := decodeProblem(t, rec)
 			if rec.Code != http.StatusBadRequest || p.Code != "COM-0001" || !maps.Equal(p.Errors, tc.want) {
 				t.Fatalf("got %d %+v", rec.Code, p)
@@ -257,7 +257,7 @@ const poOverride = "is supplied by the purchase order and cannot be overridden"
 func TestEvaluateReportsBodyAndPoReferenceErrorsTogether(t *testing.T) {
 	lookups, r := purchasingCounter(t)
 	body := `{"currency":"usd","headerTotal":2.5,"lines":[{"qty":1,"unitPrice":2.5,"poLineNo":1},{"qty":1,"unitPrice":2.5,"poLineNo":1}]}`
-	rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+	rec := do(r, http.MethodPost, evaluatePath, body, "receiving.matching-policy.maintain", true)
 	p := decodeProblem(t, rec)
 	want := map[string]string{
 		"currency":          "must be a 3-letter upper-case ISO 4217 code",
@@ -272,7 +272,7 @@ func TestEvaluateReportsBodyAndPoReferenceErrorsTogether(t *testing.T) {
 func TestEvaluateKeepsBodyErrorWhenPoReferenceErrorSharesTheKey(t *testing.T) {
 	lookups, r := purchasingCounter(t)
 	body := `{"purchaseOrderId":"` + evalPOID + `","currency":"USD","headerTotal":2.5,"lines":[{"qty":1,"unitPrice":2.5,"poLineNo":1,"poCurrency":"us"}]}`
-	rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+	rec := do(r, http.MethodPost, evaluatePath, body, "receiving.matching-policy.maintain", true)
 	p := decodeProblem(t, rec)
 	want := map[string]string{"lines[0].poCurrency": "must be a 3-letter ISO 4217 code; " + poOverride}
 	if rec.Code != http.StatusBadRequest || !maps.Equal(p.Errors, want) || lookups.Load() != 0 {
@@ -302,7 +302,7 @@ func TestEvaluateSignsThePurchaseOrderReadWithTheNamedLegalEntity(t *testing.T) 
 		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 		req.Header.Set("X-Passage-Legal-Entity", evalLE+","+otherLE)
 		req.Header.Set("X-Passage-User", callerUser)
-		req.Header.Set("X-Passage-Duties", "MatchingPolicyMaintain")
+		req.Header.Set("X-Passage-Duties", "receiving.matching-policy.maintain")
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
 		return rec

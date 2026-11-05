@@ -124,7 +124,7 @@ func canonicalLegalEntities(raw string) (string, bool) {
 	return strings.Join(canonical, ","), true
 }
 
-const DutyAllScope = "org.switcher.all_scope"
+const DutyAllScope = "org.switcher.all-scope"
 
 const DutyTenantAdmin = "tenant.administer"
 

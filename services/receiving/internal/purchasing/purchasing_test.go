@@ -28,7 +28,7 @@ const orderJSON = `{"id":"` + orderID + `","number":"PO-1","legalEntityId":"` + 
 "lines":[{"lineNo":1,"productId":"p-1","unit":"EA","qty":"10","unitPrice":"250.00","priceUnit":"100","discountPct":"10","grossAmount":"25.00","discountAmount":"2.50","lineAmount":"22.50","taxAmount":"0.00","deliveryDate":"2026-09-01","priceSource":"MANUAL","receivedQty":"4","invoicedQty":"1","status":"OPEN"}]}`
 
 func testCtx() context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: legalEntityID, UserID: userID, Duties: map[string]struct{}{"ReceivingPost": {}, "PurchaseOrderInquire": {}}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: legalEntityID, UserID: userID, Duties: map[string]struct{}{"receiving.receipt.post": {}, "procurement.purchase-order.inquire": {}}})
 }
 
 func serve(t *testing.T, status int, body string) (*Client, *http.Request) {
@@ -54,7 +54,7 @@ func TestGet_MapsOrderAndForwardsIdentity(t *testing.T) {
 		t.Fatalf("request %s %s", got.Method, got.URL.Path)
 	}
 	if got.Header.Get("X-Passage-Tenant") != tenantID || got.Header.Get("X-Passage-Legal-Entity") != legalEntityID || got.Header.Get("X-Passage-User") != userID ||
-		got.Header.Get("X-Passage-Duties") != "PurchaseOrderInquire,ReceivingPost" || got.Header.Get("X-Request-Id") != "req-7" {
+		got.Header.Get("X-Passage-Duties") != "procurement.purchase-order.inquire,receiving.receipt.post" || got.Header.Get("X-Request-Id") != "req-7" {
 		t.Fatalf("headers %v", got.Header)
 	}
 	if po.ID != orderID || po.VendorID != "v-1" || po.Currency != "USD" || po.LegalEntityID != legalEntityID || po.ApprovalStatus != "APPROVED" || po.DocumentStatus != "CONFIRMED" || len(po.Lines) != 1 {
@@ -239,7 +239,7 @@ func signedLookup(t *testing.T, status int, body string) (*Client, *http.Request
 }
 
 func scopedCtx(scope string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope, UserID: userID, Duties: map[string]struct{}{"ReceivingPost": {}}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope, UserID: userID, Duties: map[string]struct{}{"receiving.receipt.post": {}}})
 }
 
 func TestSigned_OrderAndPlanReadsCarryOnlyTheLookupDutyAndNoUserHeaders(t *testing.T) {

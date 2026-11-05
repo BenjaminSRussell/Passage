@@ -282,7 +282,7 @@ func Markdown(d Doc) string {
 	b.WriteString("# Wave 10 AC1 reconciliation\n\n")
 	b.WriteString("Seeded load of 50k customers, 20k vendors, 100k items and 10k BOMs ")
 	b.WriteString("through the migration pipeline. The cross-reference is Postgres `migration.xref`; ")
-	b.WriteString("the target is the test table `ac1.target` (not the party/product batch APIs, which are unmeasured: #475). ")
+	b.WriteString("the target is the test table `ac1.target` (the real HTTP loader is timed separately: real-loader.md, #475). ")
 	b.WriteString("Reconciliation compares the raw extract, mapped independently, with a fresh read of `ac1.target`.\n\n")
 	if d.OK {
 		b.WriteString("**Result: PASS**\n\n")

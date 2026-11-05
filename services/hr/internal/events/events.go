@@ -35,7 +35,10 @@ var (
 	CourseCompleted          = events.Type(Context, "course", "completed", 1)
 	CompensationChanged      = events.Type(Context, "compensation", "changed", 1)
 	CompensationCycleApplied = events.Type(Context, "compensationcycle", "applied", 1)
-	RequisitionChanged       = events.Type(Context, "requisition", "changed", 1)
+	// CompensationCycleApproved is written when a user independent of the
+	// cycle's creator and worksheet submitters approves it (#266).
+	CompensationCycleApproved = events.Type(Context, "compensationcycle", "approved", 1)
+	RequisitionChanged        = events.Type(Context, "requisition", "changed", 1)
 	// IncidentChanged is written when an incident is reported or moves to
 	// UNDER_REVIEW or CLOSED (FR-42.16). It carries ids, codes and counts only:
 	// no worker name and none of the sealed medical details.
@@ -55,7 +58,7 @@ var (
 // All lists every event type the service publishes (asyncapi.yaml).
 func All() []string {
 	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged,
-		WorkerSkillChanged, CertificationIssued, CourseCompleted, CompensationChanged, CompensationCycleApplied, RequisitionChanged,
+		WorkerSkillChanged, CertificationIssued, CourseCompleted, CompensationChanged, CompensationCycleApplied, CompensationCycleApproved, RequisitionChanged,
 		IncidentChanged, LoanedItemChanged, ChecklistChanged, ReviewChanged}
 }
 
@@ -245,6 +248,13 @@ type CompensationCycleAppliedData struct {
 	CycleID       string   `json:"cycle_id"`
 	EffectiveDate string   `json:"effective_date"`
 	ActionIDs     []string `json:"action_ids"`
+}
+
+type CompensationCycleApprovedData struct {
+	CycleID       string `json:"cycle_id"`
+	EffectiveDate string `json:"effective_date"`
+	ApprovedBy    string `json:"approved_by"`
+	Rows          int    `json:"rows"`
 }
 
 type RequisitionChangedData struct {

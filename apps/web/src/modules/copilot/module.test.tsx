@@ -11,9 +11,9 @@ describe("copilot module", () => {
     expect(copilot.id).toBe("copilot");
     expect(copilot.routes.map((r) => r.path)).toEqual(["/copilot", "/copilot/tools", "/copilot/tools/:name", "/copilot/kill-switch"]);
     expect(copilot.nav).toEqual([
-      { label: "Copilot", to: "/copilot", duty: "CopilotUse" },
-      { label: "Tool catalog", to: "/copilot/tools", duty: "CopilotUse" },
-      { label: "Agent kill switch", to: "/copilot/kill-switch", duty: "AgentAdmin" },
+      { label: "Copilot", to: "/copilot", duty: "mcp.copilot.use" },
+      { label: "Tool catalog", to: "/copilot/tools", duty: "mcp.copilot.use" },
+      { label: "Agent kill switch", to: "/copilot/kill-switch", duty: "agents.admin" },
     ]);
     expect(copilot.nav.every((n) => n.to.startsWith("/copilot"))).toBe(true);
   });

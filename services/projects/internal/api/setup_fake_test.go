@@ -230,7 +230,7 @@ func as(t *testing.T, h http.Handler, duties []string, method, path, body string
 func TestGroups_PutCreatesThenReplacesUnderIfMatch(t *testing.T) {
 	h := router(newFake())
 	if rec := as(t, h, []string{DutyInquire}, http.MethodPut, "/v1/projects/groups/ENG", `{"name":"Engineering"}`, nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("put without ProjSetupAdmin: status %d", rec.Code)
+		t.Fatalf("put without projects.setup.admin: status %d", rec.Code)
 	}
 	rec := as(t, h, []string{DutySetup}, http.MethodPut, "/v1/projects/groups/ENG", `{"name":"Engineering","defaultProjectType":"FIXED_PRICE"}`, nil)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
@@ -347,7 +347,7 @@ func TestPostingProfiles_OnlyResolvableKeysAreStored(t *testing.T) {
 		}
 	}
 	if rec := as(t, h, []string{DutyInquire}, http.MethodPut, "/v1/projects/posting-profiles", profileJSON("ENG", "*", "*", "5200"), nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("put without ProjSetupAdmin: status %d", rec.Code)
+		t.Fatalf("put without projects.setup.admin: status %d", rec.Code)
 	}
 }
 
@@ -382,7 +382,7 @@ func TestPlans_KindsKeysAndBaselineLock(t *testing.T) {
 		t.Fatalf("missing key: status %d", rec.Code)
 	}
 	if rec := as(t, h, []string{DutyInquire}, http.MethodPost, path, `{"kind":"WORKING"}`, map[string]string{"Idempotency-Key": "p0"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("create without ProjPlan: status %d", rec.Code)
+		t.Fatalf("create without projects.plan: status %d", rec.Code)
 	}
 	if rec := createPlan(t, h, "P-PLAN", `{"kind":"BASELINE"}`, "p1"); rec.Code != http.StatusUnprocessableEntity || errorCode(t, rec) != domain.CodePlanKind {
 		t.Fatalf("baseline without a source: status %d body %s", rec.Code, rec.Body.String())
@@ -459,7 +459,7 @@ func TestWBS_ReplaceNeedsIfMatchValidatesAndSchedules(t *testing.T) {
 		t.Fatalf("stale plan version: status %d", rec.Code)
 	}
 	if rec := as(t, h, []string{DutyInquire}, http.MethodPut, path+"/wbs", sampleWBS, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusForbidden {
-		t.Fatalf("replace without ProjPlan: status %d", rec.Code)
+		t.Fatalf("replace without projects.plan: status %d", rec.Code)
 	}
 	rec := as(t, h, []string{DutyPlan}, http.MethodPut, path+"/wbs", sampleWBS, map[string]string{"If-Match": `"1"`})
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` || !strings.Contains(rec.Body.String(), `"constraintType":"ASAP"`) {

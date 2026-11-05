@@ -10,6 +10,13 @@ migrateOnStart: false
 # reads ownership-change journals this way (#305).
 serviceIdentity:
   publicKeys: ""
+  # Secret holding this service's own Ed25519 signing key (key "signing-key"), used to
+  # sign its calls to the ledger (#477). Required when ledgerUrl is set.
+  signingKeySecret: ""
+  keyId: ""
+# General ledger base URL. Optional: without it POST /v1/inventory/gl-postings answers
+# 503 INV-GL-005 and journal entries stay in the subledger only.
+ledgerUrl: ""
 replicaCount: 3
 autoscaling:
   enabled: true

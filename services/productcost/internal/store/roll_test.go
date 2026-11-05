@@ -171,6 +171,15 @@ func TestRoll_IsIdempotentAndOnlyAnOpenVersionInItsSitesCanBeRolled(t *testing.T
 	if _, _, err := s.StoreRoll(ctx, rollInput(v, "roll-2", purchased(itemA, "1.00"))); codeOf(err) != domain.CodeVersionNotRollable {
 		t.Fatalf("blocked version: %v", err)
 	}
+	if res, found, err := s.RollReplay(ctx, "roll-1", in.Fingerprint); err != nil || !found || res.StoredCount != 1 {
+		t.Fatalf("replay lookup once the version left Open: %+v %v %v", res, found, err)
+	}
+	if _, _, err := s.RollReplay(ctx, "roll-1", "different"); codeOf(err) != CodeIdempotencyReuse {
+		t.Fatalf("replay lookup with another request: %v", err)
+	}
+	if _, found, err := s.RollReplay(ctx, "roll-unused", "x"); err != nil || found {
+		t.Fatalf("unused key: %v %v", found, err)
+	}
 
 	scoped := spec(le, "STD-SCOPED")
 	scoped.SiteIDs = []string{ids.New()}

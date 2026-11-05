@@ -44,7 +44,7 @@ describe("exception note rule", () => {
 describe("warehouse exceptions list", () => {
   it("shows the open cases with a link to each, and passes the status filter", async () => {
     server.handler = (url) => (url.pathname === "/api/v1/fulfillment/exceptions" ? json(200, { items: [exception(), exception({ id: SLIP, kind: "PACKED_BEYOND_KEPT", status: "RESOLVED" })] }) : undefined);
-    const { container } = renderAt("/fulfillment/exceptions", ["WarehouseView"]);
+    const { container } = renderAt("/fulfillment/exceptions", ["fulfillment.warehouse.view"]);
     expect(await screen.findByRole("link", { name: "Shipped beyond the kept quantity" })).toHaveAttribute("href", `/fulfillment/exceptions/${ID}`);
     expect(screen.getByRole("link", { name: "Packed beyond the kept quantity" })).toBeInTheDocument();
     expect(server.calls[0].url.searchParams.get("status")).toBe("OPEN");
@@ -55,14 +55,14 @@ describe("warehouse exceptions list", () => {
 
   it("says when nothing needs the supervisor", async () => {
     server.handler = () => json(200, { items: [] });
-    renderAt("/fulfillment/exceptions", ["WarehouseView"]);
+    renderAt("/fulfillment/exceptions", ["fulfillment.warehouse.view"]);
     expect(await screen.findByText("No open exceptions")).toBeInTheDocument();
   });
 
   it("shows the error and retries", async () => {
     let fail = true;
     server.handler = () => (fail ? json(500, { code: "COM-0500", detail: "boom" }) : json(200, { items: [] }));
-    renderAt("/fulfillment/exceptions", ["WarehouseView"]);
+    renderAt("/fulfillment/exceptions", ["fulfillment.warehouse.view"]);
     expect((await findAlert()).textContent).toContain("COM-0500");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -80,7 +80,7 @@ describe("warehouse exception detail", () => {
       }
       return json(200, current);
     };
-    const { container } = renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView", "WarehouseRelease"]);
+    const { container } = renderAt(`/fulfillment/exceptions/${ID}`, ["fulfillment.warehouse.view", "fulfillment.warehouse.release"]);
     expect(await screen.findByRole("heading", { name: "Shipped beyond the kept quantity" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the packing slip" })).toHaveAttribute("href", `/fulfillment/packing-slips/${SLIP}`);
     fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
@@ -97,14 +97,14 @@ describe("warehouse exception detail", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("offers no resolve without WarehouseRelease, and none once resolved", async () => {
+  it("offers no resolve without fulfillment.warehouse.release, and none once resolved", async () => {
     server.handler = () => json(200, exception());
-    const view = renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView"]);
+    const view = renderAt(`/fulfillment/exceptions/${ID}`, ["fulfillment.warehouse.view"]);
     expect(await screen.findByRole("heading", { name: "Shipped beyond the kept quantity" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark resolved" })).toBeNull();
     view.unmount();
     server.handler = () => json(200, exception({ status: "RESOLVED", version: 2, resolvedAt: "2026-11-03T09:00:00Z", resolvedBy: "sup", resolutionNote: "returned" }));
-    renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView", "WarehouseRelease"]);
+    renderAt(`/fulfillment/exceptions/${ID}`, ["fulfillment.warehouse.view", "fulfillment.warehouse.release"]);
     expect(await screen.findByText("returned")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark resolved" })).toBeNull();
   });
@@ -112,7 +112,7 @@ describe("warehouse exception detail", () => {
   it("names a stale version and shows a load error", async () => {
     server.handler = (url, init) =>
       url.pathname.endsWith(":resolve") && init.method === "POST" ? json(412, { code: "conflict_version", detail: "at version 2" }) : json(200, exception());
-    renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView", "WarehouseRelease"]);
+    renderAt(`/fulfillment/exceptions/${ID}`, ["fulfillment.warehouse.view", "fulfillment.warehouse.release"]);
     fireEvent.change(await screen.findByLabelText("What was done"), { target: { value: "done" } });
     fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
     expect((await findAlert()).textContent).toContain("Someone else changed this exception");
@@ -120,14 +120,14 @@ describe("warehouse exception detail", () => {
 
   it("explains a vendor confirmation beyond the kept quantity", async () => {
     server.handler = () => json(200, exception({ kind: "DROPSHIP_CONFIRMED_BEYOND_KEPT", shipmentId: null, packingSlipId: null }));
-    renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView"]);
+    renderAt(`/fulfillment/exceptions/${ID}`, ["fulfillment.warehouse.view"]);
     expect(await screen.findByRole("heading", { name: "Vendor shipped beyond the kept quantity" })).toBeInTheDocument();
     expect(screen.getByText(/vendor return/)).toBeInTheDocument();
   });
 
   it("shows the problem when the exception cannot be loaded", async () => {
     server.handler = () => json(404, { code: "FUL-0067", detail: "exception not found" });
-    renderAt(`/fulfillment/exceptions/${ID}`, ["WarehouseView"]);
+    renderAt(`/fulfillment/exceptions/${ID}`, ["fulfillment.warehouse.view"]);
     expect((await findAlert()).textContent).toContain("FUL-0067");
   });
 });

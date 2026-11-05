@@ -522,7 +522,7 @@ func runLegalEntity(p tenant.Principal, explicit string) (string, error) {
 	allScope := p.LegalEntityID == "" && p.HasDuty(tenant.DutyAllScope)
 	if explicit != "" {
 		le, ok := ids.Canonical(explicit)
-		if !ok || le == ids.Nil || !(allScope || slices.Contains(scopes, le)) {
+		if !ok || le == ids.Nil || (!allScope && !slices.Contains(scopes, le)) {
 			return "", fieldProblem(http.StatusUnprocessableEntity, "legalEntityId", "must be a legal entity within the caller's scope")
 		}
 		return le, nil

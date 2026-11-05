@@ -15,9 +15,9 @@ import (
 // dutyAgingRun runs the aging snapshot job. The PRD names no duty for scheduled
 // jobs (§5.30.16); the scheduler's service principal carries this one, and an AR
 // manager may re-run a missed night.
-const dutyAgingRun = "ARAgingRun"
+const dutyAgingRun = "receivables.aging.run"
 
-// statementRoutes mounts customer statements (FR-30.13, ARView) and the aging
+// statementRoutes mounts customer statements (FR-30.13, receivables.view) and the aging
 // snapshot job with its stored balances (§5.30.16).
 func (a *API) statementRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/statements", a.statement)

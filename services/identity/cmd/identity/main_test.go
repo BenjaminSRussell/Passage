@@ -18,7 +18,7 @@ import (
 
 const (
 	operatorID = "90000000-0000-0000-0000-000000000009"
-	catalogue  = `{"duties": {"Maintain security roles": {"permissions": [{"resource": "/v1/authz/roles{,/**}", "methods": ["GET"]}]}}}`
+	catalogue  = `{"duties": {"identity.security-role.maintain": {"permissions": [{"resource": "/v1/authz/roles{,/**}", "methods": ["GET"]}]}}}`
 )
 
 func env(values map[string]string) func(string) string {
@@ -134,18 +134,18 @@ func TestRouterServesHealthAndGuardsAdminRoutes(t *testing.T) {
 			t.Errorf("%s without a duty = %d, want 403", path, rec.Code)
 		}
 	}
-	withDuty := map[string]string{"X-Passage-Tenant": operatorID, "X-Passage-User": "u", "X-Passage-Duties": "Maintain security roles"}
+	withDuty := map[string]string{"X-Passage-Tenant": operatorID, "X-Passage-User": "u", "X-Passage-Duties": "identity.security-role.maintain"}
 	rec := get(router, "/v1/authz/roles", withDuty)
 	var body struct {
 		Items []struct{ Name string } `json:"items"`
 	}
-	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&body); err != nil || rec.Code != http.StatusOK || len(body.Items) != 1 || body.Items[0].Name != "Maintain security roles" {
+	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&body); err != nil || rec.Code != http.StatusOK || len(body.Items) != 1 || body.Items[0].Name != "identity.security-role.maintain" {
 		t.Fatalf("roles = %d %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestSCIMRoutesAreBearerOnlyAndOptional(t *testing.T) {
-	headers := map[string]string{"X-Passage-Tenant": operatorID, "X-Passage-User": "u", "X-Passage-Duties": "Provision users via SCIM"}
+	headers := map[string]string{"X-Passage-Tenant": operatorID, "X-Passage-User": "u", "X-Passage-Duties": "identity.user.provision"}
 	if rec := get(testRouter(t, false), "/scim/v2/Users", headers); rec.Code != http.StatusNotFound {
 		t.Fatalf("scim unconfigured = %d, want 404", rec.Code)
 	}

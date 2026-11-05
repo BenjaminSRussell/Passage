@@ -137,6 +137,57 @@ PASSAGE_TEST_APP_DATABASE_URL=postgres://app@host/db go test ./...   # store tes
 DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100), PLANNING_HORIZON_DAYS (365, 30 to 1095), PLANNING_FEATURE_FLAGS (comma-separated planning.dynamic, planning.statistical-forecast, planning.mps-scope; unknown names stop startup)
 ```
 
+### Scale run through the API (AC2, #479)
+
+`TestRunAPI_ScalePostgres` (`internal/api/scale_pg_test.go`) sends the `mrp-50k` snapshot of the
+engine scale test (`domain.ScaleSnapshot`: five BOM levels, 4 sales lines per item over 12 monthly
+periods, open POs, mixed coverage and lot rules) as one `POST /v1/planning/plans/{planCode}:run` over a
+loopback HTTP server, and the version is stored in Postgres through the RLS-bound app role. Planning has
+no item master of its own, so the items, BOMs and demand travel in the request; Postgres holds the plan.
+It is skipped unless `PASSAGE_PLANNING_API_SCALE_ITEMS` is set:
+
+```
+PASSAGE_TEST_DATABASE_URL=... PASSAGE_TEST_APP_DATABASE_URL=... \
+PASSAGE_PLANNING_API_SCALE_ITEMS=50000 PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT=1 PASSAGE_PLANNING_API_SCALE_RUNS=1 \
+go test -count=1 -timeout 60m -run TestRunAPI_ScalePostgres -v ./internal/api/
+```
+
+`PASSAGE_PLANNING_API_SCALE_NO_TIMEOUT=1` serves the routes on a chi router with only the tenant
+middleware, without the platform's 30 s request timeout; `PASSAGE_PLANNING_API_SCALE_RUNS` (default 2)
+repeats the run with a new Idempotency-Key and compares the stored plan hashes.
+
+Measured on 2026-11-04 on PostgreSQL 16.15 (local cluster, default settings) and the test process on
+the same host: a shared cloud VM with 4 vCPUs, 15 GB RAM and other workloads running at the same time.
+This is not the 3-node reference cluster, and the numbers are single runs, not a benchmark:
+
+| Items | Body | Run | End to end | Engine | Planned orders | Messages | Notes |
+|---|---|---|---|---|---|---|---|
+| 1,000 | 1.0 MiB | 1 and 2 | 9.3 s, 9.4 s | 0.6 s, 0.4 s | 42,402 | 2,637 | equal hashes, production router |
+| 5,000 | 5.1 MiB | 1 | 30.0 s, then 500 | — | — | — | production router: the 30 s timeout cancels the run |
+| 5,000 | 5.1 MiB | 1 and 2 | 46.3 s, 69.1 s | 2.9 s, 3.1 s | 208,790 | 13,004 | equal hashes, no timeout |
+| 50,000 | 50.7 MiB | 1 | 8 min 4 s | 35.1 s | 2,159,385 | 141,806 | no timeout; under the 10 min budget |
+| 50,000 | 50.7 MiB | 2 | > 10 min | — | — | — | no timeout; the client gave up at 10 min, so the hash comparison was not reached |
+
+The 50k version takes about 4.5 GB in Postgres (8.9 GB with the second version nearly written) and the test process peaked near
+7.3 GiB RSS (sampled; it holds the generator, the request, the server and the plan). Persistence, not
+the engine, is the cost: rows go in at about 20,000 per second (5k run: about 900,000 rows in 43 s) as single-row inserts in
+pipelined batches (COPY is refused on tables with forced RLS), and each message is one outbox insert.
+
+What the run found, and what changed (#479):
+
+- The 4 MiB body limit of `httpx.Decode` refused a snapshot above about 4,000 items. The run route now
+  reads up to 128 MiB (`maxRunBody`), enough for `maxItems` (100,000).
+- All of a run's rows were queued in one pgx batch, about 9 million statements at 50k items; the test
+  process was killed by the OOM killer at 13 GB. `RunPlan` now sends batches of 10,000 rows
+  (`runBatchRows`) inside the same transaction.
+- Not changed: the platform router's 30 s request timeout (`httpx.RequestTimeout`) cancels any run that
+  takes longer, which is every run above roughly 3,000 items of this shape. A 50k run cannot succeed
+  through the deployed service until the run moves off the request (the Temporal batch job of
+  NOT-IMPLEMENTED.md) or the route gets a longer deadline.
+- Not changed: faster persistence (multi-row `insert ... select from unnest(...)` per table, and
+  batching the `message.raised.v1` outbox rows) would cut most of the 8 minutes; it is a larger change
+  of `RunPlan` and is left for the batch-job slice.
+
 Store tests cover persistence, replay and key reuse, version numbering, the
 outbox events (plan.started before plan.completed, one message.raised per
 stored message), the stored net requirements of the current version, tenant isolation under RLS, the 409 on a concurrent run,

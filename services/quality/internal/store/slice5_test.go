@@ -67,7 +67,7 @@ func TestPostgres_StudyLifecycle(t *testing.T) {
 	if err := pool.QueryRow(ctx, `select (payload->'data'->'cancelled_pulls')::text from outbox where aggregate_id = $1 order by created_at desc, id desc limit 1`, st.ID).Scan(&cancelled); err != nil || cancelled != "[3, 6]" {
 		t.Fatalf("the termination event names the cancelled pulls: %q %v", cancelled, err)
 	}
-	if _, err := s.TransitionStudy(testkit.Ctx(testkit.TenantID(2), "QM_STABILITY_MAINTAIN"), st.ID, 3, func(cur domain.Study) (domain.Study, error) {
+	if _, err := s.TransitionStudy(testkit.Ctx(testkit.TenantID(2), "quality.stability.maintain"), st.ID, 3, func(cur domain.Study) (domain.Study, error) {
 		return cur, nil
 	}); problemStatus(err) != http.StatusNotFound {
 		t.Fatalf("another tenant cannot see the study: %v", err)
@@ -163,7 +163,7 @@ func TestPostgres_ReceiptCheckAC3314(t *testing.T) {
 	if err != nil || len(list) != 2 || list[0].ReceiptLineID != b2.ReceiptLineID || list[1].Code != domain.CodeSourceSkipped {
 		t.Fatalf("list by PO line and batch, newest first: %+v %v", list, err)
 	}
-	other := testkit.Ctx(testkit.TenantID(2), "QM_VIEW")
+	other := testkit.Ctx(testkit.TenantID(2), "quality.view")
 	if theirs, err := s.ListReceiptChecks(other, ReceiptCheckFilter{Limit: 10}); err != nil || len(theirs) != 0 {
 		t.Fatalf("tenant 2 sees no check of tenant 1: %d %v", len(theirs), err)
 	}
@@ -233,7 +233,7 @@ func TestPostgres_CoARevisions(t *testing.T) {
 	if _, _, err := issue(order, &decision, domain.CoARequest{QualityOrderID: ids.New()}, "coa-6"); problemStatus(err) != http.StatusNotFound {
 		t.Fatalf("an unknown order must be 404, got %v", err)
 	}
-	if theirs, err := s.ListCoAs(testkit.Ctx(testkit.TenantID(2), "QM_VIEW"), order.ID); err != nil || len(theirs) != 0 {
+	if theirs, err := s.ListCoAs(testkit.Ctx(testkit.TenantID(2), "quality.view"), order.ID); err != nil || len(theirs) != 0 {
 		t.Fatalf("tenant 2 sees no CoA of tenant 1: %d %v", len(theirs), err)
 	}
 }

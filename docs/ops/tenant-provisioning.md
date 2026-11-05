@@ -1,6 +1,6 @@
 # Tenant provisioning and decommission (FR-50.8, BR-50.9)
 
-## Provision: `POST /api/v1/ops/tenants` (PlatformAdmin, `Idempotency-Key` required)
+## Provision: `POST /api/v1/ops/tenants` (platform.global.admin, `Idempotency-Key` required)
 Target: <= 15 min end to end (`provisioning.timeout_min`, default 15). Five concurrent provisions.
 
 Steps, each idempotent so a retry resumes:
@@ -14,7 +14,7 @@ Steps, each idempotent so a retry resumes:
 
 Acceptance (AC-50.6): residency EU provisions into `eu-west` with RLS, realm, ACLs and license in <= 15 min.
 
-## Decommission: `DELETE /api/v1/ops/tenants/{id}` (PlatformAdmin plus second approver)
+## Decommission: `DELETE /api/v1/ops/tenants/{id}` (platform.global.admin plus second approver)
 1. Export all tenant data encrypted, retained for the longest applicable record-class minimum from the
    tenant's country packs (DE/FR: 10 years) unless the customer takes custody and signs a release (BR-50.9).
 2. Revoke the realm and ACLs; drop tenant schemas only after the export is verified.

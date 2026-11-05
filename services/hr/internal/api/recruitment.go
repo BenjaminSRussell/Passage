@@ -326,11 +326,12 @@ func (a *API) moveOffer(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 type hireRequest struct {
-	WorkerID       string `json:"workerId"`
-	LegalEntityID  string `json:"legalEntityId"`
-	EmploymentType string `json:"employmentType"`
-	FTEShare       string `json:"fteShare"`
-	CompPlanID     string `json:"compPlanId"`
+	WorkerID       string               `json:"workerId"`
+	NewWorker      *createWorkerRequest `json:"newWorker"`
+	LegalEntityID  string               `json:"legalEntityId"`
+	EmploymentType string               `json:"employmentType"`
+	FTEShare       string               `json:"fteShare"`
+	CompPlanID     string               `json:"compPlanId"`
 }
 
 func (a *API) hireFromOffer(w http.ResponseWriter, r *http.Request, id string) {
@@ -343,9 +344,20 @@ func (a *API) hireFromOffer(w http.ResponseWriter, r *http.Request, id string) {
 		forbidPay(w, r)
 		return
 	}
+	if req.NewWorker != nil && !caller(r).HasDuty(dutyWorkerMaintain) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "creating the worker on hire needs the "+dutyWorkerMaintain+" duty"))
+		return
+	}
 	fields := map[string]string{}
-	if !ids.Valid(req.WorkerID) {
-		fields["workerId"] = "must be a UUID"
+	var newWorker *store.WorkerInput
+	switch {
+	case req.NewWorker != nil && req.WorkerID != "":
+		fields["workerId"] = "give workerId or newWorker, not both"
+	case req.NewWorker != nil:
+		in := validateWorker(*req.NewWorker, true, "newWorker.", fields)
+		newWorker = &in
+	case !ids.Valid(req.WorkerID):
+		fields["workerId"] = "must be a UUID, or give newWorker to create the worker"
 	}
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
@@ -369,7 +381,7 @@ func (a *API) hireFromOffer(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	out, err := a.store.HireFromOffer(r.Context(), id, store.HireInput{
-		WorkerID: req.WorkerID, LegalEntityID: req.LegalEntityID, EmploymentType: req.EmploymentType, FTEShare: share, CompPlanID: req.CompPlanID,
+		WorkerID: req.WorkerID, NewWorker: newWorker, LegalEntityID: req.LegalEntityID, EmploymentType: req.EmploymentType, FTEShare: share, CompPlanID: req.CompPlanID,
 	})
 	if err != nil {
 		a.fail(w, r, "hire from offer", err)

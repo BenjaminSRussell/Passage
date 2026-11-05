@@ -16,8 +16,8 @@ import (
 
 // Duties for the slice-4 screens (§9.46.17).
 const (
-	DutyExport      = "AnalyticsExport"
-	DutyCatalogView = "CatalogView"
+	DutyExport      = "analytics.export"
+	DutyCatalogView = "analytics.catalog.view"
 )
 
 // registerSlice4 mounts dashboards, explorer exports, schedule deliveries and

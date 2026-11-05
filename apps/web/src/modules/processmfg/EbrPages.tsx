@@ -20,6 +20,7 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import {
   approveBatchRecord,
+  batchRecordPdfUrl,
   compileBatchRecord,
   defineRecordProfile,
   describeProblem,
@@ -48,9 +49,9 @@ export const RECORD_WRITE_DUTY = "production.batch-record.write";
 /** QA duty that approves and seals (BR-24.15); the service refuses an approver who reviewed the same record (PMF-0124). */
 export const RECORD_APPROVE_DUTY = "production.batch-record.approve";
 
-/** Shown wherever a signature id is entered or sealed: the service cannot verify it yet. */
-const UNVERIFIED_SIGNATURES =
-  "Signature ids are not verified yet: there is no electronic signature service, so this record is not a 21 CFR Part 11 signed record.";
+/** Shown wherever a decision or an approval is signed (21 CFR Part 11). */
+const SIGNING_NOTE =
+  "Recording this signs it electronically under your name: the service asks you to re-authenticate and binds the signature to what you see now.";
 
 const STATUS_LABEL: Record<RecordStatus, string> = { "in-review": "In review", approved: "Approved", sealed: "Sealed" };
 const STATUS_TONE: Record<RecordStatus, "warning" | "info" | "success"> = { "in-review": "warning", approved: "info", sealed: "success" };
@@ -201,7 +202,7 @@ export function BatchRecordDetailPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [disposition, setDisposition] = useState<RecordDisposition>("accepted");
   const [comment, setComment] = useState("");
-  const [signatureId, setSignatureId] = useState("");
+  const [printedName, setPrintedName] = useState("");
   const [text, setText] = useState("");
   const [severity, setSeverity] = useState<ExceptionSeverity>("major");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -254,17 +255,16 @@ export function BatchRecordDetailPage() {
   function decide(event: FormEvent) {
     event.preventDefault();
     const found: Record<string, string> = {};
-    if (!UUID.test(signatureId.trim())) found.signatureId = "Enter the signature id as a UUID.";
+    if (printedName.trim() === "" || printedName.trim().length > 200) found.printedName = "Enter your printed name to sign.";
     if (comment.trim().length > 500) found.comment = "At most 500 characters.";
     setErrors(found);
     if (Object.keys(found).length > 0 || !selected) return;
     void run(
       "decide",
-      (k) => dispositionRecordException(record.id, selected, { version: record.version, disposition, comment: comment.trim() || undefined, signatureId: signatureId.trim() }, k),
+      (k) => dispositionRecordException(record.id, selected, { version: record.version, disposition, comment: comment.trim() || undefined, printedName: printedName.trim() }, k),
       () => {
         setSelected(null);
         setComment("");
-        setSignatureId("");
       },
     );
   }
@@ -287,7 +287,7 @@ export function BatchRecordDetailPage() {
       header: "Decision",
       render: (e) => (e.disposition ? <Badge tone={e.disposition === "rejected" ? "danger" : "success"}>{DISPOSITION_LABEL[e.disposition]}</Badge> : <Badge tone="warning">Open</Badge>),
     },
-    { key: "signatureId", header: "Signature (unverified)", mono: true, render: (e) => (e.signatureId ? shortId(e.signatureId) : dash) },
+    { key: "signatureId", header: "Signature", mono: true, render: (e) => (e.signatureId ? shortId(e.signatureId) : dash) },
     { key: "dispositionedBy", header: "Decided by", render: (e) => e.dispositionedBy ?? dash },
     {
       key: "id",
@@ -324,7 +324,14 @@ export function BatchRecordDetailPage() {
           <p className={styles.note}>
             Sealed by {record.sealedBy ?? "unknown"}. SHA-256 of the sealed document: <span className={styles.mono}>{record.contentHash}</span>
           </p>
-          <p className={styles.note}>{UNVERIFIED_SIGNATURES}</p>
+          <p className={styles.note}>
+            {sealedVerified(record.sealedDocument)
+              ? "Every decision and the approval are signed with a verified re-authentication."
+              : "Not every signature rests on a verified re-authentication, so this is not a 21 CFR Part 11 signed record."}
+          </p>
+          <p className={styles.note}>
+            <a href={batchRecordPdfUrl(record.id)}>Download the PDF</a> (rendered from the sealed document; not PDF/A yet).
+          </p>
           {record.sealedDocument ? (
             <details>
               <summary>Sealed document</summary>
@@ -342,8 +349,8 @@ export function BatchRecordDetailPage() {
       />
       {chosen && canWrite && inReview && !chosen.disposition ? (
         <Card title={`Decide: ${chosen.description}`}>
-          <Alert tone="warning" title="Signature not verified">
-            {UNVERIFIED_SIGNATURES} A decision is final once recorded.
+          <Alert tone="info" title="Electronic signature">
+            {SIGNING_NOTE} A decision is final once recorded.
           </Alert>
           <form className={styles.form} onSubmit={decide} noValidate>
             <FormField id="exc-disposition" label="Decision">
@@ -355,8 +362,8 @@ export function BatchRecordDetailPage() {
                 </Select>
               )}
             </FormField>
-            <FormField id="exc-signature" label="Signature id" hint="The electronic signature that backs the decision. It is stored as entered and not checked." error={errors.signatureId}>
-              {(c) => <Input {...c} value={signatureId} onChange={(e) => setSignatureId(e.target.value)} invalid={Boolean(errors.signatureId)} />}
+            <FormField id="exc-signature" label="Printed name" hint="Your name as it appears on the signature." error={errors.printedName}>
+              {(c) => <Input {...c} value={printedName} onChange={(e) => setPrintedName(e.target.value)} invalid={Boolean(errors.printedName)} />}
             </FormField>
             <FormField id="exc-comment" label="Comment" error={errors.comment}>
               {(c) => <Input {...c} value={comment} onChange={(e) => setComment(e.target.value)} invalid={Boolean(errors.comment)} />}
@@ -400,9 +407,25 @@ export function BatchRecordDetailPage() {
           </Button>
         ) : null}
         {canApprove && inReview ? (
-          <Button variant="primary" onClick={() => void run("approve", (k) => approveBatchRecord(record.id, record.version, k))} loading={busy === "approve"}>
-            Approve record
-          </Button>
+          <>
+            <FormField id="approve-name" label="Printed name for the approval" hint={SIGNING_NOTE} error={errors.approveName}>
+              {(c) => <Input {...c} value={printedName} onChange={(e) => setPrintedName(e.target.value)} invalid={Boolean(errors.approveName)} />}
+            </FormField>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (printedName.trim() === "" || printedName.trim().length > 200) {
+                  setErrors({ approveName: "Enter your printed name to sign." });
+                  return;
+                }
+                setErrors({});
+                void run("approve", (k) => approveBatchRecord(record.id, record.version, printedName.trim(), k));
+              }}
+              loading={busy === "approve"}
+            >
+              Approve record
+            </Button>
+          </>
         ) : null}
         {canApprove && record.status === "approved" ? (
           <Button variant="primary" onClick={() => void run("seal", (k) => sealBatchRecord(record.id, record.version, k))} loading={busy === "seal"}>
@@ -581,4 +604,14 @@ export function NewRecordProfilePage() {
       </Card>
     </div>
   );
+}
+
+/** Reads signaturesVerified from the sealed JSON document; anything unreadable counts as unverified. */
+function sealedVerified(doc: string | undefined): boolean {
+  if (!doc) return false;
+  try {
+    return (JSON.parse(doc) as { signaturesVerified?: unknown }).signaturesVerified === true;
+  } catch {
+    return false;
+  }
 }

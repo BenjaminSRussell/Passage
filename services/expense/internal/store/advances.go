@@ -213,7 +213,7 @@ func (s *Store) ListAdvances(ctx context.Context, f AdvanceFilter, after string,
 	return out, next, nil
 }
 
-// DecideAdvance approves or rejects a SUBMITTED advance (MssApprove). The user who
+// DecideAdvance approves or rejects a SUBMITTED advance (hr.team.approve). The user who
 // requested the advance may not decide it (EXP-SOD-001).
 func (s *Store) DecideAdvance(ctx context.Context, id string, approve bool, c Command) (Advance, bool, error) {
 	p, err := decider(ctx)

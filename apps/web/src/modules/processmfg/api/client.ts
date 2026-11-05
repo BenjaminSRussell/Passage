@@ -869,14 +869,20 @@ export function raiseRecordException(
 export function dispositionRecordException(
   id: string,
   exceptionId: string,
-  input: { version: number; disposition: RecordDisposition; comment?: string; signatureId: string },
+  input: { version: number; disposition: RecordDisposition; comment?: string; printedName: string },
   key: string = newKey(),
 ): Promise<BatchRecord> {
   return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}/exceptions/${encodeURIComponent(exceptionId)}:disposition`, input, key);
 }
 
-export function approveBatchRecord(id: string, version: number, key: string = newKey()): Promise<BatchRecord> {
-  return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}:approve`, { version }, key);
+/** Approves and signs the record (meaning approved); the service re-authenticates the signer. */
+export function approveBatchRecord(id: string, version: number, printedName: string, key: string = newKey()): Promise<BatchRecord> {
+  return post<BatchRecord>(`/batch-records/${encodeURIComponent(id)}:approve`, { version, printedName }, key);
+}
+
+/** The sealed record rendered as a PDF (not PDF/A yet). */
+export function batchRecordPdfUrl(id: string): string {
+  return `${base}/batch-records/${encodeURIComponent(id)}/pdf`;
 }
 
 export function sealBatchRecord(id: string, version: number, key: string = newKey()): Promise<BatchRecord> {

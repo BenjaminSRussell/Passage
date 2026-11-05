@@ -3,10 +3,17 @@ import type { Client } from "@temporalio/client";
 import { tenderResponseSignal, tenderWorkflow, tenderWorkflowId, validateTenderInput, type TenderInput } from "./tenderWorkflow.js";
 
 export const loadReleasedType = "dev.passage.tms.load.released.v1";
+/**
+ * The only producer of load.released. Its contract (events/asyncapi.yaml, schemas/current/tms.load.released.v1.json) has
+ * transport fill releasedBy and legalEntityScope from the gateway-verified principal of the release request, never from
+ * its body; the tender's scoped=true service token rests on that, so an event from any other source starts nothing.
+ */
+export const loadReleasedSource = "/passage/tms/transport";
 export const tenderOutcomeTypes = ["dev.passage.tms.tender.accepted.v1", "dev.passage.tms.tender.declined.v1"] as const;
 
 export interface LoadReleasedEvent {
   type: string;
+  source: string;
   tenantid: string;
   data: {
     loadId: string;
@@ -27,6 +34,7 @@ export interface TenderOutcomeEvent {
 
 export function toTenderInput(event: LoadReleasedEvent): TenderInput {
   if (event.type !== loadReleasedType) throw new TypeError(`expected ${loadReleasedType}, got ${event.type}`);
+  if (event.source !== loadReleasedSource) throw new TypeError(`${loadReleasedType} is accepted only from ${loadReleasedSource}, got ${event.source}`);
   const { loadId, legalEntityId, releasedBy, legalEntityScope, carriers, currency, timeoutMin } = event.data;
   const input: TenderInput = {
     tenantId: event.tenantid,

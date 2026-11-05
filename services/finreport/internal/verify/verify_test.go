@@ -53,7 +53,7 @@ func setup(t *testing.T, entity string) (*verify.Service, *fakeLedger, *pgxpool.
 		t.Fatal(err)
 	}
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: entity, UserID: "u1",
-		Duties: map[string]struct{}{"org.switcher.all_scope": {}}})
+		Duties: map[string]struct{}{"org.switcher.all-scope": {}}})
 	ledger := ids.New()
 	seed := func(period int, account, currency, net string) {
 		err := dbx.WithTenantTx(ctx, admin, func(tx pgx.Tx) error {
@@ -285,7 +285,7 @@ func TestRun_LegalEntityScopeAndTenantIsolation(t *testing.T) {
 	if list, err := svc.List(other, "", 10); err != nil || len(list) != 0 {
 		t.Errorf("another entity lists %d checks, %v", len(list), err)
 	}
-	otherTenant := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2), UserID: "u3", Duties: map[string]struct{}{"org.switcher.all_scope": {}}})
+	otherTenant := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2), UserID: "u3", Duties: map[string]struct{}{"org.switcher.all-scope": {}}})
 	if list, err := svc.List(otherTenant, "", 10); err != nil || len(list) != 0 {
 		t.Errorf("another tenant lists %d checks, %v", len(list), err)
 	}

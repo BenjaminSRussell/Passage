@@ -131,7 +131,8 @@ func TestMigrationLoaderReachesNoOtherRoute(t *testing.T) {
 	le, pid := testkit.TenantID(9), importUUID(60)
 	for _, c := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/product/products"},
-		{http.MethodGet, "/v1/product/products/" + pid},
+		{http.MethodGet, "/v1/product/products:search"},
+		{http.MethodGet, "/v1/product/products/" + pid + "/variants:lookup"},
 		{http.MethodPost, "/v1/product/products/" + pid + "/variants:explode"},
 		{http.MethodGet, "/v1/product/released-products"},
 		{http.MethodPut, "/v1/product/released-products/rp-1/site-defaults/S1"},
@@ -142,6 +143,20 @@ func TestMigrationLoaderReachesNoOtherRoute(t *testing.T) {
 		if rec := migrationCall(t, f, le, c.method, c.path, `{}`); rec.Code != http.StatusForbidden {
 			t.Errorf("%s %s with only %s = %d, want 403", c.method, c.path, importDuty, rec.Code)
 		}
+	}
+}
+
+// product.import.read opens the product detail read, so the loader can tie out what it loaded.
+func TestMigrationLoaderReadsBackAProductByID(t *testing.T) {
+	f := newFake()
+	le, pid := testkit.TenantID(9), importUUID(61)
+	body := fmt.Sprintf(`{"id":%q,"productNumber":"P-61","name":"Bolt","productType":"item","subtype":"product","baseUom":"ea","dimensionGroupId":"dg-1"}`, pid)
+	if rec := migrationCall(t, f, le, http.MethodPost, "/v1/product/products", body); rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body)
+	}
+	rec := migrationCall(t, f, le, http.MethodGet, "/v1/product/products/"+pid, "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ProductNumber":"P-61"`) {
+		t.Fatalf("read = %d %s", rec.Code, rec.Body)
 	}
 }
 

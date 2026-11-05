@@ -109,7 +109,38 @@ channels:
     messages:
       firmed:
         $ref: '#/components/messages/plannedOrderFirmed'
+  passage.shopfloor.registration:
+    address: passage.shopfloor.registration
+    description: |
+      The shop floor's stored registrations (w25), consumed by the `production-shopfloor` consumer
+      (#481, AC-25.1). A closed job-stop that names an order posts a job card on the order's process
+      job for the operation, at the worker costRate when it is in the order currency, else at the
+      resource labor rate (BR-25.9); idempotent by registrationId. The consumer reads the order's legal
+      entity first and posts as service:production-shopfloor pinned to it. Clock punches, absences,
+      open stops and stops without an order are ignored; an unknown order or operation is dead-lettered,
+      as is an event whose CloudEvents `source` is not `shopfloor`.
+    messages:
+      posted:
+        $ref: '#/components/messages/registrationPosted'
+  passage.shopfloor.registration-corrected:
+    address: passage.shopfloor.registration-corrected
+    description: |
+      The shop floor's registration corrections, consumed by the `production-shopfloor` consumer: the
+      job card of a corrected job-stop is reversed and, for positive hours, booked again at the same
+      rate. A correction that arrives before its job card is retried with backoff and dead-lettered
+      after the retries.
+    messages:
+      corrected:
+        $ref: '#/components/messages/registrationCorrected'
 operations:
+  receiveRegistrationPosted:
+    action: receive
+    channel: { $ref: '#/channels/passage.shopfloor.registration' }
+    messages: [{ $ref: '#/channels/passage.shopfloor.registration/messages/posted' }]
+  receiveRegistrationCorrected:
+    action: receive
+    channel: { $ref: '#/channels/passage.shopfloor.registration-corrected' }
+    messages: [{ $ref: '#/channels/passage.shopfloor.registration-corrected/messages/corrected' }]
   receivePlannedOrderFirmed:
     action: receive
     channel: { $ref: '#/channels/passage.planning.plannedorder' }
@@ -192,6 +223,32 @@ operations:
     messages: [{ $ref: '#/channels/passage.production.costsnapshot/messages/taken' }]
 components:
   messages:
+    registrationPosted:
+      name: posted
+      title: A shop-floor registration was stored (received from the shop floor)
+      description: 'Consumed, not published: the shop floor''s dev.passage.shopfloor.registration.posted.v1. Only the fields production reads are listed.'
+      payload:
+        type: object
+        required: [registrationId, kind]
+        properties:
+          registrationId: { type: string, format: uuid }
+          kind: { type: string, description: Only job-stop is booked. }
+          hours: { type: [string, 'null'], description: Decimal hours of a closed registration; null while open. }
+          orderRef: { type: string, description: The production order id the job belongs to. }
+          operationRef: { type: string, description: The operation number, as text. }
+          costRate: { type: string, description: The worker's hourly rate when greater than zero. }
+          costRateCurrency: { type: string, description: The currency of costRate. }
+    registrationCorrected:
+      name: corrected
+      title: A shop-floor registration was corrected (received from the shop floor)
+      description: 'Consumed, not published: the shop floor''s dev.passage.shopfloor.registration.corrected.v1. Only the fields production reads are listed.'
+      payload:
+        type: object
+        required: [registrationId, kind]
+        properties:
+          registrationId: { type: string, format: uuid }
+          kind: { type: string, description: Only job-stop is re-booked. }
+          hours: { type: [string, 'null'], description: The new decimal hours. }
     plannedOrderFirmed:
       name: firmed
       title: A planned order was firmed (received from planning)

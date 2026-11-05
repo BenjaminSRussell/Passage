@@ -42,7 +42,7 @@ func NewProblem(status int, code, detail string) *Problem {
 	return &Problem{Type: "https://passage.dev/problems/" + code, Title: http.StatusText(status), Status: status, Code: code, Detail: detail}
 }
 
-// NewRouter returns a chi router with request id, real IP, structured logging,
+// NewRouter returns a chi router with request id, trusted-proxy client IP ($PASSAGE_TRUSTED_PROXIES), structured logging,
 // panic recovery, a 30s timeout and tenant-context extraction installed.
 func NewRouter() *chi.Mux {
 	return newRouter(tenant.Middleware)
@@ -56,7 +56,7 @@ func NewRouterWithoutTenant() *chi.Mux {
 
 func newRouter(extra ...func(http.Handler) http.Handler) *chi.Mux {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(RequestTimeout))
+	r.Use(middleware.RequestID, TrustedRealIP(trustedProxiesFromEnv()), middleware.Recoverer, middleware.Timeout(RequestTimeout))
 	r.Use(logRequests)
 	r.Use(extra...)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {

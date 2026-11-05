@@ -62,7 +62,7 @@ func TestCreateRFQFromRequisitions_Rejections(t *testing.T) {
 			return strings.Replace(fromReqBody(l, ""), "2026-03-05T17:00:00Z", "2026-03-01T14:00:00Z", 1)
 		}, rfqMaintainDuty, "", 422, codeInvalid},
 		{"legal entity outside scope", func(l []store.SourcingLine) string { return fromReqBody(l, "") }, rfqMaintainDuty, ids.New(), 403, codeScope},
-		{"needs RFQMaintain", func(l []store.SourcingLine) string { return fromReqBody(l, "") }, []string{dutyRFQAward}, "", 403, codeScope},
+		{"needs procurement.rfq.maintain", func(l []store.SourcingLine) string { return fromReqBody(l, "") }, []string{dutyRFQAward}, "", 403, codeScope},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

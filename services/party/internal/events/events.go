@@ -21,12 +21,15 @@ var (
 
 	ProtectedFieldsUpdated = events.Type(Context, "protectedfields", "updated", 1)
 
+	MergeRequested = events.Type(Context, "merge", "requested", 1)
+	MergeRejected  = events.Type(Context, "merge", "rejected", 1)
+
 	VendorBankRevealed = events.Type(Context, "vendorbank", "revealed", 1)
 	VendorGroupCreated = events.Type(Context, "vendorgroup", "created", 1)
 )
 
 func All() []string {
-	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerCreated, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated, VendorBankRevealed, VendorGroupCreated}
+	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerCreated, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated, MergeRequested, MergeRejected, VendorBankRevealed, VendorGroupCreated}
 }
 
 type CustomerCreatedData struct {
@@ -93,4 +96,15 @@ type VendorGroupCreatedData struct {
 	VendorGroupID string `json:"vendor_group_id"`
 	Code          string `json:"code"`
 	Name          string `json:"name"`
+}
+
+// MergeRequestData starts the workflow-ts merge approval (merge.requested) or
+// closes it without a merge (merge.rejected); an approval is announced by party.merged.
+type MergeRequestData struct {
+	MergeRequestID  string  `json:"merge_request_id"`
+	SurvivorPartyID string  `json:"survivor_party_id"`
+	MergedPartyID   string  `json:"merged_party_id"`
+	RequestedBy     string  `json:"requested_by"`
+	DecidedBy       string  `json:"decided_by,omitempty"`
+	Reason          *string `json:"reason,omitempty"`
 }

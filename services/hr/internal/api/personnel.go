@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	dutyCompAdmin       = "HcmCompAdmin"
-	dutyRecruitMaintain = "HcmRecruitMaintain"
+	dutyCompAdmin       = "hr.compensation.admin"
+	dutyCompApprove     = "hr.compensation.approve"
+	dutyRecruitMaintain = "hr.recruiting.maintain"
 )
 
 var (
@@ -36,7 +37,7 @@ var (
 type personnelCounters struct {
 	jobs, compPlans, actionsSubmitted, actionsApplied, actionsFailed atomic.Int64
 	requisitions, candidates, offers, hires, purged, purgeHeld       atomic.Int64
-	cycles, cycleApplies                                             atomic.Int64
+	cycles, cycleApplies, cycleApprovals                             atomic.Int64
 }
 
 func (c *personnelCounters) write(counter func(name, help string, v int64)) {
@@ -53,6 +54,7 @@ func (c *personnelCounters) write(counter func(name, help string, v int64)) {
 	counter("hr_candidates_purge_held_total", "Candidates the retention purge skipped because a legal hold covers them.", c.purgeHeld.Load())
 	counter("hr_compensation_cycles_created_total", "Compensation cycles created; idempotent replays are not counted.", c.cycles.Load())
 	counter("hr_compensation_cycles_applied_total", "Compensation cycles applied.", c.cycleApplies.Load())
+	counter("hr_compensation_cycles_approved_total", "Compensation cycles approved; repeat approvals by the same user are not counted.", c.cycleApprovals.Load())
 }
 
 func (a *API) EnableRetentionPurge(on bool) *API {

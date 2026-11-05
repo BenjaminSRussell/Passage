@@ -546,7 +546,7 @@ func TestLegacyXref_OnlyTheTargetIdConfirmationMayUpdateARow(t *testing.T) {
 type readOnlySigner struct{}
 
 func (readOnlySigner) ApplyDuties(req *http.Request, p tenant.Principal, aud, legalEntity string, _ []string) (bool, error) {
-	return targettest.HeaderSigner{Name: "migration-factory"}.ApplyDuties(req, p, aud, legalEntity, []string{"ARView"})
+	return targettest.HeaderSigner{Name: "migration-factory"}.ApplyDuties(req, p, aud, legalEntity, []string{"receivables.view"})
 }
 
 func mustDec(s string) decimal.Decimal { return decimal.RequireFromString(s) }
@@ -712,10 +712,10 @@ func TestOpenItemsLoad_PayablesLinesMakeThePackStagedInTheGoNoGo(t *testing.T) {
 	e := newLoadEnv(t, 3, nil)
 	plan := func() planDTO {
 		body := `{"t0":"2027-01-01T00:00:00Z","packs":["open_items"],"entities":["USMF"],"abortOffsetHours":36}`
-		return decode[planDTO](t, do(t, e.h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: body, user: "manager"}))
+		return decode[planDTO](t, do(t, e.h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage", body: body, user: "manager"}))
 	}()
 	readiness := func() readinessDTO {
-		r := do(t, e.h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go", tenant: tenantA, duties: "CutoverManager"})
+		r := do(t, e.h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go", tenant: tenantA, duties: "migration.cutover.manage"})
 		if r.Code != http.StatusOK {
 			t.Fatalf("readiness %d %s", r.Code, r.Body)
 		}
@@ -768,7 +768,7 @@ func TestOpenItemsLoad_PayablesLinesMakeThePackStagedInTheGoNoGo(t *testing.T) {
 	}
 	// A waiver for the pack is accepted as a waiver; the GO is refused only for the other open items.
 	w := `{"decision":"GO","waivers":[{"pack":"open_items","reason":"AP opened by hand in payables"}]}`
-	r := do(t, e.h, request{method: "POST", path: "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go", tenant: tenantA, duties: "CutoverManager", user: "alice", key: "k-waive-ap", body: w})
+	r := do(t, e.h, request{method: "POST", path: "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go", tenant: tenantA, duties: "migration.cutover.manage", user: "alice", key: "k-waive-ap", body: w})
 	if r.Code != http.StatusUnprocessableEntity || strings.Contains(r.Body.String(), "nothing to waive") || !strings.Contains(r.Body.String(), "checklist items not met") {
 		t.Fatalf("waiver: %d %s", r.Code, r.Body)
 	}

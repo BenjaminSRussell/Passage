@@ -76,7 +76,7 @@ func (f *fakeStore) GetGroupAsset(_ context.Context, id string) (store.GroupAsse
 	return g, nil
 }
 
-const maintainDuties = "AssetView,AssetMaintain"
+const maintainDuties = "assets.asset.view,assets.asset.maintain"
 
 func transferReq(id, body, duties, etag string, key bool) req {
 	headers := map[string]string{}
@@ -127,7 +127,7 @@ func TestTransfer_Guards(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"without AssetMaintain", transferReq(a.ID, ok, "AssetView,AssetDispose", `"1"`, true), http.StatusForbidden, ""},
+		{"without assets.asset.maintain", transferReq(a.ID, ok, "assets.asset.view,assets.asset.dispose", `"1"`, true), http.StatusForbidden, ""},
 		{"without Idempotency-Key", transferReq(a.ID, ok, maintainDuties, `"1"`, false), http.StatusBadRequest, "COM-0001"},
 		{"without If-Match", transferReq(a.ID, ok, maintainDuties, "", true), http.StatusPreconditionRequired, store.CodeVersionConflict},
 		{"stale If-Match", transferReq(a.ID, ok, maintainDuties, `"7"`, true), http.StatusPreconditionFailed, store.CodeVersionConflict},
@@ -181,14 +181,14 @@ func TestTransfer_ValidationListsFields(t *testing.T) {
 func TestListTransfers(t *testing.T) {
 	h := server(newFake())
 	a := createAsset(t, h)
-	if rec := call(h, http.MethodGet, "/v1/assets/"+a.ID+"/transfers", "", "AssetView", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
+	if rec := call(h, http.MethodGet, "/v1/assets/"+a.ID+"/transfers", "", "assets.asset.view", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/not-a-uuid/transfers", "", "AssetView", false); rec.Code != http.StatusNotFound {
+	if rec := call(h, http.MethodGet, "/v1/assets/not-a-uuid/transfers", "", "assets.asset.view", false); rec.Code != http.StatusNotFound {
 		t.Fatalf("malformed id status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/"+a.ID+"/transfers", "", "AssetMaintain", false); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetView status = %d", rec.Code)
+	if rec := call(h, http.MethodGet, "/v1/assets/"+a.ID+"/transfers", "", "assets.asset.maintain", false); rec.Code != http.StatusForbidden {
+		t.Fatalf("without assets.asset.view status = %d", rec.Code)
 	}
 }
 
@@ -202,12 +202,12 @@ func TestCreateGroupAsset_DutyAndInput(t *testing.T) {
 	le := testLE
 	full := sprintf(groupBody, le, m1, m2)
 	if rec := call(h, http.MethodPost, "/v1/assets/group-assets", full, maintainDuties, true); rec.Code != http.StatusForbidden {
-		t.Fatalf("without AssetConfigure status = %d", rec.Code)
+		t.Fatalf("without assets.asset.configure status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodPost, "/v1/assets/group-assets", full, "AssetConfigure", false); rec.Code != http.StatusBadRequest {
+	if rec := call(h, http.MethodPost, "/v1/assets/group-assets", full, "assets.asset.configure", false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("without Idempotency-Key status = %d", rec.Code)
 	}
-	rec := call(h, http.MethodPost, "/v1/assets/group-assets", full, "AssetConfigure", true)
+	rec := call(h, http.MethodPost, "/v1/assets/group-assets", full, "assets.asset.configure", true)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -219,19 +219,19 @@ func TestCreateGroupAsset_DutyAndInput(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &g); err != nil {
 		t.Fatal(err)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/group-assets/"+g.ID, "", "AssetView", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"groupCode":"SP-2026"`) {
+	if rec := call(h, http.MethodGet, "/v1/assets/group-assets/"+g.ID, "", "assets.asset.view", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"groupCode":"SP-2026"`) {
 		t.Fatalf("get status = %d body %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/group-assets/"+ids.New(), "", "AssetConfigure", false); rec.Code != http.StatusNotFound || problem(t, rec).Code != store.CodeGroupNotFound {
+	if rec := call(h, http.MethodGet, "/v1/assets/group-assets/"+ids.New(), "", "assets.asset.configure", false); rec.Code != http.StatusNotFound || problem(t, rec).Code != store.CodeGroupNotFound {
 		t.Fatalf("unknown group status = %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/group-assets?legalEntityId="+le, "", "AssetConfigure", false); rec.Code != http.StatusOK || f.lastGroupFilter.LegalEntityID != le || f.lastGroupFilter.Limit != 50 {
+	if rec := call(h, http.MethodGet, "/v1/assets/group-assets?legalEntityId="+le, "", "assets.asset.configure", false); rec.Code != http.StatusOK || f.lastGroupFilter.LegalEntityID != le || f.lastGroupFilter.Limit != 50 {
 		t.Fatalf("list status = %d filter %+v", rec.Code, f.lastGroupFilter)
 	}
-	if rec := call(h, http.MethodGet, "/v1/assets/group-assets?limit=0", "", "AssetView", false); rec.Code != http.StatusBadRequest {
+	if rec := call(h, http.MethodGet, "/v1/assets/group-assets?limit=0", "", "assets.asset.view", false); rec.Code != http.StatusBadRequest {
 		t.Fatalf("limit 0 status = %d", rec.Code)
 	}
-	outside := do(h, req{method: http.MethodPost, path: "/v1/assets/group-assets", body: full, duties: "AssetConfigure", key: true,
+	outside := do(h, req{method: http.MethodPost, path: "/v1/assets/group-assets", body: full, duties: "assets.asset.configure", key: true,
 		headers: map[string]string{"X-Passage-Legal-Entity": ids.New()}})
 	if outside.Code != http.StatusForbidden {
 		t.Fatalf("legal entity outside scope status = %d", outside.Code)
@@ -243,7 +243,7 @@ func TestCreateGroupAsset_ValidationListsFields(t *testing.T) {
 	m := ids.New()
 	body := `{"legalEntityId":"x","groupCode":"sp","name":"","classCode":"","bookCode":"tax","taxYear":26,"method":"Pool","serviceLifePeriods":0,
 		"convention":"MidMonth1","factor":"-1","memberAssetIds":["` + m + `","` + m + `"]}`
-	rec := call(h, http.MethodPost, "/v1/assets/group-assets", body, "AssetConfigure", true)
+	rec := call(h, http.MethodPost, "/v1/assets/group-assets", body, "assets.asset.configure", true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -254,7 +254,7 @@ func TestCreateGroupAsset_ValidationListsFields(t *testing.T) {
 			t.Errorf("field %s missing from %v", field, p.Errors)
 		}
 	}
-	if rec := call(h, http.MethodPost, "/v1/assets/group-assets", sprintf(groupBody, ids.New(), "nope", m), "AssetConfigure", true); rec.Code != http.StatusBadRequest ||
+	if rec := call(h, http.MethodPost, "/v1/assets/group-assets", sprintf(groupBody, ids.New(), "nope", m), "assets.asset.configure", true); rec.Code != http.StatusBadRequest ||
 		problem(t, rec).Errors["memberAssetIds"] == "" {
 		t.Fatalf("malformed member status = %d", rec.Code)
 	}

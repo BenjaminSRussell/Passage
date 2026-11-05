@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	dutyLearningAdmin = "HcmLearningAdmin"
-	dutyEssLearning   = "EssLearning"
+	dutyLearningAdmin = "hr.learning.admin"
+	dutyEssLearning   = "hr.learning.self"
 
 	crsMaxSkills      = 20
 	crsMaxGroup       = 60
@@ -303,7 +303,7 @@ func parseCompletion(lines []completionLine) ([]store.Outcome, map[string]string
 	return out, fields
 }
 
-// createCourse is POST /v1/hr/courses (HcmLearningAdmin).
+// createCourse is POST /v1/hr/courses (hr.learning.admin).
 func (a *API) createCourse(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -332,7 +332,7 @@ func (a *API) createCourse(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, status, out)
 }
 
-// listCourses is GET /v1/hr/courses (EssLearning): every employee browses
+// listCourses is GET /v1/hr/courses (hr.learning.self): every employee browses
 // the catalog. Paged by code.
 func (a *API) listCourses(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
@@ -363,7 +363,7 @@ func (a *API) getCourse(w http.ResponseWriter, r *http.Request, id string) {
 	httpx.JSON(w, http.StatusOK, course)
 }
 
-// createSession is POST /v1/hr/courses/{id}/sessions (HcmLearningAdmin).
+// createSession is POST /v1/hr/courses/{id}/sessions (hr.learning.admin).
 func (a *API) createSession(w http.ResponseWriter, r *http.Request, courseID string) {
 	var req sessionRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -412,7 +412,7 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 // listRegistrations is GET /v1/hr/courses/sessions/{id}/registrations
-// (HcmLearningAdmin): the attendance list in registration order.
+// (hr.learning.admin): the attendance list in registration order.
 func (a *API) listRegistrations(w http.ResponseWriter, r *http.Request, id string) {
 	items, err := a.store.ListRegistrations(r.Context(), id)
 	if err != nil {
@@ -430,8 +430,8 @@ type registrationResponse struct {
 	Warnings []domain.RuleWarning `json:"warnings"`
 }
 
-// crsOwnOnly: an employee with only EssLearning acts on their own
-// registrations; a learning administrator or a manager (MssApprove) registers
+// crsOwnOnly: an employee with only hr.learning.self acts on their own
+// registrations; a learning administrator or a manager (hr.team.approve) registers
 // and cancels for others (8.42.7 "Register worker (self or manager)").
 func crsOwnOnly(r *http.Request) bool {
 	p := caller(r)
@@ -439,7 +439,7 @@ func crsOwnOnly(r *http.Request) bool {
 }
 
 // registerForSession is POST /v1/hr/courses/sessions/{id}/registrations
-// (EssLearning). It answers 201 with a new registration and 200 with the
+// (hr.learning.self). It answers 201 with a new registration and 200 with the
 // worker's existing one; a full session and waitlist is HCM-CRS-001.
 func (a *API) registerForSession(w http.ResponseWriter, r *http.Request, id string) {
 	var req registerRequest
@@ -465,7 +465,7 @@ func (a *API) registerForSession(w http.ResponseWriter, r *http.Request, id stri
 	httpx.JSON(w, status, registrationResponse{Registration: reg, Warnings: warnings})
 }
 
-// approveRegistration is POST /v1/hr/courses/registrations/{id}/approve (MssApprove).
+// approveRegistration is POST /v1/hr/courses/registrations/{id}/approve (hr.team.approve).
 func (a *API) approveRegistration(w http.ResponseWriter, r *http.Request, id string) {
 	if tenantWide := caller(r).HasDuty(dutyLearningAdmin); !tenantWide {
 		workerID, err := a.store.RegistrationWorker(r.Context(), id)
@@ -486,7 +486,7 @@ func (a *API) approveRegistration(w http.ResponseWriter, r *http.Request, id str
 	httpx.JSON(w, http.StatusOK, reg)
 }
 
-// cancelRegistration is POST /v1/hr/courses/registrations/{id}/cancel (EssLearning).
+// cancelRegistration is POST /v1/hr/courses/registrations/{id}/cancel (hr.learning.self).
 func (a *API) cancelRegistration(w http.ResponseWriter, r *http.Request, id string) {
 	reg, changed, err := a.store.CancelRegistration(r.Context(), id, crsOwnOnly(r))
 	if err != nil {
@@ -500,7 +500,7 @@ func (a *API) cancelRegistration(w http.ResponseWriter, r *http.Request, id stri
 	httpx.JSON(w, http.StatusOK, reg)
 }
 
-// completeSession is POST /v1/hr/courses/sessions/{id}/complete (HcmLearningAdmin).
+// completeSession is POST /v1/hr/courses/sessions/{id}/complete (hr.learning.admin).
 func (a *API) completeSession(w http.ResponseWriter, r *http.Request, id string) {
 	var req completionRequest
 	if err := httpx.Decode(r, &req); err != nil {

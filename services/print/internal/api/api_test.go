@@ -224,7 +224,7 @@ func seedDock(t *testing.T, h http.Handler) {
 	t.Helper()
 	for i, code := range []string{"DOCK-1", "DOCK-2"} {
 		body := fmt.Sprintf(`{"code":%q,"name":"Dock","deviceType":"ZPL_II","dpi":203,"host":"10.0.4.%d","queueCode":"DOCK","failoverRank":%d}`, code, 20+i, i+1)
-		if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-"+code); rec.Code != http.StatusCreated {
+		if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "print.admin", "reg-"+code); rec.Code != http.StatusCreated {
 			t.Fatalf("register %s: %d %s", code, rec.Code, rec.Body)
 		}
 	}
@@ -238,7 +238,7 @@ func registerMedia(t *testing.T, h http.Handler, medias ...string) {
 		code := fmt.Sprintf("DOCK-%d", i+1)
 		body := fmt.Sprintf(`{"code":%q,"name":"Dock","deviceType":"ZPL_II","dpi":203,"mediaSize":%q,"host":"10.0.4.%d","queueCode":"DOCK","failoverRank":%d}`,
 			code, media, 20+i, i+1)
-		if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-"+code); rec.Code != http.StatusCreated {
+		if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "print.admin", "reg-"+code); rec.Code != http.StatusCreated {
 			t.Fatalf("register %s: %d %s", code, rec.Code, rec.Body)
 		}
 	}
@@ -253,7 +253,7 @@ func TestCreateJob_FailsOverWhenLabelDoesNotFitDevice(t *testing.T) {
 	sender := &fakeSender{}
 	h := router(newMemStore(), sender)
 	registerMedia(t, h, domain.Media2x1In, domain.Media4x6In)
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", cartonBody, "WMS_PRINT", "carton-fit-1")
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", cartonBody, "print.job.submit", "carton-fit-1")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create job: %d %s", rec.Code, rec.Body)
 	}
@@ -281,7 +281,7 @@ func TestCreateJob_OneInchDevicePrintsCompactLayout(t *testing.T) {
 	ms := newMemStore()
 	h := router(ms, sender)
 	registerMedia(t, h, domain.Media2x1In, domain.Media4x6In)
-	job := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-small-1"))
+	job := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "lp-small-1"))
 	if job.Status != domain.JobPrinted || job.PrinterCode != "DOCK-1" || job.Attempts != 1 {
 		t.Fatalf("want PRINTED on the 2 x 1 in DOCK-1 without failover, got %s on %q after %d attempts", job.Status, job.PrinterCode, job.Attempts)
 	}
@@ -308,9 +308,9 @@ func TestCreateJob_ReprintOnOneInchDeviceFailsOver(t *testing.T) {
 	sender := &fakeSender{}
 	h := router(newMemStore(), sender)
 	registerMedia(t, h, domain.Media2x1In, domain.Media4x6In)
-	orig := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "lp-orig"))
+	orig := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "lp-orig"))
 	body := fmt.Sprintf(`{"queueCode":"DOCK","reprintOf":%q}`, orig.ID)
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", body, "WMS_PRINT", "lp-reprint")
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", body, "print.job.submit", "lp-reprint")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("reprint: %d %s", rec.Code, rec.Body)
 	}
@@ -331,7 +331,7 @@ func decodeJob(t *testing.T, rec *httptest.ResponseRecorder) domain.Job {
 func TestCreateJob_PrintsOnFirstPrinter(t *testing.T) {
 	h := router(newMemStore(), &fakeSender{down: map[string]bool{}})
 	seedDock(t, h)
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-1")
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-1")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -348,7 +348,7 @@ func TestCreateJob_FailsOverWhenFirstPrinterIsDown(t *testing.T) {
 	sender := &fakeSender{down: map[string]bool{"DOCK-1": true}}
 	h := router(newMemStore(), sender)
 	seedDock(t, h)
-	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-2"))
+	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-2"))
 	if j.Status != domain.JobPrinted || j.PrinterCode != "DOCK-2" || j.Attempts != 3 {
 		t.Fatalf("failover job = %+v", j)
 	}
@@ -358,7 +358,7 @@ func TestCreateJob_FailedWhenNoPrinterAcceptsAndSurfacesCode(t *testing.T) {
 	sender := &fakeSender{down: map[string]bool{"DOCK-1": true, "DOCK-2": true}}
 	h := router(newMemStore(), sender)
 	seedDock(t, h)
-	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-3"))
+	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-3"))
 	if j.Status != domain.JobFailed || j.LastError != domain.CodeUnreachable {
 		t.Fatalf("job = %+v", j)
 	}
@@ -366,7 +366,7 @@ func TestCreateJob_FailedWhenNoPrinterAcceptsAndSurfacesCode(t *testing.T) {
 
 func TestCreateJob_NoRoutedPrinterFailsWithMOB0112(t *testing.T) {
 	h := router(newMemStore(), &fakeSender{down: map[string]bool{}})
-	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-4"))
+	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-4"))
 	if j.Status != domain.JobFailed || j.LastError != domain.CodeNoPrinter {
 		t.Fatalf("job = %+v", j)
 	}
@@ -376,8 +376,8 @@ func TestCreateJob_ReplayReturnsStoredJobWithoutPrinting(t *testing.T) {
 	sender := &fakeSender{down: map[string]bool{}}
 	h := router(newMemStore(), sender)
 	seedDock(t, h)
-	first := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-5"))
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-5")
+	first := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-5"))
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-5")
 	if rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replay status %d headers %v", rec.Code, rec.Header())
 	}
@@ -392,9 +392,9 @@ func TestCreateJob_ReplayReturnsStoredJobWithoutPrinting(t *testing.T) {
 func TestCreateJob_ReusedKeyWithDifferentBodyIsRefused(t *testing.T) {
 	h := router(newMemStore(), &fakeSender{down: map[string]bool{}})
 	seedDock(t, h)
-	call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-6")
+	call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-6")
 	other := strings.Replace(lpBody, "WIDGET", "GADGET", 1)
-	if rec := call(t, h, http.MethodPost, "/print/v1/jobs", other, "WMS_PRINT", "job-6"); rec.Code != http.StatusUnprocessableEntity {
+	if rec := call(t, h, http.MethodPost, "/print/v1/jobs", other, "print.job.submit", "job-6"); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d, want 422", rec.Code)
 	}
 }
@@ -403,9 +403,9 @@ func TestCreateJob_ReprintReusesStoredZPL(t *testing.T) {
 	sender := &fakeSender{down: map[string]bool{}}
 	h := router(newMemStore(), sender)
 	seedDock(t, h)
-	orig := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "WMS_PRINT", "job-7"))
+	orig := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", lpBody, "print.job.submit", "job-7"))
 	body := fmt.Sprintf(`{"queueCode":"DOCK","reprintOf":%q}`, orig.ID)
-	re := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", body, "WMS_PRINT", "job-8"))
+	re := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", body, "print.job.submit", "job-8"))
 	if re.ID == orig.ID || re.ReprintOf == nil || *re.ReprintOf != orig.ID || re.TemplateCode != orig.TemplateCode {
 		t.Fatalf("reprint = %+v", re)
 	}
@@ -424,11 +424,11 @@ func TestCreateJob_ValidationAndDuties(t *testing.T) {
 		key    string
 		want   int
 	}{
-		{"missing idempotency key", lpBody, "WMS_PRINT", "", http.StatusBadRequest},
-		{"unknown template", `{"templateCode":"NOPE","queueCode":"DOCK","data":{}}`, "WMS_PRINT", "k-a", http.StatusBadRequest},
-		{"missing field", `{"templateCode":"LP_LABEL","queueCode":"DOCK","data":{"lp":"x"}}`, "WMS_PRINT", "k-b", http.StatusBadRequest},
-		{"zpl injection in data", strings.Replace(lpBody, "WIDGET", "^XA", 1), "WMS_PRINT", "k-c", http.StatusBadRequest},
-		{"bad sscc", strings.Replace(lpBody, "340123456789012340", "340123456789012341", 1), "WMS_PRINT", "k-d", http.StatusBadRequest},
+		{"missing idempotency key", lpBody, "print.job.submit", "", http.StatusBadRequest},
+		{"unknown template", `{"templateCode":"NOPE","queueCode":"DOCK","data":{}}`, "print.job.submit", "k-a", http.StatusBadRequest},
+		{"missing field", `{"templateCode":"LP_LABEL","queueCode":"DOCK","data":{"lp":"x"}}`, "print.job.submit", "k-b", http.StatusBadRequest},
+		{"zpl injection in data", strings.Replace(lpBody, "WIDGET", "^XA", 1), "print.job.submit", "k-c", http.StatusBadRequest},
+		{"bad sscc", strings.Replace(lpBody, "340123456789012340", "340123456789012341", 1), "print.job.submit", "k-d", http.StatusBadRequest},
 		{"no duty", lpBody, "", "k-e", http.StatusForbidden},
 	}
 	for _, c := range cases {
@@ -443,15 +443,15 @@ func TestCreateJob_ValidationAndDuties(t *testing.T) {
 func TestPrinterRegistration_ValidatesAndDefaultsRawPort(t *testing.T) {
 	h := router(newMemStore(), &fakeSender{down: map[string]bool{}})
 	bad := `{"code":"x","name":"","deviceType":"LASER","dpi":150,"host":"","queueCode":"DOCK","failoverRank":0}`
-	if rec := call(t, h, http.MethodPost, "/print/v1/printers", bad, "WMS_PRINT_ADMIN", "p-bad"); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodPost, "/print/v1/printers", bad, "print.admin", "p-bad"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", rec.Code)
 	}
 	ok := `{"code":"PRT-1","name":"Pack","deviceType":"ZPL_II","dpi":300,"host":"10.0.5.9","queueCode":"PACK","failoverRank":1}`
-	rec := call(t, h, http.MethodPost, "/print/v1/printers", ok, "WMS_PRINT_ADMIN", "p-ok")
+	rec := call(t, h, http.MethodPost, "/print/v1/printers", ok, "print.admin", "p-ok")
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"port":9100`) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body)
 	}
-	if rec := call(t, h, http.MethodGet, "/print/v1/printers", "", "WMS_PRINT", ""); rec.Code != http.StatusOK {
+	if rec := call(t, h, http.MethodGet, "/print/v1/printers", "", "print.job.submit", ""); rec.Code != http.StatusOK {
 		t.Fatalf("list status %d", rec.Code)
 	}
 }
@@ -473,7 +473,7 @@ func TestCreateJob_ItemLabelComposesGS1FromFields(t *testing.T) {
 	h := router(ms, &fakeSender{down: map[string]bool{}})
 	seedDock(t, h)
 	item := `{"templateCode":"ITEM_LABEL","queueCode":"DOCK","data":{"gtin":"09501101020917","lot":"123ABC","expiry":"261231","serial":"SN0007"}}`
-	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", item, "WMS_PRINT", "item-1"))
+	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", item, "print.job.submit", "item-1"))
 	if j.Status != domain.JobPrinted || j.TemplateCode != domain.TemplateItem {
 		t.Fatalf("item label job = %+v", j)
 	}
@@ -481,7 +481,7 @@ func TestCreateJob_ItemLabelComposesGS1FromFields(t *testing.T) {
 		t.Fatalf("stored ZPL lacks the GS1 element string %q:\n%s", want, ms.jobs[j.ID].ZPL)
 	}
 	bad := strings.Replace(item, "09501101020917", "09501101020918", 1)
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", bad, "WMS_PRINT", "item-2")
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", bad, "print.job.submit", "item-2")
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), domain.CodeInvalid) {
 		t.Fatalf("bad GTIN: %d %s, want 400 %s", rec.Code, rec.Body, domain.CodeInvalid)
 	}
@@ -491,11 +491,11 @@ func TestCreateJob_CartonLabelNeedsShipTo(t *testing.T) {
 	h := router(newMemStore(), &fakeSender{down: map[string]bool{}})
 	seedDock(t, h)
 	carton := `{"templateCode":"GS1_CARTON_LABEL","queueCode":"DOCK","data":{"sscc":"340123456789012340","poNumber":"PO-7781","shipToPostal":"60601"}}`
-	if rec := call(t, h, http.MethodPost, "/print/v1/jobs", carton, "WMS_PRINT", "carton-1"); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodPost, "/print/v1/jobs", carton, "print.job.submit", "carton-1"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("carton without shipToName: %d %s, want 400", rec.Code, rec.Body)
 	}
 	carton = strings.Replace(carton, `"sscc"`, `"shipToName":"ACME DC","sscc"`, 1)
-	if j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", carton, "WMS_PRINT", "carton-2")); j.Status != domain.JobPrinted {
+	if j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", carton, "print.job.submit", "carton-2")); j.Status != domain.JobPrinted {
 		t.Fatalf("carton label status %s, want PRINTED", j.Status)
 	}
 }
@@ -507,7 +507,7 @@ func TestCreatePrinter_DefaultsPortByDeviceType(t *testing.T) {
 		port       int
 	}{{"ZPL_II", 9100}, {"PCL_6", 9100}, {"PDF_IPP", 631}} {
 		body := fmt.Sprintf(`{"code":"P-%s","name":"Office","deviceType":%q,"dpi":600,"host":"10.0.9.1","queueCode":"OFFICE-%s","failoverRank":1}`, c.deviceType, c.deviceType, c.deviceType)
-		rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "port-"+c.deviceType)
+		rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "print.admin", "port-"+c.deviceType)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("%s: %d %s", c.deviceType, rec.Code, rec.Body)
 		}
@@ -527,11 +527,11 @@ func TestCreateJob_FailsWithMediaMismatchWhenNoDeviceFits(t *testing.T) {
 	sender := &fakeSender{}
 	h := router(newMemStore(), sender)
 	body := `{"code":"DOCK-1","name":"Dock","deviceType":"ZPL_II","dpi":300,"mediaSize":"3X1_IN","host":"10.0.4.20","queueCode":"DOCK","failoverRank":1}`
-	if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "reg-small"); rec.Code != http.StatusCreated {
+	if rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "print.admin", "reg-small"); rec.Code != http.StatusCreated {
 		t.Fatalf("register: %d %s", rec.Code, rec.Body)
 	}
 	// The carton label is 4 x 6 in only; the LP label would print its 1 in layout here.
-	rec := call(t, h, http.MethodPost, "/print/v1/jobs", cartonBody, "WMS_PRINT", "carton-misfit-1")
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", cartonBody, "print.job.submit", "carton-misfit-1")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create job: %d %s", rec.Code, rec.Body)
 	}

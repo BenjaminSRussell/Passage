@@ -309,6 +309,6 @@ func TestOrderVersions_ListAndDiff(t *testing.T) {
 		}
 	}
 	if rec := h.do(call{method: "GET", path: poPath(po.ID) + "/versions", duties: []string{dutyPurchaseOrderMaintain}}); rec.Code != 403 {
-		t.Fatalf("versions without PurchaseOrderInquire: %d", rec.Code)
+		t.Fatalf("versions without procurement.purchase-order.inquire: %d", rec.Code)
 	}
 }

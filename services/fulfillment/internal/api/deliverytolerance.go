@@ -17,8 +17,8 @@ import (
 // routesDeliveryTolerance mounts the over-delivery tolerance per product and
 // customer (BR-28.7, FUL-0005).
 func (a *API) routesDeliveryTolerance(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/delivery-tolerances", a.listDeliveryTolerances)
-	r.With(authz.RequireDuty("PackingRuleMaintain")).Put("/v1/fulfillment/delivery-tolerances", a.saveDeliveryTolerance)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/delivery-tolerances", a.listDeliveryTolerances)
+	r.With(authz.RequireDuty("fulfillment.packing-rule.maintain")).Put("/v1/fulfillment/delivery-tolerances", a.saveDeliveryTolerance)
 }
 
 type deliveryToleranceRequest struct {

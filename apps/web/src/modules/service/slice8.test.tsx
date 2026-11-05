@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 /** Office staff keying in a device's actions: the technician duty and work-order maintenance. */
-const TECHNICIAN = ["SvcInquire", "SvcTechnician", "SvcWoMaintain"];
+const TECHNICIAN = ["fieldservice.inquire", "fieldservice.work-order.execute", "fieldservice.work-order.maintain"];
 
 function renderAt(path: string, duties: readonly string[] = TECHNICIAN) {
   return render(
@@ -211,9 +211,9 @@ describe("technician action log", () => {
 
   it("offers no entry form without the technician duty or before the work order is assigned", async () => {
     handler = route([]);
-    for (const duties of [["SvcInquire"], ["SvcInquire", "SvcTechnician"], ["SvcInquire", "SvcWoMaintain"]]) {
+    for (const duties of [["fieldservice.inquire"], ["fieldservice.inquire", "fieldservice.work-order.execute"], ["fieldservice.inquire", "fieldservice.work-order.maintain"]]) {
       const { unmount } = renderAt(`/service/work-orders/${WO}`, duties);
-      expect(await screen.findByText(/needs the SvcTechnician and SvcWoMaintain duties/)).toBeInTheDocument();
+      expect(await screen.findByText(/needs the fieldservice.work-order.execute and fieldservice.work-order.maintain duties/)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Record action" })).toBeNull();
       unmount();
     }

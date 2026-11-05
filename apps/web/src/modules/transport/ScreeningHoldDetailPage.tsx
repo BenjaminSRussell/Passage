@@ -17,7 +17,7 @@ export function validateRelease(reason: string): string | undefined {
   return undefined;
 }
 
-/** Release the hold with a reason (TRADE_COMPLIANCE_RELEASE). The reason and your user stay on the hold. */
+/** Release the hold with a reason (transport.screening-hold.release). The reason and your user stay on the hold. */
 function ReleaseCard({ hold, onDone }: { hold: ScreeningHold; onDone(h: ScreeningHold): void }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | undefined>();

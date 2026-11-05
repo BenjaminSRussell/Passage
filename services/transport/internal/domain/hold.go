@@ -7,7 +7,7 @@ import (
 )
 
 // Screening hold states (BR-34.17). A hold opens when a load screen decides HOLD
-// and closes only when a TRADE_COMPLIANCE_RELEASE user releases it with a reason;
+// and closes only when a transport.screening-hold.release user releases it with a reason;
 // the hook never clears it on its own.
 const (
 	HoldOpen     = "OPEN"

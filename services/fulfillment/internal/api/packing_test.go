@@ -14,7 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 )
 
-const packingDuties = "WarehouseView,WarehousePack,PackingSlipPost,PackingRuleMaintain,PackagingFeeMaintain,WarehouseReceive"
+const packingDuties = "fulfillment.warehouse.view,fulfillment.warehouse.pack,fulfillment.packing-slip.post,fulfillment.packing-rule.maintain,fulfillment.packaging-fee.maintain,fulfillment.warehouse.receive"
 
 var packingHeaders = map[string]string{"X-Passage-Duties": packingDuties}
 
@@ -199,14 +199,14 @@ func TestPackingRuleMaintainIsRequired(t *testing.T) {
 	h := newServer(t, &fakeStore{})
 	body := `{"productId":"` + ids.New() + `","containerType":"C12","qtyPerContainer":"12","maxWeightKg":"15"}`
 	rec := do(t, h, http.MethodPost, "/v1/fulfillment/packing-rules", body,
-		map[string]string{"Idempotency-Key": "k", "X-Passage-Duties": "WarehouseView,WarehousePack"})
+		map[string]string{"Idempotency-Key": "k", "X-Passage-Duties": "fulfillment.warehouse.view,fulfillment.warehouse.pack"})
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 without PackingRuleMaintain", rec.Code)
+		t.Fatalf("status = %d, want 403 without fulfillment.packing-rule.maintain", rec.Code)
 	}
 	rec = do(t, h, http.MethodPost, "/v1/fulfillment/returnable-packaging:return", `{"customerId":"`+ids.New()+`","containerType":"PALLET","qty":"1"}`,
-		map[string]string{"Idempotency-Key": "k2", "X-Passage-Duties": "WarehouseView"})
+		map[string]string{"Idempotency-Key": "k2", "X-Passage-Duties": "fulfillment.warehouse.view"})
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 without WarehouseReceive", rec.Code)
+		t.Fatalf("status = %d, want 403 without fulfillment.warehouse.receive", rec.Code)
 	}
 }
 
@@ -379,18 +379,18 @@ func TestAdjustReturnable_ValidatesAndNeedsTheMaintainDuty(t *testing.T) {
 	h := newServer(t, fs)
 	cust := ids.New()
 	path := "/v1/fulfillment/returnable-packaging:adjust"
-	maintain := withKey("adj-1", map[string]string{"X-Passage-Duties": "ReturnablePackagingMaintain"})
+	maintain := withKey("adj-1", map[string]string{"X-Passage-Duties": "fulfillment.returnable-packaging.maintain"})
 	body := func(delta, reason string) string {
 		return `{"customerId":"` + cust + `","containerType":"PALLET","delta":"` + delta + `","reason":"` + reason + `","reference":" count sheet 7 "}`
 	}
-	// Receiving returns does not let a caller correct a balance: WarehouseReceive is the
-	// duty section 5.28.17 lists as the conflict of ReturnablePackagingMaintain.
+	// Receiving returns does not let a caller correct a balance: fulfillment.warehouse.receive is the
+	// duty section 5.28.17 lists as the conflict of fulfillment.returnable-packaging.maintain.
 	if rec := do(t, h, http.MethodPost, path, body("3", "Opening balance"), withKey("adj-r", nil)); rec.Code != http.StatusForbidden {
-		t.Fatalf("with WarehouseReceive but not ReturnablePackagingMaintain: status = %d, want 403", rec.Code)
+		t.Fatalf("with fulfillment.warehouse.receive but not fulfillment.returnable-packaging.maintain: status = %d, want 403", rec.Code)
 	}
-	// ReturnablePackagingMaintain alone is enough.
-	if rec := do(t, h, http.MethodPost, path, body("3", "Opening balance"), withKey("adj-0", map[string]string{"X-Passage-Duties": "ReturnablePackagingMaintain"})); rec.Code != http.StatusCreated {
-		t.Fatalf("with only ReturnablePackagingMaintain: status = %d body = %s, want 201", rec.Code, rec.Body.String())
+	// fulfillment.returnable-packaging.maintain alone is enough.
+	if rec := do(t, h, http.MethodPost, path, body("3", "Opening balance"), withKey("adj-0", map[string]string{"X-Passage-Duties": "fulfillment.returnable-packaging.maintain"})); rec.Code != http.StatusCreated {
+		t.Fatalf("with only fulfillment.returnable-packaging.maintain: status = %d body = %s, want 201", rec.Code, rec.Body.String())
 	}
 	for _, delta := range []string{"0", "1.5", "+2", "abc", "", "1000000000"} {
 		rec := do(t, h, http.MethodPost, path, body(delta, "Opening balance"), maintain)
@@ -418,7 +418,7 @@ func TestAdjustReturnable_ValidatesAndNeedsTheMaintainDuty(t *testing.T) {
 		t.Fatalf("idempotency key = %q, want adj-1", fs.lastIdem.Key)
 	}
 	// No Idempotency-Key is a 400.
-	noKey := map[string]string{"X-Passage-Duties": "ReturnablePackagingMaintain"}
+	noKey := map[string]string{"X-Passage-Duties": "fulfillment.returnable-packaging.maintain"}
 	if rec := do(t, h, http.MethodPost, path, body("2", "Opening balance"), noKey); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), CodeIdemMissing) {
 		t.Fatalf("status = %d body = %s, want 400 %s", rec.Code, rec.Body.String(), CodeIdemMissing)
 	}
@@ -439,8 +439,8 @@ func TestListReturnableMovements_FiltersAndRejectsBadParameters(t *testing.T) {
 		rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/movements?"+q, "", packingHeaders)
 		expectField(t, rec, rec.Body.String(), field)
 	}
-	// Reading needs only WarehouseView.
-	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/movements", "", map[string]string{"X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 without WarehouseView", rec.Code)
+	// Reading needs only fulfillment.warehouse.view.
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/movements", "", map[string]string{"X-Passage-Duties": "fulfillment.warehouse.pick"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 without fulfillment.warehouse.view", rec.Code)
 	}
 }

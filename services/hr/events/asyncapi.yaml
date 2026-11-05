@@ -58,6 +58,8 @@ channels:
     messages:
       compensationCycleApplied:
         $ref: "#/components/messages/CompensationCycleApplied"
+      compensationCycleApproved:
+        $ref: "#/components/messages/CompensationCycleApproved"
   requisitionChanged:
     address: passage.hr.requisition
     messages:
@@ -168,6 +170,12 @@ operations:
       $ref: "#/channels/compensationCycleApplied"
     messages:
       - $ref: "#/channels/compensationCycleApplied/messages/compensationCycleApplied"
+  publishCompensationCycleApproved:
+    action: send
+    channel:
+      $ref: "#/channels/compensationCycleApplied"
+    messages:
+      - $ref: "#/channels/compensationCycleApplied/messages/compensationCycleApproved"
   publishRequisitionChanged:
     action: send
     channel:
@@ -205,6 +213,18 @@ components:
           action_ids:
             type: array
             items: {type: string, format: uuid}
+    CompensationCycleApproved:
+      name: dev.passage.hr.compensationcycle.approved.v1
+      description: A compensation cycle in APPROVAL was approved by a user who did not create it, submit any of its worksheets, or appear on a submitted row as the worker or the proposing manager. Apply needs this approval.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [cycle_id, effective_date, approved_by, rows]
+        properties:
+          cycle_id: {type: string, format: uuid}
+          effective_date: {type: string, format: date}
+          approved_by: {type: string}
+          rows: {type: integer}
     RequisitionChanged:
       name: dev.passage.hr.requisition.changed.v1
       description: A job requisition was created or its status changed, including FILLED and back to OPEN as hires count against its headcount.

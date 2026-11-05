@@ -245,6 +245,9 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 	case domain.PackOpenOrders:
 		s.startOpenOrdersRun(w, r)
 		return
+	case domain.PackWIPProd, domain.PackFixedAssets, domain.PackPayrollYTD:
+		s.startStagedRun(w, r, pack)
+		return
 	}
 	var req packRunRequest
 	idem, err := readCommand(r, &req, packRunBodyLimit)

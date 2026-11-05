@@ -7,7 +7,7 @@ import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, wi
 import styles from "./pages.module.css";
 import { emptyRateType, normalizeCode, validateRateType, type Errors, type RateTypeValues } from "./validate";
 
-const DUTY = "Maintain exchange rates";
+const DUTY = "fx.rate.maintain";
 const FIELDS = ["code", "name", "provider"] as const;
 const RATE_TYPE_EXISTS = "FX_RATE_TYPE_EXISTS";
 const CODE_TAKEN = "A rate type with this code already exists. Open it in the table to edit it.";
@@ -141,7 +141,7 @@ export function RateTypesPage() {
         <ApiFailure
           error={types.error}
           title="Could not load the rate types"
-          duty="View exchange rates"
+          duty="fx.rate.view"
           action={
             <Button variant="secondary" loading={types.isFetching} onClick={() => void types.refetch()}>
               Try again

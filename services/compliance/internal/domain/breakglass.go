@@ -16,16 +16,16 @@ const (
 	BreakGlassMaxReviewDays  = 10
 )
 
-// Approver duties. A session granting a protected role needs a second PlatformAdmin
-// (BR-48.19); any other session is approved by a BreakGlassApprove holder.
+// Approver duties. A session granting a protected role needs a second platform.global.admin
+// (BR-48.19); any other session is approved by a compliance.break-glass.approve holder.
 const (
-	ApproverBreakGlass    = "BreakGlassApprove"
-	ApproverPlatformAdmin = "PlatformAdmin"
+	ApproverBreakGlass    = "compliance.break-glass.approve"
+	ApproverPlatformAdmin = "platform.global.admin"
 )
 
 // Break-glass codes.
 const (
-	CodeBreakGlassSelfGrant = "SEC-0707" // cannot grant SecurityAdmin or PlatformAdmin to yourself
+	CodeBreakGlassSelfGrant = "SEC-0707" // cannot grant compliance.security.admin or platform.global.admin to yourself
 	CodeBreakGlassReview    = "SEC-0708" // session not reviewed within the SLA
 	CodeBreakGlassRequest   = "SEC-0713" // request incomplete or out of range
 )
@@ -40,7 +40,7 @@ var breakGlassReasons = map[string]bool{
 }
 
 // Roles a user can never be granted through break-glass by themselves (BR-48.19).
-var protectedRoles = map[string]bool{"SecurityAdmin": true, "PlatformAdmin": true}
+var protectedRoles = map[string]bool{"compliance.security.admin": true, "platform.global.admin": true}
 
 // ElevatedRequest is a break-glass request. RequesterID is the calling user, never a
 // value the client chooses; TenantMaxMinutes, SelfActivate and ReviewDays are the tenant
@@ -73,7 +73,7 @@ type ElevatedPlan struct {
 // PlanElevatedSession validates a request and computes the session window, the approval
 // path and the reviewer deadline. The session length is capped at min(tenant max, 240).
 // Roles are trimmed and de-duplicated. A protected role is never self-activated: it waits
-// for a second PlatformAdmin (BR-48.19). Every session, approved or self-activated, gets a
+// for a second platform.global.admin (BR-48.19). Every session, approved or self-activated, gets a
 // reviewer deadline counted from its end (FR-48.23). SoD evaluation for the session is run
 // by the caller on the granted roles.
 func PlanElevatedSession(r ElevatedRequest) (ElevatedPlan, error) {

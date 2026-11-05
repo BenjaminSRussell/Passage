@@ -100,9 +100,9 @@ describe("tolerances list", () => {
   });
 
   it("shows a failure with a way to retry", async () => {
-    handler = () => json(403, { code: "AUTH-0003", detail: "missing duty MigrationView" });
+    handler = () => json(403, { code: "AUTH-0003", detail: "missing duty migration.factory.view" });
     renderAt("/migration-factory/tolerances");
-    expect(await screen.findByText(/missing duty MigrationView \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty migration.factory.view \(AUTH-0003\)/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

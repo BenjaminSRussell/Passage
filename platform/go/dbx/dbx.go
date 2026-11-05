@@ -29,6 +29,58 @@ func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
 
 // Migrate applies every *.sql file in migrations (sorted by name) that has
 // not been recorded in schema_migrations. Each file runs in its own transaction.
+// NoTransactionMarker, as a migration file's first line, runs the file outside a transaction, one statement at a
+// time (statements end with ';' at the end of a line). Use it for CREATE INDEX CONCURRENTLY, which Postgres refuses
+// inside a transaction. A concurrent build that fails leaves an INVALID index, so such a file should drop an invalid
+// leftover before it builds (see ledger 0032).
+const NoTransactionMarker = "-- dbx:no-transaction"
+
+func migrateNoTx(ctx context.Context, pool *pgxpool.Pool, name, body string) error {
+	for _, stmt := range splitStatements(body) {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+	}
+	_, err := pool.Exec(ctx, `insert into schema_migrations(name) values($1)`, name)
+	return err
+}
+
+// splitStatements splits on ';' at the end of a line (outside $$ quoting) and drops statements that are only comments.
+func splitStatements(body string) []string {
+	var out []string
+	var cur strings.Builder
+	flush := func() {
+		stmt := strings.TrimSpace(cur.String())
+		cur.Reset()
+		code := false
+		for _, l := range strings.Split(stmt, "\n") {
+			if t := strings.TrimSpace(l); t != "" && !strings.HasPrefix(t, "--") {
+				code = true
+			}
+		}
+		if code {
+			out = append(out, stmt)
+		}
+	}
+	inDollar := false // inside a $$-quoted body (a DO block), where ';' does not end the statement
+	for _, line := range strings.Split(body, "\n") {
+		cur.WriteString(line)
+		cur.WriteString("\n")
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "--") {
+			continue
+		}
+		if strings.Count(line, "$$")%2 == 1 {
+			inDollar = !inDollar
+		}
+		if !inDollar && strings.HasSuffix(t, ";") {
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
 func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) error {
 	if _, err := pool.Exec(ctx, `create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())`); err != nil {
 		return err
@@ -55,6 +107,12 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) error {
 		body, err := fs.ReadFile(migrations, name)
 		if err != nil {
 			return err
+		}
+		if strings.HasPrefix(string(body), NoTransactionMarker) {
+			if err := migrateNoTx(ctx, pool, name, string(body)); err != nil {
+				return err
+			}
+			continue
 		}
 		tx, err := pool.Begin(ctx)
 		if err != nil {

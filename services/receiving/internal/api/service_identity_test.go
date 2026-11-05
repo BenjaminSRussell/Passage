@@ -97,7 +97,7 @@ func TestServiceIdentity_UserWithoutLedgerDutiesPostsReceiptAndInvoice(t *testin
 	if posted.LedgerEntryID != "je-1" {
 		t.Fatalf("receipt post did not reach the ledger: %+v", posted)
 	}
-	invoice := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", receipt.ID, 10, ""), as(duty("VendorInvoicePost", rg.key()))), http.StatusCreated)
+	invoice := decode[invoiceJSON](t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", receipt.ID, 10, ""), as(duty("receiving.vendor-invoice.post", rg.key()))), http.StatusCreated)
 	if invoice.LedgerEntryID != "je-1" {
 		t.Fatalf("invoice post did not reach the ledger: %+v", invoice)
 	}
@@ -120,7 +120,7 @@ func TestServiceIdentity_UnconfiguredSignerKeepsForwardingUserDuties(t *testing.
 	receipt := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath, directBody("PS-1", 10, 4, ""), rg.maintain()), http.StatusCreated)
 	rec := rg.call(http.MethodPost, receiptsPath+"/"+receipt.ID+":post", "", rg.poster(receipt.Version))
 	if rec.Code == http.StatusOK || len(ledgerSeen.snapshot()) != 0 {
-		t.Fatalf("without a signer the user's own duties apply and ReceivingPost lacks ledger.journal.post: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("without a signer the user's own duties apply and receiving.receipt.post lacks ledger.journal.post: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

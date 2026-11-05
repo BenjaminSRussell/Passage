@@ -300,7 +300,7 @@ func TestAbsenceRequestRules(t *testing.T) {
 	}
 }
 
-// TestEmployeesSeeOnlyTheirOwnAbsence covers EssAbsence as own data and the
+// TestEmployeesSeeOnlyTheirOwnAbsence covers hr.absence.self as own data and the
 // 8.42.17 rule that an approver cannot approve their own request.
 func TestEmployeesSeeOnlyTheirOwnAbsence(t *testing.T) {
 	s, admin := newStore(t)

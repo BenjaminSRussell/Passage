@@ -129,11 +129,11 @@ describe("register API client", () => {
     const bad = validateClient({ ...EMPTY_CLIENT, quotaPerMin: "5", burst: "0", sandboxTenantId: "nope" });
     expect(Object.keys(bad.errors).sort()).toEqual(["burst", "clientId", "name", "ownerContact", "quotaPerMin", "sandboxTenantId", "scopes"]);
     expect(validateClient({ ...good, scopes: "1read" }).errors.scopes).toContain("1read");
-    expect(validateClient({ ...good, scopes: "VendorInvoicePost\nMaintain users" }).input?.scopes).toEqual(["VendorInvoicePost", "Maintain users"]);
+    expect(validateClient({ ...good, scopes: "receiving.vendor-invoice.post\nidentity.user.maintain" }).input?.scopes).toEqual(["receiving.vendor-invoice.post", "identity.user.maintain"]);
     expect(validateClient({ ...good, quotaPerMin: "100001" }).errors.quotaPerMin).toBeDefined();
     expect(validateClient({ ...good, burst: "1.5" }).errors.burst).toBeDefined();
     expect(validateClient({ ...good, clientId: "Acme" }).errors.clientId).toBeDefined();
-    expect(parseScopes("a.b, a.b\n c.d\n\nMaintain users ")).toEqual(["a.b", "c.d", "Maintain users"]);
+    expect(parseScopes("a.b, a.b\n c.d\n\nidentity.user.maintain ")).toEqual(["a.b", "c.d", "identity.user.maintain"]);
     expect(parseCount(" 12 ", 10, 20)).toBe(12);
     expect(parseCount("", 10, 20)).toBeNull();
   });

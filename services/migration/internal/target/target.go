@@ -1,6 +1,7 @@
 // Package target loads mapped rows into the owning services through their HTTP APIs, acting as the
 // service:migration-loader principal (integration track S3). Party, vendor and customer rows go to the party service,
-// products to the product service and opening AR items to receivables. Every call carries a service token this
+// products to the product service, opening AR items to receivables, and BOM and route versions to engineering (as
+// drafts). Every call carries a service token this
 // service signs for the target, a stable Idempotency-Key and the legal entity of the row. A refusal (4xx) is the row's
 // reject with the target's own code; a 5xx, a 429 or a timeout is retried with backoff and, once the attempts are
 // used up, rejects the row with MIG-TARGET-UNAVAILABLE. An entity with no target API is rejected as
@@ -46,6 +47,7 @@ const (
 	audParty       = "party"
 	audProduct     = "product"
 	audReceivables = "receivables"
+	audEngineering = "engineering"
 
 	// BR-10.1: five tries with exponential backoff from 1 s, at most 60 s between tries.
 	defaultAttempts    = 5
@@ -61,9 +63,9 @@ const (
 // Config says where the owning services are and how to sign for them. A base URL left empty makes that service's
 // entities "target not available".
 type Config struct {
-	PartyURL, ProductURL, ReceivablesURL string
-	Signer                               *tenant.ServiceSigner
-	Client                               *http.Client
+	PartyURL, ProductURL, ReceivablesURL, EngineeringURL string
+	Signer                                               *tenant.ServiceSigner
+	Client                                               *http.Client
 	// Attempts is the most tries per call (default 5); Backoff the wait after the first (default 1s, doubling, at
 	// most 60s); Concurrency the calls in flight for one batch of single-row endpoints (default 8).
 	Attempts    int
@@ -75,7 +77,7 @@ type Config struct {
 
 // Configured reports whether a run can load anything: a signing key and at least one target.
 func (c Config) Configured() bool {
-	return c.Signer != nil && (c.PartyURL != "" || c.ProductURL != "" || c.ReceivablesURL != "")
+	return c.Signer != nil && (c.PartyURL != "" || c.ProductURL != "" || c.ReceivablesURL != "" || c.EngineeringURL != "")
 }
 
 // Run is what one migration run fixes for the loader.
@@ -120,6 +122,7 @@ func New(cfg Config, run Run) *Loader {
 		client = &http.Client{Timeout: defaultTimeout}
 	}
 	cfg.PartyURL, cfg.ProductURL, cfg.ReceivablesURL = strings.TrimRight(cfg.PartyURL, "/"), strings.TrimRight(cfg.ProductURL, "/"), strings.TrimRight(cfg.ReceivablesURL, "/")
+	cfg.EngineeringURL = strings.TrimRight(cfg.EngineeringURL, "/")
 	return &Loader{cfg: cfg, run: run, client: client, failed: map[string]int{}}
 }
 
@@ -136,7 +139,7 @@ func sleep(ctx context.Context, d time.Duration) error {
 
 // Entities lists the entity names the loader has a target API for.
 func Entities() []string {
-	return []string{"party", "customer", "vendor", "product", "item", "ar_open_item"}
+	return []string{"party", "customer", "vendor", "product", "item", "ar_open_item", "bom", "route"}
 }
 
 // LoadBatch loads items of one entity. The result has one entry per item, in order. An error means the batch could
@@ -175,6 +178,10 @@ func (l *Loader) loadBatch(ctx context.Context, entity string, items []domain.Lo
 		return l.each(ctx, p.TenantID, audProduct, l.cfg.ProductURL, items, l.loadProduct)
 	case "ar_open_item":
 		return l.openItems(ctx, p.TenantID, items)
+	case "bom":
+		return l.each(ctx, p.TenantID, audEngineering, l.cfg.EngineeringURL, items, l.loadBom)
+	case "route":
+		return l.each(ctx, p.TenantID, audEngineering, l.cfg.EngineeringURL, items, l.loadRoute)
 	}
 	return all(items, domain.LoadResult{Code: CodeNotAvailable, Detail: fmt.Sprintf("no target API loads %s yet; it is a handoff (services/migration/NOT-IMPLEMENTED.md)", entity)}), nil
 }

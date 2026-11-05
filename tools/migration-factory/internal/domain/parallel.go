@@ -17,7 +17,7 @@ import (
 var ErrNotFound = errors.New("not found")
 
 // ErrSoD is a review action by the person who started the run, or by nobody (9.49.17 MIG-001:
-// MigrationRun and MigrationReview on the same variances is a HIGH conflict).
+// migration.factory.run and migration.factory.review on the same variances is a HIGH conflict).
 var ErrSoD = errors.New("segregation of duties")
 
 // ParallelState is the parallel_run lifecycle (9.49.4).

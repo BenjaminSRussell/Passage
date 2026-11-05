@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -53,6 +54,35 @@ func (a *API) registerRecords(r chi.Router) {
 	r.With(write).Post(recordsPath+"/{id}/exceptions/{exceptionId}:disposition", a.dispositionException)
 	r.With(approve).Post(recordsPath+"/{id}:approve", a.approveRecord)
 	r.With(approve).Post(recordsPath+"/{id}:seal", a.sealRecord)
+	r.With(read).Get(recordsPath+"/{id}/pdf", a.recordPDF)
+}
+
+// recordPDF renders a sealed record as a PDF derived from its sealed JSON
+// (FR-24.21). The rendering is not PDF/A-2b yet (NOT-IMPLEMENTED.md); the
+// X-Content-SHA256 header is the hash of the sealed JSON it shows.
+func (a *API) recordPDF(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	rec, err := a.store.GetRecord(r.Context(), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	doc, err := store.RenderRecordPDF(rec)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"batch-record-%s.pdf\"", rec.ID))
+	w.Header().Set("X-Content-SHA256", *rec.ContentHash)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(doc)
 }
 
 type profileRequest struct {
@@ -301,11 +331,15 @@ func (a *API) raiseException(w http.ResponseWriter, r *http.Request) {
 	writeCommand(w, fresh, http.StatusOK, out)
 }
 
+// dispositionExceptionRequest decides an exception. The decision is signed
+// by this call (meaning reviewed): the caller gives the printed name and the
+// step-up assertion in X-Passage-Reauth-Assertion, and the service makes the
+// signature. A client-made signatureId is no longer accepted.
 type dispositionExceptionRequest struct {
 	Version     int    `json:"version"`
 	Disposition string `json:"disposition"`
 	Comment     string `json:"comment"`
-	SignatureID string `json:"signatureId"`
+	signRequest
 }
 
 func (a *API) dispositionException(w http.ResponseWriter, r *http.Request) {
@@ -334,19 +368,33 @@ func (a *API) dispositionException(w http.ResponseWriter, r *http.Request) {
 	if !domain.ValidExceptionDisposition(req.Disposition) {
 		fields["disposition"] = "must be accepted, deviation-raised or rejected"
 	}
-	sig, sigOK := ids.Canonical(req.SignatureID)
-	if !sigOK {
-		fields["signatureId"] = "must be the UUID of the signature that backs the decision"
-	}
 	if utf8.RuneCountInString(req.Comment) > maxCommentText {
 		fields["comment"] = "at most 500 characters"
 	}
+	req.signRequest.check(fields)
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
 	}
-	out, fresh, err := a.store.DispositionException(r.Context(), id, strings.ToLower(exceptionID),
-		store.ExceptionDisposition{Disposition: req.Disposition, Comment: req.Comment, SignatureID: sig}, req.Version, idem)
+	exceptionID = strings.ToLower(exceptionID)
+	rec, err := a.store.GetRecord(r.Context(), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	hash, err := store.DispositionHash(rec, exceptionID, req.Disposition, req.Comment)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	p, _ := tenant.FromContext(r.Context())
+	sign, err := a.reauthenticate(r.Context(), p, id, hash, req.signRequest, r.Header.Get(ReauthHeader))
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	out, fresh, err := a.store.DispositionException(r.Context(), id, exceptionID,
+		store.ExceptionDisposition{Disposition: req.Disposition, Comment: req.Comment, Sign: sign}, req.Version, idem)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -354,12 +402,52 @@ func (a *API) dispositionException(w http.ResponseWriter, r *http.Request) {
 	writeCommand(w, fresh, http.StatusOK, out)
 }
 
+// approveRecordRequest approves a record; the approval is signed by this call
+// (meaning approved) as a disposition is.
+type approveRecordRequest struct {
+	Version int `json:"version"`
+	signRequest
+}
+
 func (a *API) approveRecord(w http.ResponseWriter, r *http.Request) {
-	id, version, idem, ok := versionCommand(w, r)
+	p, ok := principal(w, r)
 	if !ok {
 		return
 	}
-	out, fresh, err := a.store.ApproveRecord(r.Context(), id, version, idem)
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req approveRecordRequest
+	idem, ok := decodeCommand(w, r, &req)
+	if !ok {
+		return
+	}
+	fields := map[string]string{}
+	if req.Version < 1 {
+		fields["version"] = "must be the version you read (1 or more)"
+	}
+	req.signRequest.check(fields)
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	rec, err := a.store.GetRecord(r.Context(), id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	hash, err := store.ApprovalHash(rec)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	sign, err := a.reauthenticate(r.Context(), p, id, hash, req.signRequest, r.Header.Get(ReauthHeader))
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	out, fresh, err := a.store.ApproveRecord(r.Context(), id, req.Version, sign, idem)
 	if err != nil {
 		fail(w, r, err)
 		return

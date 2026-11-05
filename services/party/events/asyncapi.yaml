@@ -29,6 +29,13 @@ channels:
         $ref: '#/components/messages/changeApproved'
       rejected:
         $ref: '#/components/messages/changeRejected'
+  passage.party.merge:
+    address: passage.party.merge
+    messages:
+      requested:
+        $ref: '#/components/messages/mergeRequested'
+      rejected:
+        $ref: '#/components/messages/mergeRejected'
   passage.party.protectedfields:
     address: passage.party.protectedfields
     messages:
@@ -45,6 +52,14 @@ channels:
       created:
         $ref: '#/components/messages/vendorGroupCreated'
 operations:
+  onMergeRequested:
+    action: send
+    channel: { $ref: '#/channels/passage.party.merge' }
+    messages: [{ $ref: '#/channels/passage.party.merge/messages/requested' }]
+  onMergeRejected:
+    action: send
+    channel: { $ref: '#/channels/passage.party.merge' }
+    messages: [{ $ref: '#/channels/passage.party.merge/messages/rejected' }]
   onVendorGroupCreated:
     action: send
     channel: { $ref: '#/channels/passage.party.vendorgroup' }
@@ -183,6 +198,18 @@ components:
       title: Change rejected and discarded
       payload: { $ref: '#/components/schemas/Change' }
       x-passage-type: dev.passage.party.change.rejected.v1
+    mergeRequested:
+      name: requested
+      title: Party merge approval requested
+      description: POST /v1/party/parties/{id}:merge records the request in merge_request and merges nothing. The workflow-ts merge approval starts from this event; a user other than requested_by decides it, and workflow-ts calls POST /v1/party/merge-requests/{id}:approve (which merges and emits party.merged) or :reject.
+      payload: { $ref: '#/components/schemas/MergeRequestEvent' }
+      x-passage-type: dev.passage.party.merge.requested.v1
+    mergeRejected:
+      name: rejected
+      title: Party merge rejected
+      description: The request is closed and nothing was merged. decided_by is the approver workflow-ts authenticated.
+      payload: { $ref: '#/components/schemas/MergeRequestEvent' }
+      x-passage-type: dev.passage.party.merge.rejected.v1
     protectedFieldsUpdated:
       name: updated
       title: Protected fields updated
@@ -225,6 +252,16 @@ components:
           revealed_at: { type: string, format: date-time }
       x-passage-type: dev.passage.party.vendorbank.revealed.v1
   schemas:
+    MergeRequestEvent:
+      type: object
+      required: [merge_request_id, survivor_party_id, merged_party_id, requested_by]
+      properties:
+        merge_request_id: { type: string, format: uuid }
+        survivor_party_id: { type: string, format: uuid }
+        merged_party_id: { type: string, format: uuid }
+        requested_by: { type: string }
+        decided_by: { type: string, description: Set on merge.rejected. }
+        reason: { type: string, maxLength: 500 }
     Change:
       type: object
       required: [change_id, customer_id, legal_entity_id, field, current_value, requested_value, requested_by]

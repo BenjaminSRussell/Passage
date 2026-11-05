@@ -111,7 +111,7 @@ func TestCheckSplit_SumProperty(t *testing.T) {
 }
 
 // deduction_write_off_limit defaults: 50.00 USD and 45.00 EUR; above it, or in a
-// currency without a default, only ARWriteOffApprove may write off.
+// currency without a default, only receivables.write-off.approve may write off.
 func TestCheckDeductionWriteOff(t *testing.T) {
 	tests := []struct {
 		amount, currency string

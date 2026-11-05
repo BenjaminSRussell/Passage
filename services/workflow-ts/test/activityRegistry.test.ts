@@ -18,7 +18,7 @@ describe("worker activity registry", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it("registers the party decision, payment run, ECO, CAPA and tender activities when a key is present", () => {
+  it("registers the party change and merge decisions, payment run, ECO, CAPA and tender activities when a key is present", () => {
     const warn = vi.fn();
     const activities = buildActivities({ PASSAGE_SERVICE_SIGNING_KEY: seed }, () => "", warn);
     expect(Object.keys(activities).sort()).toEqual(
@@ -29,6 +29,7 @@ describe("worker activity registry", () => {
         "completePaymentRun",
         "completeStep",
         "decidePartyChange",
+        "decidePartyMerge",
         "failPaymentRun",
         "generatePaymentFile",
         "getTender",

@@ -64,15 +64,15 @@ describe("intercompany module", () => {
       "/intercompany/transfer-pricing",
     ]);
     expect(intercompany.nav.map((n) => n.duty)).toEqual([
-      "IntercompanyView",
-      "IntercompanyView",
-      "IntercompanyPost",
-      "IntercompanyReconcile",
-      "IntercompanyPost",
-      "IntercompanyConfigure",
-      "IntercompanyPlan",
-      "IntercompanyView",
-      "IntercompanyView",
+      "intercompany.view",
+      "intercompany.view",
+      "intercompany.post",
+      "intercompany.reconcile",
+      "intercompany.post",
+      "intercompany.configure",
+      "intercompany.plan",
+      "intercompany.view",
+      "intercompany.view",
     ]);
   });
 
@@ -209,12 +209,12 @@ describe("intercompany reconciliation page", () => {
   });
 
   it("shows a refused request in an alert", async () => {
-    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty IntercompanyReconcile" } });
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty intercompany.reconcile" } });
     renderAt("/intercompany/reconciliation");
     fireEvent.click(screen.getByRole("button", { name: "Classify pairs" }));
     await waitFor(() => expect(screen.getByText("The pairs were not classified")).toBeInTheDocument());
     expect(screen.getByText("The pairs were not classified").closest("[role=alert]")).toHaveTextContent(
-      "missing duty IntercompanyReconcile (AUTH-0003)",
+      "missing duty intercompany.reconcile (AUTH-0003)",
     );
     expect(screen.queryByRole("table", { name: "Reconciliation items" })).not.toBeInTheDocument();
   });

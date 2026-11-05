@@ -1,0 +1,450 @@
+{
+  "carrier": "sandbox",
+  "interactions": [
+    {
+      "name": "rate: domestic, one parcel, every service",
+      "nowMs": 1793880000000,
+      "op": "rate",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Acme Corp",
+          "street1": "200 Main St",
+          "city": "Austin",
+          "postalCode": "73301",
+          "country": "US"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          }
+        ]
+      },
+      "response": [
+        {
+          "carrier": "sandbox",
+          "service": "GROUND",
+          "amount": "8.63",
+          "currency": "USD",
+          "transitDays": 3,
+          "billableWeightKg": "2.500"
+        },
+        {
+          "carrier": "sandbox",
+          "service": "EXPRESS",
+          "amount": "19.25",
+          "currency": "USD",
+          "transitDays": 1,
+          "billableWeightKg": "2.500"
+        }
+      ]
+    },
+    {
+      "name": "rate: domestic, volumetric parcel, ground only",
+      "nowMs": 1793880000000,
+      "op": "rate",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Acme Corp",
+          "street1": "200 Main St",
+          "city": "Austin",
+          "postalCode": "73301",
+          "country": "US"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          },
+          {
+            "weightKg": "1",
+            "lengthCm": "50",
+            "widthCm": "40",
+            "heightCm": "30"
+          }
+        ],
+        "services": [
+          "GROUND"
+        ]
+      },
+      "response": [
+        {
+          "carrier": "sandbox",
+          "service": "GROUND",
+          "amount": "18.83",
+          "currency": "USD",
+          "transitDays": 3,
+          "billableWeightKg": "14.500"
+        }
+      ]
+    },
+    {
+      "name": "rate: international surcharge and transit",
+      "nowMs": 1793880000000,
+      "op": "rate",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Muster GmbH",
+          "street1": "Hauptstr. 1",
+          "city": "Berlin",
+          "postalCode": "10115",
+          "country": "DE"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          }
+        ]
+      },
+      "response": [
+        {
+          "carrier": "sandbox",
+          "service": "GROUND",
+          "amount": "20.63",
+          "currency": "USD",
+          "transitDays": 6,
+          "billableWeightKg": "2.500"
+        },
+        {
+          "carrier": "sandbox",
+          "service": "EXPRESS",
+          "amount": "31.25",
+          "currency": "USD",
+          "transitDays": 3,
+          "billableWeightKg": "2.500"
+        }
+      ]
+    },
+    {
+      "name": "rate: unknown service",
+      "nowMs": 1793880000000,
+      "op": "rate",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Acme Corp",
+          "street1": "200 Main St",
+          "city": "Austin",
+          "postalCode": "73301",
+          "country": "US"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          }
+        ],
+        "services": [
+          "OVERNIGHT"
+        ]
+      },
+      "error": "UNKNOWN_SERVICE"
+    },
+    {
+      "name": "rate: country not served",
+      "nowMs": 1793880000000,
+      "op": "rate",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Acme Corp",
+          "street1": "200 Main St",
+          "city": "Austin",
+          "postalCode": "73301",
+          "country": "BR"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          }
+        ]
+      },
+      "error": "NOT_SERVICEABLE"
+    },
+    {
+      "name": "label: domestic ground",
+      "nowMs": 1793880000000,
+      "op": "label",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Acme Corp",
+          "street1": "200 Main St",
+          "city": "Austin",
+          "postalCode": "73301",
+          "country": "US"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          }
+        ],
+        "service": "GROUND",
+        "reference": "SH-000123",
+        "idempotencyKey": "tenant|entity|fulfillment|ship-1"
+      },
+      "response": {
+        "carrier": "sandbox",
+        "service": "GROUND",
+        "trackingNumber": "SBX103179388000066507",
+        "amount": "8.63",
+        "currency": "USD",
+        "format": "ZPL",
+        "document": "XlhBCl5DRjAsMzAKXkZPNDAsNDBeRkRTYW5kYm94IEdyb3VuZCAtIFNBTkRCT1gsIE5PVCBGT1IgU0hJUFBJTkdeRlMKXkZPNDAsMTAwXkZEQWNtZSBDb3JwXkZTCl5GTzQwLDE0MF5GRDIwMCBNYWluIFN0XkZTCl5GTzQwLDE4MF5GRDczMzAxIEF1c3RpbiBVU15GUwpeRk80MCwyNDBeRkRSZWY6IFNILTAwMDEyM15GUwpeRk80MCwzMDBeQlkzXkJDTiwxMjAsWSxOLE5eRkRTQlgxMDMxNzkzODgwMDAwNjY1MDdeRlMKXlhaCg==",
+        "createdAt": "2026-11-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "label: international express to the exception postal code",
+      "nowMs": 1793880000000,
+      "op": "label",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Muster GmbH",
+          "street1": "Hauptstr. 1",
+          "city": "Berlin",
+          "postalCode": "00000",
+          "country": "DE"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          }
+        ],
+        "service": "EXPRESS",
+        "reference": "SH-000123",
+        "idempotencyKey": "tenant|entity|fulfillment|ship-2"
+      },
+      "response": {
+        "carrier": "sandbox",
+        "service": "EXPRESS",
+        "trackingNumber": "SBX213179388000055293",
+        "amount": "31.25",
+        "currency": "USD",
+        "format": "ZPL",
+        "document": "XlhBCl5DRjAsMzAKXkZPNDAsNDBeRkRTYW5kYm94IEV4cHJlc3MgLSBTQU5EQk9YLCBOT1QgRk9SIFNISVBQSU5HXkZTCl5GTzQwLDEwMF5GRE11c3RlciBHbWJIXkZTCl5GTzQwLDE0MF5GREhhdXB0c3RyLiAxXkZTCl5GTzQwLDE4MF5GRDAwMDAwIEJlcmxpbiBERV5GUwpeRk80MCwyNDBeRkRSZWY6IFNILTAwMDEyM15GUwpeRk80MCwzMDBeQlkzXkJDTiwxMjAsWSxOLE5eRkRTQlgyMTMxNzkzODgwMDAwNTUyOTNeRlMKXlhaCg==",
+        "createdAt": "2026-11-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "label: unknown service",
+      "nowMs": 1793880000000,
+      "op": "label",
+      "request": {
+        "shipFrom": {
+          "name": "Demo Warehouse",
+          "street1": "1 Dock Rd",
+          "city": "Columbus",
+          "postalCode": "43004",
+          "country": "US"
+        },
+        "shipTo": {
+          "name": "Acme Corp",
+          "street1": "200 Main St",
+          "city": "Austin",
+          "postalCode": "73301",
+          "country": "US"
+        },
+        "parcels": [
+          {
+            "weightKg": "2.5",
+            "lengthCm": "30",
+            "widthCm": "20",
+            "heightCm": "10"
+          }
+        ],
+        "service": "OVERNIGHT",
+        "reference": "SH-000123",
+        "idempotencyKey": "tenant|entity|fulfillment|ship-1"
+      },
+      "error": "UNKNOWN_SERVICE"
+    },
+    {
+      "name": "track: just labelled",
+      "nowMs": 1793883600000,
+      "op": "track",
+      "request": {
+        "trackingNumber": "SBX103179388000066507"
+      },
+      "response": {
+        "carrier": "sandbox",
+        "trackingNumber": "SBX103179388000066507",
+        "status": "LABELLED",
+        "events": [
+          {
+            "eventKey": "SBX103179388000066507:1",
+            "status": "LABELLED",
+            "description": "Label created",
+            "eventTime": "2026-11-05T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "track: in transit",
+      "nowMs": 1793898000000,
+      "op": "track",
+      "request": {
+        "trackingNumber": "SBX103179388000066507"
+      },
+      "response": {
+        "carrier": "sandbox",
+        "trackingNumber": "SBX103179388000066507",
+        "status": "IN_TRANSIT",
+        "events": [
+          {
+            "eventKey": "SBX103179388000066507:1",
+            "status": "LABELLED",
+            "description": "Label created",
+            "eventTime": "2026-11-05T12:00:00.000Z"
+          },
+          {
+            "eventKey": "SBX103179388000066507:2",
+            "status": "IN_TRANSIT",
+            "description": "Picked up by the sandbox carrier",
+            "eventTime": "2026-11-05T16:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "track: delivered after three days",
+      "nowMs": 1794168000000,
+      "op": "track",
+      "request": {
+        "trackingNumber": "SBX103179388000066507"
+      },
+      "response": {
+        "carrier": "sandbox",
+        "trackingNumber": "SBX103179388000066507",
+        "status": "DELIVERED",
+        "events": [
+          {
+            "eventKey": "SBX103179388000066507:1",
+            "status": "LABELLED",
+            "description": "Label created",
+            "eventTime": "2026-11-05T12:00:00.000Z"
+          },
+          {
+            "eventKey": "SBX103179388000066507:2",
+            "status": "IN_TRANSIT",
+            "description": "Picked up by the sandbox carrier",
+            "eventTime": "2026-11-05T16:00:00.000Z"
+          },
+          {
+            "eventKey": "SBX103179388000066507:3",
+            "status": "DELIVERED",
+            "description": "Delivered",
+            "eventTime": "2026-11-08T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "track: exception",
+      "nowMs": 1793988000000,
+      "op": "track",
+      "request": {
+        "trackingNumber": "SBX213179388000055293"
+      },
+      "response": {
+        "carrier": "sandbox",
+        "trackingNumber": "SBX213179388000055293",
+        "status": "EXCEPTION",
+        "events": [
+          {
+            "eventKey": "SBX213179388000055293:1",
+            "status": "LABELLED",
+            "description": "Label created",
+            "eventTime": "2026-11-05T12:00:00.000Z"
+          },
+          {
+            "eventKey": "SBX213179388000055293:2",
+            "status": "IN_TRANSIT",
+            "description": "Picked up by the sandbox carrier",
+            "eventTime": "2026-11-05T16:00:00.000Z"
+          },
+          {
+            "eventKey": "SBX213179388000055293:3",
+            "status": "EXCEPTION",
+            "description": "Delivery exception: address not found",
+            "eventTime": "2026-11-06T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "track: not a sandbox number",
+      "nowMs": 1793880000000,
+      "op": "track",
+      "request": {
+        "trackingNumber": "SBX000000000000000001"
+      },
+      "error": "NOT_FOUND"
+    }
+  ]
+}

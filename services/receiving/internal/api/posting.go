@@ -22,7 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-const dutyReceivingAdmin = "ReceivingAdmin"
+const dutyReceivingAdmin = "receiving.admin"
 
 type pendingTracker struct {
 	mu       sync.Mutex

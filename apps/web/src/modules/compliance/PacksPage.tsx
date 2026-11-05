@@ -14,7 +14,7 @@ const columns: DataTableColumn<Pack>[] = [
   { key: "reports", header: "Statutory reports", align: "end", render: (p) => p.statutoryReports.length },
 ];
 
-/** Country packs (PRD §9.48.6, LocalizationAdmin): the seven first packs and what each one ships. */
+/** Country packs (PRD §9.48.6, localization.admin): the seven first packs and what each one ships. */
 export function PacksPage() {
   const navigate = useNavigate();
   const state = useLoad((signal) => listPacks(signal), "packs");

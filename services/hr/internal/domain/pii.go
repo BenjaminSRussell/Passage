@@ -14,7 +14,7 @@ import (
 )
 
 // PIIReadDuty is the duty that permits an unmasked read (FR-42.1).
-const PIIReadDuty = "HcmPIIRead"
+const PIIReadDuty = "hr.pii.read"
 
 // DefaultReasonMinLength is the minimum length of a PII reveal reason (8.42.13).
 const DefaultReasonMinLength = 10
@@ -151,7 +151,7 @@ func lastFour(v string) (string, bool) {
 	return string(r[len(r)-4:]), true
 }
 
-// CheckReveal gates an unmasked read: the caller must hold HcmPIIRead and give
+// CheckReveal gates an unmasked read: the caller must hold hr.pii.read and give
 // a reason of at least minLength characters (HCM-PII-001).
 func CheckReveal(hasDuty bool, reason string, minLength int) error {
 	if !hasDuty {

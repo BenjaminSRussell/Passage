@@ -16,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/api"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/carrier"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/migrations"
 )
@@ -81,12 +82,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("inventory client: %w", err)
 	}
+	carriers, err := carrier.FromEnv(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("carrier-gateway client: %w", err)
+	}
 	s := store.New(pool, prefix, ext).WithReleaseDefaults(horizon, fullATP).WithHolds(holds)
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
 	r := httpx.NewRouter()
-	api.New(s, api.Options{ReleaseHorizonDays: horizon, RequireFullATP: fullATP}).Routes(r)
+	api.New(s, api.Options{ReleaseHorizonDays: horizon, RequireFullATP: fullATP, Carrier: carriers}).Routes(r)
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {

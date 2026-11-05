@@ -66,7 +66,7 @@ func TestBackorderRemainder_RequiresKeyVersionBodyAndDuty(t *testing.T) {
 	if backorderDate == nil || backorderDate.Format(dateLayout) != "2026-12-01" {
 		t.Fatalf("planned ship date = %v", backorderDate)
 	}
-	rec = do(t, h, http.MethodPost, path, "{}", map[string]string{"Idempotency-Key": "b-5", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"})
+	rec = do(t, h, http.MethodPost, path, "{}", map[string]string{"Idempotency-Key": "b-5", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.pick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("picker backorder: status = %d, want 403", rec.Code)
 	}
@@ -121,7 +121,7 @@ func TestWarehouseSetting_ReadSaveValidateAndDuty(t *testing.T) {
 	if savedLegalEntity != le {
 		t.Fatalf("legal entity passed to the store = %q, want %s", savedLegalEntity, le)
 	}
-	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "s-5", "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPut, path, body, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "s-5", "X-Passage-Duties": "fulfillment.warehouse.view"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer save: %d", rec.Code)
 	}
 }

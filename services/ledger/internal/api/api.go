@@ -944,11 +944,11 @@ func (a *API) trialBalance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch q.Get("exclude_year_end_closing") {
-	case "":
+	case "", "false":
 	case "true":
 		f.ExcludeYearEndClosing = true
 	default:
-		fields["exclude_year_end_closing"] = "must be true when given"
+		fields["exclude_year_end_closing"] = "must be true or false"
 	}
 	f.Dimensions = map[string]string{}
 	for key, values := range q {

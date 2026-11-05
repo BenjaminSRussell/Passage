@@ -236,7 +236,7 @@ export interface MonitorMessage {
 /** One message with its canonical document (GET /messages/{id}). The raw payload is never returned. */
 export interface MonitorMessageDetail extends MonitorMessage {
   canonical?: CanonicalDocument;
-  /** True when party names in the document are "***" because the user lacks EDI_PII_VIEW (BR-35.12). */
+  /** True when party names in the document are "***" because the user lacks edi.pii.view (BR-35.12). */
   piiMasked: boolean;
 }
 
@@ -509,7 +509,7 @@ export function reprocessInterchange(id: string, options: { dryRun: boolean; key
   });
 }
 
-/** The raw payload of one interchange as a segment tree, masked unless the user holds EDI_PII_VIEW. */
+/** The raw payload of one interchange as a segment tree, masked unless the user holds edi.pii.view. */
 export function getPayload(id: string, signal?: AbortSignal): Promise<PayloadTree> {
   return send<PayloadTree>(`/interchanges/${encodeURIComponent(id)}/payload`, {}, signal);
 }

@@ -669,6 +669,8 @@ func TestAllocationRead_IsLimitedToTheContractOfOneOrder(t *testing.T) {
 		"/v1/revrec/contracts?orderId=" + order:                                     http.StatusOK,
 		"/v1/revrec/contracts/" + created.ID:                                        http.StatusNotFound,
 		"/v1/revrec/contracts/" + created.ID + "?orderId=" + ids.New():              http.StatusNotFound,
+		"/v1/revrec/contracts/" + created.ID + "?orderId=not-a-uuid":                http.StatusNotFound,
+		"/v1/revrec/contracts/" + created.ID + "?orderId=":                          http.StatusNotFound,
 		"/v1/revrec/contracts/" + created.ID + "?orderId=" + strings.ToUpper(order): http.StatusOK,
 	} {
 		if got := read(path); got != want {

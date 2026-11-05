@@ -88,7 +88,7 @@ describe("self service", () => {
         : undefined;
     const { container } = renderAt("/hr/my/profile");
     expect(await screen.findByText("***-**-6789")).toBeTruthy();
-    expect(paths).toEqual(["/api/v1/hr/me"]);
+    expect(paths).toEqual(["/api/v1/hr/me", "/api/v1/hr/me/profile-changes"]);
     expect(pageViolations(container)).toEqual([]);
   });
 
@@ -141,6 +141,6 @@ describe("self service", () => {
         .filter((r) => r.path?.startsWith("/hr/my/"))
         .every((r) => (r.handle as { duty?: string }).duty),
     ).toBe(true);
-    expect(hr.nav.find((n) => n.to === "/hr/my/team")?.duty).toBe("MssBase");
+    expect(hr.nav.find((n) => n.to === "/hr/my/team")?.duty).toBe("hr.team.manage");
   });
 });

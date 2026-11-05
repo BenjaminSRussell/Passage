@@ -38,7 +38,7 @@ type glFixture struct {
 func newGLFixture(t *testing.T, tenantN int) *glFixture {
 	t.Helper()
 	pool := testkit.DB(t)
-	ctx := testkit.Ctx(testkit.TenantID(tenantN), "EamPlanner", "EamTechnician")
+	ctx := testkit.Ctx(testkit.TenantID(tenantN), "eam.work.plan", "eam.work-order.execute")
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestGLPosting_AppRoleBooksWithoutBypassingRLSOrRewritingTheSubledger(t *tes
 	}
 	f := &glFixture{t: t, pool: app, ledger: ids.New(), fake: ledgerclient.NewFake()}
 	f.s = NewWithClock(app, func() time.Time { return time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC) })
-	f.ctx = testkit.Ctx(testkit.TenantID(7107), "EamPlanner", "EamTechnician")
+	f.ctx = testkit.Ctx(testkit.TenantID(7107), "eam.work.plan", "eam.work-order.execute")
 	a, err := f.s.CreateAsset(f.ctx, Asset{Name: "Pump", AssetType: "PUMP", SiteID: testkit.TenantID(9), Criticality: 3}, "gl-app-asset")
 	if err != nil {
 		t.Fatal(err)
@@ -278,10 +278,23 @@ func TestGLPosting_AppRoleBooksWithoutBypassingRLSOrRewritingTheSubledger(t *tes
 			t.Errorf("%q = %v; want insufficient_privilege 42501", stmt, err)
 		}
 	}
-	other := testkit.Ctx(testkit.TenantID(7108), "EamPlanner")
+	other := testkit.Ctx(testkit.TenantID(7108), "eam.work.plan")
 	rec, err := f.s.ReconcileGL(other, f.fake, GLReconcileRequest{LegalEntityID: glLegalEntity, LedgerID: f.ledger, Currency: "USD"})
 	if err != nil || len(rec.Accounts) != 0 {
 		t.Fatalf("another tenant must see no subledger rows: %+v %v", rec, err)
+	}
+	// #486: the profile and the subledger are legal-entity scoped by RLS, not only by the queries' entity filter.
+	otherEntity := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7107), LegalEntityID: "00000000-0000-0000-0000-0000000000e2",
+		UserID: "u2", Duties: map[string]struct{}{"eam.work.plan": {}}})
+	for ctx, want := range map[context.Context]int{f.ctx: 1, otherEntity: 0} {
+		for _, table := range []string{"eam_gl_posting", "eam_posting_profile"} {
+			var n int
+			if err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `select count(distinct legal_entity_id) from `+table).Scan(&n)
+			}); err != nil || n != want {
+				t.Errorf("%s entities visible = %d, %v; want %d", table, n, err, want)
+			}
+		}
 	}
 }
 
@@ -289,7 +302,7 @@ func TestGLPosting_OrdersTakeTheLegalEntityOfTheirAssetAndOnlyThatEntityBooksThe
 	f := newGLFixture(t, 7109)
 	f.order(domain.TypeInspection, "20.00", "", "")
 	other := "00000000-0000-0000-0000-0000000000e2"
-	otherCtx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7109), LegalEntityID: other, UserID: "u2", Duties: map[string]struct{}{"EamPlanner": {}}})
+	otherCtx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7109), LegalEntityID: other, UserID: "u2", Duties: map[string]struct{}{"eam.work.plan": {}}})
 	a2, err := f.s.CreateAsset(otherCtx, Asset{Name: "Fan", AssetType: "FAN", SiteID: testkit.TenantID(9), Criticality: 3}, "gl-asset-e2")
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +341,7 @@ func (f *glFixture) legacyAsset(name string) Asset {
 
 func TestGLPosting_NewAssetsNeedAnEntityAndLegacyOnesCannotTakeWorkOrders(t *testing.T) {
 	f := newGLFixture(t, 7110)
-	unscoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7110), UserID: "u3", Duties: map[string]struct{}{"EamAssetMaintain": {}}})
+	unscoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(7110), UserID: "u3", Duties: map[string]struct{}{"eam.asset.maintain": {}}})
 	in := Asset{Name: "Press", AssetType: "PRESS", SiteID: testkit.TenantID(9), Criticality: 3}
 	var prob *httpx.Problem
 	if _, err := f.s.CreateAsset(unscoped, in, "gl-asset-none"); !errors.As(err, &prob) || prob.Status != http.StatusBadRequest {

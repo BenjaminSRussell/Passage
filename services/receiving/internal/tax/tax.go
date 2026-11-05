@@ -23,7 +23,7 @@ import (
 const (
 	Timeout          = 3 * time.Second
 	audience         = "tax"
-	dutyCalculate    = "Calculate tax"
+	dutyCalculate    = "tax.tax.calculate"
 	dutyRecord       = "tax.transaction.record"
 	calculatePath    = "/v1/tax/calculate"
 	transactionsPath = "/v1/tax/transactions"

@@ -2,6 +2,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { PrincipalProvider } from "../../shell/principal";
 import hr from "./module";
 
 export interface Reply {
@@ -70,15 +71,17 @@ function Where() {
   return <p data-testid="where">{location.pathname + location.search}</p>;
 }
 
-export function renderAt(path: string) {
+export function renderAt(path: string, duties: readonly string[] = []) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        {hr.routes.map((route) => (
-          <Route key={route.path} path={route.path} element={route.element} />
-        ))}
-      </Routes>
-      <Where />
-    </MemoryRouter>,
+    <PrincipalProvider duties={duties}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          {hr.routes.map((route) => (
+            <Route key={route.path} path={route.path} element={route.element} />
+          ))}
+        </Routes>
+        <Where />
+      </MemoryRouter>
+    </PrincipalProvider>,
   );
 }

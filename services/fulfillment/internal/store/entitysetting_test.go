@@ -79,7 +79,7 @@ func setCogsPolicy(t *testing.T, s *store.Postgres, ctx context.Context, legalEn
 	}
 }
 
-// Changing cogs_at_shipment is an accounting policy change: WarehouseRelease
+// Changing cogs_at_shipment is an accounting policy change: fulfillment.warehouse.release
 // alone may change asn_enabled but not cogs_at_shipment.
 func TestLegalEntitySetting_CogsChangeNeedsTheLedgerSetupDuty(t *testing.T) {
 	s, admin := setup(t)

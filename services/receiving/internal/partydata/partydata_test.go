@@ -90,10 +90,10 @@ func TestSelfBillParties_RefusesASupplierWithoutAnAddressAndPrefersTheInvoiceAdd
 		_, _ = w.Write([]byte(`{"legalName":"Acme"}`))
 	}))
 	org := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/v1/org/addresses":
+		switch r.URL.Path {
+		case "/v1/org/addresses":
 			_, _ = w.Write([]byte(`{"items":` + items + `}`))
-		case r.URL.Path == "/v1/org/legal-entities/"+leID:
+		case "/v1/org/legal-entities/" + leID:
 			_, _ = w.Write([]byte(`{"name":"Passage","country":"DE"}`))
 		}
 	}))

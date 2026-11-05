@@ -47,11 +47,11 @@ const (
 
 // Duties (PRD 3.17.17) enforced on the routes.
 const (
-	dutyRequisitionCreate      = "RequisitionCreate"
-	dutyPurchaseOrderMaintain  = "PurchaseOrderMaintain"
-	dutyPurchaseOrderInquire   = "PurchaseOrderInquire"
-	dutyTradeAgreementMaintain = "TradeAgreementMaintain"
-	dutyAgreementMaintain      = "AgreementMaintain"
+	dutyRequisitionCreate      = "procurement.requisition.create"
+	dutyPurchaseOrderMaintain  = "procurement.purchase-order.maintain"
+	dutyPurchaseOrderInquire   = "procurement.purchase-order.inquire"
+	dutyTradeAgreementMaintain = "procurement.trade-agreement.maintain"
+	dutyAgreementMaintain      = "procurement.agreement.maintain"
 	dutyPlanRowSettle          = "procurement.invoicing-plan.settle"
 	dutyPurchaseOrderLookup    = "procurement.purchase-order.lookup"
 )
@@ -169,11 +169,11 @@ func (a *API) Register(r chi.Router) {
 		// PO lifecycle (FR-17.7, FR-17.8): PATCH edits or creates a change
 		// version; custom methods (":submit", ":approve", ":reject", ":confirm",
 		// ":cancel") arrive as one path segment and check their own duty in
-		// orderAction, since approve, reject and confirm need PurchaseOrderConfirm.
+		// orderAction, since approve, reject and confirm need procurement.purchase-order.confirm.
 		maintain.Patch("/purchase-orders/{id}", a.editOrder)
 		r.Post("/purchase-orders/{id}", a.orderAction)
 		// Subsequent price change over many POs (FR-17.22); preview needs
-		// PurchaseOrderInquire and apply PurchaseOrderConfirm, checked in repriceRun.
+		// procurement.purchase-order.inquire and apply procurement.purchase-order.confirm, checked in repriceRun.
 		r.Post("/purchase-orders:reprice", a.repriceRun)
 		inquire.Get("/purchase-order-lines", a.listOpenOrderLines)
 		// Purchasing inquiries (PRD 3.17.14): open orders by vendor, overdue lines, order price history.
@@ -211,7 +211,7 @@ func (a *API) Register(r chi.Router) {
 		pa.Post("/agreements/{id}", a.purchaseAgreementAction)
 		// RFQ cycle (FR-17.4). Custom methods (":send", ":close", ":cancel",
 		// ":award") arrive as one path segment and check their own duty in
-		// rfqAction, since :award needs RFQAward.
+		// rfqAction, since :award needs procurement.rfq.award.
 		rfqMaintain := r.With(authz.RequireDuty(dutyRFQMaintain))
 		rfqRead := r.With(authz.Require(anyDuty{dutyRFQMaintain, dutyRFQAward}, dutyRFQMaintain+" or "+dutyRFQAward, ""))
 		rfqMaintain.Post("/rfqs", a.createRFQ)
@@ -225,8 +225,8 @@ func (a *API) Register(r chi.Router) {
 		// Buyer scoring of a vendor's reply on the RFQ's criteria (FR-17.19).
 		r.With(authz.RequireDuty(dutyRFQAward)).Put("/rfqs/{id}/scores/{vendorId}", a.scoreRFQVendor)
 		// Scheduling agreements and releases (FR-17.15). Writes need
-		// AgreementMaintain; the release monitor and documentation are inquiries
-		// (3.17.14) open to PurchaseOrderInquire too. ":release" arrives as one
+		// procurement.agreement.maintain; the release monitor and documentation are inquiries
+		// (3.17.14) open to procurement.purchase-order.inquire too. ":release" arrives as one
 		// path segment, see schedulingAgreementAction.
 		saRead := r.With(authz.Require(anyDuty{dutyAgreementMaintain, dutyPurchaseOrderInquire},
 			dutyAgreementMaintain+" or "+dutyPurchaseOrderInquire, ""))
@@ -243,8 +243,8 @@ func (a *API) Register(r chi.Router) {
 		policyRead.Get("/purchasing-policies", a.listPolicies)
 		policyRead.Get("/purchasing-policies/{legalEntityId}", a.getPolicy)
 		r.With(authz.RequireDuty(dutyPolicyMaintain)).Put("/purchasing-policies/{legalEntityId}", a.putPolicy)
-		// Procurement catalogs (FR-17.18). Writes need CatalogMaintain; reading catalogs is open to
-		// PurchaseOrderInquire; the requisition picker is open to requesters. ":publish" and
+		// Procurement catalogs (FR-17.18). Writes need procurement.catalog.maintain; reading catalogs is open to
+		// procurement.purchase-order.inquire; the requisition picker is open to requesters. ":publish" and
 		// ":retire" arrive as one path segment, see catalogAction.
 		catalogWrite := r.With(authz.RequireDuty(dutyCatalogMaintain))
 		catalogRead := r.With(authz.Require(anyDuty{dutyCatalogMaintain, dutyPurchaseOrderInquire},

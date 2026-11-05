@@ -54,7 +54,7 @@ func TestSplitRequisitionLine_Rejections(t *testing.T) {
 		{"unknown line", func(string) string { return splitPath(ids.New()) }, `{"quantities":["1"]}`, splitHeaders("k", `"1"`), []string{dutyPurchaseOrderMaintain}, "", false, 404, store.CodeRequisitionLineNotFound},
 		{"unknown action", func(id string) string { return "/v1/procurement/requisition-lines/" + id + ":merge" }, `{"quantities":["1"]}`, splitHeaders("k", `"1"`), []string{dutyPurchaseOrderMaintain}, "", false, 404, codeUnknownAction},
 		{"legal entity outside scope", splitPath, `{"quantities":["1"]}`, splitHeaders("k", `"1"`), []string{dutyPurchaseOrderMaintain}, ids.New(), false, 403, codeScope},
-		{"needs PurchaseOrderMaintain", splitPath, `{"quantities":["1"]}`, splitHeaders("k", `"1"`), []string{dutyPurchaseOrderInquire}, "", false, 403, codeScope},
+		{"needs procurement.purchase-order.maintain", splitPath, `{"quantities":["1"]}`, splitHeaders("k", `"1"`), []string{dutyPurchaseOrderInquire}, "", false, 403, codeScope},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

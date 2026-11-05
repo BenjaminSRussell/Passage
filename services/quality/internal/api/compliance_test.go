@@ -142,8 +142,8 @@ func postList(t *testing.T, h http.Handler, body string) *domain.ComplianceList 
 func TestComplianceList_DutyVersioningAndValidation(t *testing.T) {
 	h := newHandler(newFake())
 	body := `{"code":"REACH-SVHC","name":"REACH Candidate List","kind":"REPORTING","blockMode":"WARN","regions":["EU"],"limits":[{"cas":"` + dehp + `","thresholdPct":"0.1"}]}`
-	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/compliance-lists", body: body, duties: "QM_VIEW", key: "c0"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("QM_VIEW must not create lists: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/compliance-lists", body: body, duties: "quality.view", key: "c0"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("quality.view must not create lists: %d", rec.Code)
 	}
 	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/compliance-lists", body: body, duties: dutyCompliance}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("Idempotency-Key is required: %d", rec.Code)
@@ -152,7 +152,7 @@ func TestComplianceList_DutyVersioningAndValidation(t *testing.T) {
 	if first.Version != 1 || second.Version != 2 || first.ID == second.ID {
 		t.Fatalf("versions %d and %d of the same code", first.Version, second.Version)
 	}
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/compliance-lists", duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/compliance-lists", duties: "quality.view"})
 	if rec.Code != http.StatusOK || strings.Count(rec.Body.String(), `"code":"REACH-SVHC"`) != 2 {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
@@ -174,7 +174,7 @@ type evaluation struct {
 
 func evaluate(t *testing.T, h http.Handler, item, region string) evaluation {
 	t.Helper()
-	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"` + region + `"}`, duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"` + region + `"}`, duties: "quality.view"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("evaluate %s: %d %s", region, rec.Code, rec.Body.String())
 	}
@@ -248,11 +248,11 @@ func TestCompliance_ResultVersionsChangeOnlyWithTheOutcome(t *testing.T) {
 func TestCompliance_EvaluateAndCompositionErrors(t *testing.T) {
 	h := newHandler(newFake())
 	item := ids.New()
-	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"EU"}`, duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"EU"}`, duties: "quality.view"})
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), domain.CodeCompositionMissing) {
 		t.Errorf("an item without a composition cannot be declared compliant: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"europe"}`, duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"europe"}`, duties: "quality.view"})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"region"`) {
 		t.Errorf("bad region: %d %s", rec.Code, rec.Body.String())
 	}
@@ -261,12 +261,12 @@ func TestCompliance_EvaluateAndCompositionErrors(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "parts[0].itemId") {
 		t.Errorf("an item cannot contain itself: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + "/composition", duties: "QM_VIEW", key: ids.New(),
+	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + "/composition", duties: "quality.view", key: ids.New(),
 		body: `{"direct":{"` + lead + `":"0.1"}}`})
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("QM_VIEW must not maintain compositions: %d", rec.Code)
+		t.Errorf("quality.view must not maintain compositions: %d", rec.Code)
 	}
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/items/" + item + "/composition", duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/items/" + item + "/composition", duties: "quality.view"})
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), domain.CodeCompositionMissing) {
 		t.Errorf("missing composition: %d %s", rec.Code, rec.Body.String())
 	}
@@ -274,7 +274,7 @@ func TestCompliance_EvaluateAndCompositionErrors(t *testing.T) {
 	other := ids.New()
 	saveComp(t, h, item, `{"parts":[{"itemId":"`+other+`","massFraction":"0.5"}]}`)
 	saveComp(t, h, other, `{"parts":[{"itemId":"`+item+`","massFraction":"0.5"}]}`)
-	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"EU"}`, duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/items/" + item + ":evaluate-compliance", body: `{"region":"EU"}`, duties: "quality.view"})
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeCompositionCycle) {
 		t.Errorf("cycle: %d %s", rec.Code, rec.Body.String())
 	}
@@ -293,8 +293,8 @@ func TestStudy_CreateListAndGet(t *testing.T) {
 	group, _, _ := createGroup(t, h, true)
 	accelerated, _, _ := createGroup(t, h, true)
 	item := ids.New()
-	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/stability-studies", body: studyBody(item, group, ""), duties: "QM_VIEW", key: "s0"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("QM_VIEW must not plan studies: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/stability-studies", body: studyBody(item, group, ""), duties: "quality.view", key: "s0"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("quality.view must not plan studies: %d", rec.Code)
 	}
 	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/stability-studies", duties: dutyStability, key: "s1",
 		body: studyBody(item, group, `,"pullTestGroups":{"36":"`+accelerated+`"}`)})
@@ -316,14 +316,14 @@ func TestStudy_CreateListAndGet(t *testing.T) {
 	if st.Pulls[1].OrderDate.Format(time.DateOnly) != "2026-04-23" || st.Pulls[1].TestGroupID != group || st.Pulls[7].TestGroupID != accelerated {
 		t.Errorf("pull 3: order %s group %s; pull 36 group %s", st.Pulls[1].OrderDate.Format(time.DateOnly), st.Pulls[1].TestGroupID, st.Pulls[7].TestGroupID)
 	}
-	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies/" + st.ID, duties: "QM_VIEW"}); rec.Code != http.StatusOK {
+	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies/" + st.ID, duties: "quality.view"}); rec.Code != http.StatusOK {
 		t.Fatalf("get: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies?status=PLANNED&itemId=" + item, duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies?status=PLANNED&itemId=" + item, duties: "quality.view"})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), st.ID) {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies?status=OPEN", duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies?status=OPEN", duties: "quality.view"})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"status"`) {
 		t.Fatalf("bad status filter: %d %s", rec.Code, rec.Body.String())
 	}
@@ -351,7 +351,7 @@ func TestStudy_RejectsBadInput(t *testing.T) {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
 	}
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies/" + ids.New(), duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/stability-studies/" + ids.New(), duties: "quality.view"})
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), domain.CodeStudyMissing) {
 		t.Fatalf("missing study: %d %s", rec.Code, rec.Body.String())
 	}
@@ -377,27 +377,27 @@ func TestSPC_ChartEmptyStateAndErrors(t *testing.T) {
 		groups = append(groups, []string{"10.0", "10.2", "9.8", "10.1"})
 	}
 	spcObs(f, item, test, groups...)
-	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + item + "&testId=" + test, duties: "QM_VIEW"})
+	rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + item + "&testId=" + test, duties: "quality.view"})
 	var res domain.SPCResult
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &res) != nil || res.Chart != domain.ChartXbarR || res.XBarR.SubgroupSize != 4 || len(res.OrderIDs) != 5 {
 		t.Fatalf("spc: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + ids.New() + "&testId=" + ids.New(), duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + ids.New() + "&testId=" + ids.New(), duties: "quality.view"})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"chart":"NONE"`) || !strings.Contains(rec.Body.String(), `"orderIds":[]`) {
 		t.Fatalf("no results yet is an empty chart: %d %s", rec.Code, rec.Body.String())
 	}
 	for _, q := range []string{"?itemId=nope&testId=" + test, "?itemId=" + item + "&testId=" + test + "&orders=1", "?itemId=" + item + "&testId=" + test + "&orders=500"} {
-		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc" + q, duties: "QM_VIEW"}); rec.Code != http.StatusBadRequest {
+		if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc" + q, duties: "quality.view"}); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", q, rec.Code, rec.Body.String())
 		}
 	}
 	single := ids.New()
 	spcObs(f, single, test, []string{"1"}, []string{"2"})
-	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + single + "&testId=" + test, duties: "QM_VIEW"})
+	rec = call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + single + "&testId=" + test, duties: "quality.view"})
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeSPCUnsupported) {
 		t.Fatalf("one sample per order cannot form an X-bar/R chart: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + item + "&testId=" + test, duties: "QM_RESULTS_RECORD"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("SPC needs QM_VIEW: %d", rec.Code)
+	if rec := call(h, reqSpec{method: http.MethodGet, path: "/v1/quality/spc?itemId=" + item + "&testId=" + test, duties: "quality.result.record"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("SPC needs quality.view: %d", rec.Code)
 	}
 }

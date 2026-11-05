@@ -25,8 +25,8 @@ change. Every gap above is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 The TenantAdmin duty (PRD 9.50.17) allows reading the tenant's cost (`GET /api/v1/ops/tenants/{id}/cost`)
 and assigning user types within the licence. It does not allow provisioning or decommissioning a tenant,
-changing regions or installing a licence: those are PlatformAdmin, and signing a licence file is
-LicenseIssuer. One person should not hold TenantAdmin and PlatformAdmin for the same tenant (a MEDIUM SoD
+changing regions or installing a licence: those are platform.global.admin, and signing a licence file is
+LicenseIssuer. One person should not hold TenantAdmin and platform.global.admin for the same tenant (a MEDIUM SoD
 conflict).
 
 ## 2. Legal entities and scope

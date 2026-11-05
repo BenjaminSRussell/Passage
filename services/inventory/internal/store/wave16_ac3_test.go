@@ -242,6 +242,12 @@ func TestAC3EveryJournalTypePostsABalancedEntry(t *testing.T) {
 		}
 	}
 
+	// BOM (#477): open component C 4 x 1.25 = 5.00 (value 148.06), then assemble parent B
+	// from C 3 at 1.25 = 3.75; B is received at 3.75, no GL lines, value unchanged.
+	comp, parent := ids.New(), ids.New()
+	check(postIt(domain.JournalOpeningBalance, line(comp, "4", "1.25", d1)), "148.06", glWant{"1300", "5.00", "0"}, glWant{"3900", "0", "5.00"})
+	check(postIt(domain.JournalBOM, line(comp, "-3", "0", d1), line(parent, "1", "0", d1)), "148.06")
+
 	for _, typ := range domain.JournalTypes {
 		if !seen[typ] {
 			t.Errorf("journal type %s was not posted", typ)
@@ -254,9 +260,9 @@ func TestAC3EveryJournalTypePostsABalancedEntry(t *testing.T) {
 		where j.tenant_id = $1 and j.status = 'POSTED' group by j.id) x`, testkit.TenantID(1)).Scan(&posted, &unbalanced); err != nil {
 		t.Fatal(err)
 	}
-	// Ten journals: six types, three reversals, and the second opening balance.
-	if posted != 10 || unbalanced != 0 {
-		t.Fatalf("%d posted journals, %d unbalanced; want 10 and 0", posted, unbalanced)
+	// Twelve journals: seven types, three reversals, and the second and third opening balances.
+	if posted != 12 || unbalanced != 0 {
+		t.Fatalf("%d posted journals, %d unbalanced; want 12 and 0", posted, unbalanced)
 	}
 	if rep, err := s.RebuildOnHand(tenantWideCtx(1), false); err != nil || rep.DiffCount != 0 {
 		t.Fatalf("rebuild: %v %+v", err, rep)

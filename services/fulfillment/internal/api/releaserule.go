@@ -17,9 +17,9 @@ import (
 // (section 5.28.13: release_horizon_days, release_requires_full_atp,
 // wave_max_lines, wave_max_orders).
 func (a *API) routesReleaseRule(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/release-rules", a.listReleaseRules)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/release-rules/{warehouseId}", a.getReleaseRule)
-	r.With(authz.RequireDuty("WarehouseRelease")).Put("/v1/fulfillment/release-rules/{warehouseId}", a.saveReleaseRule)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/release-rules", a.listReleaseRules)
+	r.With(authz.RequireDuty("fulfillment.warehouse.view")).Get("/v1/fulfillment/release-rules/{warehouseId}", a.getReleaseRule)
+	r.With(authz.RequireDuty("fulfillment.warehouse.release")).Put("/v1/fulfillment/release-rules/{warehouseId}", a.saveReleaseRule)
 }
 
 type releaseRuleRequest struct {

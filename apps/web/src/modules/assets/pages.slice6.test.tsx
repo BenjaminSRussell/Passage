@@ -105,8 +105,8 @@ describe("lease ledger posting", () => {
   it("is registered with navigation gated on duties the service already knows", () => {
     const paths = assets.routes.map((r) => r.path);
     for (const path of ["/assets/leases/posting", "/assets/leases/posting-profile"]) expect(paths).toContain(path);
-    expect(assets.nav.find((n) => n.to === "/assets/leases/posting")?.duty).toBe("AssetPostJournal");
-    expect(assets.nav.find((n) => n.to === "/assets/leases/posting-profile")?.duty).toBe("LeaseMaintain");
+    expect(assets.nav.find((n) => n.to === "/assets/leases/posting")?.duty).toBe("assets.journal.post");
+    expect(assets.nav.find((n) => n.to === "/assets/leases/posting-profile")?.duty).toBe("assets.lease.maintain");
   });
 
   it("starts empty, checks the form, posts and lists what was booked and what the ledger refused", async () => {

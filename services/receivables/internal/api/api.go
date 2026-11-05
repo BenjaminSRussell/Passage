@@ -27,10 +27,10 @@ import (
 
 const (
 	readyTimeout     = 500 * time.Millisecond
-	dutyView         = "ARView"
-	dutyPayment      = "ARPaymentPost"
+	dutyView         = "receivables.view"
+	dutyPayment      = "receivables.payment.post"
 	dutyRMACredit    = "ar.rmacredit.post"
-	dutyImport       = "ARImport"
+	dutyImport       = "receivables.payment-file.import"
 	maxLockboxBytes  = 3 << 20 // below httpx.Decode's 4 MiB body cap, leaving room for JSON escaping
 	validationDetail = "request failed validation"
 	idempotencyKey   = "Idempotency-Key"
@@ -66,6 +66,7 @@ func (a *API) Register(r chi.Router) {
 	r.Route("/v1/receivables", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyView)).Get("/open-items", a.listOpenItems)
 		r.With(authz.RequireDuty(dutyOpeningImport)).Post("/open-items:batch", a.importOpeningItems)
+		r.With(authz.RequireAnyDuty(dutyView, dutyOpeningRead)).Get("/open-items/{ref}", a.getOpenItem)
 		r.With(authz.RequireDuty(dutyView)).Get("/open-item-imports", a.listOpeningImports)
 		r.With(authz.RequireDuty(dutyView)).Get("/aging", a.aging)
 		r.With(authz.RequireDuty(dutyPayment)).Post("/payments", a.createPayment)

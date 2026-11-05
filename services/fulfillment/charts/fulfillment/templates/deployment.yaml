@@ -69,6 +69,10 @@ spec:
             - name: INVENTORY_URL
               value: {{ .Values.inventoryUrl | quote }}
             {{- end }}
+            {{- if .Values.carrierGatewayUrl }}
+            - name: CARRIER_GATEWAY_URL
+              value: {{ .Values.carrierGatewayUrl | quote }}
+            {{- end }}
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key

@@ -174,14 +174,14 @@ var simPurchaseOrders = strings.Join([]string{
 // R and a group-only A, and a retransmitted 997 is refused as a duplicate.
 func TestPartnerSim_DistributorPOToASNToInvoiceRoundTrip(t *testing.T) {
 	h, pool := dbHandlerPool(t)
-	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "sim"})
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "edi.admin", map[string]string{"Idempotency-Key": "sim"})
 	var partner store.Partner
 	if err := json.Unmarshal(rec.Body.Bytes(), &partner); err != nil || rec.Code != http.StatusCreated {
 		t.Fatalf("partner: %d %s", rec.Code, rec.Body.String())
 	}
 	receive := func(raw string) receiveResponse {
 		t.Helper()
-		rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "EDI_OPERATE", nil)
+		rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", raw, "edi.operate", nil)
 		var got receiveResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusCreated {
 			t.Fatalf("receive: %d %s", rec.Code, rec.Body.String())
@@ -191,7 +191,7 @@ func TestPartnerSim_DistributorPOToASNToInvoiceRoundTrip(t *testing.T) {
 	send := func(set, key, document string) simDoc {
 		t.Helper()
 		rec := do(t, h, http.MethodPost, "/edi/v1/partners/"+partner.ID+"/outbound",
-			`{"transactionSet":"`+set+`","document":`+document+`}`, "EDI_OPERATE", map[string]string{"Idempotency-Key": key})
+			`{"transactionSet":"`+set+`","document":`+document+`}`, "edi.operate", map[string]string{"Idempotency-Key": key})
 		var out store.OutboundResult
 		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
 			t.Fatalf("send %s: %d %s", set, rec.Code, rec.Body.String())
@@ -233,7 +233,7 @@ func TestPartnerSim_DistributorPOToASNToInvoiceRoundTrip(t *testing.T) {
 	}
 	detail := func(id string) store.InterchangeDetail {
 		t.Helper()
-		rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+id, "", "EDI_OPERATE,EDI_PII_VIEW", nil)
+		rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+id, "", "edi.operate,edi.pii.view", nil)
 		var d store.InterchangeDetail
 		if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil || rec.Code != http.StatusOK {
 			t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
@@ -339,11 +339,11 @@ func TestPartnerSim_DistributorPOToASNToInvoiceRoundTrip(t *testing.T) {
 
 	// 5. The distributor retransmits its 997 for the 855: same ISA13, refused, nothing changes.
 	if rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", sim997("102", "PR", "2", []simAnswer{{"855", "0001", "A"}}, "A"),
-		"EDI_OPERATE", nil); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeDuplicateControl {
+		"edi.operate", nil); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeDuplicateControl {
 		t.Fatalf("retransmitted 997: %d %s", rec.Code, rec.Body.String())
 	}
 
-	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges?direction=OUT", "", "EDI_OPERATE", nil)
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges?direction=OUT", "", "edi.operate", nil)
 	var list struct {
 		Items []store.InterchangeSummary `json:"items"`
 	}

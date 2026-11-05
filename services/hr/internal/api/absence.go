@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	dutyAbsenceAdmin = "HcmAbsenceAdmin"
-	dutyEssAbsence   = "EssAbsence"
-	dutyMssApprove   = "MssApprove"
+	dutyAbsenceAdmin = "hr.absence.admin"
+	dutyEssAbsence   = "hr.absence.self"
+	dutyMssApprove   = "hr.team.approve"
 
 	absMaxPeriodDays = 366
 	absMaxReason     = 500
@@ -54,7 +54,7 @@ type absencePlanRequest struct {
 	MinServiceDays         *int    `json:"minServiceDays"`
 }
 
-// createAbsencePlan is POST /v1/hr/absence/plans (HcmAbsenceAdmin).
+// createAbsencePlan is POST /v1/hr/absence/plans (hr.absence.admin).
 func (a *API) createAbsencePlan(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -166,7 +166,7 @@ func caller(r *http.Request) tenant.Principal {
 	return p
 }
 
-// listAbsencePlans is GET /v1/hr/absence/plans (EssAbsence): every employee
+// listAbsencePlans is GET /v1/hr/absence/plans (hr.absence.self): every employee
 // picks a plan when requesting absence.
 func (a *API) listAbsencePlans(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
@@ -186,7 +186,7 @@ func (a *API) listAbsencePlans(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, listResponse[store.AbsencePlan]{Items: page.Items, NextCursor: cursor(page.NextAfter)})
 }
 
-// getAbsencePlan is GET /v1/hr/absence/plans/{id} (HcmAbsenceAdmin): the plan
+// getAbsencePlan is GET /v1/hr/absence/plans/{id} (hr.absence.admin): the plan
 // with its latest accrual periods, year ends and carry-over expiries.
 func (a *API) getAbsencePlan(w http.ResponseWriter, r *http.Request, id string) {
 	plan, err := a.store.GetAbsencePlan(r.Context(), id)
@@ -211,7 +211,7 @@ type accrualRunResponse struct {
 	Replayed bool `json:"replayed"`
 }
 
-// runAccrual is POST /v1/hr/absence/accrue (HcmAbsenceAdmin). The PRD's key per
+// runAccrual is POST /v1/hr/absence/accrue (hr.absence.admin). The PRD's key per
 // (plan, period) is the natural key: each worker is accrued once per period,
 // so a retried call credits nobody twice and needs no Idempotency-Key.
 func (a *API) runAccrual(w http.ResponseWriter, r *http.Request) {
@@ -306,8 +306,8 @@ type absenceRequestResponse struct {
 	Warnings []domain.RuleWarning `json:"warnings"`
 }
 
-// createAbsenceRequest is POST /v1/hr/absence/requests (EssAbsence). An
-// employee requests for their own worker; HcmAbsenceAdmin may request for
+// createAbsenceRequest is POST /v1/hr/absence/requests (hr.absence.self). An
+// employee requests for their own worker; hr.absence.admin may request for
 // anyone.
 func (a *API) createAbsenceRequest(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
@@ -371,8 +371,8 @@ func (a *API) createAbsenceRequest(w http.ResponseWriter, r *http.Request) {
 
 var absStatuses = []string{domain.RequestSubmitted, domain.RequestApproved, domain.RequestRejected, domain.RequestCanceled}
 
-// listAbsenceRequests is GET /v1/hr/absence/requests (EssAbsence). An employee
-// sees only their own requests; MssApprove and HcmAbsenceAdmin see the
+// listAbsenceRequests is GET /v1/hr/absence/requests (hr.absence.self). An employee
+// sees only their own requests; hr.team.approve and hr.absence.admin see the
 // tenant's (team scoping by the position hierarchy is the OPA handoff).
 func (a *API) listAbsenceRequests(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
@@ -420,7 +420,7 @@ type absenceDecisionRequest struct {
 	Decision string `json:"decision"`
 }
 
-// decideAbsenceRequest is POST /v1/hr/absence/requests/{id}/decide (MssApprove).
+// decideAbsenceRequest is POST /v1/hr/absence/requests/{id}/decide (hr.team.approve).
 // Replaying the decision the request already has returns it unchanged.
 func (a *API) decideAbsenceRequest(w http.ResponseWriter, r *http.Request, id string) {
 	var req absenceDecisionRequest
@@ -447,8 +447,8 @@ func (a *API) decideAbsenceRequest(w http.ResponseWriter, r *http.Request, id st
 	httpx.JSON(w, http.StatusOK, stored)
 }
 
-// cancelAbsenceRequest is POST /v1/hr/absence/requests/{id}/cancel (EssAbsence):
-// the employee withdraws their own SUBMITTED request; HcmAbsenceAdmin may
+// cancelAbsenceRequest is POST /v1/hr/absence/requests/{id}/cancel (hr.absence.self):
+// the employee withdraws their own SUBMITTED request; hr.absence.admin may
 // withdraw anyone's.
 func (a *API) cancelAbsenceRequest(w http.ResponseWriter, r *http.Request, id string) {
 	stored, _, err := a.store.CancelAbsenceRequest(r.Context(), id, !caller(r).HasDuty(dutyAbsenceAdmin))
@@ -460,8 +460,8 @@ func (a *API) cancelAbsenceRequest(w http.ResponseWriter, r *http.Request, id st
 	httpx.JSON(w, http.StatusOK, stored)
 }
 
-// absenceBalances is GET /v1/hr/workers/{id}/absence/balances?asOf= (EssAbsence).
-// An employee reads their own; MssApprove and HcmAbsenceAdmin read anyone's.
+// absenceBalances is GET /v1/hr/workers/{id}/absence/balances?asOf= (hr.absence.self).
+// An employee reads their own; hr.team.approve and hr.absence.admin read anyone's.
 func (a *API) absenceBalances(w http.ResponseWriter, r *http.Request, workerID string) {
 	asOf := time.Now().UTC()
 	if raw := r.URL.Query().Get("asOf"); raw != "" {

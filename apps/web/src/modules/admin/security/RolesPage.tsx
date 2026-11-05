@@ -6,7 +6,7 @@ import { getRole, listDuties, listRoles, SecurityApiError, type DutyDetail, type
 import styles from "./security.module.css";
 import { ApiFailure, retryAction } from "./support";
 
-const DUTY = "Maintain security roles";
+const DUTY = "identity.security-role.maintain";
 
 const roleColumns: DataTableColumn<RoleSummary>[] = [
   {

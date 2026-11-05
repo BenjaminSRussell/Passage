@@ -134,7 +134,7 @@ func maskValue(v any) any {
 
 // dictionary gives the X12 004010 dictionary name for the elements of the
 // envelopes and of the sets this service reads and writes (850, 855, 856, 810,
-// 997). The viewer shows the ref alone for anything not listed.
+// 820, 214, 997). The viewer shows the ref alone for anything not listed.
 var dictionary = map[string]string{
 	"ISA05": "Interchange ID Qualifier", "ISA06": "Interchange Sender ID",
 	"ISA07": "Interchange ID Qualifier", "ISA08": "Interchange Receiver ID",
@@ -188,4 +188,14 @@ var dictionary = map[string]string{
 	"AK501": "Transaction Set Acknowledgment Code",
 	"AK901": "Functional Group Acknowledge Code", "AK902": "Number of Transaction Sets Included",
 	"AK903": "Number of Received Transaction Sets", "AK904": "Number of Accepted Transaction Sets",
+	"BPR01": "Transaction Handling Code", "BPR02": "Monetary Amount", "BPR03": "Credit/Debit Flag Code",
+	"BPR04": "Payment Method Code", "BPR16": "Date",
+	"TRN01": "Trace Type Code", "TRN02": "Reference Identification", "ENT01": "Assigned Number",
+	"RMR01": "Reference Identification Qualifier", "RMR02": "Reference Identification",
+	"RMR04": "Monetary Amount", "RMR05": "Monetary Amount", "RMR06": "Monetary Amount",
+	"B1001": "Reference Identification", "B1002": "Shipment Identification Number", "B1003": "Standard Carrier Alpha Code",
+	"L1101": "Reference Identification", "L1102": "Reference Identification Qualifier", "LX01": "Assigned Number",
+	"AT701": "Shipment Status Code", "AT702": "Shipment Status or Appointment Reason Code",
+	"AT705": "Date", "AT706": "Time", "AT707": "Time Code",
+	"MS101": "City Name", "MS102": "State or Province Code", "MS103": "Country Code",
 }

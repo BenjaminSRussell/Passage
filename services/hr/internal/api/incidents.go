@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	dutyIncidentReport = "HcmIncidentReport"
-	dutyIncidentAdmin  = "HcmIncidentAdmin"
+	dutyIncidentReport = "hr.incident.report"
+	dutyIncidentAdmin  = "hr.incident.admin"
 
 	maxIncidentDays = 365
 	maxListEntries  = 20
@@ -138,7 +138,7 @@ func validateIncident(req incidentRequest, now time.Time) (store.IncidentInput, 
 	}, fields
 }
 
-// reportIncident is POST /v1/hr/incidents (HcmIncidentReport).
+// reportIncident is POST /v1/hr/incidents (hr.incident.report).
 func (a *API) reportIncident(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -167,7 +167,7 @@ func (a *API) reportIncident(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, status, out)
 }
 
-// listIncidents is GET /v1/hr/incidents (HcmIncidentAdmin), newest case first.
+// listIncidents is GET /v1/hr/incidents (hr.incident.admin), newest case first.
 func (a *API) listIncidents(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -203,7 +203,7 @@ func incidentRoute(next func(http.ResponseWriter, *http.Request, string)) http.H
 	return idRoute(store.CodeIncidentNotFound, "incident not found", next)
 }
 
-// getIncident is GET /v1/hr/incidents/{id} (HcmIncidentAdmin); the sealed
+// getIncident is GET /v1/hr/incidents/{id} (hr.incident.admin); the sealed
 // details are opened and the read is audited.
 func (a *API) getIncident(w http.ResponseWriter, r *http.Request, id string) {
 	out, err := a.store.GetIncident(r.Context(), id)
@@ -215,7 +215,7 @@ func (a *API) getIncident(w http.ResponseWriter, r *http.Request, id string) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// advanceIncident is POST /v1/hr/incidents/{id}/status (HcmIncidentAdmin).
+// advanceIncident is POST /v1/hr/incidents/{id}/status (hr.incident.admin).
 func (a *API) advanceIncident(w http.ResponseWriter, r *http.Request, id string) {
 	var req incidentStatusRequest
 	if err := httpx.Decode(r, &req); err != nil {
@@ -238,7 +238,7 @@ func (a *API) advanceIncident(w http.ResponseWriter, r *http.Request, id string)
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// oshaExtract is GET /v1/hr/incidents/osha-extract?year=&siteId= (HcmIncidentAdmin).
+// oshaExtract is GET /v1/hr/incidents/osha-extract?year=&siteId= (hr.incident.admin).
 func (a *API) oshaExtract(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return

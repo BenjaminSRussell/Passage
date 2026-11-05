@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	dutyEssBase = "EssBase"
-	dutyMssBase = "MssBase"
+	dutyEssBase = "hr.profile.self"
+	dutyMssBase = "hr.team.manage"
 )
 
 type myProfile struct {
@@ -53,7 +53,7 @@ func (a *API) failStore(w http.ResponseWriter, r *http.Request, op string, err e
 	httpx.Fail(w, r, err)
 }
 
-// myProfile is GET /v1/hr/me (EssBase). The worker is the one linked to the
+// myProfile is GET /v1/hr/me (hr.profile.self). The worker is the one linked to the
 // caller's sign-in; nothing in the request names a worker, so there is no id
 // to tamper with. PII is masked and the read is audited like any masked read.
 func (a *API) myProfile(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +85,7 @@ func (a *API) myProfile(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, myProfile{workerDetail: workerDetail{Worker: worker, PII: pii}, AsOf: view})
 }
 
-// myTeam is GET /v1/hr/me/team (MssBase): the caller's direct reports today.
+// myTeam is GET /v1/hr/me/team (hr.team.manage): the caller's direct reports today.
 func (a *API) myTeam(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -112,7 +112,7 @@ func (a *API) myTeam(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, listResponse[teamWorker]{Items: items, NextCursor: cursor(page.NextAfter)})
 }
 
-// teamMember is GET /v1/hr/me/team/{id} (MssBase): a direct report's record
+// teamMember is GET /v1/hr/me/team/{id} (hr.team.manage): a direct report's record
 // without PII. Any other worker, including one that does not exist, is the
 // same 404, so the route cannot be used to probe ids.
 func (a *API) teamMember(w http.ResponseWriter, r *http.Request, id string) {
@@ -160,10 +160,10 @@ func (a *API) listTeamAbsenceRequests(w http.ResponseWriter, r *http.Request, f 
 	httpx.JSON(w, http.StatusOK, listResponse[store.AbsenceRequest]{Items: page.Items, NextCursor: cursor(page.NextAfter)})
 }
 
-// allowTeamWorker limits a manager (MssApprove without HcmAbsenceAdmin) to their own
+// allowTeamWorker limits a manager (hr.team.approve without hr.absence.admin) to their own
 // worker and their direct reports. A worker outside the team answers
 // notFoundCode as 404, the same as one that does not exist. Callers without
-// MssApprove pass through to the handler's own-data check.
+// hr.team.approve pass through to the handler's own-data check.
 func (a *API) allowTeamWorker(w http.ResponseWriter, r *http.Request, workerID, notFoundCode, notFoundDetail string) bool {
 	return a.confineToTeam(w, r, caller(r).HasDuty(dutyAbsenceAdmin), workerID, notFoundCode, notFoundDetail)
 }

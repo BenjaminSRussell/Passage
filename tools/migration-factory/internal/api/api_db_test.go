@@ -115,19 +115,19 @@ func TestPackRun_CleanExtractReconcilesAndRerunLoadsNothing(t *testing.T) {
 		t.Fatalf("event payload %s (%v)", raw, err)
 	}
 
-	got := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "MigrationView"})
+	got := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID, tenant: tenantA, duties: "migration.factory.view"})
 	if got.Code != http.StatusOK {
 		t.Fatalf("get run: %d %s", got.Code, got.Body)
 	}
 	if detail := decode[runDetailDTO](t, got); len(detail.ControlTotals) != len(run.ControlTotals) || detail.Status != "RECONCILED" {
 		t.Fatalf("stored run %+v", detail)
 	}
-	list := do(t, h, request{method: "GET", path: "/api/v1/migration/runs?pack=open_items&limit=1", tenant: tenantA, duties: "MigrationView"})
+	list := do(t, h, request{method: "GET", path: "/api/v1/migration/runs?pack=open_items&limit=1", tenant: tenantA, duties: "migration.factory.view"})
 	page := decode[struct{ Items []runDTO }](t, list)
 	if len(page.Items) != 1 || page.Items[0].RunID != rerun.RunID {
 		t.Fatalf("newest run first, limit 1: %+v", page.Items)
 	}
-	next := do(t, h, request{method: "GET", path: "/api/v1/migration/runs?after=" + rerun.RunID, tenant: tenantA, duties: "MigrationView"})
+	next := do(t, h, request{method: "GET", path: "/api/v1/migration/runs?after=" + rerun.RunID, tenant: tenantA, duties: "migration.factory.view"})
 	if page := decode[struct{ Items []runDTO }](t, next); len(page.Items) != 1 || page.Items[0].RunID != run.RunID {
 		t.Fatalf("second page: %+v", page.Items)
 	}
@@ -153,7 +153,7 @@ func TestPackRun_QuarantinesBadRecordAndLoadsRest(t *testing.T) {
 	if n := count(t, admin, `select count(*) from pack_quarantine where run_id = $1 and rule = 'REFERENTIAL'`, run.RunID); n != 1 {
 		t.Fatalf("pack_quarantine rows = %d", n)
 	}
-	totals := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/control-totals", tenant: tenantA, duties: "MigrationView"})
+	totals := do(t, h, request{method: "GET", path: "/api/v1/migration/runs/" + run.RunID + "/control-totals", tenant: tenantA, duties: "migration.factory.view"})
 	body := decode[struct {
 		Status        string
 		ControlTotals []totalDTO
@@ -218,13 +218,13 @@ func TestTenantIsolation(t *testing.T) {
 	h, _ := dbServer(t)
 	run := decode[runDTO](t, do(t, h, request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: openItemsBody(3)}))
 	path := "/api/v1/migration/runs/" + run.RunID + "/control-totals"
-	if rec := do(t, h, request{method: "GET", path: path, tenant: tenantA, duties: "MigrationView"}); rec.Code != http.StatusOK {
+	if rec := do(t, h, request{method: "GET", path: path, tenant: tenantA, duties: "migration.factory.view"}); rec.Code != http.StatusOK {
 		t.Fatalf("owner read: %d", rec.Code)
 	}
-	if rec := do(t, h, request{method: "GET", path: path, tenant: tenantB, duties: "MigrationView"}); rec.Code != http.StatusNotFound {
+	if rec := do(t, h, request{method: "GET", path: path, tenant: tenantB, duties: "migration.factory.view"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("other tenant must not see the run: %d", rec.Code)
 	}
-	list := decode[struct{ Items []runDTO }](t, do(t, h, request{method: "GET", path: "/api/v1/migration/runs", tenant: tenantB, duties: "MigrationView"}))
+	list := decode[struct{ Items []runDTO }](t, do(t, h, request{method: "GET", path: "/api/v1/migration/runs", tenant: tenantB, duties: "migration.factory.view"}))
 	if len(list.Items) != 0 {
 		t.Fatalf("tenant B lists tenant A runs: %+v", list.Items)
 	}
@@ -241,7 +241,7 @@ func generateBody(t0 time.Time, abortH int) string {
 func TestCutoverPlan_GenerateCompleteRollback(t *testing.T) {
 	h, admin := dbServer(t)
 	t0 := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	rec := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "CutoverManager", body: generateBody(t0, 48), user: "manager"})
+	rec := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: "migration.cutover.manage", body: generateBody(t0, 48), user: "manager"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("generate: %d %s", rec.Code, rec.Body)
 	}
@@ -258,7 +258,7 @@ func TestCutoverPlan_GenerateCompleteRollback(t *testing.T) {
 	}
 	base := "/api/v1/cutover/plans/" + plan.PlanID
 	complete := func(name string, body string) *httptest.ResponseRecorder {
-		return do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/complete", base, seqOf[name]), tenant: tenantA, duties: "CutoverStepOwner", body: body, user: "owner"})
+		return do(t, h, request{method: "POST", path: fmt.Sprintf("%s/steps/%d/complete", base, seqOf[name]), tenant: tenantA, duties: "migration.cutover-step.execute", body: body, user: "owner"})
 	}
 	if c := complete("Open user access", `{"actualDurationMin":1}`); c.Code != http.StatusUnprocessableEntity || !strings.Contains(c.Body.String(), "CUT-1601") {
 		t.Fatalf("open access before go/no-go must be rejected: %d %s", c.Code, c.Body)
@@ -294,42 +294,42 @@ func TestCutoverPlan_GenerateCompleteRollback(t *testing.T) {
 	}
 
 	rb := base + "/rollback"
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{"approvers":["alice","bob"]}`, user: "alice"}); r.Code != http.StatusBadRequest {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "migration.cutover.manage", body: `{"approvers":["alice","bob"]}`, user: "alice"}); r.Code != http.StatusBadRequest {
 		t.Fatalf("approvers cannot be named in the request: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantB, duties: "CutoverManager", body: `{}`, user: "alice"}); r.Code != http.StatusNotFound {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantB, duties: "migration.cutover.manage", body: `{}`, user: "alice"}); r.Code != http.StatusNotFound {
 		t.Fatalf("other tenant must not see the plan: %d", r.Code)
 	}
-	first := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-1", user: "alice"})
+	first := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "migration.cutover.manage", body: `{}`, key: "rb-1", user: "alice"})
 	if first.Code != http.StatusAccepted {
 		t.Fatalf("first approval must be 202 pending: %d %s", first.Code, first.Body)
 	}
 	if p := decode[planDTO](t, first); p.RolledBack || p.PendingRollback == nil || p.PendingRollback.Approver != "alice" || p.Version != 5 {
 		t.Fatalf("plan after the first approval %+v", p)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-1", user: "alice"}); r.Code != http.StatusAccepted || r.Header().Get("Idempotent-Replayed") != "true" {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "migration.cutover.manage", body: `{}`, key: "rb-1", user: "alice"}); r.Code != http.StatusAccepted || r.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replayed first approval: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, user: "alice"}); r.Code != http.StatusConflict || !strings.Contains(r.Body.String(), "CUT-1603") {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "migration.cutover.manage", body: `{}`, user: "alice"}); r.Code != http.StatusConflict || !strings.Contains(r.Body.String(), "CUT-1603") {
 		t.Fatalf("the same user cannot confirm their own approval: %d %s", r.Code, r.Body)
 	}
-	if got := decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "CutoverManager"})); got.PendingRollback == nil || got.RolledBack {
+	if got := decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "migration.cutover.manage"})); got.PendingRollback == nil || got.RolledBack {
 		t.Fatalf("pending approval is shown on the plan: %+v", got)
 	}
 	if n := count(t, admin, `select count(*) from outbox where type = 'dev.passage.cutover.plan.rolledback.v1'`); n != 0 {
 		t.Fatalf("a first approval writes no rolledback event, got %d", n)
 	}
-	done := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-2", user: "bob"})
+	done := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "migration.cutover.manage", body: `{}`, key: "rb-2", user: "bob"})
 	if done.Code != http.StatusOK {
 		t.Fatalf("second approval: %d %s", done.Code, done.Body)
 	}
 	if p := decode[planDTO](t, done); !p.RolledBack || strings.Join(p.Approvers, ",") != "alice,bob" || p.PendingRollback != nil {
 		t.Fatalf("rolled back plan %+v", p)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, key: "rb-2", user: "bob"}); r.Code != http.StatusOK || r.Header().Get("Idempotent-Replayed") != "true" {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "migration.cutover.manage", body: `{}`, key: "rb-2", user: "bob"}); r.Code != http.StatusOK || r.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replayed rollback: %d %s", r.Code, r.Body)
 	}
-	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "CutoverManager", body: `{}`, user: "carol"}); r.Code != http.StatusConflict {
+	if r := do(t, h, request{method: "POST", path: rb, tenant: tenantA, duties: "migration.cutover.manage", body: `{}`, user: "carol"}); r.Code != http.StatusConflict {
 		t.Fatalf("a second rollback must be 409: %d %s", r.Code, r.Body)
 	}
 	if c := complete("First weekly reconciliation", `{"actualDurationMin":1}`); c.Code != http.StatusConflict {
@@ -339,15 +339,15 @@ func TestCutoverPlan_GenerateCompleteRollback(t *testing.T) {
 		t.Fatalf("rolledback events = %d, want 1", n)
 	}
 
-	got := decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "CutoverManager"}))
+	got := decode[planDTO](t, do(t, h, request{method: "GET", path: base, tenant: tenantA, duties: "migration.cutover.manage"}))
 	if !got.RolledBack || len(got.Steps) != plan.StepsTotal {
 		t.Fatalf("stored plan %+v", got)
 	}
-	list := decode[struct{ Items []planDTO }](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans", tenant: tenantA, duties: "CutoverManager"}))
+	list := decode[struct{ Items []planDTO }](t, do(t, h, request{method: "GET", path: "/api/v1/cutover/plans", tenant: tenantA, duties: "migration.cutover.manage"}))
 	if len(list.Items) != 1 || list.Items[0].PlanID != plan.PlanID || list.Items[0].Steps != nil || list.Items[0].StepsDone != 3 {
 		t.Fatalf("plan list %+v", list.Items)
 	}
-	if missing := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/00000000-0000-7000-8000-000000000099", tenant: tenantA, duties: "CutoverManager"}); missing.Code != http.StatusNotFound || problemCode(t, missing) != CodeNotFound {
+	if missing := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/00000000-0000-7000-8000-000000000099", tenant: tenantA, duties: "migration.cutover.manage"}); missing.Code != http.StatusNotFound || problemCode(t, missing) != CodeNotFound {
 		t.Fatalf("unknown plan: %d %s", missing.Code, missing.Body)
 	}
 }

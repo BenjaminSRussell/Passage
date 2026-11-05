@@ -134,8 +134,8 @@ func TestCancelShipment_RequiresKeyAndVersion(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"CANCELLED"`) || rec.Header().Get("ETag") != `"4"` {
 		t.Fatalf("status = %d etag = %q body = %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
-	// Cancel is a WarehouseRelease duty, not a picker's.
-	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "c-4", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"})
+	// Cancel is a fulfillment.warehouse.release duty, not a picker's.
+	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "c-4", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.pick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("picker cancel: status = %d, want 403", rec.Code)
 	}
@@ -157,7 +157,7 @@ func TestCloseRemainder_RequiresKeyVersionAndDuty(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"SHIPPED"`) || rec.Header().Get("ETag") != `"4"` {
 		t.Fatalf("status = %d etag = %q body = %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
-	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "r-4", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"})
+	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "r-4", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.pick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("picker close: status = %d, want 403", rec.Code)
 	}
@@ -183,7 +183,7 @@ func TestUnpackContainer_RequiresKeyVersionAndDuty(t *testing.T) {
 	if rec := do(t, h, http.MethodPost, bad, "", map[string]string{"Idempotency-Key": "u-4", "If-Match": `"3"`}); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad container id: status = %d, want 404", rec.Code)
 	}
-	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "u-5", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"})
+	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "u-5", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.pick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("picker unpack: status = %d, want 403", rec.Code)
 	}
@@ -218,7 +218,7 @@ func TestNestAndUnnestContainers_RequireKeyVersionAndDuty(t *testing.T) {
 			t.Fatalf("%s: status = %d, want 400", name, rec.Code)
 		}
 	}
-	if rec := do(t, h, http.MethodPost, nest, body, map[string]string{"Idempotency-Key": "n-5", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPost, nest, body, map[string]string{"Idempotency-Key": "n-5", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.pick"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("picker nest: status = %d, want 403", rec.Code)
 	}
 	un := "/v1/fulfillment/shipments/" + sid + "/containers/" + ids.New() + ":unnest"
@@ -226,7 +226,7 @@ func TestNestAndUnnestContainers_RequireKeyVersionAndDuty(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"4"` {
 		t.Fatalf("unnest: status = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodPost, un, "", map[string]string{"Idempotency-Key": "un-2", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPost, un, "", map[string]string{"Idempotency-Key": "un-2", "If-Match": `"3"`, "X-Passage-Duties": "fulfillment.warehouse.pick"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("picker unnest: status = %d, want 403", rec.Code)
 	}
 }
@@ -297,7 +297,7 @@ func TestCreateWaves_RequiresKeyAndReportsFUL0016(t *testing.T) {
 	if fs.lastIdem.Key != "w-1" || fs.workbench.waveReq.GroupBy != "CARRIER" || fs.workbench.waveReq.Limits.MaxLines != 20 {
 		t.Fatalf("idem = %+v req = %+v", fs.lastIdem, fs.workbench.waveReq)
 	}
-	if rec := do(t, h, http.MethodPost, "/v1/fulfillment/waves", body, map[string]string{"Idempotency-Key": "w-2", "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPost, "/v1/fulfillment/waves", body, map[string]string{"Idempotency-Key": "w-2", "X-Passage-Duties": "fulfillment.warehouse.view"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("view-only create: status = %d, want 403", rec.Code)
 	}
 }
@@ -329,7 +329,7 @@ func TestTracking_RecordsOnceAndValidates(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
 	path := "/v1/fulfillment/shipments/" + ids.New() + "/tracking"
-	ship := map[string]string{"X-Passage-Duties": "WarehouseShip"}
+	ship := map[string]string{"X-Passage-Duties": "fulfillment.warehouse.ship"}
 	good := `{"provider":"easypost","eventKey":"evt_1","trackingNumber":"1Z999AA1","status":"IN_TRANSIT","description":"at hub","eventTime":"2026-10-21T12:00:00+02:00"}`
 	rec := do(t, h, http.MethodPost, path, good, ship)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"created":true`) {
@@ -357,7 +357,7 @@ func TestTracking_RecordsOnceAndValidates(t *testing.T) {
 		}
 	}
 	if rec := do(t, h, http.MethodPost, path, good, nil); rec.Code != http.StatusForbidden {
-		t.Fatalf("without WarehouseShip: status = %d, want 403", rec.Code)
+		t.Fatalf("without fulfillment.warehouse.ship: status = %d, want 403", rec.Code)
 	}
 }
 
@@ -369,8 +369,8 @@ func TestTracking_ListNeedsViewDuty(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"eventKey":"e1"`) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "PackingSlipPost"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("without WarehouseView: status = %d, want 403", rec.Code)
+	if rec := do(t, h, http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "fulfillment.packing-slip.post"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("without fulfillment.warehouse.view: status = %d, want 403", rec.Code)
 	}
 }
 
@@ -486,7 +486,7 @@ func TestConfirmWavePick_ValidationKeyAndDuty(t *testing.T) {
 	if rec := do(t, h, http.MethodPost, "/v1/fulfillment/waves/nope:confirm-pick", good, map[string]string{"Idempotency-Key": "w-404"}); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad wave id: status = %d, want 404", rec.Code)
 	}
-	rec = do(t, h, http.MethodPost, path, good, map[string]string{"Idempotency-Key": "w-403", "X-Passage-Duties": "WarehouseView"})
+	rec = do(t, h, http.MethodPost, path, good, map[string]string{"Idempotency-Key": "w-403", "X-Passage-Duties": "fulfillment.warehouse.view"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer: status = %d, want 403", rec.Code)
 	}
@@ -531,7 +531,7 @@ func TestCaptureTracking_ValidatesAndEnforcesDuty(t *testing.T) {
 		t.Fatalf("bad line id: status = %d, want 404", rec.Code)
 	}
 	h2 := hdr("t-6")
-	h2["X-Passage-Duties"] = "WarehouseView"
+	h2["X-Passage-Duties"] = "fulfillment.warehouse.view"
 	if rec := do(t, h, http.MethodPost, path, body, h2); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer: status = %d, want 403", rec.Code)
 	}

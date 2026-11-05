@@ -28,8 +28,8 @@ import (
 
 const (
 	idempotencyKey   = "Idempotency-Key"
-	dutyPrint        = "WMS_PRINT"
-	dutyPrintAdmin   = "WMS_PRINT_ADMIN"
+	dutyPrint        = "print.job.submit"
+	dutyPrintAdmin   = "print.admin"
 	validationDetail = "request failed validation"
 	readyTimeout     = 2 * time.Second
 	defaultJobLimit  = 100

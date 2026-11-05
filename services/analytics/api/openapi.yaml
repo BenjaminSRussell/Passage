@@ -13,7 +13,7 @@ paths:
     get:
       operationId: listMetrics
       summary: List published governed metrics with their formulas
-      x-passage-duty: AnalyticsView
+      x-passage-duty: analytics.view
       responses:
         "200":
           description: Published metrics
@@ -30,7 +30,7 @@ paths:
       operationId: planQuery
       summary: Validate a metric query and return the Cube plan with the caller's scope filters applied
       description: Read-only. Measures must be published and share one grain. Ranges are day grain, at most five years.
-      x-passage-duty: AnalyticsView
+      x-passage-duty: analytics.view
       requestBody:
         required: true
         content:
@@ -58,7 +58,7 @@ paths:
     get:
       operationId: listReconciliations
       summary: Reconciliation results for one day
-      x-passage-duty: FinanceView
+      x-passage-duty: analytics.finance.view
       parameters:
         - name: date
           in: query
@@ -90,7 +90,7 @@ paths:
     get:
       operationId: listDQRules
       summary: List data-quality rules, filtered by catalog asset, rule type and owner
-      x-passage-duty: CatalogSteward
+      x-passage-duty: analytics.catalog.steward
       parameters:
         - name: asset
           in: query
@@ -128,7 +128,7 @@ paths:
     get:
       operationId: listDQScores
       summary: Data-quality score history, newest first (one row per rule and day)
-      x-passage-duty: CatalogSteward
+      x-passage-duty: analytics.catalog.steward
       parameters:
         - name: asset
           in: query
@@ -168,7 +168,7 @@ paths:
     get:
       operationId: getDQRule
       summary: One data-quality rule; the ETag is its version
-      x-passage-duty: CatalogSteward
+      x-passage-duty: analytics.catalog.steward
       responses:
         "200":
           description: The rule
@@ -189,7 +189,7 @@ paths:
       operationId: putDQRule
       summary: Create a rule (no If-Match) or replace it (If-Match with the current version)
       description: muted=true opens a 7-day mute window (or keeps an open one); a muted rule still scores but does not notify (BR-46.15).
-      x-passage-duty: CatalogSteward
+      x-passage-duty: analytics.catalog.steward
       parameters:
         - name: If-Match
           in: header
@@ -244,7 +244,7 @@ paths:
     get:
       operationId: listArchivePartitions
       summary: Archive partitions, newest period first
-      x-passage-duty: ArchiveAdmin
+      x-passage-duty: analytics.archive.admin
       parameters:
         - name: domain
           in: query
@@ -284,7 +284,7 @@ paths:
     get:
       operationId: getArchivePartition
       summary: One archive partition with counts, hashes and restore state
-      x-passage-duty: ArchiveAdmin
+      x-passage-duty: analytics.archive.admin
       responses:
         "200":
           description: The partition
@@ -305,7 +305,7 @@ paths:
       operationId: restoreArchivePartition
       summary: Restore a DROPPED partition into a side table for 30 days
       description: Idempotent by partition id; repeating the request while the restore is live returns the same partition.
-      x-passage-duty: ArchiveAdmin
+      x-passage-duty: analytics.archive.admin
       responses:
         "200":
           description: The restored partition
@@ -329,7 +329,7 @@ paths:
     get:
       operationId: listSchedules
       summary: Report schedules by next run
-      x-passage-duty: AnalyticsAuthor
+      x-passage-duty: analytics.author
       responses:
         "200":
           description: Schedules
@@ -344,7 +344,7 @@ paths:
     post:
       operationId: createSchedule
       summary: Create a schedule; the first run is computed in its time zone
-      x-passage-duty: AnalyticsAuthor
+      x-passage-duty: analytics.author
       parameters:
         - name: Idempotency-Key
           in: header
@@ -385,7 +385,7 @@ paths:
     get:
       operationId: getSchedule
       summary: One report schedule
-      x-passage-duty: AnalyticsAuthor
+      x-passage-duty: analytics.author
       responses:
         "200":
           description: The schedule
@@ -409,7 +409,7 @@ paths:
       operationId: listScheduleDeliveries
       summary: Delivery attempts of one schedule, newest first (schedule deliveries inquiry)
       description: One row per attempt. The attempts of one scheduled run share runId; a failed attempt is retried after 1, 4 and 16 minutes and the fourth failure is FAILED.
-      x-passage-duty: AnalyticsAuthor
+      x-passage-duty: analytics.author
       parameters:
         - name: status
           in: query
@@ -436,7 +436,7 @@ paths:
     get:
       operationId: listDashboards
       summary: Dashboard definitions by title
-      x-passage-duty: AnalyticsView
+      x-passage-duty: analytics.view
       responses:
         "200":
           description: Dashboards
@@ -454,7 +454,7 @@ paths:
     get:
       operationId: getDashboard
       summary: Dashboard definition and tiles; the ETag is its version
-      x-passage-duty: AnalyticsView
+      x-passage-duty: analytics.view
       responses:
         "200":
           description: The dashboard
@@ -475,7 +475,7 @@ paths:
       operationId: putDashboard
       summary: Create a dashboard (no If-Match) or replace it (If-Match with the current version)
       description: Every tile must name a published governed metric.
-      x-passage-duty: AnalyticsAuthor
+      x-passage-duty: analytics.author
       parameters:
         - name: If-Match
           in: header
@@ -530,7 +530,7 @@ paths:
     get:
       operationId: listExports
       summary: Export log, newest first, filtered by user, format and creation day
-      x-passage-duty: AnalyticsExport
+      x-passage-duty: analytics.export
       parameters:
         - name: user
           in: query
@@ -576,7 +576,7 @@ paths:
       operationId: createExport
       summary: Start an explorer export job
       description: The query is planned with the caller's data scope exactly like POST /v1/analytics/query. Above 100,000 rows the job runs as a Temporal job; above 1,000,000 rows it is refused (ANA-0101). An identical request by the same user within one hour returns the existing job (BR-46.7); files are deleted 24 hours after creation.
-      x-passage-duty: AnalyticsExport
+      x-passage-duty: analytics.export
       parameters:
         - name: Idempotency-Key
           in: header
@@ -632,7 +632,7 @@ paths:
     get:
       operationId: getLineage
       summary: Upstream and downstream assets of a catalog asset, nearest first
-      x-passage-duty: CatalogView
+      x-passage-duty: analytics.catalog.view
       parameters:
         - name: depth
           in: query
@@ -660,7 +660,7 @@ paths:
       operationId: addLineageEdges
       summary: Record lineage edges (source feeds target)
       description: Idempotent by edge. Existing edges are kept, so re-sending a batch answers added 0.
-      x-passage-duty: CatalogSteward
+      x-passage-duty: analytics.catalog.steward
       requestBody:
         required: true
         content:

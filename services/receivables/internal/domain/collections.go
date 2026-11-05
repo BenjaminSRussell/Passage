@@ -17,7 +17,7 @@ const (
 	DisputeResolvedWriteOff = "RESOLVED_WRITE_OFF"
 	DisputeRejected         = "REJECTED"
 
-	// DisputeSLAHours is the CollectionsMaintain default for DISPUTE cases (§5.30.13).
+	// DisputeSLAHours is the receivables.collection.maintain default for DISPUTE cases (§5.30.13).
 	DisputeSLAHours = 120
 	// PromiseGraceDays: an unbroken promise holds until promise date + 2 days (BR-30.2).
 	PromiseGraceDays = 2

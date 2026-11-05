@@ -9,7 +9,7 @@ PYTHON ?= python3
 IMAGE_DIGEST ?=
 SKIP_VERIFY ?=
 
-.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema
+.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema test-argocd
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -74,3 +74,7 @@ validate-gateway-schema:
 
 test-gateway: validate-gateway-schema
 	$(PYTHON) -m unittest scripts/test_gateway.py -v
+
+# Argo CD Applications: structure, sync policy, chart coverage; renders every dev chart when helm is on PATH.
+test-argocd:
+	$(PYTHON) -m unittest scripts/test_argocd_apps.py -v

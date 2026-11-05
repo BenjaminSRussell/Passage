@@ -41,6 +41,8 @@ type fakeStore struct {
 	versionLE       string
 	versionStatus   string
 	roll            *store.RollInput
+	rollReplay      *store.RollResult
+	rollReplayKey   string
 	attempts        []store.Attempt
 	resolve         *store.ResolveInput
 }
@@ -130,6 +132,14 @@ func (f *fakeStore) StoreRoll(_ context.Context, in store.RollInput) (store.Roll
 	return store.RollResult{VersionID: in.VersionID, SiteID: in.SiteID, ItemCount: len(in.Roots), StoredCount: len(in.Roots)}, f.replayed, f.err
 }
 
+func (f *fakeStore) RollReplay(_ context.Context, key string, _ any) (store.RollResult, bool, error) {
+	f.rollReplayKey = key
+	if f.rollReplay == nil {
+		return store.RollResult{}, false, nil
+	}
+	return *f.rollReplay, true, nil
+}
+
 func (f *fakeStore) GetPostingAccounts(context.Context, string) (store.PostingAccounts, error) {
 	f.calls++
 	return f.accounts, f.accountsErr
@@ -196,9 +206,9 @@ func problemCode(t *testing.T, rec *httptest.ResponseRecorder) (string, map[stri
 }
 
 const (
-	maintain = "CostingMaintain"
-	view     = "CostingView"
-	activate = "CostingActivate"
+	maintain = "productcost.maintain"
+	view     = "productcost.view"
+	activate = "productcost.activate"
 	someID   = "0190f0c2-7a5e-7d3c-9a1b-2c3d4e5f6a7b"
 )
 
@@ -216,7 +226,7 @@ func TestStoredRoutes_WithoutStoreAnswer503(t *testing.T) {
 		{http.MethodGet, "/v1/product-costing/versions/" + someID, "", view, "", ""},
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, maintain, "", ""},
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/activate", `{"version":1}`, activate, "", ""},
-		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/roll", `{}`, "CostingCalculate", "k", ""},
+		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/roll", `{}`, "productcost.calculate", "k", ""},
 	} {
 		rec := c.do(h)
 		if code, _ := problemCode(t, rec); rec.Code != http.StatusServiceUnavailable || code != codeStoreUnavailable {
@@ -233,7 +243,7 @@ func TestStoredRoutes_EnforceSegregatedDuties(t *testing.T) {
 		{http.MethodPost, "/v1/product-costing/cost-components", componentBody, view, "k", ""},
 		{http.MethodPost, "/v1/product-costing/cost-groups", `{}`, view + "," + activate, "k", ""},
 		{http.MethodPost, "/v1/product-costing/versions", `{}`, view + "," + activate, "k", ""},
-		// Activation is CostingActivate only; the lifecycle moves are CostingMaintain only (PRD 7.39.17).
+		// Activation is productcost.activate only; the lifecycle moves are productcost.maintain only (PRD 7.39.17).
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/activate", `{"version":1}`, maintain, "", ""},
 		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, activate, "", ""},
 	} {

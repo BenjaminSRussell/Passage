@@ -94,17 +94,17 @@ subtotals named in `refs`). See slice 3 below.
 
 | Route | Duty (PRD 7.39.17) |
 |---|---|
-| `POST /v1/product-costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/sales-order-estimates:refresh`, `/sales-order-estimates:freeze`, `/estimates`, `/postings:cogs`, `/postings:price-difference` | `CostingCalculate` |
-| `POST /v1/product-costing/comparisons`, `/reconciliations` | `CostingView` |
-| `POST /v1/product-costing/variances/compute` | `CostingSystem` |
-| `POST /v1/product-costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
-| `POST /v1/product-costing/versions:transition` (block, unblock, close) | `CostingMaintain` |
-| `GET /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}`, `/posting-accounts/{legalEntityId}` | `CostingView` |
-| `POST /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition`; `PUT /v1/product-costing/posting-accounts/{legalEntityId}` | `CostingMaintain` |
-| `POST /v1/product-costing/versions/{id}/activate` | `CostingActivate` |
+| `POST /v1/product-costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/sales-order-estimates:refresh`, `/sales-order-estimates:freeze`, `/estimates`, `/postings:cogs`, `/postings:price-difference` | `productcost.calculate` |
+| `POST /v1/product-costing/comparisons`, `/reconciliations` | `productcost.view` |
+| `POST /v1/product-costing/variances/compute` | `productcost.variance.compute` |
+| `POST /v1/product-costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `productcost.activate` |
+| `POST /v1/product-costing/versions:transition` (block, unblock, close) | `productcost.maintain` |
+| `GET /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}`, `/posting-accounts/{legalEntityId}` | `productcost.view` |
+| `POST /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition`; `PUT /v1/product-costing/posting-accounts/{legalEntityId}` | `productcost.maintain` |
+| `POST /v1/product-costing/versions/{id}/activate` | `productcost.activate` |
 
 The comparison and the reconciliation compute an inquiry without changing anything, so they
-take the PRD's read duty `CostingView` (the PRD's `GET /product-costing/compare` and the inventory
+take the PRD's read duty `productcost.view` (the PRD's `GET /product-costing/compare` and the inventory
 value report).
 
 ## Web
@@ -143,8 +143,8 @@ session-only version list of slice 3.
   `ProfitCenter` is built in slice 4 (below). A comparison can roll the same selection in
   different views (the valuation view comparison).
 - **Version lifecycle** (FR-39.3, BR-39.2): `POST /v1/product-costing/versions:transition`
-  (`CostingMaintain`) blocks, unblocks or closes a version: Open ⇄ Blocked, Active → Closed.
-  `POST /v1/product-costing/versions:activate` (`CostingActivate`) moves Open or Blocked to Active;
+  (`productcost.maintain`) blocks, unblocks or closes a version: Open ⇄ Blocked, Active → Closed.
+  `POST /v1/product-costing/versions:activate` (`productcost.activate`) moves Open or Blocked to Active;
   the maintain route refuses `activate` because the two duties are segregated (section
   7.39.17). Simulation versions cannot activate (`CST-0711`). `SpecifiedVersion` fallback
   needs a fallback version other than the version itself (`CST-0716`). Other moves are
@@ -180,7 +180,7 @@ the next state. Nothing is stored and no event is published until the persistenc
   flag keep their price; the Legal and Group views ignore the flag. `profitCenterSource`,
   `transferPrice` and `costPlusPct` are only allowed on Purchased items, and an item cannot be
   both `intercompany` and `profitCenterSource`.
-- **Ad-hoc estimates** (`POST /v1/product-costing/estimates`, FR-39.13, `CostingCalculate`): a
+- **Ad-hoc estimates** (`POST /v1/product-costing/estimates`, FR-39.13, `productcost.calculate`): a
   costing model (`code`, `characteristics` with an optional `default`, and `lines` of type
   `Item`, `Activity`, `Subcontract` or `Overhead`) is priced for a `Quote`, `InternalOrder` or
   `ProjectTask`. Each line's `quantityFormula` and optional `priceFormula` are arithmetic over
@@ -194,7 +194,7 @@ the next state. Nothing is stored and no event is published until the persistenc
   for a characteristic the model does not have, a bad formula, division by zero, or a negative
   quantity or price is `CST-0764` (new code, 422). The formula grammar is local to this
   service until the wave-38 grammar (FR-38.17) is shared.
-- **Sales order estimate versions** (FR-39.16, BR-39.14, `CostingCalculate`):
+- **Sales order estimate versions** (FR-39.16, BR-39.14, `productcost.calculate`):
   - `POST /v1/product-costing/sales-order-estimates:refresh` costs the line like
     `/sales-order-estimates` and versions the result against `configHash`. The current version
     is the highest that is not Superseded. The same (`lineId`, `configHash`), the PRD's
@@ -242,8 +242,8 @@ same transaction (see `events/asyncapi.yaml`).
   `GET /v1/product-costing/versions/{id}` reads one (`CST-0717`, 404). Event
   `dev.passage.costing.version.created.v1`.
 - **Lifecycle** (BR-39.2): `POST /v1/product-costing/versions/{id}/transition` with `{action, version}`
-  blocks, unblocks or closes (CostingMaintain); `POST /v1/product-costing/versions/{id}/activate` with
-  `{version}` activates (CostingActivate, segregated). `version` is the counter the caller read;
+  blocks, unblocks or closes (productcost.maintain); `POST /v1/product-costing/versions/{id}/activate` with
+  `{version}` activates (productcost.activate, segregated). `version` is the counter the caller read;
   a stale one is `CST-0714` (409) and changes nothing. The rules are those of slice 3
   (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. Event
   `dev.passage.costing.version.transitioned.v1` with the action and both statuses.
@@ -317,10 +317,10 @@ same transaction (see `events/asyncapi.yaml`).
   activation while a later, non-reversed activation booked any of its positions (the stock
   would sit at the later standard; reverse the later one first). The ledger accounts are
   stored configuration per legal entity, `PUT /v1/product-costing/posting-accounts/{legalEntityId}`
-  with `{inventoryAccount, costChangeAccount}` (CostingMaintain, legal-entity scope; the two
+  with `{inventoryAccount, costChangeAccount}` (productcost.maintain, legal-entity scope; the two
   must differ; each change publishes `dev.passage.costing.postingaccounts.changed.v1`) and
   `GET` (`CST-0724`, 404 when none). Productcost holds `ledger.entry.post` and
-  `ledger.journal.reverse`, so a caller choosing an account would let CostingActivate post
+  `ledger.journal.reverse`, so a caller choosing an account would let productcost.activate post
   to any account. An activation with a non-zero revaluation and no configured accounts is
   `CST-0724` (422). Event `dev.passage.costing.standardcost.activated.v1`.
   Deployment: the ledger and inventory services must list productcost's public key in

@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/ocr"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
@@ -69,7 +70,7 @@ func scannedInvoice(confidence string) domain.ExtractedInvoice {
 
 func TestInvoiceCapture_UBLIsStoredReadableAndDeduplicated(t *testing.T) {
 	rg := newCaptureRig(nil)
-	rec := rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", ublDocument), duty("VendorInvoicePost", rg.key()))
+	rec := rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", ublDocument), duty("receiving.vendor-invoice.post", rg.key()))
 	got := decode[captureJSON](t, rec, http.StatusCreated)
 	if got.Status != "CAPTURED" || got.Source != "UBL" || got.InvoiceNumber != "INV-9" || got.Total != "25" || len(got.Lines) != 1 || got.Lines[0].Qty != "10" || len(got.ReviewReasons) != 0 {
 		t.Fatalf("capture %+v", got)
@@ -77,11 +78,11 @@ func TestInvoiceCapture_UBLIsStoredReadableAndDeduplicated(t *testing.T) {
 	if rec.Header().Get("Location") != capturesPath+"/"+got.ID {
 		t.Fatalf("location %q", rec.Header().Get("Location"))
 	}
-	again := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", ublDocument), duty("VendorInvoicePost", rg.key())), http.StatusOK)
+	again := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", ublDocument), duty("receiving.vendor-invoice.post", rg.key())), http.StatusOK)
 	if again.ID != got.ID {
 		t.Fatalf("same document captured twice: %s and %s", got.ID, again.ID)
 	}
-	read := decode[captureJSON](t, rg.call(http.MethodGet, capturesPath+"/"+got.ID, "", duty("APInquire", "")), http.StatusOK)
+	read := decode[captureJSON](t, rg.call(http.MethodGet, capturesPath+"/"+got.ID, "", duty("receiving.ap.inquire", "")), http.StatusOK)
 	if read.ID != got.ID || read.InvoiceNumber != "INV-9" {
 		t.Fatalf("read %+v", read)
 	}
@@ -90,20 +91,34 @@ func TestInvoiceCapture_UBLIsStoredReadableAndDeduplicated(t *testing.T) {
 func TestInvoiceCapture_OCRUsesTheExtractorAndFlagsLowConfidence(t *testing.T) {
 	ex := &domain.FakeExtractor{Result: scannedInvoice("0.55")}
 	rg := newCaptureRig(ex)
-	got := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", "%PDF-1.7 scan"), duty("VendorInvoicePost", rg.key())), http.StatusCreated)
+	got := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", "%PDF-1.7 scan"), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
 	if ex.Calls != 1 || got.Source != "OCR" || got.Status != "NEEDS_REVIEW" || len(got.ReviewReasons) != 1 || got.ReviewReasons[0] != domain.ReviewLowConfidence || got.Confidence != "0.55" {
 		t.Fatalf("calls %d capture %+v", ex.Calls, got)
 	}
 }
 
+func TestInvoiceCapture_LocalOCRProviderReadsAPDFTextLayer(t *testing.T) {
+	rg := newCaptureRig(ocr.Local{})
+	pdf := "%PDF-1.7\n1 0 obj << /Length 0 >>\nstream\nBT (Invoice Number: LOC-7) Tj (Invoice Date: 2026-11-01) Tj (Currency: USD) Tj " +
+		"(Vendor Tax ID: US99) Tj (Line: Field service | 3 | HUR | 90 | 270) Tj (Total: 270.00) Tj ET\nendstream\nendobj\n"
+	got := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", pdf), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
+	if got.Source != "OCR" || got.Status != "CAPTURED" || got.InvoiceNumber != "LOC-7" || got.Total != "270" || got.Confidence != "0.85" || len(got.Lines) != 1 || got.Lines[0].Qty != "3" {
+		t.Fatalf("capture %+v", got)
+	}
+	problem := decodeProblem(t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "\x89PNG scan"), duty("receiving.vendor-invoice.post", rg.key())))
+	if problem.Status != http.StatusUnprocessableEntity || problem.Code != domain.CodeCaptureExtraction {
+		t.Fatalf("image without a text layer %+v", problem)
+	}
+}
+
 func TestInvoiceCapture_OCRFailureAndMissingProvider(t *testing.T) {
 	failing := newCaptureRig(&domain.FakeExtractor{Err: domain.ErrExtraction})
-	problem := decodeProblem(t, failing.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", failing.key())))
+	problem := decodeProblem(t, failing.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("receiving.vendor-invoice.post", failing.key())))
 	if problem.Status != http.StatusUnprocessableEntity || problem.Code != domain.CodeCaptureExtraction {
 		t.Fatalf("failure %+v", problem)
 	}
 	unconfigured := newCaptureRig(nil)
-	rec := unconfigured.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", unconfigured.key()))
+	rec := unconfigured.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("receiving.vendor-invoice.post", unconfigured.key()))
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "COM-0503") {
 		t.Fatalf("unconfigured %d %s", rec.Code, rec.Body)
 	}
@@ -112,34 +127,34 @@ func TestInvoiceCapture_OCRFailureAndMissingProvider(t *testing.T) {
 func TestInvoiceCapture_RefusesBadRequestsAndForeignScope(t *testing.T) {
 	rg := newCaptureRig(&domain.FakeExtractor{Result: scannedInvoice("0.9")})
 	post := func(body string, hdr headers) int { return rg.call(http.MethodPost, capturesPath, body, hdr).Code }
-	if got := post(captureRequest("UBL", "", `<Invoice><ID>1</ID></Invoice>`), duty("VendorInvoicePost", rg.key())); got != http.StatusUnprocessableEntity {
+	if got := post(captureRequest("UBL", "", `<Invoice><ID>1</ID></Invoice>`), duty("receiving.vendor-invoice.post", rg.key())); got != http.StatusUnprocessableEntity {
 		t.Errorf("incomplete UBL: %d", got)
 	}
-	if got := post(captureRequest("PDF", "", "x"), duty("VendorInvoicePost", rg.key())); got != http.StatusBadRequest {
+	if got := post(captureRequest("PDF", "", "x"), duty("receiving.vendor-invoice.post", rg.key())); got != http.StatusBadRequest {
 		t.Errorf("unknown format: %d", got)
 	}
-	if got := post(captureRequest("OCR", "text/html", "x"), duty("VendorInvoicePost", rg.key())); got != http.StatusBadRequest {
+	if got := post(captureRequest("OCR", "text/html", "x"), duty("receiving.vendor-invoice.post", rg.key())); got != http.StatusBadRequest {
 		t.Errorf("html media type: %d", got)
 	}
-	if got := post(captureRequest("UBL", "", ""), duty("VendorInvoicePost", rg.key())); got != http.StatusBadRequest {
+	if got := post(captureRequest("UBL", "", ""), duty("receiving.vendor-invoice.post", rg.key())); got != http.StatusBadRequest {
 		t.Errorf("empty content: %d", got)
 	}
-	if got := post(captureRequest("UBL", "", ublDocument), duty("ReceivingMaintain", rg.key())); got != http.StatusForbidden {
+	if got := post(captureRequest("UBL", "", ublDocument), duty("receiving.receipt.maintain", rg.key())); got != http.StatusForbidden {
 		t.Errorf("wrong duty: %d", got)
 	}
-	other := duty("VendorInvoicePost", rg.key(), "X-Passage-Legal-Entity", "22222222-2222-4222-8222-222222222222")
+	other := duty("receiving.vendor-invoice.post", rg.key(), "X-Passage-Legal-Entity", "22222222-2222-4222-8222-222222222222")
 	if got := post(captureRequest("UBL", "", ublDocument), other); got != http.StatusForbidden {
 		t.Errorf("foreign entity: %d", got)
 	}
-	created := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", ublDocument), duty("VendorInvoicePost", rg.key())), http.StatusCreated)
-	foreign := duty("APInquire", "", "X-Passage-Legal-Entity", "22222222-2222-4222-8222-222222222222")
+	created := decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", ublDocument), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
+	foreign := duty("receiving.ap.inquire", "", "X-Passage-Legal-Entity", "22222222-2222-4222-8222-222222222222")
 	if got := rg.call(http.MethodGet, capturesPath+"/"+created.ID, "", foreign).Code; got != http.StatusForbidden {
 		t.Errorf("foreign read: %d", got)
 	}
-	if got := rg.call(http.MethodGet, capturesPath+"/not-a-uuid", "", duty("APInquire", "")).Code; got != http.StatusBadRequest {
+	if got := rg.call(http.MethodGet, capturesPath+"/not-a-uuid", "", duty("receiving.ap.inquire", "")).Code; got != http.StatusBadRequest {
 		t.Errorf("bad id: %d", got)
 	}
-	if got := rg.call(http.MethodGet, capturesPath+"/33333333-3333-4333-8333-333333333333", "", duty("APInquire", "")).Code; got != http.StatusNotFound {
+	if got := rg.call(http.MethodGet, capturesPath+"/33333333-3333-4333-8333-333333333333", "", duty("receiving.ap.inquire", "")).Code; got != http.StatusNotFound {
 		t.Errorf("unknown id: %d", got)
 	}
 }
@@ -148,7 +163,7 @@ func TestInvoiceCapture_OutOfRangeNumbersAreRefusedOnBothPaths(t *testing.T) {
 	for _, exp := range []string{"1e999999999", "1e-999999999", "1e50000000"} {
 		doc := strings.Replace(ublDocument, "<TaxExclusiveAmount>25.00</TaxExclusiveAmount>", "<TaxExclusiveAmount>"+exp+"</TaxExclusiveAmount>", 1)
 		rg := newCaptureRig(nil)
-		rec := rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", doc), duty("VendorInvoicePost", rg.key()))
+		rec := rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", doc), duty("receiving.vendor-invoice.post", rg.key()))
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeInvalidCapture) {
 			t.Errorf("UBL %s: %d %s", exp, rec.Code, rec.Body)
 		}
@@ -156,7 +171,7 @@ func TestInvoiceCapture_OutOfRangeNumbersAreRefusedOnBothPaths(t *testing.T) {
 		bad := scannedInvoice("0.9")
 		bad.Total = big
 		ocr := newCaptureRig(&domain.FakeExtractor{Result: bad})
-		rec = ocr.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", ocr.key()))
+		rec = ocr.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("receiving.vendor-invoice.post", ocr.key()))
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), domain.CodeInvalidCapture) {
 			t.Errorf("OCR %s: %d %s", exp, rec.Code, rec.Body)
 		}
@@ -166,8 +181,8 @@ func TestInvoiceCapture_OutOfRangeNumbersAreRefusedOnBothPaths(t *testing.T) {
 func TestInvoiceCapture_RepeatedDocumentSkipsTheExtractor(t *testing.T) {
 	ex := &domain.FakeExtractor{Result: scannedInvoice("0.9")}
 	rg := newCaptureRig(ex)
-	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", rg.key())), http.StatusCreated)
-	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("VendorInvoicePost", rg.key())), http.StatusOK)
+	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
+	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "image/png", "png"), duty("receiving.vendor-invoice.post", rg.key())), http.StatusOK)
 	if ex.Calls != 1 {
 		t.Fatalf("extractor ran %d times", ex.Calls)
 	}

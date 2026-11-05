@@ -214,8 +214,8 @@ func TestImportTotals_PerSourceEntityAndCurrency(t *testing.T) {
 		t.Fatalf("another legal entity has no totals: %+v", other)
 	}
 	last := f.Calls()[len(f.Calls())-2]
-	if last.Duties[0] != "ARView" {
-		t.Fatalf("the read is signed with ARView only: %+v", last)
+	if last.Duties[0] != "receivables.view" {
+		t.Fatalf("the read is signed with receivables.view only: %+v", last)
 	}
 	f.DenyImports = true
 	if _, err := c.ImportTotals(context.Background(), tid, le, "a"); !errors.Is(err, target.ErrDenied) {
@@ -227,5 +227,5 @@ func TestImportTotals_PerSourceEntityAndCurrency(t *testing.T) {
 type noDuty struct{}
 
 func (noDuty) ApplyDuties(req *http.Request, p tenant.Principal, aud, legalEntity string, _ []string) (bool, error) {
-	return targettest.HeaderSigner{Name: "migration-factory"}.ApplyDuties(req, p, aud, legalEntity, []string{"ARView"})
+	return targettest.HeaderSigner{Name: "migration-factory"}.ApplyDuties(req, p, aud, legalEntity, []string{"receivables.view"})
 }

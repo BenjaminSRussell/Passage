@@ -205,7 +205,7 @@ func TestRequestErasure_RefusedUnderHoldThenEmittedOnceAfterRelease(t *testing.T
 func TestRequestErasure_LinkedRequestMustBeAnApprovedErasureOfTheSameSubject(t *testing.T) {
 	s, _ := migrated(t)
 	tenantID, le := ids.New(), ids.New()
-	ctx := asEntity(tenantID, le, ids.New(), "PrivacyIntake", "PrivacyOfficer")
+	ctx := asEntity(tenantID, le, ids.New(), "compliance.privacy-request.create", "compliance.privacy-request.process")
 	req, err := s.Intake(ctx, IntakeInput{Type: domain.RequestErasure, Regulation: domain.RegulationGDPR, SubjectRef: "party:42"}, "k-intake", t0)
 	if err != nil {
 		t.Fatal(err)

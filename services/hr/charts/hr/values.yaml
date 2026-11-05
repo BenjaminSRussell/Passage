@@ -2,6 +2,7 @@ image:
   repository: ghcr.io/benjaminsrussell/passage-hr
   # Digest-pin in deploy/ (Argo CD sync); the tag is for local k3d use only.
   tag: "0.1.0"
+  digest: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 2

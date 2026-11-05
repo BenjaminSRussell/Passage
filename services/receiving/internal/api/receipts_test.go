@@ -42,7 +42,7 @@ func doWith(h http.Handler, method, path, body string, hdr headers) *httptest.Re
 }
 
 func maintainer(key string) headers {
-	return headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "ReceivingMaintain", "Idempotency-Key": key}
+	return headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "receiving.receipt.maintain", "Idempotency-Key": key}
 }
 
 func arrivalJSON(slip string, lineFields string) string {
@@ -117,9 +117,9 @@ func TestArrival_AuthAndScope(t *testing.T) {
 		wantCode   string
 	}{
 		{"no tenant", headers{"Idempotency-Key": "k"}, http.StatusUnauthorized, "AUTH-0001"},
-		{"missing duty", headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "APInquire", "Idempotency-Key": "k"}, http.StatusForbidden, "AUTH-0003"},
-		{"other legal entity", headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "ReceivingMaintain", "X-Passage-Legal-Entity": "66666666-6666-4666-8666-666666666666", "Idempotency-Key": "k"}, http.StatusForbidden, "AUTH-0003"},
-		{"same legal entity", headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "ReceivingMaintain", "X-Passage-Legal-Entity": legalEntityID, "Idempotency-Key": "k"}, http.StatusCreated, ""},
+		{"missing duty", headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "receiving.ap.inquire", "Idempotency-Key": "k"}, http.StatusForbidden, "AUTH-0003"},
+		{"other legal entity", headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "receiving.receipt.maintain", "X-Passage-Legal-Entity": "66666666-6666-4666-8666-666666666666", "Idempotency-Key": "k"}, http.StatusForbidden, "AUTH-0003"},
+		{"same legal entity", headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "receiving.receipt.maintain", "X-Passage-Legal-Entity": legalEntityID, "Idempotency-Key": "k"}, http.StatusCreated, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

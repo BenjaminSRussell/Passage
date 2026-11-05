@@ -29,6 +29,7 @@ func (a *API) registerCompCycles(r chi.Router) {
 	admin.Get("/v1/hr/compensation/cycles/{id}", notFound(a.getCycle))
 	admin.Post("/v1/hr/compensation/cycles/{id}/advance", notFound(a.advanceCycle))
 	admin.Post("/v1/hr/compensation/cycles/{id}/apply", notFound(a.applyCycle))
+	r.With(authz.RequireDuty(dutyCompApprove)).Post("/v1/hr/compensation/cycles/{id}/approve", notFound(a.approveCycle))
 	admin.Put("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}", notFound(a.asAdmin(a.saveWorksheet)))
 	admin.Get("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}", notFound(a.asAdmin(a.getWorksheet)))
 	admin.Post("/v1/hr/compensation/cycles/{id}/worksheets/{managerId}/submit", notFound(a.asAdmin(a.submitWorksheet)))
@@ -138,6 +139,19 @@ func (a *API) advanceCycle(w http.ResponseWriter, r *http.Request, id string) {
 	if err != nil {
 		a.fail(w, r, "advance compensation cycle", err)
 		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// approveCycle records the segregated approval a cycle needs before apply.
+func (a *API) approveCycle(w http.ResponseWriter, r *http.Request, id string) {
+	out, approved, err := a.store.ApproveCompCycle(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "approve compensation cycle", err)
+		return
+	}
+	if approved {
+		a.personnel.cycleApprovals.Add(1)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

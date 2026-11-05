@@ -383,13 +383,13 @@ func contains(s []string, v string) bool {
 }
 
 func (f *Fake) imports(w http.ResponseWriter, r *http.Request) {
-	call, ok := f.admit(w, r, "ARView", 0)
+	call, ok := f.admit(w, r, "receivables.view", 0)
 	if !ok {
 		return
 	}
 	if f.DenyImports {
 		f.finish(call, http.StatusForbidden)
-		problem(w, http.StatusForbidden, "AUTH-0002", "duty ARView required")
+		problem(w, http.StatusForbidden, "AUTH-0002", "duty receivables.view required")
 		return
 	}
 	type key struct{ source, le, cur string }

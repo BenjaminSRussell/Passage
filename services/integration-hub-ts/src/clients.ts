@@ -135,10 +135,11 @@ function eventData(r: ApiClientRecord): Record<string, unknown> {
 }
 
 const CLIENT_ID = /^[a-z0-9][a-z0-9._-]{2,63}$/;
-// Duty names come in several styles (sales.order.read, VendorInvoicePost, "Maintain users";
-// policies/authz/README.md), so a scope is any duty-shaped name: letters, digits, space, '.',
-// '_' or '-', starting with a letter and not ending in a space. Commas are refused because the
-// gateway joins duties with commas in X-Passage-Duties.
+// Duty names are dotted lower-case (sales.order.read; policies/authz/README.md). Clients registered
+// before #210 may still hold scopes in the old PascalCase, SCREAMING_CASE or prose styles, so a
+// scope stays any duty-shaped name: letters, digits, space, '.', '_' or '-', starting with a letter
+// and not ending in a space. Commas are refused because the gateway joins duties with commas in
+// X-Passage-Duties.
 const SCOPE = /^[A-Za-z](?:[A-Za-z0-9 ._-]{0,98}[A-Za-z0-9._-])?$/;
 const UNIQUE_VIOLATION = "23505";
 
@@ -156,7 +157,7 @@ export function validateScopes(scopes: readonly string[]): void {
   }
   for (const s of scopes) {
     if (!SCOPE.test(s)) {
-      throw new RangeError(`scope ${JSON.stringify(s)} is not a duty name such as sales.order.read or VendorInvoicePost`);
+      throw new RangeError(`scope ${JSON.stringify(s)} is not a duty name such as sales.order.read or receiving.vendor-invoice.post`);
     }
   }
 }

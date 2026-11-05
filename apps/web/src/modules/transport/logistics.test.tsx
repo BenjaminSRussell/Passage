@@ -373,7 +373,7 @@ describe("Landed cost voyages", () => {
     const { unmount } = renderAt("/transport/voyages");
     expect(await screen.findByText("No voyages yet")).toBeInTheDocument();
     unmount();
-    handler = () => problem(403, "AUTH-0003", "missing duty TMS_LANDED_COST");
+    handler = () => problem(403, "AUTH-0003", "missing duty transport.landed-cost.maintain");
     renderAt("/transport/voyages");
     expect(await findAlert()).toHaveTextContent("AUTH-0003");
   });

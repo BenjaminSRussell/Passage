@@ -194,7 +194,7 @@ func (s *Store) SubmitRequisition(ctx context.Context, id string, c Command) (Re
 	return s.moveRequisition(ctx, p.TenantID, id, c, domain.RequisitionSubmitted, "")
 }
 
-// DecideRequisition approves or rejects a SUBMITTED requisition (MssApprove). The user
+// DecideRequisition approves or rejects a SUBMITTED requisition (hr.team.approve). The user
 // who created the requisition may not decide it (EXP-SOD-001).
 func (s *Store) DecideRequisition(ctx context.Context, id string, approve bool, c Command) (Requisition, bool, error) {
 	p, err := decider(ctx)

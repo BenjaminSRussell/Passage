@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, Input, Skeleton, type DataTableColumn } from "../../shell/ui";
 import {
-  createRegistrations,
   describeProblem,
   listJobs,
   newKey,
@@ -14,6 +13,7 @@ import {
 } from "./api/client";
 import { formatDateTime, formatHours } from "./format";
 import { JobStatusBadge } from "./JobsPage";
+import { kioskQueue, OfflineQueueFullError, submitOrQueue } from "./offlineQueue";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -81,7 +81,9 @@ export interface KioskJobsProps {
  * Kiosk job actions (FR-25.3): the worker's open job or bundle with a stop button, and the
  * dispatch list to start one job, or several together as a bundle. Starting work stops the
  * open work on the server, which says so (SF-0002). A failed action keeps its client UUIDs,
- * so pressing the button again can never register it twice.
+ * so pressing the button again can never register it twice. While the network is down an
+ * action is saved on the kiosk and synced in order later (D5); the server's auto-stop and
+ * finished-job answers then come with the sync, not on the button.
  */
 export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJobsChange }: KioskJobsProps) {
   const jobs = useLoad((signal) => listJobs({ workerId }, signal), `dispatch:${workerId}`);
@@ -97,7 +99,9 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
     setSelectError(null);
   }
 
-  async function send(action: "start" | "bundle" | "stop", build: () => RegistrationInput[], done: (items: RegistrationInput[], res: RegistrationResult[]) => void) {
+  const OFFLINE_LINE = "Saved on this kiosk; it syncs when the network is back.";
+
+  async function send(action: "start" | "bundle" | "stop", build: () => RegistrationInput[], done: (items: RegistrationInput[], res: RegistrationResult[], queued: boolean) => void) {
     const signature = `${action}:${action === "stop" ? openJobs.map((j) => j.jobId).join(",") : selected.join(",")}`;
     if (pending.current?.action !== signature) pending.current = { action: signature, items: build() };
     const items = pending.current.items;
@@ -105,12 +109,12 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
     setFailure(null);
     setNotice(null);
     try {
-      const res = await createRegistrations(items);
+      const out = await submitOrQueue(kioskQueue(), items);
       pending.current = null;
-      done(items, res);
-      jobs.reload();
+      done(items, out.queued ? [] : out.results, out.queued);
+      if (!out.queued) jobs.reload();
     } catch (error) {
-      setFailure(describeProblem(error));
+      setFailure(error instanceof OfflineQueueFullError ? { code: error.code, message: error.message, fields: {} } : describeProblem(error));
     } finally {
       setBusy(null);
     }
@@ -126,7 +130,7 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
     void send(
       asBundle ? "bundle" : "start",
       () => selected.map((jobId) => ({ id: newKey(), workerId, kind: "job-start", jobId, bundleId, startedAt, deviceId: KIOSK_DEVICE_ID })),
-      (items, res) => {
+      (items, res, queued) => {
         const started = items.map((it) => it.jobId ?? "");
         onOpenJobsChange(items.map((it) => ({ jobId: it.jobId ?? "", bundleId: it.bundleId ?? null, startedAt: it.startedAt })));
         setSelected([]);
@@ -135,7 +139,7 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
         setNotice({
           tone: lines.length > 0 ? "warning" : "success",
           title: asBundle ? `Started a bundle of ${started.length} jobs` : "Job started",
-          lines: [`Started ${names} at ${formatDateTime(items[0].startedAt)}.`, ...lines],
+          lines: [`Started ${names} at ${formatDateTime(items[0].startedAt)}.`, ...lines, ...(queued ? [OFFLINE_LINE] : [])],
         });
       },
     );
@@ -146,10 +150,10 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
     void send(
       "stop",
       () => stopItems(workerId, openJobs, stoppedAt),
-      (items) => {
+      (items, _res, queued) => {
         onOpenJobsChange([]);
         const names = items.map((it) => jobLabel(it.jobId ?? "", jobs.data)).join(", ");
-        setNotice({ tone: "success", title: "Work stopped", lines: [`Stopped ${names} at ${formatDateTime(items[0].stoppedAt)}.`] });
+        setNotice({ tone: "success", title: "Work stopped", lines: [`Stopped ${names} at ${formatDateTime(items[0].stoppedAt)}.`, ...(queued ? [OFFLINE_LINE] : [])] });
       },
     );
   }

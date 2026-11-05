@@ -82,11 +82,11 @@ function ResolveCard({ exception, onDone }: { exception: WarehouseException; onD
   );
 }
 
-/** One exception with what to do about it, and the form that closes it (WarehouseRelease). */
+/** One exception with what to do about it, and the form that closes it (fulfillment.warehouse.release). */
 export function ExceptionDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getException(id, signal), id);
-  const canResolve = holdsDuty(usePrincipalDuties(), "WarehouseRelease");
+  const canResolve = holdsDuty(usePrincipalDuties(), "fulfillment.warehouse.release");
 
   if (state.error) {
     return (

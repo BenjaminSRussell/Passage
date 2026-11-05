@@ -23,18 +23,18 @@ import (
 
 // Duties (8.44.17). Enforced by authz.RequireDuty on each route.
 const (
-	DutyAssetMaintain   = "EamAssetMaintain"
-	DutyCounterRegister = "EamCounterRegister"
-	DutyPlanAdmin       = "EamPlanAdmin"
-	DutyRequestCreate   = "EamRequestCreate"
-	DutyPlanner         = "EamPlanner"
-	DutyTechnician      = "EamTechnician"
-	DutyInquire         = "EamInquire"
-	DutyPermitIssuer    = "EamPermitIssuer"
-	DutySetupAdmin      = "EamSetupAdmin"
-	DutyGLPost          = "EamGlPost"
+	DutyAssetMaintain   = "eam.asset.maintain"
+	DutyCounterRegister = "eam.counter.register"
+	DutyPlanAdmin       = "eam.plan.admin"
+	DutyRequestCreate   = "eam.request.create"
+	DutyPlanner         = "eam.work.plan"
+	DutyTechnician      = "eam.work-order.execute"
+	DutyInquire         = "eam.inquire"
+	DutyPermitIssuer    = "eam.permit.issue"
+	DutySetupAdmin      = "eam.setup.admin"
+	DutyGLPost          = "eam.gl.post"
 	// DutyStructureMaintain covers functional locations and asset placement.
-	DutyStructureMaintain = "EamStructureMaintain"
+	DutyStructureMaintain = "eam.structure.maintain"
 )
 
 var (

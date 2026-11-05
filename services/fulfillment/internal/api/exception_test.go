@@ -73,13 +73,13 @@ func TestExceptions_ListGetResolve(t *testing.T) {
 	if rec.Code != http.StatusOK || fs.resolved != "returned via RMA" || fs.resolvedVersion != 1 || !strings.Contains(rec.Body.String(), "RESOLVED") {
 		t.Fatalf("resolve: %d %s %q", rec.Code, rec.Body.String(), fs.resolved)
 	}
-	// Resolving needs WarehouseRelease; viewing needs WarehouseView.
-	rec = do(t, h, http.MethodPost, path, `{"note":"x"}`, map[string]string{"If-Match": `"1"`, "Idempotency-Key": "r4", "X-Passage-Duties": "WarehouseView"})
+	// Resolving needs fulfillment.warehouse.release; viewing needs fulfillment.warehouse.view.
+	rec = do(t, h, http.MethodPost, path, `{"note":"x"}`, map[string]string{"If-Match": `"1"`, "Idempotency-Key": "r4", "X-Passage-Duties": "fulfillment.warehouse.view"})
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("resolve without WarehouseRelease: %d", rec.Code)
+		t.Fatalf("resolve without fulfillment.warehouse.release: %d", rec.Code)
 	}
-	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/exceptions", "", map[string]string{"X-Passage-Duties": "WarehousePick"}); rec.Code != http.StatusForbidden {
-		t.Fatalf("list without WarehouseView: %d", rec.Code)
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/exceptions", "", map[string]string{"X-Passage-Duties": "fulfillment.warehouse.pick"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("list without fulfillment.warehouse.view: %d", rec.Code)
 	}
 }
 
