@@ -68,6 +68,62 @@ spec:
         key: passage/dev/transport-postgres/cdc-password
         property: value
 ---
+# eam's DATABASE_URL (chart value database.secretName eam-database, key url): its own login role
+# passage_eam_app in passage_eam, created by 60-eam-db.sh with the same Vault password (APP_PASSWORD). The
+# password goes into the URL as is, so it must be URL-safe (hex, like the other dev passwords).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: eam-database
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: eam-database
+    creationPolicy: Owner
+    template:
+      data:
+        url: "postgres://passage_eam_app:{{ .password }}@postgres.hello-ledger.svc:5432/passage_eam?sslmode=disable"
+        APP_PASSWORD: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/eam-postgres/app-password
+        property: value
+---
+# transport's DATABASE_URL (chart value database.secretName transport-db, key url): its own login role
+# passage_transport_app in passage_transport, created by 70-transport-db.sh with the same Vault password
+# (APP_PASSWORD). URL-safe password, as for eam-database.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: transport-db
+  namespace: hello-ledger
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: transport-db
+    creationPolicy: Owner
+    template:
+      data:
+        url: "postgres://passage_transport_app:{{ .password }}@postgres.hello-ledger.svc:5432/passage_transport?sslmode=disable"
+        APP_PASSWORD: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/transport-postgres/app-password
+        property: value
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -114,24 +170,26 @@ data:
     GRANT CONNECT ON DATABASE passage_receiving TO passage_app, debezium_cdc;
     SQL
   60-eam-db.sh: |
-    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_EAM_PASSWORD" <<'SQL'
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_EAM_PASSWORD" -v app_password="$EAM_APP_PASSWORD" <<'SQL'
     CREATE ROLE debezium_cdc_eam LOGIN NOSUPERUSER NOBYPASSRLS REPLICATION PASSWORD :'cdc_password';
+    CREATE ROLE passage_eam_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD :'app_password';
     SELECT 'CREATE DATABASE passage_eam' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_eam')\gexec
     REVOKE CONNECT ON DATABASE passage_eam FROM PUBLIC;
-    GRANT CONNECT, CREATE ON DATABASE passage_eam TO passage_app;
+    GRANT CONNECT, CREATE ON DATABASE passage_eam TO passage_app, passage_eam_app;
     GRANT CONNECT ON DATABASE passage_eam TO debezium_cdc_eam;
     \c passage_eam
-    GRANT ALL ON SCHEMA public TO passage_app;
+    GRANT ALL ON SCHEMA public TO passage_app, passage_eam_app;
     SQL
   70-transport-db.sh: |
-    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_TRANSPORT_PASSWORD" <<'SQL'
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v cdc_password="$CDC_TRANSPORT_PASSWORD" -v app_password="$TRANSPORT_APP_PASSWORD" <<'SQL'
     CREATE ROLE debezium_cdc_transport LOGIN NOSUPERUSER NOBYPASSRLS REPLICATION PASSWORD :'cdc_password';
+    CREATE ROLE passage_transport_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD :'app_password';
     SELECT 'CREATE DATABASE passage_transport' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_transport')\gexec
     REVOKE CONNECT ON DATABASE passage_transport FROM PUBLIC;
-    GRANT CONNECT, CREATE ON DATABASE passage_transport TO passage_app;
+    GRANT CONNECT, CREATE ON DATABASE passage_transport TO passage_app, passage_transport_app;
     GRANT CONNECT ON DATABASE passage_transport TO debezium_cdc_transport;
     \c passage_transport
-    GRANT ALL ON SCHEMA public TO passage_app;
+    GRANT ALL ON SCHEMA public TO passage_app, passage_transport_app;
     SQL
 ---
 apiVersion: apps/v1
@@ -152,7 +210,7 @@ spec:
         app.kubernetes.io/name: postgres
       annotations:
         # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
-        passage.dev/init-rev: "7"
+        passage.dev/init-rev: "8"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -188,6 +246,12 @@ spec:
             - name: CDC_TRANSPORT_PASSWORD
               valueFrom:
                 secretKeyRef: { name: transport-cdc, key: CDC_PASSWORD }
+            - name: EAM_APP_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: eam-database, key: APP_PASSWORD }
+            - name: TRANSPORT_APP_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: transport-db, key: APP_PASSWORD }
             - name: ORG_OWNER_PASSWORD
               valueFrom:
                 secretKeyRef: { name: hello-ledger-db, key: ORG_OWNER_PASSWORD, optional: true }
@@ -244,6 +308,12 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: org
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: eam
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: transport
       ports:
         - { protocol: TCP, port: 5432 }
     - from:

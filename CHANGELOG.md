@@ -40,6 +40,13 @@ release may change public APIs.
   one (every carrier declined or timed out) PLANNED again. The moves are checked in `domain.NextLoadStatus`. The web
   tender form gains "Release to the tender workflow" for holders of `transport.load.tender`: it shows the load's
   status and version, releases with `If-Match` and one `Idempotency-Key`, and shows the resulting status.
+- Dev database wiring for transport and eam (#426): the ExternalSecrets `transport-db` and `eam-database` in
+  `deploy/envs/dev/apps/postgres.yaml` write each chart's `url` for its own login role (`passage_transport_app`,
+  `passage_eam_app`; NOSUPERUSER, NOBYPASSRLS) from the new Vault keys `passage/dev/transport-postgres/app-password`
+  and `passage/dev/eam-postgres/app-password`; the init scripts create the roles with the same password (init-rev 8),
+  the dev Postgres NetworkPolicy admits the transport and eam pods, and transport migrates on start in dev
+  (`deploy/envs/dev/values/transport.yaml`). `make -C deploy test-argocd` checks the Secret, role, grants and policy
+  and, with helm, that each chart reads that Secret.
 - Argo CD dev wiring for every service chart (#106): a `services` ApplicationSet and an `observability` Application
   in `deploy/envs/dev/apps`, per-service dev values in `deploy/envs/dev/values` (batch turns on SMTP notify with its
   ESO secret), and `make -C deploy test-argocd`, which checks sync policy and chart coverage and renders every dev

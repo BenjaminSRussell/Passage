@@ -59,6 +59,12 @@ UNMANAGED_SECRETS = {
     ("hello-ledger", "keycloak-db"): "deploy/keycloak/README.md (created by hand, #80)",
     ("hello-ledger", "keycloak-admin"): "deploy/keycloak/README.md (created by hand, #80)",
 }
+# Service databases in the shared dev Postgres (deploy/envs/dev/apps/postgres.yaml) whose DATABASE_URL Secret an
+# ExternalSecret in that file writes: dev Application -> (database, login role, Secret, key the chart reads).
+DEV_POSTGRES_DATABASES = {
+    "eam": ("passage_eam", "passage_eam_app", "eam-database", "url"),
+    "transport": ("passage_transport", "passage_transport_app", "transport-db", "url"),
+}
 # Applications whose images are built and imported locally by `make deploy-local` (tag, not digest).
 LOCAL_IMAGE_APPS = {("local", "hello-ledger")}
 
@@ -341,6 +347,54 @@ class ArgoApplicationsTest(unittest.TestCase):
                         if ref and (ns, ref["name"]) not in UNMANAGED_SECRETS:
                             self.assertIn(ref["key"], written.get((ns, ref["name"]), set()),
                                           f"{kind} {name}: nothing writes {ref['name']}/{ref['key']}")
+
+    def dev_postgres(self):
+        docs = load_docs(DEPLOY / "envs/dev/apps/postgres.yaml")
+        return {(d["kind"], d["metadata"]["name"]): d for d in docs}
+
+    # The dev Postgres creates each service's login role from the password its DATABASE_URL Secret carries, an
+    # ExternalSecret writes that Secret, and the NetworkPolicy admits the service's pods (#426).
+    def test_dev_postgres_writes_and_admits_service_databases(self):
+        dev, pg = self.dev_apps(), self.dev_postgres()
+        secrets = {es_output(d)[:2]: d for (kind, _), d in pg.items() if kind == "ExternalSecret"}
+        scripts = pg[("ConfigMap", "postgres-init")]["data"].values()
+        (container,) = pod_containers(pg[("Deployment", "postgres")])
+        env = {e["name"]: e["valueFrom"]["secretKeyRef"] for e in container["env"] if "valueFrom" in e}
+        policy = pg[("NetworkPolicy", "postgres")]
+        admitted = {f["podSelector"]["matchLabels"].get("app.kubernetes.io/name")
+                    for rule in policy["spec"]["ingress"] for f in rule["from"] if "namespaceSelector" not in f}
+        for app, (database, role, secret, key) in DEV_POSTGRES_DATABASES.items():
+            with self.subTest(app=app):
+                ns = dev[app]["spec"]["destination"]["namespace"]
+                self.assertEqual(ns, policy["metadata"]["namespace"], f"{app} runs outside the dev Postgres namespace")
+                self.assertIn(app, admitted, f"the dev Postgres NetworkPolicy does not admit {app}")
+                es = secrets.get((ns, secret))
+                self.assertIsNotNone(es, f"no ExternalSecret in postgres.yaml writes {ns}/{secret}")
+                template = es["spec"]["target"]["template"]["data"]
+                self.assertEqual(template[key],
+                                 f"postgres://{role}:{{{{ .password }}}}@postgres.{ns}.svc:5432/{database}?sslmode=disable")
+                self.assertEqual(template["APP_PASSWORD"], "{{ .password }}")
+                self.assertEqual(len(es["spec"]["data"]), 1, f"{secret}: one Vault key for the URL and the role")
+                (password_env,) = [n for n, ref in env.items() if ref == {"name": secret, "key": "APP_PASSWORD"}]
+                (script,) = [s for s in scripts if f"CREATE ROLE {role} " in s]
+                self.assertIn(f'-v app_password="${password_env}"', script)
+                self.assertIn(f"CREATE ROLE {role} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD :'app_password';", script)
+                self.assertIn(f"CREATE DATABASE {database}'", script)
+                self.assertRegex(script, rf"GRANT CONNECT, CREATE ON DATABASE {database} TO [^;]*\b{role}\b")
+                self.assertRegex(script, rf"\\c {database}\n[^\n]*GRANT ALL ON SCHEMA public TO [^;]*\b{role}\b")
+
+    @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
+    def test_service_charts_read_their_dev_postgres_secret(self):
+        dev = self.dev_apps()
+        for app, (_, _, secret, key) in DEV_POSTGRES_DATABASES.items():
+            with self.subTest(app=app):
+                src = next(s for s in sources(dev[app]) if "path" in s)
+                (workload,) = [d for d in render(dev[app], src) if d["kind"] == "Deployment"]
+                pod = workload["spec"]["template"]
+                self.assertEqual(pod["metadata"]["labels"].get("app.kubernetes.io/name"), app, "NetworkPolicy label")
+                refs = [e["valueFrom"]["secretKeyRef"] for c in pod_containers(workload) for e in c.get("env") or []
+                        if e["name"] == "DATABASE_URL"]
+                self.assertEqual(refs, [{"name": secret, "key": key}])
 
     @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
     def test_temporal_values_match_its_database(self):
