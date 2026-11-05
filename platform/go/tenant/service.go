@@ -184,6 +184,8 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"migration-factory": {
 		"receivables": {"receivables.import.write", "ARView"},
+		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
+		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"integration-hub": {
 		"migration": {"migration.outbound.render", "migration.xref.record"},

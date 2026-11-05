@@ -3382,7 +3382,8 @@
       "engineering": ["engineering.import.write", "engineering.import.read"]
     },
     "migration-factory": {
-      "receivables": ["receivables.import.write", "ARView"]
+      "receivables": ["receivables.import.write", "ARView"],
+      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "integration-hub": {
       "migration": ["migration.outbound.render", "migration.xref.record"]
