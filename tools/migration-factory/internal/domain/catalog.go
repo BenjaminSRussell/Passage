@@ -10,7 +10,8 @@ type CatalogEntry struct {
 }
 
 // availablePacks are the packs the service validates, loads and reconciles today.
-var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true, PackOnhand: true, PackBankBal: true, PackOpenOrders: true}
+var availablePacks = map[Pack]bool{PackOpenItems: true, PackGLBalances: true, PackProjectWIP: true, PackOnhand: true, PackBankBal: true, PackOpenOrders: true,
+	PackWIPProd: true, PackFixedAssets: true, PackPayrollYTD: true}
 
 // PackAvailable reports whether a pack run can be started in this release.
 func PackAvailable(p Pack) bool { return availablePacks[p] }
@@ -21,10 +22,10 @@ var controlTotalsByPack = map[Pack]string{
 	PackGLBalances:  "balance per (entity, account, dimensions, currency), trial balance debit = credit, non-zero combinations",
 	PackOnhand:      "quantity per (item, site, warehouse, location, batch, serial), value per (item, site), value per entity",
 	PackOpenOrders:  "open quantity per (order type, item, unit), open value per (order type, currency), line and order count per order type",
-	PackWIPProd:     "order count, WIP value per order",
-	PackFixedAssets: "count, acquisition cost, accumulated depreciation, NBV per book",
+	PackWIPProd:     "order count, WIP value per order, WIP value per entity and currency",
+	PackFixedAssets: "count per book, acquisition cost, accumulated depreciation, NBV per (book, currency); next depreciation within 0.01 (BR-49.6)",
 	PackProjectWIP:  "cost, sales, WIP cost and WIP sales per (project, category)",
-	PackPayrollYTD:  "gross, tax, net per worker",
+	PackPayrollYTD:  "gross, tax, net per (worker, tax year, currency), worker count per tax year",
 	PackBankBal:     "balance per (bank account, currency), balance per entity and currency, account count",
 }
 

@@ -93,6 +93,12 @@ paths:
         The legacy id of an open item is unique per side: a receivable and a payable with the same id
         (AX CustTransOpen and VendTransOpen RecIds, SAP BSID and BSIK keys) are two items, held in legacy_xref
         under open_items.receivable and open_items.payable.
+        wip_prod, fixed_assets and payroll_ytd take a StagedRunRequest whose `master` lists the items,
+        depreciation books or workers the referential rule checks. They are staged in the factory
+        (`staged_opening_line`) and not posted to production, fixed assets or payroll (D1a). A fixed
+        asset whose next depreciation, recomputed from the loaded values (SL or DB), is more than 0.01
+        off the legacy projection is quarantined with MIG-1507 (BR-49.6); a payroll year whose net is
+        not gross - tax - deductions is quarantined (DOMAIN).
         Records failing the referential, domain or uniqueness rules are quarantined (FR-49.11);
         the run is rejected with MIG-1504 when they exceed quarantineMaxPct. Accepted records
         that legacy_xref already holds by (system, company, table, id) are not loaded again
@@ -122,6 +128,7 @@ paths:
                 - $ref: "#/components/schemas/OpenOrdersRunRequest"
                 - $ref: "#/components/schemas/BankRunRequest"
                 - $ref: "#/components/schemas/ProjectRunRequest"
+                - $ref: "#/components/schemas/StagedRunRequest"
       responses:
         "201":
           description: The stored run (or the stored outcome of a repeated key).
@@ -1277,6 +1284,205 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /api/v1/migration/parallel-runs/replay:
+    post:
+      operationId: replayParallelRun
+      summary: Replay a legacy period through the ledger and diff the trial balances (FR-49.5, D4)
+      description: |
+        Posts the legacy period's journal documents, in their original sequence (posting date, then
+        seq), through the general ledger's posting API into the rehearsal ledger `ledgerId` of
+        `legalEntityId` (which must own it, MIG-1531), each under a fixed idempotency key. It then
+        reads the ledger's period balance of every account the documents or `legacyTrialBalance`
+        name and stores the diff against the legacy trial balance (the documents' own when none is
+        given) as a parallel run in REVIEW, idempotent by (period, system). A document the ledger
+        refuses is listed in `rejected` and shows as TB variances; any other ledger failure is 502
+        MIG-1533 and the replay can be repeated. Without a configured ledger the answer is 503 MIG-1530.
+      x-passage-duty: MigrationRun
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [period, sourceSystem, legalEntityId, ledgerId, revenue, documents]
+              properties:
+                period: {type: string, pattern: "^[0-9]{4}-[0-9]{2}$"}
+                sourceSystem: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}
+                legalEntityId: {type: string, format: uuid}
+                ledgerId: {type: string}
+                revenue: {type: string}
+                explainedMaxPct: {type: string}
+                documents:
+                  type: array
+                  items:
+                    type: object
+                    required: [seq, documentId, postingDate, currency, lines]
+                    properties:
+                      seq: {type: integer, minimum: 1}
+                      documentId: {type: string}
+                      postingDate: {type: string, format: date}
+                      currency: {type: string}
+                      lines:
+                        type: array
+                        items:
+                          type: object
+                          required: [account, amount]
+                          properties:
+                            account: {type: string}
+                            amount: {type: string, description: "Debit positive, credit negative."}
+                            text: {type: string}
+                legacyTrialBalance:
+                  type: array
+                  items:
+                    type: object
+                    required: [account, currency, amount]
+                    properties:
+                      account: {type: string}
+                      currency: {type: string}
+                      amount: {type: string}
+      responses:
+        "201":
+          description: The stored parallel run with its variances, the number of documents posted and the rejected ones.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/coexistence:
+    get:
+      operationId: listCoexistence
+      summary: The entity-by-entity cutover flags of a legacy company (FR-49.7, D6)
+      description: Every entity kind with its mode; a kind never set is LEGACY at version 0.
+      x-passage-duty: MigrationView
+      parameters:
+        - {name: sourceSystem, in: query, required: true, schema: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}}
+        - {name: sourceCompany, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: The flags.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/coexistence/{system}/{company}/{entity}:
+    put:
+      operationId: setCoexistence
+      summary: Cut an entity kind over to Passage, or flip it back to the legacy system (BR-49.10)
+      description: |
+        PASSAGE records the cutover time; from then the coexistence adapter's legacy changes of the
+        kind made at or after it are refused (MIG-1510). LEGACY (a rollback) clears it. The write is
+        against `expectedVersion` (MIG-0006); setting the current mode is MIG-0004.
+      x-passage-duty: CutoverManager
+      parameters:
+        - {name: system, in: path, required: true, schema: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}}
+        - {name: company, in: path, required: true, schema: {type: string}}
+        - {name: entity, in: path, required: true, schema: {type: string, enum: [customer, vendor, product, open_items, open_orders, onhand, gl_journal, fixed_asset, worker]}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, expectedVersion]
+              properties:
+                mode: {type: string, enum: [LEGACY, PASSAGE]}
+                expectedVersion: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: The flag after the change.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/rollback/compensations:
+    post:
+      operationId: postRollbackCompensations
+      summary: Post the compensating journals of a rolled-back plan (FR-49.9, D9)
+      description: |
+        One compensating entry per re-keying journal (entity, document, currency), its lines on the
+        opposite side, derived from the stored re-keying lines and dated the rollback day. `ledgers`
+        pins an entity's ledger on first use after the ledger service confirms the legal entity owns
+        it (MIG-1531); another ledger later is 409 MIG-1532. A failing journal backs off (1 minute
+        doubling to 1 hour) and is parked after a rejection or 5 attempts; `retryParked` queues the
+        parked ones again. Each journal is posted once under a fixed idempotency key. The plan must be
+        rolled back (MIG-0004).
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ledgers:
+                  type: array
+                  items:
+                    type: object
+                    required: [entity, legalEntityId, ledgerId]
+                    properties:
+                      entity: {type: string}
+                      legalEntityId: {type: string, format: uuid}
+                      ledgerId: {type: string}
+                retryParked: {type: boolean}
+      responses:
+        "200":
+          description: The compensations with their reconciliation against the re-keying journals.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: getRollbackCompensations
+      summary: The compensating journals of a rolled-back plan and their reconciliation
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The compensations, pinned ledgers and per (entity, account, currency) reconciliation.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
     bearerAuth:
@@ -1625,6 +1831,32 @@ components:
         balance:
           type: string
           description: Signed book balance at the cutoff (an overdrawn account is negative), a decimal string in whole minor units of the currency (2 decimal places for USD, 0 for JPY); a finer value is a DOMAIN failure. Never a float.
+    StagedRunRequest:
+      type: object
+      required: [sourceSystem, sourceCompany, cutoffTs, freezeTs, master, records]
+      additionalProperties: false
+      properties:
+        sourceSystem: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}
+        sourceCompany: {type: string, minLength: 1}
+        cutoffTs: {type: string, format: date-time}
+        freezeTs: {type: string, format: date-time}
+        quarantineMaxPct: {type: string}
+        master:
+          type: array
+          minItems: 1
+          items: {type: string}
+        records:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [legacyId, currency]
+            description: |
+              wip_prod reads productionOrder, item, material, labor, overhead; fixed_assets reads asset, book,
+              method (SL or DB), usefulLifeMonths, remainingLifeMonths, acquisitionCost, accumulatedDepreciation,
+              salvageValue, nextDepreciation; payroll_ytd reads worker, taxYear, gross, tax, deductions, net.
+              Amounts are decimal strings; a blank amount is zero.
+            additionalProperties: true
     BankRunRequest:
       type: object
       required: [sourceSystem, sourceCompany, cutoffTs, freezeTs, bankAccounts, records]

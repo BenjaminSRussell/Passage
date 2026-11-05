@@ -210,7 +210,6 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"pack run needs MigrationRun", request{method: "POST", path: runsPath, tenant: tenantA, duties: "MigrationView", body: openItemsBody(1)}, 403, "AUTH-0003", ""},
 		{"no tenant", request{method: "POST", path: runsPath, duties: allDuties, body: openItemsBody(1)}, 401, "", ""},
 		{"late cutoff MIG-1501", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: late}, 422, CodeInvalid, "MIG-1501"},
-		{"pack not built yet", request{method: "POST", path: "/api/v1/migration/packs/wip_prod/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
 		{"unknown pack", request{method: "POST", path: "/api/v1/migration/packs/nonsense/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
 		{"unknown source system", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), "AX2012", "AX4", 1)}, 422, CodeInvalid, ""},
 		{"blank company", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), `"USMF"`, `" "`, 1)}, 422, CodeInvalid, "sourceCompany"},

@@ -21,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
@@ -80,6 +81,11 @@ type Store interface {
 	RunOnhand(ctx context.Context, idem store.Idem, in store.OnhandRun) (domain.PackRun, bool, error)
 	RunBankBalances(ctx context.Context, idem store.Idem, in store.BankRun) (domain.PackRun, bool, error)
 	RunOpenOrders(ctx context.Context, idem store.Idem, in store.OpenOrdersRun) (domain.PackRun, bool, error)
+	RunStaged(ctx context.Context, idem store.Idem, in store.StagedRun) (domain.PackRun, bool, error)
+	PostCompensations(ctx context.Context, ledger ledgerclient.Ledger, in store.CompensationRun) (store.CompensationReport, error)
+	CompensationReport(ctx context.Context, planID string) (store.CompensationReport, error)
+	ListCoexistence(ctx context.Context, system domain.SourceSystem, company string) ([]domain.CoexistFlag, error)
+	SetCoexistence(ctx context.Context, idem store.Idem, c store.CoexistChange) (domain.CoexistFlag, bool, error)
 	GetProjectOpening(ctx context.Context, f store.OpeningFilter) (store.ProjectOpening, error)
 	GetTargetLoad(ctx context.Context, runID string) (domain.TargetLoad, error)
 	ListTargetRows(ctx context.Context, runID string, f store.TargetRowFilter) ([]domain.TargetRowView, error)
@@ -93,6 +99,7 @@ type Server struct {
 	store  Store
 	now    func() time.Time
 	target Target
+	ledger ledgerclient.Ledger
 }
 
 // New returns a server over st.
@@ -127,7 +134,10 @@ func (s *Server) Register(r chi.Router) {
 		// already refused requests without a principal.
 		r.Get("/migration/xref", s.lookupXref)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/parallel-runs", s.startParallelRun)
+		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/parallel-runs/replay", s.replayParallelRun)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/parallel-runs", s.listParallelRuns)
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/coexistence", s.listCoexistence)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Put("/migration/coexistence/{system}/{company}/{entity}", s.setCoexistence)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/parallel-runs/{id}", s.getParallelRun)
 		r.With(authz.RequireDuty(DutyMigrationReview)).Post("/migration/parallel-runs/{id}/variances/{v}/explain", s.explainVariance)
 		r.With(authz.RequireDuty(DutyMigrationReview)).Post("/migration/parallel-runs/{id}/sign-off", s.signOffParallelRun)
@@ -140,6 +150,8 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/{id}/go-no-go", s.recordDecision)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/{id}/rollback", s.rollback)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/rekeying/{file}", s.rekeyFile)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/{id}/rollback/compensations", s.postCompensations)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/rollback/compensations", s.getCompensations)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/export/{file}", s.exportFile)
 	})
 }

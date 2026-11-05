@@ -167,7 +167,7 @@ func TestStepTiming_RunningDoneAndNotStarted(t *testing.T) {
 	}
 }
 
-func TestPackCatalog_NinePacksAllSystemsSixAvailable(t *testing.T) {
+func TestPackCatalog_NinePacksAllSystemsAllAvailable(t *testing.T) {
 	cat := PackCatalog()
 	if len(cat) != len(Packs) {
 		t.Fatalf("catalog has %d packs, want %d", len(cat), len(Packs))
@@ -187,8 +187,9 @@ func TestPackCatalog_NinePacksAllSystemsSixAvailable(t *testing.T) {
 			available = append(available, e.Pack)
 		}
 	}
-	if len(available) != 6 || available[0] != PackOpenItems || available[1] != PackGLBalances || available[2] != PackOnhand || available[3] != PackOpenOrders || available[4] != PackProjectWIP || available[5] != PackBankBal {
-		t.Fatalf("available packs %v, want open_items, gl_balances, onhand, open_orders, project_wip and bank_balances", available)
+	// Slice 17 makes wip_prod, fixed_assets and payroll_ytd available (staged only).
+	if len(available) != len(Packs) {
+		t.Fatalf("available packs %v, want all nine", available)
 	}
 	cat[0].Systems[0] = "X"
 	if PackCatalog()[0].Systems[0] != SourceAX2012 {
