@@ -1,6 +1,8 @@
 package api
 
 import (
+	"time"
+
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -65,8 +67,13 @@ type correctedLineData struct {
 }
 
 type receiptCorrectedData struct {
-	ReceiptID     string              `json:"receipt_id"`
-	ReceiptNumber string              `json:"receipt_number"`
+	ReceiptID     string `json:"receipt_id"`
+	ReceiptNumber string `json:"receipt_number"`
+	// LegalEntityID and PostingDate (the adjustment's posting date) let the
+	// inventory postings consumer book the correction in the receipt's legal
+	// entity on that date (#480).
+	LegalEntityID string              `json:"legal_entity_id"`
+	PostingDate   string              `json:"posting_date"`
 	Kind          string              `json:"kind"`
 	CorrectionSeq int                 `json:"correction_seq"`
 	LedgerEntryID string              `json:"ledger_entry_id"`
@@ -222,9 +229,16 @@ func receiptPostedEvent(tenantID string, r store.Receipt, amounts []store.LineAm
 	return newEvent("receiving", "receipt", "posted", r.ID, tenantID, data)
 }
 
-func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledgerEntryID string, lines []correctedLineData) (events.Event, error) {
+// receiptCorrectedEvent announces a correction or cancellation posted on
+// postingDate, the adjustment's date: the requested one, else the receipt
+// date (domain.Receipt.Correct and Cancel apply the same rule).
+func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, postingDate time.Time, ledgerEntryID string, lines []correctedLineData) (events.Event, error) {
+	if postingDate.IsZero() {
+		postingDate = r.Date
+	}
 	return newEvent("receiving", "receipt", "corrected", r.ID, tenantID, receiptCorrectedData{
-		ReceiptID: r.ID, ReceiptNumber: r.Number, Kind: kind, CorrectionSeq: seq, LedgerEntryID: ledgerEntryID, Currency: r.Currency, Lines: lines,
+		ReceiptID: r.ID, ReceiptNumber: r.Number, LegalEntityID: r.LegalEntityID, PostingDate: postingDate.Format(dateLayout),
+		Kind: kind, CorrectionSeq: seq, LedgerEntryID: ledgerEntryID, Currency: r.Currency, Lines: lines,
 	})
 }
 

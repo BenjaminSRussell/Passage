@@ -503,7 +503,7 @@ func (a *API) correctReceipt(w http.ResponseWriter, r *http.Request) {
 				AmountDelta: amountDelta.String(), AmountAcctDelta: acct(amountDelta, rec.ExchangeRate).String(),
 			})
 		}
-		evt, err := receiptCorrectedEvent(cmd.principal.TenantID, correctKind, rec, seq, entryID, eventLines)
+		evt, err := receiptCorrectedEvent(cmd.principal.TenantID, correctKind, rec, seq, postingDate, entryID, eventLines)
 		adj.Event = &evt
 		return adj, err
 	})
@@ -560,11 +560,11 @@ func (a *API) cancelReceipt(w http.ResponseWriter, r *http.Request) {
 		eventLines := make([]correctedLineData, len(rec.Lines))
 		for i, l := range rec.Lines {
 			eventLines[i] = correctedLineData{
-				LineNo: l.LineNo, POLineID: l.POLineID, ProductID: l.ProductID, QtyDelta: l.Qty.Neg().String(),
+				LineNo: l.LineNo, POLineID: l.POLineID, ProductID: l.ProductID, QtyDelta: l.Qty.Neg().String(), CWQtyDelta: -l.CWQty,
 				AmountDelta: l.Amount.Decimal.Neg().String(), AmountAcctDelta: l.AmountAcct.Decimal.Neg().String(),
 			}
 		}
-		evt, err := receiptCorrectedEvent(cmd.principal.TenantID, cancelKind, rec, rec.CorrectionSeq, entryID, eventLines)
+		evt, err := receiptCorrectedEvent(cmd.principal.TenantID, cancelKind, rec, rec.CorrectionSeq, postingDate, entryID, eventLines)
 		return store.Adjustment{LedgerEntryID: entryID, Event: &evt}, err
 	})
 	if err != nil {

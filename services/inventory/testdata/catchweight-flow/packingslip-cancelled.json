@@ -1,0 +1,25 @@
+{
+  "packing_slip_id": "0199f480-0000-7000-8000-000000000021",
+  "packing_slip_number": "PS-W",
+  "reversal_id": "0199f480-0000-7000-8000-000000000022",
+  "shipment_id": "0199f480-0000-7000-8000-000000000023",
+  "order_id": "0199f480-0000-7000-8000-000000000012",
+  "legal_entity_id": "0199f480-0000-7000-8000-00000000000a",
+  "posting_date": "2026-10-28",
+  "currency": "USD",
+  "lines": [
+    {
+      "order_line_id": "0199f480-0000-7000-8000-000000000013",
+      "qty": "-5",
+      "cost_amount": "-102",
+      "cost_snapshot_id": "snap-cw",
+      "weight": "-51"
+    }
+  ],
+  "journal": [
+    {"account": "1405", "amount": "-102", "currency": "USD", "order_line_id": "0199f480-0000-7000-8000-000000000013"},
+    {"account": "1400", "amount": "102", "currency": "USD", "order_line_id": "0199f480-0000-7000-8000-000000000013"}
+  ],
+  "packaging_fees": [],
+  "returnables": []
+}

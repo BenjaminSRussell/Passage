@@ -128,7 +128,8 @@ components:
       name: dev.passage.receiving.receipt.corrected.v1
       summary: >-
         A POSTED receipt was corrected by a quantity delta (kind CORRECTION) or fully reversed (kind CANCELLATION).
-        Cancelling an ARRIVED or REGISTERED receipt posts nothing and emits nothing. Consumers: payables, costing.
+        Cancelling an ARRIVED or REGISTERED receipt posts nothing and emits nothing. Consumers: payables, costing,
+        inventory (the postings consumer offsets the booked receipt line, #480).
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ReceiptCorrectedData"
@@ -256,6 +257,8 @@ components:
       properties:
         receipt_id: { type: string, format: uuid }
         receipt_number: { type: string }
+        legal_entity_id: { type: string, format: uuid, description: "the receipt's legal entity (#480)" }
+        posting_date: { type: string, format: date, description: "the adjustment's posting date: the requested one, else the receipt date (#480)" }
         kind: { type: string, enum: [CORRECTION, CANCELLATION] }
         correction_seq: { type: integer, minimum: 0, description: "1-based sequence of the correction; the count so far on a cancellation" }
         ledger_entry_id: { type: string }
@@ -270,7 +273,7 @@ components:
               po_line_id: { type: string }
               product_id: { type: string, format: uuid }
               qty_delta: { type: string, description: "decimal string, negative when the received quantity falls" }
-              cw_qty_delta: { type: integer, description: "catch-weight lines only, present when the case count changed (FR-24.7)" }
+              cw_qty_delta: { type: integer, description: "catch-weight lines only, present when the case count changed (FR-24.7); on a CANCELLATION the negated case count left on the line (#480)" }
               amount_delta: { type: string, description: "decimal string, receipt currency" }
               amount_acct_delta: { type: string, description: "decimal string, accounting currency" }
     InvoicePostedData:

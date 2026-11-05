@@ -21,7 +21,10 @@ import (
 
 // receiptFixture is the catch-weight receipt.posted the inventory postings
 // consumer is tested with (services/inventory/testdata/catchweight-flow, #480).
-const receiptFixture = "../../../inventory/testdata/catchweight-flow/receipt-posted.json"
+const (
+	fixtureDir     = "../../../inventory/testdata/catchweight-flow/"
+	receiptFixture = fixtureDir + "receipt-posted.json"
+)
 
 func sortedKeys(m map[string]any) []string {
 	out := make([]string, 0, len(m))
@@ -38,6 +41,8 @@ func sortedKeys(m map[string]any) []string {
 // members of the fixture inventory books from, with the weight as qty, the
 // cases as cw_qty, the per-kg unit_price, the amount 204 and the PO line's site
 // and warehouse; the GR/IR open item carries the same cwQty beside the weight.
+// The correction and the cancellation that follow write receipt.corrected
+// with exactly the members of receipt-corrected.json and receipt-cancelled.json.
 func TestCatchWeightReceipt_PostedEventAndGRIRMatchTheInventoryContract(t *testing.T) {
 	raw, err := os.ReadFile(receiptFixture)
 	if err != nil {
@@ -120,5 +125,64 @@ func TestCatchWeightReceipt_PostedEventAndGRIRMatchTheInventoryContract(t *testi
 	}
 	if strings.Contains(grir.Body.String(), `"cwQty":0`) {
 		t.Fatal("cwQty 0 written")
+	}
+
+	// The correction (1 case and 10 kg short, on 2026-10-27) and the
+	// cancellation of what is left (9 cases, 92 kg, on 2026-10-29) are the
+	// receipt.corrected events inventory offsets the booked line with.
+	var posted receiptJSON
+	_ = json.Unmarshal(post.Body.Bytes(), &posted)
+	corr := doWith(h, http.MethodPost, receiptsPath+"/"+r.ID+":correct", `{"postingDate":"2026-10-27","lines":[{"lineNo":1,"qtyDelta":-10,"cwQtyDelta":-1}]}`,
+		duty("receiving.receipt.post", "cw-correct", "If-Match", fmt.Sprintf(`"%d"`, posted.Version)))
+	if corr.Code != http.StatusOK {
+		t.Fatalf("correct: %d %s", corr.Code, corr.Body)
+	}
+	var corrected receiptJSON
+	_ = json.Unmarshal(corr.Body.Bytes(), &corrected)
+	cancel := doWith(h, http.MethodPost, receiptsPath+"/"+r.ID+":cancel", `{"postingDate":"2026-10-29"}`,
+		duty("receiving.receipt.post", "cw-cancel", "If-Match", fmt.Sprintf(`"%d"`, corrected.Version)))
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("cancel: %d %s", cancel.Code, cancel.Body)
+	}
+	var adjustments []map[string]any
+	for _, e := range st.Events() {
+		if e.Type == "dev.passage.receiving.receipt.corrected.v1" {
+			var m map[string]any
+			if err := json.Unmarshal(e.Data, &m); err != nil {
+				t.Fatal(err)
+			}
+			adjustments = append(adjustments, m)
+		}
+	}
+	if len(adjustments) != 2 {
+		t.Fatalf("%d receipt.corrected events, want the correction and the cancellation", len(adjustments))
+	}
+	for i, name := range []string{"receipt-corrected.json", "receipt-cancelled.json"} {
+		raw, err := os.ReadFile(fixtureDir + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want map[string]any
+		if err := json.Unmarshal(raw, &want); err != nil {
+			t.Fatal(err)
+		}
+		got := adjustments[i]
+		wantLine, gotLine := want["lines"].([]any)[0].(map[string]any), got["lines"].([]any)[0].(map[string]any)
+		if !reflect.DeepEqual(sortedKeys(got), sortedKeys(want)) || !reflect.DeepEqual(sortedKeys(gotLine), sortedKeys(wantLine)) {
+			t.Fatalf("%s: members differ from the fixture:\n got %v / %v\nwant %v / %v", name, sortedKeys(got), sortedKeys(gotLine), sortedKeys(want), sortedKeys(wantLine))
+		}
+		for _, k := range []string{"posting_date", "kind", "correction_seq", "currency"} {
+			if !reflect.DeepEqual(got[k], want[k]) {
+				t.Errorf("%s: %s = %v, fixture %v", name, k, got[k], want[k])
+			}
+		}
+		if got["legal_entity_id"] != legalEntityID || got["receipt_id"] != r.ID {
+			t.Errorf("%s: legal entity %v, receipt %v, want %s, %s", name, got["legal_entity_id"], got["receipt_id"], legalEntityID, r.ID)
+		}
+		for _, k := range []string{"line_no", "product_id", "qty_delta", "cw_qty_delta", "amount_delta", "amount_acct_delta"} {
+			if !reflect.DeepEqual(gotLine[k], wantLine[k]) {
+				t.Errorf("%s: line %s = %v, fixture %v", name, k, gotLine[k], wantLine[k])
+			}
+		}
 	}
 }

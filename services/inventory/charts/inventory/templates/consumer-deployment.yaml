@@ -1,7 +1,9 @@
 {{- if .Values.consumer.enabled }}
-# The postings consumer (#480): books receiving's receipt.posted and sales'
-# DELIVERED orderprogress.recorded as inventory transactions. It starts only
-# while service:inventory-postings is seeded in the service principal table.
+# The postings consumer (#480): books receiving's receipt.posted and
+# receipt.corrected, sales' DELIVERED orderprogress.recorded and fulfillment's
+# packingslip.cancelled as inventory transactions. It starts only while
+# service:inventory-postings is seeded in the service principal table. Kafka
+# user and ACLs: deploy/kafka/inventory-consumer.yaml.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,6 +28,12 @@ spec:
           secret:
             secretName: {{ required "consumer.kafka.secret is required" .Values.consumer.kafka.secret }}
             defaultMode: 0440
+{{- if .Values.productUrl }}
+        - name: service-identity
+          secret:
+            secretName: {{ required "serviceIdentity.signingKeySecret is required with productUrl" .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: {{ .Chart.Name }}-consumer
           {{- if .Values.image.digest }}
@@ -67,8 +75,24 @@ spec:
               value: /var/run/passage/kafka/password
             - name: KAFKA_TLS_CA_FILE
               value: /var/run/passage/kafka/ca.crt
+            - name: PASSAGE_SERVICE_NAME
+              value: inventory
+{{- if .Values.productUrl }}
+            # Plain lines are converted into the product's inventory unit by the
+            # product service, signed with product.uom.convert (#480).
+            - { name: PRODUCT_URL, value: {{ .Values.productUrl | quote }} }
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
           volumeMounts:
             - { name: kafka, mountPath: /var/run/passage/kafka, readOnly: true }
+{{- if .Values.productUrl }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
           livenessProbe:
             httpGet: { path: /healthz, port: admin }
             initialDelaySeconds: 5

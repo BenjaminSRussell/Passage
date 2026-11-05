@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 )
 
@@ -60,4 +61,35 @@ func (s *Postgres) IssueBasis(ctx context.Context, legalEntityID, productID stri
 		return cur, decimal.Zero, nil
 	}
 	return cur, value.DivRound(qty, issueCostScale), nil
+}
+
+// OriginBookings returns the transactions registered for the given origins of
+// one source type in a legal entity, keyed by source id: what the postings
+// consumer booked for a receipt line or a delivery line, read back so a
+// correction or a cancellation offsets exactly that booking (#480). An origin
+// without a transaction is absent from the map.
+func (s *Postgres) OriginBookings(ctx context.Context, legalEntityID, sourceType string, sourceIDs []string) (map[string]TransactionRow, error) {
+	out := map[string]TransactionRow{}
+	if len(sourceIDs) == 0 {
+		return out, nil
+	}
+	p, _ := tenant.FromContext(ctx)
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+transactionColumns+transactionFrom+`
+			where t.tenant_id = $1 and t.legal_entity_id = $2::uuid and o.source_type = $3 and o.source_id = any($4::uuid[])`,
+			p.TenantID, legalEntityID, sourceType, sourceIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			r, err := scanTransaction(rows)
+			if err != nil {
+				return err
+			}
+			out[r.SourceID] = r
+		}
+		return rows.Err()
+	})
+	return out, err
 }

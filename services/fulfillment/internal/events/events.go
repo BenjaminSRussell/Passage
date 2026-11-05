@@ -411,16 +411,22 @@ type PackingSlipPostedData struct {
 // mirrors it: lines carry negative quantities and costs, the journal negative
 // amounts on the same accounts (FR-28.5).
 type PackingSlipCancelledData struct {
-	PackingSlipID string           `json:"packing_slip_id"`
-	ReversalID    string           `json:"reversal_id"`
-	ShipmentID    string           `json:"shipment_id"`
-	OrderID       string           `json:"order_id"`
-	PostingDate   string           `json:"posting_date"`
-	Currency      string           `json:"currency"`
-	Lines         []SlipLine       `json:"lines"`
-	Journal       []JournalEntry   `json:"journal"`
-	PackagingFees []PackagingFee   `json:"packaging_fees"`
-	Returnables   []ReturnableMove `json:"returnables"`
+	PackingSlipID string `json:"packing_slip_id"`
+	// PackingSlipNumber is the cancelled slip's number, the source reference
+	// its delivery was reported to sales under; with LegalEntityID (the
+	// shipment's) the inventory postings consumer finds and offsets the
+	// delivery it booked (#480).
+	PackingSlipNumber string           `json:"packing_slip_number"`
+	ReversalID        string           `json:"reversal_id"`
+	ShipmentID        string           `json:"shipment_id"`
+	OrderID           string           `json:"order_id"`
+	LegalEntityID     string           `json:"legal_entity_id"`
+	PostingDate       string           `json:"posting_date"`
+	Currency          string           `json:"currency"`
+	Lines             []SlipLine       `json:"lines"`
+	Journal           []JournalEntry   `json:"journal"`
+	PackagingFees     []PackagingFee   `json:"packaging_fees"`
+	Returnables       []ReturnableMove `json:"returnables"`
 }
 
 // DropShipData is published when a drop-ship is created (FR-28.7), confirmed

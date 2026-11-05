@@ -77,11 +77,12 @@ func flowTransactions(t *testing.T, s *store.Postgres, ctx context.Context, prod
 // inventory boundary (#480): the postings consumer books the receipt as qty
 // 102 (kg) with cw_qty 10 (cases) at 204, and the delivery as qty -51 (kg)
 // with cw_qty 5 at the running average, 102, leaving 51 kg on hand. Replays
-// book nothing twice; an invoice report, a plain line and a line without a
-// site are not booked, and an issue beyond the stock parks the event.
+// book nothing twice; an invoice report books nothing, a plain line without a
+// unit conversion and a line without a site are parked, and an issue beyond
+// the stock parks the event.
 func TestCatchWeightFlow_ReceiptToSalesDelivery(t *testing.T) {
 	s, _, _ := setup(t)
-	handlers := api.PostingsConsumerHandlers(s, domain.NegativePolicy{})
+	handlers := api.PostingsConsumerHandlers(s, nil, domain.NegativePolicy{})
 	consumer := flowConsumerCtx(t)
 	handle := func(evt events.Event) error {
 		return handlers[evt.Type].Handle(consumer, nil, evt)
@@ -140,7 +141,8 @@ func TestCatchWeightFlow_ReceiptToSalesDelivery(t *testing.T) {
 		t.Fatalf("on hand %s after the delivery, want 51", phys)
 	}
 
-	// An invoice report moves no stock; a plain (not catch-weight) line is not booked.
+	// An invoice report moves no stock; a plain (not catch-weight) line needs a
+	// unit conversion, and without one it is parked, not skipped.
 	invoiced := flowEvent(t, api.OrderProgressRecordedType, api.SalesSource, flowData(t, "orderprogress-delivered.json", func(m, l map[string]any) {
 		m["kind"], m["progress_id"] = "INVOICED", "0199f480-0000-7000-8000-0000000000a1"
 		delete(l, "reported_weight")
@@ -151,10 +153,11 @@ func TestCatchWeightFlow_ReceiptToSalesDelivery(t *testing.T) {
 			delete(l, k)
 		}
 	}))
-	for _, evt := range []events.Event{invoiced, plain} {
-		if err := handle(evt); err != nil {
-			t.Fatalf("%s: %v", evt.Type, err)
-		}
+	if err := handle(invoiced); err != nil {
+		t.Fatalf("invoice report: %v", err)
+	}
+	if err := handle(plain); !eventing.IsPermanent(err) || !strings.Contains(err.Error(), api.CodePostingNoConverter) {
+		t.Fatalf("plain line without a unit conversion: %v, want it parked with %s", err, api.CodePostingNoConverter)
 	}
 	if n, m := len(flowTransactions(t, s, read, product, "RECEIPT_LINE")), len(flowTransactions(t, s, read, product, "SALES_LINE")); n != 1 || m != 1 {
 		t.Fatalf("%d receipt and %d sales transactions after the invoice and the plain line, want 1 and 1", n, m)
@@ -168,7 +171,7 @@ func TestCatchWeightFlow_ReceiptToSalesDelivery(t *testing.T) {
 	}))
 	foreign := flowEvent(t, api.ReceiptPostedType, "/passage/purchasing/purchasing", flowData(t, "receipt-posted.json", nil))
 	tooMuch := flowEvent(t, api.OrderProgressRecordedType, api.SalesSource, flowData(t, "orderprogress-delivered.json", func(m, l map[string]any) {
-		m["progress_id"] = "0199f480-0000-7000-8000-0000000000a4"
+		m["progress_id"], m["source_ref"] = "0199f480-0000-7000-8000-0000000000a4", "PS-X"
 		l["quantity"], l["reported_weight"] = "6", "61"
 	}))
 	for name, evt := range map[string]events.Event{"no site": noSite, "foreign source": foreign, "beyond stock": tooMuch} {
@@ -176,7 +179,7 @@ func TestCatchWeightFlow_ReceiptToSalesDelivery(t *testing.T) {
 		if err == nil || !eventing.IsPermanent(err) {
 			t.Fatalf("%s: %v, want a permanent error that parks the event", name, err)
 		}
-		if name == "beyond stock" && !strings.Contains(err.Error(), "line 1") {
+		if name == "beyond stock" && (!strings.Contains(err.Error(), "line 1") || !strings.Contains(err.Error(), "INV-NEG-001")) {
 			t.Fatalf("beyond stock: %v does not name the line", err)
 		}
 	}

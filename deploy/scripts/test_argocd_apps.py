@@ -12,6 +12,9 @@ test checks, without a cluster:
   plain-directory source is applied by some dev Application and parses; Strimzi custom resources sync after the
   operator and name an existing Kafka or KafkaConnect; their Secret references (KafkaConnector
   `${secrets:ns/name:key}`, workload secretKeyRef) are written by an ExternalSecret that a dev Application syncs;
+- every consumer KafkaUser in deploy/kafka is the username of a chart's consumer, reads its group and writes only
+  dead-letter topics a synced KafkaTopic creates; the inventory postings consumer's ACLs are exactly the topics,
+  group and dead-letter topic its code uses (#480);
 - if helm is on PATH, every dev and local Application whose source is a chart in this repo renders with its
   values, and outside local every container image is pinned by digest; Temporal's persistence values name the
   Service and Secret its database chart renders.
@@ -395,6 +398,71 @@ class ArgoApplicationsTest(unittest.TestCase):
                 refs = [e["valueFrom"]["secretKeyRef"] for c in pod_containers(workload) for e in c.get("env") or []
                         if e["name"] == "DATABASE_URL"]
                 self.assertEqual(refs, [{"name": secret, "key": key}])
+
+    def synced_kafka_resources(self):
+        """KafkaUser name -> {(resource type, name): operations} and the KafkaTopic names dev Applications sync."""
+        users, topics = {}, set()
+        for _, _, files, _ in directory_sources(self.apps, "dev"):
+            for f in files:
+                for doc in load_docs(f):
+                    if doc.get("kind") == "KafkaUser":
+                        acls = doc["spec"].get("authorization", {}).get("acls") or []
+                        users[doc["metadata"]["name"]] = {(a["resource"]["type"], a["resource"].get("name", "")): set(a["operations"])
+                                                          for a in acls}
+                    elif doc.get("kind") == "KafkaTopic":
+                        topics.add(doc["spec"]["topicName"])
+        return users, topics
+
+    def test_consumer_kafka_users_match_their_charts(self):
+        # Every consumer KafkaUser in deploy/kafka is named by a chart's consumer username, reads that chart's group,
+        # and writes only dead-letter topics that a synced KafkaTopic creates.
+        users, topics = self.synced_kafka_resources()
+        charts_by_user = {}
+        for values_file in sorted(REPO.glob("services/*/charts/*/values.yaml")):
+            values = yaml.safe_load(values_file.read_text()) or {}
+            kafka = ((values.get("consumer") or {}).get("kafka")) or values.get("kafka")
+            if isinstance(kafka, dict) and kafka.get("username"):
+                charts_by_user.setdefault(kafka["username"], []).append((values_file, kafka))
+        for path in manifests(DEPLOY / "kafka"):
+            if not path.name.endswith("-consumer.yaml"):
+                continue
+            for doc in load_docs(path):
+                if doc.get("kind") != "KafkaUser":
+                    continue
+                name = doc["metadata"]["name"]
+                with self.subTest(user=name):
+                    self.assertIn(name, charts_by_user, f"{path.name}: no chart names consumer username {name}")
+                    granted = users[name]
+                    for values_file, kafka in charts_by_user[name]:
+                        self.assertIn("Read", granted.get(("group", kafka.get("group")), set()),
+                                      f"{name}: no Read on group {kafka.get('group')} ({values_file.relative_to(REPO)})")
+                        if kafka.get("dlqTopic"):
+                            self.assertIn("Write", granted.get(("topic", kafka["dlqTopic"]), set()), f"{name}: dlqTopic")
+                    for (kind, resource), ops in granted.items():
+                        if kind == "topic" and "Write" in ops:
+                            self.assertTrue(resource.endswith(".dlq"), f"{name} writes {resource}, not a dead-letter topic")
+                            self.assertIn(resource, topics, f"{name}: no synced KafkaTopic creates {resource}")
+
+    def test_inventory_postings_consumer_acls(self):
+        # The inventory postings consumer (#480): its KafkaUser reads exactly the topics and group the code subscribes
+        # to and writes the dead-letter topic the code parks on.
+        api = (REPO / "services/inventory/internal/api/postings_consumer.go").read_text()
+        cmd = (REPO / "services/inventory/cmd/inventory/consumer.go").read_text()
+        source_topics = set(re.findall(r'^\s+\w+Topic\s+=\s+"([^"]+)"', api, re.M))
+        (group,) = re.findall(r'PostingsConsumerName\s+=\s+"([^"]+)"', api)
+        (dlq,) = re.findall(r'postingsDeadLetterTopic\s+=\s+"([^"]+)"', cmd)
+        values = yaml.safe_load((REPO / "services/inventory/charts/inventory/values.yaml").read_text())
+        kafka = values["consumer"]["kafka"]
+        users, topics = self.synced_kafka_resources()
+        self.assertEqual(kafka["group"], group)
+        self.assertIn(kafka["username"], users, "deploy/kafka/inventory-consumer.yaml")
+        granted = users[kafka["username"]]
+        self.assertEqual(source_topics, {"passage.receiving.receipt", "passage.sales.orderprogress", "passage.fulfillment.packingslip"})
+        want = {("topic", t): {"Read", "Describe"} for t in source_topics}
+        want[("topic", dlq)] = {"Write", "Describe"}
+        want[("group", group)] = {"Read", "Describe"}
+        self.assertEqual(granted, want)
+        self.assertIn(dlq, topics)
 
     @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
     def test_temporal_values_match_its_database(self):

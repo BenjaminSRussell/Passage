@@ -23,6 +23,20 @@ release may change public APIs.
   Deliveries waiting for an asynchronous MDN time out after `EDI_AS2_MDN_TIMEOUT_MINUTES` (default 24 hours), are
   sent again with the same Message-ID or FAILED, and every FAILED delivery publishes
   `dev.passage.edi.delivery.failed.v1`.
+- Inventory postings consumer follow-ups (#480): plain (not catch-weight) receipt and delivery lines are booked in
+  the product's inventory unit, converted by the product service (`GET /v1/product/uom/convert` without `to` now
+  converts into the product's base unit; new service-only duty `product.uom.convert`, granted inventory -> product).
+  Without `PRODUCT_URL` such a line is parked (`INV-PST-002`), and a conversion product refuses parks it
+  (`INV-PST-001`). The consumer also offsets its bookings: receiving's `receipt.corrected` books a correction's delta
+  or a cancellation's remaining net, and fulfillment's `packingslip.cancelled` books the exact mirror of the
+  delivery. Each offset is read back from the booking it corrects (`corrects_transaction_id`), keyed so replays
+  book nothing twice, and refused when the original is missing (`INV-PST-003`) or does not match (`INV-PST-004`).
+  Additive event fields: `receipt.corrected` gains `legal_entity_id`, `posting_date` and, on a cancellation,
+  `cw_qty_delta`; `packingslip.cancelled` gains `packing_slip_number` and `legal_entity_id`. New shared fixtures in
+  `services/inventory/testdata/catchweight-flow` are checked by the receiving and fulfillment producer tests.
+  `deploy/kafka/inventory-consumer.yaml` adds the consumer's KafkaUser, literal ACLs and dead-letter topic, and
+  `make -C deploy test-argocd` checks consumer KafkaUsers against their charts. The consumer stays off in dev, like
+  the other consumers.
 - Live tender trigger (#426): transport's `POST /v1/transport/loads/{id}:release` (duty `transport.load.tender`,
   migration 0010) applies the tender gates and publishes `dev.passage.tms.load.released.v1` with the releasing user
   and legal-entity scope from the verified caller; workflow-ts's new Kafka consumer (`src/eventConsumer.ts`, kafkajs)

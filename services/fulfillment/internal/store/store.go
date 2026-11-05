@@ -1429,7 +1429,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 				return PackingSlip{}, err
 			}
 			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipCancelled, p.TenantID, fulevents.PackingSlipCancelledData{
-				PackingSlipID: orig.ID, ReversalID: rev.ID, ShipmentID: sh.ID, OrderID: sh.OrderID,
+				PackingSlipID: orig.ID, PackingSlipNumber: orig.Number, ReversalID: rev.ID, ShipmentID: sh.ID, OrderID: sh.OrderID, LegalEntityID: sh.LegalEntityID,
 				PostingDate: rev.PostingDate.Format("2006-01-02"), Currency: rev.Currency, Lines: slipLineData(rev.Lines),
 				Journal: journalData(rev.Journal), PackagingFees: feeData(rev.PackagingFees), Returnables: returnableData(returnables, -1),
 			}); err != nil {

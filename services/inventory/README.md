@@ -28,7 +28,10 @@ What is not in this slice is listed in `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/inventory/            entrypoint: config, connect, migrate, router, admin port, serve;
-                          `consume` runs the postings consumer (receipt.posted, orderprogress.recorded, #480)
+                          `consume` runs the postings consumer (receipt.posted, receipt.corrected,
+                          orderprogress.recorded, packingslip.cancelled; #480)
+internal/productunits/    product service client converting a document quantity into the product's
+                          inventory unit (GET /v1/product/uom/convert, duty product.uom.convert)
 internal/domain/          journal rules, valuation, status model, dimensions, on-hand buckets, FEFO,
                           reservation, blocking, count, transfer and ABC rules (pure, no I/O)
 internal/store/           pgx repositories: journals, posting, on-hand projection, transactions,
@@ -312,9 +315,14 @@ go run ./cmd/inventory
 
 `go run ./cmd/inventory consume` runs the postings consumer instead (same database and
 `INV_*` settings, plus `KAFKA_BROKERS` and the other `platform/eventing/kafka` variables): it
-books catch-weight lines of receiving's `receipt.posted` and sales' DELIVERED
-`orderprogress.recorded` as inventory transactions (qty the weight, `cw_qty` the cases; #480,
-see NOT-IMPLEMENTED.md).
+books receiving's `receipt.posted` and sales' DELIVERED `orderprogress.recorded` as inventory
+transactions, and offsets them on receiving's `receipt.corrected` and fulfillment's
+`packingslip.cancelled` (#480, see NOT-IMPLEMENTED.md). A catch-weight line books the weight as
+qty and the cases as `cw_qty`; a plain line's quantity is converted into the product's inventory
+unit by the product service at `PRODUCT_URL` (optional; it needs the service signing key,
+`PASSAGE_SERVICE_NAME=inventory` and `PASSAGE_SERVICE_SIGNING_KEY[_FILE]`, and product must
+trust inventory's public key). Without `PRODUCT_URL` plain lines are parked with `INV-PST-002`.
+Kafka user, ACLs and dead-letter topic: `deploy/kafka/inventory-consumer.yaml`.
 
 Optional: `INV_NEGATIVE_DEFAULT` (`forbid`, default, or `allow`), `INV_JOURNAL_MAX_LINES`
 (1000 to 50000, default 10000), `HTTP_ADDR` (`:8080`), `ADMIN_ADDR` (`:9090`).
@@ -388,6 +396,10 @@ expected picks come from `testdata/gen_fefo_100.py` (`python3 -I gen_fefo_100.py
 | `INV-STP-002` | 409 | The origin already has a transaction (one transaction per origin) |
 | `INV-TXN-001` | 404 | Transaction id not found in the tenant / legal-entity scope |
 | `INV-REC-001` | 404 | Reconciliation run not found in the tenant / legal-entity scope |
+| `INV-PST-001` | - | Postings consumer: the product service has no conversion from the line's unit into the product's inventory unit (or no such product); the event is parked |
+| `INV-PST-002` | - | Postings consumer: a plain line needs a unit conversion and `PRODUCT_URL` is unset; the event is parked |
+| `INV-PST-003` | - | Postings consumer: a correction or cancellation names a line it has not booked (parked at once for a receipt; retried with back-off, then parked, for a cancelled packing slip, whose delivery comes on another topic) |
+| `INV-PST-004` | - | Postings consumer: a correction or cancellation does not match the booked line (another product, a cancellation of another quantity than booked, cases and weight moving apart); the event is parked |
 | `idempotency_key_conflict` | 409 | The status-change Idempotency-Key is held by a change in a legal entity outside the caller's scope |
 | `conflict_version` | 412 | `If-Match` does not match the journal, blocking or count sheet version, or `fromStatus` of a STEP is not the transaction's current status |
 | `idempotency_key_reuse` | 422 | Idempotency-Key (or a line `clientKey`) reused with a different body |

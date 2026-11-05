@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -15,16 +16,29 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/api"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/productunits"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
 
-// postingsDeadLetterTopic parks the receipt and delivery events the postings
-// consumer could not book (both source topics share it; the x-origin-topic
-// header names where a record came from).
+// postingsDeadLetterTopic parks the receipt, delivery and cancellation events
+// the postings consumer could not book (the source topics share it; the
+// x-origin-topic header names where a record came from).
 const postingsDeadLetterTopic = "passage.inventory.postings.dlq"
 
 func postingsKafkaConfig(getenv func(string) string) (kafka.Config, error) {
-	return kafka.ConfigFromEnv(getenv, api.PostingsConsumerName, api.PostingsConsumerName, []string{api.ReceiptTopic, api.OrderProgressTopic})
+	return kafka.ConfigFromEnv(getenv, api.PostingsConsumerName, api.PostingsConsumerName,
+		[]string{api.ReceiptTopic, api.OrderProgressTopic, api.PackingSlipTopic})
+}
+
+// postingsUnits is the unit conversion plain lines are booked with: the
+// product service at PRODUCT_URL, signed with the service signing key. It is
+// nil without PRODUCT_URL, and plain lines are then parked (INV-PST-002).
+func postingsUnits(getenv func(string) string) (api.UnitConverter, error) {
+	c, err := productunits.FromEnv(getenv)
+	if err != nil || c == nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 // postingsSeeded reports whether the service principal table gives the postings
@@ -34,8 +48,9 @@ func postingsSeeded(table map[string][]string) bool {
 	return slices.Contains(table[api.PostingsConsumerName], "inventory.transaction.apply")
 }
 
-// runPostingsConsumer books receiving's receipt.posted and sales' DELIVERED
-// orderprogress.recorded as inventory transactions (#480) and serves the
+// runPostingsConsumer books receiving's receipt.posted and receipt.corrected,
+// sales' DELIVERED orderprogress.recorded and fulfillment's
+// packingslip.cancelled as inventory transactions (#480) and serves the
 // consumer's admin port.
 func runPostingsConsumer(ctx context.Context, getenv func(string) string, s *store.Postgres, pool *pgxpool.Pool, neg domain.NegativePolicy) error {
 	if !postingsSeeded(tenant.ServicePrincipalTable()) {
@@ -45,13 +60,20 @@ func runPostingsConsumer(ctx context.Context, getenv func(string) string, s *sto
 	if err != nil {
 		return err
 	}
+	units, err := postingsUnits(getenv)
+	if err != nil {
+		return fmt.Errorf("product unit conversion: %w", err)
+	}
+	if units == nil {
+		slog.WarnContext(ctx, "PRODUCT_URL is unset: plain (not catch-weight) lines are parked with "+api.CodePostingNoConverter)
+	}
 	client, err := kafka.New(cfg)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 	consumer, err := eventing.NewConsumer(client, client, eventing.NewPgInbox(pool), eventing.Config{
-		Name: api.PostingsConsumerName, Idempotent: true, Handlers: api.PostingsConsumerHandlers(s, neg),
+		Name: api.PostingsConsumerName, Idempotent: true, Handlers: api.PostingsConsumerHandlers(s, units, neg),
 		DeadLetterTopic: postingsDeadLetterTopic, Log: slog.Default(),
 	})
 	if err != nil {
