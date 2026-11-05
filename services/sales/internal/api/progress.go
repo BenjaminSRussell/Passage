@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
 
@@ -28,12 +30,27 @@ const (
 	maxProgressSource = 100
 	// quantityPlaces is the scale of a quantity (numeric(20,6)).
 	quantityPlaces = 6
+	// maxTrackingEntries bounds the batch and serial entries of one line, and
+	// maxTrackingValue a batch or serial number (inventory's dimension limit).
+	maxTrackingEntries = 1000
+	maxTrackingValue   = 60
 )
 
 // progressLineRequest is the quantity a report covers on one order line.
 // ActualWeight is the catch-weight of a DELIVERED report (FR-24.7).
 type progressLineRequest struct {
-	LineNo       int     `json:"lineNo"`
+	LineNo       int                       `json:"lineNo"`
+	Quantity     string                    `json:"quantity"`
+	ActualWeight *string                   `json:"actualWeight,omitempty"`
+	Tracking     []progressTrackingRequest `json:"tracking,omitempty"`
+}
+
+// progressTrackingRequest is the part of a delivered line taken from one
+// batch or serial (#480): quantity in the line's unit, and on a catch-weight
+// line split over several entries each entry's actualWeight.
+type progressTrackingRequest struct {
+	Batch        string  `json:"batch,omitempty"`
+	Serial       string  `json:"serial,omitempty"`
 	Quantity     string  `json:"quantity"`
 	ActualWeight *string `json:"actualWeight,omitempty"`
 }
@@ -93,7 +110,8 @@ func (a *API) recordProgress(w http.ResponseWriter, r *http.Request) {
 					actual = &w
 				}
 			}
-			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, Quantity: q, ActualWeight: actual})
+			tracking := progressTracking(fields, name, req.Kind, q, actual, l.Tracking)
+			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, Quantity: q, ActualWeight: actual, Tracking: tracking})
 		}
 		if len(fields) > 0 {
 			validationFailed(w, r, fields)
@@ -123,6 +141,88 @@ func (a *API) recordProgress(w http.ResponseWriter, r *http.Request) {
 	})(w, r)
 }
 
+// progressTracking validates the batch and serial entries of one report line
+// (#480): only on a DELIVERED report; each entry names a batch, a serial or
+// both and a positive quantity (exactly 1 for a serial); no batch and serial
+// pair twice; the quantities add up to the line's. Entry weights are all set
+// or all absent, and when set the line's actualWeight is their sum.
+func progressTracking(fields map[string]string, name, kind string, quantity decimal.Decimal, actual *decimal.Decimal, req []progressTrackingRequest) []store.ProgressTracking {
+	if len(req) == 0 {
+		return nil
+	}
+	if kind != domain.ProgressDelivered {
+		fields[name+".tracking"] = "applies only to a DELIVERED report"
+		return nil
+	}
+	if len(req) > maxTrackingEntries {
+		fields[name+".tracking"] = fmt.Sprintf("must have at most %d entries", maxTrackingEntries)
+		return nil
+	}
+	out := make([]store.ProgressTracking, 0, len(req))
+	seen := map[[2]string]bool{}
+	sum, weights, weighed := decimal.Zero, decimal.Zero, 0
+	for i, t := range req {
+		entry := fmt.Sprintf("%s.tracking[%d]", name, i)
+		batch, serial := strings.TrimSpace(t.Batch), strings.TrimSpace(t.Serial)
+		switch {
+		case batch == "" && serial == "":
+			fields[entry] = "must name a batch or a serial"
+		case !trackingValue(batch) || !trackingValue(serial):
+			fields[entry] = fmt.Sprintf("batch and serial must be at most %d printable characters", maxTrackingValue)
+		case seen[[2]string{batch, serial}] || (serial != "" && seen[[2]string{"\x00", serial}]):
+			fields[entry] = "names the same batch or serial as an earlier entry"
+		}
+		seen[[2]string{batch, serial}] = true
+		if serial != "" {
+			seen[[2]string{"\x00", serial}] = true
+		}
+		q, err := decimal.NewFromString(t.Quantity)
+		switch {
+		case err != nil || !q.IsPositive() || q.Exponent() < -quantityPlaces:
+			fields[entry+".quantity"] = fmt.Sprintf("must be a positive decimal with at most %d places", quantityPlaces)
+		case serial != "" && !q.Equal(decimal.NewFromInt(1)):
+			fields[entry+".quantity"] = "must be 1 for a serial"
+		}
+		sum = sum.Add(q)
+		item := store.ProgressTracking{Batch: batch, Serial: serial, Quantity: q}
+		if t.ActualWeight != nil {
+			w, werr := decimal.NewFromString(*t.ActualWeight)
+			if werr != nil || !w.IsPositive() || !domain.FitsWeightColumn(w) {
+				fields[entry+".actualWeight"] = fmt.Sprintf("must be a positive decimal with at most %d places and 14 integer digits", quantityPlaces)
+			} else {
+				item.ActualWeight = &w
+				weights = weights.Add(w)
+			}
+			weighed++
+		}
+		out = append(out, item)
+	}
+	if _, bad := fields[name+".quantity"]; !bad && !sum.Equal(quantity) {
+		fields[name+".tracking"] = fmt.Sprintf("entry quantities add up to %s, not the line's %s", sum, quantity)
+	}
+	switch {
+	case weighed > 0 && weighed < len(req):
+		fields[name+".tracking"] = "actualWeight must be set on every entry or on none"
+	case weighed > 0 && (actual == nil || !actual.Equal(weights)):
+		fields[name+".actualWeight"] = "must be the sum of the tracking entries' actualWeight"
+	}
+	return out
+}
+
+// trackingValue reports whether a batch or serial number fits inventory's
+// dimension value: at most maxTrackingValue characters, none of them control.
+func trackingValue(v string) bool {
+	if utf8.RuneCountInString(v) > maxTrackingValue {
+		return false
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // mayRecord reports whether p holds the duty for reports of kind.
 func mayRecord(p tenant.Principal, kind string) bool {
 	switch kind {
@@ -139,10 +239,17 @@ func mayRecord(p tenant.Principal, kind string) bool {
 // retry that orders its lines differently or writes 4 as 4.0 is the same
 // report rather than a conflicting one.
 func canonicalProgress(in store.NewProgress) any {
+	type entry struct {
+		Batch        string  `json:"batch,omitempty"`
+		Serial       string  `json:"serial,omitempty"`
+		Quantity     string  `json:"quantity"`
+		ActualWeight *string `json:"actualWeight,omitempty"`
+	}
 	type line struct {
 		LineNo       int     `json:"lineNo"`
 		Quantity     string  `json:"quantity"`
 		ActualWeight *string `json:"actualWeight,omitempty"`
+		Tracking     []entry `json:"tracking,omitempty"`
 	}
 	lines := make([]line, 0, len(in.Lines))
 	for _, l := range in.Lines {
@@ -150,6 +257,15 @@ func canonicalProgress(in store.NewProgress) any {
 		if l.ActualWeight != nil {
 			s := l.ActualWeight.String()
 			item.ActualWeight = &s
+		}
+		// Entries keep their order: it is the order inventory issues them in.
+		for _, t := range l.Tracking {
+			e := entry{Batch: t.Batch, Serial: t.Serial, Quantity: t.Quantity.String()}
+			if t.ActualWeight != nil {
+				s := t.ActualWeight.String()
+				e.ActualWeight = &s
+			}
+			item.Tracking = append(item.Tracking, e)
 		}
 		lines = append(lines, item)
 	}

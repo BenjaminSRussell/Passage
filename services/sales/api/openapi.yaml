@@ -4314,6 +4314,18 @@ components:
               lineNo: {type: integer, minimum: 1, description: once per report}
               quantity: {$ref: "#/components/schemas/Money", description: "what this report covers (positive, at most 6 places), not the cumulative quantity"}
               actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "DELIVERED only, catch-weight lines only: actual weight of the quantity cases this report delivers (a whole number of cases; FR-24.7). Added to the line total; BR-24.5 SLS-0061 when outside min/max × the cases reported, SLS-0063 when the line is not catch-weight, the report is not DELIVERED or the cases are not whole"}
+              tracking:
+                type: array
+                maxItems: 1000
+                description: "DELIVERED only (#480): the batches and serials the delivery took, passed through on orderprogress.recorded so inventory issues them under those dimensions. Quantities add up to the line's quantity; a batch or serial appears once; entries count in the Idempotency-Key request hash in their order."
+                items:
+                  type: object
+                  required: [quantity]
+                  properties:
+                    batch: {type: string, maxLength: 60, description: "batch number; at least one of batch and serial"}
+                    serial: {type: string, maxLength: 60, description: "serial number; its quantity must be 1"}
+                    quantity: {$ref: "#/components/schemas/Money", description: "taken from this entry, in the line's unit (cases on a catch-weight line)"}
+                    actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "catch-weight lines only: the entry's weight. Set on every entry or none; when set, the line's actualWeight must be their sum (400), and a plain line refuses it (SLS-0063)"}
     OrderProgress:
       type: object
       required: [id, legalEntityId, orderId, orderNumber, kind, sourceRef, lines, orderStatus, orderVersion, recordedBy, recordedAt]

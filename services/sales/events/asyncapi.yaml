@@ -977,6 +977,17 @@ components:
               unit: {type: string, description: "the line's unit (the case unit on a catch-weight line)"}
               site_id: {type: string, format: uuid, description: "the line's site, when set"}
               warehouse_id: {type: string, format: uuid, description: "the line's warehouse, when set"}
+              tracking:
+                type: array
+                description: "DELIVERED reports that named them only (#480): the batches and serials the delivery took, in the reported order; quantities add up to quantity"
+                items:
+                  type: object
+                  required: [quantity]
+                  properties:
+                    batch: {type: string}
+                    serial: {type: string}
+                    quantity: {type: string, description: "decimal string in the line's unit (cases on a catch-weight line)"}
+                    reported_weight: {type: string, description: "catch-weight lines split over several entries: the entry's weight; the entries add up to reported_weight"}
         previous_status: {type: string}
         order_status: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED]}
         actor: {type: string}
