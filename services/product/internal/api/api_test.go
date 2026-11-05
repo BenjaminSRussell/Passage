@@ -30,6 +30,7 @@ type fakeStore struct {
 	pingErr        error
 	lastExplode    domain.ExplosionResult
 	configurations map[string]domain.ConfigurationRef
+	convertedTo    string
 }
 
 func newFake() *fakeStore {
@@ -202,7 +203,8 @@ func (f *fakeStore) AddRelation(_ context.Context, in domain.Relation) ([]domain
 func (f *fakeStore) EvaluatePolicy(_ context.Context, releasedID, process string) (domain.ProcessDecision, error) {
 	return domain.EvaluateProcessPolicy(process, f.released[releasedID], domain.StateActive, domain.SeededLifecycleStates()), nil
 }
-func (f *fakeStore) ConvertUOM(context.Context, string, string, string, string) (string, error) {
+func (f *fakeStore) ConvertUOM(_ context.Context, _, _, to, _ string) (string, error) {
+	f.convertedTo = to
 	return "1", nil
 }
 func (f *fakeStore) Search(context.Context, string, int) ([]domain.Product, error) {
@@ -544,5 +546,32 @@ func TestGetSavedConfigurationReportsWhetherItBelongsToTheProduct(t *testing.T) 
 	}
 	if rec = do(r, http.MethodGet, "/v1/product/saved-configurations/"+config+"?productId="+master, "", "product.read"); rec.Code != http.StatusForbidden {
 		t.Fatalf("missing duty %d", rec.Code)
+	}
+}
+
+// The unit conversion without a target unit converts into the product's base
+// unit and names it; product.uom.convert reaches the conversion and nothing
+// else (the inventory postings consumer, #480).
+func TestConvertIntoTheBaseUnitUnderTheNarrowDuty(t *testing.T) {
+	f := newFake()
+	id := testkit.TenantID(5)
+	f.products[id] = domain.Product{ID: id, ProductNumber: "BOLT", BaseUOM: "EA"}
+	r := newRouter(f)
+	rec := do(r, http.MethodGet, "/v1/product/uom/convert?product="+id+"&from=BOX&qty=2", "", "product.uom.convert")
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK || got["to"] != "EA" || f.convertedTo != "EA" {
+		t.Fatalf("base-unit conversion %d %s (converted to %q)", rec.Code, rec.Body.String(), f.convertedTo)
+	}
+	if rec = do(r, http.MethodGet, "/v1/product/uom/convert?from=BOX&qty=2", "", "product.uom.convert"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no target and no product %d", rec.Code)
+	}
+	if rec = do(r, http.MethodGet, "/v1/product/uom/convert?product="+testkit.TenantID(6)+"&from=BOX&qty=2", "", "product.uom.convert"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown product %d", rec.Code)
+	}
+	if rec = do(r, http.MethodGet, "/v1/product/uom/convert?from=BOX&to=EA&qty=2", "", "product.read"); rec.Code != http.StatusOK || f.convertedTo != "EA" {
+		t.Fatalf("explicit target under product.read %d", rec.Code)
+	}
+	if rec = do(r, http.MethodGet, "/v1/product/products/"+id, "", "product.uom.convert"); rec.Code != http.StatusForbidden {
+		t.Fatalf("product read under product.uom.convert %d", rec.Code)
 	}
 }

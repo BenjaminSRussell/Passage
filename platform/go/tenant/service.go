@@ -107,8 +107,11 @@ var serviceGrants = map[string]map[string][]string{
 	"costing": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
+	// The postings consumer converts plain document quantities into the
+	// product's inventory unit (#480).
 	"inventory": {
-		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
+		"ledger":  {"ledger.entry.post", "ledger.ledger.lookup"},
+		"product": {"product.uom.convert"},
 	},
 	"eam": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read"},

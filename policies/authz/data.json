@@ -2625,7 +2625,8 @@
       {"resource": "/v1/pricing/journals/*/audit-extract", "methods": ["GET"]}
     ]},
     "product.configuration.read": {"service_only": true, "permissions": [{"resource": "/v1/product/saved-configurations/*", "methods": ["GET"]}]},
-    "product.configure": {"permissions": [{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
+    "product.uom.convert": {"service_only": true, "permissions": [{"resource": "/v1/product/uom/convert", "methods": ["GET"]}]},
+    "product.configure": {"permissions":[{"resource": "/v1/product/configuration-models/*:solve", "methods": ["POST"]}]},
     "product.gtin.allocate": {"permissions": [{"resource": "/v1/product/gtins", "methods": ["POST"]}]},
     "product.read": {"permissions": [
       {"resource": "/v1/product/barcodes/*", "methods": ["GET"]},
@@ -3314,7 +3315,8 @@
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "inventory": {
-      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"]
+      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
+      "product": ["product.uom.convert"]
     },
     "eam": {
       "ledger": ["ledger.entry.post", "ledger.balance.read"]
