@@ -111,6 +111,7 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.admin")).Post("/partners", a.createPartner)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners", a.listPartners)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}", a.getPartner)
+		r.With(authz.RequireDuty("edi.admin")).Patch("/partners/{id}", a.patchPartner)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/trade-profile", a.putTradeProfile)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/transport", a.putTransport)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/transport", a.getTransport)

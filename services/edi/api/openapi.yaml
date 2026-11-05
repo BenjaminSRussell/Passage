@@ -79,6 +79,63 @@ paths:
               schema: { $ref: '#/components/schemas/Partner' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: patchPartner
+      summary: Change a trading partner (JSON merge patch) under If-Match
+      description: >
+        Changes the name, ISA identity, ack SLA, EDIFACT identity and CONTRL mode, or status of a
+        partner. If-Match must carry the version (the ETag of getPartner): absent is 428 COM-0428,
+        stale is 412 conflict_version with the current ETag. Members left out keep their value;
+        null or "" for edifactId removes the EDIFACT identity with its qualifier and CONTRL mode.
+        The environment cannot change. A partner whose trade profile binds it to a legal entity is
+        changed only by callers scoped to that entity (403 EDI-0018), as its profile and transport
+        are; a partner without a profile by any caller of the tenant with the duty. Setting status
+        inactive stops inbound receipt (its senders no longer resolve), the AS2 listener (404) and
+        outbound documents (EDI-0008).
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, example: '"3"' }
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/PartnerPatch' }
+          application/json:
+            schema: { $ref: '#/components/schemas/PartnerPatch' }
+      responses:
+        '200':
+          description: The changed partner; ETag carries its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Partner' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: Missing duty, or EDI-0018 the partner is bound to a legal entity outside the caller's scope
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0004 another partner has this ISA or EDIFACT identity in the environment
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412':
+          description: conflict_version — If-Match is not the current version (the response ETag is)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '428':
+          description: COM-0428 — If-Match is required
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
   /edi/v1/partners/{id}/outbound:
     post:
       operationId: createOutbound
@@ -1245,6 +1302,19 @@ components:
           enum: [REQUESTED, ALWAYS, NEVER]
           default: REQUESTED
           description: When inbound EDIFACT is answered with a CONTRL; REQUESTED follows UNB 0031. Needs edifactId.
+    PartnerPatch:
+      type: object
+      additionalProperties: false
+      description: JSON merge patch of a partner; environment is not a member
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        isaQualifier: { type: string, pattern: '^[A-Z0-9]{2}$' }
+        isaId: { type: string, pattern: '^[A-Za-z0-9]{1,15}$' }
+        ackSlaMinutes: { type: integer, minimum: 5, maximum: 1440 }
+        status: { type: string, enum: [active, inactive] }
+        edifactId: { type: [string, 'null'], description: null or "" removes the EDIFACT identity }
+        edifactQualifier: { type: [string, 'null'] }
+        edifactContrl: { type: [string, 'null'], enum: [REQUESTED, ALWAYS, NEVER, null] }
     Partner:
       type: object
       required: [id, name, isaQualifier, isaId, environment, ackSlaMinutes, status, version, createdAt]

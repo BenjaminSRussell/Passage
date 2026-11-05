@@ -22,6 +22,14 @@ release may change public APIs.
   fulfillment by code. Receiving arrival and direct receipt lines without a purchase order line take `siteId` and
   `warehouseId`, carried on `receipt.posted`, so inventory books them instead of parking them.
 
+- Partner update in edi (#483): `PATCH /edi/v1/partners/{id}` (duty `edi.admin`, seeded in `policies/authz/data.json`
+  next to the existing partner read) changes a partner's name, ISA identity, ack SLA, status (inactive stops receipt,
+  the AS2 listener and outbound documents) and EDIFACT identity as a JSON merge patch under `If-Match` on the partner
+  version (428 `COM-0428`, 412 `conflict_version`, new ETag on 200); the environment cannot change. A partner bound
+  to a legal entity by its trade profile is changed only by callers scoped to that entity (403 EDI-0018), read through
+  a SECURITY DEFINER `edi_partner_in_entity_scope()` over a trigger-maintained `partner_entity_index` (migration 0009,
+  allowlisted in `tools/rlscheck`); `passage_app` gets UPDATE on the changed columns only. The policy seeds also gain
+  the missing `POST /edi/v1/inbound/edifact` route under `edi.operate`, the duty the service already requires for it.
 - TA1 interchange acknowledgments and duplicate answers in edi (#483): the X12 codec reads and writes TA1 segments.
   An interchange an AS2 or SFTP transport brought from the authenticated partner that fails at the envelope (IEA
   missing, IEA01 or IEA02 wrong, no group, content after IEA) is answered with a TA1 R and its TA105 code (023, 021,

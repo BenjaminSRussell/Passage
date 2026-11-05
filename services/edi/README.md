@@ -362,6 +362,20 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   duplicate with 409 and record nothing. A TA1 from the partner is matched by TA101 to our outbound
   interchange: R rejects its messages (FAILED, REJECTED, `message.acked`), A or E is noted on the
   TA1 (POSTED) and the 997 answers the groups; an unmatched TA1 is FAILED with EDI-0161.
+- **Partner update** (`PATCH /edi/v1/partners/{id}`, duty `edi.admin` like the other partner
+  writes, migration `0009_partner_update.sql`): a JSON merge patch of `name`, `isaQualifier`,
+  `isaId`, `ackSlaMinutes`, `status` (`inactive` stops receipt, the AS2 listener and outbound
+  documents) and the EDIFACT identity (`edifactId`, `edifactQualifier`, `edifactContrl`; null or ""
+  for `edifactId` removes it). `If-Match` must carry the version from the partner's ETag (428
+  `COM-0428` without it, 412 `conflict_version` with the current ETag when stale); the response
+  carries the new ETag. The environment is not a member (400). An identity another partner holds
+  in the environment is 409 EDI-0004. Once a trade profile binds the partner to a legal entity, only
+  callers scoped to that entity (or to every entity) may change it (403 EDI-0018), as for the
+  profile and the transport: the profile's restrictive RLS hides it from other callers, so the
+  binding is read through `edi_partner_in_entity_scope()`, a SECURITY DEFINER function over the
+  `partner_entity_index` a trigger on `partner_trade_profile` keeps (no RLS, no `passage_app`
+  grant, listed in `tools/rlscheck`). `passage_app` gets UPDATE on the changed columns only:
+  tenant, id, environment and creation time stay write-once and partners are never deleted.
 - **Posting inbound documents (decision)**: nothing in edi posts a received document into another
   service, and no service grant was added for it. Sales already has the intake route
   (`POST /v1/sales/orders`, service-only `sales.channel.intake`), but its request needs a product,
@@ -400,7 +414,7 @@ internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP a
 internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
 internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
 internal/events/    event type constants and payloads
-migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal)
+migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal), 0009_partner_update.sql (partner UPDATE column grant, partner_entity_index and edi_partner_in_entity_scope())
 api/openapi.yaml    OpenAPI 3.1 for the routes above
 events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1, message.failed.v1, message.sent.v1 and delivery.failed.v1
 charts/edi/         Helm chart (api deployment, service, optional AS2 service, NetworkPolicy, transport ExternalSecret, ServiceMonitor); test-as2.sh checks the AS2 port's NetworkPolicy
@@ -416,6 +430,7 @@ testdata/as2/       a third-party MDN
 | POST | /edi/v1/partners | edi.admin | Requires `Idempotency-Key`; replay returns 200 with the stored partner, another body under the key is 422; optional `edifactId`, `edifactQualifier`, `edifactContrl` for EDIFACT senders |
 | GET | /edi/v1/partners?environment= | edi.admin | `{items}` by name |
 | GET | /edi/v1/partners/{id} | edi.admin | `ETag` carries the version |
+| PATCH | /edi/v1/partners/{id} | edi.admin | JSON merge patch (name, ISA identity, ack SLA, status, EDIFACT identity); `If-Match` with the ETag (428, 412 `conflict_version`); 403 EDI-0018 when the trade profile binds it to another legal entity; 200 with the new ETag |
 | PUT | /edi/v1/partners/{id}/trade-profile | edi.admin | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
 | PUT | /edi/v1/partners/{id}/transport | edi.admin | Transport API, AS2 or SFTP with secret references; 409 EDI-0012 without a trade profile in the caller's entities |
 | GET | /edi/v1/partners/{id}/transport | edi.admin | The transport, the AS2 inbound and MDN URLs, the partner certificate fingerprint and whether each secret reference resolves |
@@ -500,6 +515,9 @@ signing uses the standard library only.
 | EDI-0015 | 409 | Nothing to resend: not outbound, its last delivery is not FAILED or REJECTED, or the partner has no AS2 or SFTP transport in the caller's entities |
 | EDI-0016 | 503 | No secret directory is configured (`EDI_SECRETS_DIR`), so AS2 and SFTP transports cannot be saved |
 | EDI-0017 | 409 | An EDIFACT ORDERS, DESADV or INVOIC for a partner without an EDIFACT identity (`edifactId`) |
+| EDI-0018 | 403 | The partner's trade profile binds it to a legal entity outside the caller's scope; it cannot be changed |
+| COM-0428 | 428 | `If-Match` with the partner version is required (PATCH /partners/{id}) |
+| conflict_version | 412 | `If-Match` is not the partner's current version; the response `ETag` is |
 | EDI-0160 | (in 200 map result) | A required 850 segment or element is missing or invalid; rejected |
 | EDI-0161 | (message error) | A received 997 or TA1 answers no outbound interchange of the partner, or the 997's AK101 does not match; a received CONTRL answers no outbound EDIFACT interchange of the partner |
 | idempotency_key_reuse | 422 | `Idempotency-Key` already used with a different request body |
