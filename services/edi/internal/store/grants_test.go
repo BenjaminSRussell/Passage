@@ -13,7 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
 )
 
-func TestGrants_AppRoleLocksAndRewritesButPartnersAreAppendOnly(t *testing.T) {
+func TestGrants_AppRoleLocksAndRewritesButPartnerKeysAreWriteOnce(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
@@ -37,8 +37,12 @@ func TestGrants_AppRoleLocksAndRewritesButPartnersAreAppendOnly(t *testing.T) {
 		t.Fatalf("control number upsert as passage_app: %v", err)
 	}
 	for _, stmt := range []string{
-		`update trading_partner set name = name`,
+		// The partner update writes only its own columns (0009).
+		`update trading_partner set environment = environment`,
+		`update trading_partner set tenant_id = tenant_id`,
+		`update trading_partner set created_at = created_at`,
 		`delete from trading_partner`,
+		`select count(*) from partner_entity_index`,
 		`delete from message`,
 		`update outbox set type = type`,
 		`select count(*) from outbox`,

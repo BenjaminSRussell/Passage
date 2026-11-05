@@ -573,6 +573,20 @@ type ProgressLine struct {
 	Unit        string `json:"unit,omitempty"`
 	SiteID      string `json:"site_id,omitempty"`
 	WarehouseID string `json:"warehouse_id,omitempty"`
+	// Tracking is what a DELIVERED report took from each batch or serial
+	// (#480), as the reporter named it; absent for an untracked delivery.
+	// Quantities add up to Quantity.
+	Tracking []ProgressTracking `json:"tracking,omitempty"`
+}
+
+// ProgressTracking is one batch or serial of a delivered line: quantity in
+// the line's unit (cases on a catch-weight line) and, on a catch-weight line
+// split over several entries, reported_weight, the entry's weight.
+type ProgressTracking struct {
+	Batch          string `json:"batch,omitempty"`
+	Serial         string `json:"serial,omitempty"`
+	Quantity       string `json:"quantity"`
+	ReportedWeight string `json:"reported_weight,omitempty"`
 }
 
 // OrderProgressData is the data member of orderprogress.recorded.v1.

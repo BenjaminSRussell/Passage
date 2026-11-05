@@ -42,7 +42,8 @@ migrations/             0001_init.sql (RLS, outbox, idempotency, number counters
                         0003_partial_waves_tracking.sql (PARTIALLY_SHIPPED, carrier and
                         zone, container slip link, waves, tracking events)
                         0004_dni.sql (partial index for the DNI report)
-                        0005_short_picks.sql (first short-pick time per shipment line)
+                        0005_short_picks.sql (first short-pick time per shipment line), ...,
+                        0029/0030 (CDC publication and role grants for outbox-fulfillment)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint in this slice
 events/asyncapi.yaml    AsyncAPI 3 for every event in this slice
 charts/fulfillment/     Helm chart (helm lint passes)
@@ -105,6 +106,15 @@ owner. Without the URLs the store tests are skipped, so `go test ./...` passes
 without a database. The API tests use an in-package fake store; they also check
 that `api/openapi.yaml` documents exactly the mounted routes with a duty each,
 and the events test checks `events/asyncapi.yaml` against the published types.
+
+Events reach Kafka through the `outbox-fulfillment` Debezium connector
+(`deploy/kafka/connect.yaml`): it streams the outbox through the `passage_outbox_fulfillment`
+publication (migration 0029) as the `debezium_cdc_fulfillment` role (grants in migration 0030)
+and routes each event by its type to `passage.fulfillment.<entity>`, the AsyncAPI channel
+(`events.Topic`), not by `aggregate_type`: the packing-slip, pick, container, ASN and tracking
+events are written under aggregate_type `shipment`, and `packingslip.posted` /
+`packingslip.cancelled` land on `passage.fulfillment.packingslip` (read by inventory's postings
+consumer). A new entity needs a literal ACL for the `debezium` Kafka user in `connect.yaml`.
 
 The web module (`apps/web/src/modules/fulfillment`) has the fulfillment workspace,
 release board, shipments list, shipment detail (confirm pick, auto-pack, pack

@@ -311,10 +311,13 @@ func TestTransportAS2_EdifactInboundCONTRLAndRefusalAcks(t *testing.T) {
 	}
 	processed("eu-2@distributor", transport.ContentEdifact, edifactRef(t, ordersEdifact(t), "43"))
 	e.dispatch(1)
-	// The same interchange in a new message is a duplicate.
+	// The same interchange in a new message is a duplicate, answered with a
+	// CONTRL UCI 4 and code 26.
 	if r, err := send("eu-1-again@distributor", transport.ContentEdifact, ordersEdifact(t)); err != nil || !strings.Contains(r.Disposition, "duplicate-document") {
 		t.Fatalf("duplicate: %+v %v", r, err)
 	}
+	e.dispatch(1)
+	lastAck(transport.ContentEdifact + "|UCI+42+" + euSender + "+PASSAGE:ZZZ+4+26'")
 
 	// A syntax error with a readable UNB: error MDN and a CONTRL UCI 4 with
 	// the code, over the partner's transport.
@@ -373,7 +376,7 @@ func TestTransportAS2_EdifactInboundCONTRLAndRefusalAcks(t *testing.T) {
 		t.Fatalf("%d interchanges recorded for traffic that gets no answer", after-before)
 	}
 	e.dispatch(0)
-	if got := len(e.peer.messages()); got != 7 {
+	if got := len(e.peer.messages()); got != 8 {
 		t.Fatalf("partner got %d acknowledgments", got)
 	}
 }

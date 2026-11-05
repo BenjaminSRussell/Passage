@@ -38,7 +38,7 @@ operations:
   publishMessageAcked:
     action: send
     channel: { $ref: '#/channels/messageAcked' }
-    summary: The partner's 997 answering one outbound transaction was matched (BR-35.5)
+    summary: The partner's 997 (X12) or CONTRL (EDIFACT) answering one outbound transaction or message was matched (BR-35.5)
   publishMessageFailed:
     action: send
     channel: { $ref: '#/channels/messageFailed' }
@@ -97,11 +97,11 @@ components:
               message_id: { type: string, format: uuid, description: the outbound message acknowledged }
               interchange_id: { type: string, format: uuid, description: the outbound interchange }
               partner_id: { type: string, format: uuid }
-              transaction_set: { type: string, enum: ['855', '856', '810'] }
-              control_number: { type: string, description: ISA13 of the outbound interchange }
-              st_control: { type: string }
+              transaction_set: { type: string, enum: ['855', '856', '810', '820', '214', ORDERS, DESADV, INVOIC] }
+              control_number: { type: string, description: ISA13 of the outbound interchange, or its UNB 0020 reference for EDIFACT }
+              st_control: { type: string, description: ST02, or the UNH 0062 reference for EDIFACT }
               ack_status: { type: string, enum: [ACCEPTED, ACCEPTED_WITH_ERRORS, REJECTED] }
-              ack_message_id: { type: string, format: uuid, description: the received 997 message }
+              ack_message_id: { type: string, format: uuid, description: the received 997 or CONTRL message }
     MessageFailed:
       name: dev.passage.edi.message.failed.v1
       contentType: application/cloudevents+json

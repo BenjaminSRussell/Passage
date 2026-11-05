@@ -1,6 +1,7 @@
 // Package transporttest holds in-process partner endpoints for tests: an
-// SSH server with the sftp subsystem on the real file system, and
-// self-signed AS2 certificates. Only tests import it.
+// SSH server with the sftp subsystem on the real file system, self-signed
+// AS2 certificates, and a test CA with intermediates and CRLs.
+// Only tests import it.
 package transporttest
 
 import (
@@ -173,6 +174,79 @@ func NewKeyPair(t testing.TB, name string, ec bool) KeyPair {
 	tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: name}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * 365 * time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection}}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return KeyPair{Cert: cert, Key: key}
+}
+
+// CA is a test certificate authority: a root (when parent is nil) or an
+// intermediate, with its key.
+type CA struct {
+	KeyPair
+}
+
+// NewCA returns a self-signed root CA valid from an hour before now for a
+// year.
+func NewCA(t testing.TB, name string) CA {
+	t.Helper()
+	return CA{issue(t, name, true, nil)}
+}
+
+// Intermediate returns a CA certificate for name issued by ca.
+func (ca CA) Intermediate(t testing.TB, name string) CA {
+	t.Helper()
+	return CA{issue(t, name, true, &ca.KeyPair)}
+}
+
+// Issue returns an RSA end-entity certificate for name (an AS2 partner)
+// issued by ca, valid from an hour before now for a year.
+func (ca CA) Issue(t testing.TB, name string) KeyPair {
+	t.Helper()
+	return issue(t, name, false, &ca.KeyPair)
+}
+
+// CRL returns a DER CRL signed by ca, valid from thisUpdate to nextUpdate,
+// listing the serial numbers of revoked as revoked an hour before
+// thisUpdate.
+func (ca CA) CRL(t testing.TB, number int64, thisUpdate, nextUpdate time.Time, revoked ...*x509.Certificate) []byte {
+	t.Helper()
+	tmpl := &x509.RevocationList{Number: big.NewInt(number), ThisUpdate: thisUpdate, NextUpdate: nextUpdate}
+	for _, c := range revoked {
+		tmpl.RevokedCertificateEntries = append(tmpl.RevokedCertificateEntries,
+			x509.RevocationListEntry{SerialNumber: c.SerialNumber, RevocationTime: thisUpdate.Add(-time.Hour)})
+	}
+	der, err := x509.CreateRevocationList(rand.Reader, tmpl, ca.Cert, ca.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
+}
+
+func issue(t testing.TB, name string, isCA bool, parent *KeyPair) KeyPair {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
+	now := time.Now()
+	tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: name}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * 365 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection}}
+	if isCA {
+		tmpl.IsCA, tmpl.BasicConstraintsValid = true, true
+		tmpl.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature
+		tmpl.ExtKeyUsage = nil
+	}
+	signerCert, signerKey := tmpl, crypto.Signer(key)
+	if parent != nil {
+		signerCert, signerKey = parent.Cert, parent.Key
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, signerCert, key.Public(), signerKey)
 	if err != nil {
 		t.Fatal(err)
 	}

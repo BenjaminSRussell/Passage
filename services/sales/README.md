@@ -93,6 +93,15 @@ and `npx tsc --noEmit` in `apps/web`).
 
 Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 
+Events are written to the outbox in the transaction that makes the change. The `outbox-sales`
+Debezium connector (`deploy/kafka/connect.yaml`) streams the outbox through the
+`passage_outbox_sales` publication (migration 0039) as the `debezium_cdc_sales` role (grants in
+migration 0040) and routes each event by its type to `passage.sales.<entity>`, the AsyncAPI
+channel (`events.Topic`), not by `aggregate_type`: most order-side events share aggregate_type
+`order`, but `orderprogress.recorded` lands on `passage.sales.orderprogress` (read by inventory's
+postings consumer) and `orderhold.*` on `passage.sales.orderhold` (read by fulfillment). A new
+entity needs a literal ACL for the `debezium` Kafka user in `connect.yaml`.
+
 | Method | Path | Duty | Notes |
 |---|---|---|---|
 | POST | `/v1/sales/orders` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key` required; `(channel, externalRef)` dedup; optional `oneTime` {name, line1, city, postalCode, country, taxId} makes it a one-time customer order held to `one_time_order_limit` (`SLS-0016`); the buyer is sealed at rest and needs field encryption keys (`SLS-0054`) |

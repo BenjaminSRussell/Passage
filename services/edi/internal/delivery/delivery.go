@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -66,8 +67,11 @@ const DefaultMDNTimeout = 24 * time.Hour
 // URL partners reach our AS2 listener on, needed for asynchronous MDNs;
 // MDNTimeout bounds the wait for one (DefaultMDNTimeout when zero).
 type Dispatcher struct {
-	Store        *store.Store
-	Secrets      secrets.Store
+	Store   *store.Store
+	Secrets secrets.Store
+	// Trust checks partner AS2 certificates against the trust roots and
+	// CRLs; nil pins them only.
+	Trust        *certtrust.Checker
 	HTTP         *http.Client
 	AS2PublicURL string
 	Batch        int
@@ -326,8 +330,15 @@ type AS2Endpoint struct {
 }
 
 // LoadAS2 reads our signing key and certificate from the secret store and
-// parses the partner certificate. Errors never carry secret material.
-func LoadAS2(s secrets.Store, cfg domain.AS2Settings, now time.Time) (AS2Endpoint, error) {
+// parses the partner certificate, which stays pinned: signatures are
+// verified against it alone. With trust configured (EDI_AS2_TRUST_ROOTS and
+// EDI_AS2_CRL_DIR) the certificate must also chain to a trust root through
+// the intermediates stored after it and not be revoked, checked at every
+// use: an untrusted or revoked certificate wraps certtrust.ErrUntrusted and
+// transport.ErrInvalid (a delivery fails at once), an unknown revocation
+// status certtrust.ErrRevocationUnknown (retried until the CRL is
+// refreshed). Errors never carry secret material.
+func LoadAS2(s secrets.Store, trust *certtrust.Checker, cfg domain.AS2Settings, now time.Time) (AS2Endpoint, error) {
 	if s == nil {
 		return AS2Endpoint{}, errors.New("no secret store is configured (EDI_SECRETS_DIR)")
 	}
@@ -335,9 +346,14 @@ func LoadAS2(s secrets.Store, cfg domain.AS2Settings, now time.Time) (AS2Endpoin
 	if err != nil {
 		return AS2Endpoint{}, fmt.Errorf("signing key %q: %w", cfg.SigningKeyRef, err)
 	}
-	partnerCert, msg := domain.ParsePartnerCertificate(cfg.PartnerCertificate, now)
+	partnerCert, intermediates, msg := domain.ParsePartnerChain(cfg.PartnerCertificate, now)
 	if msg != "" {
 		return AS2Endpoint{}, fmt.Errorf("partner certificate %s", msg)
+	}
+	if err := trust.Verify(partnerCert, intermediates, now); errors.Is(err, certtrust.ErrUntrusted) {
+		return AS2Endpoint{}, fmt.Errorf("%w: partner certificate: %w", transport.ErrInvalid, err)
+	} else if err != nil {
+		return AS2Endpoint{}, fmt.Errorf("partner certificate: %w", err)
 	}
 	return AS2Endpoint{
 		Us: transport.AS2Identity{ID: cfg.OurAS2ID, Cert: cert, Key: key},
@@ -348,7 +364,7 @@ func LoadAS2(s secrets.Store, cfg domain.AS2Settings, now time.Time) (AS2Endpoin
 
 func (d *Dispatcher) sendAS2(ctx context.Context, rec store.TransportRecord, msg transport.Message) (transport.Receipt, error) {
 	cfg := *rec.Config.AS2
-	ep, err := LoadAS2(d.Secrets, cfg, d.now())
+	ep, err := LoadAS2(d.Secrets, d.Trust, cfg, d.now())
 	if err != nil {
 		return transport.Receipt{}, err
 	}

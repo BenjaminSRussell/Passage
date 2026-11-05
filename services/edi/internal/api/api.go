@@ -1,10 +1,10 @@
 // Package api exposes the edi HTTP surface: partner profiles, the dry-run map
-// tester, inbound X12 receipt (850s mapped, 997s matched to outbound
-// documents) and EDIFACT receipt (ORDERS, DESADV and INVOIC mapped, CONTRL
-// answers), outbound 855/856/810 generation, and the message monitor with
-// single and bulk reprocess, the masked raw segment-tree viewer and the
-// partner SLA dashboard. Handlers decode, validate,
-// check duties, then call the domain and store.
+// tester, inbound X12 receipt (850, 820 and 214 mapped, 997s matched to
+// outbound documents) and EDIFACT receipt (ORDERS, DESADV and INVOIC mapped,
+// CONTRL answers, received CONTRLs matched), outbound X12 and EDIFACT
+// generation, and the message monitor with single and bulk reprocess, the
+// masked raw segment-tree viewer and the partner SLA dashboard. Handlers
+// decode, validate, check duties, then call the domain and store.
 package api
 
 import (
@@ -26,6 +26,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -51,6 +52,7 @@ const (
 	CodeNoTradeProfile   = "EDI-0012"
 	CodeSourceNotFinal   = "EDI-0013"
 	CodeSourceForbidden  = "EDI-0014"
+	CodeNoEdifactID      = "EDI-0017"
 )
 
 // Interchange list page size: default and maximum.
@@ -66,13 +68,19 @@ const maxInbound = 4 << 20
 // EDI_ISA_QUALIFIER and EDI_ISA_ID are not set.
 var DefaultSender = domain.Party{Qualifier: "ZZ", ID: "PASSAGE"}
 
+// DefaultEdifactSender is our UNB S002 identity on outbound EDIFACT
+// interchanges when EDI_EDIFACT_ID and EDI_EDIFACT_QUALIFIER are not set.
+var DefaultEdifactSender = domain.EdifactParty{ID: "PASSAGE", Qualifier: "ZZZ"}
+
 // API holds the store used by the handlers that persist state. Sender is our
-// ISA06/GS02 identity on outbound documents.
+// ISA06/GS02 identity on outbound documents, EdifactSender our UNB S002
+// identity on outbound EDIFACT.
 type API struct {
-	store   *store.Store
-	now     func() time.Time
-	Sender  domain.Party
-	Sources Sources
+	store         *store.Store
+	now           func() time.Time
+	Sender        domain.Party
+	EdifactSender domain.EdifactParty
+	Sources       Sources
 	// AllowBodyOutbound mounts POST /partners/{id}/outbound, which takes the
 	// canonical document from the request body. Tests and development only.
 	AllowBodyOutbound bool
@@ -85,6 +93,10 @@ type API struct {
 	AS2PublicURL string
 	// AllowInsecureAS2 admits http:// partner AS2 URLs (development only).
 	AllowInsecureAS2 bool
+	// AS2Trust checks partner AS2 certificates against the trust roots and
+	// CRLs (EDI_AS2_TRUST_ROOTS, EDI_AS2_CRL_DIR) when a transport is saved
+	// and at every use; nil pins them only.
+	AS2Trust *certtrust.Checker
 	// AS2Limit is the per-endpoint rate limit of the AS2 listener; nil admits
 	// every request. Asynchronous MDNs we owe are stored and posted by the
 	// delivery dispatcher, not from the listener.
@@ -94,7 +106,7 @@ type API struct {
 // New returns the API. The store may be nil for routes that do not persist
 // (maps:test), which lets those routes be tested without a database.
 func New(s *store.Store) *API {
-	return &API{store: s, now: time.Now, Sender: DefaultSender}
+	return &API{store: s, now: time.Now, Sender: DefaultSender, EdifactSender: DefaultEdifactSender}
 }
 
 // Routes returns the HTTP handler with kernel middleware and every edi route.
@@ -104,6 +116,7 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.admin")).Post("/partners", a.createPartner)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners", a.listPartners)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}", a.getPartner)
+		r.With(authz.RequireDuty("edi.admin")).Patch("/partners/{id}", a.patchPartner)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/trade-profile", a.putTradeProfile)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/transport", a.putTransport)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/transport", a.getTransport)
@@ -298,32 +311,54 @@ func (a *API) getInterchange(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, d)
 }
 
-// txResult is the outcome of mapping one transaction set.
+// txResult is the outcome of mapping one transaction set. order is set for
+// an 850 (and an ORDERS), document for every set that mapped onto a
+// canonical document; unsupported marks a set no mapping exists for.
 type txResult struct {
-	outcome   domain.TxOutcome
-	status    string
-	order     *domain.Order
-	canonical []byte
-	errText   string
-	issues    []domain.Issue
+	outcome     domain.TxOutcome
+	status      string
+	order       *domain.Order
+	document    any
+	canonical   []byte
+	errText     string
+	issues      []domain.Issue
+	unsupported bool
 }
 
+// InboundSets lists the X12 transaction sets the receipt maps onto a
+// canonical document: the 850 order, the 820 remittance and the 214
+// shipment status. A 997 is matched, not mapped; any other set is rejected
+// (AK5 R, EDI-0006).
+var InboundSets = []string{"850", "820", "214"}
+
 // mapTransaction maps one transaction and derives its 997 code and message
-// status. Only 850 is mapped in this slice; other sets are rejected (AK5 R).
+// status: AK5 A and MAPPED without issues, E and FAILED with only
+// accepted-with-error issues, R and FAILED with a rejecting issue. Sets
+// outside InboundSets are rejected (AK5 R).
 func mapTransaction(t domain.Transaction) (txResult, error) {
 	res := txResult{outcome: domain.TxOutcome{SetID: t.SetID, Control: t.Control}}
-	if t.SetID != "850" {
+	var issues []domain.Issue
+	switch t.SetID {
+	case "850":
+		order, is := domain.Map850(t)
+		res.order, res.document, issues = &order, order, is
+	case "820":
+		r, is := domain.Map820(t)
+		res.document, issues = r, is
+	case "214":
+		st, is := domain.Map214(t)
+		res.document, issues = st, is
+	default:
 		res.outcome.Code = domain.AckRejected
 		res.status = "FAILED"
 		res.errText = "transaction set " + t.SetID + " is not supported yet"
+		res.unsupported = true
 		return res, nil
 	}
-	order, issues := domain.Map850(t)
-	canonical, err := json.Marshal(order)
+	canonical, err := json.Marshal(res.document)
 	if err != nil {
 		return txResult{}, err
 	}
-	res.order = &order
 	res.canonical = canonical
 	res.issues = issues
 	var details []string
@@ -349,11 +384,13 @@ type mapRequest struct {
 }
 
 type mapResult struct {
-	TransactionSet string         `json:"transactionSet"`
-	STControl      string         `json:"stControl"`
-	Status         string         `json:"status"`
-	Order          *domain.Order  `json:"order,omitempty"`
-	Issues         []domain.Issue `json:"issues"`
+	TransactionSet string        `json:"transactionSet"`
+	STControl      string        `json:"stControl"`
+	Status         string        `json:"status"`
+	Order          *domain.Order `json:"order,omitempty"`
+	// Document is the canonical remittance (820) or shipment status (214).
+	Document any            `json:"document,omitempty"`
+	Issues   []domain.Issue `json:"issues"`
 }
 
 // mapsTest runs the mapping over a sample interchange without persisting
@@ -378,10 +415,13 @@ func (a *API) mapsTest(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			mr := mapResult{TransactionSet: t.SetID, STControl: t.Control, Status: res.status, Order: res.order, Issues: res.issues}
+			if res.order == nil {
+				mr.Document = res.document
+			}
 			if mr.Issues == nil {
 				mr.Issues = []domain.Issue{}
 			}
-			if res.order == nil && res.errText != "" {
+			if res.unsupported {
 				mr.Issues = append(mr.Issues, domain.Issue{Code: CodeUnsupportedSet, Detail: res.errText, Reject: true})
 			}
 			results = append(results, mr)
@@ -513,6 +553,15 @@ func (a *API) receiveX12Interchange(ctx context.Context, body []byte, o receiveO
 		all      []domain.TxOutcome
 		messages []store.Message
 	)
+	// A TA1 is matched to the outbound interchange it answers and is never
+	// acknowledged itself.
+	for _, ta1 := range ic.TA1 {
+		m, err := ta1Message(ta1)
+		if err != nil {
+			return receiveResponse{}, err
+		}
+		messages = append(messages, m)
+	}
 	for _, g := range ic.Groups {
 		// A 997 group is matched to the outbound document it answers and is
 		// never acknowledged itself.
@@ -545,8 +594,8 @@ func (a *API) receiveX12Interchange(ctx context.Context, body []byte, o receiveO
 	if len(messages) == 0 {
 		return receiveResponse{}, httpx.NewProblem(http.StatusBadRequest, CodeSyntax, "interchange carries no transactions")
 	}
-	// An interchange of 997s only is accepted; the store downgrades it when a
-	// 997 cannot be read or matched.
+	// An interchange of 997s or TA1s only is accepted; the store downgrades it
+	// when one cannot be read or matched.
 	status := domain.StatusAccepted
 	if len(all) > 0 {
 		status = domain.SummarizeOutcomes(all)
@@ -616,14 +665,26 @@ func ackMessage(t domain.Transaction) (store.Message, error) {
 	return m, nil
 }
 
+// ta1Message records one received TA1 (TransactionSet TA1, STControl the
+// TA101 it answers) for the store to match.
+func ta1Message(ta1 domain.InterchangeAck) (store.Message, error) {
+	canonical, err := json.Marshal(ta1)
+	if err != nil {
+		return store.Message{}, err
+	}
+	a := ta1
+	return store.Message{ID: ids.New(), TransactionSet: "TA1", STControl: ta1.Control, Status: "RECEIVED", Canonical: canonical, TA1: &a}, nil
+}
+
 type outboundRequest struct {
 	TransactionSet string          `json:"transactionSet"`
 	Document       json.RawMessage `json:"document"`
 }
 
-// createOutbound builds an 855, 856, 810, 820 or 214 from a caller-supplied canonical
-// document. It is mounted only when AllowBodyOutbound is set (tests and
-// development); production documents come from outboundFromSource.
+// createOutbound builds an 855, 856, 810, 820 or 214, or an EDIFACT ORDERS,
+// DESADV or INVOIC, from a caller-supplied canonical document. It is mounted
+// only when AllowBodyOutbound is set (tests and development); production
+// documents come from outboundFromSource.
 func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 255 {
@@ -643,18 +704,34 @@ func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 	a.sendOutbound(w, r, key, id, req.TransactionSet, req.Document)
 }
 
-// sendOutbound builds the transaction for a canonical document, wraps it in an
-// interchange to the partner with the next gap-free control number and records
-// it with ack_status PENDING until the partner's 997 is matched. When the
-// partner has an AS2 or SFTP transport the interchange is queued for delivery
-// in the same transaction (the response carries the delivery); the message
-// stays MAPPED until the transport confirms receipt and then becomes SENT.
+// sendOutbound builds the transaction (or, for ORDERS, DESADV and INVOIC,
+// the EDIFACT message) for a canonical document, wraps it in an interchange
+// to the partner with the next gap-free control number of the standard and
+// records it with ack_status PENDING until the partner's 997 or CONTRL is
+// matched. An EDIFACT document needs the partner's UNB identity (409
+// EDI-0017); it goes from EdifactSender in a UNOC syntax 3 interchange that
+// requests a CONTRL. When the partner has an AS2 or SFTP transport the
+// interchange is queued for delivery in the same transaction (the response
+// carries the delivery); the message stays MAPPED until the transport
+// confirms receipt and then becomes SENT.
 func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerID, setID string, document json.RawMessage) {
-	if domain.FunctionalIDOf(setID) == "" {
-		httpx.Fail(w, r, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ")}))
+	edifact := domain.IsEdifactOutbound(setID)
+	if domain.FunctionalIDOf(setID) == "" && !edifact {
+		httpx.Fail(w, r, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ") +
+			" or " + strings.Join(domain.EdifactOutboundTypes, ", ")}))
 		return
 	}
-	tr, canonical, err := domain.BuildOutbound(setID, document)
+	var (
+		tr        domain.Transaction
+		msg       domain.EdifactMessage
+		canonical []byte
+		err       error
+	)
+	if edifact {
+		msg, canonical, err = domain.BuildEdifactOutbound(setID, document)
+	} else {
+		tr, canonical, err = domain.BuildOutbound(setID, document)
+	}
 	if errors.Is(err, domain.ErrOutbound) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
 		return
@@ -676,30 +753,43 @@ func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerI
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodePartnerInactive, "partner is inactive; no documents can be sent to it"))
 		return
 	}
-	usage := "P"
-	if partner.Environment == "TEST" {
-		usage = "T"
-	}
-	to := domain.Party{Qualifier: partner.ISAQualifier, ID: partner.ISAID}
 	at := a.now()
-	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+setID+"\x00"), canonical...))
-	res, created, err := a.store.CreateOutbound(r.Context(), key, hex.EncodeToString(sum[:]), store.Outbound{
-		PartnerID:      partner.ID,
-		TransactionSet: setID,
-		Canonical:      canonical,
-		Build: func(control int64) (string, error) {
+	out := store.Outbound{PartnerID: partner.ID, TransactionSet: setID, Canonical: canonical}
+	if edifact {
+		if partner.Edifact() == nil {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNoEdifactID, "partner has no EDIFACT identity (edifactId); "+setID+" cannot be addressed to it"))
+			return
+		}
+		to := domain.EdifactParty{ID: partner.EdifactID, Qualifier: partner.EdifactQualifier}
+		out.Standard = domain.SyntaxEdifact
+		out.Build = func(control int64) (string, error) {
+			ic, err := domain.EdifactOutbound([]domain.EdifactMessage{msg}, a.EdifactSender, to, control, partner.Environment == "TEST", at)
+			if err != nil {
+				return "", err
+			}
+			return domain.SerializeEdifact(ic, false)
+		}
+	} else {
+		usage := "P"
+		if partner.Environment == "TEST" {
+			usage = "T"
+		}
+		to := domain.Party{Qualifier: partner.ISAQualifier, ID: partner.ISAID}
+		out.Build = func(control int64) (string, error) {
 			ic, err := domain.OutboundEnvelope(tr, a.Sender, to, usage, control, at)
 			if err != nil {
 				return "", err
 			}
 			return domain.Serialize(ic)
-		},
-	})
+		}
+	}
+	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+setID+"\x00"), canonical...))
+	res, created, err := a.store.CreateOutbound(r.Context(), key, hex.EncodeToString(sum[:]), out)
 	if errors.Is(err, store.ErrIdempotencyReuse) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body"))
 		return
 	}
-	if errors.Is(err, domain.ErrSyntax) {
+	if errors.Is(err, domain.ErrSyntax) || errors.Is(err, domain.ErrEdifactSyntax) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
 		return
 	}

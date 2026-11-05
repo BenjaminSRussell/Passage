@@ -231,7 +231,8 @@ database or publishes an event, so these routes also run without a store.
   first segment), whose ISA or UNB sender must be the endpoint's partner; the 997 or CONTRL is
   queued back over the partner's transport (slice 8). Retransmissions
   (same Message-ID and content, or an interchange inside the duplicate window) answer
-  `processed/warning: duplicate-document` and record nothing.
+  `processed/warning: duplicate-document` and record no receipt (a new message repeating an
+  interchange is also answered with a TA1 025 or CONTRL 26, slice 9).
 - **SFTP poller**: every due partner with an inbound directory is polled once per interval, at
   most 50 files of at most 4 MiB in name order, skipping `.part` files; a file is known by name and
   SHA-256 (`transport_inbound`), is marked DONE in the receipt transaction and then moved to
@@ -247,7 +248,8 @@ ignores `X-Passage-*` headers. The endpoint id in the path (random, per partner 
 across updates) is resolved by the SECURITY DEFINER `edi_as2_endpoint()` to a tenant and partner
 and nothing else; the work then runs as the edi service in the one legal entity of the partner's
 trade profile. The caller is authenticated by its CMS signature against the certificate pinned on
-the transport (signatures are always required, encryption when selected), with AS2-From and AS2-To
+the transport (signatures are always required, encryption when selected; with trust roots the
+certificate must also chain to them and not be revoked, 403 otherwise), with AS2-From and AS2-To
 matching the profile; nothing is parsed before the signature verifies; bodies are capped at 8 MiB
 (1 MiB for MDNs) and the payload at 4 MiB. Unknown endpoints, other transports and inactive
 partners all answer 404. Asynchronous MDNs we owe are stored and posted only to the scheme and host
@@ -286,9 +288,9 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   accepted-with-errors as for the 850), DESADV is held to the 856 rules and INVOIC to the 810 rules;
   each message is stored with its canonical document under the UNH type and reference and gets
   `dev.passage.edi.message.received.v1` (standard EDIFACT), failed ones also `message.failed`. Other
-  message types are FAILED (EDI-0006). A received CONTRL is read, recorded FAILED with EDI-0161
-  (there are no outbound EDIFACT interchanges to match yet) and never acknowledged. Reprocess reads
-  stored EDIFACT and re-maps by type and UNH reference.
+  message types are FAILED (EDI-0006). A received CONTRL is read, matched to our outbound EDIFACT
+  interchange (slice 9) and never acknowledged. Reprocess reads stored EDIFACT and re-maps by type
+  and UNH reference.
 - **CONTRL answers**: a partner's `edifactContrl` is REQUESTED (default: when UNB 0031 = 1), ALWAYS
   or NEVER. `BuildCONTRL` goes back from the recipient to the sender in the sender's syntax and
   service characters, on the partner's own gap-free EDIFACT counter (`control_number_counter`
@@ -313,8 +315,90 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   again without a second acknowledgment), and the acknowledgment is queued in the same transaction.
   A refused interchange never counts in the duplicate window, so the corrected one is received. No
   acknowledgment is built for traffic that is not authenticated (unknown endpoint, bad signature),
-  for payloads over 4 MiB, for an ISA or UNB that cannot be read, or for an X12 interchange without
-  a group other than 997s.
+  for payloads over 4 MiB, for an ISA or UNB that cannot be read, or for an interchange of
+  acknowledgments only. Slice 9 adds the TA1 for X12 envelope errors and duplicates (below).
+
+## Slice 9 scope: #483 follow-ups
+
+- **Outbound EDIFACT** (`internal/domain/edifact_outbound.go`): `POST /partners/{id}/outbound`
+  takes `ORDERS`, `DESADV` and `INVOIC` next to the X12 sets, and `outbound:from-source` takes
+  `DESADV` (from the fulfillment shipment, like the 856) and `INVOIC` (from the billing invoice,
+  like the 810) under the same service grant. `BuildEdifactOutbound` holds DESADV to the 856 rules
+  and INVOIC to the 810 rules; the message goes in a UNOC syntax 3 interchange (UNA, default service
+  characters, UNB 0035 test indicator for a TEST partner) from our UNB identity (`EDI_EDIFACT_ID`,
+  `EDI_EDIFACT_QUALIFIER`, default PASSAGE/ZZZ, chart `edifactSender`) to the partner's
+  `edifactId`/`edifactQualifier` (409 EDI-0017 when it has none), asks for a CONTRL (UNB 0031 = 1)
+  and takes UNB 0020 from the partner's gap-free EDIFACT counter, the one the CONTRLs we send it
+  use. It is stored as an OUT interchange (standard EDIFACT, version UNOC:3, UNH reference 1),
+  returned as `edifact` with `standard`, and queued over the partner's AS2 or SFTP transport like
+  X12 (`application/edifact`, `<type>_<ref>_<id>.edi`), becoming SENT on the MDN or upload.
+- **CONTRL matching**: a CONTRL from the partner is matched by its UCI 0020 to our outbound EDIFACT
+  interchange with that reference, the way a 997 is matched by AK102 (`store.matchContrl`, sharing
+  `applyAnswers` with the 997): each message still MAPPED or SENT becomes ACKED, or FAILED when the
+  UCI is 4 or a UCM 4 names it (the error says which, with the 0085 code); UCI 8 (received, nothing
+  checked) acknowledges; the interchange takes the CONTRL's status (`ContrlAck.Status`) and
+  `acked_at` unless an earlier CONTRL answered it; `dev.passage.edi.message.acked.v1` is published
+  per answered message. The CONTRL is POSTED (with notes for UCMs naming no message), or FAILED with
+  EDI-0161 when it answers nothing. The SLA dashboard counts EDIFACT acknowledgments like 997s.
+- **Inbound 820 and 214**: the X12 receipt maps the 820 onto the canonical remittance (`Map820`:
+  BPR, TRN, CUR, N1 PR/PE, RMR IV lines; BPR02 must equal the RMR04 total) and the 214 onto the
+  shipment status (`Map214`: B10, L11, N1 SF/ST, LX/AT7/MS1) next to the 850, with the same 997 codes
+  (AK5 A, E, or R with the failing rule), `message.received` and, when it fails, `message.failed`;
+  reprocess and `maps:test` (which returns `document`) cover them, and payer, payee, ship-from and
+  ship-to names are masked without `edi.pii.view`. Inbound X12 856 and 810 are still rejected
+  (EDI-0006).
+- **TA1 and duplicate acknowledgments** (`internal/domain/x12_ta1.go`): the X12 codec reads and
+  writes TA1 segments (between ISA and the first GS). An interchange a transport brought from the
+  authenticated partner that fails at the interchange level (`TA1Cause`: IEA missing 023, IEA02 not
+  ISA13 001, IEA01 not the group count 021, no group or content after IEA 024) is answered with a
+  TA1 R carrying that TA105 code instead of a 997; group and transaction errors keep the negative
+  997. A duplicate interchange (EDI-0102) over AS2 or SFTP is answered with a TA1 R 025 (X12) or a
+  CONTRL UCI 4 with code 26 (EDIFACT, when the partner wants CONTRLs), next to the
+  `processed/warning: duplicate-document` MDN or the archived file. The answer is recorded like a
+  refusal (`store.RecordRefusal`): its own transaction after the rolled-back receipt, the next
+  number of the partner's X12 (or EDIFACT) counter, an interchange with `refusal` EDI-0102, no
+  messages and the TA1 (shown as `ta1` on the interchange), queued as `TA1_<isa13>_<id>.x12`, and
+  the AS2 message or file DONE with it so a retransmission is not answered again. Interchanges of
+  acknowledgments only (997s, TA1s, CONTRLs) are never answered; the operator routes still answer a
+  duplicate with 409 and record nothing. A TA1 from the partner is matched by TA101 to our outbound
+  interchange: R rejects its messages (FAILED, REJECTED, `message.acked`), A or E is noted on the
+  TA1 (POSTED) and the 997 answers the groups; an unmatched TA1 is FAILED with EDI-0161.
+- **Partner update** (`PATCH /edi/v1/partners/{id}`, duty `edi.admin` like the other partner
+  writes, migration `0009_partner_update.sql`): a JSON merge patch of `name`, `isaQualifier`,
+  `isaId`, `ackSlaMinutes`, `status` (`inactive` stops receipt, the AS2 listener and outbound
+  documents) and the EDIFACT identity (`edifactId`, `edifactQualifier`, `edifactContrl`; null or ""
+  for `edifactId` removes it). `If-Match` must carry the version from the partner's ETag (428
+  `COM-0428` without it, 412 `conflict_version` with the current ETag when stale); the response
+  carries the new ETag. The environment is not a member (400). An identity another partner holds
+  in the environment is 409 EDI-0004. Once a trade profile binds the partner to a legal entity, only
+  callers scoped to that entity (or to every entity) may change it (403 EDI-0018), as for the
+  profile and the transport: the profile's restrictive RLS hides it from other callers, so the
+  binding is read through `edi_partner_in_entity_scope()`, a SECURITY DEFINER function over the
+  `partner_entity_index` a trigger on `partner_trade_profile` keeps (no RLS, no `passage_app`
+  grant, listed in `tools/rlscheck`). `passage_app` gets UPDATE on the changed columns only:
+  tenant, id, environment and creation time stay write-once and partners are never deleted.
+- **Partner certificate trust** (`internal/certtrust`): the partner AS2 certificate stays pinned
+  (signatures are verified against it alone, so another certificate of the same CA cannot sign for
+  the partner). The `partnerCertificate` field may carry up to five intermediate CA certificates after
+  it. With `EDI_AS2_TRUST_ROOTS` (a PEM bundle of CA certificates) the certificate must also chain to
+  one of them; with `EDI_AS2_CRL_DIR` (a directory of CRLs, PEM or DER, dot files skipped) every
+  certificate of the chain below the root must be covered by the newest current CRL its issuer
+  signed (thisUpdate passed, nextUpdate set and ahead) and not be listed. Both fail closed, at
+  `PUT /transport` (400 on `as2.partnerCertificate`) and at every use: an inbound AS2 message from a
+  partner whose certificate is untrusted or revoked gets 403, an outbound delivery FAILS at once
+  (`delivery.failed`); when an issuer has no current CRL the listener answers 503 and deliveries back
+  off until the CRL is refreshed. The files are read again when one changes (size or mtime), so a
+  rotated CRL needs no restart. `GET /transport` shows `partnerCertificateTrust` (`pinned`, `trusted`,
+  `untrusted`, `revocation-unknown`) with the reason. Nothing is fetched from the network: OCSP and
+  CRL distribution points are not used.
+- **Posting inbound documents (decision)**: nothing in edi posts a received document into another
+  service, and no service grant was added for it. Sales already has the intake route
+  (`POST /v1/sales/orders`, service-only `sales.channel.intake`), but its request needs a product,
+  site and warehouse per line and an invoice account that the 850 and ORDERS do not carry and edi
+  cannot resolve without the BR-35.1 item cross-reference; transport's
+  `POST /v1/transport/tracking-events` needs a load id and stop number the 214 does not carry;
+  receivables has no remittance-advice route. Consumers read `dev.passage.edi.message.received.v1`
+  and the canonical document; `NOT-IMPLEMENTED.md` (Handoffs) lists what each posting needs.
 
 ## Wave 35 proof
 
@@ -338,14 +422,15 @@ Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
-internal/domain/    X12 codec, 997 out and in (and the negative 997 of a refused interchange), 850 mapping, 855/856/810/820/214 builders, 820/214 maps, EDIFACT codec with groups, ORDERS/DESADV/INVOIC and CONTRL (accept, reject, refusal), SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
+internal/domain/    X12 codec, 997 out and in (and the negative 997 of a refused interchange), 850 mapping, 855/856/810/820/214 builders, 820/214 maps, EDIFACT codec with groups, ORDERS/DESADV/INVOIC (in and out) and CONTRL (accept, reject, refusal, matching our outbound), SSCC, segment tree and PII masking, partner rules, UBL builder and arithmetic, cXML envelope, punchout and self-billing rules (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
 internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP and loopback senders; transporttest has the in-process partner endpoints
 internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
 internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
+internal/certtrust/ partner AS2 certificate chain and CRL checks (EDI_AS2_TRUST_ROOTS, EDI_AS2_CRL_DIR)
 internal/events/    event type constants and payloads
-migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal)
+migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal), 0009_partner_update.sql (partner UPDATE column grant, partner_entity_index and edi_partner_in_entity_scope())
 api/openapi.yaml    OpenAPI 3.1 for the routes above
 events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1, message.failed.v1, message.sent.v1 and delivery.failed.v1
 charts/edi/         Helm chart (api deployment, service, optional AS2 service, NetworkPolicy, transport ExternalSecret, ServiceMonitor); test-as2.sh checks the AS2 port's NetworkPolicy
@@ -361,14 +446,15 @@ testdata/as2/       a third-party MDN
 | POST | /edi/v1/partners | edi.admin | Requires `Idempotency-Key`; replay returns 200 with the stored partner, another body under the key is 422; optional `edifactId`, `edifactQualifier`, `edifactContrl` for EDIFACT senders |
 | GET | /edi/v1/partners?environment= | edi.admin | `{items}` by name |
 | GET | /edi/v1/partners/{id} | edi.admin | `ETag` carries the version |
+| PATCH | /edi/v1/partners/{id} | edi.admin | JSON merge patch (name, ISA identity, ack SLA, status, EDIFACT identity); `If-Match` with the ETag (428, 412 `conflict_version`); 403 EDI-0018 when the trade profile binds it to another legal entity; 200 with the new ETag |
 | PUT | /edi/v1/partners/{id}/trade-profile | edi.admin | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
 | PUT | /edi/v1/partners/{id}/transport | edi.admin | Transport API, AS2 or SFTP with secret references; 409 EDI-0012 without a trade profile in the caller's entities |
 | GET | /edi/v1/partners/{id}/transport | edi.admin | The transport, the AS2 inbound and MDN URLs, the partner certificate fingerprint and whether each secret reference resolves |
-| POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810","sourceId"}`; 201 with the X12, repeat 200; 409 EDI-0012 without a profile, 503 EDI-0010 without source services |
-| POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"856"\|"810"\|"855","document":{...}}`; requires `Idempotency-Key`; 201 with the X12, replay 200 |
+| POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810"\|"DESADV"\|"INVOIC","sourceId"}`; 201 with the X12 or EDIFACT, repeat 200; 409 EDI-0012 without a profile, EDI-0017 EDIFACT without `edifactId`; 503 EDI-0010 without source services |
+| POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"855"\|"856"\|"810"\|"820"\|"214"\|"ORDERS"\|"DESADV"\|"INVOIC","document":{...}}`; requires `Idempotency-Key`; 201 with the X12 or EDIFACT, replay 200 |
 | POST | /edi/v1/maps:test | edi.admin | Body `{"raw": "<X12>"}`; nothing is stored |
-| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | edi.operate | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
-| POST | /edi/v1/inbound/edifact?environment=TEST\|PROD | edi.operate | `text/plain` EDIFACT interchange; returns 201 with the CONTRL text when the partner gets one |
+| POST | /edi/v1/inbound/x12?environment=TEST\|PROD | edi.operate | `text/plain` interchange; 850, 820 and 214 are mapped, 997s matched; returns 201 with 997 text (none for an interchange of 997s) |
+| POST | /edi/v1/inbound/edifact?environment=TEST\|PROD | edi.operate | `text/plain` EDIFACT interchange; returns 201 with the CONTRL text when the partner gets one; a received CONTRL is matched to our outbound EDIFACT |
 | GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | edi.operate | `{items}` newest first, limit 1 to 200 (default 50) |
 | GET | /edi/v1/interchanges/{id} | edi.operate | Messages with canonical documents (party names masked without `edi.pii.view`), the 997 or CONTRL, and `refusal` for a refused interchange |
 | GET | /edi/v1/interchanges/{id}/payload | edi.operate | Raw payload as a segment tree; PII masked without `edi.pii.view`; X12 only (422 EDI-0006 for EDIFACT) |
@@ -401,6 +487,8 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/edi
 Configuration: `DATABASE_URL` (required), `HTTP_ADDR` (default `:8080`),
 `MIGRATE_ON_START` (dev only), `EDI_DUP_WINDOW_DAYS` (default 30), `EDI_ISA_QUALIFIER`
 and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASSAGE),
+`EDI_EDIFACT_ID` and `EDI_EDIFACT_QUALIFIER` (our UNB S002 identity on outbound EDIFACT, default
+PASSAGE/ZZZ; the qualifier may be empty),
 `PASSAGE_SERVICE_NAME=edi` with `PASSAGE_SERVICE_SIGNING_KEY` or `_FILE` (and `PASSAGE_SERVICE_KEY_ID`),
 `EDI_FULFILLMENT_URL`, `EDI_BILLING_URL`, `EDI_SALES_URL` (without a signing key the from-source
 or any source URL is unset the from-source route answers 503), `EDI_ALLOW_BODY_OUTBOUND` (off in the binary; the chart
@@ -412,8 +500,11 @@ are refused), `EDI_AS2_ADDR` (AS2 listener address, off when empty, must differ 
 `EDI_AS2_RATE_BURST` (the listener's limit per endpoint, default 120 and 60; 0 a minute is off),
 `EDI_TRANSPORT_WORKERS=true` (run the dispatcher, which also posts the asynchronous MDNs we owe, and
 the SFTP poller; with the AS2 listener on, some replica must run them),
-`EDI_TRANSPORT_INTERVAL_SECONDS` (default 15) and `EDI_AS2_MDN_TIMEOUT_MINUTES` (how long a delivery
-waits for its asynchronous MDN, default 1440). Chart values
+`EDI_TRANSPORT_INTERVAL_SECONDS` (default 15), `EDI_AS2_MDN_TIMEOUT_MINUTES` (how long a delivery
+waits for its asynchronous MDN, default 1440), `EDI_AS2_TRUST_ROOTS` (PEM bundle of the CAs partner AS2
+certificates must chain to; unset pins certificates only) and `EDI_AS2_CRL_DIR` (CRLs of those CAs,
+needs the roots; chart `transports.trust.rootsConfigMap`/`rootsKey` and `crlConfigMap`, mounted under
+`/etc/passage/edi-trust`). Chart values
 under `transports` set them, mount the Secret `transports.secretName` at
 `/var/run/passage/edi-secrets` and, with `transports.externalSecret.enabled`, create it from the
 Vault path `transports.externalSecret.key` (every property becomes one reference).
@@ -436,17 +527,21 @@ signing uses the standard library only.
 | EDI-0003 | 400 / 413 / 422 | Malformed X12 or EDIFACT interchange (or the other syntax on an inbound route), empty interchange, or over 4 MiB; 422 on reprocess when the stored payload no longer parses; 400 for a punchout document that is not a PunchOutOrderMessage or an OCI post without NEW_ITEM fields |
 | EDI-0004 | 409 | Partner with this ISA or EDIFACT identity already exists in the environment |
 | EDI-0005 | 404 | Partner, interchange or message not found |
-| EDI-0006 | (in 200 map result) / 422 | Transaction set or EDIFACT message type not supported yet; the transaction is rejected (AK5 R, UCM 4); 422 for the raw viewer of an EDIFACT payload |
+| EDI-0006 | (in 200 map result) / 422 | Transaction set (other than 850, 820, 214 and 997) or EDIFACT message type not supported yet; the transaction is rejected (AK5 R, UCM 4); 422 for the raw viewer of an EDIFACT payload |
 | EDI-0007 | 422 | Outbound document breaks a mapping rule (invalid SSCC, totals that do not add up, unknown field, a value holding a delimiter) |
 | EDI-0008 | 409 | The partner is inactive; nothing can be sent to it |
 | EDI-0009 | 409 | Only inbound interchanges are reprocessed (an outbound one is resent) |
 | EDI-0015 | 409 | Nothing to resend: not outbound, its last delivery is not FAILED or REJECTED, or the partner has no AS2 or SFTP transport in the caller's entities |
 | EDI-0016 | 503 | No secret directory is configured (`EDI_SECRETS_DIR`), so AS2 and SFTP transports cannot be saved |
+| EDI-0017 | 409 | An EDIFACT ORDERS, DESADV or INVOIC for a partner without an EDIFACT identity (`edifactId`) |
+| EDI-0018 | 403 | The partner's trade profile binds it to a legal entity outside the caller's scope; it cannot be changed |
+| COM-0428 | 428 | `If-Match` with the partner version is required (PATCH /partners/{id}) |
+| conflict_version | 412 | `If-Match` is not the partner's current version; the response `ETag` is |
 | EDI-0160 | (in 200 map result) | A required 850 segment or element is missing or invalid; rejected |
-| EDI-0161 | (message error) | A received 997 answers no outbound interchange of the partner, or its AK101 does not match; every received CONTRL (no outbound EDIFACT exists yet) |
+| EDI-0161 | (message error) | A received 997 or TA1 answers no outbound interchange of the partner, or the 997's AK101 does not match; a received CONTRL answers no outbound EDIFACT interchange of the partner |
 | idempotency_key_reuse | 422 | `Idempotency-Key` already used with a different request body |
 | EDI-0101 | 422 | Interchange sender (ISA05/ISA06 or UNB S002) is not configured for any partner in the environment, or is not the transport's partner |
-| EDI-0102 | 409 | Duplicate ISA13 or UNB 0020 inside the duplicate window (TA1 025 semantics; no TA1 interchange is sent yet) |
+| EDI-0102 | 409 | Duplicate ISA13 or UNB 0020 inside the duplicate window; over AS2 or SFTP also answered with a TA1 R 025 or a CONTRL code 26 |
 | EDI-0103 | (in 200 map result) | CTT01 does not match the PO1 count; the transaction is rejected |
 | EDI-0105 | (in 200 map result) | No item cross-reference for the line; accepted with errors |
 | EDI-0133 | (in 200 punchout result) | Punchout line dropped: missing part id, quantity, price, price unit, allowed currency or mapped unit |

@@ -1018,6 +1018,14 @@ components:
         unit: { type: string, minLength: 1, maxLength: 16 }
         batchTracked: { type: boolean, default: false }
         serialTracked: { type: boolean, default: false }
+        siteId:
+          type: string
+          format: uuid
+          description: Delivery site of a line without poLineNo (#480), carried on receipt.posted so inventory can book the line. A line with poLineNo takes the order line's site; supplying it is 400.
+        warehouseId:
+          type: string
+          format: uuid
+          description: Delivery warehouse of a line without poLineNo; needs siteId. A line with poLineNo takes the order line's warehouse; supplying it is 400.
     ArrivalRequest:
       type: object
       additionalProperties: false
@@ -1059,6 +1067,8 @@ components:
         amount: { type: [string, 'null'], description: Null until posted. }
         amountAcct: { type: [string, 'null'], description: Null until posted. }
         cwQty: { type: integer, minimum: 1, description: Catch-weight count (cases). qty is the actual weight. }
+        siteId: { type: string, format: uuid, description: The line's delivery site (the purchase order line's, or the one keyed on a line without it); absent when none is known. }
+        warehouseId: { type: string, format: uuid, description: The line's delivery warehouse; absent when none is known. }
     Receipt:
       type: object
       required: [id, receiptNumber, state, version, vendorId, purchaseOrderId, legalEntityId, packingSlip, carrier, receiptDate, currency, exchangeRate, createdAt, lines]

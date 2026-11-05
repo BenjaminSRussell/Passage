@@ -173,6 +173,40 @@ func TestFromSource_810TakesTotalFromBilling(t *testing.T) {
 	}
 }
 
+// The same sources give the EDIFACT DESADV and INVOIC for a partner with a
+// UNB identity, on its EDIFACT counter, idempotent per source document and
+// message type.
+func TestFromSource_DESADVAndINVOICForAnEdifactPartner(t *testing.T) {
+	f := newFake()
+	h, pool, partner := sourceHandler(t, f)
+	putProfile(t, h, partner, profileBody)
+	if rec := fromSource(t, h, partner, "DESADV", srcShipment); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeNoEdifactID {
+		t.Fatalf("without an EDIFACT identity: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := pool.Exec(context.Background(), `update trading_partner set edifact_id = '4012345000009', edifact_qualifier = '14', edifact_contrl = 'REQUESTED'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ set, id, control, want string }{
+		{"DESADV", srcShipment, "1", "UNH+1+DESADV:D:96A:UN'BGM+351+SHP-0001+9'"},
+		{"INVOIC", srcInvoice, "2", "UNH+1+INVOIC:D:96A:UN'BGM+380+INV-1+9'"},
+		{"DESADV", srcShipment, "1", "UNH+1+DESADV:D:96A:UN'"}, // repeat: the recorded interchange
+	} {
+		rec := fromSource(t, h, partner, c.set, c.id)
+		var res store.OutboundResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || (rec.Code != http.StatusCreated && rec.Code != http.StatusOK) ||
+			res.Standard != "EDIFACT" || res.ControlNumber != c.control || !strings.Contains(res.Edifact, c.want) {
+			t.Fatalf("%s: %d %s", c.set, rec.Code, rec.Body.String())
+		}
+	}
+	// The X12 counter is untouched; the 856 still takes ISA13 1.
+	if rec := fromSource(t, h, partner, "856", srcShipment); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"controlNumber":"000000001"`) {
+		t.Fatalf("856: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := fromSource(t, h, partner, "ORDERS", srcShipment); rec.Code != http.StatusBadRequest {
+		t.Fatalf("ORDERS has no source: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestFromSource_RefusalsAndErrors(t *testing.T) {
 	other := "00000000-0000-0000-0000-0000000000ff"
 	cases := []struct {

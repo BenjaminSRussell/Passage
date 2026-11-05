@@ -44,6 +44,10 @@ spec:
               value: {{ .Values.isaSender.qualifier | quote }}
             - name: EDI_ISA_ID
               value: {{ .Values.isaSender.id | quote }}
+            - name: EDI_EDIFACT_ID
+              value: {{ .Values.edifactSender.id | quote }}
+            - name: EDI_EDIFACT_QUALIFIER
+              value: {{ .Values.edifactSender.qualifier | quote }}
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_NAME
               value: edi
@@ -88,6 +92,14 @@ spec:
             - name: EDI_AS2_PUBLIC_URL
               value: {{ .Values.transports.as2.publicUrl | quote }}
             {{- end }}
+            {{- if .Values.transports.trust.rootsConfigMap }}
+            - name: EDI_AS2_TRUST_ROOTS
+              value: /etc/passage/edi-trust/roots/{{ .Values.transports.trust.rootsKey }}
+            {{- end }}
+            {{- if .Values.transports.trust.crlConfigMap }}
+            - name: EDI_AS2_CRL_DIR
+              value: /etc/passage/edi-trust/crl
+            {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
@@ -102,7 +114,7 @@ spec:
             httpGet: { path: /healthz, port: http }
           readinessProbe:
             httpGet: { path: /readyz, port: http }
-          {{- if or .Values.serviceIdentity.signingKeySecret .Values.transports.secretName }}
+          {{- if or .Values.serviceIdentity.signingKeySecret .Values.transports.secretName .Values.transports.trust.rootsConfigMap }}
           volumeMounts:
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
@@ -110,10 +122,19 @@ spec:
             {{- if .Values.transports.secretName }}
             - { name: edi-secrets, mountPath: /var/run/passage/edi-secrets, readOnly: true }
             {{- end }}
+            {{- if .Values.transports.trust.rootsConfigMap }}
+            - { name: edi-trust-roots, mountPath: /etc/passage/edi-trust/roots, readOnly: true }
+            {{- end }}
+            {{- if .Values.transports.trust.crlConfigMap }}
+            - { name: edi-trust-crl, mountPath: /etc/passage/edi-trust/crl, readOnly: true }
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or .Values.serviceIdentity.signingKeySecret .Values.transports.secretName }}
+      {{- if and .Values.transports.trust.crlConfigMap (not .Values.transports.trust.rootsConfigMap) }}
+      {{- fail "transports.trust.crlConfigMap needs transports.trust.rootsConfigMap" }}
+      {{- end }}
+      {{- if or .Values.serviceIdentity.signingKeySecret .Values.transports.secretName .Values.transports.trust.rootsConfigMap }}
       volumes:
         {{- if .Values.serviceIdentity.signingKeySecret }}
         - name: service-identity
@@ -126,5 +147,15 @@ spec:
           secret:
             secretName: {{ .Values.transports.secretName }}
             defaultMode: 0440
+        {{- end }}
+        {{- if .Values.transports.trust.rootsConfigMap }}
+        - name: edi-trust-roots
+          configMap:
+            name: {{ .Values.transports.trust.rootsConfigMap }}
+        {{- end }}
+        {{- if .Values.transports.trust.crlConfigMap }}
+        - name: edi-trust-crl
+          configMap:
+            name: {{ .Values.transports.trust.crlConfigMap }}
         {{- end }}
       {{- end }}

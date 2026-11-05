@@ -586,6 +586,15 @@ test_edi_transport_routes if {
 	not allowed("edi.admin", "POST", "/edi/v1/interchanges/i1:resend")
 }
 
+test_edi_partner_update_and_edifact_inbound_routes if {
+	allowed("edi.admin", "PATCH", "/edi/v1/partners/p1")
+	not allowed("edi.operate", "PATCH", "/edi/v1/partners/p1")
+	not allowed("edi.admin", "PUT", "/edi/v1/partners/p1")
+	not allowed("edi.admin", "DELETE", "/edi/v1/partners/p1")
+	allowed("edi.operate", "POST", "/edi/v1/inbound/edifact")
+	not allowed("edi.admin", "POST", "/edi/v1/inbound/edifact")
+}
+
 granted_duty_known(duty) if data.duties[duty]
 
 test_service_principals_hold_only_known_unprivileged_duties if {

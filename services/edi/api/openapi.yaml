@@ -79,20 +79,82 @@ paths:
               schema: { $ref: '#/components/schemas/Partner' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: patchPartner
+      summary: Change a trading partner (JSON merge patch) under If-Match
+      description: >
+        Changes the name, ISA identity, ack SLA, EDIFACT identity and CONTRL mode, or status of a
+        partner. If-Match must carry the version (the ETag of getPartner): absent is 428 COM-0428,
+        stale is 412 conflict_version with the current ETag. Members left out keep their value;
+        null or "" for edifactId removes the EDIFACT identity with its qualifier and CONTRL mode.
+        The environment cannot change. A partner whose trade profile binds it to a legal entity is
+        changed only by callers scoped to that entity (403 EDI-0018), as its profile and transport
+        are; a partner without a profile by any caller of the tenant with the duty. Setting status
+        inactive stops inbound receipt (its senders no longer resolve), the AS2 listener (404) and
+        outbound documents (EDI-0008).
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, example: '"3"' }
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/PartnerPatch' }
+          application/json:
+            schema: { $ref: '#/components/schemas/PartnerPatch' }
+      responses:
+        '200':
+          description: The changed partner; ETag carries its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Partner' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: Missing duty, or EDI-0018 the partner is bound to a legal entity outside the caller's scope
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0004 another partner has this ISA or EDIFACT identity in the environment
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412':
+          description: conflict_version — If-Match is not the current version (the response ETag is)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '428':
+          description: COM-0428 — If-Match is required
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
   /edi/v1/partners/{id}/outbound:
     post:
       operationId: createOutbound
-      summary: Generate an outbound 855, 856, 810, 820 or 214 for the partner
+      summary: Generate an outbound 855, 856, 810, 820 or 214, or an EDIFACT ORDERS, DESADV or INVOIC, for the partner
       description: >
         Builds the transaction from its canonical document (BR-35.2 856 S/O/P/I with SSCC-18,
         BR-35.3 810, 855 acknowledgment, 820 remittance whose items add up to the payment, 214
         shipment status), wraps it in an X12 00401 interchange from our identity
         (EDI_ISA_QUALIFIER/EDI_ISA_ID) to the partner with the next gap-free control number
         (ISA13 and GS06, BR-35.5) and records it with ackStatus PENDING until the partner's 997 is
-        matched. The message stays MAPPED: AS2/SFTP transmission is not built yet. A document that
-        breaks a mapping rule is 422 EDI-0007. Served only when EDI_ALLOW_BODY_OUTBOUND=true
-        (tests and development); production generates from the owning services through
-        outbound:from-source.
+        matched. ORDERS, DESADV (held to the 856 rules) and INVOIC (held to the 810 rules) are
+        written as EDIFACT D.96A in a UNOC syntax 3 interchange from our UNB identity
+        (EDI_EDIFACT_ID/EDI_EDIFACT_QUALIFIER) to the partner's edifactId, asking for a CONTRL
+        (UNB 0031 = 1), with the next number of the partner's gap-free EDIFACT counter (the one
+        the CONTRLs we send it use) as UNB 0020; the partner's CONTRL is matched to it. With an
+        AS2 or SFTP transport the interchange is queued for delivery (delivery); the message
+        becomes SENT when the transport confirms receipt. A document that breaks a mapping rule
+        is 422 EDI-0007. Served only when EDI_ALLOW_BODY_OUTBOUND=true (tests and development);
+        production generates from the owning services through outbound:from-source.
       x-passage-duty: edi.operate
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -117,7 +179,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
-          description: EDI-0008 — the partner is inactive
+          description: EDI-0008 — the partner is inactive; EDI-0017 — an EDIFACT message for a partner without edifactId
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -213,8 +275,10 @@ paths:
   /edi/v1/partners/{id}/outbound:from-source:
     post:
       operationId: outboundFromSource
-      summary: Generate the 856 from a fulfillment shipment or the 810 from a billing invoice
+      summary: Generate the 856 or DESADV from a fulfillment shipment, or the 810 or INVOIC from a billing invoice
       description: >
+        DESADV and INVOIC are the EDIFACT counterparts built from the same canonical ASN and
+        invoice (see createOutbound for the envelope); they need the partner's edifactId.
         Reads the shipment (with its sales order for the customer PO) or the invoice from its owning
         service under a service grant limited to the read duties fulfillment.shipment.read,
         billing.invoice.read and sales.order.lookup, for the legal entity of the partner's trade
@@ -249,7 +313,7 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
-          description: EDI-0008 partner inactive, EDI-0012 no trade profile, EDI-0013 source not final
+          description: EDI-0008 partner inactive, EDI-0012 no trade profile, EDI-0013 source not final, EDI-0017 DESADV or INVOIC for a partner without edifactId
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -693,12 +757,20 @@ paths:
       description: >
         Identifies the partner by ISA sender, rejects duplicate ISA13 values inside the
         duplicate window (EDI-0102), records every transaction and returns the 997 generated in the
-        same transaction. Unknown senders are EDI-0101. A 997 group (GS01 FA) from the partner is
+        same transaction. Unknown senders are EDI-0101. The 850 is mapped onto the canonical order,
+        the 820 onto the remittance and the 214 onto the shipment status, each published with
+        dev.passage.edi.message.received.v1 (and message.failed when a rule breaks, AK5 R or E);
+        other sets are rejected (AK5 R, EDI-0006). A 997 group (GS01 FA) from the partner is
         matched by AK102 to the outbound interchange with that control number: answered messages
         become ACKED (AK5 A/E) or FAILED (AK5 R), the outbound interchange takes the AK9 status and
         dev.passage.edi.message.acked.v1 is published per answered message. The 997 itself is
         POSTED, or FAILED with EDI-0161 when it answers nothing; 997s are never acknowledged, so
-        ack997 is absent for an interchange of 997s only.
+        ack997 is absent for an interchange of 997s only. TA1 segments (before the first GS) are
+        matched by TA101 to our outbound interchange with that ISA13: a TA1 R rejects every
+        message (FAILED, the interchange REJECTED, message.acked per message), a TA1 A or E is
+        noted (the 997 answers the groups); a TA1 is POSTED, or FAILED with EDI-0161, and never
+        answered. A duplicate is 409 here; over AS2 or SFTP it is also answered with a TA1 R 025
+        queued to the partner.
       x-passage-duty: edi.operate
       parameters:
         - name: environment
@@ -738,8 +810,12 @@ paths:
         are 400. A CONTRL is returned (and queued over the partner's transport) when the partner's
         edifactContrl is ALWAYS, or REQUESTED and UNB 0031 is 1: UCI 7 when a message is
         accepted, UCI 4 when none is, UCM 4 with UCS and UCD for each rejected message, UCF per
-        group with a rejected message. Received CONTRLs are recorded FAILED with EDI-0161 (no
-        outbound EDIFACT exists to match) and never acknowledged.
+        group with a rejected message. A CONTRL from the partner is matched by its UCI 0020 to our
+        outbound EDIFACT interchange with that reference, as a 997 is by AK102: the messages it
+        answers become ACKED, or FAILED when the UCI is 4 or a UCM 4 names them, the interchange
+        takes the CONTRL's status and acked_at, and dev.passage.edi.message.acked.v1 is published
+        per answered message. The CONTRL is POSTED, or FAILED with EDI-0161 when it answers
+        nothing; CONTRLs are never acknowledged.
       x-passage-duty: edi.operate
       parameters:
         - name: environment
@@ -1192,6 +1268,7 @@ components:
           properties:
             ack997: { type: string, description: Serialized X12 997 sent back to the partner }
             contrl: { type: string, description: Serialized EDIFACT CONTRL sent back to the partner (EDIFACT interchanges) }
+            ta1: { type: string, description: 'Serialized X12 TA1 sent back instead of a 997: TA1 R for an interchange refused at the envelope (TA105 001, 021, 023, 024) or a duplicate (025)' }
             messages:
               type: array
               items:
@@ -1202,7 +1279,7 @@ components:
                   transactionSet: { type: string }
                   stControl: { type: string }
                   status: { type: string, enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED] }
-                  canonical: { type: object, description: 'Canonical document: 850 or ORDERS Order, 997 FunctionalAck, CONTRL ContrlAck, outbound 855 Ack855, 856 or DESADV ASN, 810 or INVOIC Invoice' }
+                  canonical: { type: object, description: 'Canonical document: 850 or ORDERS Order, 820 Remittance, 214 ShipmentStatus, 997 FunctionalAck, CONTRL ContrlAck, TA1 InterchangeAck (control, date, time, code, note), outbound 855 Ack855, 856 or DESADV ASN, 810 or INVOIC Invoice' }
                   error: { type: string }
             deliveries:
               type: array
@@ -1225,6 +1302,19 @@ components:
           enum: [REQUESTED, ALWAYS, NEVER]
           default: REQUESTED
           description: When inbound EDIFACT is answered with a CONTRL; REQUESTED follows UNB 0031. Needs edifactId.
+    PartnerPatch:
+      type: object
+      additionalProperties: false
+      description: JSON merge patch of a partner; environment is not a member
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        isaQualifier: { type: string, pattern: '^[A-Z0-9]{2}$' }
+        isaId: { type: string, pattern: '^[A-Za-z0-9]{1,15}$' }
+        ackSlaMinutes: { type: integer, minimum: 5, maximum: 1440 }
+        status: { type: string, enum: [active, inactive] }
+        edifactId: { type: [string, 'null'], description: null or "" removes the EDIFACT identity }
+        edifactQualifier: { type: [string, 'null'] }
+        edifactContrl: { type: [string, 'null'], enum: [REQUESTED, ALWAYS, NEVER, null] }
     Partner:
       type: object
       required: [id, name, isaQualifier, isaId, environment, ackSlaMinutes, status, version, createdAt]
@@ -1249,6 +1339,11 @@ components:
         stControl: { type: string }
         status: { type: string, enum: [MAPPED, FAILED] }
         order: { type: object, description: Canonical order (850 only) }
+        document:
+          description: Canonical remittance (820) or shipment status (214)
+          oneOf:
+            - $ref: '#/components/schemas/Remittance'
+            - $ref: '#/components/schemas/ShipmentStatus'
         issues:
           type: array
           items: { $ref: '#/components/schemas/Issue' }
@@ -1290,31 +1385,37 @@ components:
       additionalProperties: false
       required: [transactionSet, sourceId]
       properties:
-        transactionSet: { type: string, enum: ['856', '810'] }
-        sourceId: { type: string, format: uuid, description: shipment id for 856, invoice id for 810 }
+        transactionSet: { type: string, enum: ['856', '810', DESADV, INVOIC] }
+        sourceId: { type: string, format: uuid, description: shipment id for 856 and DESADV, invoice id for 810 and INVOIC }
     OutboundRequest:
       type: object
       additionalProperties: false
       required: [transactionSet, document]
       properties:
-        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214'] }
+        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214', ORDERS, DESADV, INVOIC] }
         document:
-          description: The canonical document for the set; unknown fields are refused. Decimals are strings.
+          description: >
+            The canonical document for the set; unknown fields are refused. Decimals are strings.
+            DESADV takes the ASN, INVOIC the Invoice and ORDERS the canonical order an inbound 850
+            maps to (purpose, orderType, poNumber, poDate, ship-to, lines).
           oneOf:
             - $ref: '#/components/schemas/Ack855'
             - $ref: '#/components/schemas/ASN'
             - $ref: '#/components/schemas/Invoice'
             - $ref: '#/components/schemas/Remittance'
             - $ref: '#/components/schemas/ShipmentStatus'
+            - { type: object, description: Canonical order (ORDERS) }
     OutboundResult:
       type: object
-      required: [interchangeId, messageId, transactionSet, controlNumber, x12]
+      required: [interchangeId, messageId, transactionSet, controlNumber]
       properties:
         interchangeId: { type: string, format: uuid }
         messageId: { type: string, format: uuid }
-        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214'] }
-        controlNumber: { type: string, description: ISA13, nine digits }
-        x12: { type: string, description: The serialized interchange }
+        standard: { type: string, enum: [X12, EDIFACT] }
+        transactionSet: { type: string, enum: ['855', '856', '810', '820', '214', ORDERS, DESADV, INVOIC] }
+        controlNumber: { type: string, description: 'ISA13, nine digits; for EDIFACT the UNB 0020 reference' }
+        x12: { type: string, description: The serialized X12 interchange }
+        edifact: { type: string, description: The serialized EDIFACT interchange }
         delivery:
           description: The queued delivery when the partner has an AS2 or SFTP transport in the caller's legal entities
           allOf: [{ $ref: '#/components/schemas/Delivery' }]
@@ -1361,7 +1462,13 @@ components:
         partnerAs2Id: { type: string, pattern: '^[A-Za-z0-9._@:-]{1,128}$' }
         ourAs2Id: { type: string, pattern: '^[A-Za-z0-9._@:-]{1,128}$' }
         url: { type: string, format: uri, description: The partner's AS2 URL (https) }
-        partnerCertificate: { type: string, description: 'One PEM certificate (RSA of 2048 bits or more, or ECDSA), valid now; RSA when encrypting' }
+        partnerCertificate:
+          type: string
+          description: >
+            The partner's PEM certificate (RSA of 2048 bits or more, or ECDSA), valid now, RSA when encrypting; it is
+            pinned (signatures are verified against it). It may be followed by up to five intermediate CA certificates.
+            With EDI_AS2_TRUST_ROOTS the certificate must chain to a trust root through them, and with EDI_AS2_CRL_DIR
+            every certificate of the chain needs a current CRL from its issuer that does not list it; otherwise 400.
         signingKeyRef: { type: string, pattern: '^[a-z0-9]([a-z0-9._-]{0,61}[a-z0-9])?$', description: Name of the secret file holding our PEM private key and certificate }
         signingAlgorithm: { type: string, enum: [sha-256, sha-384, sha-512], default: sha-256 }
         encryptionAlgorithm: { type: string, enum: [none, aes128-cbc, aes192-cbc, aes256-cbc], default: none }
@@ -1398,6 +1505,14 @@ components:
             mdnUrl: { type: string, description: Where the partner posts asynchronous MDNs }
             partnerCertificateSha256: { type: string }
             partnerCertificateNotAfter: { type: string, format: date-time }
+            partnerCertificateTrust:
+              type: string
+              enum: [pinned, trusted, untrusted, revocation-unknown]
+              description: >
+                pinned without trust roots; otherwise whether the certificate chains to a trust root and is not revoked
+                now (untrusted: no chain or revoked, refused for good; revocation-unknown: no current CRL from an issuer,
+                refused until the CRL is refreshed)
+            partnerCertificateTrustError: { type: string }
         secrets:
           type: object
           description: Per reference field, whether the secret is ok, missing or malformed (never its content)

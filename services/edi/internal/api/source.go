@@ -61,8 +61,9 @@ type sourceRequest struct {
 	SourceID       string `json:"sourceId"`
 }
 
-// outboundFromSource generates the 856 from a fulfillment shipment or the 810
-// from a billing invoice. The documents are read from their owning services
+// outboundFromSource generates the 856 (or the EDIFACT DESADV) from a
+// fulfillment shipment or the 810 (or INVOIC) from a billing invoice. The
+// documents are read from their owning services
 // under a service grant limited to the read duty, for the legal entity of the
 // partner's trade profile, and must belong to that legal entity and customer.
 // Generation is idempotent per source document: asking again returns the
@@ -79,8 +80,10 @@ func (a *API) outboundFromSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if req.TransactionSet != "856" && req.TransactionSet != "810" {
-		fields["transactionSet"] = "must be 856 or 810"
+	switch req.TransactionSet {
+	case "856", "810", "DESADV", "INVOIC":
+	default:
+		fields["transactionSet"] = "must be 856, 810, DESADV or INVOIC"
 	}
 	if !validID(req.SourceID) {
 		fields["sourceId"] = "must be a UUID"
@@ -124,7 +127,7 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		err error
 	)
 	switch req.TransactionSet {
-	case "856":
+	case "856", "DESADV":
 		var sh domain.SourceShipment
 		if sh, err = a.Sources.Shipment(ctx, p.LegalEntityID, req.SourceID); err != nil {
 			return nil, err

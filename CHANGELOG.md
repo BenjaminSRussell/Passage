@@ -10,6 +10,62 @@ release may change public APIs.
 
 ### Added
 
+- Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
+  batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
+  equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
+  that names the line (`inventory_transaction_origin.line_source_id`, inventory migrations 0036 and 0037, the index
+  built concurrently). Sales' `:record-progress` lines take optional `tracking` entries on a DELIVERED report
+  (batch, serial, quantity, and on a catch-weight line split over several entries each entry's `actualWeight`),
+  passed through on `orderprogress.recorded`; inventory issues each entry under its batch and serial at its own
+  row's running average. Receipt cancellations and cancelled packing slips offset every entry of the line. Tracking
+  that cannot be booked parks with the new `INV-PST-005`. Location is still not booked: receiving names it by id and
+  fulfillment by code. Receiving arrival and direct receipt lines without a purchase order line take `siteId` and
+  `warehouseId`, carried on `receipt.posted`, so inventory books them instead of parking them.
+
+- Partner AS2 certificate chain and revocation checks in edi (#483): with the new `EDI_AS2_TRUST_ROOTS` (a PEM bundle of
+  CA certificates; chart `transports.trust.rootsConfigMap`) a partner's pinned AS2 certificate must also chain to a
+  trust root through the intermediates now accepted after it in `partnerCertificate`, and with `EDI_AS2_CRL_DIR`
+  (chart `transports.trust.crlConfigMap`) every certificate of the chain needs a current CRL from its issuer that does
+  not list it. Both fail closed when a transport is saved (400) and at every use (`internal/certtrust`): an untrusted
+  or revoked certificate gets 403 at the AS2 listener and fails outbound deliveries at once, a missing or expired CRL
+  answers 503 and backs deliveries off until it is refreshed. The files are reread when they change; nothing is
+  fetched from the network (no OCSP or CRL distribution points). `GET /partners/{id}/transport` shows
+  `partnerCertificateTrust`. Pinning is unchanged: signatures are still verified against the stored certificate only.
+- Partner update in edi (#483): `PATCH /edi/v1/partners/{id}` (duty `edi.admin`, seeded in `policies/authz/data.json`
+  next to the existing partner read) changes a partner's name, ISA identity, ack SLA, status (inactive stops receipt,
+  the AS2 listener and outbound documents) and EDIFACT identity as a JSON merge patch under `If-Match` on the partner
+  version (428 `COM-0428`, 412 `conflict_version`, new ETag on 200); the environment cannot change. A partner bound
+  to a legal entity by its trade profile is changed only by callers scoped to that entity (403 EDI-0018), read through
+  a SECURITY DEFINER `edi_partner_in_entity_scope()` over a trigger-maintained `partner_entity_index` (migration 0009,
+  allowlisted in `tools/rlscheck`); `passage_app` gets UPDATE on the changed columns only. The policy seeds also gain
+  the missing `POST /edi/v1/inbound/edifact` route under `edi.operate`, the duty the service already requires for it.
+- TA1 interchange acknowledgments and duplicate answers in edi (#483): the X12 codec reads and writes TA1 segments.
+  An interchange an AS2 or SFTP transport brought from the authenticated partner that fails at the envelope (IEA
+  missing, IEA01 or IEA02 wrong, no group, content after IEA) is answered with a TA1 R and its TA105 code (023, 021,
+  001, 024) instead of a 997, and a duplicate interchange (EDI-0102) with a TA1 R 025, or for EDIFACT a CONTRL UCI 4
+  with code 26 (AC-35.5). The answer is recorded as a refused interchange in its own transaction after the rolled-back
+  receipt, takes the next number of the partner's gap-free counter, is shown as `ta1` on the interchange and is
+  queued back over the partner's transport; the duplicate's AS2 message or file is marked DONE so a retransmission is
+  not answered twice. A TA1 from the partner is matched to our outbound interchange (TA1 R rejects its messages and
+  publishes `message.acked`). The operator routes still answer duplicates with 409 only.
+- Inbound 820 and 214 receipt in edi (#483): the X12 receipt maps the 820 onto the canonical remittance and the 214
+  onto the shipment status next to the 850, with the same 997 codes, `dev.passage.edi.message.received.v1` and
+  `message.failed`; reprocess and `maps:test` (new `document` field) cover them, and party names are masked without
+  `edi.pii.view`. Posting received documents into sales, transport or receivables stays a handoff and no service grant
+  was added: sales' `sales.channel.intake` route needs product, site, warehouse and invoice-account ids the 850 and
+  ORDERS do not carry (BR-35.1 item cross-reference), transport's tracking ingest needs a load id and stop, and
+  receivables has no remittance route (`services/edi/NOT-IMPLEMENTED.md`, Handoffs).
+- Outbound EDIFACT with CONTRL matching (#483): edi's `POST /edi/v1/partners/{id}/outbound` builds ORDERS, DESADV
+  (held to the 856 rules) and INVOIC (held to the 810 rules), and `outbound:from-source` builds DESADV from the
+  fulfillment shipment and INVOIC from the billing invoice under the existing read grant. Each goes in a UNOC syntax
+  3 interchange from our UNB identity (new `EDI_EDIFACT_ID`/`EDI_EDIFACT_QUALIFIER`, default PASSAGE/ZZZ, chart
+  `edifactSender`) to the partner's `edifactId` (409 EDI-0017 without one), asks for a CONTRL, takes UNB 0020 from the
+  partner's gap-free EDIFACT counter (shared with the CONTRLs we send it), and is queued over the partner's AS2 or
+  SFTP transport like X12. A CONTRL from the partner is now matched by UCI 0020 to that interchange the way a 997 is
+  matched: messages become ACKED, or FAILED for UCI 4 or a UCM 4 naming them, the interchange takes the CONTRL status
+  and `acked_at`, and `dev.passage.edi.message.acked.v1` is published per message (its `transaction_set` and
+  `control_number` now also carry EDIFACT values); an unmatched CONTRL stays FAILED with EDI-0161. The outbound result
+  gains `standard` and `edifact` (`x12` is omitted for EDIFACT).
 - Inbound EDIFACT over the transports, with CONTRL (#483): the edi receipt tells X12 (ISA) from EDIFACT (UNA/UNB)
   by the first segment, so the AS2 listener, the SFTP poller and the new `POST /edi/v1/inbound/edifact` take EDIFACT
   interchanges. They are read with UNG/UNE functional groups and every count and reference checked; the UNB sender
@@ -49,6 +105,16 @@ release may change public APIs.
   `deploy/kafka/inventory-consumer.yaml` adds the consumer's KafkaUser, literal ACLs and dead-letter topic, and
   `make -C deploy test-argocd` checks consumer KafkaUsers against their charts. The consumer stays off in dev, like
   the other consumers.
+- Sales and fulfillment outboxes reach Kafka in dev (#480): new `outbox-sales` and `outbox-fulfillment` Debezium
+  connectors (publication and CDC role grants in sales migrations 0039 and 0040 and fulfillment migrations 0029 and
+  0030, each with a re-run test; own `debezium_cdc_sales` / `debezium_cdc_fulfillment` roles and `passage_sales` /
+  `passage_fulfillment` databases in the dev Postgres, init-rev 9; Vault keys `passage/dev/sales-postgres/cdc-password`
+  and `passage/dev/fulfillment-postgres/cdc-password`). Both route by event type to `passage.<context>.<entity>`, the
+  AsyncAPI channel, because these services write several entities under one aggregate_type: `orderprogress.recorded`
+  (aggregate `order`) lands on `passage.sales.orderprogress` and `packingslip.*` (aggregate `shipment`) on
+  `passage.fulfillment.packingslip`, the topics the inventory postings consumer reads. The debezium user gets a literal
+  ACL per channel; `make -C deploy test-argocd` checks the route and the ACLs against each service's AsyncAPI, and the
+  enricher chain test runs Debezium's EventRouter with the type route.
 - Live tender trigger (#426): transport's `POST /v1/transport/loads/{id}:release` (duty `transport.load.tender`,
   migration 0010) applies the tender gates and publishes `dev.passage.tms.load.released.v1` with the releasing user
   and legal-entity scope from the verified caller; workflow-ts's new Kafka consumer (`src/eventConsumer.ts`, kafkajs)
@@ -164,6 +230,9 @@ release may change public APIs.
 
 ### Fixed
 
+- Inventory postings consumer (#480): replaying a sales delivery that emptied its on-hand row no longer fails as a
+  reused Idempotency-Key (the row's running average had moved to zero, so the replay was a different request);
+  entries already booked are skipped.
 - Production GL posting sent the journal number as the ledger `documentId`, which the ledger refuses (it must be a
   UUID); it now sends the journal id (the order id for a settlement) and carries the number as line text (#478).
 - Ledger posting no longer deadlocks (`40P01`) when two ledgers of one tenant post the same new dimension

@@ -607,12 +607,25 @@ func TestTransportAS2_InboundVerifiedRecordedAndAcknowledged(t *testing.T) {
 		t.Fatalf("partner got %+v", got)
 	}
 	// A retransmission of the same message, and a new message repeating the
-	// interchange, are duplicates: processed with a warning, nothing new.
-	for _, id := range []string{"po-1@distributor", "po-1-again@distributor"} {
+	// interchange, are duplicates: processed with a warning, nothing new. The
+	// new message is also answered with a TA1 R 025 (AC-35.5) on the next
+	// control number; resending that message is not answered again.
+	for _, id := range []string{"po-1@distributor", "po-1-again@distributor", "po-1-again@distributor"} {
 		r, err := send(id, x12Control(t, "000000101"))
 		if err != nil || !strings.Contains(r.Disposition, "processed/warning: duplicate-document") {
 			t.Fatalf("%s: %+v %v", id, r, err)
 		}
+	}
+	if n := e.count(`select count(*) from interchange where refusal like 'EDI-0102:%' and control_number = '000000101' and ack_status = 'REJECTED'`); n != 1 {
+		t.Fatalf("%d recorded duplicates", n)
+	}
+	e.dispatch(1)
+	got = e.peer.messages()
+	if ta1 := string(got[len(got)-1].Payload); !strings.Contains(ta1, "*000000002*0*T*>~TA1*000000101*261021*1200*R*025~") || !strings.HasSuffix(ta1, "*R*025~IEA*0*000000002~") {
+		t.Fatalf("TA1 %s", ta1)
+	}
+	if n := e.count(`select count(*) from transport_delivery where payload_kind = 'ACK' and filename like 'TA1\_000000101\_%.x12'`); n != 1 {
+		t.Fatal("TA1 delivery file name")
 	}
 	// Signed by a key the profile does not pin: refused before parsing.
 	forged := e.partnerClient(v.AS2Inbound.URL, transporttest.NewKeyPair(t, "DISTRIBUTOR", false))
@@ -640,8 +653,8 @@ func TestTransportAS2_InboundVerifiedRecordedAndAcknowledged(t *testing.T) {
 	if n := e.count(inbound + ` and refusal is null`); n != 1 {
 		t.Fatalf("%d inbound interchanges after refusals", n)
 	}
-	if n := e.count(inbound + ` and refusal is not null`); n != 1 {
-		t.Fatalf("%d refused interchanges", n)
+	if n := e.count(inbound + ` and refusal is not null`); n != 2 {
+		t.Fatalf("%d refused interchanges (the duplicate and the foreign sender)", n)
 	}
 	// Wrong AS2-To, an unknown endpoint, and headers claiming a tenant change nothing.
 	c.Partner.ID = "SOMEONE"

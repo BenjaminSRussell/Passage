@@ -1063,11 +1063,12 @@
     "edi.admin": {"permissions": [
       {"resource": "/edi/v1/maps:test", "methods": ["POST"]},
       {"resource": "/edi/v1/partners", "methods": ["GET", "POST"]},
-      {"resource": "/edi/v1/partners/*", "methods": ["GET"]},
+      {"resource": "/edi/v1/partners/*", "methods": ["GET", "PATCH"]},
       {"resource": "/edi/v1/partners/*/trade-profile", "methods": ["PUT"]},
       {"resource": "/edi/v1/partners/*/transport", "methods": ["GET", "PUT"]}
     ]},
     "edi.operate": {"permissions": [
+      {"resource": "/edi/v1/inbound/edifact", "methods": ["POST"]},
       {"resource": "/edi/v1/inbound/x12", "methods": ["POST"]},
       {"resource": "/edi/v1/interchanges", "methods": ["GET"]},
       {"resource": "/edi/v1/interchanges/*", "methods": ["GET"]},

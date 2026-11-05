@@ -78,9 +78,10 @@ func (p Partner) Edifact() *domain.EdifactIdentity {
 
 // Message is one transaction set (X12) or message (EDIFACT: TransactionSet
 // is the UNH message type, STControl the UNH 0062 reference) inside a
-// received interchange. Ack is set for a parsed 997: ReceiveInterchange
-// matches it to the outbound interchange it answers and sets Status to POSTED
-// (matched) or FAILED (no match).
+// received interchange. Ack is set for a parsed 997, Contrl for a parsed
+// CONTRL and TA1 for a TA1 segment (TransactionSet TA1, STControl its TA101):
+// ReceiveInterchange matches it to the outbound interchange it answers and
+// sets Status to POSTED (matched) or FAILED (no match).
 type Message struct {
 	ID             string
 	TransactionSet string
@@ -89,6 +90,8 @@ type Message struct {
 	Canonical      []byte
 	Error          string
 	Ack            *domain.FunctionalAck
+	Contrl         *domain.ContrlAck
+	TA1            *domain.InterchangeAck
 }
 
 // Inbound is one received interchange ready to be recorded. Standard is X12
@@ -165,7 +168,10 @@ type InterchangeDetail struct {
 	AckPayload string `json:"ack997,omitempty"`
 	// Contrl is the CONTRL sent back for an inbound EDIFACT interchange (the
 	// ack997 field stays empty for EDIFACT).
-	Contrl     string          `json:"contrl,omitempty"`
+	Contrl string `json:"contrl,omitempty"`
+	// TA1 is the TA1 interchange sent back instead of a 997 for an X12
+	// interchange refused at the interchange level or as a duplicate.
+	TA1        string          `json:"ta1,omitempty"`
 	Messages   []MessageDetail `json:"messages"`
 	Deliveries []DeliveryView  `json:"deliveries,omitempty"`
 }
@@ -350,6 +356,11 @@ func nextControl(ctx context.Context, tx pgx.Tx, tid, partnerID, standard string
 	return n, err
 }
 
+// acknowledgment reports whether a received message is a partner's
+// acknowledgment (997, CONTRL, TA1), which is matched, never mapped or
+// acknowledged.
+func acknowledgment(set string) bool { return set == "997" || set == "CONTRL" || set == "TA1" }
+
 // standardOf is the stored standard of an inbound interchange (X12 when
 // unset) and the set id of the acknowledgment that answers it.
 func standardOf(standard string) (string, string) {
@@ -402,7 +413,17 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 					return err
 				}
 			}
-			if (m.TransactionSet == "997" || m.TransactionSet == "CONTRL") && m.Status == "FAILED" && status == string(domain.StatusAccepted) {
+			if m.Contrl != nil {
+				if err := matchContrl(ctx, tx, tid, in.PartnerID, &m); err != nil {
+					return err
+				}
+			}
+			if m.TA1 != nil {
+				if err := matchTA1(ctx, tx, tid, in.PartnerID, &m); err != nil {
+					return err
+				}
+			}
+			if acknowledgment(m.TransactionSet) && m.Status == "FAILED" && status == string(domain.StatusAccepted) {
 				status = string(domain.StatusAcceptedWithErrors)
 			}
 			messages = append(messages, m)
@@ -441,7 +462,7 @@ func (s *Store) ReceiveInterchange(ctx context.Context, in Inbound) (Received, e
 				return err
 			}
 			if ack != "" {
-				if _, err := enqueueDelivery(ctx, tx, tid, in.PartnerID, interchangeID, "ACK", ackSet, in.ISAControl); err != nil {
+				if _, err := enqueueDelivery(ctx, tx, tid, in.PartnerID, interchangeID, "ACK", standard, ackSet, in.ISAControl); err != nil {
 					return err
 				}
 			}
@@ -505,6 +526,8 @@ func (s *Store) GetInterchange(ctx context.Context, id string) (InterchangeDetai
 		switch {
 		case ack != nil && out.Standard == domain.SyntaxEdifact:
 			out.Contrl = *ack
+		case ack != nil && domain.IsTA1Interchange(*ack):
+			out.TA1 = *ack
 		case ack != nil:
 			out.AckPayload = *ack
 		}

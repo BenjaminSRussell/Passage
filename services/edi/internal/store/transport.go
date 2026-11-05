@@ -208,8 +208,10 @@ type DeliveryView struct {
 
 // enqueueDelivery records a PENDING delivery of the interchange over the
 // partner's transport when it has an AS2 or SFTP transport the caller may
-// see; otherwise it does nothing and returns nil.
-func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchangeID, payloadKind, setID, control string) (*DeliveryView, error) {
+// see; otherwise it does nothing and returns nil. standard (X12 or EDIFACT)
+// is the syntax of what is sent, setID the transaction set, message type or
+// TA1 that names the file.
+func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchangeID, payloadKind, standard, setID, control string) (*DeliveryView, error) {
 	var kind, entity string
 	err := tx.QueryRow(ctx, `select kind, legal_entity_id::text from partner_transport where partner_id = $1`, partnerID).Scan(&kind, &entity)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && kind == domain.TransportAPI) {
@@ -221,8 +223,8 @@ func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchange
 	id := ids.New()
 	compact := strings.ReplaceAll(id, "-", "")
 	ext := ".x12"
-	if !isDigitsOnly(setID) {
-		ext = ".edi" // an EDIFACT message type (CONTRL), not an X12 set id
+	if standard == domain.SyntaxEdifact {
+		ext = ".edi"
 	}
 	msgID := "edi-" + compact + "@passage"
 	filename := fmt.Sprintf("%s_%s_%s%s", setID, fileSafe(control), compact[:12], ext)
@@ -233,15 +235,6 @@ func enqueueDelivery(ctx context.Context, tx pgx.Tx, tid, partnerID, interchange
 		return nil, err
 	}
 	return &d, nil
-}
-
-func isDigitsOnly(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return s != ""
 }
 
 // fileSafe turns a control number into a file name part: an EDIFACT UNB05
@@ -295,12 +288,12 @@ func (s *Store) Resend(ctx context.Context, interchangeID string) (DeliveryView,
 		if err != nil {
 			return err
 		}
-		var partnerID, direction, control, setID, status string
-		err = tx.QueryRow(ctx, `select i.partner_id::text, i.direction, i.control_number,
+		var partnerID, direction, standard, control, setID, status string
+		err = tx.QueryRow(ctx, `select i.partner_id::text, i.direction, i.standard, i.control_number,
 			coalesce((select m.transaction_set from message m where m.interchange_id = i.id order by m.st_control limit 1), ''),
 			coalesce((select d.status from transport_delivery d where d.interchange_id = i.id and d.payload_kind = 'DOCUMENT'
 				order by d.created_at desc, d.id desc limit 1), '')
-			from interchange i where i.id = $1 for update of i`, interchangeID).Scan(&partnerID, &direction, &control, &setID, &status)
+			from interchange i where i.id = $1 for update of i`, interchangeID).Scan(&partnerID, &direction, &standard, &control, &setID, &status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -310,7 +303,7 @@ func (s *Store) Resend(ctx context.Context, interchangeID string) (DeliveryView,
 		if direction != "OUT" || (status != "FAILED" && status != "REJECTED") {
 			return ErrNotResendable
 		}
-		d, err := enqueueDelivery(ctx, tx, tid, partnerID, interchangeID, "DOCUMENT", setID, control)
+		d, err := enqueueDelivery(ctx, tx, tid, partnerID, interchangeID, "DOCUMENT", standard, setID, control)
 		if err != nil {
 			return err
 		}
@@ -671,19 +664,25 @@ func recordInboundDone(ctx context.Context, tx pgx.Tx, tid, partnerID, interchan
 }
 
 // Refusal is an interchange a transport brought from an authenticated
-// partner that the receipt refused as a whole (its syntax, or a sender that
-// is not the partner), with the negative 997 or CONTRL that answers it.
-// Standard is X12 or EDIFACT, Control the ISA13 or UNB05 as read, Reason
-// the refusal. BuildAck works as Inbound.BuildAck.
+// partner that the receipt refused as a whole (its syntax, a sender that is
+// not the partner, or a duplicate control number), with the negative 997,
+// TA1 or CONTRL that answers it. Standard is X12 or EDIFACT, Control the
+// ISA13 or UNB05 as read, Reason the refusal. BuildAck works as
+// Inbound.BuildAck. AckSet names the acknowledgment's delivery file (997 or
+// CONTRL by standard when empty, TA1). SourceStatus is what the transport
+// source becomes: PARKED (the default: a retransmission is refused again) or
+// DONE (a duplicate: a retransmission is a duplicate again).
 type Refusal struct {
-	PartnerID string
-	Standard  string
-	Version   string
-	Control   string
-	Raw       string
-	Reason    string
-	BuildAck  func(next func() (int64, error)) (string, error)
-	Source    InboundSource
+	PartnerID    string
+	Standard     string
+	Version      string
+	Control      string
+	Raw          string
+	Reason       string
+	AckSet       string
+	SourceStatus string
+	BuildAck     func(next func() (int64, error)) (string, error)
+	Source       InboundSource
 }
 
 // ErrNoAck means no acknowledgment could be built for a refused
@@ -692,9 +691,9 @@ var ErrNoAck = errors.New("edi: no acknowledgment for the refused interchange")
 
 // RecordRefusal records a refused interchange in one transaction: the
 // interchange (REJECTED, the reason, no messages, the acknowledgment as its
-// ack payload), its transport source PARKED with it, so a retransmission is
-// refused again without a second acknowledgment, and the acknowledgment
-// queued over the partner's transport. The control number comes from the
+// ack payload), its transport source PARKED (or DONE, see SourceStatus) with
+// it, so a retransmission gets no second acknowledgment, and the
+// acknowledgment queued over the partner's transport. The control number comes from the
 // standard's gap-free counter. A refused interchange never counts in the
 // duplicate window. The source's asynchronous MDN is not stored: the
 // transport answers the refusal with its error MDN. It returns the
@@ -702,6 +701,13 @@ var ErrNoAck = errors.New("edi: no acknowledgment for the refused interchange")
 func (s *Store) RecordRefusal(ctx context.Context, r Refusal) (string, error) {
 	interchangeID := ids.New()
 	standard, ackSet := standardOf(r.Standard)
+	if r.AckSet != "" {
+		ackSet = r.AckSet
+	}
+	srcStatus := r.SourceStatus
+	if srcStatus != "DONE" {
+		srcStatus = "PARKED"
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tid, err := tenantID(ctx)
 		if err != nil {
@@ -726,13 +732,13 @@ func (s *Store) RecordRefusal(ctx context.Context, r Refusal) (string, error) {
 		}
 		src := r.Source
 		if _, err := tx.Exec(ctx, `insert into transport_inbound (tenant_id, partner_id, legal_entity_id, transport, ref, content_sha256, status,
-			interchange_id, attempts, last_error) values ($1, $2, $3, $4, $5, $6, 'PARKED', $7, 1, $8)
-			on conflict (tenant_id, partner_id, transport, ref, content_sha256) do update set status = 'PARKED', interchange_id = excluded.interchange_id,
+			interchange_id, attempts, last_error) values ($1, $2, $3, $4, $5, $6, $9, $7, 1, $8)
+			on conflict (tenant_id, partner_id, transport, ref, content_sha256) do update set status = excluded.status, interchange_id = excluded.interchange_id,
 			attempts = transport_inbound.attempts + 1, next_attempt_at = null, last_error = excluded.last_error, updated_at = now()`,
-			tid, r.PartnerID, src.LegalEntityID, src.Transport, src.Ref, src.SHA256, interchangeID, reason); err != nil {
+			tid, r.PartnerID, src.LegalEntityID, src.Transport, src.Ref, src.SHA256, interchangeID, reason, srcStatus); err != nil {
 			return err
 		}
-		_, err = enqueueDelivery(ctx, tx, tid, r.PartnerID, interchangeID, "ACK", ackSet, r.Control)
+		_, err = enqueueDelivery(ctx, tx, tid, r.PartnerID, interchangeID, "ACK", standard, ackSet, r.Control)
 		return err
 	})
 	if err != nil {

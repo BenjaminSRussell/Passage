@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -48,16 +49,19 @@ import (
 // the product service (productunits); without a converter, or when product
 // knows no conversion, the line is parked under INV-PST-002 or INV-PST-001.
 //
-// Lines are booked under the financial dimensions site and warehouse, plus
-// inventory_status for a receipt not received as AVAILABLE, so a delivery
-// draws from what was received; location, batch and serial stay with
-// warehouse management. A compensation reads the booking it offsets back
+// Lines are booked under the dimensions site and warehouse, plus
+// inventory_status for a receipt not received as AVAILABLE, and batch and
+// serial when the document names them, so a delivery draws from what was
+// received. A serial-tracked receipt line is booked serial by serial and a
+// tracked delivery entry by entry, each under its own origin that names the
+// line (line_source_id). Location stays with warehouse management: receiving
+// names it by id and fulfillment by code. A compensation reads the booking it offsets back
 // (store.OriginBookings) and takes product, dimensions, unit factor, currency
 // and cost from it, never from the event; it is linked to it
 // (corrects_transaction_id) and refused when it is not found (INV-PST-003) or
 // does not match it (INV-PST-004). Each line is booked under its own origin
 // and idempotency key, so a retry or a replay books only what is missing. A
-// line that cannot be booked (no site, serials, a rule of inventory such as
+// line that cannot be booked (no site, tracking that does not add up, a rule of inventory such as
 // stock that would go negative) fails the event after the other lines: a
 // validation or business-rule failure is permanent and parks the event on the
 // dead-letter topic, anything else is retried with back-off first.
@@ -94,6 +98,10 @@ const (
 	// line as booked (another product, a cancellation of another quantity
 	// than the booked net, cases and weight moving apart).
 	CodePostingMismatch = "INV-PST-004"
+	// CodePostingTracking: a batch or serial on the line cannot be booked as
+	// given (a serial that is not one inventory unit, serials on a
+	// catch-weight receipt line, tracking entries that do not add up).
+	CodePostingTracking = "INV-PST-005"
 
 	sourceReceiptLine   = "RECEIPT_LINE"
 	sourceSalesLine     = "SALES_LINE"
@@ -111,7 +119,7 @@ const (
 type PostingsStore interface {
 	CreateTransaction(ctx context.Context, in store.CreateTransactionInput) (store.StatusChange, bool, error)
 	IssueBasis(ctx context.Context, legalEntityID, productID string, dims domain.Dimensions) (string, decimal.Decimal, error)
-	OriginBookings(ctx context.Context, legalEntityID, sourceType string, sourceIDs []string) (map[string]store.TransactionRow, error)
+	LineBookings(ctx context.Context, legalEntityID, sourceType string, lineSourceIDs []string) (map[string][]store.TransactionRow, error)
 }
 
 // UnitConverter converts a document quantity into the product's inventory
@@ -132,6 +140,7 @@ type receiptPostedData struct {
 		ProductID       string   `json:"product_id"`
 		Unit            string   `json:"unit"`
 		Qty             string   `json:"qty"`
+		Batch           string   `json:"batch"`
 		Serials         []string `json:"serials"`
 		InventoryStatus string   `json:"inventory_status"`
 		Amount          string   `json:"amount"`
@@ -173,6 +182,12 @@ type orderProgressData struct {
 		SiteID         string `json:"site_id"`
 		WarehouseID    string `json:"warehouse_id"`
 		ReportedWeight string `json:"reported_weight"`
+		Tracking       []struct {
+			Batch          string `json:"batch"`
+			Serial         string `json:"serial"`
+			Quantity       string `json:"quantity"`
+			ReportedWeight string `json:"reported_weight"`
+		} `json:"tracking"`
 	} `json:"lines"`
 }
 
@@ -250,6 +265,17 @@ func receiptLineSourceID(tenantID, receiptID string, lineNo int) string {
 // receiptCorrectionSourceID is the origin of the booking of correction seq of a receipt line.
 func receiptCorrectionSourceID(tenantID, receiptID string, seq, lineNo int) string {
 	return postingSourceID(tenantID, "receipt-line-correction", strings.ToLower(receiptID), strconv.Itoa(seq), strconv.Itoa(lineNo))
+}
+
+// receiptSerialSourceID is the origin of one serial of a booked receipt line.
+func receiptSerialSourceID(tenantID, receiptID string, lineNo int, serial string) string {
+	return postingSourceID(tenantID, "receipt-line-serial", strings.ToLower(receiptID), strconv.Itoa(lineNo), serial)
+}
+
+// deliveryEntrySourceID is the origin of one batch or serial entry of a
+// booked delivery line.
+func deliveryEntrySourceID(lineSourceID, batch, serial string) string {
+	return postingSourceID(lineSourceID, "sales-delivery-entry", batch, serial)
 }
 
 // deliverySourceID is the origin of a booked delivery line: the order, the
@@ -356,8 +382,8 @@ func bookReceipt(ctx context.Context, s PostingsStore, conv UnitConverter, evt e
 		case !ids.Valid(l.SiteID):
 			failed.add(what, eventing.Permanent(errors.New("has no site_id (a receipt line without a PO line has no delivery site)")))
 			continue
-		case len(l.Serials) > 0:
-			failed.add(what, eventing.Permanent(errors.New("serial-tracked receipt lines are not booked by the postings consumer")))
+		case len(l.Serials) > 0 && l.CWQty > 0:
+			failed.add(what, eventing.Permanent(fmt.Errorf("%s: a catch-weight line with serials has no weight per serial", CodePostingTracking)))
 			continue
 		}
 		product := strings.ToLower(l.ProductID)
@@ -387,24 +413,94 @@ func bookReceipt(ctx context.Context, s PostingsStore, conv UnitConverter, evt e
 		if st := strings.TrimSpace(l.InventoryStatus); st != "" && st != inventoryAvailable {
 			dims[domain.DimStatus] = st
 		}
-		in.LegalEntityID, in.SourceType, in.SourceID = le, sourceReceiptLine, receiptLineSourceID(evt.TenantID, d.ReceiptID, l.LineNo)
+		if b := strings.TrimSpace(l.Batch); b != "" {
+			dims[domain.DimBatch] = b
+		}
+		lineSrc := receiptLineSourceID(evt.TenantID, d.ReceiptID, l.LineNo)
+		in.LegalEntityID, in.SourceType, in.SourceID = le, sourceReceiptLine, lineSrc
 		in.Reference, in.ProductID, in.Dims = postingReference(d.ReceiptNumber), product, dims
 		in.EnteredQty, in.EnteredUnit, in.Status, in.Currency, in.CWQty, in.Date = qty, unit, domain.StatusReceived, d.Currency, l.CWQty, date
 		in.IdempotencyKey = postingsKeyPrefix + "receipt:" + strings.ToLower(d.ReceiptID) + ":" + strconv.Itoa(l.LineNo)
-		change, applied, err := s.CreateTransaction(ctx, in)
-		if err != nil {
-			failed.add(what, err)
-			continue
+		entries := []store.CreateTransactionInput{in}
+		if len(l.Serials) > 0 {
+			if entries, err = serialEntries(evt.TenantID, d.ReceiptID, l.LineNo, l.Serials, in); err != nil {
+				failed.add(what, err)
+				continue
+			}
 		}
-		booked++
-		slog.InfoContext(ctx, "receipt line booked", "receiptId", d.ReceiptID, "lineNo", l.LineNo, "transactionId", change.TransactionID,
-			"qty", in.Qty.String(), "cwQty", l.CWQty, "applied", applied, "eventId", evt.ID)
+		for _, e := range entries {
+			change, applied, err := s.CreateTransaction(ctx, e)
+			if err != nil {
+				failed.add(what+serialLabel(e), err)
+				continue
+			}
+			booked++
+			slog.InfoContext(ctx, "receipt line booked", "receiptId", d.ReceiptID, "lineNo", l.LineNo, "transactionId", change.TransactionID,
+				"qty", e.Qty.String(), "cwQty", l.CWQty, "serial", e.Dims[domain.DimSerial], "applied", applied, "eventId", evt.ID)
+		}
 	}
 	if err := failed.err(evt); err != nil {
 		slog.WarnContext(ctx, "receipt lines not booked", "receiptId", d.ReceiptID, "booked", booked, "err", err, "eventId", evt.ID)
 		return err
 	}
 	return nil
+}
+
+// serialLabel names the serial of an entry in a failure, if it has one.
+func serialLabel(in store.CreateTransactionInput) string {
+	if sn := in.Dims[domain.DimSerial]; sn != "" {
+		return " serial " + sn
+	}
+	return ""
+}
+
+// serialEntries splits a receipt line booking (line, in the inventory unit)
+// into one registration per serial (#480): each serial is one inventory unit,
+// so the line's inventory quantity must equal the number of serials, and each
+// takes an equal share of the document quantity and of the value, the last
+// one the rounding remainder, so the entries add up to the line. Each serial
+// has its own origin and key and names the line as its line origin.
+func serialEntries(tenantID, receiptID string, lineNo int, serials []string, line store.CreateTransactionInput) ([]store.CreateTransactionInput, error) {
+	n := decimal.NewFromInt(int64(len(serials)))
+	if !line.Qty.Equal(n) {
+		return nil, eventing.Permanent(fmt.Errorf("%s: %d serials for %s in the inventory unit; a serial is one inventory unit",
+			CodePostingTracking, len(serials), line.Qty))
+	}
+	entered := line.EnteredQty.DivRound(n, int32(domain.DefaultJournalRules.MaxScale))
+	if !entered.Mul(n).Equal(line.EnteredQty) {
+		return nil, eventing.Permanent(fmt.Errorf("%s: %s %s does not divide evenly over %d serials",
+			CodePostingTracking, line.EnteredQty, line.EnteredUnit, len(serials)))
+	}
+	total := domain.ReceiptValue(line.Qty, line.CostPrice, line.Currency)
+	if line.Value != nil {
+		total = *line.Value
+	}
+	share := money.Amount{Value: total.DivRound(n, 12), Currency: line.Currency}.Round().Value
+	out := make([]store.CreateTransactionInput, 0, len(serials))
+	seen := map[string]bool{}
+	for i, raw := range serials {
+		serial := strings.TrimSpace(raw)
+		if serial == "" || seen[serial] {
+			return nil, eventing.Permanent(fmt.Errorf("%s: serial %q is empty or repeated on the line", CodePostingTracking, raw))
+		}
+		seen[serial] = true
+		value := share
+		if i == len(serials)-1 {
+			value = total.Sub(share.Mul(n.Sub(decimal.NewFromInt(1))))
+		}
+		if value.IsNegative() {
+			return nil, eventing.Permanent(fmt.Errorf("%s: the line value %s does not split over %d serials", CodePostingTracking, total, len(serials)))
+		}
+		e := line
+		e.Dims = maps.Clone(line.Dims)
+		e.Dims[domain.DimSerial] = serial
+		e.SourceID = receiptSerialSourceID(tenantID, receiptID, lineNo, serial)
+		e.LineSourceID = line.SourceID
+		e.Qty, e.EnteredQty, e.CostPrice, e.Value = decimal.NewFromInt(1), entered, value, &value
+		e.IdempotencyKey = postingsKeyPrefix + "receipt-serial:" + e.SourceID
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 // issueCostScale is the scale of a derived unit cost (cost prices are numeric(20,6)).
@@ -449,6 +545,51 @@ func compensation(orig store.TransactionRow, sourceType, sourceID, reference str
 	}
 }
 
+// isSingleBooking reports whether a line's bookings are its own one booking
+// (an untracked line), not entries booked under it.
+func isSingleBooking(rows []store.TransactionRow, lineSrc string) bool {
+	return len(rows) == 1 && rows[0].SourceID == lineSrc
+}
+
+// cancelEntries offsets every serial booked for a receipt line on a
+// CANCELLATION (#480). A serial-tracked line is never corrected by quantity
+// (receiving refuses it), so its entries are what the line holds; receiving
+// cancels their document quantity, else the line is parked (INV-PST-004).
+// Each offset is linked to its entry, under its own origin and key.
+func cancelEntries(ctx context.Context, s PostingsStore, entries []store.TransactionRow, d receiptCorrectedData, lineNo int, productID string,
+	delta decimal.Decimal, date time.Time, evt events.Event, neg domain.NegativePolicy) (int, error) {
+	receipt := strings.ToLower(d.ReceiptID)
+	if d.Kind != cancellationKind {
+		return 0, eventing.Permanent(fmt.Errorf("%s: receipt line %s/%d is booked serial by serial and is not corrected by quantity", CodePostingMismatch, receipt, lineNo))
+	}
+	entered := decimal.Zero
+	for _, e := range entries {
+		if !strings.EqualFold(e.ProductID, productID) || !e.Qty.IsPositive() {
+			return 0, eventing.Permanent(fmt.Errorf("%s: product %s, the booked serial holds %s %s", CodePostingMismatch, productID, e.Qty, e.ProductID))
+		}
+		entered = entered.Add(e.EnteredQty)
+	}
+	if !entered.Equal(delta.Neg()) {
+		return 0, eventing.Permanent(fmt.Errorf("%s: receiving cancels %s, the booked serials hold %s", CodePostingMismatch, delta.Neg(), entered))
+	}
+	lineCancel := postingSourceID(evt.TenantID, "receipt-line-cancellation", receipt, strconv.Itoa(lineNo))
+	done := 0
+	for _, e := range entries {
+		src := postingSourceID(evt.TenantID, "receipt-line-cancellation", receipt, strconv.Itoa(lineNo), e.SourceID)
+		in := compensation(e, sourceReceiptLine, src, d.ReceiptNumber, e.Qty.Neg(), e.EnteredQty.Neg(), e.CostAmountPhysical.Neg(), signedCases(e), date,
+			postingsKeyPrefix+"receipt-cancellation:"+src, neg)
+		in.LineSourceID = lineCancel
+		change, applied, err := s.CreateTransaction(ctx, in)
+		if err != nil {
+			return done, fmt.Errorf("serial %s: %w", e.Dims[domain.DimSerial], err)
+		}
+		done++
+		slog.InfoContext(ctx, "receipt serial cancellation booked", "receiptId", d.ReceiptID, "lineNo", lineNo, "serial", e.Dims[domain.DimSerial],
+			"transactionId", change.TransactionID, "corrects", e.ID, "applied", applied, "eventId", evt.ID)
+	}
+	return done, nil
+}
+
 // bookReceiptCorrection books receipt.corrected against the booked receipt
 // lines. A CORRECTION books each line's delta, converted at the booked line's
 // own unit factor and valued at its booked cost. A CANCELLATION offsets what
@@ -479,9 +620,16 @@ func bookReceiptCorrection(ctx context.Context, s PostingsStore, neg domain.Nega
 			}
 		}
 	}
-	booked, err := s.OriginBookings(ctx, le, sourceReceiptLine, origins)
+	lines, err := s.LineBookings(ctx, le, sourceReceiptLine, origins)
 	if err != nil {
 		return fmt.Errorf("read the booked receipt lines: %w", err)
+	}
+	// booked is the single booking of an untracked line or a correction.
+	booked := map[string]store.TransactionRow{}
+	for id, rows := range lines {
+		if len(rows) == 1 && rows[0].SourceID == id {
+			booked[id] = rows[0]
+		}
 	}
 	var failed lineFailures
 	done := 0
@@ -492,7 +640,17 @@ func bookReceiptCorrection(ctx context.Context, s PostingsStore, neg domain.Nega
 			failed.add(what, eventing.Permanent(errors.New("needs a qty_delta")))
 			continue
 		}
-		orig, ok := booked[receiptLineSourceID(evt.TenantID, receipt, l.LineNo)]
+		lineSrc := receiptLineSourceID(evt.TenantID, receipt, l.LineNo)
+		if entries := lines[lineSrc]; len(entries) > 0 && !isSingleBooking(entries, lineSrc) {
+			// A serial-tracked line, booked serial by serial.
+			n, err := cancelEntries(ctx, s, entries, d, l.LineNo, l.ProductID, delta, date, evt, neg)
+			done += n
+			if err != nil {
+				failed.add(what, err)
+			}
+			continue
+		}
+		orig, ok := booked[lineSrc]
 		switch {
 		case !ok:
 			failed.add(what, eventing.Permanent(fmt.Errorf("%s: receipt line %s/%d was not booked", CodePostingOriginalMissing, receipt, l.LineNo)))
@@ -612,37 +770,178 @@ func bookDelivery(ctx context.Context, s PostingsStore, conv UnitConverter, neg 
 		if l.WarehouseID != "" {
 			dims[domain.DimWarehouse] = strings.ToLower(l.WarehouseID)
 		}
-		// The issue is valued at the row's running average (physical receipts
-		// included) in the currency the stock is held in; the order currency
-		// only names a row with no value.
-		currency, cost, err := s.IssueBasis(ctx, le, product, dims)
+		lineSrc := deliverySourceID(evt.TenantID, d.OrderID, d.SourceRef, l.LineID)
+		line := deliveryEntry{dims: dims, qty: qty, entered: quantity, cases: cwQty, src: lineSrc}
+		entries := []deliveryEntry{line}
+		if len(l.Tracking) > 0 {
+			split := make([]trackingEntry, 0, len(l.Tracking))
+			for _, t := range l.Tracking {
+				split = append(split, trackingEntry{batch: t.Batch, serial: t.Serial, quantity: t.Quantity, weight: t.ReportedWeight})
+			}
+			if entries, err = deliveryEntries(line, catchWeight, split); err != nil {
+				failed.add(what, err)
+				continue
+			}
+		}
+		// What a replay finds booked is left alone: the running average it
+		// was valued at has moved (to zero once the row is empty), so booking
+		// it again would not be the same request.
+		already, err := s.LineBookings(ctx, le, sourceSalesLine, []string{lineSrc})
 		if err != nil {
-			failed.add(what, err)
+			failed.add(what, fmt.Errorf("read the booked delivery: %w", err))
 			continue
 		}
-		if currency == "" {
-			currency = d.Currency
+		done := map[string]bool{}
+		for _, r := range already[lineSrc] {
+			done[r.SourceID] = true
 		}
-		src := deliverySourceID(evt.TenantID, d.OrderID, d.SourceRef, l.LineID)
-		change, applied, err := s.CreateTransaction(ctx, store.CreateTransactionInput{
-			LegalEntityID: le, SourceType: sourceSalesLine, SourceID: src,
-			Reference: postingReference(d.SourceRef), ProductID: product, Dims: dims,
-			Qty: qty.Neg(), EnteredQty: quantity.Neg(), EnteredUnit: unit, Status: domain.StatusDeducted,
-			Currency: currency, CostPrice: cost, CWQty: cwQty, Date: date, IdempotencyKey: postingsKeyPrefix + "delivery:" + src, Negative: neg,
-		})
-		if err != nil {
-			failed.add(what, err)
-			continue
+		for _, e := range entries {
+			if done[e.src] {
+				booked++
+				continue
+			}
+			// The issue is valued at the row's running average (physical
+			// receipts included) in the currency the stock is held in; the
+			// order currency only names a row with no value.
+			currency, cost, err := s.IssueBasis(ctx, le, product, e.dims)
+			if err != nil {
+				failed.add(what+e.label(), err)
+				continue
+			}
+			if currency == "" {
+				currency = d.Currency
+			}
+			in := store.CreateTransactionInput{
+				LegalEntityID: le, SourceType: sourceSalesLine, SourceID: e.src,
+				Reference: postingReference(d.SourceRef), ProductID: product, Dims: e.dims,
+				Qty: e.qty.Neg(), EnteredQty: e.entered.Neg(), EnteredUnit: unit, Status: domain.StatusDeducted,
+				Currency: currency, CostPrice: cost, CWQty: e.cases, Date: date, IdempotencyKey: postingsKeyPrefix + "delivery:" + e.src, Negative: neg,
+			}
+			if e.src != lineSrc {
+				in.LineSourceID = lineSrc
+			}
+			change, applied, err := s.CreateTransaction(ctx, in)
+			if err != nil {
+				failed.add(what+e.label(), err)
+				continue
+			}
+			booked++
+			slog.InfoContext(ctx, "sales delivery booked", "orderId", d.OrderID, "lineId", l.LineID, "transactionId", change.TransactionID,
+				"qty", in.Qty.String(), "cwQty", e.cases, "batch", e.dims[domain.DimBatch], "serial", e.dims[domain.DimSerial], "applied", applied, "eventId", evt.ID)
 		}
-		booked++
-		slog.InfoContext(ctx, "sales delivery booked", "orderId", d.OrderID, "lineId", l.LineID, "transactionId", change.TransactionID,
-			"qty", qty.Neg().String(), "cwQty", cwQty, "applied", applied, "eventId", evt.ID)
 	}
 	if err := failed.err(evt); err != nil {
 		slog.WarnContext(ctx, "delivery lines not booked", "orderId", d.OrderID, "booked", booked, "err", err, "eventId", evt.ID)
 		return err
 	}
 	return nil
+}
+
+// deliveryEntry is one issue of a delivery line: the whole line, or one of
+// its batch or serial entries. qty is in the inventory unit, entered in the
+// line's unit, cases the catch-weight count.
+type deliveryEntry struct {
+	dims    domain.Dimensions
+	qty     decimal.Decimal
+	entered decimal.Decimal
+	cases   int
+	src     string
+}
+
+func (e deliveryEntry) label() string {
+	var parts []string
+	if b := e.dims[domain.DimBatch]; b != "" {
+		parts = append(parts, "batch "+b)
+	}
+	if sn := e.dims[domain.DimSerial]; sn != "" {
+		parts = append(parts, "serial "+sn)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " " + strings.Join(parts, " ")
+}
+
+// trackingEntry is one batch or serial entry of a delivered line as sales
+// reported it.
+type trackingEntry struct{ batch, serial, quantity, weight string }
+
+// deliveryEntries splits a delivery line into its batch and serial entries
+// (#480). Entry quantities are in the line's unit and add up to it. A plain
+// line's inventory quantity is shared in proportion, the last entry taking
+// the rounding remainder, and a serial must be one inventory unit. A
+// catch-weight line's entries are whole cases; with one entry it is the
+// line's weight, with several each entry carries its weight and they add up
+// to the line's. Anything else parks the line (INV-PST-005).
+func deliveryEntries(line deliveryEntry, catchWeight bool, tracking []trackingEntry) ([]deliveryEntry, error) {
+	bad := func(format string, args ...any) error {
+		return eventing.Permanent(fmt.Errorf("%s: "+format, append([]any{CodePostingTracking}, args...)...))
+	}
+	sum, weights := decimal.Zero, decimal.Zero
+	weighed := 0
+	quantities := make([]decimal.Decimal, len(tracking))
+	seen := map[string]bool{}
+	for i, t := range tracking {
+		batch, serial := strings.TrimSpace(t.batch), strings.TrimSpace(t.serial)
+		q, err := decimal.NewFromString(t.quantity)
+		switch {
+		case batch == "" && serial == "":
+			return nil, bad("tracking entry %d names no batch or serial", i+1)
+		case err != nil || !q.IsPositive():
+			return nil, bad("tracking entry %d needs a positive quantity", i+1)
+		case catchWeight && !q.IsInteger():
+			return nil, bad("tracking entry %d of a catch-weight line is not whole cases", i+1)
+		case serial != "" && seen[serial]:
+			return nil, bad("serial %s is named twice", serial)
+		}
+		seen[serial] = serial != ""
+		quantities[i], sum = q, sum.Add(q)
+		if t.weight != "" {
+			w, werr := decimal.NewFromString(t.weight)
+			if werr != nil || !w.IsPositive() {
+				return nil, bad("tracking entry %d has no positive reported_weight", i+1)
+			}
+			weights = weights.Add(w)
+			weighed++
+		}
+	}
+	if !sum.Equal(line.entered) {
+		return nil, bad("tracking entries add up to %s, the line delivered %s", sum, line.entered)
+	}
+	multi := len(tracking) > 1
+	if catchWeight && multi && (weighed != len(tracking) || !weights.Equal(line.qty)) {
+		return nil, bad("a catch-weight line split over %d entries needs each entry's weight, adding up to %s", len(tracking), line.qty)
+	}
+	out := make([]deliveryEntry, 0, len(tracking))
+	left := line.qty
+	for i, t := range tracking {
+		e := deliveryEntry{dims: maps.Clone(line.dims), entered: quantities[i], src: line.src}
+		batch, serial := strings.TrimSpace(t.batch), strings.TrimSpace(t.serial)
+		if batch != "" {
+			e.dims[domain.DimBatch] = batch
+		}
+		if serial != "" {
+			e.dims[domain.DimSerial] = serial
+		}
+		switch {
+		case catchWeight && multi:
+			e.qty = decimal.RequireFromString(t.weight)
+			e.cases = int(quantities[i].IntPart())
+		case catchWeight:
+			e.qty, e.cases = line.qty, line.cases
+		case i == len(tracking)-1:
+			e.qty = left
+		default:
+			e.qty = line.qty.Mul(quantities[i]).DivRound(line.entered, int32(domain.DefaultJournalRules.MaxScale))
+		}
+		left = left.Sub(e.qty)
+		if !e.qty.IsPositive() || (serial != "" && !e.qty.Equal(decimal.NewFromInt(1))) {
+			return nil, bad("entry %d is %s in the inventory unit; a serial is one inventory unit", i+1, e.qty)
+		}
+		e.src = deliveryEntrySourceID(line.src, batch, serial)
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 // bookSlipCancellation books the mirror of each delivery line booked for the
@@ -668,7 +967,7 @@ func bookSlipCancellation(ctx context.Context, s PostingsStore, evt events.Event
 	for _, l := range d.Lines {
 		origins = append(origins, deliverySourceID(evt.TenantID, d.OrderID, d.PackingSlipNumber, l.OrderLineID))
 	}
-	booked, err := s.OriginBookings(ctx, le, sourceSalesLine, origins)
+	booked, err := s.LineBookings(ctx, le, sourceSalesLine, origins)
 	if err != nil {
 		return fmt.Errorf("read the booked deliveries: %w", err)
 	}
@@ -677,30 +976,46 @@ func bookSlipCancellation(ctx context.Context, s PostingsStore, evt events.Event
 	for i, l := range d.Lines {
 		what := "order line " + l.OrderLineID
 		qty, qerr := decimal.NewFromString(l.Qty)
-		orig, ok := booked[origins[i]]
+		// The line's own booking, or each batch and serial entry booked under it.
+		entries := booked[origins[i]]
+		issued := decimal.Zero
+		unit := ""
+		for _, e := range entries {
+			if !e.Qty.IsNegative() {
+				issued = decimal.NewFromInt(-1) // not an issue: never matches
+				break
+			}
+			issued, unit = issued.Add(e.EnteredQty.Abs()), e.EnteredUnit
+		}
 		switch {
 		case !ids.Valid(l.OrderLineID) || qerr != nil:
 			failed.add(what, eventing.Permanent(errors.New("needs order_line_id and qty")))
 			continue
-		case !ok:
+		case len(entries) == 0:
 			failed.add(what, fmt.Errorf("%s: no delivery of packing slip %s is booked for the line yet", CodePostingOriginalMissing, d.PackingSlipNumber))
 			continue
-		case !orig.Qty.IsNegative() || !qty.Abs().Equal(orig.EnteredQty.Abs()):
+		case !qty.Abs().Equal(issued):
 			failed.add(what, eventing.Permanent(fmt.Errorf("%s: the slip reverses %s, the booked delivery issued %s %s",
-				CodePostingMismatch, qty.Abs(), orig.EnteredQty.Abs(), orig.EnteredUnit)))
+				CodePostingMismatch, qty.Abs(), issued, unit)))
 			continue
 		}
-		src := postingSourceID(evt.TenantID, "sales-delivery-cancellation", orig.SourceID)
-		in := compensation(orig, sourceSalesLine, src, d.PackingSlipNumber, orig.Qty.Neg(), orig.EnteredQty.Neg(), orig.CostAmountPhysical.Neg(),
-			signedCases(orig), date, postingsKeyPrefix+"delivery-cancellation:"+src, domain.NegativePolicy{})
-		change, applied, err := s.CreateTransaction(ctx, in)
-		if err != nil {
-			failed.add(what, err)
-			continue
+		tracked := !isSingleBooking(entries, origins[i])
+		for _, orig := range entries {
+			src := postingSourceID(evt.TenantID, "sales-delivery-cancellation", orig.SourceID)
+			in := compensation(orig, sourceSalesLine, src, d.PackingSlipNumber, orig.Qty.Neg(), orig.EnteredQty.Neg(), orig.CostAmountPhysical.Neg(),
+				signedCases(orig), date, postingsKeyPrefix+"delivery-cancellation:"+src, domain.NegativePolicy{})
+			if tracked {
+				in.LineSourceID = postingSourceID(evt.TenantID, "sales-delivery-cancellation", origins[i])
+			}
+			change, applied, err := s.CreateTransaction(ctx, in)
+			if err != nil {
+				failed.add(what+(deliveryEntry{dims: orig.Dims}).label(), err)
+				continue
+			}
+			done++
+			slog.InfoContext(ctx, "cancelled delivery booked", "packingSlipId", d.PackingSlipID, "orderLineId", l.OrderLineID, "transactionId", change.TransactionID,
+				"corrects", orig.ID, "qty", in.Qty.String(), "applied", applied, "eventId", evt.ID)
 		}
-		done++
-		slog.InfoContext(ctx, "cancelled delivery booked", "packingSlipId", d.PackingSlipID, "orderLineId", l.OrderLineID, "transactionId", change.TransactionID,
-			"corrects", orig.ID, "qty", in.Qty.String(), "applied", applied, "eventId", evt.ID)
 	}
 	if err := failed.err(evt); err != nil {
 		slog.WarnContext(ctx, "cancelled delivery lines not booked", "packingSlipId", d.PackingSlipID, "booked", done, "err", err, "eventId", evt.ID)

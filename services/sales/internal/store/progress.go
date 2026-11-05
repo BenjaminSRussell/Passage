@@ -32,6 +32,19 @@ type ProgressLineInput struct {
 	LineNo       int
 	Quantity     decimal.Decimal
 	ActualWeight *decimal.Decimal
+	// Tracking names the batches and serials a DELIVERED report took (#480),
+	// passed through on orderprogress.recorded so inventory issues them.
+	Tracking []ProgressTracking
+}
+
+// ProgressTracking is the part of a delivered line taken from one batch or
+// serial: Quantity in the line's unit (cases on a catch-weight line) and, on
+// a catch-weight line split over several entries, the entry's ActualWeight.
+type ProgressTracking struct {
+	Batch        string
+	Serial       string
+	Quantity     decimal.Decimal
+	ActualWeight *decimal.Decimal
 }
 
 // NewProgress is a delivery or invoice report for one order. SourceRef names
@@ -215,6 +228,21 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 					reported = *req.ActualWeight
 				}
 				ev.ReportedWeight, ev.DeliveredWeight = reported.String(), l.ActualWeight.String()
+			}
+			if len(req.Tracking) > 0 {
+				if in.Kind != domain.ProgressDelivered {
+					return problem(http.StatusUnprocessableEntity, CodeProgressQuantity, fmt.Sprintf("line %d: tracking applies only to a DELIVERED report", l.LineNo))
+				}
+				for _, t := range req.Tracking {
+					if t.ActualWeight != nil && l.CatchWeight == nil {
+						return problem(http.StatusUnprocessableEntity, domain.CodeCatchWeightInput, fmt.Sprintf("line %d is not a catch-weight item; tracking entries carry no actualWeight", l.LineNo))
+					}
+					et := salesevents.ProgressTracking{Batch: t.Batch, Serial: t.Serial, Quantity: t.Quantity.String()}
+					if t.ActualWeight != nil {
+						et.ReportedWeight = t.ActualWeight.String()
+					}
+					ev.Tracking = append(ev.Tracking, et)
+				}
 			}
 			evLines = append(evLines, ev)
 		}

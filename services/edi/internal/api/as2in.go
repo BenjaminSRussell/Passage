@@ -17,6 +17,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -112,7 +113,14 @@ func (a *API) as2Partner(w http.ResponseWriter, r *http.Request) (context.Contex
 		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
 		return nil, rec, partner, ep, false
 	}
-	ep, err = delivery.LoadAS2(a.Secrets, *rec.Config.AS2, a.now())
+	ep, err = delivery.LoadAS2(a.Secrets, a.AS2Trust, *rec.Config.AS2, a.now())
+	if errors.Is(err, certtrust.ErrUntrusted) {
+		// The pinned certificate no longer chains to the trust roots or was
+		// revoked: the partner cannot be authenticated until it is replaced.
+		slog.Warn("as2 partner certificate not trusted", "tenant", tid, "partner", pid, "err", err)
+		http.Error(w, "partner certificate not trusted", http.StatusForbidden)
+		return nil, rec, partner, ep, false
+	}
 	if err != nil {
 		slog.Error("as2 keys unavailable", "tenant", tid, "partner", pid, "err", err)
 		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
@@ -261,9 +269,11 @@ func ediPayload(m transport.Message) bool {
 // one wrapping delivery.ErrPermanent for a payload that can never be
 // recorded, and any other error for a failure worth retrying
 // (delivery.Receiver). A payload refused for its syntax or its sender is
-// answered with a negative 997 or CONTRL when its envelope allows one (see
-// refuse): the transport authenticated the partner, so the answer goes back
-// to it over its own transport, next to the error MDN or the parked file.
+// answered with a negative 997, a TA1 or a CONTRL when its envelope allows
+// one (see refuse), and a duplicate interchange with a TA1 025 or a CONTRL
+// 26 (see answerDuplicate): the transport authenticated the partner, so the
+// answer goes back to it over its own transport, next to the error or
+// duplicate MDN, the parked file or the archived duplicate.
 func (a *API) ReceiveFromTransport(ctx context.Context, partnerID string, src store.InboundSource, payload []byte) error {
 	partner, err := a.store.GetPartner(ctx, partnerID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -278,6 +288,9 @@ func (a *API) ReceiveFromTransport(ctx context.Context, partnerID string, src st
 	case err == nil:
 		return nil
 	case errors.As(err, &p) && p.Code == CodeDuplicateControl:
+		if aerr := a.answerDuplicate(ctx, partner, src, payload, p); aerr != nil {
+			return aerr
+		}
 		return fmt.Errorf("%w: %s", store.ErrDuplicate, p.Detail)
 	case errors.As(err, &p):
 		if rerr := a.refuse(ctx, partner, src, payload, p); rerr != nil {

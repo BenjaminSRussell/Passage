@@ -58,6 +58,68 @@ spec:
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.tms.goodsintransit, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.order, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.orderhold, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.creditcheck, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.agreement, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.quotation, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.allocationquota, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.allocation, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.atp, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.schedulerelease, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.backorderrun, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.parameters, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.intakeerror, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.orderchange, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.changepolicy, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.deliveryterms, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.orderprogress, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.returnorder, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.shipment, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.pick, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.packingslip, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.container, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.wave, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.asn, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.tracking, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.warehousesetting, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.legalentitysetting, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.warehousereleaserule, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.deliverytolerance, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.dropship, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.returnablepackaging, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.exception, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
       - resource: {type: group, name: passage-connect, patternType: literal}
@@ -356,6 +418,118 @@ spec:
     transforms.outbox.table.field.event.payload: payload
     transforms.outbox.route.by.field: aggregate_type
     transforms.outbox.route.topic.replacement: passage.tms.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Sales routes by event type, not aggregate_type: it writes many of its events under aggregate_type "order"
+# (orderhold.*, creditcheck.evaluated, atp.promised and orderprogress.recorded among them), while its AsyncAPI channels
+# (services/sales/events/asyncapi.yaml) and events.Topic name the topic after the type's entity. The route takes the
+# entity out of dev.passage.sales.<entity>.<verb>.v<n>, so orderprogress.recorded lands on passage.sales.orderprogress
+# (read by the inventory postings consumer, deploy/kafka/inventory-consumer.yaml) and order.confirmed on
+# passage.sales.order. A type that does not match keeps its own name as the topic, which no ACL allows, so the task
+# fails instead of writing elsewhere. The ACLs above are literal per AsyncAPI channel (a new entity needs an entry)
+# and never cover passage.sales.order.dlq.
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_sales has REPLICATION; the dev Postgres init grants it CONNECT on passage_sales only and revokes CONNECT from PUBLIC there.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-sales
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-sales:username}
+    database.password: ${secrets:kafka/debezium-cdc-sales:password}
+    database.dbname: passage_sales
+    topic.prefix: passage.sales
+    slot.name: passage_outbox_sales
+    publication.name: passage_outbox_sales
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox,enrich
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: type
+    transforms.outbox.route.topic.regex: 'dev\.passage\.sales\.(?<routedByValue>[a-z][a-z0-9]*)\.[a-z][a-z0-9]*\.v[0-9]+'
+    transforms.outbox.route.topic.replacement: passage.sales.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Fulfillment routes by event type, as sales does: packing-slip, pick, container, ASN and tracking events are written
+# under aggregate_type "shipment" and the settings under snake_case aggregate types (drop_ship, warehouse_setting, ...),
+# while the AsyncAPI channels (services/fulfillment/events/asyncapi.yaml) and events.Topic use the type's entity.
+# packingslip.posted and packingslip.cancelled land on passage.fulfillment.packingslip, read by the inventory postings
+# consumer (deploy/kafka/inventory-consumer.yaml). The ACLs above are literal per AsyncAPI channel (a new entity
+# needs an entry).
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_fulfillment has REPLICATION; the dev Postgres init grants it CONNECT on passage_fulfillment only and revokes CONNECT from PUBLIC there.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-fulfillment
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-fulfillment:username}
+    database.password: ${secrets:kafka/debezium-cdc-fulfillment:password}
+    database.dbname: passage_fulfillment
+    topic.prefix: passage.fulfillment
+    slot.name: passage_outbox_fulfillment
+    publication.name: passage_outbox_fulfillment
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox,enrich
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: type
+    transforms.outbox.route.topic.regex: 'dev\.passage\.fulfillment\.(?<routedByValue>[a-z][a-z0-9]*)\.[a-z][a-z0-9]*\.v[0-9]+'
+    transforms.outbox.route.topic.replacement: passage.fulfillment.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher

@@ -85,6 +85,12 @@ type CreateTransactionInput struct {
 	// Neither is reachable through transactions:apply.
 	Corrects string
 	Value    *decimal.Decimal
+	// LineSourceID is the document line a tracked entry belongs to (#480):
+	// the postings consumer books a serial- or batch-tracked line as one
+	// registration per entry, each under its own origin, and records the
+	// line on each so LineBookings finds them all. Empty for any other
+	// registration; not reachable through transactions:apply.
+	LineSourceID string
 }
 
 // StatusStepInput is one status move of an inventory transaction (FR-16.2,
@@ -152,6 +158,9 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 	}
 	if in.Corrects != "" && !ids.Valid(in.Corrects) {
 		return StatusChange{}, false, problem(http.StatusBadRequest, domain.CodeInvalid, "corrects must be a transaction id")
+	}
+	if in.LineSourceID != "" && (!ids.Valid(in.LineSourceID) || strings.EqualFold(in.LineSourceID, in.SourceID)) {
+		return StatusChange{}, false, problem(http.StatusBadRequest, domain.CodeInvalid, "lineSourceId must be a document line id other than the origin")
 	}
 	in.Dims = dims
 	date := stepDate(in.Date)
@@ -227,7 +236,7 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		}
 		changeID := ids.New()
 		doc := document{legalEntityID: in.LegalEntityID, currency: in.Currency, date: date, sourceType: in.SourceType,
-			referenceID: strings.TrimSpace(in.Reference), statusChangeID: changeID}
+			referenceID: strings.TrimSpace(in.Reference), statusChangeID: changeID, lineSourceID: strings.ToLower(in.LineSourceID)}
 		pl := domain.PostedLine{Line: domain.JournalLine{ProductID: in.ProductID, Dims: dims, Qty: in.Qty, EnteredQty: in.EnteredQty,
 			EnteredUnit: in.EnteredUnit, CostPrice: in.CostPrice, CWQty: in.CWQty}, Status: in.Status, Value: value, Corrects: in.Corrects}
 		txnID, err := writeTransaction(ctx, tx, tp.TenantID, doc, in.SourceID, r, pl)
@@ -605,6 +614,9 @@ func createRequestHash(in CreateTransactionInput) string {
 	}
 	if in.Value != nil {
 		parts = append(parts, "value", in.Value.String())
+	}
+	if in.LineSourceID != "" {
+		parts = append(parts, "line", strings.ToLower(in.LineSourceID))
 	}
 	return fingerprint(append(parts, requestedDate(in.Date))...)
 }

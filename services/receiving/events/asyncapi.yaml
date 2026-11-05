@@ -245,8 +245,8 @@ components:
               amount: { type: string, description: "decimal string, receipt currency" }
               amount_acct: { type: string, description: "decimal string, accounting currency (amount times the receipt exchange rate)" }
               unit_price: { type: string, description: "decimal string, receipt currency: the line's net unit price per unit (per weight unit on a catch-weight line)" }
-              site_id: { type: string, format: uuid, description: "the PO line's delivery site (#480); absent without a PO line" }
-              warehouse_id: { type: string, format: uuid, description: "the PO line's delivery warehouse (#480); absent without a PO line or warehouse" }
+              site_id: { type: string, format: uuid, description: "the line's delivery site (#480): the PO line's, or the one keyed on a line without a PO line; absent when neither is known" }
+              warehouse_id: { type: string, format: uuid, description: "the line's delivery warehouse (#480), from the PO line or keyed on a line without one; absent when none is known" }
               cw_qty: { type: integer, minimum: 1, description: "catch-weight lines only (FR-24.7): the case count; qty is then the actual weight in unit" }
               cw_nominal: { type: string, description: "catch-weight lines only: nominal weight per case, decimal string in unit" }
               cw_min: { type: string, description: "catch-weight lines only: minimum weight per case, decimal string in unit" }
