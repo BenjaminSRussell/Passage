@@ -116,38 +116,11 @@ func element(s Segment, i int) string {
 // and control numbers (SE02, GE02, IEA02) so a truncated or mis-numbered
 // interchange never reaches the mapper.
 func Parse(raw string) (Interchange, error) {
-	raw = strings.TrimLeft(raw, " \t\r\n\ufeff")
-	if len(raw) < isaLen || !strings.HasPrefix(raw, "ISA") {
-		return Interchange{}, syntaxf("interchange does not start with a %d-character ISA header", isaLen)
+	ic, body, err := readISA(raw)
+	if err != nil {
+		return Interchange{}, err
 	}
-	d := Delims{Element: raw[3], Component: raw[104], Segment: raw[105]}
-	isa := strings.Split(raw[:105], string(d.Element))
-	if len(isa) != 17 {
-		return Interchange{}, syntaxf("ISA header does not carry 16 elements")
-	}
-	if !supportedVersion(isa[12]) {
-		return Interchange{}, syntaxf("ISA12 version %q is not supported (00401 or 00501)", isa[12])
-	}
-	if usesRepetition(isa[12]) {
-		if len(isa[11]) != 1 {
-			return Interchange{}, syntaxf("ISA11 repetition separator must be one character")
-		}
-		d.Repetition = isa[11][0]
-	}
-	if !d.distinct() {
-		return Interchange{}, syntaxf("ISA delimiters are not distinct")
-	}
-	ic := Interchange{
-		Delims:   d,
-		Sender:   Party{Qualifier: isa[5], ID: strings.TrimRight(isa[6], " ")},
-		Receiver: Party{Qualifier: isa[7], ID: strings.TrimRight(isa[8], " ")},
-		Date:     isa[9],
-		Time:     isa[10],
-		Version:  isa[12],
-		Control:  isa[13],
-		Usage:    isa[15],
-	}
-	segs, err := splitSegments(raw[106:], d)
+	segs, err := splitSegments(body, ic.Delims)
 	if err != nil {
 		return Interchange{}, err
 	}
@@ -166,6 +139,43 @@ func Parse(raw string) (Interchange, error) {
 	}
 	ic.Groups = groups
 	return ic, nil
+}
+
+// readISA reads the fixed-length ISA header and returns the interchange
+// fields with the text after it.
+func readISA(raw string) (Interchange, string, error) {
+	raw = strings.TrimLeft(raw, " \t\r\n\ufeff")
+	if len(raw) < isaLen || !strings.HasPrefix(raw, "ISA") {
+		return Interchange{}, "", syntaxf("interchange does not start with a %d-character ISA header", isaLen)
+	}
+	d := Delims{Element: raw[3], Component: raw[104], Segment: raw[105]}
+	isa := strings.Split(raw[:105], string(d.Element))
+	if len(isa) != 17 {
+		return Interchange{}, "", syntaxf("ISA header does not carry 16 elements")
+	}
+	if !supportedVersion(isa[12]) {
+		return Interchange{}, "", syntaxf("ISA12 version %q is not supported (00401 or 00501)", isa[12])
+	}
+	if usesRepetition(isa[12]) {
+		if len(isa[11]) != 1 {
+			return Interchange{}, "", syntaxf("ISA11 repetition separator must be one character")
+		}
+		d.Repetition = isa[11][0]
+	}
+	if !d.distinct() {
+		return Interchange{}, "", syntaxf("ISA delimiters are not distinct")
+	}
+	ic := Interchange{
+		Delims:   d,
+		Sender:   Party{Qualifier: isa[5], ID: strings.TrimRight(isa[6], " ")},
+		Receiver: Party{Qualifier: isa[7], ID: strings.TrimRight(isa[8], " ")},
+		Date:     isa[9],
+		Time:     isa[10],
+		Version:  isa[12],
+		Control:  isa[13],
+		Usage:    isa[15],
+	}
+	return ic, raw[isaLen:], nil
 }
 
 func splitSegments(body string, d Delims) ([]Segment, error) {

@@ -1,6 +1,7 @@
 // Package api exposes the edi HTTP surface: partner profiles, the dry-run map
 // tester, inbound X12 receipt (850s mapped, 997s matched to outbound
-// documents), outbound 855/856/810 generation, and the message monitor with
+// documents) and EDIFACT receipt (ORDERS, DESADV and INVOIC mapped, CONTRL
+// answers), outbound 855/856/810 generation, and the message monitor with
 // single and bulk reprocess, the masked raw segment-tree viewer and the
 // partner SLA dashboard. Handlers decode, validate,
 // check duties, then call the domain and store.
@@ -112,6 +113,7 @@ func (a *API) Routes() http.Handler {
 		}
 		r.With(authz.RequireDuty("edi.admin")).Post("/maps:test", a.mapsTest)
 		r.With(authz.RequireDuty("edi.operate")).Post("/inbound/x12", a.receiveX12)
+		r.With(authz.RequireDuty("edi.operate")).Post("/inbound/edifact", a.receiveEdifact)
 		r.With(authz.RequireDuty("edi.operate")).Get("/interchanges", a.listInterchanges)
 		r.With(authz.RequireDuty("edi.operate")).Get("/interchanges/{id}", a.getInterchange)
 		r.With(authz.RequireDuty("edi.operate")).Get("/interchanges/{id}/payload", a.getPayload)
@@ -129,11 +131,14 @@ func (a *API) Routes() http.Handler {
 }
 
 type partnerRequest struct {
-	Name          string `json:"name"`
-	ISAQualifier  string `json:"isaQualifier"`
-	ISAID         string `json:"isaId"`
-	Environment   string `json:"environment"`
-	AckSLAMinutes int    `json:"ackSlaMinutes"`
+	Name             string `json:"name"`
+	ISAQualifier     string `json:"isaQualifier"`
+	ISAID            string `json:"isaId"`
+	Environment      string `json:"environment"`
+	AckSLAMinutes    int    `json:"ackSlaMinutes"`
+	EdifactID        string `json:"edifactId"`
+	EdifactQualifier string `json:"edifactQualifier"`
+	EdifactContrl    string `json:"edifactContrl"`
 }
 
 func validation(fields map[string]string) *httpx.Problem {
@@ -159,6 +164,9 @@ func (a *API) createPartner(w http.ResponseWriter, r *http.Request) {
 		Environment:   req.Environment,
 		AckSLAMinutes: req.AckSLAMinutes,
 	}
+	if req.EdifactID != "" || req.EdifactQualifier != "" || req.EdifactContrl != "" {
+		prof.EDIFACT = &domain.EdifactIdentity{ID: req.EdifactID, Qualifier: req.EdifactQualifier, Contrl: req.EdifactContrl}
+	}
 	if fields := prof.Validate(); len(fields) > 0 {
 		httpx.Fail(w, r, validation(fields))
 		return
@@ -170,7 +178,7 @@ func (a *API) createPartner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, store.ErrDuplicate) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodePartnerExists, "a partner with this ISA identity already exists in this environment"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodePartnerExists, "a partner with this ISA or EDIFACT identity already exists in this environment"))
 		return
 	}
 	if err != nil {
@@ -395,6 +403,16 @@ type receiveResponse struct {
 	AckStatus     string        `json:"ackStatus"`
 	Messages      []messageView `json:"messages"`
 	Ack997        string        `json:"ack997,omitempty"`
+	Contrl        string        `json:"contrl,omitempty"`
+}
+
+func messageViews(msgs []store.Message) []messageView {
+	views := make([]messageView, 0, len(msgs))
+	for _, m := range msgs {
+		views = append(views, messageView{MessageID: m.ID, TransactionSet: m.TransactionSet,
+			STControl: m.STControl, Status: m.Status, Error: m.Error})
+	}
+	return views
 }
 
 type groupOutcomes struct {
@@ -408,6 +426,12 @@ type groupOutcomes struct {
 // ISA sender, records every transaction, and returns the 997 text generated
 // in the same transaction.
 func (a *API) receiveX12(w http.ResponseWriter, r *http.Request) {
+	a.receiveRoute(w, r, domain.SyntaxX12)
+}
+
+// receiveRoute serves POST /inbound/x12 and /inbound/edifact: the payload
+// must be in the route's syntax.
+func (a *API) receiveRoute(w http.ResponseWriter, r *http.Request, syntax string) {
 	env := r.URL.Query().Get("environment")
 	if env == "" {
 		env = "PROD"
@@ -421,7 +445,7 @@ func (a *API) receiveX12(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, CodeSyntax, "could not read interchange"))
 		return
 	}
-	res, err := a.receive(r.Context(), body, receiveOptions{Environment: env})
+	res, err := a.receive(r.Context(), body, receiveOptions{Environment: env, Syntax: syntax})
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -430,24 +454,43 @@ func (a *API) receiveX12(w http.ResponseWriter, r *http.Request) {
 }
 
 // receiveOptions says where an inbound interchange came from. PartnerID, set
-// by the transports, is the partner the transport authenticated: the ISA
-// sender must resolve to it, so one partner cannot file interchanges in
+// by the transports, is the partner the transport authenticated: the ISA (or
+// UNB) sender must resolve to it, so one partner cannot file interchanges in
 // another's name. Source marks the transport message or file as received.
+// Syntax, when set (the inbound routes), is the only syntax accepted; empty
+// (the transports) detects it from the first segment.
 type receiveOptions struct {
 	Environment string
 	PartnerID   string
 	Source      *store.InboundSource
+	Syntax      string
 }
 
-// receive is the inbound X12 pipeline: parse, resolve the partner by ISA
-// sender, map each transaction (997s are matched to outbound interchanges),
-// and record everything with the 997 answer in one transaction. Refusals are
-// *httpx.Problem values (a duplicate control number is 409 EDI-0102); any
-// other error is a failure worth retrying.
+// receive is the inbound pipeline. It tells the syntax by the first segment
+// (ISA for X12, UNA or UNB for EDIFACT) and runs the X12 or the EDIFACT
+// receipt. Refusals are *httpx.Problem values (a duplicate control number is
+// 409 EDI-0102); any other error is a failure worth retrying.
 func (a *API) receive(ctx context.Context, body []byte, o receiveOptions) (receiveResponse, error) {
 	if len(body) > maxInbound {
 		return receiveResponse{}, httpx.NewProblem(http.StatusRequestEntityTooLarge, CodeSyntax, "interchange exceeds 4 MiB")
 	}
+	syntax := domain.DetectSyntax(body)
+	switch {
+	case syntax == "":
+		return receiveResponse{}, httpx.NewProblem(http.StatusBadRequest, CodeSyntax, "payload does not start with an ISA, UNA or UNB segment")
+	case o.Syntax != "" && syntax != o.Syntax:
+		return receiveResponse{}, httpx.NewProblem(http.StatusBadRequest, CodeSyntax, "payload is "+syntax+", not "+o.Syntax)
+	case syntax == domain.SyntaxEdifact:
+		return a.receiveEdifactInterchange(ctx, body, o)
+	}
+	return a.receiveX12Interchange(ctx, body, o)
+}
+
+// receiveX12Interchange is the inbound X12 pipeline: parse, resolve the
+// partner by ISA sender, map each transaction (997s are matched to outbound
+// interchanges), and record everything with the 997 answer in one
+// transaction.
+func (a *API) receiveX12Interchange(ctx context.Context, body []byte, o receiveOptions) (receiveResponse, error) {
 	ic, err := domain.Parse(string(body))
 	if err != nil {
 		return receiveResponse{}, httpx.NewProblem(http.StatusBadRequest, CodeSyntax, err.Error())
@@ -547,15 +590,10 @@ func (a *API) receive(ctx context.Context, body []byte, o receiveOptions) (recei
 	if err != nil {
 		return receiveResponse{}, err
 	}
-	views := make([]messageView, 0, len(res.Messages))
-	for _, m := range res.Messages {
-		views = append(views, messageView{MessageID: m.ID, TransactionSet: m.TransactionSet,
-			STControl: m.STControl, Status: m.Status, Error: m.Error})
-	}
 	return receiveResponse{
 		InterchangeID: res.InterchangeID,
 		AckStatus:     res.AckStatus,
-		Messages:      views,
+		Messages:      messageViews(res.Messages),
 		Ack997:        res.AckPayload,
 	}, nil
 }

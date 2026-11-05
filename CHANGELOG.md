@@ -10,6 +10,18 @@ release may change public APIs.
 
 ### Added
 
+- Inbound EDIFACT over the transports, with CONTRL (#483): the edi receipt tells X12 (ISA) from EDIFACT (UNA/UNB)
+  by the first segment, so the AS2 listener, the SFTP poller and the new `POST /edi/v1/inbound/edifact` take EDIFACT
+  interchanges. They are read with UNG/UNE functional groups and every count and reference checked; the UNB sender
+  must be the partner's new `edifactId`/`edifactQualifier` (and the transport's partner); the UNB reference is
+  checked against the duplicate window; ORDERS, DESADV and INVOIC are mapped onto the canonical order, ASN and
+  invoice with the 850/856/810 rules and published as `dev.passage.edi.message.received.v1` (standard EDIFACT).
+  Partners get a CONTRL (`edifactContrl`: REQUESTED when UNB 0031 = 1, ALWAYS, NEVER) on their own gap-free
+  EDIFACT counter, queued back over their AS2 or SFTP transport like the 997: UCI 7 or 4, UCF per rejected group,
+  UCM 4 with UCS and UCD placing each syntax or mapping error. A payload an authenticated transport brought and the
+  receipt refused for syntax or sender is now also answered with a negative 997 (AK502/AK905 trailer codes) or
+  CONTRL (UCI 4 with the 0085 code, 23 for a foreign sender) next to the error MDN or the parked file, recorded as a
+  refused interchange (migration 0008: `interchange.refusal`) that never counts as a duplicate.
 - AS2 edge and listener hardening (#483): trading partners reach the edi AS2 listener through Gateway `passage-as2`
   on `as2.dev.passage.dev` (`deploy/gateway/as2-*.yaml`), a Gateway of its own outside the `passage-api` JWT
   SecurityPolicy, with one HTTPRoute (`POST /as2/v1/` to the `edi-as2` Service), HTTPS only with a cert-manager

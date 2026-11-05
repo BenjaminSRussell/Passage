@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/transport"
 )
@@ -212,12 +213,18 @@ func (a *API) deliverAS2(ctx context.Context, partner store.Partner, rec store.T
 		if k.SHA256 == src.SHA256 && k.Status == "DONE" {
 			return &transport.DispositionError{Modifier: "duplicate-document", Warning: true}
 		}
+		if k.SHA256 == src.SHA256 && k.Status == "PARKED" {
+			// Refused before, and answered then (a negative 997 or CONTRL
+			// when one could be built): refused again, nothing new.
+			log.Warn("as2 payload refused again", "err", k.LastError)
+			return &transport.DispositionError{Modifier: "unexpected-processing-error"}
+		}
 		if k.SHA256 != src.SHA256 {
 			log.Warn("as2 Message-ID reused with other content")
 			return &transport.DispositionError{Modifier: "unexpected-processing-error"}
 		}
 	}
-	if !x12Payload(m) {
+	if !ediPayload(m) {
 		log.Warn("as2 payload refused", "contentType", m.ContentType)
 		return &transport.DispositionError{Modifier: "unexpected-processing-error"}
 	}
@@ -236,25 +243,27 @@ func (a *API) deliverAS2(ctx context.Context, partner store.Partner, rec store.T
 	}
 }
 
-// x12Payload accepts application/edi-x12, and an untyped body that starts
-// with an ISA segment. EDIFACT receipt is not built yet.
-func x12Payload(m transport.Message) bool {
-	if m.ContentType == transport.ContentX12 {
-		return true
-	}
+// ediPayload accepts application/edi-x12, application/edifact and an untyped
+// body whose first segment is ISA (X12), UNA or UNB (EDIFACT); the receipt
+// tells the syntax by that segment.
+func ediPayload(m transport.Message) bool {
 	switch m.ContentType {
-	case "", "application/octet-stream", "text/plain":
-		return strings.HasPrefix(strings.TrimLeft(string(m.Payload[:min(len(m.Payload), 64)]), " \t\r\n"), "ISA")
+	case transport.ContentX12, transport.ContentEdifact, "", "application/octet-stream", "text/plain":
+		return domain.DetectSyntax(m.Payload) != ""
 	}
 	return false
 }
 
-// ReceiveFromTransport records an X12 interchange an AS2 message or an SFTP
-// file brought from partnerID; ctx carries the service principal of the
-// transport's tenant (and legal entity). It returns nil when recorded, an
-// error wrapping store.ErrDuplicate for an interchange recorded before, one
-// wrapping delivery.ErrPermanent for a payload that can never be recorded,
-// and any other error for a failure worth retrying (delivery.Receiver).
+// ReceiveFromTransport records an X12 or EDIFACT interchange an AS2 message
+// or an SFTP file brought from partnerID; ctx carries the service principal
+// of the transport's tenant (and legal entity). It returns nil when recorded,
+// an error wrapping store.ErrDuplicate for an interchange recorded before,
+// one wrapping delivery.ErrPermanent for a payload that can never be
+// recorded, and any other error for a failure worth retrying
+// (delivery.Receiver). A payload refused for its syntax or its sender is
+// answered with a negative 997 or CONTRL when its envelope allows one (see
+// refuse): the transport authenticated the partner, so the answer goes back
+// to it over its own transport, next to the error MDN or the parked file.
 func (a *API) ReceiveFromTransport(ctx context.Context, partnerID string, src store.InboundSource, payload []byte) error {
 	partner, err := a.store.GetPartner(ctx, partnerID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -271,6 +280,9 @@ func (a *API) ReceiveFromTransport(ctx context.Context, partnerID string, src st
 	case errors.As(err, &p) && p.Code == CodeDuplicateControl:
 		return fmt.Errorf("%w: %s", store.ErrDuplicate, p.Detail)
 	case errors.As(err, &p):
+		if rerr := a.refuse(ctx, partner, src, payload, p); rerr != nil {
+			return rerr
+		}
 		return fmt.Errorf("%w: %s %s", delivery.ErrPermanent, p.Code, p.Detail)
 	}
 	return err

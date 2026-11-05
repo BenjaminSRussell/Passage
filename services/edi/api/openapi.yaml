@@ -334,7 +334,7 @@ paths:
         edi.pii.view, the party name (N102), N2 names, every N3 and N4 element and the PER contact name
         and numbers are replaced by "***" and flagged masked (BR-35.12); entity codes, qualifiers and the
         GLN stay visible. The raw text itself is never returned. A stored payload that no longer parses
-        is EDI-0003.
+        is EDI-0003; an EDIFACT payload is EDI-0006 (the viewer reads X12 only).
       x-passage-duty: edi.operate
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -476,9 +476,13 @@ paths:
         partner and legal entity come from it); the caller is authenticated by its CMS signature
         against the pinned partner certificate, AS2-From must be the partner's AS2 id and AS2-To
         ours. Nothing is parsed before the signature verifies (and the envelope decrypts when
-        encryption is required). The X12 payload goes through the inbound pipeline of
-        /edi/v1/inbound/x12, its ISA sender must be this partner, and the 997 is queued back over
-        the partner's transport. The MDN (signed when asked) is returned in the response, or, when
+        encryption is required). The syntax is told by the first segment: an X12 payload (ISA)
+        goes through the inbound pipeline of /edi/v1/inbound/x12, an EDIFACT payload (UNA or UNB)
+        through that of /edi/v1/inbound/edifact; its ISA or UNB sender must be this partner, and
+        the 997 or CONTRL is queued back over the partner's transport. A payload refused for its
+        syntax or its sender is answered with processed/error and, when its envelope can be read,
+        with a negative 997 or CONTRL queued the same way (the refused interchange is recorded
+        with its refusal and no messages). The MDN (signed when asked) is returned in the response, or, when
         the sender asks for an asynchronous MDN at a Receipt-Delivery-Option on the partner's
         configured AS2 host, stored (in the transaction that records the interchange) and posted by
         the delivery dispatcher with retries; the request is answered 200 only once it is stored.
@@ -695,6 +699,47 @@ paths:
         dev.passage.edi.message.acked.v1 is published per answered message. The 997 itself is
         POSTED, or FAILED with EDI-0161 when it answers nothing; 997s are never acknowledged, so
         ack997 is absent for an interchange of 997s only.
+      x-passage-duty: edi.operate
+      parameters:
+        - name: environment
+          in: query
+          required: false
+          schema: { type: string, enum: [TEST, PROD], default: PROD }
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        '201':
+          description: Interchange recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiveResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /edi/v1/inbound/edifact:
+    post:
+      operationId: receiveEdifact
+      summary: Receive one raw EDIFACT interchange from a partner
+      description: >
+        The EDIFACT counterpart of /edi/v1/inbound/x12. Reads UNA (custom service characters),
+        UNB, optional UNG..UNE functional groups, UNH..UNT messages and UNZ, with UNT01/UNT02,
+        UNE01/UNE02 and UNZ01/UNZ02 checked; identifies the partner by UNB sender (S002 id and
+        qualifier against the partner's edifactId and edifactQualifier, EDI-0101 when none),
+        rejects a UNB 0020 interchange reference seen from the partner inside the duplicate
+        window (EDI-0102), and records every message: ORDERS mapped like the 850, DESADV held to
+        the 856 rules, INVOIC to the 810 rules, with dev.passage.edi.message.received.v1
+        (standard EDIFACT) per message and message.failed per failed one. A message whose UNT
+        count or reference is wrong is FAILED while the rest is processed; other envelope errors
+        are 400. A CONTRL is returned (and queued over the partner's transport) when the partner's
+        edifactContrl is ALWAYS, or REQUESTED and UNB 0031 is 1: UCI 7 when a message is
+        accepted, UCI 4 when none is, UCM 4 with UCS and UCD for each rejected message, UCF per
+        group with a rejected message. Received CONTRLs are recorded FAILED with EDI-0161 (no
+        outbound EDIFACT exists to match) and never acknowledged.
       x-passage-duty: edi.operate
       parameters:
         - name: environment
@@ -1133,6 +1178,12 @@ components:
         receivedAt: { type: string, format: date-time }
         messageCount: { type: integer }
         failedCount: { type: integer }
+        refusal:
+          type: string
+          description: >
+            Why an interchange a transport brought was refused as a whole (syntax or sender); it
+            has no messages, its ackStatus is REJECTED and the negative 997 or CONTRL was queued
+            back. A refused interchange never counts in the duplicate window.
     InterchangeDetail:
       allOf:
         - $ref: '#/components/schemas/InterchangeSummary'
@@ -1140,6 +1191,7 @@ components:
           required: [messages]
           properties:
             ack997: { type: string, description: Serialized X12 997 sent back to the partner }
+            contrl: { type: string, description: Serialized EDIFACT CONTRL sent back to the partner (EDIFACT interchanges) }
             messages:
               type: array
               items:
@@ -1150,11 +1202,11 @@ components:
                   transactionSet: { type: string }
                   stControl: { type: string }
                   status: { type: string, enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED] }
-                  canonical: { type: object, description: 'Canonical document: 850 Order, 997 FunctionalAck, outbound 855 Ack855, 856 ASN or 810 Invoice' }
+                  canonical: { type: object, description: 'Canonical document: 850 or ORDERS Order, 997 FunctionalAck, CONTRL ContrlAck, outbound 855 Ack855, 856 or DESADV ASN, 810 or INVOIC Invoice' }
                   error: { type: string }
             deliveries:
               type: array
-              description: Deliveries of the interchange (DOCUMENT) or of its 997 (ACK) over the partner's transport, in the caller's legal entities
+              description: Deliveries of the interchange (DOCUMENT) or of its 997 or CONTRL (ACK) over the partner's transport, in the caller's legal entities
               items: { $ref: '#/components/schemas/Delivery' }
     PartnerRequest:
       type: object
@@ -1166,6 +1218,13 @@ components:
         isaId: { type: string, pattern: '^[A-Za-z0-9]{1,15}$' }
         environment: { type: string, enum: [TEST, PROD] }
         ackSlaMinutes: { type: integer, minimum: 5, maximum: 1440, default: 60 }
+        edifactId: { type: string, pattern: '^[A-Za-z0-9._-]{1,35}$', description: UNB S002 0004 sender id of a partner that sends EDIFACT }
+        edifactQualifier: { type: string, pattern: '^[A-Za-z0-9]{1,4}$', description: UNB S002 0007 code qualifier (14 GLN, ZZZ); omit when the partner sends none }
+        edifactContrl:
+          type: string
+          enum: [REQUESTED, ALWAYS, NEVER]
+          default: REQUESTED
+          description: When inbound EDIFACT is answered with a CONTRL; REQUESTED follows UNB 0031. Needs edifactId.
     Partner:
       type: object
       required: [id, name, isaQualifier, isaId, environment, ackSlaMinutes, status, version, createdAt]
@@ -1176,6 +1235,9 @@ components:
         isaId: { type: string }
         environment: { type: string, enum: [TEST, PROD] }
         ackSlaMinutes: { type: integer }
+        edifactId: { type: string }
+        edifactQualifier: { type: string }
+        edifactContrl: { type: string, enum: [REQUESTED, ALWAYS, NEVER] }
         status: { type: string, enum: [active, inactive] }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
@@ -1210,6 +1272,7 @@ components:
               status: { type: string, enum: [MAPPED, FAILED, POSTED] }
               error: { type: string }
         ack997: { type: string, description: Serialized X12 997 functional acknowledgment; absent when only 997s were received }
+        contrl: { type: string, description: Serialized EDIFACT CONTRL; absent when the partner does not get one or only CONTRLs were received }
     TradeProfile:
       type: object
       additionalProperties: false

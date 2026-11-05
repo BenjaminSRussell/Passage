@@ -34,7 +34,7 @@ operations:
   publishMessageReceived:
     action: send
     channel: { $ref: '#/channels/messageReceived' }
-    summary: One inbound transaction set has been recorded (FR-35.4)
+    summary: One inbound transaction set (X12) or message (EDIFACT ORDERS, DESADV, INVOIC, CONTRL; standard EDIFACT) has been recorded (FR-35.4)
   publishMessageAcked:
     action: send
     channel: { $ref: '#/channels/messageAcked' }
@@ -42,7 +42,7 @@ operations:
   publishMessageFailed:
     action: send
     channel: { $ref: '#/channels/messageFailed' }
-    summary: An inbound transaction failed mapping, or a received 997 could not be read or matched; also after a reprocess that still fails with another error (FR-35.10)
+    summary: An inbound transaction failed mapping, or a received 997 or CONTRL could not be read or matched; also after a reprocess that still fails with another error (FR-35.10)
   publishMessageSent:
     action: send
     channel: { $ref: '#/channels/messageSent' }
@@ -168,7 +168,7 @@ components:
             required: [delivery_id, interchange_id, partner_id, payload_kind, transport, transport_message_id, attempts, mdn_timeouts, mdn_timeout, error]
             properties:
               delivery_id: { type: string, format: uuid }
-              interchange_id: { type: string, format: uuid, description: the outbound interchange (DOCUMENT) or the inbound one whose 997 this is (ACK) }
+              interchange_id: { type: string, format: uuid, description: the outbound interchange (DOCUMENT) or the inbound one whose 997 or CONTRL this is (ACK; also the negative 997 or CONTRL of an interchange a transport refused) }
               partner_id: { type: string, format: uuid }
               payload_kind: { type: string, enum: [DOCUMENT, ACK] }
               transport: { type: string, enum: [AS2, SFTP] }

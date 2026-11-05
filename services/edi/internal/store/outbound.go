@@ -59,7 +59,7 @@ func (s *Store) CreateOutbound(ctx context.Context, key, requestHash string, o O
 		if replayed, err := claimKey(ctx, tx, tid, key, requestHash, &out); err != nil || replayed {
 			return err
 		}
-		n, err := nextControl(ctx, tx, tid, o.PartnerID)
+		n, err := nextControl(ctx, tx, tid, o.PartnerID, domain.SyntaxX12)
 		if err != nil {
 			return err
 		}

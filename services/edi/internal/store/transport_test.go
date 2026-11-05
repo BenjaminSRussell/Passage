@@ -178,3 +178,18 @@ func TestTransport_EntityScopedDueIndexAndEndpointLookup(t *testing.T) {
 		t.Fatalf("old entity still reads it: %v", err)
 	}
 }
+
+func TestClipAndFileSafe_KeepTextValid(t *testing.T) {
+	if got := clip("aä", 2); got != "a" {
+		t.Fatalf("clip split a UTF-8 sequence: %q", got)
+	}
+	if got := clip("ää", 4); got != "ää" {
+		t.Fatalf("clip = %q", got)
+	}
+	if got := fileSafe("REF 1/ä"); got != "REF_1___" {
+		t.Fatalf("fileSafe = %q", got)
+	}
+	if got := fileSafe(""); got != "0" {
+		t.Fatalf("fileSafe = %q", got)
+	}
+}

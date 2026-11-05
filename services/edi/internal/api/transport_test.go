@@ -626,12 +626,22 @@ func TestTransportAS2_InboundVerifiedRecordedAndAcknowledged(t *testing.T) {
 	if _, err := send("po-3@distributor", strings.ReplaceAll(x12Control(t, "000000103"), "DISTRIBUTOR    ", "OTHER          ")); !errors.Is(err, transport.ErrRejected) {
 		t.Fatalf("other sender: %v", err)
 	}
-	// Garbage that is not X12.
+	// It is answered with a negative 997 next to the error MDN: the refused
+	// interchange is kept (no messages) and the 997 is queued to the partner.
+	if n := e.count(`select count(*) from interchange i join transport_delivery d on d.interchange_id = i.id and d.payload_kind = 'ACK'
+		where i.refusal like 'EDI-0101:%' and i.ack_status = 'REJECTED' and i.ack_payload like '%AK5*R~%AK9*R*1*1*0~%'
+		and not exists (select 1 from message m where m.interchange_id = i.id)`); n != 1 {
+		t.Fatalf("%d refused interchanges with a 997", n)
+	}
+	// Garbage that is not X12: no envelope to answer.
 	if _, err := send("po-4@distributor", "UNB+UNOC:3+A+B'"); !errors.Is(err, transport.ErrRejected) {
 		t.Fatalf("not X12: %v", err)
 	}
-	if n := e.count(inbound); n != 1 {
+	if n := e.count(inbound + ` and refusal is null`); n != 1 {
 		t.Fatalf("%d inbound interchanges after refusals", n)
+	}
+	if n := e.count(inbound + ` and refusal is not null`); n != 1 {
+		t.Fatalf("%d refused interchanges", n)
 	}
 	// Wrong AS2-To, an unknown endpoint, and headers claiming a tenant change nothing.
 	c.Partner.ID = "SOMEONE"
@@ -667,7 +677,7 @@ func TestTransportAS2_InboundVerifiedRecordedAndAcknowledged(t *testing.T) {
 	if r, err := send("po-7@distributor", x12Control(t, "000000107")); err != nil || !strings.HasSuffix(r.Disposition, "; processed") {
 		t.Fatalf("encrypted: %+v %v", r, err)
 	}
-	if n := e.count(inbound); n != 2 {
+	if n := e.count(inbound + ` and refusal is null`); n != 2 {
 		t.Fatalf("%d inbound interchanges", n)
 	}
 }
