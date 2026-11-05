@@ -89,7 +89,8 @@ def charts():
     found = set()
     for chart in REPO.glob("**/Chart.yaml"):
         rel = chart.parent.relative_to(REPO).as_posix()
-        if "node_modules" in rel or rel.startswith("apps/"):
+        # Skip dependencies, apps/ and hidden directories (.git, .claude/worktrees and other local checkouts).
+        if "node_modules" in rel or rel.startswith("apps/") or any(part.startswith(".") for part in rel.split("/")):
             continue
         if chart.parent.parent.name == "charts" and (chart.parent.parent.parent / "Chart.yaml").exists():
             continue  # subchart, rendered by its parent
