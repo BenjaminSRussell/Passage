@@ -531,6 +531,9 @@ export interface RebateAgreementInput {
   customerId?: string;
   customerGroupId?: string;
   vendorId?: string;
+  /** At most one of productId or productGroupId limits the agreement to invoice lines of that product or group (FR-26.11). */
+  productId?: string;
+  productGroupId?: string;
   basis: RebateBasis;
   period: RebatePeriod;
   tiers: RebateTier[];
@@ -750,6 +753,9 @@ export interface RetroLineInput {
   value: string;
   quantity?: string;
   currency: string;
+  /** Needed to match an agreement with a product scope (PRC-0070). */
+  productId?: string;
+  productGroupId?: string;
 }
 
 export interface RetroDelta {

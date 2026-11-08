@@ -31,9 +31,9 @@ import {
   type RetroLineInput,
   type RetroResult,
 } from "./api/client";
-import { DAY, SIGNED_DECIMAL, sumDecimals } from "./format";
+import { DAY, SIGNED_DECIMAL, sumDecimals, UUID } from "./format";
 import styles from "./pages.module.css";
-import { basisLabel, describePosting, describeRebateCustomer, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
+import { basisLabel, describePosting, describeProductScope, describeRebateCustomer, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
 import { RebateLifecycleCard } from "./RebateLifecycleCard";
 import { RebateStatementCard } from "./RebateStatementCard";
@@ -69,18 +69,23 @@ const deltaColumns: DataTableColumn<RetroDelta>[] = [
 ];
 
 /**
- * Parses pasted invoice lines, one per row: invoice line id, invoice date, net value[, quantity].
+ * Parses pasted invoice lines, one per row: invoice line id, invoice date, net value[, quantity[, product id[, product group id]]].
  * Returns the lines or the first row's error.
  */
 export function parseRetroLines(text: string, currency: string): { lines: RetroLineInput[]; error?: string } {
   const lines: RetroLineInput[] = [];
   const rows = text.split("\n").map((r) => r.trim()).filter((r) => r !== "");
   for (const [i, row] of rows.entries()) {
-    const [id = "", date = "", value = "", quantity = "0"] = row.split(",").map((c) => c.trim());
+    const [id = "", date = "", value = "", qty = "", productId = "", productGroupId = ""] = row.split(",").map((c) => c.trim());
+    // An empty quantity cell (a row that skips it to reach the product columns) is 0.
+    const quantity = qty === "" ? "0" : qty;
     if (id === "" || id.length > 128) return { lines: [], error: `Row ${i + 1}: enter the invoice line id.` };
     if (!DAY.test(date)) return { lines: [], error: `Row ${i + 1}: enter the invoice date as YYYY-MM-DD.` };
     if (!SIGNED_DECIMAL.test(value) || !SIGNED_DECIMAL.test(quantity)) return { lines: [], error: `Row ${i + 1}: value and quantity must be numbers.` };
-    lines.push({ invoiceLineId: id, invoiceDate: date, value, quantity, currency });
+    if ((productId !== "" && !UUID.test(productId)) || (productGroupId !== "" && !UUID.test(productGroupId))) {
+      return { lines: [], error: `Row ${i + 1}: the product and product group ids must be UUIDs.` };
+    }
+    lines.push({ invoiceLineId: id, invoiceDate: date, value, quantity, currency, ...(productId ? { productId } : {}), ...(productGroupId ? { productGroupId } : {}) });
   }
   if (lines.length > 5000) return { lines: [], error: "Paste at most 5,000 invoice lines per run." };
   return { lines };
@@ -185,6 +190,7 @@ export function RebateDetailPage() {
           <Detail term={vendor ? "Vendor" : agreement.customerId ? "Customer" : "Customer group"} mono>
             {vendor ? agreement.vendorId : (agreement.customerId ?? agreement.customerGroupId)}
           </Detail>
+          <Detail term="Products">{describeProductScope(agreement)}</Detail>
           <Detail term="Basis">{basisLabel(agreement)}</Detail>
           <Detail term="Accrual period">{PERIOD_LABELS[agreement.period]}</Detail>
           <Detail term="Valid" mono>
@@ -252,7 +258,7 @@ export function RebateDetailPage() {
             <FormField
               id="rb-retro-lines"
               label="Posted invoice lines"
-              hint={`One per row: invoice line id, invoice date, net value in ${currency}, quantity (optional). For example INV-100/1, ${agreement.validFrom}, 20000`}
+              hint={`One per row: invoice line id, invoice date, net value in ${currency}, quantity, product id, product group id (the last three optional; an agreement limited to a product or group needs its id). For example INV-100/1, ${agreement.validFrom}, 20000`}
               error={retroError || undefined}
             >
               {(c) => <Textarea {...c} mono rows={5} value={retroText} onChange={(e) => { setRetroText(e.target.value); retroKey.current = newKey(); }} invalid={Boolean(retroError)} />}

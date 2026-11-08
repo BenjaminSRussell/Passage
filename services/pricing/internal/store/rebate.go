@@ -25,6 +25,12 @@ import (
 // CodeAgreementNotFound is raised when a rebate agreement id does not exist.
 const CodeAgreementNotFound = "PRC-0035"
 
+// scopeProblem is the 422 for an invoice line outside the agreement's product scope.
+func scopeProblem(a domain.RebateAgreement, lineID string) error {
+	return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeOutOfProductScope,
+		"invoice line "+lineID+" is not of "+domain.ScopeDescription(a)+", the product scope of agreement "+a.ID)
+}
+
 // CodePartyMismatch is raised when an invoice of one party role is presented to an
 // agreement of the other: sales invoices accrue CUSTOMER agreements, vendor invoices
 // accrue VENDOR agreements (FR-26.15).
@@ -57,6 +63,10 @@ type AccrualInput struct {
 	Value         decimal.Decimal
 	Quantity      decimal.Decimal
 	Currency      string
+	// ProductID and ProductGroupID say what the line sold. An agreement with a product scope
+	// accrues only a line that names its product or product group (PRC-0070).
+	ProductID      string
+	ProductGroupID string
 }
 
 // AccrualFilter selects accrual rows by agreement and period.
@@ -99,11 +109,13 @@ func (s *Postgres) CreateAgreement(ctx context.Context, a domain.RebateAgreement
 		a.ID = ids.New()
 		var inserted string
 		err := tx.QueryRow(ctx, `insert into rebate_agreement (tenant_id, id, legal_entity_id, name, party_role, customer_id, customer_group_id,
-			vendor_id, basis, period, tiers, currency, valid_from, valid_to, accrual_account, expense_account, idempotency_key)
-			values ($1, $2, $3, $4, $5, nullif($6, '')::uuid, nullif($7, '')::uuid, nullif($8, '')::uuid, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			vendor_id, basis, period, tiers, currency, valid_from, valid_to, accrual_account, expense_account, idempotency_key,
+			product_id, product_group_id)
+			values ($1, $2, $3, $4, $5, nullif($6, '')::uuid, nullif($7, '')::uuid, nullif($8, '')::uuid, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+			nullif($18, '')::uuid, nullif($19, '')::uuid)
 			on conflict (tenant_id, idempotency_key) do nothing returning id::text`,
 			p.TenantID, a.ID, a.LegalEntityID, a.Name, a.PartyRole, a.CustomerID, a.CustomerGroupID, a.VendorID, a.Basis, a.Period, tiers,
-			a.Currency, a.ValidFrom, a.ValidTo, a.AccrualAccount, a.ExpenseAccount, key).Scan(&inserted)
+			a.Currency, a.ValidFrom, a.ValidTo, a.AccrualAccount, a.ExpenseAccount, key, a.ProductID, a.ProductGroupID).Scan(&inserted)
 		if errors.Is(err, pgx.ErrNoRows) && key != nil {
 			replay, err := loadAgreement(ctx, tx, `where tenant_id = $1 and idempotency_key = $2`, p.TenantID, *key)
 			if err != nil {
@@ -144,13 +156,13 @@ func agreementNotFound(id string) error {
 
 const agreementColumns = `select id::text, legal_entity_id::text, name, party_role, coalesce(customer_id::text, ''),
 	coalesce(customer_group_id::text, ''), coalesce(vendor_id::text, ''), basis, period, tiers, currency::text, valid_from, valid_to,
-	accrual_account, expense_account, status, version from rebate_agreement `
+	accrual_account, expense_account, status, version, coalesce(product_id::text, ''), coalesce(product_group_id::text, '') from rebate_agreement `
 
 func scanAgreement(row pgx.Row) (domain.RebateAgreement, error) {
 	var a domain.RebateAgreement
 	var tiers []byte
 	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.Name, &a.PartyRole, &a.CustomerID, &a.CustomerGroupID, &a.VendorID, &a.Basis,
-		&a.Period, &tiers, &a.Currency, &a.ValidFrom, &a.ValidTo, &a.AccrualAccount, &a.ExpenseAccount, &a.Status, &a.Version); err != nil {
+		&a.Period, &tiers, &a.Currency, &a.ValidFrom, &a.ValidTo, &a.AccrualAccount, &a.ExpenseAccount, &a.Status, &a.Version, &a.ProductID, &a.ProductGroupID); err != nil {
 		return a, err
 	}
 	if err := json.Unmarshal(tiers, &a.Tiers); err != nil {
@@ -171,7 +183,7 @@ func sameAgreement(stored, in domain.RebateAgreement) bool {
 	return stored.LegalEntityID == in.LegalEntityID && stored.Name == in.Name && stored.PartyRole == domain.PartyRoleOf(in) &&
 		stored.CustomerID == in.CustomerID && stored.CustomerGroupID == in.CustomerGroupID && stored.VendorID == in.VendorID &&
 		stored.Basis == in.Basis && stored.Period == in.Period && stored.AccrualAccount == in.AccrualAccount &&
-		stored.ExpenseAccount == in.ExpenseAccount &&
+		stored.ExpenseAccount == in.ExpenseAccount && stored.ProductID == in.ProductID && stored.ProductGroupID == in.ProductGroupID &&
 		stored.Currency == in.Currency && string(a) == string(b) &&
 		dayStr(stored.ValidFrom) == dayStr(in.ValidFrom) && dayStr(stored.ValidTo) == dayStr(in.ValidTo)
 }
@@ -204,6 +216,9 @@ func (s *Postgres) AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accr
 		}
 		if day := dayStr(in.InvoiceDate); day < dayStr(a.ValidFrom) || day > dayStr(a.ValidTo) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "invoice date is outside the agreement validity")
+		}
+		if !domain.InProductScope(a, in.ProductID, in.ProductGroupID) {
+			return scopeProblem(a, in.InvoiceLineID)
 		}
 		key := domain.PeriodKey(a.Period, in.InvoiceDate)
 		if _, err := tx.Exec(ctx, `insert into rebate_period (tenant_id, agreement_id, period_key) values ($1, $2, $3) on conflict do nothing`,

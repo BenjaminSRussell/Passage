@@ -230,6 +230,9 @@ func (f *fakeStore) AccrueInvoiceLine(_ context.Context, in store.AccrualInput) 
 	if in.Currency != a.Currency {
 		return store.Accrual{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "invoice currency does not match the agreement currency")
 	}
+	if !domain.InProductScope(a, in.ProductID, in.ProductGroupID) {
+		return store.Accrual{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeOutOfProductScope, "invoice line is outside the product scope")
+	}
 	dedupe := in.AgreementID + "|" + in.InvoiceLineID
 	if acc, ok := f.accruals[dedupe]; ok {
 		if !acc.BasisValue.Equal(in.Value) || !acc.BasisQty.Equal(in.Quantity) || !acc.InvoiceDate.Equal(in.InvoiceDate) {

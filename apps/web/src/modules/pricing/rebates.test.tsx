@@ -5,6 +5,7 @@ import type { RebateAccrual, RebateAgreement } from "./api/client";
 import { sumDecimals } from "./format";
 import { emptyRebate, toAgreementInput, validateRebate } from "./NewRebatePage";
 import { parseRetroLines } from "./RebateDetailPage";
+import { describeProductScope } from "./rebateFormat";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
 useFakeServer();
@@ -260,6 +261,26 @@ describe("rebate form rules", () => {
     expect(validateRebate({ ...ok, expenseAccount: "41" }).expenseAccount).toBeDefined();
     expect(toAgreementInput({ ...ok, scope: "group", customer: G1, basis: "QUANTITY" })).toMatchObject({ customerGroupId: G1, tiers: [{ from: "0", amountPerUnit: "2" }] });
     expect(toAgreementInput(ok)).not.toHaveProperty("customerGroupId");
+  });
+
+  it("limits an agreement to a product or product group", () => {
+    const ok = { ...emptyRebate, legalEntityId: LE, name: "x", customer: C1, validFrom: "2027-01-01", validTo: "2027-12-31", tiers: [{ from: "0", value: "2" }] };
+    expect(toAgreementInput(ok)).not.toHaveProperty("productId");
+    expect(validateRebate({ ...ok, productScope: "product" }).productKey).toBe("Enter the product id (a UUID).");
+    expect(validateRebate({ ...ok, productScope: "group", productKey: "nope" }).productKey).toBe("Enter the product group id (a UUID).");
+    expect(validateRebate({ ...ok, productScope: "group", productKey: G1 })).toEqual({});
+    expect(toAgreementInput({ ...ok, productScope: "group", productKey: G1 })).toMatchObject({ productGroupId: G1 });
+    expect(toAgreementInput({ ...ok, productScope: "product", productKey: G1 })).toMatchObject({ productId: G1 });
+    expect(describeProductScope({})).toBe("All products");
+    expect(describeProductScope({ productGroupId: G1 })).toBe(`Product group ${G1}`);
+  });
+
+  it("parses the product columns of pasted retro rows", () => {
+    expect(parseRetroLines(`A,2027-01-02,10,2,${C1},${G1}`, "EUR").lines[0]).toMatchObject({ productId: C1, productGroupId: G1, quantity: "2" });
+    expect(parseRetroLines("A,2027-01-02,10,2,nope", "EUR").error).toBe("Row 1: the product and product group ids must be UUIDs.");
+    // A four-column row (no product keys) still parses, and so does one that skips the quantity.
+    expect(parseRetroLines("A,2027-01-02,10,2", "EUR").lines[0]).toEqual({ invoiceLineId: "A", invoiceDate: "2027-01-02", value: "10", quantity: "2", currency: "EUR" });
+    expect(parseRetroLines(`A,2027-01-02,10,,,${G1}`, "EUR").lines[0]).toEqual({ invoiceLineId: "A", invoiceDate: "2027-01-02", value: "10", quantity: "0", currency: "EUR", productGroupId: G1 });
   });
 
   it("sums decimal strings exactly", () => {

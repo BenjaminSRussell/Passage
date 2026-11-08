@@ -153,3 +153,43 @@ func TestAccrueSumsToPeriodTarget(t *testing.T) {
 		}
 	})
 }
+
+func TestInProductScope(t *testing.T) {
+	const p1, p2, g1, g2 = "00000000-0000-0000-0008-000000000001", "00000000-0000-0000-0008-000000000002",
+		"00000000-0000-0000-0009-000000000001", "00000000-0000-0000-0009-000000000002"
+	cases := []struct {
+		name   string
+		a      RebateAgreement
+		prod   string
+		group  string
+		wantIn bool
+	}{
+		{"no scope takes any line", RebateAgreement{}, p1, g1, true},
+		{"no scope takes a line without keys", RebateAgreement{}, "", "", true},
+		{"product scope, same product", RebateAgreement{ProductID: p1}, p1, g2, true},
+		{"product scope, other product", RebateAgreement{ProductID: p1}, p2, g1, false},
+		{"product scope, group only does not match", RebateAgreement{ProductID: p1}, "", g1, false},
+		{"group scope, same group", RebateAgreement{ProductGroupID: g1}, p2, g1, true},
+		{"group scope, other group", RebateAgreement{ProductGroupID: g1}, p1, g2, false},
+		{"group scope, line without group", RebateAgreement{ProductGroupID: g1}, p1, "", false},
+	}
+	for _, c := range cases {
+		if got := InProductScope(c.a, c.prod, c.group); got != c.wantIn {
+			t.Errorf("%s: InProductScope = %v; want %v", c.name, got, c.wantIn)
+		}
+	}
+}
+
+func TestValidateAgreementRejectsBothProductScopes(t *testing.T) {
+	a := RebateAgreement{PartyRole: PartyCustomer, CustomerID: "c", Basis: BasisNetAmount, Period: PeriodMonth, Currency: "USD",
+		ValidFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ValidTo: time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC),
+		Tiers: []Tier{{From: decimal.Zero, RatePct: decimal.NewFromInt(2)}}, ProductID: "p", ProductGroupID: "g"}
+	e := ValidateAgreement(a)
+	if e == nil || e.Fields["productScope"] == "" {
+		t.Fatalf("both product and group = %v; want a productScope field error", e)
+	}
+	a.ProductGroupID = ""
+	if e := ValidateAgreement(a); e != nil {
+		t.Fatalf("product scope alone = %v; want valid", e)
+	}
+}

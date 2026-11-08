@@ -1110,7 +1110,8 @@ paths:
         period to its target at the new cumulative basis and accrues the difference on this line, so a
         tier crossing recomputes the whole period (BR-26.8). 201 when a new accrual posted, 200 when the
         invoice line was already accrued with the same date, value and quantity, 422
-        idempotency_key_reuse when it was accrued with different ones.
+        idempotency_key_reuse when it was accrued with different ones. 422 PRC-0070 when the agreement is
+        limited to a product or product group and the line does not carry that productId or productGroupId.
       x-passage-duty: pricing.rebate.maintain
       requestBody:
         required: true
@@ -1139,7 +1140,8 @@ paths:
       description: >
         The agreement is activated when it is created; when its validFrom is earlier, the invoices posted
         between validFrom and the activation day are replayed (SAP VBOF). Until the w29/w30 invoice ledger
-        exists the caller supplies those posted invoice lines. Each line not accrued before joins its
+        exists the caller supplies those posted invoice lines (with productId or productGroupId when the
+        agreement is limited to a product or group; a line outside that scope is 422 PRC-0070). Each line not accrued before joins its
         period's cumulative basis (recorded as a zero-amount accrual with retroactive=true); each period is
         then recomputed at its tier and the difference against what it already accrued posts once, with
         retroactive=true and a rebateaccrual.posted event (BR-26.7, BR-26.14, AC-26.14). Posted invoices are
@@ -3961,6 +3963,8 @@ components:
         customerId: {type: string, format: uuid}
         customerGroupId: {type: string, format: uuid}
         vendorId: {type: string, format: uuid}
+        productId: {type: string, format: uuid, description: "Limits the agreement to invoice lines of this product. At most one of productId and productGroupId; neither means every line."}
+        productGroupId: {type: string, format: uuid, description: "Limits the agreement to invoice lines of this product group."}
         basis: {type: string, enum: [NET_AMOUNT, QUANTITY]}
         period: {type: string, enum: [MONTH, QUARTER, YEAR]}
         tiers:
@@ -4015,6 +4019,8 @@ components:
         value: {type: string, description: "Invoice line net value."}
         quantity: {type: string}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
+        productId: {type: string, format: uuid, description: "The product the line sold. Required to match an agreement with a productId (422 PRC-0070 otherwise)."}
+        productGroupId: {type: string, format: uuid, description: "The product group of the line. Required to match an agreement with a productGroupId (422 PRC-0070 otherwise)."}
     RebateAccrual:
       type: object
       required: [id, agreementId, periodId, invoiceLineId, invoiceDate, basisValue, basisQuantity, amount, currency, status]
@@ -4229,6 +4235,8 @@ components:
         value: {type: string, description: "Invoice line net value; default 0."}
         quantity: {type: string, description: "Default 0."}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
+        productId: {type: string, format: uuid, description: "Required to match an agreement with a productId (422 PRC-0070)."}
+        productGroupId: {type: string, format: uuid, description: "Required to match an agreement with a productGroupId (422 PRC-0070)."}
     RetroRecomputeRequest:
       type: object
       required: [lines]

@@ -32,6 +32,9 @@ type RetroLine struct {
 	Value         decimal.Decimal
 	Quantity      decimal.Decimal
 	Currency      string
+	// ProductID and ProductGroupID say what the line sold; see AccrualInput.
+	ProductID      string
+	ProductGroupID string
 }
 
 // RetroInput replays the invoices posted in an agreement's scope between valid_from and its
@@ -187,6 +190,8 @@ func checkRetroLines(a domain.RebateAgreement, activatedOn time.Time, lines []Re
 			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "invoice line "+l.InvoiceLineID+" appears more than once")
 		case strings.HasPrefix(l.InvoiceLineID, "retro:"):
 			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "invoice line ids starting with retro: are reserved")
+		case !domain.InProductScope(a, l.ProductID, l.ProductGroupID):
+			return scopeProblem(a, l.InvoiceLineID)
 		case l.Currency != a.Currency:
 			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "invoice line "+l.InvoiceLineID+" is not in the agreement currency "+a.Currency)
 		case !domain.InRetroScope(a, activatedOn, l.InvoiceDate):

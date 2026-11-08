@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -105,5 +106,79 @@ func TestPostgres_RebateTierCrossing(t *testing.T) {
 	list, err := s.ListAgreements(ctx, store.AgreementFilter{LegalEntityID: legalEntity})
 	if err != nil || len(list) != 1 || list[0].ID != a.ID {
 		t.Fatalf("agreements = %+v, %v", list, err)
+	}
+}
+
+// FR-26.11 product scope against Postgres: an agreement for one product group accrues only
+// the lines of that group, the scope survives a read and an idempotent replay, and a line of
+// another group or without a group is refused with PRC-0070 without moving the period.
+func TestPostgres_RebateProductScope(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	const group, otherGroup = "00000000-0000-0000-0009-000000000001", "00000000-0000-0000-0009-000000000002"
+	scoped := agreement(tier("0", "2"))
+	scoped.ProductGroupID = group
+	a, err := s.CreateAgreement(ctx, scoped, "scope-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetAgreement(ctx, a.ID); err != nil || got.ProductGroupID != group || got.ProductID != "" {
+		t.Fatalf("read = %+v, %v; want product group %s", got, err, group)
+	}
+	if replay, err := s.CreateAgreement(ctx, scoped, "scope-1"); err != nil || replay.ID != a.ID {
+		t.Fatalf("replayed create = %+v, %v", replay, err)
+	}
+	other := scoped
+	other.ProductGroupID = otherGroup
+	if _, err := s.CreateAgreement(ctx, other, "scope-1"); problemCode(err) != store.CodeIdempotencyUse {
+		t.Fatalf("same key, other scope = %v; want %s", err, store.CodeIdempotencyUse)
+	}
+	both := scoped
+	both.ProductID = "00000000-0000-0000-0008-000000000001"
+	if _, err := s.CreateAgreement(ctx, both, "scope-2"); err == nil || !strings.Contains(err.Error(), "rebate_agreement_product_scope_check") {
+		t.Fatalf("product and group scope = %v; want the table check to refuse it", err)
+	}
+
+	in := invoice(a.ID, "S-1", "2026-10-05", "10000.00")
+	in.ProductGroupID = group
+	if acc, created, err := s.AccrueInvoiceLine(ctx, in); err != nil || !created || !acc.Accrued.Equal(decimal.NewFromInt(200)) {
+		t.Fatalf("in-scope accrual = %+v created=%v, %v; want 200", acc, created, err)
+	}
+	for _, g := range []string{otherGroup, ""} {
+		out := invoice(a.ID, "S-2", "2026-10-06", "5000.00")
+		out.ProductGroupID = g
+		if _, _, err := s.AccrueInvoiceLine(ctx, out); problemCode(err) != domain.CodeOutOfProductScope {
+			t.Fatalf("group %q = %v; want %s", g, err, domain.CodeOutOfProductScope)
+		}
+	}
+	rows, err := s.ListAccruals(ctx, store.AccrualFilter{AgreementID: a.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("accruals = %v, %v; want only the in-scope line", rows, err)
+	}
+}
+
+// A retroactive replay of a scoped agreement refuses a line outside the scope (PRC-0070).
+func TestPostgres_RetroReplayRespectsProductScope(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(7, "")
+	s := store.New(pool)
+	const product = "00000000-0000-0000-0008-000000000001"
+	scoped := agreement(tier("0", "2"))
+	scoped.ProductID = product
+	a, err := s.CreateAgreement(ctx, scoped, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(id, productID string) store.RetroLine {
+		return store.RetroLine{InvoiceLineID: id, InvoiceDate: day("2026-03-05"), Value: decimal.NewFromInt(10000), Currency: "USD", ProductID: productID}
+	}
+	_, err = s.RecomputeRetro(ctx, store.RetroInput{AgreementID: a.ID, RunKey: "r1", Lines: []store.RetroLine{line("A", product), line("B", "")}})
+	if problemCode(err) != domain.CodeOutOfProductScope {
+		t.Fatalf("replay with an out-of-scope line = %v; want %s", err, domain.CodeOutOfProductScope)
+	}
+	res, err := s.RecomputeRetro(ctx, store.RetroInput{AgreementID: a.ID, RunKey: "r2", Lines: []store.RetroLine{line("A", product)}})
+	if err != nil || res.ReaccruedLines != 1 {
+		t.Fatalf("replay of in-scope lines = %+v, %v; want one line re-accrued", res, err)
 	}
 }

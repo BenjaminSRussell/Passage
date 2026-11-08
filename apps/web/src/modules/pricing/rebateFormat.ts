@@ -23,6 +23,13 @@ export function describeRebateCustomer(a: Pick<RebateAgreement, "customerId" | "
   return a.customerId ? a.customerId : `Group ${a.customerGroupId ?? ""}`;
 }
 
+/** Which invoice lines the agreement accrues: every line, one product, or one product group (FR-26.11). */
+export function describeProductScope(a: Pick<RebateAgreement, "productId" | "productGroupId">): string {
+  if (a.productId) return `Product ${a.productId}`;
+  if (a.productGroupId) return `Product group ${a.productGroupId}`;
+  return "All products";
+}
+
 /** The ledger lines of a positive accrual: Dr 4150 / Cr 2150 for a customer, Dr 2160 / Cr 5100 for a vendor. */
 export function describePosting(a: Pick<RebateAgreement, "partyRole" | "accrualAccount" | "expenseAccount">): string {
   return a.partyRole === "VENDOR" ? `Dr ${a.accrualAccount} / Cr ${a.expenseAccount}` : `Dr ${a.expenseAccount} / Cr ${a.accrualAccount}`;

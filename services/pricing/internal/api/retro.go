@@ -26,6 +26,9 @@ type retroLineDTO struct {
 	Value         string `json:"value"`
 	Quantity      string `json:"quantity"`
 	Currency      string `json:"currency"`
+	// ProductID and ProductGroupID are required to match when the agreement has a product scope.
+	ProductID      string `json:"productId"`
+	ProductGroupID string `json:"productGroupId"`
 }
 
 type retroRequest struct {
@@ -104,7 +107,14 @@ func (a *API) retroRecompute(w http.ResponseWriter, r *http.Request) {
 		if !currencyCode.MatchString(l.Currency) {
 			fields[key+"currency"] = "must be an ISO 4217 code"
 		}
-		in.Lines = append(in.Lines, store.RetroLine{InvoiceLineID: l.InvoiceLineID, InvoiceDate: day, Value: value, Quantity: qty, Currency: l.Currency})
+		if l.ProductID != "" && !ids.Valid(l.ProductID) {
+			fields[key+"productId"] = "must be a UUID"
+		}
+		if l.ProductGroupID != "" && !ids.Valid(l.ProductGroupID) {
+			fields[key+"productGroupId"] = "must be a UUID"
+		}
+		in.Lines = append(in.Lines, store.RetroLine{InvoiceLineID: l.InvoiceLineID, InvoiceDate: day, Value: value, Quantity: qty, Currency: l.Currency,
+			ProductID: l.ProductID, ProductGroupID: l.ProductGroupID})
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

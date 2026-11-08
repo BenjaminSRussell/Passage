@@ -28,14 +28,18 @@ type RebateAgreement struct {
 	CustomerID      string
 	CustomerGroupID string
 	VendorID        string
-	Basis           string
-	Period          string
-	Tiers           []Tier
-	Currency        string
-	ValidFrom       time.Time
-	ValidTo         time.Time
-	AccrualAccount  string
-	ExpenseAccount  string
+	// ProductID or ProductGroupID (at most one) limits the agreement to invoice lines of that
+	// product or product group; both empty means every line (FR-26.11).
+	ProductID      string
+	ProductGroupID string
+	Basis          string
+	Period         string
+	Tiers          []Tier
+	Currency       string
+	ValidFrom      time.Time
+	ValidTo        time.Time
+	AccrualAccount string
+	ExpenseAccount string
 	// Status is ACTIVE or CLOSED; Version is the optimistic lock (1 on create, +1 per revise or close).
 	Status  string
 	Version int
@@ -47,6 +51,8 @@ const (
 	AgreementClosed = "CLOSED"
 	// CodeAgreementEndsEarly: the end date falls before an invoice already accrued.
 	CodeAgreementEndsEarly = "PRC-0048"
+	// CodeOutOfProductScope: the invoice line is not of the agreement's product or product group.
+	CodeOutOfProductScope = "PRC-0070"
 	// CodeAgreementHasAccruals: tiers cannot change once the agreement has accruals.
 	CodeAgreementHasAccruals = "PRC-0049"
 )
@@ -71,6 +77,9 @@ func ValidateAgreement(a RebateAgreement) *Error {
 		}
 	default:
 		fields["partyRole"] = "must be CUSTOMER or VENDOR"
+	}
+	if a.ProductID != "" && a.ProductGroupID != "" {
+		fields["productScope"] = "at most one of productId or productGroupId"
 	}
 	if a.Basis != BasisNetAmount && a.Basis != BasisQuantity {
 		fields["basis"] = "must be NET_AMOUNT or QUANTITY"
@@ -162,4 +171,26 @@ func Accrue(a RebateAgreement, prior PeriodState, value, qty decimal.Decimal) (P
 	next := PeriodState{Value: prior.Value.Add(value), Qty: prior.Qty.Add(qty)}
 	next.Accrued = PeriodTarget(a, next.Value, next.Qty)
 	return next, next.Accrued.Sub(prior.Accrued)
+}
+
+// InProductScope reports whether an invoice line of productID in productGroupID falls in the
+// agreement's product scope. An agreement without a scope takes every line; a scoped one takes
+// only a line that names the same product (or product group), so a line that omits the key
+// does not match (FR-26.11).
+func InProductScope(a RebateAgreement, productID, productGroupID string) bool {
+	switch {
+	case a.ProductID != "":
+		return productID == a.ProductID
+	case a.ProductGroupID != "":
+		return productGroupID == a.ProductGroupID
+	}
+	return true
+}
+
+// ScopeDescription names the agreement's product scope for a refusal message.
+func ScopeDescription(a RebateAgreement) string {
+	if a.ProductID != "" {
+		return "product " + a.ProductID
+	}
+	return "product group " + a.ProductGroupID
 }

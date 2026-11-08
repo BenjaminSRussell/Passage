@@ -45,6 +45,8 @@ type agreementRequest struct {
 	CustomerID      string    `json:"customerId"`
 	CustomerGroupID string    `json:"customerGroupId"`
 	VendorID        string    `json:"vendorId"`
+	ProductID       string    `json:"productId"`
+	ProductGroupID  string    `json:"productGroupId"`
 	Basis           string    `json:"basis"`
 	Period          string    `json:"period"`
 	Tiers           []tierDTO `json:"tiers"`
@@ -63,6 +65,8 @@ type agreementView struct {
 	CustomerID      string    `json:"customerId,omitempty"`
 	CustomerGroupID string    `json:"customerGroupId,omitempty"`
 	VendorID        string    `json:"vendorId,omitempty"`
+	ProductID       string    `json:"productId,omitempty"`
+	ProductGroupID  string    `json:"productGroupId,omitempty"`
 	Basis           string    `json:"basis"`
 	Period          string    `json:"period"`
 	Tiers           []tierDTO `json:"tiers"`
@@ -84,6 +88,10 @@ type accrualRequest struct {
 	Value         string `json:"value"`
 	Quantity      string `json:"quantity"`
 	Currency      string `json:"currency"`
+	// ProductID and ProductGroupID say what the line sold; an agreement with a product scope
+	// accrues only a line of its product or product group (PRC-0070).
+	ProductID      string `json:"productId"`
+	ProductGroupID string `json:"productGroupId"`
 }
 
 type accrualView struct {
@@ -126,6 +134,12 @@ func (a *API) createAgreement(w http.ResponseWriter, r *http.Request) {
 	if req.VendorID != "" && !ids.Valid(req.VendorID) {
 		fields["vendorId"] = "must be a UUID"
 	}
+	if req.ProductID != "" && !ids.Valid(req.ProductID) {
+		fields["productId"] = "must be a UUID"
+	}
+	if req.ProductGroupID != "" && !ids.Valid(req.ProductGroupID) {
+		fields["productGroupId"] = "must be a UUID"
+	}
 	party := orDefault(req.PartyRole, domain.PartyCustomer)
 	if !currencyCode.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
@@ -154,7 +168,7 @@ func (a *API) createAgreement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agreement := domain.RebateAgreement{LegalEntityID: req.LegalEntityID, Name: req.Name, PartyRole: party, CustomerID: req.CustomerID,
-		CustomerGroupID: req.CustomerGroupID, VendorID: req.VendorID, Basis: req.Basis, Period: req.Period, Tiers: tiers,
+		CustomerGroupID: req.CustomerGroupID, VendorID: req.VendorID, ProductID: req.ProductID, ProductGroupID: req.ProductGroupID, Basis: req.Basis, Period: req.Period, Tiers: tiers,
 		Currency: req.Currency, ValidFrom: from, ValidTo: to, AccrualAccount: accrual, ExpenseAccount: expense}
 	if e := domain.ValidateAgreement(agreement); e != nil {
 		validationFailed(w, r, e.Fields)
@@ -213,12 +227,19 @@ func (a *API) accrue(w http.ResponseWriter, r *http.Request, party string) {
 	if !currencyCode.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
 	}
+	if req.ProductID != "" && !ids.Valid(req.ProductID) {
+		fields["productId"] = "must be a UUID"
+	}
+	if req.ProductGroupID != "" && !ids.Valid(req.ProductGroupID) {
+		fields["productGroupId"] = "must be a UUID"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
 	acc, created, err := a.store.AccrueInvoiceLine(r.Context(), store.AccrualInput{Party: party, AgreementID: req.AgreementID,
-		InvoiceLineID: req.InvoiceLineID, InvoiceDate: day, Value: value, Quantity: qty, Currency: req.Currency})
+		InvoiceLineID: req.InvoiceLineID, InvoiceDate: day, Value: value, Quantity: qty, Currency: req.Currency,
+		ProductID: req.ProductID, ProductGroupID: req.ProductGroupID})
 	if err != nil {
 		slog.Error("rebate accrual failed", "err", err, "agreementId", req.AgreementID, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -328,7 +349,7 @@ func agreementResponse(g domain.RebateAgreement) agreementView {
 		tiers = append(tiers, tierDTO{From: t.From.String(), RatePct: t.RatePct.String(), AmountPerUnit: t.AmountPerUnit.String()})
 	}
 	return agreementView{ID: g.ID, LegalEntityID: g.LegalEntityID, Name: g.Name, PartyRole: domain.PartyRoleOf(g), CustomerID: g.CustomerID,
-		CustomerGroupID: g.CustomerGroupID, VendorID: g.VendorID, Basis: g.Basis, Period: g.Period, Tiers: tiers, Currency: g.Currency,
+		CustomerGroupID: g.CustomerGroupID, VendorID: g.VendorID, ProductID: g.ProductID, ProductGroupID: g.ProductGroupID, Basis: g.Basis, Period: g.Period, Tiers: tiers, Currency: g.Currency,
 		ValidFrom: g.ValidFrom.Format(dateLayout), ValidTo: g.ValidTo.Format(dateLayout), AccrualAccount: g.AccrualAccount,
 		ExpenseAccount: g.ExpenseAccount, Status: orDefault(g.Status, domain.AgreementActive), Version: max(g.Version, 1)}
 }

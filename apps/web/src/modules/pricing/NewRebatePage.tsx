@@ -28,6 +28,9 @@ export interface RebateDraft {
   scope: "customer" | "group";
   /** The customer, customer group or (vendor rebate) vendor id. */
   customer: string;
+  /** Which invoice lines accrue: all, one product or one product group (FR-26.11). */
+  productScope: "all" | "product" | "group";
+  productKey: string;
   basis: RebateBasis;
   period: RebatePeriod;
   currency: string;
@@ -52,6 +55,8 @@ export const emptyRebate: RebateDraft = {
   party: "CUSTOMER",
   scope: "customer",
   customer: "",
+  productScope: "all",
+  productKey: "",
   basis: "NET_AMOUNT",
   period: "QUARTER",
   currency: "USD",
@@ -71,6 +76,9 @@ export function validateRebate(v: RebateDraft): Errors {
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (!UUID.test(v.customer.trim())) {
     errors.customer = v.party === "VENDOR" ? "Enter the vendor id (a UUID)." : v.scope === "customer" ? "Enter the customer id (a UUID)." : "Enter the customer group id (a UUID).";
+  }
+  if (v.productScope !== "all" && !UUID.test(v.productKey.trim())) {
+    errors.productKey = v.productScope === "product" ? "Enter the product id (a UUID)." : "Enter the product group id (a UUID).";
   }
   if (!/^[A-Z]{3}$/.test(v.currency)) errors.currency = "Use a three-letter ISO 4217 code, such as USD.";
   if (!DAY.test(v.validFrom)) errors.validFrom = "Enter the first valid day.";
@@ -96,6 +104,7 @@ export function toAgreementInput(v: RebateDraft): RebateAgreementInput {
     name: v.name.trim(),
     partyRole: v.party,
     ...(v.party === "VENDOR" ? { vendorId: customer } : v.scope === "customer" ? { customerId: customer } : { customerGroupId: customer }),
+    ...(v.productScope === "product" ? { productId: v.productKey.trim() } : v.productScope === "group" ? { productGroupId: v.productKey.trim() } : {}),
     basis: v.basis,
     period: v.period,
     tiers: v.tiers.map((t) => (v.basis === "NET_AMOUNT" ? { from: t.from, ratePct: t.value } : { from: t.from, amountPerUnit: t.value })),
@@ -152,6 +161,7 @@ export function NewRebatePage() {
       const fields: Errors = {};
       for (const [name, message] of Object.entries(problem.fields)) {
         if (name === "customer" || name === "customerId" || name === "customerGroupId" || name === "vendorId") fields.customer = message;
+        else if (name === "productId" || name === "productGroupId" || name === "productScope") fields.productKey = message;
         else if (name === "validity") fields.validTo = message;
         else if (name === "accounts") fields.accrualAccount = message;
         else if (name === "tiers") fields["tiers[0].value"] = message;
@@ -222,6 +232,16 @@ export function NewRebatePage() {
             </FormField>
           )}
           {text("rb-customer", "customer", vendor ? "Vendor id" : values.scope === "customer" ? "Customer id" : "Customer group id", { mono: true })}
+          <FormField id="rb-product-scope" label="Products" hint="Limit the agreement to the invoice lines of one product or one product group.">
+            {(c) => (
+              <Select {...c} value={values.productScope} onChange={(e) => update({ productScope: e.target.value as RebateDraft["productScope"] })}>
+                <option value="all">All products</option>
+                <option value="product">One product</option>
+                <option value="group">A product group</option>
+              </Select>
+            )}
+          </FormField>
+          {values.productScope === "all" ? null : text("rb-product-key", "productKey", values.productScope === "product" ? "Product id" : "Product group id", { mono: true })}
           <FormField id="rb-basis" label="Basis">
             {(c) => (
               <Select {...c} value={values.basis} onChange={(e) => update({ basis: e.target.value as RebateBasis })}>
