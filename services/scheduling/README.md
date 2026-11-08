@@ -53,6 +53,11 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
   `numeric(20,6)` cost and an optional cleaning operation set.
 - **CleanoutRule** (`scheduling_cleanout_rule`): one per setup group, duration,
   operation set, after N batches and/or M run hours, and at campaign end.
+- **CleanoutReset** (`scheduling_cleanout_reset`): a planner's manual reset of a
+  resource's cleanout counter (counts cleared, reason, user); insert-only.
+  `POST /resources/{id}/cleanout-counter:reset` needs the counts the caller
+  saw (SCHED-0148 when they moved) and lists the planned campaigns it makes
+  stale.
 - **Campaign / CampaignOrder** (`scheduling_campaign`, `scheduling_campaign_order`):
   resource, key, planned start, limits (orders, quantity, minutes), sequence
   rule, current setup group, status `proposed` → `planned` (sequenced) →

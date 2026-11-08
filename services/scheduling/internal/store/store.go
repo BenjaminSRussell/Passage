@@ -327,6 +327,7 @@ type Store interface {
 	SetupStore
 	PegStore
 	OverrideStore
+	CleanoutStore
 	ResourceUpdateStore
 	ParametersStore
 	SetupUpdateStore

@@ -1469,3 +1469,53 @@ export async function fetchBlockReport(filter: { from: string; to: string; resou
     utilizationPct: body.utilizationPct ?? null,
   };
 }
+
+// Slice 36: cleanout counters and their manual reset (FR-23.15)
+
+export interface CleanoutCounterRow {
+  resourceId: string;
+  resourceCode: string;
+  resourceName: string;
+  batchesSince: number;
+  minutesSince: number;
+  lastCampaignId: string | null;
+  updatedAt: string | null;
+  lastResetAt: string | null;
+}
+
+export interface CleanoutReset {
+  id: string;
+  resourceId: string;
+  previousBatches: number;
+  previousMinutes: number;
+  reason: string;
+  resetBy: string;
+  createdAt: string;
+}
+
+export interface CleanoutCounterDetail extends CleanoutCounterRow {
+  resets: CleanoutReset[];
+}
+
+export interface CleanoutResetInput {
+  batchesSince: number;
+  minutesSince: number;
+  reason: string;
+}
+
+export interface CleanoutResetResult extends CleanoutReset {
+  counter: CleanoutCounterDetail;
+  staleCampaignIds: string[];
+}
+
+export function listCleanoutCounters(signal?: AbortSignal): Promise<CleanoutCounterRow[]> {
+  return items<CleanoutCounterRow>("/cleanout-counters", signal);
+}
+
+export function getCleanoutCounter(resourceId: string, signal?: AbortSignal): Promise<CleanoutCounterDetail> {
+  return send<CleanoutCounterDetail>(`/resources/${encodeURIComponent(resourceId)}/cleanout-counter`, {}, signal);
+}
+
+export function resetCleanoutCounter(resourceId: string, input: CleanoutResetInput, key: string = newKey()): Promise<CleanoutResetResult> {
+  return post<CleanoutResetResult>(`/resources/${encodeURIComponent(resourceId)}/cleanout-counter:reset`, input, key);
+}

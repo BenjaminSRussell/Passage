@@ -231,6 +231,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/capacity-overrides", a.listCapacityOverrides)
 	r.With(authz.RequireDuty(dutyCapacity)).Delete("/v1/scheduling/resources/{id}/capacity-overrides/{overrideId}", a.deleteCapacityOverride)
 
+	// Slice 36: the cleanout counter of a resource and its manual reset (FR-23.15).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/cleanout-counters", a.listCleanoutCounters)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/cleanout-counter", a.getCleanoutCounter)
+	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/resources/{id}/cleanout-counter:reset", a.resetCleanoutCounter)
+
 	// Slice 4: order pegs that moves propagate along (FR-23.8).
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/order-pegs", a.createPeg)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-pegs", a.listPegs)

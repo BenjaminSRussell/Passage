@@ -60,6 +60,7 @@ type fakeStore struct {
 	// slice 4
 	lastPeg      store.Peg
 	lastOverride store.CapacityOverride
+	lastReset    store.CleanoutResetInput
 
 	// slice 5
 	lastUseID              string

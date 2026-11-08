@@ -21,6 +21,8 @@ var (
 	CapacityOverrideCreated = events.Type(Context, "capacityoverride", "created", 1)
 	CapacityOverrideDeleted = events.Type(Context, "capacityoverride", "deleted", 1)
 
+	CleanoutCounterReset = events.Type(Context, "cleanoutcounter", "reset", 1)
+
 	ResourceUpdated = events.Type(Context, "resource", "updated", 1)
 
 	CapacityBlockUpdated = events.Type(Context, "capacityblock", "updated", 1)
@@ -39,7 +41,7 @@ var (
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated, BottleneckDetected}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CleanoutCounterReset, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated, BottleneckDetected}
 }
 
 type RunCompletedData struct {
@@ -314,4 +316,18 @@ type ParametersUpdatedData struct {
 	PropagationOrders int    `json:"propagationOrders"`
 	PropagationLevels int    `json:"propagationLevels"`
 	Version           int    `json:"version"`
+}
+
+// CleanoutCounterResetData announces that a planner told the scheduler a
+// resource was cleaned out outside the plan (FR-23.15): its counter is back to
+// zero. StaleCampaignIDs are the planned campaigns on the resource that were
+// sequenced from the old counter; starting one is refused (SCHED-0123) until it
+// is sequenced again.
+type CleanoutCounterResetData struct {
+	ResetID          string   `json:"resetId"`
+	ResourceID       string   `json:"resourceId"`
+	PreviousBatches  int      `json:"previousBatches"`
+	PreviousMinutes  int      `json:"previousMinutes"`
+	Reason           string   `json:"reason"`
+	StaleCampaignIDs []string `json:"staleCampaignIds"`
 }

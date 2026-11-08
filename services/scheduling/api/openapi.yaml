@@ -211,6 +211,79 @@ paths:
         '204': { description: Removed }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/cleanout-counters:
+    get:
+      operationId: listCleanoutCounters
+      summary: Batches and run minutes since the last cleanout of every resource (FR-23.15)
+      description: >
+        One row per resource, the ones with the most batches since their last
+        cleanout first. A resource that never ran a campaign reads zero. The
+        counter moves when a campaign starts or is cancelled and when a planner
+        resets it.
+      x-passage-duty: scheduling.read
+      responses:
+        '200':
+          description: The counters (at most 1,000 resources)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CleanoutCounter' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/cleanout-counter:
+    get:
+      operationId: getCleanoutCounter
+      summary: Cleanout counter of a resource with its latest manual resets
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The counter and its resets, newest first (at most 50)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CleanoutCounterDetail' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/cleanout-counter:reset:
+    post:
+      operationId: resetCleanoutCounter
+      summary: Tell the scheduler a resource was cleaned out outside the plan (FR-23.15)
+      description: >
+        Sets the counter to zero and keeps the reset with its reason and the
+        counts it cleared. The caller sends the batches and minutes it saw; a
+        counter that moved since is refused with SCHED-0148 (409). Campaigns are
+        not changed: the planned campaigns sequenced from a non-zero counter
+        are listed in staleCampaignIds and refuse to start (SCHED-0123) until
+        they are sequenced again; one sequenced from a zero counter stays valid.
+        A replay answers the stored reset and its list. Publishes
+        cleanoutcounter.reset (once; a replay publishes nothing).
+      x-passage-duty: scheduling.campaign.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CleanoutResetRequest' }
+      responses:
+        '201':
+          description: 'Reset. A replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CleanoutResetResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/operations:
     post:
       operationId: createOperation
@@ -2375,6 +2448,56 @@ components:
             id: { type: string, format: uuid }
             resourceId: { type: string, format: uuid }
             createdAt: { type: string, format: date-time }
+    CleanoutCounter:
+      type: object
+      required: [resourceId, resourceCode, resourceName, batchesSince, minutesSince, lastCampaignId, updatedAt, lastResetAt]
+      properties:
+        resourceId: { type: string, format: uuid }
+        resourceCode: { type: string }
+        resourceName: { type: string }
+        batchesSince: { type: integer, minimum: 0, description: Batches run since the last cleanout. }
+        minutesSince: { type: integer, minimum: 0, description: Run minutes since the last cleanout. }
+        lastCampaignId: { type: [string, 'null'], format: uuid, description: The started campaign that left this counter; null after a reset or when none ran. }
+        updatedAt: { type: [string, 'null'], format: date-time }
+        lastResetAt: { type: [string, 'null'], format: date-time }
+    CleanoutReset:
+      type: object
+      required: [id, resourceId, previousBatches, previousMinutes, reason, resetBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        previousBatches: { type: integer, minimum: 0 }
+        previousMinutes: { type: integer, minimum: 0 }
+        reason: { type: string }
+        resetBy: { type: string, description: The user who reset the counter. }
+        createdAt: { type: string, format: date-time }
+    CleanoutCounterDetail:
+      allOf:
+        - $ref: '#/components/schemas/CleanoutCounter'
+        - type: object
+          required: [resets]
+          properties:
+            resets:
+              type: array
+              items: { $ref: '#/components/schemas/CleanoutReset' }
+    CleanoutResetRequest:
+      type: object
+      required: [batchesSince, minutesSince, reason]
+      properties:
+        batchesSince: { type: integer, minimum: 0, description: The batches since the last cleanout the caller saw. }
+        minutesSince: { type: integer, minimum: 0, description: The run minutes since the last cleanout the caller saw. }
+        reason: { type: string, minLength: 1, maxLength: 200 }
+    CleanoutResetResult:
+      allOf:
+        - $ref: '#/components/schemas/CleanoutReset'
+        - type: object
+          required: [counter, staleCampaignIds]
+          properties:
+            counter: { $ref: '#/components/schemas/CleanoutCounterDetail' }
+            staleCampaignIds:
+              type: array
+              description: Planned campaigns on the resource sequenced from the non-zero counter the reset cleared; they refuse to start (SCHED-0123) until sequenced again. A replay answers the same list.
+              items: { type: string, format: uuid }
     AffectedJob:
       type: object
       required: [jobId, orderId, operNumber, start, end, firmed]

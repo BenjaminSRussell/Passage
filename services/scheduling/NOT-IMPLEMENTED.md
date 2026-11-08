@@ -1077,6 +1077,49 @@ new endpoint, no new duty.
 | Secondary bookings counted in the block-utilization inquiry and report | later slice of PSG-23 | Blocks match the operation's attributes on the resource a job runs on; whether a secondary booking should use up a block of the secondary resource is a rule the PRD does not state. |
 | Dragging a secondary bar to move the job | accepted | The job has one start; moving it from its secondary row would need a rule for which resource the new start applies to. Use the primary bar or the Move form. |
 
+## Slice 36: cleanout counters and their manual reset (FR-23.15, BR-23.13)
+
+Built: `GET /v1/scheduling/cleanout-counters` (batches and run minutes since the
+last cleanout of every resource, most batches first; zero for a resource that
+never ran a campaign), `GET /v1/scheduling/resources/{id}/cleanout-counter`
+(the counter and its latest 50 resets) and
+`POST /v1/scheduling/resources/{id}/cleanout-counter:reset` (duty
+`scheduling.campaign.write`, Idempotency-Key, reason of 1-200 characters). The
+reset sets the counter to zero after a cleanout done outside the plan and keeps
+the counts it cleared, the reason and the user in `scheduling_cleanout_reset`
+(migration `0023_cleanout_resets.sql`, insert-only, tenant RLS, SELECT and
+INSERT granted). The caller sends the `batchesSince` and `minutesSince` it saw
+(optimistic check in place of a version column, which the counter does not
+have): the counter row is locked, the same lock a campaign start takes, and a
+counter that moved is refused with 409 SCHED-0148, so a reset never throws away
+counts the planner did not see. The lock is taken before the Idempotency-Key
+lookup, so two requests with one key serialise and the second replays the
+first. Campaigns are not touched: the planned ones sequenced from a non-zero
+counter are returned as `staleCampaignIds`, kept on the reset row (a replay
+answers the same list) and listed in `cleanoutcounter.reset`, and starting one
+is refused with SCHED-0123 until it is sequenced again; a planned campaign
+sequenced from a zero counter stays valid and is not listed; cancelling a started campaign after a reset gives back no
+counts (the counter no longer names it). `cleanoutcounter.reset` goes through
+the outbox in the same transaction (AsyncAPI documents it; a replay writes no
+second event). Web: a Cleanout counters list and a detail page per resource
+with the reset form (reason; it sends the counts shown), the stale campaigns
+after a reset and the history, in the navigation under `scheduling.read`. The
+OpenAPI and AsyncAPI documents pass the doc gates with no FAIL lines. No new
+duty.
+
+Handoffs (authz seed, for the main session; no existing wildcard covers them,
+as the matcher treats `/` and `:` as separators): under `scheduling.read`,
+`{"resource": "/v1/scheduling/cleanout-counters", "methods": ["GET"]}` and
+`{"resource": "/v1/scheduling/resources/*/cleanout-counter", "methods": ["GET"]}`;
+under `scheduling.campaign.write`,
+`{"resource": "/v1/scheduling/resources/*/cleanout-counter:reset", "methods": ["POST"]}`.
+
+| Item | Status | Reason |
+|---|---|---|
+| Reset of a counter to a chosen value (a partial cleanout) | accepted | A cleanout empties the resource; setting an arbitrary count would be a correction, not a cleanout. |
+| Re-sequencing the stale campaigns from the reset | later slice of PSG-23 | The planner opens each campaign and sequences it again; a bulk command would also change plans nobody reviewed. |
+| Resetting from a wave 25 shop-floor cleanout confirmation | handoff — wave 25 | The reset is a planner command until shop-floor feedback publishes a cleanout event. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -1118,7 +1161,7 @@ new endpoint, no new duty.
 | 7 | Proposals from wave 22 planned orders not yet scheduled, and orders excluded once Started | handoff — wave 22 (planned orders) and wave 25 (order start) | Only orders with a scheduled job are proposed; scheduling has no Started status yet, so every scheduled order outside a campaign is eligible. |
 | 7 | CP-SAT circuit sequencing (`AddCircuit`, at most 50 orders) | built (slice 6) | `sequenceRule: cp-sat`; `:sequence` calls `POST /v1/optimize/campaign-sequence` and keeps a certified, strictly cheaper order (BR-23.9), otherwise nearest-neighbour with SCHED-0006. The solver gets 20 s, not the PRD's 30 s, because the platform router ends every request at 30 s; a longer limit needs the asynchronous run path (FR-23.11). |
 | 7 | Setup matrix and campaign per resource group; setup group taken from the product (w8) or formula (w24) | handoff — wave 9 (resource groups), waves 8 and 24 | Matrices and campaigns are per resource; each campaign order carries its setup group. |
-| 7 | Batch and run-hour counters carried in from the resource's history | built for campaigns (slice 6); actual counts are a handoff to wave 25 | `scheduling_cleanout_counter` carries the planned batches and run minutes from each started campaign into the next; a cleaning changeover or a cleanout resets it. Batches run outside campaigns and actual run hours from shop-floor feedback (wave 25) do not move it yet, and there is no endpoint to reset it by hand after an unplanned cleanout. |
+| 7 | Batch and run-hour counters carried in from the resource's history | built for campaigns (slice 6); actual counts are a handoff to wave 25 | `scheduling_cleanout_counter` carries the planned batches and run minutes from each started campaign into the next; a cleaning changeover or a cleanout resets it. Batches run outside campaigns and actual run hours from shop-floor feedback (wave 25) do not move it yet. A planner resets it by hand after an unplanned cleanout since slice 36. |
 | 7 | Posting the campaign changeover allocation as `campaign-changeover` overhead cost lines before orders end (FR-23.16) | handoff — wave 21 (order costing and journals) | `:allocate-cost` computes the BR-23.14 split (amounts sum exactly to the cost, residual to the largest order) and writes nothing. |
 | 7 | SCHED-0013: refuse to end an order while the campaign cleanout is unended; `campaign.allowEarlyEnd` estimate and true-up | handoff — wave 21 (order end) | The order end lives in wave 21. |
 | 8 | Capacity blocks: definition and the BR-23.15 matching and priority rule (FR-23.17) | built | `POST/GET /v1/scheduling/capacity-blocks`; `domain.Placeable`, `MatchesAny`. |

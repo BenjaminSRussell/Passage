@@ -11,6 +11,8 @@ import { CapacityBlocksPage } from "./CapacityBlocksPage";
 import { CapacityLoadJobsPage } from "./CapacityLoadJobsPage";
 import { CapacityLoadPage } from "./CapacityLoadPage";
 import { CapacityOverridesPage } from "./CapacityOverridesPage";
+import { CleanoutCounterDetailPage } from "./CleanoutCounterDetailPage";
+import { CleanoutCountersPage } from "./CleanoutCountersPage";
 import { CleanoutRulesPage } from "./CleanoutRulesPage";
 import { DispatchListPage } from "./DispatchListPage";
 import { EditResourcePage } from "./EditResourcePage";
@@ -47,7 +49,7 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, bottleneck episodes, late orders, block utilization across resources, the network feasibility inquiry, the dispatch list of a resource for a day or shift, production orders received from wave 21, run utilization and lateness measures, run comparison and rollback to a previous run, resources, operations (change, delete, take an order off the schedule), order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks, capacity overrides (downtimes and extra shifts) and the scheduling parameters (run defaults, drag snap, propagation limits).",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load by week or day with its job drill-down, bottleneck episodes, late orders, block utilization across resources, the network feasibility inquiry, the dispatch list of a resource for a day or shift, production orders received from wave 21, run utilization and lateness measures, run comparison and rollback to a previous run, resources, operations (change, delete, take an order off the schedule), order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, cleanout counters and their manual reset, resource networks, capacity blocks, capacity overrides (downtimes and extra shifts) and the scheduling parameters (run defaults, drag snap, propagation limits).",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
@@ -81,6 +83,8 @@ const scheduling: PassageModule = {
     { path: "/scheduling/setup-matrices/:id", element: createElement(SetupMatrixDetailPage), handle: { title: "Setup matrix" } },
     { path: "/scheduling/cleanout-rules", element: createElement(CleanoutRulesPage), handle: { title: "Cleanout rules" } },
     { path: "/scheduling/cleanout-rules/new", element: createElement(NewCleanoutRulePage), handle: { title: "New cleanout rule" } },
+    { path: "/scheduling/cleanout-counters", element: createElement(CleanoutCountersPage), handle: { title: "Cleanout counters" } },
+    { path: "/scheduling/cleanout-counters/:id", element: createElement(CleanoutCounterDetailPage), handle: { title: "Cleanout counter" } },
     { path: "/scheduling/networks", element: createElement(NetworksPage), handle: { title: "Resource networks" } },
     { path: "/scheduling/networks/new", element: createElement(NewNetworkPage), handle: { title: "New resource network" } },
     { path: "/scheduling/networks/:id", element: createElement(NetworkDetailPage), handle: { title: "Resource network" } },
@@ -108,6 +112,7 @@ const scheduling: PassageModule = {
     { label: "Campaign proposals", to: "/scheduling/campaign-proposals", duty: "scheduling.read" },
     { label: "Setup matrices", to: "/scheduling/setup-matrices", duty: "scheduling.read" },
     { label: "Cleanout rules", to: "/scheduling/cleanout-rules", duty: "scheduling.read" },
+    { label: "Cleanout counters", to: "/scheduling/cleanout-counters", duty: "scheduling.read" },
     { label: "Resource networks", to: "/scheduling/networks", duty: "scheduling.read" },
     { label: "Capacity blocks", to: "/scheduling/capacity-blocks", duty: "scheduling.read" },
     { label: "Block utilization", to: "/scheduling/block-utilization", duty: "scheduling.read" },
