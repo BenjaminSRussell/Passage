@@ -1539,3 +1539,9 @@ test_sales_reads_party_customer if {
 	allowed("party.read", "GET", "/v1/party/customers/c-1")
 	not allowed("party.read", "POST", "/v1/party/customers/c-1")
 }
+
+# Wave 6 slice 47: operating-unit CSV bulk import.
+test_org_operating_unit_import if {
+	allowed("org.operating-unit.write", "POST", "/v1/org/operating-units:import")
+	not allowed("org.read", "POST", "/v1/org/operating-units:import")
+}

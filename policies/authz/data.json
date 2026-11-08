@@ -2321,6 +2321,7 @@
     ]},
     "org.operating-unit.write": {"permissions": [
       {"resource": "/v1/org/operating-units", "methods": ["POST"]},
+      {"resource": "/v1/org/operating-units:import", "methods": ["POST"]},
       {"resource": "/v1/org/operating-units/*", "methods": ["PATCH"]},
       {"resource": "/v1/org/team-types", "methods": ["POST"]},
       {"resource": "/v1/org/teams", "methods": ["POST"]},
