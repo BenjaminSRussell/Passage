@@ -277,7 +277,7 @@ export function RequisitionCreatePage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New requisition" description="Leave the estimate blank to take the preferred vendor's trade agreement price." />
+      <PageHeader title="New requisition" description="Leave the estimate blank to take the preferred vendor's trade agreement price, or the price of the product's last approved order." />
       <CatalogPicker
         legalEntityId={legalEntityId.trim()}
         operatingUnitId={operatingUnitId.trim()}

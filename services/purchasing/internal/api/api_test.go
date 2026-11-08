@@ -47,6 +47,9 @@ type fakeStore struct {
 	changeOrders       []store.ChangeOrder
 	overdue            []store.OverdueLine
 	priceHist          []store.PriceHistoryEntry
+	lastPrice          *store.PriceHistoryEntry
+	lastPriceErr       error
+	lastPriceCalls     int
 	lastInquiry        store.InquiryFilter
 	lastOpenLines      store.OpenLineFilter
 	lastAgrFilter      store.AgreementFilter
@@ -294,6 +297,14 @@ func (f *fakeStore) ListChangeOrders(_ context.Context, qf store.InquiryFilter, 
 func (f *fakeStore) ListPriceHistory(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.PriceHistoryEntry], error) {
 	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
 	return store.Page[store.PriceHistoryEntry]{Items: f.priceHist}, nil
+}
+
+func (f *fakeStore) LastOrderPrice(_ context.Context, legalEntityID, productID, currency, unit string) (*store.PriceHistoryEntry, error) {
+	f.lastPriceCalls++
+	if f.lastPriceErr != nil {
+		return nil, f.lastPriceErr
+	}
+	return f.lastPrice, nil
 }
 
 func (f *fakeStore) RequisitionLinesByID(_ context.Context, lineIDs []string) ([]store.SourcingLine, error) {

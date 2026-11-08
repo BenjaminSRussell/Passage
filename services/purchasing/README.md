@@ -74,7 +74,7 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 
 | Method and path | Duty | Notes |
 |---|---|---|
-| POST `/requisitions` | procurement.requisition.create | Idempotency-Key required; max 500 lines; blank estimates default from the preferred vendor's trade agreement, else 0 with warning PRC-REQ-003 |
+| POST `/requisitions` | procurement.requisition.create | Idempotency-Key required; max 500 lines; blank estimates default from the preferred vendor's trade agreement, else from the last approved order of the product in the legal entity, currency and unit (warning PRC-REQ-012), else 0 with warning PRC-REQ-003 |
 | GET `/requisitions` | procurement.requisition.create | Newest first; `status`, `mine=true`, `limit` (≤ 200), `cursor` |
 | GET `/requisitions/{id}` | procurement.requisition.create or procurement.requisition.approve | ETag = version; legal entity scope applies (row-level security); `approvedSteps`, `nextApprover`, `history` |
 | POST `/requisitions/{id}:submit` | procurement.requisition.create | Idempotency-Key and If-Match (version) required; requester only; routes approvers |
@@ -529,6 +529,7 @@ store codes are returned as the `code` field.
 | AUTH-0003 | 403 | Caller lacks the route's duty, or the legal entity is outside the caller's scope |
 | PRC-REQ-002 | 422 | Requisition has more than 500 lines |
 | PRC-REQ-003 | warning | Returned in `warnings` on create: no price found, estimate set to 0 |
+| PRC-REQ-012 | warning | Returned in `warnings` on create: the estimate was taken from the last approved order of the product (names the order and its date) |
 | PRC-REQ-004 | 403 | Only the requester can submit, reopen or cancel the requisition |
 | PRC-REQ-009 | 403 | The requester cannot approve or reject their own requisition |
 | PRC-REQ-010 | 403 | The approver already approved an earlier level of this round |

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 
@@ -95,4 +97,58 @@ func mustDay(t *testing.T, s string) domain.Day {
 		t.Fatal(err)
 	}
 	return d
+}
+
+func TestEstimatePrices_FallsBackToTheLastOrderPrice(t *testing.T) {
+	product := ids.New()
+	last := &store.PriceHistoryEntry{Number: "PO-00000042", OrderDate: mustDay(t, "2026-02-03"), UnitPrice: decimal.RequireFromString("1250"),
+		PriceUnit: decimal.NewFromInt(100), DiscountPct: decimal.NewFromInt(10)}
+	tests := []struct {
+		name      string
+		line      string
+		last      *store.PriceHistoryEntry
+		wantPrice string
+		wantTotal string
+		wantCode  string
+		wantCalls int
+	}{
+		{"net of discount per price unit", `{"productId":"` + product + `","qty":"3","unit":"EA","requestedDate":"2026-03-10"}`, last, "11.25", "33.75", codeLastPrice, 1},
+		{"no earlier order keeps zero and warns", `{"productId":"` + product + `","qty":"3","unit":"EA","requestedDate":"2026-03-10"}`, nil, "0", "0", codeNoEstimate, 1},
+		{"a given estimate is never replaced", `{"productId":"` + product + `","qty":"3","unit":"EA","estimatedUnitPrice":"2","requestedDate":"2026-03-10"}`, last, "2", "6", "", 0},
+		{"a non-catalog line has no history", `{"description":"Chairs","category":"OFFICE","qty":"3","unit":"EA","requestedDate":"2026-03-10"}`, last, "0", "0", codeNoEstimate, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.fake.lastPrice = tc.last
+			body := `{"legalEntityId":"` + leA + `","currency":"USD","lines":[` + tc.line + `]}`
+			rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions", user: userA, duties: []string{dutyRequisitionCreate}, body: body, headers: idem("k-last")})
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			var out store.Requisition
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if !out.Lines[0].EstimatedUnitPrice.Equal(decimal.RequireFromString(tc.wantPrice)) || !out.Total.Equal(decimal.RequireFromString(tc.wantTotal)) {
+				t.Fatalf("estimate %s total %s, want %s and %s", out.Lines[0].EstimatedUnitPrice, out.Total, tc.wantPrice, tc.wantTotal)
+			}
+			if tc.wantCode == "" && len(out.Warnings) != 0 || tc.wantCode != "" && (len(out.Warnings) != 1 || out.Warnings[0].Code != tc.wantCode) {
+				t.Fatalf("warnings = %+v, want %q", out.Warnings, tc.wantCode)
+			}
+			if h.fake.lastPriceCalls != tc.wantCalls {
+				t.Fatalf("last price lookups = %d, want %d", h.fake.lastPriceCalls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+func TestEstimatePrices_LastPriceLookupFailureFailsTheCreate(t *testing.T) {
+	h := newHarness(t)
+	h.fake.lastPriceErr = errors.New("db down")
+	body := `{"legalEntityId":"` + leA + `","currency":"USD","lines":[{"productId":"` + ids.New() + `","qty":"1","unit":"EA","requestedDate":"2026-03-10"}]}`
+	rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions", user: userA, duties: []string{dutyRequisitionCreate}, body: body, headers: idem("k-err")})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500: %s", rec.Code, rec.Body)
+	}
 }

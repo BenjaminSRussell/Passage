@@ -42,6 +42,7 @@ const (
 	codeTooManyLines   = "PRC-REQ-002"
 	codeNoEstimate     = "PRC-REQ-003"
 	codeNotRequester   = "PRC-REQ-004"
+	codeLastPrice      = "PRC-REQ-012"
 	codeUnknownAction  = "PRC-ACTION-001"
 )
 

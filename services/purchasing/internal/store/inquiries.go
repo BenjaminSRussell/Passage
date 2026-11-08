@@ -331,6 +331,45 @@ func (s *Postgres) ListPriceHistory(ctx context.Context, f InquiryFilter, after 
 	return pg, nil
 }
 
+// LastOrderPrice returns the newest priced line of a product on an order that reached approval
+// (APPROVED, CONFIRMED, FINALIZED) in the same legal entity, currency and unit (FR-17.1 estimate
+// fallback), or nil when there is none. Cancelled lines and lines priced at zero (unit price 0 or a
+// 100 % discount) are skipped. Ties on the order time go to the higher order id, then line number.
+func (s *Postgres) LastOrderPrice(ctx context.Context, legalEntityID, productID, currency, unit string) (*PriceHistoryEntry, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out *PriceHistoryEntry
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select o.id, o.number, l.line_no, o.created_at, o.vendor_id, o.currency, l.unit, l.qty,
+			l.unit_price, l.price_unit, l.discount_pct, l.price_source, coalesce(l.agreement_line_id::text, '')
+			from purchase_order_line l
+			join purchase_order o on o.tenant_id = l.tenant_id and o.id = l.purchase_order_id
+			where l.tenant_id = $1 and l.product_id = $2::uuid and l.status <> 'CANCELLED' and l.unit_price > 0 and l.discount_pct < 100
+			and o.legal_entity_id = $3::uuid and o.currency = $4 and l.unit = $5
+			and o.approval_status in ('APPROVED', 'CONFIRMED', 'FINALIZED')
+			order by o.created_at desc, o.id desc, l.line_no desc limit 1`,
+			p.TenantID, productID, legalEntityID, currency, unit)
+		if err != nil {
+			return err
+		}
+		items, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (PriceHistoryEntry, error) {
+			var e PriceHistoryEntry
+			var at time.Time
+			err := r.Scan(&e.PurchaseOrderID, &e.Number, &e.LineNo, &at, &e.VendorID, &e.Currency, &e.Unit, &e.Qty,
+				&e.UnitPrice, &e.PriceUnit, &e.DiscountPct, &e.PriceSource, &e.AgreementLineID)
+			e.OrderDate = day(at.UTC().Truncate(24 * time.Hour))
+			return e, err
+		})
+		if err != nil {
+			return err
+		}
+		if len(items) > 0 {
+			out = &items[0]
+		}
+		return nil
+	})
+	return out, err
+}
+
 // ExpiringAgreement is a purchase agreement that ends within the look-ahead window, or that has
 // ended while still EFFECTIVE or ON_HOLD (Lapsed). Committed and released amounts add up the lines
 // measured in value (VALUE, CATEGORY_VALUE, TOTAL_VALUE) in the agreement currency; QUANTITY lines

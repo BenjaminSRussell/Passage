@@ -492,7 +492,7 @@ components:
         updatedAt: { type: string, format: date-time }
         warnings:
           type: array
-          description: PRC-REQ-003 on create when a line's estimate stayed 0; on submit, PRC-CAT-002 (SOFT category access) and PRC-CAT-010 (PROVISIONAL vendor assignment) per line.
+          description: PRC-REQ-003 on create when a line's estimate stayed 0, PRC-REQ-012 when a product line's blank estimate was taken from the last approved order of the product (same legal entity, currency and unit); on submit, PRC-CAT-002 (SOFT category access) and PRC-CAT-010 (PROVISIONAL vendor assignment) per line.
           items:
             type: object
             properties:

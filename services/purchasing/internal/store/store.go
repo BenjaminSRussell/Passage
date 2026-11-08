@@ -82,6 +82,7 @@ type Store interface {
 	ListNearLimitAgreementLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[NearLimitLine], error)
 	ListChangeOrders(ctx context.Context, f InquiryFilter, after string, limit int) (Page[ChangeOrder], error)
 	ListPriceHistory(ctx context.Context, f InquiryFilter, after string, limit int) (Page[PriceHistoryEntry], error)
+	LastOrderPrice(ctx context.Context, legalEntityID, productID, currency, unit string) (*PriceHistoryEntry, error)
 	ConsolidateRequisitionLines(ctx context.Context, orders []PurchaseOrder, lineIDs []string, idem Idem) ([]PurchaseOrder, error)
 	CreateRFQ(ctx context.Context, in domain.RFQ, idem Idem) (domain.RFQ, error)
 	GetRFQ(ctx context.Context, id string) (domain.RFQ, error)

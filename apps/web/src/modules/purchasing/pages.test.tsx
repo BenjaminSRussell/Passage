@@ -161,6 +161,22 @@ describe("new requisition", () => {
     expect(await screen.findByText(/No price found for Laptop/)).toBeInTheDocument();
   });
 
+  it("tells the requester the blank estimate can come from the last order and shows that warning", async () => {
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        return json({ ...requisition, warnings: [{ code: "PRC-REQ-012", lineNo: 1, detail: "Estimated price taken from the last order of P1, PO-00000042 (2026-02-03)" }] }, 201);
+      }
+      return json(requisition, 200, { ETag: '"1"' });
+    });
+    renderAt("/purchasing/requisitions/new");
+    expect(await screen.findByText(/or the price of the product's last approved order/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: "0197c1f2-0000-7000-8000-0000000000aa" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
+    expect(await screen.findByText(/taken from the last order of P1, PO-00000042/)).toBeInTheDocument();
+  });
+
   it("adds and removes lines", async () => {
     stubFetch(() => json({}));
     renderAt("/purchasing/requisitions/new");

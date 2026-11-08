@@ -508,3 +508,57 @@ func TestInquiries_ExpiringAgreements(t *testing.T) {
 		t.Fatalf("other legal entity = %+v, %v", other.Items, err)
 	}
 }
+
+// FR-17.1 last-price fallback against Postgres: the newest approved order line of the product in the
+// same legal entity, currency and unit; drafts, cancelled lines, zero prices, fully discounted lines
+// and other tenants' orders never supply a price.
+func TestLastOrderPrice(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(290)
+	vendor, product := ids.New(), ids.New()
+
+	if got, err := s.LastOrderPrice(ctx, legalEntity, product, "USD", "EA"); err != nil || got != nil {
+		t.Fatalf("no history: %+v, %v", got, err)
+	}
+	old := lifecyclePO(t, vendor, "10", "2027-01-05")
+	old.Lines[0].ProductID = product
+	newer := lifecyclePO(t, vendor, "20", "2027-01-06")
+	newer.Lines[0].ProductID, newer.Lines[0].UnitPrice = product, dec("12")
+	newer.Lines[0].GrossAmount, newer.Lines[0].LineAmount = dec("240"), dec("240")
+	newer.Subtotal, newer.Total = dec("240"), dec("240")
+	confirmedPO(t, ctx, s, old)
+	confirmedPO(t, ctx, s, newer)
+	draft := lifecyclePO(t, vendor, "5", "2027-01-07")
+	draft.Lines[0].ProductID, draft.Lines[0].UnitPrice = product, dec("99")
+	if _, err := s.CreatePurchaseOrder(ctx, draft, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	cancelled := lifecyclePO(t, vendor, "5", "2027-01-08")
+	cancelled.Lines[0].ProductID, cancelled.Lines[0].UnitPrice = product, dec("77")
+	cpo := confirmedPO(t, ctx, s, cancelled)
+	execTenant(t, ctx, pool, `update purchase_order_line set status = 'CANCELLED' where purchase_order_id = $1`, cpo.ID)
+	free := lifecyclePO(t, vendor, "5", "2027-01-09")
+	free.Lines[0].ProductID, free.Lines[0].DiscountPct = product, dec("100")
+	free.Lines[0].DiscountAmount, free.Lines[0].LineAmount = dec("50"), dec("0")
+	free.DiscountTotal, free.Total = dec("50"), dec("0")
+	confirmedPO(t, ctx, s, free)
+
+	got, err := s.LastOrderPrice(ctx, legalEntity, product, "USD", "EA")
+	if err != nil || got == nil || !got.UnitPrice.Equal(dec("12")) || got.Number == "" || got.VendorID != vendor {
+		t.Fatalf("last price = %+v, %v; want the newest approved, uncancelled line at 12", got, err)
+	}
+	for name, args := range map[string][4]string{
+		"other legal entity": {ids.New(), product, "USD", "EA"},
+		"other currency":     {legalEntity, product, "EUR", "EA"},
+		"other unit":         {legalEntity, product, "USD", "KG"},
+		"other product":      {legalEntity, ids.New(), "USD", "EA"},
+	} {
+		if g, err := s.LastOrderPrice(ctx, args[0], args[1], args[2], args[3]); err != nil || g != nil {
+			t.Errorf("%s: %+v, %v; want none", name, g, err)
+		}
+	}
+	if g, err := s.LastOrderPrice(principalContext(291), legalEntity, product, "USD", "EA"); err != nil || g != nil {
+		t.Errorf("other tenant: %+v, %v; want none", g, err)
+	}
+}

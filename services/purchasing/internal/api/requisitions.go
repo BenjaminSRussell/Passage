@@ -179,9 +179,9 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 
 // estimatePrices defaults blank estimates (FR-17.1): a catalog line with a
 // preferred vendor takes the trade agreement price for its quantity on the
-// requested date; anything left at zero carries warning PRC-REQ-003. The
-// last-PO-price fallback needs PO history by product and is listed in
-// NOT-IMPLEMENTED.md.
+// requested date; a product line the agreement could not price falls back to the net price of the
+// last approved order of the product in the same legal entity, currency and unit (warning
+// PRC-REQ-012 names the order); anything left at zero carries warning PRC-REQ-003.
 func (a *API) estimatePrices(ctx context.Context, req *store.Requisition, needsEstimate []bool) error {
 	minor := money.MinorUnits(req.Currency)
 	req.Total = decimal.Zero
@@ -196,6 +196,26 @@ func (a *API) estimatePrices(ctx context.Context, req *store.Requisition, needsE
 			if res.Winner != nil {
 				l.EstimatedUnitPrice = res.Winner.Price.DivRound(res.Winner.PriceUnit, 6)
 				l.Amount = l.Qty.Mul(res.Winner.Price).DivRound(res.Winner.PriceUnit, 12).RoundBank(minor)
+			}
+		}
+		if needsEstimate[i] && l.EstimatedUnitPrice.IsZero() && l.ProductID != "" {
+			last, err := a.store.LastOrderPrice(ctx, req.LegalEntityID, l.ProductID, req.Currency, l.Unit)
+			if err != nil {
+				return err
+			}
+			if last != nil {
+				// The order's own line math (domain.ComputeLine): qty × unit price ÷ price unit, net of the
+				// discount percent, rounded half-even once; the estimate is that net price per one unit.
+				la, err := domain.ComputeLine(domain.LineInput{Qty: l.Qty, UnitPrice: last.UnitPrice, PriceUnit: last.PriceUnit,
+					DiscountPct: last.DiscountPct, Tax: decimal.Zero}, minor)
+				if err != nil {
+					return err
+				}
+				hundred := decimal.NewFromInt(100)
+				l.EstimatedUnitPrice = last.UnitPrice.Mul(hundred.Sub(last.DiscountPct)).Div(hundred).DivRound(last.PriceUnit, 6)
+				l.Amount = la.Amount
+				req.Warnings = append(req.Warnings, store.Warning{Code: codeLastPrice, LineNo: l.LineNo,
+					Detail: "Estimated price taken from the last order of " + l.ProductID + ", " + last.Number + " (" + last.OrderDate.String() + ")"})
 			}
 		}
 		if needsEstimate[i] && l.EstimatedUnitPrice.IsZero() {
