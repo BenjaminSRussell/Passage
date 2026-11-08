@@ -501,16 +501,31 @@ func nextJournalNumber(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 }
 
 func insertJournalLines(ctx context.Context, tx pgx.Tx, tenantID, journalID string, lines []JournalLine) error {
+	var b pgx.Batch
 	for i, l := range lines {
-		if _, err := tx.Exec(ctx, `insert into production_journal_line (tenant_id, journal_id, line_seq, kind, bom_line_number, oper_number, item_id,
+		b.Queue(`insert into production_journal_line (tenant_id, journal_id, line_seq, kind, bom_line_number, oper_number, item_id,
 				qty, qty_good, qty_error, finish_operation, unit_cost, amount, overhead_amount, coproduct_line_number, job_type)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 			tenantID, journalID, i+1, l.Kind, l.LineNo, l.OperNumber, l.ItemID, l.Qty.String(), l.QtyGood.String(), l.QtyError.String(),
-			l.Finished, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String(), l.CoProductLineNo, l.JobType); err != nil {
+			l.Finished, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String(), l.CoProductLineNo, l.JobType)
+	}
+	return sendBatch(ctx, tx, &b)
+}
+
+// sendBatch runs the queued statements in one round trip (PRD 4.21: a 200-line
+// journal posts in under 2 s at p95, so the per-line writes are not sent one by one).
+func sendBatch(ctx context.Context, tx pgx.Tx, b *pgx.Batch) error {
+	if b.Len() == 0 {
+		return nil
+	}
+	br := tx.SendBatch(ctx, b)
+	for i := 0; i < b.Len(); i++ {
+		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
 			return err
 		}
 	}
-	return nil
+	return br.Close()
 }
 
 // PostJournal posts a draft journal (FR-21.5 to FR-21.7) in one transaction:
@@ -791,18 +806,23 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 // the BOM lines and operations: feedback starts an operation and a finishing
 // line closes it (FR-21.6).
 func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID string, lines []JournalLine, keepFinished bool) error {
+	// The valued lines and the consumption on the BOM lines are written in one round trip;
+	// the other kinds book through their own statements below.
+	var b pgx.Batch
 	for i, l := range lines {
-		if _, err := tx.Exec(ctx, `update production_journal_line set unit_cost = $4, amount = $5, overhead_amount = $6
+		b.Queue(`update production_journal_line set unit_cost = $4, amount = $5, overhead_amount = $6
 			where tenant_id = $1 and journal_id = $2 and line_seq = $3`,
-			tenantID, journalID, i+1, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String()); err != nil {
-			return err
+			tenantID, journalID, i+1, l.UnitCost.String(), l.Amount.String(), l.OverheadAmount.String())
+		if l.Kind == KindIssue {
+			b.Queue(`update production_bom_line set qty_consumed = qty_consumed + $4
+				where tenant_id = $1 and order_id = $2 and line_number = $3`, tenantID, orderID, *l.LineNo, l.Qty.String())
 		}
+	}
+	if err := sendBatch(ctx, tx, &b); err != nil {
+		return err
+	}
+	for _, l := range lines {
 		switch l.Kind {
-		case KindIssue:
-			if _, err := tx.Exec(ctx, `update production_bom_line set qty_consumed = qty_consumed + $4
-				where tenant_id = $1 and order_id = $2 and line_number = $3`, tenantID, orderID, *l.LineNo, l.Qty.String()); err != nil {
-				return err
-			}
 		case KindCoProduct:
 			if err := bookCoProduct(ctx, tx, tenantID, orderID, *l.CoProductLineNo, l.Qty); err != nil {
 				return err
@@ -827,15 +847,14 @@ func applyLines(ctx context.Context, tx pgx.Tx, tenantID, orderID, journalID str
 }
 
 func insertPostings(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, journalID *string, postingDate string, ps []domain.Posting) error {
+	var b pgx.Batch
 	for _, w := range ps {
-		if _, err := tx.Exec(ctx, `insert into production_wip_posting (tenant_id, id, legal_entity_id, order_id, journal_id, posting_type,
+		b.Queue(`insert into production_wip_posting (tenant_id, id, legal_entity_id, order_id, journal_id, posting_type,
 				ledger_account, wip, amount_dr, amount_cr, currency, posting_date)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::date)`,
-			tenantID, ids.New(), h.legalEntityID, h.id, journalID, w.Type, w.Account, w.WIP, w.Dr.String(), w.Cr.String(), h.currency, postingDate); err != nil {
-			return err
-		}
+			tenantID, ids.New(), h.legalEntityID, h.id, journalID, w.Type, w.Account, w.WIP, w.Dr.String(), w.Cr.String(), h.currency, postingDate)
 	}
-	return nil
+	return sendBatch(ctx, tx, &b)
 }
 
 func eventPostings(ps []domain.Posting) []prodevents.Posting {
