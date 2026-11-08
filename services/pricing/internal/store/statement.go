@@ -44,9 +44,23 @@ order by l.invoice_date, l.retroactive, l.created_at, l.id`
 func (s *Postgres) RebateStatementInput(ctx context.Context, agreementID, periodKey string) (domain.RebateAgreement, domain.StatementInput, error) {
 	var a domain.RebateAgreement
 	var in domain.StatementInput
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var err error
-		a, err = loadAgreement(ctx, tx, `where id = $1`, agreementID)
+	err := s.StreamRebateStatement(ctx, agreementID, periodKey, MaxStatementLines,
+		func(ag domain.RebateAgreement, head domain.StatementInput) error { a, in = ag, head; return nil },
+		func(l domain.StatementLine) error { in.Lines = append(in.Lines, l); return nil })
+	return a, in, err
+}
+
+// StreamRebateStatement reads a rebate agreement statement without holding its lines in
+// memory. It hands the agreement and the input without lines (period state, exact totals and
+// LineCount) to start, which may refuse the read before anything is written, then each
+// accrual row in invoice order to line, up to limit rows (limit <= 0 reads every row). Header,
+// totals and lines come from ONE statement, so the footer always agrees with the lines. A
+// period with no accrual row calls start with an empty input. A callback error stops the read
+// and is returned.
+func (s *Postgres) StreamRebateStatement(ctx context.Context, agreementID, periodKey string, limit int,
+	start func(domain.RebateAgreement, domain.StatementInput) error, line func(domain.StatementLine) error) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		a, err := loadAgreement(ctx, tx, `where id = $1`, agreementID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agreementNotFound(agreementID)
 		}
@@ -56,43 +70,58 @@ func (s *Postgres) RebateStatementInput(ctx context.Context, agreementID, period
 		if e := domain.ValidStatementPeriod(a, periodKey); e != nil {
 			return problemOf(e)
 		}
-		in = domain.StatementInput{Lines: []domain.StatementLine{}}
 		// Period state, totals and lines come from ONE statement, so they share one snapshot: under
 		// READ COMMITTED (the tenant transaction's level) separate reads could straddle an accrual
 		// posted in between and the footer would disagree with the lines. No period row means no
-		// result row, which is the empty input.
-		rows, err := tx.Query(ctx, rebateStatementQuery, a.ID, periodKey, domain.StatusSettled, MaxStatementLines)
+		// result row, which is the empty input. A NULL limit lists every row.
+		var lim *int
+		if limit > 0 {
+			lim = &limit
+		}
+		rows, err := tx.Query(ctx, rebateStatementQuery, a.ID, periodKey, domain.StatusSettled, lim)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
-		first := true
+		started := false
 		for rows.Next() {
 			var bv, bq, acc, settled, rowsAcc, rowsValue, rowsQty string
+			var count int
 			var id, lineID, cur, status, lbv, lbq, lacc *string
 			var date *time.Time
 			var retro *bool
-			if err := rows.Scan(&bv, &bq, &acc, &settled, &in.LineCount, &rowsAcc, &rowsValue, &rowsQty,
+			if err := rows.Scan(&bv, &bq, &acc, &settled, &count, &rowsAcc, &rowsValue, &rowsQty,
 				&id, &lineID, &date, &lbv, &lbq, &lacc, &cur, &status, &retro); err != nil {
 				return fmt.Errorf("scan rebate statement: %w", err)
 			}
-			if first {
-				first = false
-				in.Period = domain.PeriodState{Value: decimal.RequireFromString(bv), Qty: decimal.RequireFromString(bq), Accrued: decimal.RequireFromString(acc)}
-				in.Settled = decimal.RequireFromString(settled)
-				in.RowsAccrued, in.RowsBasisValue, in.RowsBasisQty = decimal.RequireFromString(rowsAcc), decimal.RequireFromString(rowsValue), decimal.RequireFromString(rowsQty)
+			if !started {
+				started = true
+				in := domain.StatementInput{Lines: []domain.StatementLine{}, LineCount: count,
+					Period:      domain.PeriodState{Value: decimal.RequireFromString(bv), Qty: decimal.RequireFromString(bq), Accrued: decimal.RequireFromString(acc)},
+					Settled:     decimal.RequireFromString(settled),
+					RowsAccrued: decimal.RequireFromString(rowsAcc), RowsBasisValue: decimal.RequireFromString(rowsValue), RowsBasisQty: decimal.RequireFromString(rowsQty)}
+				if err := start(a, in); err != nil {
+					return err
+				}
 			}
 			if id == nil {
 				continue
 			}
-			in.Lines = append(in.Lines, StatementLineOf(Accrual{ID: *id, AgreementID: a.ID, PeriodKey: periodKey,
+			if err := line(StatementLineOf(Accrual{ID: *id, AgreementID: a.ID, PeriodKey: periodKey,
 				InvoiceLineID: *lineID, InvoiceDate: *date, BasisValue: decimal.RequireFromString(*lbv),
 				BasisQty: decimal.RequireFromString(*lbq), Accrued: decimal.RequireFromString(*lacc), Currency: *cur,
-				Status: *status, Retroactive: *retro}))
+				Status: *status, Retroactive: *retro})); err != nil {
+				return err
+			}
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if !started {
+			return start(a, domain.StatementInput{Lines: []domain.StatementLine{}})
+		}
+		return nil
 	})
-	return a, in, err
 }
 
 // StatementLineOf maps an accrual row to its statement line.

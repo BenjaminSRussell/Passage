@@ -242,3 +242,39 @@ func BenchmarkNetPriceList_FullPage(b *testing.B) {
 		}
 	}
 }
+
+// The price list filter keeps the records keyed to the product (its variants too) or the group,
+// in their order, and leaves out the all-products records and the other products.
+func TestNetPriceFilterEntries_KeepsProductVariantAndGroupRecords(t *testing.T) {
+	variant := rec("var", domain.TypePrice, domain.CustomerKindAll, "", domain.ProductKindVariant, "P1", "USD", "0", "99")
+	variant.Variant = "RED"
+	recs := []domain.Record{
+		rec("p1", domain.TypePrice, domain.CustomerKindAll, "", domain.ProductKindProduct, "P1", "USD", "0", "100"),
+		variant,
+		rec("p2", domain.TypePrice, domain.CustomerKindAll, "", domain.ProductKindProduct, "P2", "USD", "0", "50"),
+		rec("g9", domain.TypeLineDisc, domain.CustomerKindAll, "", domain.ProductKindGroup, "G9", "USD", "0", "0"),
+		rec("any", domain.TypeLineDisc, domain.CustomerKindAll, "", domain.ProductKindAll, "", "USD", "0", "0"),
+	}
+	entries := domain.PriceListFor(recs, "C1", "", nil)
+	ids := func(f domain.NetPriceFilter) []string {
+		var out []string
+		for _, e := range f.Entries(entries) {
+			out = append(out, e.Record.ID)
+		}
+		return out
+	}
+	for _, c := range []struct {
+		f    domain.NetPriceFilter
+		want []string
+	}{
+		{domain.NetPriceFilter{}, []string{"any", "g9", "p1", "var", "p2"}},
+		{domain.NetPriceFilter{ProductID: "P1"}, []string{"p1", "var"}},
+		{domain.NetPriceFilter{ProductGroupID: "G9"}, []string{"g9"}},
+		{domain.NetPriceFilter{ProductID: "P2", ProductGroupID: "G9"}, []string{"g9", "p2"}},
+		{domain.NetPriceFilter{ProductID: "P3"}, nil},
+	} {
+		if got := ids(c.f); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("filter %+v = %v; want %v", c.f, got, c.want)
+		}
+	}
+}

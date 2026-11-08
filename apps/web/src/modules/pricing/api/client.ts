@@ -340,6 +340,10 @@ export interface PriceListQuery {
   currency: string;
   asOf: string;
   type?: ConditionType | "";
+  productId?: string;
+  productGroupId?: string;
+  /** Entries to skip: the nextOffset of the previous page. */
+  offset?: number;
 }
 
 export interface NetPriceQuery {
@@ -387,17 +391,21 @@ export interface NetPriceList {
 
 export interface PriceList {
   items: PriceListItem[];
-  /** True when more records apply than the service returns (it caps the list at 1000 entries). */
+  /** True when more entries follow this page (the service returns at most 1000 per page). */
   truncated: boolean;
+  /** Every entry that matches, whatever the page. */
+  total: number;
+  /** Offset of the next page; set only when truncated. */
+  nextOffset?: number;
 }
 
 /** GET /price-list - the ACTIVE records that apply to a customer on a date, most specific first. */
 export async function getPriceList(q: PriceListQuery, signal?: AbortSignal): Promise<PriceList> {
-  const body = await send<{ items?: PriceListItem[]; truncated?: boolean }>(`/price-list${query({ ...q })}`, {}, signal);
+  const body = await send<{ items?: PriceListItem[]; truncated?: boolean; total?: number; nextOffset?: number }>(`/price-list${query({ ...q })}`, {}, signal);
   if (!Array.isArray(body.items)) {
     throw new PricingApiError(0, "COM-0001", "The response has no items");
   }
-  return { items: body.items, truncated: body.truncated === true };
+  return { items: body.items, truncated: body.truncated === true, total: body.total ?? body.items.length, nextOffset: body.nextOffset };
 }
 
 /** GET /price-list/net-prices - the net price at each quantity break of the customer's price list rows. */
@@ -615,18 +623,16 @@ export function getRebateStatement(id: string, period: string, signal?: AbortSig
 export interface CsvDocument {
   csv: string;
   filename: string;
-  /** True when the service cut the document (X-Passage-Truncated). */
-  truncated: boolean;
 }
 
 async function csvDocument(path: string, fallbackName: string, signal?: AbortSignal): Promise<CsvDocument> {
   const res = await sendRaw(path, { headers: { Accept: "text/csv" } }, signal);
   const csv = await res.text();
   const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
-  return { csv, filename: disposition?.[1] ?? fallbackName, truncated: res.headers.get("X-Passage-Truncated") === "true" };
+  return { csv, filename: disposition?.[1] ?? fallbackName };
 }
 
-/** GET /rebates/agreements/{id}/statement?format=csv - the statement lines and footer rows. */
+/** GET /rebates/agreements/{id}/statement?format=csv - every accrual row of the period (streamed, never cut) and the footer rows. */
 export function exportRebateStatement(id: string, period: string, signal?: AbortSignal): Promise<CsvDocument> {
   return csvDocument(`/rebates/agreements/${encodeURIComponent(id)}/statement${query({ period, format: "csv" })}`, `rebate-statement-${id}-${period}.csv`, signal);
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,9 +30,9 @@ const (
 	MaxNetPriceBreaks = 2000
 )
 
-// MaxPriceListItems caps one price list response. A legal entity's all-customer records cover every
-// product it sells, so the list is cut after this many entries (in its product order) and marked
-// truncated; narrow it with type to see the rest.
+// MaxPriceListItems caps one price list page. A legal entity's all-customer records cover every
+// product it sells, so a page holds at most this many entries (limit lowers it), in the list's
+// product order; truncated says more follow and nextOffset is where the next page starts.
 const MaxPriceListItems = 1000
 
 // priceListItem is an ACTIVE condition record that applies to the customer, with its scope.
@@ -72,6 +73,21 @@ func (a *API) priceList(w http.ResponseWriter, r *http.Request) {
 			types[domain.ConditionType(t)] = true
 		}
 	}
+	limit, offset := MaxPriceListItems, 0
+	if raw := q.Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err != nil || n < 1 || n > MaxPriceListItems {
+			fields["limit"] = "must be a whole number from 1 to " + strconv.Itoa(MaxPriceListItems)
+		} else {
+			limit = n
+		}
+	}
+	if raw := q.Get("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err != nil || n < 0 {
+			fields["offset"] = "must be a whole number from 0"
+		} else {
+			offset = n
+		}
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -87,17 +103,24 @@ func (a *API) priceList(w http.ResponseWriter, r *http.Request) {
 	if in.Set != nil {
 		records = in.Set.Records()
 	}
-	list := domain.PriceListFor(records, q.Get("customerId"), group, types)
-	truncated := len(list) > MaxPriceListItems
+	list := domain.NetPriceFilter{ProductID: q.Get("productId"), ProductGroupID: q.Get("productGroupId")}.
+		Entries(domain.PriceListFor(records, q.Get("customerId"), group, types))
+	total := len(list)
+	list = list[min(offset, total):]
+	truncated := len(list) > limit
 	if truncated {
-		list = list[:MaxPriceListItems]
+		list = list[:limit]
 	}
 	items := make([]priceListItem, len(list))
 	for i, e := range list {
 		rec := e.Record
 		items[i] = priceListItem{Scope: e.Scope, recordView: viewOf(store.Entry{LegalEntityID: q.Get("legalEntityId"), Record: rec})}
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "truncated": truncated})
+	out := map[string]any{"items": items, "truncated": truncated, "total": total}
+	if truncated {
+		out["nextOffset"] = offset + limit
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 // netPriceList is the price list by customer with the net price at each quantity break (PRD 5.26.14):

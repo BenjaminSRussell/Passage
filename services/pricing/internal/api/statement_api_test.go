@@ -20,9 +20,35 @@ import (
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/store"
 )
 
-// RebateStatementInput mirrors the Postgres read: 404 for an unknown agreement, 422 for a
+// StreamRebateStatement mirrors the streaming Postgres read over rebateStatementInput.
+func (f *fakeStore) StreamRebateStatement(_ context.Context, agreementID, periodKey string, limit int,
+	start func(domain.RebateAgreement, domain.StatementInput) error, line func(domain.StatementLine) error) error {
+	a, in, err := f.rebateStatementInput(agreementID, periodKey)
+	if err != nil {
+		return err
+	}
+	lines := in.Lines
+	in.Lines = []domain.StatementLine{}
+	if err := start(a, in); err != nil {
+		return err
+	}
+	for i, l := range lines {
+		if limit > 0 && i >= limit {
+			break
+		}
+		if i == 1 && f.streamErr != nil {
+			return f.streamErr
+		}
+		if err := line(l); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rebateStatementInput mirrors the Postgres read: 404 for an unknown agreement, 422 for a
 // period key the agreement does not accrue by, an empty input for a period with no activity.
-func (f *fakeStore) RebateStatementInput(_ context.Context, agreementID, periodKey string) (domain.RebateAgreement, domain.StatementInput, error) {
+func (f *fakeStore) rebateStatementInput(agreementID, periodKey string) (domain.RebateAgreement, domain.StatementInput, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a, ok := f.agreements[agreementID]
@@ -383,6 +409,53 @@ func TestPriceJournalAuditExtract_MidStreamFailureAbortsTheConnection(t *testing
 	}()
 	// JSON is written in one piece after the read, so the same failure is a 500 problem.
 	if rec := getRaw(h, path+"?format=json", "pricing.view"); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("json after a failed read = %d, want 500", rec.Code)
+	}
+}
+
+// The JSON statement lists at most store.MaxStatementLines rows and flags linesTruncated, while
+// its totals and the CSV cover every row; a read that fails after the 200 aborts the connection.
+func TestRebateStatement_CSVStreamsEveryRowJSONTruncates(t *testing.T) {
+	fs, h, aid := statementFixture(t)
+	fs.mu.Lock()
+	var base store.Accrual
+	for _, a := range fs.accruals {
+		base = a
+		break
+	}
+	for i := 0; i < store.MaxStatementLines; i++ {
+		x := base
+		x.ID, x.InvoiceLineID = fmt.Sprintf("bulk-%05d", i), fmt.Sprintf("B%05d", i)
+		fs.accruals[x.ID] = x
+	}
+	fs.mu.Unlock()
+	path := "/v1/pricing/rebates/agreements/" + aid + "/statement?period=2026-Q2"
+	code, st := call(t, h, http.MethodGet, path, "pricing.rebate.view", "")
+	if code != http.StatusOK || st["linesTruncated"] != true || len(st["lines"].([]any)) != store.MaxStatementLines || st["lineCount"] != float64(store.MaxStatementLines+2) {
+		t.Fatalf("json = %d truncated %v lines %d count %v; want %d of %d", code, st["linesTruncated"], len(st["lines"].([]any)), st["lineCount"], store.MaxStatementLines, store.MaxStatementLines+2)
+	}
+	rec := getRaw(h, path+"&format=csv", "pricing.rebate.view")
+	if n := strings.Count(rec.Body.String(), "\nLINE,"); n != store.MaxStatementLines+2 || rec.Header().Get("X-Passage-Truncated") != "" {
+		t.Fatalf("csv has %d lines, want all %d", n, store.MaxStatementLines+2)
+	}
+	if !strings.Contains(rec.Body.String(), "\nOPEN,2026-Q2,") {
+		t.Fatalf("csv lacks the footer:\n%.300s", rec.Body.String())
+	}
+}
+
+func TestRebateStatement_CSVMidStreamFailureAbortsTheConnection(t *testing.T) {
+	fs, h, aid := statementFixture(t)
+	fs.streamErr = errors.New("connection reset by database")
+	path := "/v1/pricing/rebates/agreements/" + aid + "/statement?period=2026-Q2"
+	func() {
+		defer func() {
+			if v := recover(); v != http.ErrAbortHandler {
+				t.Fatalf("recovered %v, want http.ErrAbortHandler", v)
+			}
+		}()
+		getRaw(h, path+"&format=csv", "pricing.rebate.view")
+	}()
+	if rec := getRaw(h, path, "pricing.rebate.view"); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("json after a failed read = %d, want 500", rec.Code)
 	}
 }

@@ -186,6 +186,35 @@ func TestPriceList_TruncatesAtTheCap(t *testing.T) {
 	if last := items[len(items)-1].(map[string]any); last["productKey"] != fmt.Sprintf("P%05d", api.MaxPriceListItems-1) || last["status"] != "ACTIVE" || last["version"] != float64(2) {
 		t.Fatalf("the list keeps its product order up to the cap and the stored status and version: last = %v", last)
 	}
+	// The next page starts at nextOffset and holds the one entry left; total counts them all.
+	if out["total"] != float64(api.MaxPriceListItems+1) || out["nextOffset"] != float64(api.MaxPriceListItems) {
+		t.Fatalf("total %v nextOffset %v; want %d and %d", out["total"], out["nextOffset"], api.MaxPriceListItems+1, api.MaxPriceListItems)
+	}
+	_, page2 := call(t, h, http.MethodGet, "/v1/pricing/price-list?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&offset=1000", "pricing.view", "")
+	if items2, _ := page2["items"].([]any); len(items2) != 1 || items2[0].(map[string]any)["productKey"] != fmt.Sprintf("P%05d", api.MaxPriceListItems) || page2["truncated"] != false || page2["nextOffset"] != nil {
+		t.Fatalf("second page = %v; want the last entry and no further page", page2)
+	}
+	_, small := call(t, h, http.MethodGet, "/v1/pricing/price-list?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&limit=10&offset=5", "pricing.view", "")
+	if items3, _ := small["items"].([]any); len(items3) != 10 || items3[0].(map[string]any)["productKey"] != "P00005" || small["nextOffset"] != float64(15) {
+		t.Fatalf("limit 10 offset 5 = %v; want P00005.. and nextOffset 15", small["nextOffset"])
+	}
+	_, filtered := call(t, h, http.MethodGet, "/v1/pricing/price-list?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&productId=P00007", "pricing.view", "")
+	if items4, _ := filtered["items"].([]any); len(items4) != 1 || filtered["total"] != float64(1) {
+		t.Fatalf("productId filter = %v; want the one record", filtered)
+	}
+	_, past := call(t, h, http.MethodGet, "/v1/pricing/price-list?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&offset=5000", "pricing.view", "")
+	if items5, _ := past["items"].([]any); len(items5) != 0 || past["truncated"] != false || past["total"] != float64(api.MaxPriceListItems+1) || past["nextOffset"] != nil {
+		t.Fatalf("offset past the end = %v; want an empty page that still counts the total", past)
+	}
+	_, group := call(t, h, http.MethodGet, "/v1/pricing/price-list?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&productGroupId=NOPE", "pricing.view", "")
+	if items6, _ := group["items"].([]any); len(items6) != 0 || group["total"] != float64(0) {
+		t.Fatalf("a product group no record is keyed to = %v; want an empty list", group)
+	}
+	for _, q := range []string{"limit=0", "limit=1001", "limit=x", "offset=-1", "offset=y"} {
+		if code, _ := call(t, h, http.MethodGet, "/v1/pricing/price-list?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01&"+q, "pricing.view", ""); code != http.StatusUnprocessableEntity {
+			t.Errorf("%s = %d; want 422", q, code)
+		}
+	}
 	delete(fs.records, fmt.Sprintf("00000000-0000-0000-0003-%012d", 0))
 	if _, out := call(t, h, http.MethodGet, "/v1/pricing/price-list?legalEntityId="+legalEntity+"&customerId=C1&currency=USD&asOf=2026-06-01", "pricing.view", ""); out["truncated"] != false {
 		t.Fatalf("a list at the cap is not truncated: %v", out["truncated"])

@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, getNetPriceList, getPriceList, type ConditionType, type NetPriceList, type PriceList, type PriceListItem, type PriceListScope, type Problem } from "./api/client";
+import { describeProblem, getNetPriceList, getPriceList, type ConditionType, type NetPriceList, type PriceList, type PriceListItem, type PriceListQuery, type PriceListScope, type Problem } from "./api/client";
 import { DAY, describePercent, describeProduct, netPriceLines, netPricesCsv, today, TYPE_LABELS, UUID, winningQuantities, type NetPriceLine } from "./format";
 import styles from "./pages.module.css";
 
@@ -50,13 +50,31 @@ export function PriceListPage() {
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [list, setList] = useState<PriceList | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreFailure, setMoreFailure] = useState<Problem | null>(null);
   const [net, setNet] = useState<NetPriceList | null>(null);
   const [netFailure, setNetFailure] = useState<Problem | null>(null);
   // The query the shown tables answer, for the CSV header and file name (the form may have changed since).
   const [asked, setAsked] = useState({ customerId: "", asOf: "", currency: "USD" });
+  // The query of the shown list, so the next page continues it even after the form changed.
+  const [listQuery, setListQuery] = useState<PriceListQuery | null>(null);
 
   const wins = useMemo(() => winningQuantities(net?.rows ?? []), [net]);
   const lines = useMemo(() => netPriceLines(net?.rows ?? []), [net]);
+
+  async function loadMore() {
+    if (!list || list.nextOffset === undefined || !listQuery) return;
+    setMoreFailure(null);
+    setLoadingMore(true);
+    try {
+      const page = await getPriceList({ ...listQuery, offset: list.nextOffset });
+      setList({ ...page, items: [...list.items, ...page.items] });
+    } catch (error) {
+      setMoreFailure(describeProblem(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const set = (patch: Partial<typeof f>) => setF((prev) => ({ ...prev, ...patch }));
 
@@ -70,11 +88,14 @@ export function PriceListPage() {
     setErrors(found);
     setFailure(null);
     setNetFailure(null);
+    setMoreFailure(null);
     if (Object.keys(found).length > 0) return;
     setLoading(true);
     const who = { legalEntityId: f.legalEntityId.trim(), customerId: f.customerId.trim(), customerGroupId: f.customerGroupId.trim() || undefined, currency: f.currency, asOf: f.asOf };
     try {
-      setList(await getPriceList({ ...who, type: f.type }));
+      const listed: PriceListQuery = { ...who, type: f.type, productId: f.productId.trim() || undefined, productGroupId: f.productGroupId.trim() || undefined };
+      setList(await getPriceList(listed));
+      setListQuery(listed);
       setAsked({ customerId: who.customerId, asOf: who.asOf, currency: who.currency });
     } catch (error) {
       const problem = describeProblem(error);
@@ -120,8 +141,8 @@ export function PriceListPage() {
           {text("pl-group", "customerGroupId", "Customer group", { optional: true })}
           {text("pl-currency", "currency", "Currency")}
           {text("pl-date", "asOf", "As of", { type: "date" })}
-          {text("pl-product", "productId", "Product", { optional: true, hint: "Narrows the net prices to this product." })}
-          {text("pl-product-group", "productGroupId", "Product group", { optional: true, hint: "Narrows the net prices to this group's own prices." })}
+          {text("pl-product", "productId", "Product", { optional: true, hint: "Narrows the list and the net prices to this product." })}
+          {text("pl-product-group", "productGroupId", "Product group", { optional: true, hint: "Narrows the list and the net prices to this group's own records." })}
           {text("pl-channel", "salesChannel", "Sales channel", { optional: true, hint: "Prices with the procedure assigned to the channel." })}
           <FormField id="pl-type" label="Condition">
             {(c) => (
@@ -151,7 +172,12 @@ export function PriceListPage() {
       {!loading && list === null && !failure ? <EmptyState title="No price list yet" description="Enter a customer and a date to list the agreements that apply." /> : null}
       {!loading && list?.truncated ? (
         <Alert tone="warning" title="Only the first agreements are shown" live="status">
-          More agreements apply than one list holds ({list.items.length} shown, in product order). Choose a condition to narrow the list.
+          {list.items.length} of {list.total} agreements are shown, in product order. Load the next page, or choose a condition or a product to narrow the list.
+        </Alert>
+      ) : null}
+      {moreFailure ? (
+        <Alert tone="danger" title="The next page could not be loaded" live="alert">
+          {moreFailure.message} ({moreFailure.code})
         </Alert>
       ) : null}
       {!loading && list ? (
@@ -163,6 +189,11 @@ export function PriceListPage() {
             getRowKey={(r) => r.id}
             empty={{ title: "No agreements apply", description: "No active record matches this customer on that date." }}
           />
+          {list.truncated ? (
+            <Button variant="secondary" onClick={loadMore} loading={loadingMore}>
+              Load the next page
+            </Button>
+          ) : null}
         </Card>
       ) : null}
       {!loading && netFailure ? (

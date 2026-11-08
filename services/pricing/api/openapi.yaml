@@ -174,7 +174,10 @@ paths:
         given) or to all customers, ordered by product, variant, unit, condition type, scope (CUSTOMER,
         GROUP, ALL) and from-quantity. Records of a killed, expired or non-targeted campaign are left out,
         as in resolve. It is an inquiry: POST /resolve decides which condition wins a given line.
-        At most 1000 items are returned, in that order; `truncated` is true when more apply (narrow with type).
+        At most 1000 items are returned per page, in that order; `truncated` is true when more follow and
+        `nextOffset` is the offset of the next page (pass it as `offset`). `total` counts every entry that
+        matches, whatever the page. productId and productGroupId keep the records keyed to that product
+        (or one of its variants) or product group, as in getCustomerNetPriceList.
       x-passage-duty: pricing.view
       parameters:
         - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
@@ -183,20 +186,26 @@ paths:
         - {name: currency, in: query, required: true, schema: {type: string, pattern: "^[A-Z]{3}$"}}
         - {name: asOf, in: query, required: true, description: "Pricing date, YYYY-MM-DD.", schema: {type: string, format: date}}
         - {name: type, in: query, required: false, description: "Comma-separated condition types; all types when omitted.", schema: {type: string}}
+        - {name: productId, in: query, required: false, description: "Only records keyed to this product or one of its variants (with productGroupId, records matching either).", schema: {type: string}}
+        - {name: productGroupId, in: query, required: false, description: "Only records keyed to this product group (with productId, records matching either).", schema: {type: string}}
+        - {name: limit, in: query, required: false, description: "Page size, 1 to 1000; 1000 when omitted.", schema: {type: integer, minimum: 1, maximum: 1000, default: 1000}}
+        - {name: offset, in: query, required: false, description: "Entries to skip, from 0; the nextOffset of the previous page.", schema: {type: integer, minimum: 0, default: 0}}
       responses:
         "200":
-          description: The applicable records, most specific agreement first.
+          description: One page of the applicable records, most specific agreement first.
           content:
             application/json:
               schema:
                 type: object
-                required: [items, truncated]
+                required: [items, truncated, total]
                 properties:
                   items:
                     type: array
                     maxItems: 1000
                     items: {$ref: "#/components/schemas/PriceListItem"}
-                  truncated: {type: boolean, description: "True when more than 1000 records apply and the list was cut."}
+                  truncated: {type: boolean, description: "True when more entries follow this page."}
+                  total: {type: integer, description: "Entries that match the filters, whatever the page."}
+                  nextOffset: {type: integer, description: "Offset of the next page; present only when truncated."}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
@@ -952,10 +961,13 @@ paths:
         equals accruedAmount, the rows (credits as negative rows, retroactive deltas included)
         sum to it (linesAccruedAmount, over every row whatever the list limit), and the rows'
         own basis sums to the period's cumulative basis. A period without accruals is a
-        statement with zero totals and no lines. At most 5,000 lines are listed
-        (linesTruncated=true when there are more). format=csv downloads the lines and the three
-        footer rows (rowType LINE, TOTAL_ACCRUED, TOTAL_SETTLED, OPEN; source INVOICE, REPLAYED
-        or RETRO_DELTA). Read only: nothing is written and no event is raised.
+        statement with zero totals and no lines. The JSON lists at most 5,000 lines
+        (linesTruncated=true when there are more). format=csv streams every accrual row of the
+        period as it is read, never cut, then the three footer rows (rowType LINE, TOTAL_ACCRUED,
+        TOTAL_SETTLED, OPEN; source INVOICE, REPLAYED or RETRO_DELTA); header, lines and footer
+        come from one database snapshot, and a read that fails after the 200 aborts the
+        connection so a short file never looks complete. Read only: nothing is written and no
+        event is raised.
       x-passage-duty: pricing.rebate.view
       parameters:
         - {name: period, in: query, required: true, description: "The accrual period key in the form the agreement accrues by: 2027-03 (MONTH), 2027-Q1 (QUARTER) or 2027 (YEAR).", schema: {type: string}}

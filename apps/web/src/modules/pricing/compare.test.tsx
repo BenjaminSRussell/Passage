@@ -156,12 +156,45 @@ describe("Price list by customer", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("warns when the service cut the list at its cap", async () => {
-    server.handler = (url) => (url.pathname.endsWith("/price-list") ? json(200, { items: [item("r1", "ALL", "100")], truncated: true }) : undefined);
+  it("warns when the service cut the list at its cap and loads the next page", async () => {
+    server.handler = (url) =>
+      url.pathname.endsWith("/price-list")
+        ? url.searchParams.get("offset") === "1"
+          ? json(200, { items: [item("r2", "ALL", "90")], truncated: false, total: 2 })
+          : json(200, { items: [item("r1", "ALL", "100")], truncated: true, total: 2, nextOffset: 1 })
+        : undefined;
     renderAt("/pricing/price-list", VIEW);
     ask();
     expect(await screen.findByText("Only the first agreements are shown")).toBeInTheDocument();
-    expect(screen.getByText(/1 shown, in product order/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 agreements are shown/)).toBeInTheDocument();
+    // The next page continues the shown list, not what the form says now.
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "C2" } });
+    fireEvent.change(screen.getByLabelText(/^Product$/), { target: { value: "P9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load the next page" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Load the next page" })).not.toBeInTheDocument());
+    const next = server.calls.find((c) => c.url.searchParams.get("offset") === "1")!;
+    expect(next.url.searchParams.get("customerId")).toBe("C1");
+    expect(next.url.searchParams.get("productId")).toBeNull();
+    expect(next.url.searchParams.get("type")).toBe("PRICE");
+    expect(screen.queryByText("Only the first agreements are shown")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/90/).length).toBeGreaterThan(0);
+  });
+
+  it("keeps the shown page when the next one fails", async () => {
+    server.handler = (url) =>
+      url.pathname.endsWith("/price-list")
+        ? url.searchParams.get("offset") === "1"
+          ? json(500, { code: "COM-0500", detail: "database unavailable" })
+          : json(200, { items: [item("r1", "ALL", "100")], truncated: true, total: 2, nextOffset: 1 })
+        : undefined;
+    renderAt("/pricing/price-list", VIEW);
+    ask();
+    expect(await screen.findByText(/1 of 2 agreements are shown/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load the next page" }));
+    expect(await screen.findByText("The next page could not be loaded")).toBeInTheDocument();
+    expect(screen.getByText(/COM-0500/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load the next page" })).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 agreements are shown/)).toBeInTheDocument();
   });
 
   it("shows the empty state when nothing applies", async () => {

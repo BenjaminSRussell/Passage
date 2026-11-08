@@ -55,6 +55,22 @@ func (f NetPriceFilter) keeps(k netRowKey) bool {
 	return false
 }
 
+// Entries keeps the price list entries the filter keeps, by the product dimension of the record
+// (an all-products record is kept only when the filter is empty), in their order. Empty returns
+// the list as it is.
+func (f NetPriceFilter) Entries(list []PriceListEntry) []PriceListEntry {
+	if f.ProductID == "" && f.ProductGroupID == "" {
+		return list
+	}
+	out := make([]PriceListEntry, 0, len(list))
+	for _, e := range list {
+		if f.keeps(netRowKey{kind: e.Record.ProductKind, key: e.Record.ProductKey}) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 type netRowKey struct {
 	kind    ProductKind
 	key     string

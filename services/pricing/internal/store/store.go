@@ -102,7 +102,7 @@ type Store interface {
 	ListAgreements(ctx context.Context, f AgreementFilter) ([]domain.RebateAgreement, error)
 	AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accrual, bool, error)
 	ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual, error)
-	RebateStatementInput(ctx context.Context, agreementID, periodKey string) (domain.RebateAgreement, domain.StatementInput, error)
+	StreamRebateStatement(ctx context.Context, agreementID, periodKey string, limit int, start func(domain.RebateAgreement, domain.StatementInput) error, line func(domain.StatementLine) error) error
 	PreviewVendorClaim(ctx context.Context, agreementID, periodKey string) (VendorClaimPreview, error)
 	CreateVendorClaim(ctx context.Context, in VendorClaimInput, idempotencyKey string) (VendorClaim, error)
 	GetVendorClaim(ctx context.Context, id string) (VendorClaim, error)

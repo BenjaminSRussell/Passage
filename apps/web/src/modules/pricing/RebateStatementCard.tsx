@@ -62,7 +62,7 @@ export function RebateStatementCard({ agreement }: { agreement: RebateAgreement 
     try {
       const file = await exportRebateStatement(agreement.id, applied);
       downloadCsv(file.filename, file.csv);
-      setExported(`Downloaded ${file.filename}.${file.truncated ? " The file lists the first 5,000 accrual rows; the totals cover all of them." : ""}`);
+      setExported(`Downloaded ${file.filename}.`);
     } catch (error) {
       setExportFailure(describeProblem(error));
     } finally {
@@ -114,7 +114,7 @@ export function RebateStatementCard({ agreement }: { agreement: RebateAgreement 
               loading={state.loading}
               empty={{ title: "Nothing accrued in this period", description: "No posted invoice fell in the period, so the statement has no lines and nothing open." }}
             />
-            {st?.linesTruncated ? <p className={styles.note}>{`Showing the first ${st.lines.length} of ${st.lineCount} accrual rows; the totals cover all of them.`}</p> : null}
+            {st?.linesTruncated ? <p className={styles.note}>{`Showing the first ${st.lines.length} of ${st.lineCount} accrual rows; the totals cover all of them. The CSV lists every one.`}</p> : null}
             <div className={styles.actions}>
               <Button variant="secondary" loading={exporting} disabled={!st} onClick={() => void download()}>
                 Download CSV

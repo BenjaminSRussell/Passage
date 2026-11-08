@@ -109,6 +109,14 @@ describe("Rebate statement", () => {
     ).toBeInTheDocument();
   });
 
+  it("notes a listed page shorter than the period and points to the CSV for every row", async () => {
+    rebateServer(() => json(200, { ...statement, lineCount: 5002, linesTruncated: true }));
+    renderAt(`/pricing/rebates/${A1}`);
+    fireEvent.change(await screen.findByLabelText(/^Statement period/), { target: { value: "2027-Q2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show statement" }));
+    expect(await screen.findByText("Showing the first 2 of 5002 accrual rows; the totals cover all of them. The CSV lists every one.")).toBeInTheDocument();
+  });
+
   it("labels a replayed invoice and a retroactive delta, which has no basis of its own", async () => {
     const delta = { invoiceLineId: "retro:run-1:2027-Q2", invoiceDate: "2027-06-30", amount: "0.00", status: "ACCRUED" as const, retroactive: true, source: "RETRO_DELTA" as const };
     const replayed = { ...statement.lines[0]!, invoiceLineId: "INV-0/1", status: "ACCRUED" as const, amount: "0.00", retroactive: true, source: "REPLAYED" as const };
@@ -135,11 +143,11 @@ describe("Rebate statement", () => {
     expect(await screen.findByText("INV-1/1")).toBeInTheDocument();
   });
 
-  it("downloads the statement CSV for the chosen period and notes a cut list", async () => {
+  it("downloads the statement CSV for the chosen period", async () => {
     const csv = "rowType,period\nLINE,2027-Q2\n";
     rebateServer((url) =>
       url.searchParams.get("format") === "csv"
-        ? text(200, csv, { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="rebate-statement-${A1}-2027-Q2.csv"`, "X-Passage-Truncated": "true" })
+        ? text(200, csv, { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="rebate-statement-${A1}-2027-Q2.csv"` })
         : json(200, statement),
     );
     const blobs: Blob[] = [];
@@ -154,7 +162,7 @@ describe("Rebate statement", () => {
     const call = server.calls.find((c) => c.url.searchParams.get("format") === "csv")!;
     expect(call.url.searchParams.get("period")).toBe("2027-Q2");
     expect(await blobs[0]!.text()).toBe(csv);
-    expect(await screen.findByText(/Downloaded rebate-statement-.*\.csv\. The file lists the first 5,000 accrual rows/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Downloaded rebate-statement-.*\.csv\.$/)).toBeInTheDocument();
   });
 });
 

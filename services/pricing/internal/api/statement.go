@@ -95,7 +95,8 @@ var rebateStatementColumns = []string{"rowType", "period", "invoiceLineId", "inv
 
 // rebateStatement is the rebate agreement statement of one accrual period (PRD §5.26.15):
 // header, one line per accrual row and the footer accrued, settled and open. format=csv
-// downloads the same document as CSV.
+// downloads the same document as CSV, streaming every row (the JSON lists at most
+// store.MaxStatementLines and flags linesTruncated).
 func (a *API) rebateStatement(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -112,41 +113,97 @@ func (a *API) rebateStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := q.Get("period")
-	agreement, in, err := a.store.RebateStatementInput(r.Context(), id, key)
+	if format == "csv" {
+		a.rebateStatementCSV(w, r, id, key)
+		return
+	}
+	var agreement domain.RebateAgreement
+	var in domain.StatementInput
+	err := a.store.StreamRebateStatement(r.Context(), id, key, store.MaxStatementLines,
+		func(ag domain.RebateAgreement, head domain.StatementInput) error {
+			agreement, in = ag, head
+			return nil
+		},
+		func(l domain.StatementLine) error { in.Lines = append(in.Lines, l); return nil })
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	st := domain.BuildRebateStatement(agreement, key, in)
-	if format != "csv" {
-		httpx.JSON(w, http.StatusOK, statementResponse(st))
+	httpx.JSON(w, http.StatusOK, statementResponse(domain.BuildRebateStatement(agreement, key, in)))
+}
+
+// rebateStatementCSV streams the statement as CSV: every accrual row as it is read (a busy
+// period holds far more than MaxStatementLines rows, and the JSON cap does not apply), then the
+// footer from the totals the same statement returned with the first row, so footer and lines
+// come from one snapshot. A failure after the 200 aborts the connection so the client sees a
+// failed download, not a short file that looks complete.
+func (a *API) rebateStatementCSV(w http.ResponseWriter, r *http.Request, id, key string) {
+	bw := bufio.NewWriter(w)
+	cw := csv.NewWriter(bw)
+	flusher, _ := w.(http.Flusher)
+	flush := func() error {
+		cw.Flush()
+		if err := cw.Error(); err != nil {
+			return err
+		}
+		if err := bw.Flush(); err != nil {
+			return err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
+	}
+	c := domain.CSVCell
+	var st domain.RebateStatement
+	var cur string
+	started, n := false, 0
+	start := func(ag domain.RebateAgreement, in domain.StatementInput) error {
+		st, cur = domain.BuildRebateStatement(ag, key, in), ag.Currency
+		h := w.Header()
+		h.Set("Content-Type", "text/csv; charset=utf-8")
+		h.Set("Content-Disposition", `attachment; filename="rebate-statement-`+id+`-`+key+`.csv"`)
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusOK)
+		started = true
+		return cw.Write(rebateStatementColumns)
+	}
+	line := func(l domain.StatementLine) error {
+		src := l.Source()
+		var bv, bq string
+		if src != domain.SourceRetroDelta {
+			bv, bq = l.BasisValue.String(), l.BasisQty.String()
+		}
+		if err := cw.Write([]string{"LINE", key, c(l.InvoiceLineID), l.InvoiceDate, c(bv), c(bq), c(minor(l.Accrued, cur)), cur, l.Status, src}); err != nil {
+			return err
+		}
+		if n++; n%exportFlushRows == 0 {
+			return flush()
+		}
+		return nil
+	}
+	err := a.store.StreamRebateStatement(r.Context(), id, key, 0, start, line)
+	if err == nil {
+		for _, f := range [][2]string{{"TOTAL_ACCRUED", minor(st.Accrued, cur)}, {"TOTAL_SETTLED", minor(st.Settled, cur)}, {"OPEN", minor(st.Open, cur)}} {
+			if err = cw.Write([]string{f[0], key, "", "", "", "", c(f[1]), cur, "", ""}); err != nil {
+				break
+			}
+		}
+	}
+	if err == nil {
+		err = flush()
+	}
+	if err == nil {
 		return
 	}
-	v := statementResponse(st)
-	h := w.Header()
-	h.Set("Content-Type", "text/csv; charset=utf-8")
-	h.Set("Content-Disposition", `attachment; filename="rebate-statement-`+id+`-`+key+`.csv"`)
-	h.Set("Cache-Control", "no-store")
-	h.Set("X-Content-Type-Options", "nosniff")
-	if v.LinesTruncated {
-		h.Set("X-Passage-Truncated", "true")
+	if !started {
+		httpx.Fail(w, r, err)
+		return
 	}
-	w.WriteHeader(http.StatusOK)
-	cw := csv.NewWriter(w)
-	_ = cw.Write(rebateStatementColumns)
-	c := domain.CSVCell
-	for _, l := range v.Lines {
-		_ = cw.Write([]string{"LINE", key, c(l.InvoiceLineID), l.InvoiceDate, c(l.BasisValue), c(l.BasisQuantity), c(l.Amount), v.Currency, l.Status, l.Source})
-	}
-	for _, f := range [][2]string{{"TOTAL_ACCRUED", v.AccruedAmount}, {"TOTAL_SETTLED", v.SettledAmount}, {"OPEN", v.OpenAmount}} {
-		_ = cw.Write([]string{f[0], key, "", "", "", "", c(f[1]), v.Currency, "", ""})
-	}
-	// The document is at most MaxStatementLines rows and was read in full before the 200, so the
-	// only failure left is the client's connection; log it rather than pretend it was delivered.
-	cw.Flush()
-	if err := cw.Error(); err != nil {
-		slog.Warn("rebate statement CSV write failed", "err", err, "agreementId", id, "correlationId", middleware.GetReqID(r.Context()))
-	}
+	slog.Error("rebate statement CSV failed", "err", errors.Join(errExportStarted, err), "agreementId", id, "rows", n,
+		"correlationId", middleware.GetReqID(r.Context()))
+	panic(http.ErrAbortHandler)
 }
 
 // auditExtractColumns is the header of the price journal audit extract CSV: the journal

@@ -261,3 +261,60 @@ func TestPostgres_RebateStatementIsOneSnapshot(t *testing.T) {
 		t.Fatalf("period %s, row total %s, lines %s; want one snapshot, all three equal", r.in.Period.Accrued, r.in.RowsAccrued, lines)
 	}
 }
+
+// The streaming read hands the exact totals to start before any line, lists every row when the
+// limit is 0, stops at a positive limit with LineCount still the full count, calls start with an
+// empty input for a quiet period, and returns a callback error.
+func TestPostgres_StreamRebateStatement(t *testing.T) {
+	_, pool := adminAndAppPools(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	a, err := s.CreateAgreement(ctx, agreement(tier("0", "1")), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, value := range []string{"1000", "2000", "3000"} {
+		if _, _, err := s.AccrueInvoiceLine(ctx, invoice(a.ID, "T"+string(rune('1'+i)), "2026-03-1"+string(rune('0'+i)), value)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(limit int) (domain.StatementInput, []string) {
+		var head domain.StatementInput
+		var ids []string
+		err := s.StreamRebateStatement(ctx, a.ID, "2026-03", limit,
+			func(_ domain.RebateAgreement, in domain.StatementInput) error {
+				if len(ids) != 0 {
+					t.Fatal("start must come before the first line")
+				}
+				head = in
+				return nil
+			},
+			func(l domain.StatementLine) error { ids = append(ids, l.InvoiceLineID); return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return head, ids
+	}
+	head, ids := read(0)
+	if len(ids) != 3 || ids[0] != "T1" || ids[2] != "T3" || head.LineCount != 3 || !head.Period.Value.Equal(decimal.NewFromInt(6000)) || len(head.Lines) != 0 {
+		t.Fatalf("unlimited read = %v head %+v; want T1..T3, count 3, basis 6000, no lines in the head", ids, head)
+	}
+	head, ids = read(2)
+	if len(ids) != 2 || head.LineCount != 3 {
+		t.Fatalf("limit 2 read = %v count %d; want 2 lines of 3", ids, head.LineCount)
+	}
+	var quiet domain.StatementInput
+	calls := 0
+	if err := s.StreamRebateStatement(ctx, a.ID, "2026-04", 0, func(_ domain.RebateAgreement, in domain.StatementInput) error { calls++; quiet = in; return nil },
+		func(domain.StatementLine) error { t.Fatal("a quiet period has no lines"); return nil }); err != nil || calls != 1 || quiet.LineCount != 0 {
+		t.Fatalf("quiet period: err %v calls %d input %+v; want one start with an empty input", err, calls, quiet)
+	}
+	refused := errors.New("refused")
+	if err := s.StreamRebateStatement(ctx, a.ID, "2026-03", 0, func(domain.RebateAgreement, domain.StatementInput) error { return nil },
+		func(domain.StatementLine) error { return refused }); !errors.Is(err, refused) {
+		t.Fatalf("callback error = %v; want it returned", err)
+	}
+	if err := s.StreamRebateStatement(principal(2, ""), a.ID, "2026-03", 0, nil, nil); problemCode(err) != store.CodeAgreementNotFound {
+		t.Fatalf("other tenant = %v; want not found", err)
+	}
+}
