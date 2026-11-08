@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import { bodyOf, callsTo, draftNodes, json, openType, published, renderPage, versionList, type Reply } from "./hierarchyTestKit";
+import { bodyOf, callsTo, draftNodes, json, node, openType, published, renderPage, versionList, type Reply } from "./hierarchyTestKit";
 import { stubLocalStorage } from "./testStorage";
 
 beforeEach(() => void stubLocalStorage());
@@ -465,6 +465,82 @@ describe("export", () => {
       expect(await blobs[0].text()).toBe(
         ["Level,Name,Code,Kind,Parent code", "1,Passage Inc,PI,legal_entity,", "2,Alpha,ALPHA,operating_unit,PI", "3,ou-c,ou-c,operating_unit,ALPHA", "2,Beta,BETA,operating_unit,PI"].join("\r\n"),
       );
+    } finally {
+      click.mockRestore();
+    }
+  });
+
+  const captureDownloads = () => {
+    const blobs: Blob[] = [];
+    const names: string[] = [];
+    const revoked = vi.fn();
+    Object.assign(URL, { createObjectURL: vi.fn((blob: Blob) => (blobs.push(blob), "blob:chart")), revokeObjectURL: revoked });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      names.push(this.download);
+    });
+    return { blobs, names, revoked, click };
+  };
+
+  it("downloads the displayed version as an SVG organization chart", async () => {
+    const { blobs, names, revoked, click } = captureDownloads();
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-04T10:00:00Z") });
+    try {
+      const { user } = renderPage({
+        "GET /operating-units": () =>
+          json({
+            items: [
+              { id: "ou-a", code: "ALPHA", name: "Alpha", status: "active", managerPartyId: "party-1" },
+              { id: "ou-b", code: "BETA", name: "Beta", status: "active" },
+            ],
+          }),
+      });
+      await openType(user);
+      await screen.findByRole("tree");
+      await user.click(screen.getByRole("button", { name: "Export chart (SVG)" }));
+      expect(names).toEqual(["org-chart-REP-v2.svg"]);
+      await waitFor(() => expect(revoked).toHaveBeenCalledWith("blob:chart"));
+      expect(blobs[0].type).toBe("image/svg+xml;charset=utf-8");
+      const doc = new DOMParser().parseFromString(await blobs[0].text(), "image/svg+xml");
+      expect(Array.from(doc.querySelectorAll("text"), (text) => text.textContent)).toEqual([
+        "REP · Reporting",
+        "Purpose: reporting, security    As of: 2026-06-01",
+        "PI",
+        "Passage Inc",
+        "ALPHA",
+        "Alpha",
+        "Manager: assigned",
+        "ou-c",
+        "ou-c",
+        "BETA",
+        "Beta",
+        "Manager: none",
+        "Version 2    Printed 2026-11-04T10:00:00.000Z",
+      ]);
+      expect(doc.documentElement.textContent).not.toContain("party-1");
+    } finally {
+      vi.useRealTimers();
+      click.mockRestore();
+    }
+  });
+
+  it("asks before exporting a chart too large to print, and exports only when confirmed", async () => {
+    const { names, click } = captureDownloads();
+    const many = [node("le1", null, 0, "legal_entity"), ...Array.from({ length: 1000 }, (_, index) => node(`ou-${index}`, "le1", index))];
+    try {
+      const { user } = renderPage({ "GET /hierarchy-versions/v2": () => json({ ...versionList[1], version: 4, nodes: many }) });
+      await openType(user);
+      await screen.findByRole("tree", {}, { timeout: 30_000 });
+      await user.click(screen.getByRole("button", { name: "Export chart (SVG)" }));
+      const dialog = screen.getByRole("alertdialog", { name: "Export a very large chart?" });
+      expect(dialog).toHaveTextContent("This version has 1,001 nodes, so the chart is about 184,032 by 300 pixels.");
+      expect(names).toEqual([]);
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(names).toEqual([]);
+      await user.click(screen.getByRole("button", { name: "Export chart (SVG)" }));
+      await user.click(screen.getByRole("button", { name: "Export anyway" }));
+      expect(names).toEqual(["org-chart-REP-v2.svg"]);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
     } finally {
       click.mockRestore();
     }

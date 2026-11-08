@@ -12,7 +12,12 @@ export function buildTree(nodes: readonly HierarchyNode[]): TreeNode[] {
   const byParent = new Map<string | null, HierarchyNode[]>();
   for (const node of nodes) {
     const parent = node.parentOrgUnitId !== null && known.has(node.parentOrgUnitId) ? node.parentOrgUnitId : null;
-    byParent.set(parent, [...(byParent.get(parent) ?? []), node]);
+    const siblings = byParent.get(parent);
+    if (siblings) {
+      siblings.push(node);
+    } else {
+      byParent.set(parent, [node]);
+    }
   }
   const build = (parent: string | null): TreeNode[] =>
     (byParent.get(parent) ?? [])

@@ -10,6 +10,7 @@ import {
   listHierarchyVersions,
   type HierarchyVersionSummary,
 } from "./api/hierarchy";
+import { CHART_WARN_NODES, chartSize, hierarchyChartSvg } from "./hierarchyChart";
 import { HierarchyDraftEditor, ProblemAlert, type Candidate } from "./HierarchyDraftEditor";
 import { HierarchyTreeView, RemovedSection, type Label } from "./HierarchyTreeView";
 import { useLegalEntity } from "./legalEntityContext";
@@ -69,8 +70,8 @@ function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>, refr
 const rangeText = (version: HierarchyVersionSummary) =>
   version.effectiveFrom === null ? "Not yet effective" : `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`;
 
-function downloadCsv(filename: string, csv: string) {
-  const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" }));
+function downloadFile(filename: string, parts: BlobPart[], type: string) {
+  const url = URL.createObjectURL(new Blob(parts, { type }));
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -79,6 +80,11 @@ function downloadCsv(filename: string, csv: string) {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+const downloadCsv = (filename: string, csv: string) => downloadFile(filename, ["\ufeff", csv], "text/csv;charset=utf-8");
+
+// Type codes are A-Z, 0-9, _ and - today; anything else would be a path separator or space in the saved file name.
+const fileSafe = (text: string) => text.replace(/[^A-Za-z0-9_-]/g, "_");
 
 export function HierarchyDesignerPage() {
   const { entities, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy } = useLegalEntity();
@@ -94,6 +100,7 @@ export function HierarchyDesignerPage() {
   const [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false);
   const [createFailure, setCreateFailure] = useState<Problem | null>(null);
+  const [largeChart, setLargeChart] = useState<{ nodes: number; width: number; height: number } | null>(null);
 
   const types = useLoad("types", (signal) => listHierarchyTypes({}, { signal }));
   const units = useLoad("units", (signal) => listOperatingUnits(ALL, { signal }));
@@ -235,6 +242,29 @@ export function HierarchyDesignerPage() {
     }
   };
 
+  // The unit carries only managerPartyId until party names can be resolved here, so the chart says whether a manager is
+  // assigned rather than printing an internal id; legal entities have no manager and get no manager line.
+  const exportSvg = (confirmed = false) => {
+    if (!detail.data || !displayed) {
+      return;
+    }
+    const roots = buildTree(detail.data.nodes);
+    if (!confirmed && detail.data.nodes.length > CHART_WARN_NODES) {
+      setLargeChart({ nodes: detail.data.nodes.length, ...chartSize(roots) });
+      return;
+    }
+    setLargeChart(null);
+    const managers = new Map<string, string | null>((units.data?.items ?? []).map((unit) => [unit.id, unit.managerPartyId ? "assigned" : null]));
+    const typeCode = selectedType?.code ?? typeId;
+    const svg = hierarchyChartSvg(
+      roots,
+      (id) => ({ ...(labels.get(id) ?? { name: id, code: id }), manager: managers.get(id) }),
+      { typeCode, typeName: selectedType?.name ?? "", purposes: selectedType?.purposes ?? [], asOf: displayed.effectiveFrom === null ? "draft" : asOf },
+      { versionNo: displayed.versionNo, printedAt: new Date().toISOString() },
+    );
+    downloadFile(`org-chart-${fileSafe(typeCode)}-v${displayed.versionNo}.svg`, [svg], "image/svg+xml;charset=utf-8");
+  };
+
   const columns: DataTableColumn<HierarchyVersionSummary>[] = [
     { key: "versionNo", header: "Version", align: "end" },
     { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
@@ -356,9 +386,14 @@ export function HierarchyDesignerPage() {
                   {banner}
                 </div>
                 {detailData && displayed ? (
-                  <Button size="sm" onClick={exportCsv}>
-                    Export CSV
-                  </Button>
+                  <>
+                    <Button size="sm" onClick={exportCsv}>
+                      Export CSV
+                    </Button>
+                    <Button size="sm" onClick={() => exportSvg()}>
+                      Export chart (SVG)
+                    </Button>
+                  </>
                 ) : null}
               </div>
               {displayed ? (
@@ -426,6 +461,16 @@ export function HierarchyDesignerPage() {
           cancelLabel="Keep editing"
           onConfirm={confirmLeave}
           onCancel={keepEditing}
+        />
+      ) : null}
+      {largeChart ? (
+        <ConfirmDialog
+          title="Export a very large chart?"
+          description={`This version has ${largeChart.nodes.toLocaleString("en")} nodes, so the chart is about ${largeChart.width.toLocaleString("en")} by ${largeChart.height.toLocaleString("en")} pixels. It will not fit a printed page and may be slow to open. The CSV export suits large hierarchies better.`}
+          confirmLabel="Export anyway"
+          cancelLabel="Cancel"
+          onConfirm={() => exportSvg(true)}
+          onCancel={() => setLargeChart(null)}
         />
       ) : null}
     </>
