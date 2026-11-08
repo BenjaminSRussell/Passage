@@ -186,6 +186,25 @@ describe("ColumnSetEditorPage", () => {
     expect((put?.body as { columns: { dimensionFilter?: unknown }[] }).columns[1].dimensionFilter).toBeUndefined();
   });
 
+  it("sets a balance side on a period column and saves it", async () => {
+    server.handler = (url, init) => {
+      if (url.pathname === `${BASE}/column-sets/MINE` && init.method === "PUT") return json(200, JSON.parse(String(init.body)), { ETag: '"1"' });
+      return undefined;
+    };
+    renderAt("/finreport/column-sets/new");
+    fireEvent.change(await screen.findByLabelText("Column set code"), { target: { value: "mine" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Debit balances" } });
+    fireEvent.change(screen.getByLabelText("Balance side"), { target: { value: "debit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add column" }));
+    fireEvent.change(screen.getAllByLabelText(/^Period/)[1], { target: { value: "calc" } });
+    // A CALC column reads other columns, so it offers no side of its own.
+    expect(screen.getAllByLabelText("Balance side")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Save column set" }));
+    await waitFor(() => expect(server.calls.some((c) => c.method === "PUT")).toBe(true));
+    const put = server.calls.find((c) => c.method === "PUT");
+    expect(put?.body).toMatchObject({ columns: [{ periodExpr: "P", balanceSide: "debit" }, { periodExpr: "CALC" }] });
+  });
+
   it("reports a template that does not exist", async () => {
     server.handler = (url) => (url.pathname === `${BASE}/column-set-templates` ? json(200, { items: [template] }) : undefined);
     renderAt("/finreport/column-sets/new?template=NOPE");

@@ -68,6 +68,7 @@ export function cleanColumn(col: DefinitionColumn): DefinitionColumn {
   else {
     if (col.currencyType) out.currencyType = col.currencyType;
     if (col.dimensionFilter && Object.keys(col.dimensionFilter).length > 0) out.dimensionFilter = col.dimensionFilter;
+    if (col.balanceSide) out.balanceSide = col.balanceSide;
   }
   return out;
 }

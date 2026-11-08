@@ -279,3 +279,48 @@ func TestApplyEntry_EntityScope(t *testing.T) {
 		t.Fatalf("lag after refusals %+v", lag)
 	}
 }
+
+// TestRun_BalanceSideColumnsDrillToLines runs a trial balance with debit and
+// credit balance columns over the consumer's read model: the credit side shows
+// the account's credit positive, and drill level 2 lists its lines with the
+// amounts the cell shows, summing to the cell (BR-15.4).
+func TestRun_BalanceSideColumnsDrillToLines(t *testing.T) {
+	st, all, _ := applyFixture(t)
+	ledger, entity := ids.New(), ids.New()
+	ctx := scopedCtx(testkit.TenantID(1), entity)
+	mustApply(t, st, ctx, postedEntry(ledger, entity, 1, "2026-01", "", sl(1, "1000", "D", "100", nil), sl(2, "2000", "C", "100", nil)), 1)
+	mustApply(t, st, ctx, postedEntry(ledger, entity, 2, "2026-02", "", sl(1, "1000", "C", "30", nil), sl(2, "2000", "D", "10", nil), sl(3, "3000", "D", "20", nil)), 1)
+	def := domain.Definition{Code: "TBSIDE", Name: "Sides", Kind: domain.KindTrialBalance,
+		Rows: []domain.Row{{Code: "ALL", Kind: domain.RowAccountRange, Label: "All", AccountFrom: "1000", AccountTo: "3999", NormalBalance: "debit"}},
+		Columns: []domain.Column{
+			{Code: "DR", Label: "Debit", PeriodExpr: "P", CurrencyType: "acct", BalanceSide: domain.BalanceSideDebit},
+			{Code: "CR", Label: "Credit", PeriodExpr: "P", CurrencyType: "acct", BalanceSide: domain.BalanceSideCredit},
+			{Code: "DIFF", Label: "Difference", PeriodExpr: "CALC", Expression: "DR-CR"},
+		}}
+	if _, _, err := st.SaveDraft(all, def, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Publish(all, "TBSIDE", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.CreateRun(ctx, RunSpec{Code: "TBSIDE", LedgerID: ledger, CurrencyType: "acct", PeriodYear: 2026, PeriodNo: 2,
+		Calendar: storeFixtureCalendar(), RequestedBy: "tester", IdempotencyKey: "side", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells, err := st.ListCells(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1000 nets 70 debit, 3000 nets 20 debit; 2000 nets 90 credit.
+	want := map[string]string{"DR": "90", "CR": "90", "DIFF": "0"}
+	for _, c := range cells {
+		if w, ok := want[c.Column]; !ok || !c.Value.Equal(decimal.RequireFromString(w)) {
+			t.Errorf("%s = %s, want %s", c.Column, c.Value, w)
+		}
+	}
+	page, err := st.DrillLines(ctx, run.ID, "ALL", "CR", LineQuery{Key: -1, Limit: 100})
+	if err != nil || !page.Reconciliation.Reconciled() || len(page.Items) != 2 || !page.SumOfLines.Equal(decimal.RequireFromString("90")) {
+		t.Fatalf("credit drill %+v err %v", page, err)
+	}
+}

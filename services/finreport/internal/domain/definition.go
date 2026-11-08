@@ -84,6 +84,12 @@ type Row struct {
 // Column is one period column. Columns with CALC take their values from other
 // columns of the same row through Expression. An empty CurrencyType uses the
 // currency type of the run.
+// Balance sides of a column (Column.BalanceSide).
+const (
+	BalanceSideDebit  = "debit"
+	BalanceSideCredit = "credit"
+)
+
 type Column struct {
 	Code         string `json:"code"`
 	Label        string `json:"label"`
@@ -96,6 +102,13 @@ type Column struct {
 	// column's filter both match. Not allowed on CALC columns, which read
 	// other columns.
 	DimensionFilter map[string][]string `json:"dimensionFilter,omitempty"`
+	// BalanceSide splits a trial balance by the sign of each account's balance
+	// over the column: "debit" shows only accounts whose net over the column is
+	// a debit balance (the amount is the net), "credit" only those with a
+	// credit balance (the amount is the credit, shown positive). Empty shows
+	// every account as the row's normal balance does. Not allowed on CALC
+	// columns, which read other columns.
+	BalanceSide string `json:"balanceSide,omitempty"`
 	// Ledger limits the column to one ledger. It is set only by Consolidate for
 	// a consolidated-by-entity run and never stored or exported.
 	Ledger string `json:"-"`
@@ -221,6 +234,9 @@ func (d Definition) Validate() []Issue {
 			if len(c.DimensionFilter) > 0 {
 				add("columns["+strconv.Itoa(i)+"].dimensionFilter", ShapeCode, "a cash flow column cannot be filtered by dimension; the cash flow reconciles over the whole ledger")
 			}
+			if c.BalanceSide != "" {
+				add("columns["+strconv.Itoa(i)+"].balanceSide", ShapeCode, "a cash flow column cannot keep one balance side; the cash flow reconciles over every account")
+			}
 		}
 	}
 	return out
@@ -249,6 +265,12 @@ func validateColumns(cols []Column) []Issue {
 		}
 		if c.CurrencyType != "" && c.CurrencyType != "acct" && c.CurrencyType != "rpt" && c.CurrencyType != "txn" {
 			add(field+".currencyType", ShapeCode, "must be acct, rpt or txn, or empty for the run's currency type")
+		}
+		if c.BalanceSide != "" && c.BalanceSide != BalanceSideDebit && c.BalanceSide != BalanceSideCredit {
+			add(field+".balanceSide", ShapeCode, "must be debit or credit, or empty to show every account")
+		}
+		if c.BalanceSide != "" && c.PeriodExpr == "CALC" {
+			add(field+".balanceSide", ShapeCode, "a CALC column reads other columns; put the side on those")
 		}
 		if len(c.DimensionFilter) > 0 {
 			if c.PeriodExpr == "CALC" {

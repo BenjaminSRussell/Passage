@@ -312,5 +312,8 @@ describe("DefinitionEditorPage", () => {
     expect(cleanColumn({ code: "C1", label: "P", periodExpr: "P", dimensionFilter: filter }).dimensionFilter).toEqual(filter);
     expect(cleanColumn({ code: "C1", label: "P", periodExpr: "P", dimensionFilter: {} })).toEqual({ code: "C1", label: "P", periodExpr: "P" });
     expect(cleanColumn({ code: "V", label: "V", periodExpr: "CALC", calcExpression: "C1", dimensionFilter: filter }).dimensionFilter).toBeUndefined();
+    // A balance side is kept on a period column and dropped on a CALC column.
+    expect(cleanColumn({ code: "DR", label: "Debit", periodExpr: "P", balanceSide: "debit" }).balanceSide).toBe("debit");
+    expect(cleanColumn({ code: "V", label: "V", periodExpr: "CALC", calcExpression: "C1", balanceSide: "credit" }).balanceSide).toBeUndefined();
   });
 });

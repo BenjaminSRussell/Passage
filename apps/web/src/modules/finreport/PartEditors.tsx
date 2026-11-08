@@ -203,6 +203,17 @@ export function ColumnsEditor({ columns, onChange }: { columns: DefinitionColumn
                   )}
                 </FormField>
               )}
+              {col.periodExpr.trim() === "CALC" ? null : (
+                <FormField id={`fr-col-${i}-side`} label="Balance side" optional hint="Trial balance: show only accounts with a debit (or credit) balance">
+                  {(c) => (
+                    <Select {...c} value={col.balanceSide ?? ""} onChange={(e) => changeColumn(i, { balanceSide: (e.target.value || undefined) as DefinitionColumn["balanceSide"] })}>
+                      <option value="">Every account</option>
+                      <option value="debit">Debit balances</option>
+                      <option value="credit">Credit balances</option>
+                    </Select>
+                  )}
+                </FormField>
+              )}
               <div className={styles.lineActions}>
                 <Button size="sm" variant="ghost" aria-label={`Remove column ${i + 1}`} disabled={columns.length === 1} onClick={() => onChange(columns.filter((_, j) => j !== i))}>
                   Remove

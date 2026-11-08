@@ -46,6 +46,8 @@ export interface DefinitionColumn {
   calcExpression?: string;
   /** Only balances whose dimension values match are read into the column ({attribute: [values or "*"]}). Not for CALC columns. */
   dimensionFilter?: Record<string, string[]>;
+  /** Trial balance split: only accounts whose net over the column is a debit (or a credit) balance. Not for CALC columns. */
+  balanceSide?: "debit" | "credit";
 }
 
 export interface Definition {

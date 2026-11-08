@@ -117,6 +117,8 @@ type colPlan struct {
 	dims map[string][]string
 	// ledger, when set, keeps only that ledger's balances (consolidated runs).
 	ledger string
+	// side is the column's balance side ("debit", "credit" or empty).
+	side string
 }
 
 type slot struct {
@@ -270,7 +272,7 @@ func planColumns(in Input) ([]colPlan, error) {
 		if currency == "" {
 			currency = in.CurrencyType
 		}
-		plans[j] = colPlan{found: true, currency: currency, include: include, dims: c.DimensionFilter, ledger: c.Ledger}
+		plans[j] = colPlan{found: true, currency: currency, include: include, dims: c.DimensionFilter, ledger: c.Ledger, side: c.BalanceSide}
 	}
 	return plans, nil
 }
@@ -328,7 +330,9 @@ func (e *evaluator) compute(ri, ci int) (cellVal, error) {
 			rv, err := e.cell(ri, ci)
 			v := rv.v
 			// raw: uses stored net (debit - credit) instead of the displayed value (BR-15.3).
-			if raw && e.def.Rows[ri].NormalBalance == "credit" {
+			// A balance-side column shows credits positive whatever the row's normal
+			// balance, so there the column decides the sign.
+			if raw && shownAsCredit(e.def.Rows[ri], e.plans[ci].side) {
 				v = v.Neg()
 			}
 			return Value{V: v, Blank: rv.blank}, err
@@ -465,6 +469,10 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 	excludeClosing := ExcludesClosing(e.def.Kind)
 	periods := e.cal.Periods()
 	var out cellVal
+	// A balance-side column keeps whole accounts: the sign of an account's net
+	// over the column decides which side it is on, so a key is kept or dropped
+	// with its account and the keys still sum to the cell (BR-15.4).
+	byAccount := map[string]decimal.Decimal{}
 	for i := range periods {
 		if !plan.include[i] {
 			continue
@@ -483,6 +491,10 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 			if excludeClosing {
 				net = net.Sub(b.ClosingNet)
 			}
+			if plan.side != "" {
+				byAccount[b.Account] = byAccount[b.Account].Add(net)
+				continue
+			}
 			amt := net
 			if credit {
 				amt = net.Neg()
@@ -492,7 +504,52 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 				Combination: b.Combination, CurrencyType: b.CurrencyType, Amount: amt, Credit: credit})
 		}
 	}
+	if plan.side == "" {
+		return out
+	}
+	creditSide := plan.side == BalanceSideCredit
+	for i := range periods {
+		if !plan.include[i] {
+			continue
+		}
+		k := slot{plan.currency, i}
+		list := e.index[k]
+		for _, j := range e.matching(row, k, list) {
+			b := list[j]
+			if plan.dims != nil && !dimsMatch(plan.dims, b.Dims) {
+				continue
+			}
+			if plan.ledger != "" && b.LedgerID != plan.ledger {
+				continue
+			}
+			total := byAccount[b.Account]
+			if (creditSide && !total.IsNegative()) || (!creditSide && total.Sign() <= 0) {
+				continue
+			}
+			net := b.Net
+			if excludeClosing {
+				net = net.Sub(b.ClosingNet)
+			}
+			amt := net
+			if creditSide {
+				amt = net.Neg()
+			}
+			out.v = out.v.Add(amt)
+			out.keys = append(out.keys, Key{LedgerID: b.LedgerID, Period: periods[i].Label(), Account: b.Account,
+				Combination: b.Combination, CurrencyType: b.CurrencyType, Amount: amt, Credit: creditSide})
+		}
+	}
 	return out
+}
+
+// shownAsCredit reports whether a balance-backed cell of row in a column with
+// the given balance side shows -net: a credit side column always does, a debit
+// side column never does, and any other column follows the row (BR-15.3).
+func shownAsCredit(row Row, side string) bool {
+	if side != "" {
+		return side == BalanceSideCredit
+	}
+	return row.NormalBalance == "credit"
 }
 
 func dimsMatch(filter map[string][]string, dims map[string]string) bool {

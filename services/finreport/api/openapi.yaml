@@ -2011,6 +2011,16 @@ components:
         periodExpr: {type: string, pattern: '^(P|P-[0-9]+|YTD|PY|PYTD|Q|FY|CALC)$'}
         currencyType: {type: string, enum: [acct, rpt, txn], description: Omitted means the run's currency type}
         calcExpression: {type: string}
+        balanceSide:
+          type: string
+          enum: [debit, credit]
+          description: >-
+            Trial balance split. debit keeps only accounts whose net over the column is a debit
+            balance (shown as the net); credit only those with a credit balance (shown positive).
+            An account is on one side as a whole, so a cell still drills to exactly its balances.
+            The side is decided per cell, over the balances the row and the column read. An account
+            netting to zero is on neither side. Omitted shows every account. Not allowed on CALC
+            columns or on cash flow definitions (422 COM-0001).
         dimensionFilter:
           type: object
           description: >-

@@ -123,6 +123,12 @@ func trialBalanceStd() Definition {
 			{Code: "OPEN", Label: "Opening", PeriodExpr: "P-1"},
 			{Code: "CLOSE", Label: "Closing", PeriodExpr: "P"},
 			{Code: "MOVE", Label: "Movement", PeriodExpr: "CALC", Expression: "CLOSE-OPEN"},
+			// Debit and credit balances per account (FR-15.5): an account is on
+			// the side of its net balance, so the totals of both columns agree
+			// for a balanced ledger and DIFF (must be 0.00) shows it.
+			{Code: "CLOSE_DR", Label: "Closing debit", PeriodExpr: "P", BalanceSide: BalanceSideDebit},
+			{Code: "CLOSE_CR", Label: "Closing credit", PeriodExpr: "P", BalanceSide: BalanceSideCredit},
+			{Code: "DIFF", Label: "Debit less credit", PeriodExpr: "CALC", Expression: "CLOSE_DR-CLOSE_CR"},
 		},
 	}
 }

@@ -173,8 +173,17 @@ func NewLineScope(def Definition, cell Cell, hwm int64, key int) (LineScope, err
 	if row == nil {
 		return LineScope{}, fmt.Errorf("row %s is not in definition %s version %d", cell.Row, def.Code, def.Version)
 	}
+	// A balance-side column signs its keys by the side, not by the row, so a
+	// debit side cell of a credit-normal row keeps its keys' own (debit) sign.
+	side := ""
+	for _, c := range def.Columns {
+		if c.Code == cell.Column {
+			side = c.BalanceSide
+			break
+		}
+	}
 	keys := append([]Key(nil), cell.Keys...)
-	if row.Kind != RowTotal && row.NormalBalance == "credit" {
+	if row.Kind != RowTotal && side == "" && row.NormalBalance == "credit" {
 		for i := range keys {
 			keys[i].Credit = true
 		}
