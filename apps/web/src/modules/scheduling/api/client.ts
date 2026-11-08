@@ -575,6 +575,55 @@ export async function fetchLateOrders(minLateMinutes: number, signal?: AbortSign
   return { items: body.items, truncated: body.truncated === true };
 }
 
+/** One run message about a resource network (PRD 4.23.14 Network feasibility). */
+export interface NetworkFinding {
+  runId: string;
+  runScope: string;
+  runAt: string;
+  /** SCHED-0009 (operation left unplaced) or SCHED-0010 (wait over the network maximum). */
+  code: "SCHED-0009" | "SCHED-0010";
+  flag: "NETWORK_INFEASIBLE" | "WAIT_EXCEEDED";
+  operationId: string;
+  /** Null when the operation was deleted since the run. */
+  orderId: string | null;
+  operNumber: number | null;
+  networkId: string | null;
+  networkCode: string | null;
+  detail: string;
+}
+
+export interface NetworkFeasibility {
+  items: NetworkFinding[];
+  truncated: boolean;
+  /** SCHED-0009 findings (operations). */
+  infeasible: number;
+  /** Distinct orders flagged NETWORK_INFEASIBLE; a failed chain lists each of its operations. */
+  infeasibleOrders: number;
+  waitViolations: number;
+}
+
+export interface NetworkFeasibilityFilter {
+  networkId?: string;
+  /** Only runs made at or after this instant. */
+  from?: string;
+  /** Only runs made before this instant. */
+  to?: string;
+}
+
+export async function fetchNetworkFeasibility(filter: NetworkFeasibilityFilter, signal?: AbortSignal): Promise<NetworkFeasibility> {
+  const body = await send<Partial<NetworkFeasibility>>(`/network-feasibility${query({ ...filter, limit: 200 })}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no items");
+  }
+  return {
+    items: body.items,
+    truncated: body.truncated === true,
+    infeasible: body.infeasible ?? 0,
+    infeasibleOrders: body.infeasibleOrders ?? 0,
+    waitViolations: body.waitViolations ?? 0,
+  };
+}
+
 /** One numbered line of a resource's dispatch list (PRD 4.23.15). */
 export interface DispatchLine {
   sequence: number;

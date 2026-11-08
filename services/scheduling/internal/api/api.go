@@ -213,6 +213,8 @@ func (a *API) Register(r chi.Router) {
 	// Slice 17: run measures and the late orders inquiry (PRD 4.23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/kpis", a.runKPIs)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/late-orders", a.lateOrders)
+	// Slice 33: the network feasibility inquiry (PRD 4.23.14).
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/network-feasibility", a.networkFeasibility)
 	// Slice 29: run comparison and rollback to a previous run (PRD 4.23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/runs/{id}/compare", a.compareRuns)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/scheduling/runs/{id}:rollback", a.rollbackRun)

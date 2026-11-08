@@ -40,6 +40,7 @@ type fakeStore struct {
 	lastLoad    store.LoadFilter
 	lastDaily   store.DailyLoadFilter
 	lastLate    store.LateOrderFilter
+	lastNetFind store.NetworkFeasibilityFilter
 	lastImports store.OrderImportFilter
 	reimported  string
 	lastOps     store.OperationFilter

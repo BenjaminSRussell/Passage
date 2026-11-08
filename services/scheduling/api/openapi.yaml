@@ -1065,6 +1065,48 @@ paths:
                     items: { $ref: '#/components/schemas/LateOrder' }
                   truncated: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/network-feasibility:
+    get:
+      operationId: listNetworkFeasibility
+      summary: Operations schedule runs left network infeasible and waits over the network maximum
+      description: >
+        The Network feasibility inquiry (PRD 4.23.14), read from the messages of schedule runs. Lists the operations a
+        run left unplaced because their chain has no allowed resource transition within the delay limit
+        (`SCHED-0009`, flag `NETWORK_INFEASIBLE`) and the placed operations whose wait behind a frozen predecessor is
+        over the network maximum (`SCHED-0010`, flag `WAIT_EXCEEDED`), newest run first. The order, operation number
+        and network are those of the operation as it is now and are null when it was deleted since. `networkId` keeps
+        the findings of operations that follow that network; `from` (inclusive) and `to` (exclusive) bound the time the
+        run was made. The totals count every match, whatever `limit` (`infeasibleOrders` counts the distinct orders flagged, as one failed chain lists each of its operations); `truncated` is true when more were found.
+      x-passage-duty: scheduling.read
+      parameters:
+        - name: networkId
+          in: query
+          required: false
+          description: Only operations that follow this resource network.
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          required: false
+          description: Only runs made at or after this time.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: Only runs made before this time; must be after `from`.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          required: false
+          description: At most this many findings.
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Network findings, newest run first, with totals per kind
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkFeasibility' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/order-imports:
     get:
       operationId: listOrderImports
@@ -2367,6 +2409,32 @@ components:
         operations: { type: integer }
         firmed: { type: boolean, description: True when any job of the order is firmed. }
         dependentOrders: { type: integer, description: "Pegged demand: orders pegged to consume this order's output, which its lateness delays in turn." }
+    NetworkFinding:
+      type: object
+      required: [runId, runScope, runAt, code, flag, operationId, orderId, operNumber, networkId, networkCode, detail]
+      properties:
+        runId: { type: string, format: uuid }
+        runScope: { type: string, enum: [site, selection, order, move, rollback] }
+        runAt: { type: string, format: date-time, description: When the run was made. }
+        code: { type: string, enum: [SCHED-0009, SCHED-0010] }
+        flag: { type: string, enum: [NETWORK_INFEASIBLE, WAIT_EXCEEDED], description: 'NETWORK_INFEASIBLE for SCHED-0009 (the operation was left unplaced), WAIT_EXCEEDED for SCHED-0010 (a placed operation waits longer than the network allows).' }
+        operationId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid, nullable: true, description: Null when the operation was deleted since the run. }
+        operNumber: { type: integer, nullable: true }
+        networkId: { type: string, format: uuid, nullable: true, description: The network the operation follows now; null when it follows none or was deleted. }
+        networkCode: { type: string, nullable: true }
+        detail: { type: string, description: The scheduler's reason, as written in the run. }
+    NetworkFeasibility:
+      type: object
+      required: [items, truncated, infeasible, infeasibleOrders, waitViolations]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkFinding' }
+        truncated: { type: boolean, description: True when more findings match than `limit`. }
+        infeasible: { type: integer, description: Matching SCHED-0009 findings, whatever the limit. }
+        infeasibleOrders: { type: integer, description: "Distinct orders flagged NETWORK_INFEASIBLE among the matching SCHED-0009 findings, whatever the limit. A chain that fails lists each of its operations, so this can be smaller than infeasible; findings of deleted operations have no order and are not counted." }
+        waitViolations: { type: integer, description: Matching SCHED-0010 findings, whatever the limit. }
     OrderImport:
       type: object
       required: [orderId, orderNumber, orderVersion, reason, eventId, status, operationsTotal, created, updated, unchanged, removed, keptFirmed, skipped, replanRequired, orderStart, orderEnd, receivedAt, reimportable, withdrawnAt, withdrawnTo]

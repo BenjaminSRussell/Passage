@@ -279,6 +279,7 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/runs/{id}/compare?to` (jobs added, removed and changed between two runs' snapshots; lists cut at 500, counts exact) | `scheduling.read` |
 | POST | `/v1/scheduling/runs/{id}:rollback` (Idempotency-Key; restores the jobs the run placed under a new run of scope `rollback`) | `scheduling.run` |
 | GET | `/v1/scheduling/late-orders?minLateMinutes&limit` | `scheduling.read` |
+| GET | `/v1/scheduling/network-feasibility?networkId&from&to&limit` | `scheduling.read` |
 | GET | `/v1/scheduling/dispatch-list?resourceId&date&days&startMinute&endMinute` | `scheduling.read` |
 | GET | `/v1/scheduling/order-imports?status&limit` | `scheduling.read` |
 | GET | `/v1/scheduling/order-imports/{orderId}` | `scheduling.read` |

@@ -849,7 +849,6 @@ no FAIL lines on the doc gates.
 | Snapshots of Gantt moves, and of runs before this slice | later slice of PSG-23 | A move changes one order's jobs; rolling back to one is not defined. Older runs stay as history rows only. |
 | Rollback of operations the run left unplaced, and a rollback that also moves jobs of other operations out of the way | later slice of PSG-23 | Only the jobs the run placed are restored; an overlap with a booking made since, or a SCHED-0146 break, refuses the rollback instead of re-planning around it. |
 | Rollback re-checks not done: resource efficiency changed since the run (job lengths), network transfer time and maximum wait (BR-23.11), a setup matrix version that changed between the run's day and the restored jobs' day, and jobs restored into the past | later slice of PSG-23 | The checks above cover what the Gantt flags and what runs and moves refuse; efficiency and network waits are not flagged on existing jobs either, and runs themselves accept a start in the past. |
-| Network feasibility report (4.23.14) | later slice of PSG-23 | Not part of this slice. |
 
 ## Slice 30: materialized capacity load and bottleneck episodes (PRD 4.23.14, AC-23.6, SCHED-0015)
 
@@ -1002,6 +1001,37 @@ rollback run, which copies the source run's mode, so it moves in that mode.
 | `POST /orders/{id}:schedule` on a site whose `defaultMode` is operations | decision for Ben | Left out, the mode now comes from the parameters, so on such a site the per-order command (and the "Schedule this order" button on the order import page, which sends no mode) schedules in daily buckets where it used to run in jobs mode. A caller that needs the old behaviour sends `"mode": "jobs"`. No other service calls the command (production's `:schedule` is its own). |
 | Moves of jobs placed by move runs made before this slice | accepted | Those move runs recorded `jobs` whatever the job's mode, so moving such a job again uses jobs mode until a run places it again. |
 
+## Slice 33: network feasibility inquiry (PRD 4.23.14)
+
+Slice 33 builds the Network feasibility list inquiry, read from the messages of
+schedule runs. `GET /v1/scheduling/network-feasibility` (duty `scheduling.read`)
+lists the operations a run left unplaced because their chain has no allowed
+resource transition within the delay limit (SCHED-0009, flag
+`NETWORK_INFEASIBLE`, from the run's unplaced messages) and the placed
+operations whose wait behind a frozen predecessor is over the network maximum
+(SCHED-0010, flag `WAIT_EXCEEDED`, from the run's warnings), newest run first.
+Filters: `networkId` (the network the operation follows now; unknown network is
+404 SCHED-0109), `from` (inclusive) and `to` (exclusive) on the time the run was
+made, `limit` (1 to 500, default 100). The totals `infeasible` (operations),
+`infeasibleOrders` (distinct orders flagged, the PRD's "orders flagged
+NETWORK_INFEASIBLE": one failed chain lists each of its operations) and
+`waitViolations` count every match, whatever the limit. No migration and no
+event: the inquiry only reads `schedule_run`, `scheduling_operation` and
+`scheduling_resource_network`. The Network feasibility page (list with network
+and day filters, totals, links to the run and the operation, loading, empty and
+error states) is in the scheduling web module. The scheduling OpenAPI and
+AsyncAPI specs pass the doc gates with no FAIL lines.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/network-feasibility` (GET) under `scheduling.read` | handoff - main session (authz seed) | Existing duty; only the route row is new. Until it is seeded the route and the page answer 403 for roles that rely on the resource rows. |
+| Findings of runs older than the retention of `schedule_run`, and moves | accepted | Move runs record other messages (overrides, truncation), not network findings; a move that breaks a network is refused with SCHED-0009 and is not stored. The inquiry covers what site, selection and order runs recorded. |
+| Findings by the operation's network at the time of the run | accepted | The network and order shown are those of the operation today; an operation moved to another network, or deleted, shows the current values (null when deleted). |
+| Operation attributes of the finding such as the failing resource pair and the queue/wait figures as fields | later slice of PSG-23 | They are inside the `detail` text the scheduler wrote; no structured fields are stored on the run. |
+| Network filter on the predecessors of a failed chain | accepted | The filter keeps findings of operations that follow the network now. When a chain fails at an operation of network N, its earlier operations are also flagged SCHED-0009; those that follow no network (or another one) are left out under `networkId=N`, while the failing operation, and so the order, is listed. |
+| Default date range and an index for the scan | accepted | With no `from`/`to` the inquiry reads the messages and warnings of every run of the tenant (twice: totals and page). `from`/`to` use the existing `schedule_run_created` index; the page leaves both open by default. |
+| Date range on the time the run was made | decision for Ben | PRD 4.23.14 says only "date range"; the slice filters on when the run was made, not on the dates of the jobs the finding is about (an unplaced operation has no job date). |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -1071,7 +1101,7 @@ rollback run, which copies the source run's mode, so it moves in that mode.
 | Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
 | Resource utilization and changeover time of a run (4.23.14) | built (slice 17) | `GET /runs/{id}/kpis` and the Plan measures card on the run detail; they describe the jobs the run still holds. |
 | Run comparison (4.23.14) | built (slice 29) | `GET /runs/{id}/compare`, per-run snapshots in `schedule_run_job`; see the slice 29 section. |
-| Network feasibility report (4.23.14) | later slice of PSG-23 | |
+| Network feasibility report (4.23.14) | built (slice 33) | `GET /network-feasibility` and the Network feasibility page; see the slice 33 section. |
 | Dispatch list (4.23.15) | built (slice 25) as an inquiry and a printable page | See the slice 25 section; a PDF template and the kiosk view are handoffs. |
 | Gantt print, campaign sheet, cleanout record documents (4.23.15) | later slice of PSG-23 | No document templates yet. |
 | Feature flags `scheduling.cp-sat`, `scheduling.propagate-dependents`; config `SCHED_OPT_TIME_LIMIT_S` | later slice of PSG-23 | No flag client; CP-SAT is chosen per campaign with its sequence rule and switched off by leaving `SCHED_OPT_URL` empty, propagation is chosen per move with `propagate`, and the campaign solver limit is fixed at 20 s. |

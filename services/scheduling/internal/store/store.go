@@ -314,6 +314,7 @@ type Store interface {
 	BottleneckStore
 	DispatchStore
 	RunKPIStore
+	NetworkFeasibilityStore
 	RunSnapshotStore
 	SetupStore
 	PegStore

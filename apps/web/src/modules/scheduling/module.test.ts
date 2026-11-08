@@ -15,6 +15,7 @@ describe("scheduling module", () => {
         "/scheduling",
         "/scheduling/load",
         "/scheduling/late-orders",
+        "/scheduling/network-feasibility",
         "/scheduling/bottlenecks",
         "/scheduling/bottlenecks/:id",
         "/scheduling/dispatch-list",
