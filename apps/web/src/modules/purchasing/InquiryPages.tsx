@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { Button, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import {
+  listBackorderedLines,
   listOpenOrdersByVendor,
   listOverdueLines,
   listPriceHistory,
+  type BackorderedLine,
   type InquiryFilters,
   type OverdueLine,
   type PriceHistoryEntry,
@@ -40,18 +42,22 @@ const toFilters = (d: Draft): InquiryFilters => {
   return { vendorId: opt(d.vendorId), productId: opt(d.productId), asOf: opt(d.asOf), from: opt(d.from), to: opt(d.to) };
 };
 
+/** The inquiry sub-navigation; NavLink marks the open inquiry with aria-current="page". */
 function InquiryNav() {
   return (
     <nav aria-label="Inquiries" className={styles.actions}>
-      <Link className={styles.link} to="/purchasing/inquiries">
+      <NavLink className={styles.link} to="/purchasing/inquiries" end>
         Open orders by vendor
-      </Link>
-      <Link className={styles.link} to="/purchasing/inquiries/overdue">
+      </NavLink>
+      <NavLink className={styles.link} to="/purchasing/inquiries/overdue">
         Overdue lines
-      </Link>
-      <Link className={styles.link} to="/purchasing/inquiries/price-history">
+      </NavLink>
+      <NavLink className={styles.link} to="/purchasing/inquiries/backordered">
+        Backordered lines
+      </NavLink>
+      <NavLink className={styles.link} to="/purchasing/inquiries/price-history">
         Price history
-      </Link>
+      </NavLink>
     </nav>
   );
 }
@@ -205,6 +211,43 @@ export function OverdueLinesPage() {
       empty={{ title: "Nothing overdue", description: "No open line is past its due date." }}
       load={(f, cursor, signal) => listOverdueLines(f, { cursor, signal })}
       what="overdue lines"
+    />
+  );
+}
+
+/** Backordered purchase order lines (PRD 3.17.14): received in part, the rest still owed. */
+export function BackorderedLinesPage() {
+  const columns: DataTableColumn<BackorderedLine>[] = [
+    {
+      key: "po",
+      header: "Purchase order",
+      render: (l) => (
+        <Link className={styles.link} to={`/purchasing/purchase-orders/${l.purchaseOrderId}`}>
+          {l.number}
+        </Link>
+      ),
+    },
+    { key: "lineNo", header: "Line", align: "end" },
+    { key: "vendorId", header: "Vendor", render: (l) => <ShortId id={l.vendorId} /> },
+    { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+    { key: "qty", header: "Ordered", align: "end", render: (l) => `${l.qty} ${l.unit}` },
+    { key: "receivedQty", header: "Received", align: "end", render: (l) => `${l.receivedQty} ${l.unit}` },
+    { key: "openQty", header: "Backordered", align: "end", render: (l) => `${l.openQty} ${l.unit}` },
+    { key: "openValue", header: "Open value", align: "end", render: (l) => money(l.openValue, l.currency) },
+    { key: "dueDate", header: "Due", mono: true },
+    { key: "daysLate", header: "Days late", align: "end" },
+  ];
+  return (
+    <InquiryFrame<BackorderedLine>
+      title="Backordered lines"
+      description="Open lines of confirmed purchase orders that were received in part, earliest due first. A line is due on the date the vendor confirmed, else the requested date."
+      fields={["vendorId", "productId", "asOf"]}
+      tableLabel="Backordered order lines"
+      columns={columns}
+      rowKey={(l) => `${l.purchaseOrderId}:${l.lineNo}`}
+      empty={{ title: "Nothing backordered", description: "No open line has been received in part." }}
+      load={(f, cursor, signal) => listBackorderedLines(f, { cursor, signal })}
+      what="backordered lines"
     />
   );
 }

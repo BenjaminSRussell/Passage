@@ -86,6 +86,25 @@ func (a *API) listOverdueLines(w http.ResponseWriter, r *http.Request) {
 	writePage(w, page)
 }
 
+// listBackorderedLines is GET /inquiries/backordered-lines (PRD 3.17.14): open lines received in part.
+func (a *API) listBackorderedLines(w http.ResponseWriter, r *http.Request) {
+	limit, err := listLimit(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	f, ok := a.inquiryFilter(w, r)
+	if !ok {
+		return
+	}
+	page, err := a.store.ListBackorderedLines(r.Context(), f, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writePage(w, page)
+}
+
 // listPriceHistory is GET /inquiries/price-history (PRD 3.17.14, ME1P): productId is required.
 func (a *API) listPriceHistory(w http.ResponseWriter, r *http.Request) {
 	limit, err := listLimit(r)

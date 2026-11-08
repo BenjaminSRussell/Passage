@@ -42,6 +42,13 @@ const openLineSource = `purchase_order_line l
 
 const openLineWhere = `l.tenant_id = $1 and o.approval_status = 'CONFIRMED' and l.status = 'OPEN' and l.qty > l.received_qty`
 
+// lineDue is the due date of a line of openLineSource and lineOpenValue its unrounded open value;
+// every open-order inquiry selects these two, so they date and value a line the same way.
+const (
+	lineDue       = `coalesce(nx.due, l.delivery_date)`
+	lineOpenValue = `l.line_amount * (l.qty - l.received_qty) / l.qty`
+)
+
 // VendorOpenOrders is one row of "open orders by vendor": a vendor and currency with their
 // CONFIRMED purchase orders that still have quantity to receive.
 type VendorOpenOrders struct {
@@ -56,16 +63,25 @@ type VendorOpenOrders struct {
 	OverdueValue decimal.Decimal `json:"overdueValue"`
 }
 
-// OverdueLine is an open line of a CONFIRMED purchase order whose due date is before the as-of
-// date, with the days it is late. DeliveryDate is the requested date; ConfirmedDate here is the
-// vendor's confirmed date of the schedule row the line is waiting on, when it has one.
-type OverdueLine struct {
+// DueLine is an open line of a CONFIRMED purchase order with its due date, the days it is late at
+// the as-of date (zero while it is not yet due) and its open value. DeliveryDate is the requested
+// date; ConfirmedDate here is the vendor's confirmed date of the schedule row the line is waiting
+// on, when it has one. The overdue and backordered inquiries return it, read by one query
+// (listDueLines) so the two cannot date a line differently.
+type DueLine struct {
 	OpenOrderLine
 	DueDate   domain.Day      `json:"dueDate"`
 	Currency  string          `json:"currency"`
 	DaysLate  int             `json:"daysLate"`
 	OpenValue decimal.Decimal `json:"openValue"`
 }
+
+// OverdueLine is a line of the overdue inquiry: due before the as-of date.
+type OverdueLine = DueLine
+
+// BackorderedLine is a line of the backordered inquiry: received in part (some quantity arrived,
+// the rest is still owed), due or not.
+type BackorderedLine = DueLine
 
 // PriceHistoryEntry is one priced purchase order line of a product (ME1P order price history).
 type PriceHistoryEntry struct {
@@ -114,8 +130,8 @@ func (s *Postgres) ListOpenOrdersByVendor(ctx context.Context, f InquiryFilter, 
 		rows, err := tx.Query(ctx, `select x.vendor_id, x.currency, count(distinct x.po_id), count(*), sum(x.open_value),
 			count(*) filter (where x.due < $5::date), min(x.due),
 			coalesce(sum(x.open_value) filter (where x.due < $5::date), 0)
-			from (select o.vendor_id, o.currency, o.id as po_id, coalesce(nx.due, l.delivery_date) as due,
-			        l.line_amount * (l.qty - l.received_qty) / l.qty as open_value
+			from (select o.vendor_id, o.currency, o.id as po_id, `+lineDue+` as due,
+			        `+lineOpenValue+` as open_value
 			      from `+openLineSource+`
 			      where `+openLineWhere+`
 			      and ($2::uuid is null or o.legal_entity_id = $2::uuid)
@@ -150,6 +166,24 @@ func (s *Postgres) ListOpenOrdersByVendor(ctx context.Context, f InquiryFilter, 
 // ListOverdueLines pages open lines of CONFIRMED POs with a due date before f.AsOf, oldest due
 // first; the cursor is "<due date>|<po id>|<line no>".
 func (s *Postgres) ListOverdueLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[OverdueLine], error) {
+	return s.listDueLines(ctx, f, after, limit, "true", "x.due < $4::date")
+}
+
+// ListBackorderedLines pages the open lines of CONFIRMED POs that were received in part (some
+// quantity received, some still to receive), due or not, earliest due first; the cursor is as for
+// ListOverdueLines. A line whose receipts are reversed back to zero leaves the list (it is then
+// only open, and overdue once its due date passes). The partial index of migration 0028 covers
+// exactly openLineWhere plus received_qty > 0.
+func (s *Postgres) ListBackorderedLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[BackorderedLine], error) {
+	return s.listDueLines(ctx, f, after, limit, "l.received_qty > 0", "true")
+}
+
+// listDueLines pages the lines of openLineSource that also match lineWhere (a constant predicate
+// on l and o) and whose due date x.due matches dueWhere (a constant predicate on the due date and
+// $4, the as-of date), ordered by (due date, PO id, line no), which is also the cursor. Days late
+// are counted at f.AsOf and are zero for a line not yet due; asOf never moves the sort key, so a
+// cursor stays valid under another asOf.
+func (s *Postgres) listDueLines(ctx context.Context, f InquiryFilter, after string, limit int, lineWhere, dueWhere string) (Page[DueLine], error) {
 	p, _ := tenant.FromContext(ctx)
 	limit = clampLimit(limit)
 	var curDate *time.Time
@@ -163,27 +197,27 @@ func (s *Postgres) ListOverdueLines(ctx context.Context, f InquiryFilter, after 
 			n, nerr = strconv.Atoi(parts[2])
 		}
 		if len(parts) != 3 || derr != nil || nerr != nil || !ids.Valid(parts[1]) {
-			return Page[OverdueLine]{}, &domain.Error{Code: domain.CodeValidation, Detail: "cursor is not one this list returned"}
+			return Page[DueLine]{}, &domain.Error{Code: domain.CodeValidation, Detail: "cursor is not one this list returned"}
 		}
 		curDate, curPO, curLine = &d.Time, &parts[1], &n
 	}
-	var items []OverdueLine
+	var items []DueLine
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select x.po_id, x.number, x.line_no, x.legal_entity_id, x.vendor_id, x.currency, x.product_id,
 			x.description, x.site_id, x.warehouse_id, x.unit, x.qty, x.received_qty, x.open_qty, x.delivery_date, x.due,
-			$4::date - x.due, x.open_value, x.due_confirmed
+			greatest($4::date - x.due, 0), x.open_value, x.due_confirmed
 			from (select o.id as po_id, o.number, l.line_no, o.legal_entity_id, o.vendor_id, o.currency, coalesce(l.product_id::text, '') as product_id,
 			        l.description, coalesce(coalesce(l.site_id, o.site_id)::text, '') as site_id,
 			        coalesce(coalesce(l.warehouse_id, o.warehouse_id)::text, '') as warehouse_id,
 			        l.unit, l.qty, l.received_qty, l.qty - l.received_qty as open_qty, l.delivery_date,
-			        coalesce(nx.due, l.delivery_date) as due, nx.confirmed_date as due_confirmed,
-			        l.line_amount * (l.qty - l.received_qty) / l.qty as open_value
+			        `+lineDue+` as due, nx.confirmed_date as due_confirmed,
+			        `+lineOpenValue+` as open_value
 			      from `+openLineSource+`
-			      where `+openLineWhere+`
+			      where `+openLineWhere+` and `+lineWhere+`
 			      and ($2::uuid is null or o.legal_entity_id = $2::uuid)
 			      and ($3::uuid is null or o.vendor_id = $3::uuid)
 			      and ($5::uuid is null or l.product_id = $5::uuid)) x
-			where x.due < $4::date
+			where `+dueWhere+`
 			and ($6::date is null or (x.due, x.po_id, x.line_no) > ($6::date, $7::uuid, $8::int))
 			order by x.due, x.po_id, x.line_no limit $9`,
 			p.TenantID, nullable(f.LegalEntityID), nullable(f.VendorID), f.AsOf, nullable(f.ProductID),
@@ -191,8 +225,8 @@ func (s *Postgres) ListOverdueLines(ctx context.Context, f InquiryFilter, after 
 		if err != nil {
 			return err
 		}
-		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (OverdueLine, error) {
-			var l OverdueLine
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (DueLine, error) {
+			var l DueLine
 			var requested, due time.Time
 			var confirmed *time.Time
 			err := row.Scan(&l.PurchaseOrderID, &l.Number, &l.LineNo, &l.LegalEntityID, &l.VendorID, &l.Currency, &l.ProductID, &l.Description,
@@ -208,12 +242,12 @@ func (s *Postgres) ListOverdueLines(ctx context.Context, f InquiryFilter, after 
 		return err
 	})
 	if err != nil {
-		return Page[OverdueLine]{}, err
+		return Page[DueLine]{}, err
 	}
 	if items == nil {
-		items = []OverdueLine{}
+		items = []DueLine{}
 	}
-	return pageOf(items, limit, func(l OverdueLine) string {
+	return pageOf(items, limit, func(l DueLine) string {
 		return fmt.Sprintf("%s|%s|%d", l.DueDate, l.PurchaseOrderID, l.LineNo)
 	}), nil
 }

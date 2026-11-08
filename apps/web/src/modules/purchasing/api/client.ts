@@ -699,6 +699,9 @@ export interface OverdueLine extends OpenOrderLine {
   openValue: string;
 }
 
+/** An open line received in part: `openQty` is still owed; `daysLate` is 0 until the line is due. */
+export type BackorderedLine = OverdueLine;
+
 /** A priced line of an approved purchase order for one product. */
 export interface PriceHistoryEntry {
   purchaseOrderId: string;
@@ -730,6 +733,10 @@ export function listOpenOrdersByVendor(filters: InquiryFilters = {}, options: Li
 
 export function listOverdueLines(filters: InquiryFilters = {}, options: ListOptions = {}) {
   return list<OverdueLine>("/inquiries/overdue-lines", { ...filters }, options);
+}
+
+export function listBackorderedLines(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<BackorderedLine>("/inquiries/backordered-lines", { ...filters }, options);
 }
 
 export function listPriceHistory(filters: InquiryFilters = {}, options: ListOptions = {}) {

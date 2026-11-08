@@ -22,6 +22,54 @@ const vendorRow = {
 };
 
 describe("purchasing inquiries", () => {
+  it("shows backordered lines with received and open quantity, an empty state and an error", async () => {
+    const fetchMock = stubFetch(() =>
+      json({
+        items: [
+          {
+            purchaseOrderId: PO_ID,
+            number: "PO-00000009",
+            lineNo: 2,
+            legalEntityId: "11111111-1111-4111-8111-111111111111",
+            vendorId: VENDOR,
+            description: "Washer",
+            unit: "EA",
+            qty: "10",
+            receivedQty: "4",
+            openQty: "6",
+            deliveryDate: "2027-01-02",
+            dueDate: "2027-01-02",
+            currency: "USD",
+            daysLate: 0,
+            openValue: "60",
+          },
+        ],
+      }),
+    );
+    renderAt("/purchasing/inquiries/backordered");
+    const table = await findTable({ name: "Backordered order lines" });
+    expect(await within(table).findByRole("link", { name: "PO-00000009" })).toBeInTheDocument();
+    expect(within(table).getByText("4 EA")).toBeInTheDocument();
+    expect(within(table).getByText("6 EA")).toBeInTheDocument();
+    expect(within(table).getByText("60 USD")).toBeInTheDocument();
+    const inquiryNav = screen.getByRole("navigation", { name: "Inquiries" });
+    expect(within(inquiryNav).getByRole("link", { name: "Backordered lines" })).toHaveAttribute("aria-current", "page");
+    expect(within(inquiryNav).getByRole("link", { name: "Open orders by vendor" })).not.toHaveAttribute("aria-current");
+    fireEvent.change(screen.getByLabelText(/Product id/), { target: { value: PRODUCT } });
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    await waitFor(() =>
+      expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe(`/api/v1/procurement/inquiries/backordered-lines?productId=${PRODUCT}`),
+    );
+    vi.unstubAllGlobals();
+    stubFetch(() => json({ items: [] }));
+    renderAt("/purchasing/inquiries/backordered");
+    expect(await screen.findByRole("heading", { name: "Nothing backordered" })).toBeInTheDocument();
+    vi.unstubAllGlobals();
+    stubFetch(() => problem(500, "PRC-INTERNAL", "boom"));
+    renderAt("/purchasing/inquiries/backordered");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
   it("lists open orders by vendor and filters by vendor and as-of date", async () => {
     const fetchMock = stubFetch(() => json({ items: [vendorRow] }));
     const { container } = renderAt("/purchasing/inquiries");

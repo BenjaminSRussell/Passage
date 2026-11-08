@@ -35,6 +35,14 @@ func TestInquiries_Read(t *testing.T) {
 		!strings.Contains(rec.Body.String(), `"dueDate":"2027-01-02"`) || !strings.Contains(rec.Body.String(), `"deliveryDate":"2026-12-20"`) {
 		t.Fatalf("overdue: %d %s", rec.Code, rec.Body)
 	}
+	h.fake.backordered = []store.BackorderedLine{{OpenOrderLine: store.OpenOrderLine{Number: "PO-00000002", LineNo: 2, VendorID: vendor, Unit: "EA",
+		Qty: decimal.NewFromInt(10), ReceivedQty: decimal.NewFromInt(4), OpenQty: decimal.NewFromInt(6), DeliveryDate: mustDay(t, "2027-01-02")},
+		DueDate: mustDay(t, "2027-01-02"), Currency: "USD", OpenValue: decimal.NewFromInt(60)}}
+	rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/backordered-lines?productId=" + product + "&cursor=2027-01-02|x&limit=7", duties: []string{dutyPurchaseOrderInquire}})
+	if rec.Code != http.StatusOK || h.fake.lastInquiry.ProductID != product || h.fake.lastLimit != 7 || h.fake.lastAfter != "2027-01-02|x" ||
+		!strings.Contains(rec.Body.String(), `"receivedQty":"4"`) || !strings.Contains(rec.Body.String(), `"openValue":"60"`) {
+		t.Fatalf("backordered: %d %s", rec.Code, rec.Body)
+	}
 	rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/price-history?productId=" + product + "&from=2027-01-01&to=2027-02-01", duties: []string{dutyPurchaseOrderInquire}})
 	if rec.Code != http.StatusOK || h.fake.lastInquiry.From == nil || h.fake.lastInquiry.To == nil || !strings.Contains(rec.Body.String(), `"unitPrice":"9.5"`) {
 		t.Fatalf("price history: %d %s", rec.Code, rec.Body)
@@ -45,14 +53,14 @@ func TestInquiries_Rejects(t *testing.T) {
 	h := newHarness(t)
 	product := ids.New()
 	for _, q := range []string{
-		"open-orders-by-vendor?vendorId=nope", "open-orders-by-vendor?asOf=yesterday", "overdue-lines?limit=0",
+		"open-orders-by-vendor?vendorId=nope", "open-orders-by-vendor?asOf=yesterday", "overdue-lines?limit=0", "backordered-lines?vendorId=nope", "backordered-lines?asOf=x", "backordered-lines?limit=0",
 		"price-history", "price-history?productId=" + product + "&from=2027-02-01&to=2027-01-01", "price-history?productId=" + product + "&from=x",
 	} {
 		if rec := h.do(call{method: "GET", path: "/v1/procurement/inquiries/" + q, duties: []string{dutyPurchaseOrderInquire}}); problemCode(t, rec) != codeInvalid {
 			t.Fatalf("%s: %d %s", q, rec.Code, rec.Body)
 		}
 	}
-	for _, p := range []string{"open-orders-by-vendor?", "overdue-lines?", "price-history?productId=" + product + "&"} {
+	for _, p := range []string{"open-orders-by-vendor?", "overdue-lines?", "backordered-lines?", "price-history?productId=" + product + "&"} {
 		if rec := h.do(call{method: "GET", path: "/v1/procurement/inquiries/" + p, duties: []string{dutyRequisitionCreate}}); rec.Code != http.StatusForbidden {
 			t.Fatalf("%s without procurement.purchase-order.inquire: %d", p, rec.Code)
 		}

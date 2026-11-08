@@ -176,9 +176,10 @@ func (a *API) Register(r chi.Router) {
 		// procurement.purchase-order.inquire and apply procurement.purchase-order.confirm, checked in repriceRun.
 		r.Post("/purchase-orders:reprice", a.repriceRun)
 		inquire.Get("/purchase-order-lines", a.listOpenOrderLines)
-		// Purchasing inquiries (PRD 3.17.14): open orders by vendor, overdue lines, order price history.
+		// Purchasing inquiries (PRD 3.17.14): open orders by vendor, overdue lines, backordered lines, order price history.
 		inquire.Get("/inquiries/open-orders-by-vendor", a.listOpenOrdersByVendor)
 		inquire.Get("/inquiries/overdue-lines", a.listOverdueLines)
+		inquire.Get("/inquiries/backordered-lines", a.listBackorderedLines)
 		inquire.Get("/inquiries/price-history", a.listPriceHistory)
 		inquire.Get("/purchase-orders/{id}/versions", a.orderVersions)
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)

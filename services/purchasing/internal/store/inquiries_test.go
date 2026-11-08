@@ -129,8 +129,24 @@ func TestInquiries_DueDateFollowsConfirmationAndSchedule(t *testing.T) {
 	if err != nil || len(vendors.Items) != 1 || vendors.Items[0].OverdueLines != 0 || vendors.Items[0].EarliestDue.String() != "2027-01-20" {
 		t.Fatalf("vendor row before the confirmed date = %+v, %v", vendors.Items, err)
 	}
+	backorderedOn := func(asOf string) []store.BackorderedLine {
+		t.Helper()
+		page, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: day(t, asOf).Time}, "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page.Items
+	}
+	// Overdue with nothing received: not backordered.
+	if got := backorderedOn("2027-01-25"); len(got) != 0 {
+		t.Fatalf("a line with nothing received is backordered: %+v", got)
+	}
 	// The first row is received: the line waits on the second row (2027-02-10, unconfirmed).
 	setLineQuantities(t, ctx, pool, po.ID, "60", "0")
+	if got := backorderedOn("2027-02-15"); len(got) != 1 || got[0].DueDate.String() != "2027-02-10" || got[0].ConfirmedDate != nil ||
+		got[0].DaysLate != 5 || !got[0].ReceivedQty.Equal(dec("60")) || !got[0].OpenQty.Equal(dec("40")) {
+		t.Fatalf("backordered on the second row = %+v", got)
+	}
 	if got := overdueOn("2027-02-01"); len(got) != 0 {
 		t.Fatalf("received first row still overdue: %+v", got)
 	}
@@ -304,5 +320,105 @@ func TestInquiries_PriceHistoryByProduct(t *testing.T) {
 	}
 	if other, _ := s.ListPriceHistory(ctx, store.InquiryFilter{ProductID: product, VendorID: ids.New()}, "", 0); len(other.Items) != 0 {
 		t.Fatalf("other vendor lists %d", len(other.Items))
+	}
+}
+
+// Backordered lines are OPEN lines of CONFIRMED orders received in part: a line with nothing
+// received, one received in full, a cancelled line and a DRAFT order are left out; the open value
+// is decimal (pro rata, half to even); due dates tie and page by (due, PO id, line no) with no
+// repeats; a caller of another legal entity sees none.
+func TestInquiries_BackorderedLines(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(68)
+	vendor, product := ids.New(), ids.New()
+	asOf := day(t, "2027-02-01").Time
+
+	// Three orders of one line each: 3 EA with 1 received -> 100.00 * 2/3 open = 66.67.
+	want := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		in := lifecyclePO(t, vendor, "3", "2027-01-05")
+		in.Lines[0].ProductID = product
+		in.Lines[0].GrossAmount, in.Lines[0].LineAmount = dec("100"), dec("100")
+		in.Subtotal, in.Total = dec("100"), dec("100")
+		po := confirmedPO(t, ctx, s, in)
+		execTenant(t, ctx, pool, `update purchase_order_line set received_qty = 1 where purchase_order_id = $1`, po.ID)
+		want[po.ID+"/1"] = true
+	}
+	// Left out: nothing received, received in full, cancelled, and a DRAFT with a receipt.
+	confirmedPO(t, ctx, s, lifecyclePO(t, vendor, "3", "2027-01-05"))
+	full := confirmedPO(t, ctx, s, lifecyclePO(t, vendor, "3", "2027-01-05"))
+	execTenant(t, ctx, pool, `update purchase_order_line set received_qty = qty where purchase_order_id = $1`, full.ID)
+	cancelled := confirmedPO(t, ctx, s, lifecyclePO(t, vendor, "3", "2027-01-05"))
+	execTenant(t, ctx, pool, `update purchase_order_line set received_qty = 1, status = 'CANCELLED' where purchase_order_id = $1`, cancelled.ID)
+	draft, err := s.CreatePurchaseOrder(ctx, lifecyclePO(t, vendor, "3", "2027-01-05"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execTenant(t, ctx, pool, `update purchase_order_line set received_qty = 1 where purchase_order_id = $1`, draft.ID)
+
+	seen := map[string]bool{}
+	after := ""
+	for pages := 0; ; pages++ {
+		if pages > len(want) {
+			t.Fatal("paging does not end")
+		}
+		page, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: asOf}, after, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range page.Items {
+			key := l.PurchaseOrderID + "/" + strconv.Itoa(l.LineNo)
+			if seen[key] || !want[key] {
+				t.Fatalf("page %d returned %s again or unexpectedly", pages, key)
+			}
+			seen[key] = true
+			if l.OpenValue.String() != "66.67" || !l.OpenQty.Equal(dec("2")) || !l.ReceivedQty.Equal(dec("1")) || l.DaysLate != 27 || l.Currency != "USD" {
+				t.Fatalf("row = %+v", l)
+			}
+		}
+		if page.Next == "" {
+			break
+		}
+		after = page.Next
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("paged %d lines, want %d", len(seen), len(want))
+	}
+	// Not yet due: listed, with zero days late.
+	early, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: day(t, "2027-01-01").Time, ProductID: product}, "", 0)
+	if err != nil || len(early.Items) != 3 || early.Items[0].DaysLate != 0 {
+		t.Fatalf("before the due date = %+v, %v", early.Items, err)
+	}
+	if other, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: asOf, VendorID: ids.New()}, "", 0); err != nil || len(other.Items) != 0 {
+		t.Fatalf("other vendor = %+v, %v", other.Items, err)
+	}
+	if _, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: asOf}, "junk", 1); err == nil {
+		t.Fatal("a bad cursor was accepted")
+	}
+	// asOf changes days late, not the sort key: a cursor taken at one asOf pages on at another.
+	first, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: asOf}, "", 1)
+	if err != nil || first.Next == "" {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	rest, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: day(t, "2027-01-10").Time}, first.Next, 0)
+	if err != nil || len(rest.Items) != len(want)-1 || rest.Items[0].DaysLate != 5 || rest.Items[0].PurchaseOrderID == first.Items[0].PurchaseOrderID {
+		t.Fatalf("rest at another asOf = %+v, %v", rest.Items, err)
+	}
+	// A receipt reversed back to zero (a return) takes the line off the list.
+	reversed := first.Items[0].PurchaseOrderID
+	execTenant(t, ctx, pool, `update purchase_order_line set received_qty = 0 where purchase_order_id = $1`, reversed)
+	left, err := s.ListBackorderedLines(ctx, store.InquiryFilter{AsOf: asOf}, "", 0)
+	if err != nil || len(left.Items) != len(want)-1 {
+		t.Fatalf("after the reversal = %+v, %v", left.Items, err)
+	}
+	for _, l := range left.Items {
+		if l.PurchaseOrderID == reversed {
+			t.Fatalf("a line with its receipt reversed is still backordered: %+v", l)
+		}
+	}
+	otherLE := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(68), LegalEntityID: ids.New(), UserID: ids.New()})
+	if got, err := s.ListBackorderedLines(otherLE, store.InquiryFilter{AsOf: asOf}, "", 0); err != nil || len(got.Items) != 0 {
+		t.Fatalf("other legal entity sees %d rows (%v)", len(got.Items), err)
 	}
 }
