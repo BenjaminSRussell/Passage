@@ -308,7 +308,7 @@ export function WorkspacePage() {
             onDrop={onDrop}
           />
           <p className={styles.note}>
-            Outlines: amber is late, dashed is firmed, red breaks a constraint, dotted red sits in a capacity block it does not match. A lighter bar is a secondary resource held for a job running on another row; it moves with that job. The table lists the same jobs for keyboard use.
+            Outlines: amber is late, dashed is firmed, red breaks a constraint, dotted red sits in a capacity block it does not match. A lighter bar is a secondary resource held for a job running on another row; it moves with that job. A grey dashed bar is a campaign cleanout window: closed time in one piece. The table lists the same jobs for keyboard use.
           </p>
           {proposal ? (
             <div ref={formRef}>

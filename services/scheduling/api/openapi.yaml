@@ -580,9 +580,10 @@ paths:
       summary: Scheduled segments for a Gantt window (at most 5,000 bars)
       description: >
         Returns the primary segments in the window and, as bars with secondary
-        true, the secondary bookings (BR-23.4) on the secondary resource's row.
-        resourceIds filters both by the resource the bar sits on. The 5,000-bar
-        limit counts both kinds.
+        true, the secondary bookings (BR-23.4) on the secondary resource's row,
+        and, as bars with cleanout true, the cleanout windows a placed campaign
+        holds (FR-23.14, BR-23.13). resourceIds filters all by the resource the
+        bar sits on. The 5,000-bar limit counts every kind.
       x-passage-duty: scheduling.read
       parameters:
         - name: from
@@ -2408,7 +2409,7 @@ components:
     Bar:
       type: object
       properties:
-        jobId: { type: string, format: uuid }
+        jobId: { type: string, format: uuid, description: 'The scheduled job (operation) the bar belongs to. On a cleanout bar it is the campaign id instead (campaignId repeats it): not a job, so never pass it to :move or :firm.' }
         orderId: { type: string, format: uuid }
         operNumber: { type: integer }
         orderRef: { type: string, description: 'Shop floor key: the production order id.' }
@@ -2436,6 +2437,8 @@ components:
           description: Resources booked for the same segments as the primary resource (BR-23.4); empty when the operation needs none. Always empty on a secondary bar.
         secondary: { type: boolean, description: 'True for the bar of a secondary booking (BR-23.4): the job holds resourceId as a secondary resource for these segments, mirroring its primary segment. Such a bar is read-only (move the job through its primary bar), carries no changeover and no blockBreach, and takes lateMinutes and firmed from the primary segment.' }
         primaryResourceId: { type: [string, 'null'], format: uuid, description: 'The resource the job runs on when secondary is true; null on a primary bar.' }
+        cleanout: { type: boolean, description: 'True for the bar of a campaign cleanout window (FR-23.14, BR-23.13): closed time laid by campaign placement after the order orderId. Such a bar is read-only, has jobId equal to campaignId, operNumber 0, no changeover and no secondary resources, carries the setup group the cleanout follows and the cleaning set, has an empty operationRef, and is never flagged outsideCapacity or blockBreach because the window is itself closed capacity.' }
+        campaignId: { type: [string, 'null'], format: uuid, description: 'The placed campaign that owns the window when cleanout is true; null on a job bar.' }
     MoveRequest:
       type: object
       required: [start]

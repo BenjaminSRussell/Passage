@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
@@ -315,5 +316,82 @@ func TestPlaceCampaign_KeepsTheOrdersRoute(t *testing.T) {
 	// Nothing changed: the refused placement rolled back whole.
 	if got := barsOf(t, ctx, s); !got[ops[0].ID].Start.Equal(jb.Start) || !got[succ.ID].Start.Equal(at(0, 11, 45)) {
 		t.Fatalf("bars after the refusal = %+v", got)
+	}
+}
+
+// FR-23.14, BR-23.13: the cleanout window is a read-only bar on the resource's
+// Gantt row, filtered by resource like any bar, and never flagged as outside
+// capacity although it is closed time.
+func TestPlaceCampaign_CleanoutWindowIsAGanttBar(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := tenantCtx(1)
+	c, r, _ := plannedCampaign(t, ctx, s, "MIX-GANTT")
+	placed, _, err := s.PlaceCampaign(ctx, store.CampaignCommand{CampaignID: c.ID, Version: c.Version, HorizonDays: 60}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := placed.Placement.Cleanouts[0]
+	bars, err := s.Gantt(ctx, monday.AddDate(0, 0, -1), monday.AddDate(0, 0, 30), []string{r.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cleanouts []store.Bar
+	for _, b := range bars {
+		if b.Cleanout {
+			cleanouts = append(cleanouts, b)
+		}
+	}
+	if len(bars) != 3 || len(cleanouts) != 1 {
+		t.Fatalf("bars = %d cleanouts = %d, want two jobs and one cleanout", len(bars), len(cleanouts))
+	}
+	b := cleanouts[0]
+	if b.ResourceID != r.ID || !b.Start.Equal(w.Start) || !b.End.Equal(w.End) || b.OrderID != w.AfterOrderID ||
+		b.CampaignID == nil || *b.CampaignID != c.ID || b.JobID != c.ID || b.OutsideCapacity || b.Secondary || b.SetupGroup == nil || *b.SetupGroup != "C" {
+		t.Fatalf("cleanout bar = %+v window %+v", b, w)
+	}
+	// Another resource's filter leaves it out; a window before it too.
+	other := mustResource(t, ctx, s, "OTHER-GANTT", true)
+	if got, err := s.Gantt(ctx, monday.AddDate(0, 0, -1), monday.AddDate(0, 0, 30), []string{other.ID}); err != nil || len(got) != 0 {
+		t.Fatalf("bars on another resource = %d, %v", len(got), err)
+	}
+	// The window is half-open: one ending where the cleanout starts and one
+	// starting where it ends both leave it out, one overlapping by a minute
+	// at either edge includes it.
+	countCleanouts := func(from, to time.Time) int {
+		t.Helper()
+		got, err := s.Gantt(ctx, from, to, []string{r.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, b := range got {
+			if b.Cleanout {
+				n++
+			}
+		}
+		return n
+	}
+	if n := countCleanouts(w.End, w.End.Add(time.Hour)); n != 0 {
+		t.Fatalf("cleanouts in a window starting at its end = %d", n)
+	}
+	if n := countCleanouts(w.Start.Add(-time.Hour), w.Start); n != 0 {
+		t.Fatalf("cleanouts in a window ending at its start = %d", n)
+	}
+	if n := countCleanouts(w.End.Add(-time.Minute), w.End.Add(time.Hour)); n != 1 {
+		t.Fatalf("cleanouts in a window overlapping its end = %d", n)
+	}
+	if n := countCleanouts(w.Start.Add(-time.Hour), w.Start.Add(time.Minute)); n != 1 {
+		t.Fatalf("cleanouts in a window overlapping its start = %d", n)
+	}
+	// Another tenant does not see it.
+	if got, err := s.Gantt(tenantCtx(2), monday.AddDate(0, 0, -1), monday.AddDate(0, 0, 30), nil); err != nil || len(got) != 0 {
+		t.Fatalf("bars for another tenant = %d, %v", len(got), err)
+	}
+	// Unplacing takes the bar off.
+	if _, _, err := s.UnplaceCampaign(ctx, store.CampaignCommand{CampaignID: c.ID, Version: placed.Version}, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Gantt(ctx, monday.AddDate(0, 0, -1), monday.AddDate(0, 0, 30), []string{r.ID}); err != nil || len(got) != 0 {
+		t.Fatalf("bars after unplace = %d, %v", len(got), err)
 	}
 }

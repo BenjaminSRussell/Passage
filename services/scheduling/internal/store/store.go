@@ -200,6 +200,14 @@ type Bar struct {
 	// changeover, no secondary list and no block breach.
 	Secondary         bool    `json:"secondary"`
 	PrimaryResourceID *string `json:"primaryResourceId"`
+	// Cleanout is true for the bar of a campaign cleanout window (FR-23.14,
+	// BR-23.13): closed time on ResourceID laid by :place after the campaign
+	// order OrderID. JobID is the campaign id (CampaignID repeats it), the
+	// bar has no operation (OperNumber 0) and carries the setup group the
+	// cleanout follows and the cleaning set. It is read-only and is never
+	// flagged outside capacity: the window is itself closed capacity.
+	Cleanout   bool    `json:"cleanout"`
+	CampaignID *string `json:"campaignId"`
 }
 
 type RunRequest struct {
@@ -868,8 +876,15 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		if err != nil {
 			return err
 		}
-		if len(secondary) > 0 {
-			bars = append(bars, secondary...)
+		bars = append(bars, secondary...)
+		if len(bars) <= MaxBars {
+			cleanouts, err := cleanoutBars(ctx, tx, from, to, resourceIDs, MaxBars+1-len(bars))
+			if err != nil {
+				return err
+			}
+			bars = append(bars, cleanouts...)
+		}
+		if len(bars) > 0 {
 			sort.SliceStable(bars, func(i, j int) bool {
 				a, b := bars[i], bars[j]
 				if !a.Start.Equal(b.Start) {
@@ -893,6 +908,35 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeWindowTooLarge, "the window holds more than 5000 bars; narrow the window or the resources")
 	}
 	return bars, nil
+}
+
+// cleanoutBars reads the campaign cleanout windows overlapping [from, to) on
+// the given resources (all when none) as read-only bars (FR-23.14, BR-23.13).
+// At most limit bars are read.
+func cleanoutBars(ctx context.Context, tx pgx.Tx, from, to time.Time, resourceIDs []string, limit int) ([]Bar, error) {
+	rows, err := tx.Query(ctx, `select c.campaign_id::text, c.after_order_id::text, c.resource_id::text, c.start_at, c.end_at,
+			c.setup_group, c.cleaning_operation_set_id
+		from scheduling_campaign_cleanout c
+		where c.end_at > $1 and c.start_at < $2 and ($3::boolean or c.resource_id = any($4::uuid[]))
+		order by c.start_at, c.resource_id limit $5`,
+		from, to, len(resourceIDs) == 0, resourceIDs, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Bar
+	for rows.Next() {
+		b := Bar{Cleanout: true, Segment: 1, SecondaryResourceIDs: []string{}}
+		var campaign string
+		var group string
+		if err := rows.Scan(&campaign, &b.OrderID, &b.ResourceID, &b.Start, &b.End, &group, &b.CleaningSetID); err != nil {
+			return nil, err
+		}
+		b.JobID, b.CampaignID, b.SetupGroup = campaign, &campaign, &group
+		b.OrderRef, b.OperationRef = b.OrderID, ""
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
 // secondaryBars reads the secondary bookings overlapping [from, to) on the
@@ -955,6 +999,9 @@ func flagOutsideCapacity(ctx context.Context, tx pgx.Tx, bars []Bar) error {
 	}
 	for i := range bars {
 		b := &bars[i]
+		if b.Cleanout {
+			continue
+		}
 		b.OutsideCapacity = domain.OutsideOpen(open[b.ResourceID], b.Start, b.End)
 		// A secondary resource is booked for the same segment, so a downtime
 		// on it (or a calendar that no longer covers it) flags the bar too.
@@ -985,7 +1032,7 @@ func flagBlockBreach(ctx context.Context, tx pgx.Tx, bars []Bar, resources []dom
 	placeable := map[string][]domain.Interval{}
 	for i := range bars {
 		b := &bars[i]
-		if b.Secondary || b.OutsideCapacity || !b.finite || len(blocks[b.ResourceID]) == 0 {
+		if b.Secondary || b.Cleanout || b.OutsideCapacity || !b.finite || len(blocks[b.ResourceID]) == 0 {
 			continue
 		}
 		if _, ok := expanded[b.ResourceID]; !ok {

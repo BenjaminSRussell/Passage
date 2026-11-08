@@ -1185,12 +1185,29 @@ resources.
 | `policies/authz/data.json`: resource rows `/v1/scheduling/campaigns/*:place` and `/v1/scheduling/campaigns/*:unplace` (POST) under `scheduling.schedule.write` (an existing duty) | handoff - main session (authz seed) | The matcher treats `/` and `:` as separators, so the existing campaign rows do not cover them. Only the route rows are new (no new duty, nothing for #313). Until seeded the gateway answers 403 and the Place on schedule and Take off schedule buttons show the error. |
 | Cleanout orders for the windows (`campaign.placed` carries each window with its start and end) | handoff - wave 21 | Production creates the lightweight cleanout order for exactly the placed window; scheduling holds the time and nothing else. |
 | Consumers of `campaign.placed` / `campaign.unplaced` (production dates, planning) | handoff - waves 21 and 22 | The topics `passage.scheduling.campaign` already exist; deploy/kafka has no scheduling outbox connector yet (see the slice 23 row). |
-| Cleanout window as a Gantt bar; campaign jobs drawn as one block | later slice of PSG-23 | The Gantt draws jobs only; windows are closed time in the capacity views. |
+| Campaign jobs drawn as one block with their cleanout windows | later slice of PSG-23 | The cleanout window is a bar since slice 38; the campaign's jobs are still drawn as separate bars, one per order.
 | Placing a started campaign, or re-placing after orders began | accepted | A started campaign is frozen (SCHED-0011); its jobs move with `:move` like any job. |
 | Order precedence, queue times and networks for the campaign operation | built (slice 37 review) | Scheduled earlier operations set the job's earliest start, later ones are pushed; an unscheduled earlier operation refuses with SCHED-0153. |
 | Pegged orders around a placed campaign (FR-23.8) | later slice of PSG-23 | A placement neither pushes the orders pegged to a campaign order nor waits for the parents of a campaign order; run the dependents afterwards or move with `propagate`. |
 | Runs and moves that keep a placed campaign together | open - product decision | The campaign jobs are ordinary jobs: a later site or order run re-places them like any job and a move moves one alone, while the cleanout windows stay where they were laid (the campaign read shows the jobs where they are now). Whether runs should treat a placed campaign as fixed (or firm its jobs) is not settled by the PRD; firm the jobs or unplace and place again after a run. |
 | A run or move that commits while a placement is being written | accepted | Like a capacity override created during a run, a run that read the resource before the cleanout windows committed may book into a window; the exclusion constraint still refuses double booking of jobs. Place again to re-lay the campaign around it. |
+
+## Slice 38: cleanout windows as bars on the Gantt (FR-23.14, BR-23.13)
+
+Built: `GET /gantt` also returns the cleanout windows a placed campaign holds
+as bars with `cleanout: true` and `campaignId`, on the campaign resource's row
+(`jobId` is the campaign id, `orderId` the campaign order the window follows,
+`operNumber` 0, the setup group the cleanout follows and its cleaning set;
+`resourceIds` filters them like any bar and the 5,000-bar limit counts them). A
+cleanout bar is never flagged `outsideCapacity` or `blockBreach`: the window is
+itself closed capacity. The workspace draws it as a grey dashed block that
+cannot be dragged or selected, and it is not a row of the jobs table. No
+migration, no new endpoint, no new duty. Slice 37 listed the bar as not built;
+that row is now only the campaign drawn as one block.
+
+| Item | Status | Reason |
+|---|---|---|
+| Opening the campaign from its cleanout bar | later slice of PSG-23 | The bar shows its campaign in `data-cleanout-campaign` and a title; the campaign detail is reached from the campaign list. |
 
 ## Ticket deliverables
 
@@ -1225,7 +1242,7 @@ resources.
 | 6 | Booking the edge's transfer resource (a transfer line) during the transfer | later slice of PSG-23 | `secondary_resource_id` is stored on the edge but not booked; operation secondaries (BR-23.4) are built in slice 12, the edge's transfer line is still not booked for the transfer window. |
 | 6 | Network per site and assigned to a route operation chain; network edge editing | handoff — wave 9 (sites) and wave 21 (route operation chains) | A network is tenant-wide and each operation names the network of the step into it (`networkId`) until wave 21 route operation chains carry it. Networks can be renamed and ended on a date since slice 15 (`PATCH /networks/{id}`); their transitions are fixed at creation, so changing an edge means creating a new network, and an end date can be moved but not cleared. |
 | 7 | Campaigns, setup matrix sequencing, leading setup and cleanouts in the plan (FR-23.14, FR-23.15, BR-23.12, BR-23.13, AC-23.11, SCHED-0011, SCHED-0012) | built | `/v1/scheduling/campaigns`, `:sequence`, `:start`, `/setup-matrices`, `/cleanout-rules`. |
-| 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | built (slice 37) | `POST /campaigns/{id}:place`: the orders as jobs back to back with the matrix changeovers, the cleanouts as closed windows (`scheduling_campaign_cleanout`) that count as downtime for every capacity read. Cleanout bars on the Gantt, the order's other operations and a campaign over several resources are not built; see the slice 37 section. |
+| 7 | Placing a sequenced campaign contiguously on the Gantt (changeover and cleanout jobs as scheduled jobs; cleanout never split, BR-23.13) | built (slice 37) | `POST /campaigns/{id}:place`: the orders as jobs back to back with the matrix changeovers, the cleanouts as closed windows (`scheduling_campaign_cleanout`) that count as downtime for every capacity read. The order's other operations and a campaign over several resources are not built; see the slice 37 section. |
 | 7 | Cleanout and setup orders as lightweight production orders of type `cleanout` (`cleanout_order_id`, `setup_order_id`), consuming cleaning materials and labour | handoff — wave 21 (production orders) | Columns exist and stay null; `campaign.sequenced` carries the cleanouts for wave 21 to create them. |
 | 7 | Campaign start from the first order Started; complete and cancel transitions | built (slice 14) as explicit commands; automatic transitions are a handoff to wave 21 (order status events) | `:start`, `:complete` and `:cancel` are planner commands. Completing when the last order ends and starting when the first order starts need wave 21 order events. Cancelling does not unplace or cancel the orders themselves; production decides from `campaign.cancelled`. |
 | 7 | Campaign proposals from planned and firmed orders sharing a campaign key within a window (default 14 days) | built (slice 8) as an inquiry | `GET /campaign-proposals` over scheduled jobs and the campaign proposals screen; the planner enters quantities and creates the campaign. The window is a query parameter until site parameters exist. |

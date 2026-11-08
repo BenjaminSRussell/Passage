@@ -154,6 +154,16 @@
   fill-opacity: 0.5;
 }
 
+/* FR-23.14: a campaign cleanout window is closed time: a muted, dashed block that cannot be dragged or selected. */
+.cleanoutBar {
+  fill: var(--color-text-muted);
+  fill-opacity: 0.25;
+  stroke: var(--color-text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
+
 /* The changeover at the start of a job (FR-23.15): a hatch over the bar. */
 .changeover {
   fill: var(--color-text);

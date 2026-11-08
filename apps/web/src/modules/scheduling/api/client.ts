@@ -220,6 +220,14 @@ export interface GanttBar {
    */
   secondary?: boolean;
   primaryResourceId?: string | null;
+  /**
+   * True for the bar of a campaign cleanout window (FR-23.14, BR-23.13): closed
+   * time laid by campaign placement after the order orderId. jobId is the
+   * campaign id, operNumber 0. Read-only; never outsideCapacity. Absent on
+   * older servers.
+   */
+  cleanout?: boolean;
+  campaignId?: string | null;
 }
 
 export interface MoveRequest {

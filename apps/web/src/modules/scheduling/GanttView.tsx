@@ -126,6 +126,25 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
               {rowBars.map((bar) => {
                 const pos = barPosition(bar, from, to);
                 if (!pos) return null;
+                if (bar.cleanout) {
+                  // FR-23.14, BR-23.13: the cleanout window of a placed campaign, closed time in one piece.
+                  return (
+                    <rect
+                      key={`${bar.jobId}-${bar.orderId}-cleanout`}
+                      data-cleanout-campaign={bar.jobId}
+                      x={pos.x * VIEW_WIDTH}
+                      y={BAR_INSET}
+                      width={Math.max(pos.width * VIEW_WIDTH, 1)}
+                      height={ROW_HEIGHT - 2 * BAR_INSET}
+                      rx={3}
+                      className={styles.cleanoutBar}
+                    >
+                      <title>
+                        {`Cleanout${bar.setupGroup ? ` after group ${bar.setupGroup}` : ""} following order ${bar.orderId.slice(0, 8)}${bar.cleaningSetId ? `, cleaning set ${bar.cleaningSetId}` : ""}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}, closed time`}
+                      </title>
+                    </rect>
+                  );
+                }
                 if (bar.secondary) {
                   const primary = bar.primaryResourceId ? (resources.find((r) => r.id === bar.primaryResourceId)?.code ?? shortId(bar.primaryResourceId)) : "";
                   return (
