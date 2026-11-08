@@ -27,6 +27,7 @@ import (
 )
 
 type fakeStore struct {
+	copies              []store.LegalEntityCopyInput
 	err                 error
 	pingErr             error
 	entities            []store.LegalEntity

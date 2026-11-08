@@ -7,48 +7,16 @@ import { AddressAction } from "./AddressAction";
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { StatusAction, useRows } from "./referenceParts";
+import { codeProblems, validateLegalEntity, type LegalEntityErrors, type LegalEntityValues } from "./legalEntityValues";
+import { CopyLegalEntityForm, copySummary } from "./CopyLegalEntityForm";
 
-const codePattern = /^[A-Za-z0-9]{2,8}$/;
-type Errors = Partial<Record<"code" | "name" | "country" | "currency" | "timeZone", string>>;
-
-export interface LegalEntityValues {
-  code: string;
-  name: string;
-  country: string;
-  currency: string;
-  timeZone: string;
-}
-
-export function validateLegalEntity({ code, name, country, currency, timeZone }: LegalEntityValues): Errors {
-  const errors: Errors = {};
-  if (!codePattern.test(code)) {
-    errors.code = "Use 2 to 8 letters or digits.";
-  }
-  if (name.trim() === "" || name.trim().length > 120) {
-    errors.name = "Enter a name of 1 to 120 characters.";
-  }
-  if (country === "") {
-    errors.country = "Select a country.";
-  }
-  if (currency === "") {
-    errors.currency = "Select an accounting currency.";
-  }
-  if (timeZone.trim() === "") {
-    errors.timeZone = "Enter an IANA time zone such as America/Detroit.";
-  }
-  return errors;
-}
-
-const codeProblems: Record<string, string> = {
-  "ORG-LE-CODE-DUPLICATE": "A legal entity with this code already exists.",
-  "ORG-LE-CODE-RESERVED": "This code is reserved. Choose another.",
-};
+export { validateLegalEntity, type LegalEntityValues };
 
 function CreateLegalEntityForm({ onCreated }: { onCreated(): void }) {
   const countries = useRows((signal) => listCountries("active", { signal }), "countries");
   const currencies = useRows((signal) => listCurrencies("active", { signal }), "currencies");
   const [values, setValues] = useState<LegalEntityValues>({ code: "", name: "", country: "", currency: "", timeZone: "UTC" });
-  const [errors, setErrors] = useState<Errors>({});
+  const [errors, setErrors] = useState<LegalEntityErrors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -142,6 +110,8 @@ function CreateLegalEntityForm({ onCreated }: { onCreated(): void }) {
 export function LegalEntitiesPage() {
   const { canWriteLegalEntity, canWriteAddress, canAdministerTenant, reload: reloadSwitcher } = useLegalEntity();
   const state = useRows((signal) => listLegalEntities(ALL, { signal }).then((page) => page.items), "legal-entities");
+  const [copySource, setCopySource] = useState<LegalEntity | null>(null);
+  const [copied, setCopied] = useState("");
   const columns: DataTableColumn<LegalEntity>[] = [
     { key: "code", header: "Code", mono: true },
     { key: "name", header: "Name" },
@@ -175,6 +145,19 @@ export function LegalEntitiesPage() {
                 setPointer={(addressId) => refresh(() => setLegalEntityAddress(row.id, row.version, addressId))}
               />
             ) : null}
+            {canAdministerTenant ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={`Copy legal entity ${row.code}`}
+                onClick={() => {
+                  setCopied("");
+                  setCopySource(row);
+                }}
+              >
+                Copy
+              </Button>
+            ) : null}
             <StatusAction
               subject={`legal entity ${row.code}`}
               status={row.status}
@@ -197,6 +180,24 @@ export function LegalEntitiesPage() {
             reloadSwitcher();
           }}
         /> : null}
+      {copySource && canAdministerTenant ? (
+        <CopyLegalEntityForm
+          key={copySource.id}
+          source={copySource}
+          onCancel={() => setCopySource(null)}
+          onCopied={(copy) => {
+            setCopied(copySummary(copySource.code, copy));
+            setCopySource(null);
+            state.reload();
+            reloadSwitcher();
+          }}
+        />
+      ) : null}
+      {copied ? (
+        <Alert tone="success" title="Legal entity copied" live="status">
+          {copied}
+        </Alert>
+      ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load legal entities" live="alert">
           {state.error.message} ({state.error.code})

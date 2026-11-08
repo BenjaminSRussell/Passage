@@ -77,6 +77,23 @@ paths:
           description: The operating period of the legal entity's fiscal calendar that contains the date, with source legalEntity. Opening, closing and adjustment periods are never returned. An inactive calendar still resolves. 400 COM-0001 naming date when it is missing or not YYYY-MM-DD. 404 ORG-LE-NOT-FOUND for a malformed, unknown or out-of-scope id. 404 ORG-CAL-PERIOD-NOT-FOUND when no generated period of the calendar contains the date. 422 ORG-LE-NO-CALENDAR when the legal entity has no calendar. 403 AUTH-0003 without the duty.
           content: { application/json: { schema: { $ref: '#/components/schemas/FiscalPeriodResolution' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/legal-entities/{id}:copy:
+    post:
+      operationId: copyLegalEntity
+      summary: Create a legal entity by copying an existing one
+      description: Creates a legal entity from the legal entity in the path (FR-6.15). The caller supplies the code, name, country and accounting currency; the time zone and default language default to the source's. In one transaction the copy takes the fiscal calendar assignment (when the calendar is still active with a generated year) and, by default, the active sites with their default warehouses, the active warehouses and locations, and the currency rounding rules the source overrides. Every copied row gets a new id and keeps its code, which is unique per legal entity. Addresses, number sequences, parameters, operating units, teams, translations and all transactional data are not copied. Any failure rolls back the whole copy. Needs the tenant.administer duty and no legal-entity scope.
+      x-passage-duty: org.legal-entity.write
+      parameters:
+        - { name: id, in: path, required: true, description: The legal entity to copy., schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CopyLegalEntity' } } }
+      responses:
+        '201':
+          description: The new legal entity with the number of rows copied, or the original result on an Idempotency-Key replay. 400 COM-0001 for a field error, 400 ORG-LE-CODE-RESERVED for DAT, SYS or ALL. 403 AUTH-0003 for a scoped caller or without tenant.administer. 404 ORG-LE-NOT-FOUND when the source is unknown. 409 ORG-LE-CODE-DUPLICATE when the code exists. 422 ORG-LE-REFERENCE-INACTIVE for an unknown or inactive country, currency or language, 422 ORG-LE-LIMIT at 500 legal entities, 422 idempotency_key_reuse when the key was used with a different body.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LegalEntityCopy' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/legal-entities/{id}/names:
     get:
       operationId: listLegalEntityNames
@@ -1524,6 +1541,37 @@ components:
       additionalProperties: false
       required: [version]
       properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, timeZone: { type: string, description: IANA time zone name }, defaultLanguage: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }, registrationNumber: { type: string, maxLength: 40 }, status: { type: string, enum: [active, inactive] }, primaryAddressId: { type: string, description: A UUID of a current address owned by the legal entity, or an empty string to clear }, fiscalCalendarId: { type: string, description: A UUID of an active fiscal calendar with at least one generated year (422 ORG-LE-CALENDAR-INVALID otherwise), or an empty string to clear } }
+    CopyLegalEntity:
+      type: object
+      additionalProperties: false
+      required: [code, name, country, currency]
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9]{2,8}$', description: Upper-cased on save. DAT SYS and ALL are rejected with ORG-LE-CODE-RESERVED }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        timeZone: { type: string, description: IANA time zone name; defaults to the source's }
+        defaultLanguage: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$', description: Defaults to the source's }
+        registrationNumber: { type: string, maxLength: 40, description: Never copied from the source }
+        include:
+          type: object
+          additionalProperties: false
+          description: What to copy besides the legal entity itself; every flag defaults to true.
+          properties:
+            sites: { type: boolean, description: Active sites with their default warehouses and active warehouses }
+            locations: { type: boolean, description: Active locations of the copied warehouses; needs sites }
+            roundingRules: { type: boolean, description: Currency rounding rules the source entity overrides }
+    LegalEntityCopy:
+      type: object
+      required: [legalEntity, sourceId, sites, warehouses, locations, roundingRules, calendarCopied]
+      properties:
+        legalEntity: { $ref: '#/components/schemas/LegalEntity' }
+        sourceId: { type: string, format: uuid }
+        sites: { type: integer, description: Sites created }
+        warehouses: { type: integer, description: Warehouses created }
+        locations: { type: integer, description: Locations created }
+        roundingRules: { type: integer, description: Currency rounding rules created }
+        calendarCopied: { type: boolean, description: True when the source's fiscal calendar was assigned to the new entity }
     LegalEntityName:
       type: object
       required: [name, validFrom]

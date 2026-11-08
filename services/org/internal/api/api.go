@@ -55,6 +55,7 @@ type API struct {
 	created atomic.Int64
 	failed  atomic.Int64
 	updated atomic.Int64
+	copied  atomic.Int64
 
 	referenceChanged  atomic.Int64
 	unitCreated       atomic.Int64
@@ -170,6 +171,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities", a.listLegalEntities)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities/{id}", a.readByID("get legal entity", func(ctx context.Context, id string) (any, error) { return a.store.GetLegalEntity(ctx, id) }))
 	r.With(authz.RequireDuty(dutyLegalEntity)).Patch("/v1/org/legal-entities/{id}", legalEntityRoute(a.updateLegalEntity))
+	r.With(authz.RequireDuty(dutyLegalEntity)).Post("/v1/org/legal-entities/{id}:copy", legalEntityRoute(a.copyLegalEntity))
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities/{id}/names", a.readByID("list legal entity names", func(ctx context.Context, id string) (any, error) {
 		names, err := a.store.ListLegalEntityNames(ctx, id)
 		return map[string]any{"items": names}, err
@@ -201,6 +203,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP org_legal_entities_created_total Legal entities created.\n# TYPE org_legal_entities_created_total counter\norg_legal_entities_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP org_legal_entities_failed_total Legal entity creations that failed in the store.\n# TYPE org_legal_entities_failed_total counter\norg_legal_entities_failed_total %d\n", a.failed.Load())
 		fmt.Fprintf(w, "# HELP org_legal_entities_updated_total Legal entity updates that bumped the version.\n# TYPE org_legal_entities_updated_total counter\norg_legal_entities_updated_total %d\n", a.updated.Load())
+		fmt.Fprintf(w, "# HELP org_legal_entities_copied_total Legal entities created by a copy; idempotent replays are not counted.\n# TYPE org_legal_entities_copied_total counter\norg_legal_entities_copied_total %d\n", a.copied.Load())
 		fmt.Fprintf(w, "# HELP org_reference_status_changed_total Reference rows whose tenant status was set.\n# TYPE org_reference_status_changed_total counter\norg_reference_status_changed_total %d\n", a.referenceChanged.Load())
 		fmt.Fprintf(w, "# HELP org_uom_units_created_total Custom units of measure created.\n# TYPE org_uom_units_created_total counter\norg_uom_units_created_total %d\n", a.unitCreated.Load())
 		fmt.Fprintf(w, "# HELP org_uom_conversions_created_total Custom unit conversions created; idempotent replays are not counted.\n# TYPE org_uom_conversions_created_total counter\norg_uom_conversions_created_total %d\n", a.conversionCreated.Load())

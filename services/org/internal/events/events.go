@@ -7,6 +7,7 @@ const Context = "org"
 var (
 	LegalEntityCreated      = events.Type(Context, "legalentity", "created", 1)
 	LegalEntityUpdated      = events.Type(Context, "legalentity", "updated", 1)
+	LegalEntityCopied       = events.Type(Context, "legalentity", "copied", 1)
 	OperatingUnitCreated    = events.Type(Context, "operatingunit", "created", 1)
 	OperatingUnitUpdated    = events.Type(Context, "operatingunit", "updated", 1)
 	SiteCreated             = events.Type(Context, "site", "created", 1)
@@ -24,7 +25,7 @@ var (
 )
 
 func All() []string {
-	return []string{LegalEntityCreated, LegalEntityUpdated, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated, HierarchyVersionActivated, TeamMembershipChanged}
+	return []string{LegalEntityCreated, LegalEntityUpdated, LegalEntityCopied, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated, HierarchyVersionActivated, TeamMembershipChanged}
 }
 
 type LegalEntityCreatedData struct {
@@ -40,6 +41,16 @@ type LegalEntityUpdatedData struct {
 	ID            string   `json:"id"`
 	ChangedFields []string `json:"changed_fields"`
 	Version       int      `json:"version"`
+}
+
+type LegalEntityCopiedData struct {
+	SourceID       string `json:"source_id"`
+	TargetID       string `json:"target_id"`
+	Sites          int    `json:"sites"`
+	Warehouses     int    `json:"warehouses"`
+	Locations      int    `json:"locations"`
+	RoundingRules  int    `json:"rounding_rules"`
+	CalendarCopied bool   `json:"calendar_copied"`
 }
 
 type OperatingUnitCreatedData struct {

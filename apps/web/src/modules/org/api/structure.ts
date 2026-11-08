@@ -17,6 +17,24 @@ export interface CreateLegalEntityInput {
 export const createLegalEntity = (input: CreateLegalEntityInput) =>
   referenceFetch<LegalEntity>("/legal-entities", { method: "POST", body: JSON.stringify(input) });
 
+export interface CopyLegalEntityInput extends CreateLegalEntityInput {
+  include: { sites: boolean; locations: boolean; roundingRules: boolean };
+}
+
+export interface LegalEntityCopy {
+  legalEntity: LegalEntity;
+  sourceId: string;
+  sites: number;
+  warehouses: number;
+  locations: number;
+  roundingRules: number;
+  calendarCopied: boolean;
+}
+
+// copyLegalEntity creates a legal entity from an existing one (FR-6.15) in one transaction on the service.
+export const copyLegalEntity = (sourceId: string, input: CopyLegalEntityInput) =>
+  referenceFetch<LegalEntityCopy>(`/legal-entities/${encodeURIComponent(sourceId)}:copy`, { method: "POST", body: JSON.stringify(input) });
+
 export const getLegalEntity = (id: string) => referenceFetch<LegalEntity>(`/legal-entities/${encodeURIComponent(id)}`);
 
 export const setLegalEntityStatus = (id: string, version: number, status: "active" | "inactive") =>

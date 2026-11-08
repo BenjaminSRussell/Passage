@@ -55,6 +55,7 @@ type Store interface {
 	CreateLegalEntity(ctx context.Context, in LegalEntity, idempotencyKey string) (LegalEntity, error)
 	GetLegalEntity(ctx context.Context, id string) (LegalEntity, error)
 	UpdateLegalEntity(ctx context.Context, id string, version int, in LegalEntityPatch) (LegalEntity, error)
+	CopyLegalEntity(ctx context.Context, in LegalEntityCopyInput, idempotencyKey string) (LegalEntityCopy, error)
 	ListLegalEntityNames(ctx context.Context, id string) ([]LegalEntityName, error)
 	ListLegalEntities(ctx context.Context, f LegalEntityFilter, afterCode string, limit int) (LegalEntityPage, error)
 	CreateOperatingUnit(ctx context.Context, in OperatingUnit, idempotencyKey string) (OperatingUnit, error)

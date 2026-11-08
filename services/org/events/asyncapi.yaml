@@ -11,6 +11,8 @@ channels:
         $ref: '#/components/messages/legalEntityCreated'
       updated:
         $ref: '#/components/messages/legalEntityUpdated'
+      copied:
+        $ref: '#/components/messages/legalEntityCopied'
   passage.org.operatingunit:
     address: passage.org.operatingunit
     messages:
@@ -153,6 +155,22 @@ components:
           changed_fields: { type: array, items: { type: string } }
           version: { type: integer }
       x-passage-type: dev.passage.org.legalentity.updated.v1
+    legalEntityCopied:
+      name: copied
+      title: Legal entity copied
+      summary: A legal entity was created from another; number sequences and parameters are for the owning waves to copy.
+      payload:
+        type: object
+        required: [source_id, target_id, sites, warehouses, locations, rounding_rules, calendar_copied]
+        properties:
+          source_id: { type: string, format: uuid }
+          target_id: { type: string, format: uuid }
+          sites: { type: integer }
+          warehouses: { type: integer }
+          locations: { type: integer }
+          rounding_rules: { type: integer }
+          calendar_copied: { type: boolean }
+      x-passage-type: dev.passage.org.legalentity.copied.v1
     operatingUnitCreated:
       name: created
       title: Operating unit created
