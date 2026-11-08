@@ -2575,7 +2575,8 @@
       {"resource": "/v1/pricing/condition-records:expire", "methods": ["POST"]},
       {"resource": "/v1/pricing/free-goods-rules", "methods": ["POST"]},
       {"resource": "/v1/pricing/free-goods-rules/*:withdraw", "methods": ["POST"]},
-      {"resource": "/v1/pricing/campaigns/*:revise", "methods": ["POST"]}
+      {"resource": "/v1/pricing/campaigns/*:revise", "methods": ["POST"]},
+      {"resource": "/v1/pricing/free-goods-rules/*:revise", "methods": ["POST"]}
     ]},
     "pricing.rebate-claim.approve": {"permissions": [
       {"resource": "/v1/pricing/rebates/vendor-claims/*:approve", "methods": ["POST"]},

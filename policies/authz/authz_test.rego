@@ -1541,6 +1541,12 @@ test_scheduling_network_feasibility_read if {
 	not allowed("scheduling.read", "POST", "/v1/scheduling/network-feasibility")
 }
 
+# Wave 26 slice 26: free goods rule revision.
+test_pricing_free_goods_revise if {
+	allowed("pricing.maintain", "POST", "/v1/pricing/free-goods-rules/x:revise")
+	not allowed("pricing.view", "POST", "/v1/pricing/free-goods-rules/x:revise")
+}
+
 # Wave 27 slice 34: sales reads the customer's group from party on order, quotation and release entry.
 test_sales_reads_party_customer if {
 	data.service_grants.sales.party == ["party.read"]
