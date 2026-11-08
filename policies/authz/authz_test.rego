@@ -1573,3 +1573,9 @@ test_reporting_library_and_firings if {
 	allowed("reporting.statement.schedule", "GET", "/v1/reporting/schedule-firings")
 	not allowed("reporting.statement.view", "POST", "/v1/reporting/library")
 }
+
+# Wave 23 slice 34: block utilization report across resources.
+test_scheduling_block_utilization_report if {
+	allowed("scheduling.read", "GET", "/v1/scheduling/block-utilization")
+	not allowed("scheduling.read", "POST", "/v1/scheduling/block-utilization")
+}
