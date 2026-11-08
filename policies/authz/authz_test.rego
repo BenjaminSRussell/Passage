@@ -1579,3 +1579,15 @@ test_scheduling_block_utilization_report if {
 	allowed("scheduling.read", "GET", "/v1/scheduling/block-utilization")
 	not allowed("scheduling.read", "POST", "/v1/scheduling/block-utilization")
 }
+
+# Wave 15 slice 17: report library legal holds and retention sweeps.
+test_reporting_legal_holds if {
+	allowed("reporting.library.hold", "POST", "/v1/reporting/legal-holds")
+	allowed("reporting.library.hold", "POST", "/v1/reporting/legal-holds/h-1:release")
+	allowed("reporting.statement.view", "GET", "/v1/reporting/legal-holds")
+	allowed("reporting.statement.view", "GET", "/v1/reporting/legal-holds/h-1")
+	allowed("reporting.statement.view", "GET", "/v1/reporting/library-sweeps")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/legal-holds")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/legal-holds/h-1:release")
+	not allowed("reporting.library.hold", "GET", "/v1/reporting/legal-holds")
+}

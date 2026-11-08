@@ -266,7 +266,10 @@
       {"resource": "/v1/reporting/runs/*/tree", "methods": ["GET"]},
       {"resource": "/v1/reporting/library", "methods": ["GET"]},
       {"resource": "/v1/reporting/library/*", "methods": ["GET"]},
-      {"resource": "/v1/reporting/library/*/content", "methods": ["GET"]}
+      {"resource": "/v1/reporting/library/*/content", "methods": ["GET"]},
+      {"resource": "/v1/reporting/legal-holds", "methods": ["GET"]},
+      {"resource": "/v1/reporting/legal-holds/*", "methods": ["GET"]},
+      {"resource": "/v1/reporting/library-sweeps", "methods": ["GET"]}
     ]},
     "reporting.definition.maintain": {"permissions": [
       {"resource": "/v1/reporting/definitions/*", "methods": ["PUT"]},
@@ -309,6 +312,10 @@
       {"resource": "/v1/reporting/balance-verifications/*", "methods": ["GET"]}
     ]},
     "reporting.balance.verify": {"permissions": [{"resource": "/v1/reporting/balance-verifications", "methods": ["POST"]}]},
+    "reporting.library.hold": {"permissions": [
+      {"resource": "/v1/reporting/legal-holds", "methods": ["POST"]},
+      {"resource": "/v1/reporting/legal-holds/*:release", "methods": ["POST"]}
+    ]},
     "hub.subscription.write": {"permissions": [
       {"resource": "/v1/hub/subscriptions", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*", "methods": ["PATCH", "DELETE"]},
