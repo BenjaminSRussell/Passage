@@ -98,6 +98,33 @@ func TestRecordProgress(t *testing.T) {
 	}
 }
 
+// TestRecordProgressFinal checks the final flag of a delivered line (close for
+// delivery): it reaches the store, it counts in the request hash so a replay
+// without it is not the same report, and an invoice refuses it.
+func TestRecordProgressFinal(t *testing.T) {
+	id := ids.New()
+	path := orders + "/" + id + ":record-progress"
+	h := map[string]string{idempotencyKey: "k1"}
+	s := &progressStore{created: true}
+	final := `{"kind":"DELIVERED","sourceRef":"PS-1","lines":[{"lineNo":1,"quantity":"96","final":true},{"lineNo":2,"quantity":"3"}]}`
+	rec := serveBody(t, s, http.MethodPost, path, final, principal(dutyRecordDelivery), h)
+	if rec.Code != http.StatusCreated || len(s.got.Lines) != 2 || !s.got.Lines[0].Final || s.got.Lines[1].Final {
+		t.Fatalf("final: %d %s %+v", rec.Code, rec.Body, s.got.Lines)
+	}
+	withFinal := s.got.RequestHash
+	if rec := serveBody(t, s, http.MethodPost, path, strings.Replace(final, `,"final":true`, "", 1), principal(dutyRecordDelivery), h); rec.Code != http.StatusCreated || s.got.RequestHash == withFinal {
+		t.Fatalf("final must count in the hash: %d %s", rec.Code, s.got.RequestHash)
+	}
+	if rec := serveBody(t, s, http.MethodPost, path, strings.Replace(final, `,"final":true`, `,"final":false`, 1), principal(dutyRecordDelivery), h); s.got.RequestHash == withFinal || rec.Code != http.StatusCreated {
+		t.Fatalf("final false is the default: %d", rec.Code)
+	}
+	s.got = store.NewProgress{}
+	invoice := strings.Replace(final, "DELIVERED", "INVOICED", 1)
+	if rec := serveBody(t, s, http.MethodPost, path, invoice, principal(dutyRecordInvoice), h); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[0].final") || s.got.OrderID != "" {
+		t.Fatalf("an invoice line is never final: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestListProgress(t *testing.T) {
 	s := &progressStore{}
 	order := ids.New()

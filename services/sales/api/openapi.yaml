@@ -2823,7 +2823,16 @@ paths:
         under the invoice number first. Quantities are positive: returns and credit notes are not recorded here. Takes
         the order's row lock and writes an order version with the field-level diff and orderprogress.recorded in the
         same transaction. The same sourceRef of a kind is applied once per order: a repeat with the same lines and
-        quantities (in any order) is answered with the stored report, with other lines it is 409 SLS-0060.
+        quantities (in any order) is answered with the stored report, with other lines it is 409 SLS-0060. A DELIVERED
+        report is checked against the delivery tolerance of the line's product and customer (BR-27.9): the delivery that
+        completes a line may take it up to the ordered quantity plus the over-delivery percent, and the line's quantity
+        becomes the delivered quantity (tolerance OVER; the release line of an agreement order draws the extra quantity
+        from the agreement, 422 SLS-0008 beyond its ceiling); a line already delivered in full takes nothing more. A
+        line marked final (the last delivery for it) that is short of the ordered quantity by no more than the
+        under-delivery percent is completed: the remainder is closed like the cancel-remainder action and
+        order.remaindercancelled is queued (tolerance UNDER); short by more it is SLS-0059. Without final a short
+        delivery stays partial. Without a rule the quantities are exact (SLS-0059 beyond the ordered quantity).
+        Catch-weight lines are not stretched by a tolerance.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2854,7 +2863,8 @@ paths:
           description: >-
             SLS-0058 the order cannot take it (not CONFIRMED or PARTIALLY_SHIPPED, SHIPPED for an invoice; a JOURNAL or
             RETURNED order; an invoice on a SUBSCRIPTION order, which billing invoices per period),
-            SLS-0059 the quantity passes the ordered quantity (delivery) or the delivered quantity (invoice), or the
+            SLS-0059 the quantity passes the ordered quantity and its over-delivery tolerance (delivery) or the delivered
+            quantity (invoice), or a final line is short by more than its under-delivery tolerance, or the
             Idempotency-Key was used with another body, SLS-0061 the actual catch weight is outside min/max × cases,
             SLS-0063 a report on a catch-weight line is not a whole number of cases, or actualWeight is on a line that is
             not catch-weight or on a report that is not DELIVERED
@@ -4702,6 +4712,7 @@ components:
                     serial: {type: string, maxLength: 60, description: "serial number; its quantity must be 1"}
                     quantity: {$ref: "#/components/schemas/Money", description: "taken from this entry, in the line's unit (cases on a catch-weight line)"}
                     actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "catch-weight lines only: the entry's weight. Set on every entry or none; when set, the line's actualWeight must be their sum (400), and a plain line refuses it (SLS-0063)"}
+              final: {type: boolean, default: false, description: "DELIVERED only (400 otherwise): this is the last delivery for the line (close for delivery). A delivered quantity short of the ordered quantity by no more than the under-delivery tolerance then completes the line and closes the remainder (tolerance UNDER); short by more is SLS-0059. Counts in the Idempotency-Key request hash."}
     OrderProgress:
       type: object
       required: [id, legalEntityId, orderId, orderNumber, kind, sourceRef, lines, orderStatus, orderVersion, recordedBy, recordedAt]
@@ -4724,6 +4735,8 @@ components:
               deliveredQty: {$ref: "#/components/schemas/Money", description: the line's delivered quantity after the report}
               invoicedQty: {$ref: "#/components/schemas/Money", description: the line's invoiced quantity after the report}
               lineStatus: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+              lineQuantity: {$ref: "#/components/schemas/Money", description: "the line's ordered quantity after the report; it differs from the quantity before only where the delivery tolerance acted (tolerance); absent on reports stored before slice 40"}
+              tolerance: {type: string, enum: [OVER, UNDER], description: "set when the delivery tolerance of the product and customer (delivery-tolerances) moved the line to the delivered quantity: OVER accepted more than ordered, UNDER accepted a short delivery as complete and closed the remainder"}
         orderStatus: {type: string, enum: [CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED], description: the order status after the report}
         orderVersion: {type: integer, description: the order version the report produced}
         recordedBy: {type: string}

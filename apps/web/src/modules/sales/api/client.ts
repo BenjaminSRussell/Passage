@@ -95,6 +95,8 @@ export interface OrderLine {
   /** Line number of that parent; the line follows it (BR-27.14). */
   parentLineNo?: number;
   supplementaryRuleId?: string;
+  /** Set on a catch-weight line (FR-24.7): whole cases priced by weight; the delivery tolerance does not stretch it. */
+  catchWeight?: { nominal: Decimal; min: Decimal; max: Decimal };
 }
 
 /** A non-blocking message, such as SLS-0012 for each supplementary line an order received. */
@@ -2042,6 +2044,10 @@ export interface OrderProgressLine {
   deliveredQty: Decimal;
   invoicedQty: Decimal;
   lineStatus: string;
+  /** The line's ordered quantity after the report; it moves only where the delivery tolerance acted. Absent on older reports. */
+  lineQuantity?: Decimal;
+  /** OVER: more than ordered was accepted within the over-delivery tolerance. UNDER: a short delivery completed the line and its remainder was closed. */
+  tolerance?: "OVER" | "UNDER";
 }
 
 /** A delivery or invoice recorded on an order (BR-27.5). */
@@ -2068,7 +2074,8 @@ export interface OrderProgressFilter {
 export interface RecordProgressInput {
   kind: ProgressKind;
   sourceRef: string;
-  lines: { lineNo: number; quantity: Decimal }[];
+  /** final (DELIVERED only): the last delivery for the line; a short quantity within the under-delivery tolerance completes it. */
+  lines: { lineNo: number; quantity: Decimal; final?: boolean }[];
 }
 
 export async function listOrderProgress(filter: OrderProgressFilter = {}, signal?: AbortSignal): Promise<OrderProgress[]> {

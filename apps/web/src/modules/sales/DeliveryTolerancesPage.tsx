@@ -219,7 +219,7 @@ export function DeliveryTolerancesListPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Delivery tolerances"
-        description="How far a shipment of a product may differ from the order for a customer, and whether the order may ship in parts. A product without a rule resolves to exact quantities, in parts if need be. Shipping does not apply these rules yet: fulfillment checks over-picks against its own over-delivery tolerances."
+        description="How far a shipment of a product may differ from the order for a customer, and whether the order may ship in parts. A product without a rule resolves to exact quantities, in parts if need be. Sales applies these rules when a delivery is recorded on an order (the delivery that completes a line may pass the order by the over-delivery figure; a short delivery marked as the line's last completes it within the under-delivery figure); fulfillment still checks over-picks against its own over-delivery tolerances."
         actions={
           canMaintain ? (
             <Link className={buttonClassName("primary")} to="/sales/delivery-tolerances/new">

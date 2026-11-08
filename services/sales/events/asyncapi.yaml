@@ -1066,6 +1066,8 @@ components:
               delivered_qty: {type: string, description: the line's delivered quantity after the report}
               invoiced_qty: {type: string, description: the line's invoiced quantity after the report}
               line_status: {type: string, enum: [OPEN, RESERVED, PICKED, DELIVERED, INVOICED, CANCELLED]}
+              line_quantity: {type: string, description: "the line's ordered quantity after the report (the delivered quantity); present only where tolerance is set"}
+              tolerance: {type: string, enum: [OVER, UNDER], description: "present when the delivery tolerance moved the line to the delivered quantity: OVER accepted more than ordered, UNDER accepted a short delivery marked final and closed the remainder (order.remaindercancelled is queued with it)"}
               reported_weight: {type: string, description: "catch-weight lines on a DELIVERED report only (FR-24.7): the weight this report delivered (its actualWeight, else cases x nominal), decimal string in the product's inventory weight unit"}
               delivered_weight: {type: string, description: "catch-weight lines on a DELIVERED report only: the line's delivered weight so far"}
               product_id: {type: string, format: uuid, description: "the line's product (#480)"}

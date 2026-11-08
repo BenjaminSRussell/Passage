@@ -247,22 +247,31 @@ func (s *Postgres) ResolveDeliveryTolerance(ctx context.Context, legalEntityID, 
 	p, _ := tenant.FromContext(ctx)
 	var out ResolvedTolerance
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+toleranceColumns+` from delivery_tolerance
-			where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and (customer_id is null or customer_id = $4)`,
-			p.TenantID, legalEntityID, productID, customerID)
-		if err != nil {
-			return err
-		}
-		stored, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (DeliveryTolerance, error) { return scanTolerance(row) })
-		if err != nil {
-			return err
-		}
-		rules := make([]domain.ToleranceRule, len(stored))
-		for i, t := range stored {
-			rules[i] = domain.ToleranceRule{ID: t.ID, CustomerID: t.CustomerID, DeliveryTolerance: t.values()}
-		}
-		out.Tolerance, out.ToleranceID, out.Source = domain.ResolveTolerance(rules, customerID)
-		return nil
+		var err error
+		out, err = resolveToleranceTx(ctx, tx, p.TenantID, legalEntityID, productID, customerID)
+		return err
 	})
 	return out, err
+}
+
+// resolveToleranceTx is ResolveDeliveryTolerance inside a transaction, for the
+// flows that apply the tolerance (a delivery report).
+func resolveToleranceTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, productID, customerID string) (ResolvedTolerance, error) {
+	var out ResolvedTolerance
+	rows, err := tx.Query(ctx, `select `+toleranceColumns+` from delivery_tolerance
+		where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and (customer_id is null or customer_id = $4)`,
+		tenantID, legalEntityID, productID, customerID)
+	if err != nil {
+		return out, err
+	}
+	stored, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (DeliveryTolerance, error) { return scanTolerance(row) })
+	if err != nil {
+		return out, err
+	}
+	rules := make([]domain.ToleranceRule, len(stored))
+	for i, t := range stored {
+		rules[i] = domain.ToleranceRule{ID: t.ID, CustomerID: t.CustomerID, DeliveryTolerance: t.values()}
+	}
+	out.Tolerance, out.ToleranceID, out.Source = domain.ResolveTolerance(rules, customerID)
+	return out, nil
 }

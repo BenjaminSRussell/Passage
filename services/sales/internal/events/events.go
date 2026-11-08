@@ -610,6 +610,12 @@ type ProgressLine struct {
 	DeliveredQty string `json:"delivered_qty"`
 	InvoicedQty  string `json:"invoiced_qty"`
 	LineStatus   string `json:"line_status"`
+	// LineQuantity is the line's ordered quantity after the report, set only
+	// where the delivery tolerance acted (it is then the delivered quantity):
+	// Tolerance is OVER (the line grew to the quantity delivered) or UNDER (the
+	// remainder was closed at the quantity delivered, see order.remaindercancelled).
+	LineQuantity string `json:"line_quantity,omitempty"`
+	Tolerance    string `json:"tolerance,omitempty"`
 	// Catch-weight lines only (FR-24.7): on a DELIVERED report, the weight it
 	// delivered (the reported actualWeight, else cases x nominal) and the
 	// line's delivered weight so far. Quantities stay in cases.

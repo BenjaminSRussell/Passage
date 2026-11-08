@@ -43,6 +43,9 @@ type progressLineRequest struct {
 	Quantity     string                    `json:"quantity"`
 	ActualWeight *string                   `json:"actualWeight,omitempty"`
 	Tracking     []progressTrackingRequest `json:"tracking,omitempty"`
+	// Final marks a DELIVERED line as the last delivery for it: a short
+	// quantity within the under-delivery tolerance completes the line.
+	Final bool `json:"final,omitempty"`
 }
 
 // progressTrackingRequest is the part of a delivered line taken from one
@@ -110,8 +113,11 @@ func (a *API) recordProgress(w http.ResponseWriter, r *http.Request) {
 					actual = &w
 				}
 			}
+			if l.Final && req.Kind != domain.ProgressDelivered {
+				fields[name+".final"] = "applies only to a DELIVERED report"
+			}
 			tracking := progressTracking(fields, name, req.Kind, q, actual, l.Tracking)
-			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, Quantity: q, ActualWeight: actual, Tracking: tracking})
+			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, Quantity: q, ActualWeight: actual, Tracking: tracking, Final: l.Final})
 		}
 		if len(fields) > 0 {
 			validationFailed(w, r, fields)
@@ -250,10 +256,11 @@ func canonicalProgress(in store.NewProgress) any {
 		Quantity     string  `json:"quantity"`
 		ActualWeight *string `json:"actualWeight,omitempty"`
 		Tracking     []entry `json:"tracking,omitempty"`
+		Final        bool    `json:"final,omitempty"`
 	}
 	lines := make([]line, 0, len(in.Lines))
 	for _, l := range in.Lines {
-		item := line{LineNo: l.LineNo, Quantity: l.Quantity.String()}
+		item := line{LineNo: l.LineNo, Quantity: l.Quantity.String(), Final: l.Final}
 		if l.ActualWeight != nil {
 			s := l.ActualWeight.String()
 			item.ActualWeight = &s

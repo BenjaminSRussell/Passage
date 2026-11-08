@@ -120,6 +120,121 @@ describe("Deliveries and invoices list", () => {
   });
 });
 
+describe("Delivery tolerance on reports and on the form", () => {
+  it("says what the tolerance did to a line in the reports list", async () => {
+    handler = () => ({
+      status: 200,
+      body: {
+        items: [
+          report({ sourceRef: "PS-OVER", lines: [{ lineId: "l1", lineNo: 1, quantity: "105", deliveredQty: "105", invoicedQty: "0", lineStatus: "DELIVERED", lineQuantity: "105", tolerance: "OVER" }] }),
+          report({ id: "66666666-0000-4000-8000-000000000007", sourceRef: "PS-UNDER", lines: [{ lineId: "l2", lineNo: 2, quantity: "96", deliveredQty: "96", invoicedQty: "0", lineStatus: "DELIVERED", lineQuantity: "96", tolerance: "UNDER" }] }),
+        ],
+      },
+    });
+    renderAt("/sales/order-progress");
+    expect(await screen.findByText("1: 105 (over-delivery accepted, line now 105)")).toBeInTheDocument();
+    expect(screen.getByText("2: 96 (completed short, remainder closed at 96)")).toBeInTheDocument();
+  });
+
+  it("accepts a delivery up to the over-delivery tolerance of the product and customer", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return { status: 201, body: report({ sourceRef: "PS-1003" }) };
+      if (url.pathname.endsWith("/delivery-tolerances:resolve")) {
+        return url.searchParams.get("productId") === "p1"
+          ? { status: 200, body: { source: "CUSTOMER", toleranceId: "t1", overdeliveryPct: "5", underdeliveryPct: "0", partialDelivery: "ALLOWED", orderedQty: "10", minQty: "10", maxQty: "10.5" } }
+          : { status: 200, body: { source: "DEFAULT", overdeliveryPct: "0", underdeliveryPct: "0", partialDelivery: "ALLOWED" } };
+      }
+      return { status: 200, body: order(), etag: '"4"' };
+    };
+    const { container } = renderAt(`/sales/orders/${ORDER_ID}/progress/new`);
+    expect(await screen.findByText("up to 6.5 (over 5 %)")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    const resolve = calls.find((c) => c.url.pathname.endsWith("/delivery-tolerances:resolve") && c.url.searchParams.get("productId") === "p1");
+    expect(resolve?.url.searchParams.get("customerId")).toBe("22222222-0000-4000-8000-000000000002");
+    expect(resolve?.url.searchParams.get("orderedQty")).toBe("10");
+    fireEvent.change(screen.getByLabelText("Reference"), { target: { value: "PS-1003" } });
+    fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));
+    expect(await screen.findByText("At most 6.5 can still be delivered within the over-delivery tolerance.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "6.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ kind: "DELIVERED", sourceRef: "PS-1003", lines: [{ lineNo: 1, quantity: "6.5" }] });
+  });
+
+  it("names the under-delivery bound and keeps the exact limit when the tolerance cannot be read", async () => {
+    handler = (url) =>
+      url.pathname.endsWith("/delivery-tolerances:resolve")
+        ? { status: 403, body: { code: "COM-0403", detail: "forbidden" } }
+        : { status: 200, body: order(), etag: '"4"' };
+    const first = renderAt(`/sales/orders/${ORDER_ID}/progress/new`);
+    await screen.findByText("Record delivery or invoice on SO-0000042");
+    fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Reference"), { target: { value: "PS-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));
+    expect(await screen.findByText("At most 6 can still be delivered.")).toBeInTheDocument();
+    first.unmount();
+    handler = (url) =>
+      url.pathname.endsWith("/delivery-tolerances:resolve")
+        ? { status: 200, body: { source: "ALL_CUSTOMERS", overdeliveryPct: "0", underdeliveryPct: "5", partialDelivery: "ALLOWED", minQty: "9.5", maxQty: "10" } }
+        : { status: 200, body: order(), etag: '"4"' };
+    renderAt(`/sales/orders/${ORDER_ID}/progress/new`);
+    expect((await screen.findAllByText("a last delivery completes from 9.5 in all (under 5 %)")).length).toBeGreaterThan(0);
+  });
+
+  it("marks a short delivery as the last one only within the under-delivery tolerance", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return { status: 201, body: report({ sourceRef: "PS-2001" }) };
+      if (url.pathname.endsWith("/delivery-tolerances:resolve")) {
+        return { status: 200, body: { source: "ALL_CUSTOMERS", overdeliveryPct: "0", underdeliveryPct: "5", partialDelivery: "ALLOWED", orderedQty: "10", minQty: "9.5", maxQty: "10" } };
+      }
+      return { status: 200, body: order(), etag: '"4"' };
+    };
+    const { container } = renderAt(`/sales/orders/${ORDER_ID}/progress/new`);
+    await screen.findAllByText("a last delivery completes from 9.5 in all (under 5 %)");
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Reference"), { target: { value: "PS-2001" } });
+    fireEvent.click(screen.getByLabelText("Close line 1 after this delivery"));
+    fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));
+    expect(await screen.findByText(/A last delivery must bring the line to at least 9.5/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "5.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ kind: "DELIVERED", sourceRef: "PS-2001", lines: [{ lineNo: 1, quantity: "5.5", final: true }] });
+  });
+
+  it("asks no tolerance for a catch-weight line and does not widen a line delivered in full", async () => {
+    handler = (url) => {
+      if (url.pathname.endsWith("/delivery-tolerances:resolve")) {
+        return { status: 200, body: { source: "ALL_CUSTOMERS", overdeliveryPct: "10", underdeliveryPct: "0", partialDelivery: "ALLOWED", minQty: "10", maxQty: "11" } };
+      }
+      const base = order();
+      return {
+        status: 200,
+        etag: '"4"',
+        body: order({
+          lines: [
+            { ...base.lines[0], deliveredQty: "10", lineStatus: "DELIVERED" },
+            { ...base.lines[1], catchWeight: { nominal: "2", min: "1.8", max: "2.2" } },
+          ],
+        }),
+      };
+    };
+    renderAt(`/sales/orders/${ORDER_ID}/progress/new`);
+    await screen.findByText("Record delivery or invoice on SO-0000042");
+    await vi.waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith("/delivery-tolerances:resolve"))).toBe(true));
+    expect(calls.filter((c) => c.url.pathname.endsWith("/delivery-tolerances:resolve")).map((c) => c.url.searchParams.get("productId"))).toEqual(["p1"]);
+    expect(screen.queryByLabelText("Close line 1 after this delivery")).toBeNull();
+    expect(screen.getByLabelText("Close line 2 after this delivery")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Reference"), { target: { value: "PS-3001" } });
+    fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));
+    expect(await screen.findByText("At most 0 can still be delivered.")).toBeInTheDocument();
+  });
+});
+
 describe("Order detail", () => {
   it("shows the delivered and invoiced quantities and the reports of the order", async () => {
     handler = (url) => (url.pathname.endsWith("/order-progress") ? { status: 200, body: { items: [report()] } } : { status: 200, body: order(), etag: '"4"' });

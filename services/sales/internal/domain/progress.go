@@ -22,6 +22,13 @@ const (
 	OrderInvoiced         = "INVOICED"
 	OrderClosed           = "CLOSED"
 
+	// ToleranceOver and ToleranceUnder name what ApplyProgressWithin did to a
+	// line's quantity: a delivery past the ordered quantity accepted within the
+	// over-delivery tolerance, or a delivery short of it accepted as complete
+	// within the under-delivery tolerance.
+	ToleranceOver  = "OVER"
+	ToleranceUnder = "UNDER"
+
 	OrderTypeSubscription = "SUBSCRIPTION"
 	OrderTypeReturned     = "RETURNED"
 )
@@ -83,6 +90,61 @@ func ApplyProgress(l LineProgress, kind string, qty decimal.Decimal) (LineProgre
 		l.Status = LinePicked
 	}
 	return l, nil
+}
+
+// ApplyProgressWithin is ApplyProgress under the delivery tolerance of the
+// line's product and customer (BR-27.9, BR-28.7). Only a DELIVERED report is
+// affected, and with the default tolerance (0, 0) and final false the result is
+// ApplyProgress.
+//
+// Over-delivery: the delivery that completes a line may take its delivered
+// quantity past the ordered quantity up to the ordered quantity plus the
+// over-delivery tolerance (tol.Range); it is accepted and the line's quantity
+// becomes the delivered quantity (outcome ToleranceOver), so the line is
+// DELIVERED and the invoice rule (invoiced = quantity) holds for what was
+// shipped. A line already delivered in full (by a slip, an earlier
+// over-delivery or a closed remainder) takes nothing more: the tolerance widens
+// the delivery that completes a line, it does not reopen a delivered or
+// invoiced one.
+//
+// Under-delivery: final says the report is the last delivery for the line (the
+// "close for delivery" of the packing slip). A final delivery that leaves the
+// delivered quantity short of the ordered quantity by no more than the
+// under-delivery tolerance completes the line: its quantity becomes the
+// delivered quantity and the remainder is closed (outcome ToleranceUnder), as
+// the cancel remainder action does. A final delivery short by more is refused,
+// and without final a short delivery stays a partial delivery that later slips
+// finish, so a split shipment is never cut by the first slip.
+func ApplyProgressWithin(l LineProgress, kind string, qty decimal.Decimal, tol DeliveryTolerance, final bool) (LineProgress, string, error) {
+	if kind != ProgressDelivered || !qty.IsPositive() || l.Status == LineCancelled {
+		next, err := ApplyProgress(l, kind, qty)
+		return next, "", err
+	}
+	total := l.Delivered.Add(qty)
+	min, max := tol.Range(l.Quantity)
+	outcome := ""
+	switch {
+	case total.GreaterThan(l.Quantity):
+		if !tol.OverdeliveryPct.IsPositive() || !l.Delivered.LessThan(l.Quantity) {
+			return l, "", &ProgressRefusal{fmt.Sprintf("delivering %s would exceed the ordered quantity %s (already delivered %s)", qty, l.Quantity, l.Delivered)}
+		}
+		if total.GreaterThan(max) {
+			return l, "", &ProgressRefusal{fmt.Sprintf("delivering %s would exceed the ordered quantity %s and its over-delivery tolerance of %s%% (at most %s, already delivered %s)",
+				qty, l.Quantity, tol.OverdeliveryPct, max, l.Delivered)}
+		}
+		outcome = ToleranceOver
+	case total.LessThan(l.Quantity) && final:
+		if !tol.UnderdeliveryPct.IsPositive() || total.LessThan(min) {
+			return l, "", &ProgressRefusal{fmt.Sprintf("a final delivery of %s leaves the line at %s of the ordered %s, short by more than its under-delivery tolerance of %s%% (at least %s); record it as a partial delivery and cancel the remainder",
+				qty, total, l.Quantity, tol.UnderdeliveryPct, min)}
+		}
+		outcome = ToleranceUnder
+	}
+	if outcome != "" {
+		l.Quantity = total
+	}
+	next, err := ApplyProgress(l, kind, qty)
+	return next, outcome, err
 }
 
 // OrderStatusFor derives the status of a progressing order from its lines

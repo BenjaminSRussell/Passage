@@ -11,12 +11,15 @@ import {
   newKey,
   PROGRESS_KINDS,
   recordOrderProgress,
+  resolveDeliveryTolerance,
   type OrderProgress,
+  type OrderProgressLine,
   type OrderProgressFilter,
   type OrderType,
   type Order,
   type Problem,
   type ProgressKind,
+  type ResolvedDeliveryTolerance,
   type Versioned,
 } from "./api/client";
 import { dash, DECIMAL, formatDateTime, sentence, shortId, subtractDecimal, UUID } from "./format";
@@ -64,6 +67,14 @@ export function ProgressKindBadge({ kind }: { kind: ProgressKind }) {
   return <Badge tone={kindTone[kind]}>{sentence(kind)}</Badge>;
 }
 
+/** One line of a report as the list shows it, with what the delivery tolerance did to the line. */
+export function progressLineLabel(l: OrderProgressLine): string {
+  const base = `${l.lineNo}: ${l.quantity}`;
+  if (l.tolerance === "OVER") return `${base} (over-delivery accepted, line now ${l.lineQuantity ?? l.deliveredQty})`;
+  if (l.tolerance === "UNDER") return `${base} (completed short, remainder closed at ${l.lineQuantity ?? l.deliveredQty})`;
+  return base;
+}
+
 function progressColumns(withOrder: boolean): DataTableColumn<OrderProgress>[] {
   const cols: DataTableColumn<OrderProgress>[] = [
     { key: "recordedAt", header: "Recorded", render: (p) => `${formatDateTime(p.recordedAt)} by ${p.recordedBy}` },
@@ -72,7 +83,7 @@ function progressColumns(withOrder: boolean): DataTableColumn<OrderProgress>[] {
     {
       key: "lines",
       header: "Lines",
-      render: (p) => p.lines.map((l) => `${l.lineNo}: ${l.quantity}`).join(", "),
+      render: (p) => p.lines.map(progressLineLabel).join(", "),
     },
     { key: "orderStatus", header: "Order then", render: (p) => <StatusPill status={p.orderStatus} /> },
   ];
@@ -186,10 +197,32 @@ export function NewOrderProgressPage() {
   const [chosenKind, setKind] = useState<ProgressKind | null>(null);
   const [sourceRef, setSourceRef] = useState("");
   const [quantities, setQuantities] = useState<Record<number, string>>({});
+  const [finals, setFinals] = useState<Record<number, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  // The delivery tolerance of each line's product and customer widens what a
+  // delivery may cover. It is a hint: when it cannot be read the form checks the
+  // exact open quantity and the service stays the judge. A catch-weight line is
+  // never stretched by a tolerance, so it gets none.
+  const tolerances = useLoad(async (signal) => {
+    const found: Record<number, ResolvedDeliveryTolerance> = {};
+    const o = state.data?.value;
+    if (!o) return found;
+    await Promise.all(
+      o.lines
+        .filter((l) => l.lineStatus !== "CANCELLED" && !l.catchWeight)
+        .map(async (l) => {
+          try {
+            found[l.lineNo] = await resolveDeliveryTolerance({ legalEntityId: o.legalEntityId, productId: l.productId, customerId: o.customerId, orderedQty: l.quantity }, signal);
+          } catch {
+            // No hint for this line.
+          }
+        }),
+    );
+    return found;
+  }, state.data ? `${state.data.value.id}:${state.data.value.version}` : "none");
 
   const back = (
     <Link className={buttonClassName("ghost")} to={`/sales/orders/${id}`}>
@@ -221,6 +254,17 @@ export function NewOrderProgressPage() {
   const canRecord = kinds.length > 0;
   const lines = order.lines.filter((l) => l.lineStatus !== "CANCELLED");
   const open = (l: (typeof lines)[number]) => (kind === "DELIVERED" ? subtractDecimal(l.quantity, l.deliveredQty ?? "0") : subtractDecimal(l.deliveredQty ?? "0", l.invoicedQty ?? "0"));
+  const isPositive = (d: string) => !d.startsWith("-") && Number(d) !== 0;
+  // What a delivery may still cover: the open quantity plus the over-delivery
+  // tolerance, on a line that is not delivered in full yet (the tolerance widens
+  // the delivery that completes a line, it never reopens one).
+  const tolerance = (l: (typeof lines)[number]) => (kind === "DELIVERED" ? tolerances.data?.[l.lineNo] : undefined);
+  const allowed = (l: (typeof lines)[number]) => {
+    const max = tolerance(l)?.maxQty;
+    return max && isPositive(open(l)) && !subtractDecimal(max, l.quantity).startsWith("-") ? subtractDecimal(max, l.deliveredQty ?? "0") : open(l);
+  };
+  // A line may be marked as its last delivery while it is not delivered in full.
+  const canClose = (l: (typeof lines)[number]) => kind === "DELIVERED" && isPositive(open(l));
 
   function touch() {
     key.current = newKey();
@@ -230,13 +274,21 @@ export function NewOrderProgressPage() {
     event.preventDefault();
     const found: Record<string, string> = {};
     if (sourceRef.trim() === "" || sourceRef.trim().length > 100) found.sourceRef = "Enter the packing slip or invoice number (up to 100 characters).";
-    const chosen: { lineNo: number; quantity: string }[] = [];
+    const chosen: { lineNo: number; quantity: string; final?: boolean }[] = [];
     for (const l of lines) {
       const q = (quantities[l.lineNo] ?? "").trim();
-      if (q === "") continue;
+      const final = canClose(l) && finals[l.lineNo] === true;
+      if (q === "") {
+        if (final) found[`line-${l.lineNo}`] = "Enter the quantity of the last delivery.";
+        continue;
+      }
+      const min = tolerance(l)?.minQty;
       if (!DECIMAL.test(q) || Number(q) <= 0) found[`line-${l.lineNo}`] = "Enter a positive quantity with up to 6 places.";
-      else if (subtractDecimal(open(l), q).startsWith("-")) found[`line-${l.lineNo}`] = `At most ${open(l)} can still be ${kind === "DELIVERED" ? "delivered" : "invoiced"}.`
-      else chosen.push({ lineNo: l.lineNo, quantity: q });
+      else if (subtractDecimal(allowed(l), q).startsWith("-"))
+        found[`line-${l.lineNo}`] = `At most ${allowed(l)} can still be ${kind === "DELIVERED" ? "delivered" : "invoiced"}${allowed(l) !== open(l) ? " within the over-delivery tolerance" : ""}.`
+      else if (final && min && subtractDecimal(q, subtractDecimal(min, l.deliveredQty ?? "0")).startsWith("-"))
+        found[`line-${l.lineNo}`] = `A last delivery must bring the line to at least ${min} (the under-delivery tolerance); record it as a partial delivery and cancel the remainder instead.`
+      else chosen.push(final ? { lineNo: l.lineNo, quantity: q, final: true } : { lineNo: l.lineNo, quantity: q });
     }
     if (chosen.length === 0 && !Object.keys(found).some((k) => k.startsWith("line-"))) found.lines = "Enter a quantity on at least one line.";
     setErrors(found);
@@ -271,7 +323,26 @@ export function NewOrderProgressPage() {
     { key: "quantity", header: "Ordered", align: "end", render: (l) => `${l.quantity} ${l.unit}` },
     { key: "deliveredQty", header: "Delivered", align: "end", render: (l) => l.deliveredQty ?? "0" },
     { key: "invoicedQty", header: "Invoiced", align: "end", render: (l) => l.invoicedQty ?? "0" },
-    { key: "open", header: kind === "DELIVERED" ? "Still to deliver" : "Still to invoice", align: "end", render: (l) => open(l) },
+    {
+      key: "open",
+      header: kind === "DELIVERED" ? "Still to deliver" : "Still to invoice",
+      align: "end",
+      render: (l) => {
+        const t = tolerance(l);
+        if (!t || (!Number(t.overdeliveryPct) && !Number(t.underdeliveryPct))) return open(l);
+        const notes = [
+          Number(t.overdeliveryPct) > 0 ? `up to ${allowed(l)} (over ${t.overdeliveryPct} %)` : "",
+          Number(t.underdeliveryPct) > 0 && t.minQty ? `a last delivery completes from ${t.minQty} in all (under ${t.underdeliveryPct} %)` : "",
+        ].filter(Boolean);
+        return (
+          <>
+            {open(l)}
+            <br />
+            <small>{notes.join("; ")}</small>
+          </>
+        );
+      },
+    },
     {
       key: "report",
       header: "This report",
@@ -293,6 +364,31 @@ export function NewOrderProgressPage() {
         </FormField>
       ),
     },
+    ...(kind === "DELIVERED"
+      ? [
+          {
+            key: "final",
+            header: "Last delivery",
+            render: (l: (typeof lines)[number]) =>
+              canClose(l) ? (
+                <span className={styles.check}>
+                  <Input
+                    id={`progress-final-${l.lineNo}`}
+                    type="checkbox"
+                    checked={finals[l.lineNo] === true}
+                    onChange={(e) => {
+                      setFinals({ ...finals, [l.lineNo]: e.target.checked });
+                      touch();
+                    }}
+                  />
+                  <label htmlFor={`progress-final-${l.lineNo}`}>Close line {l.lineNo} after this delivery</label>
+                </span>
+              ) : (
+                dash
+              ),
+          } satisfies DataTableColumn<(typeof lines)[number]>,
+        ]
+      : []),
   ];
 
   return (

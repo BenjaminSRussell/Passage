@@ -35,6 +35,9 @@ type ProgressLineInput struct {
 	// Tracking names the batches and serials a DELIVERED report took (#480),
 	// passed through on orderprogress.recorded so inventory issues them.
 	Tracking []ProgressTracking
+	// Final marks a DELIVERED report as the last delivery for the line: a short
+	// quantity within the under-delivery tolerance then completes the line.
+	Final bool
 }
 
 // ProgressTracking is the part of a delivered line taken from one batch or
@@ -69,6 +72,12 @@ type ProgressLineResult struct {
 	DeliveredQty decimal.Decimal `json:"deliveredQty"`
 	InvoicedQty  decimal.Decimal `json:"invoicedQty"`
 	LineStatus   string          `json:"lineStatus"`
+	// LineQuantity is the line's ordered quantity after the report; Tolerance
+	// says the delivery tolerance moved it to the delivered quantity: OVER (more
+	// than ordered was accepted) or UNDER (a short delivery completed the line
+	// and its remainder was closed). Reports stored before slice 40 carry neither.
+	LineQuantity *decimal.Decimal `json:"lineQuantity,omitempty"`
+	Tolerance    string           `json:"tolerance,omitempty"`
 }
 
 // OrderProgress is a stored delivery or invoice report.
@@ -183,6 +192,9 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			before[i] = domain.LineProgress{Status: l.LineStatus, Quantity: l.Quantity, Delivered: l.DeliveredQty, Invoiced: l.InvoicedQty}
 		}
 		var diff []domain.FieldChange
+		tolerances := map[string]domain.DeliveryTolerance{}
+		moved := map[int]Line{}
+		var under []salesevents.RemainderLine
 		results := make([]ProgressLineResult, 0, len(in.Lines))
 		evLines := make([]salesevents.ProgressLine, 0, len(in.Lines))
 		for _, req := range in.Lines {
@@ -191,7 +203,22 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 				return problem(http.StatusNotFound, CodeLineNotFound, fmt.Sprintf("order line %d not found", req.LineNo))
 			}
 			cur := domain.LineProgress{Status: l.LineStatus, Quantity: l.Quantity, Delivered: l.DeliveredQty, Invoiced: l.InvoicedQty}
-			next, err := domain.ApplyProgress(cur, in.Kind, req.Quantity)
+			tol := domain.DefaultTolerance()
+			if in.Kind == domain.ProgressDelivered && l.CatchWeight == nil {
+				// A catch-weight line counts whole cases against their weight
+				// and is not stretched by a percentage.
+				key := l.ProductID
+				if t, ok := tolerances[key]; ok {
+					tol = t
+				} else {
+					r, err := resolveToleranceTx(ctx, tx, p.TenantID, o.LegalEntityID, l.ProductID, o.CustomerID)
+					if err != nil {
+						return err
+					}
+					tol, tolerances[key] = r.Tolerance, r.Tolerance
+				}
+			}
+			next, outcome, err := domain.ApplyProgressWithin(cur, in.Kind, req.Quantity, tol, req.Final)
 			if err != nil {
 				return problem(http.StatusUnprocessableEntity, CodeProgressQuantity, fmt.Sprintf("line %d: %s", l.LineNo, err))
 			}
@@ -202,10 +229,30 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			if !l.LineNet.Equal(oldNet) {
 				diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "lineNet", Old: oldNet.String(), New: l.LineNet.String()})
 			}
-			if _, err := tx.Exec(ctx, `update sales_order_line set delivered_qty = $4::numeric, invoiced_qty = $5::numeric, line_status = $6,
+			if outcome != "" {
+				// The tolerance moved the line to the delivered quantity: price it
+				// at that quantity and let the agreement and quota follow below.
+				net, err := domain.LineNetFor(next.Quantity, next.Delivered, l.UnitPrice, l.DiscPct, nil, nil)
+				if err != nil {
+					return problem(http.StatusInternalServerError, "COM-0500", err.Error())
+				}
+				if _, ok := moved[l.LineNo]; !ok {
+					moved[l.LineNo] = *l
+				}
+				diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "quantity", Old: l.Quantity.String(), New: next.Quantity.String()})
+				if !net.Equal(l.LineNet) {
+					diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "lineNet", Old: l.LineNet.String(), New: net.String()})
+				}
+				if outcome == domain.ToleranceUnder {
+					under = append(under, salesevents.RemainderLine{LineID: l.ID, LineNo: l.LineNo, ProductID: l.ProductID,
+						CancelledQty: l.Quantity.Sub(next.Quantity).String(), KeptQty: next.Quantity.String(), LineStatus: next.Status})
+				}
+				l.Quantity, l.LineNet = next.Quantity, net
+			}
+			if _, err := tx.Exec(ctx, `update sales_order_line set quantity = $9::numeric, delivered_qty = $4::numeric, invoiced_qty = $5::numeric, line_status = $6,
 					actual_weight = $7, line_net = $8::numeric
 				where tenant_id = $1 and order_id = $2 and id = $3`, p.TenantID, o.ID, l.ID, next.Delivered.String(), next.Invoiced.String(), next.Status,
-				nullDec(l.ActualWeight), l.LineNet.String()); err != nil {
+				nullDec(l.ActualWeight), l.LineNet.String(), l.Quantity.String()); err != nil {
 				return err
 			}
 			if in.Kind == domain.ProgressDelivered {
@@ -217,11 +264,18 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 				diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "lineStatus", Old: cur.Status, New: next.Status})
 			}
 			l.DeliveredQty, l.InvoicedQty, l.LineStatus = next.Delivered, next.Invoiced, next.Status
+			lineQty := next.Quantity
 			results = append(results, ProgressLineResult{LineID: l.ID, LineNo: l.LineNo, Quantity: req.Quantity,
-				DeliveredQty: next.Delivered, InvoicedQty: next.Invoiced, LineStatus: next.Status})
+				DeliveredQty: next.Delivered, InvoicedQty: next.Invoiced, LineStatus: next.Status, LineQuantity: &lineQty, Tolerance: outcome})
 			ev := salesevents.ProgressLine{LineID: l.ID, LineNo: l.LineNo, Quantity: req.Quantity.String(),
 				DeliveredQty: next.Delivered.String(), InvoicedQty: next.Invoiced.String(), LineStatus: next.Status,
+				Tolerance: outcome,
 				ProductID: l.ProductID, Unit: l.Unit, SiteID: l.SiteID, WarehouseID: l.WarehouseID}
+			if outcome != "" {
+				// Only where the tolerance acted, so the contract of an exact
+				// delivery (inventory's fixture) is unchanged.
+				ev.LineQuantity = lineQty.String()
+			}
 			if in.Kind == domain.ProgressDelivered && l.CatchWeight != nil && l.ActualWeight != nil {
 				reported := req.Quantity.Mul(l.CatchWeight.Nominal)
 				if req.ActualWeight != nil {
@@ -245,6 +299,9 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 				}
 			}
 			evLines = append(evLines, ev)
+		}
+		if err := followToleranceTx(ctx, tx, p.TenantID, o, moved, under, in.Actor, now); err != nil {
+			return err
 		}
 		after := make([]domain.LineProgress, len(o.Lines))
 		for i, l := range o.Lines {
@@ -282,6 +339,13 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 			ProgressID: id, OrderID: o.ID, LegalEntityID: o.LegalEntityID, Currency: o.Currency, Kind: in.Kind, SourceRef: in.SourceRef, Lines: evLines,
 			PreviousStatus: o.Status, OrderStatus: status, Actor: in.Actor, Version: version}); err != nil {
 			return err
+		}
+		if len(under) > 0 {
+			if err := enqueue(ctx, tx, "order", o.ID, salesevents.OrderRemainderCancelled, p.TenantID, salesevents.OrderRemainderCancelledData{
+				OrderID: o.ID, LegalEntityID: o.LegalEntityID, Version: version, Status: status, Lines: under,
+				Reason: fmt.Sprintf("under-delivery within tolerance: %s %s", in.Kind, in.SourceRef), Actor: in.Actor}); err != nil {
+				return err
+			}
 		}
 		stored, err := loadProgressBy(ctx, tx, `p.id = $2`, p.TenantID, id)
 		if err != nil {
@@ -373,4 +437,36 @@ func nullDec(d *decimal.Decimal) any {
 		return nil
 	}
 	return d.String()
+}
+
+// followToleranceTx carries the lines a delivery tolerance moved to the
+// delivered quantity into what hangs on the quantity (BR-27.9, BR-27.15). o has
+// the lines as they are after the report and before maps their numbers to the
+// line as it was. A line closed short gives its quota draw back to the period
+// and its open schedule lines are cancelled, the way :cancel-remainder does.
+// The release line of an order released from a sales agreement then draws the
+// extra quantity of an over-delivery under the agreement's lock (beyond the
+// ceiling the whole report is 422 SLS-0008, nothing is stored) or gives back
+// the closed remainder of an under-delivery. Quotas are locked before the
+// agreement, the order of :cancel-remainder, PATCH and :cancel. Quota is not
+// drawn for the extra quantity of an over-delivery: the goods are already
+// shipped, and a quota exists to hold back the confirmation of an order.
+func followToleranceTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, before map[int]Line, under []salesevents.RemainderLine, actor string, now time.Time) error {
+	if len(before) == 0 {
+		return nil
+	}
+	if len(under) > 0 {
+		cut := map[int]Line{}
+		for _, u := range under {
+			cut[u.LineNo] = before[u.LineNo]
+			if _, err := tx.Exec(ctx, `update order_schedule_line set status = 'CANCELLED', updated_at = now()
+				where tenant_id = $1 and line_id = $2 and status in ('CONFIRMED', 'BACKORDER', 'UNPROMISED')`, tenantID, u.LineID); err != nil {
+				return err
+			}
+		}
+		if err := shrinkAllocationTx(ctx, tx, tenantID, o, cut, now); err != nil {
+			return err
+		}
+	}
+	return followReleaseLineTx(ctx, tx, tenantID, o, before, actor, now)
 }
