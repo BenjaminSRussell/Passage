@@ -235,6 +235,8 @@ export interface PurchaseOrderCharge {
   allocationRule?: AllocationRule;
   /** True when an auto charge added the charge. */
   auto?: boolean;
+  /** The line a line charge belongs to; absent for a header charge. */
+  lineNo?: number;
 }
 
 export interface PurchaseOrder {
@@ -257,7 +259,7 @@ export interface PurchaseOrder {
   rowVersion: number;
   lines: PurchaseOrderLine[];
   charges: PurchaseOrderCharge[];
-  /** Charge codes auto charges have added to the order; saving with auto charges does not add them again (FR-17.9). */
+  /** Charges auto charges have added to the order, as a charge code id or "<code id>#<line no>"; saving with auto charges does not add them again (FR-17.9). */
   autoChargeCodes?: string[];
   createdAt: string;
   updatedAt: string;
@@ -311,7 +313,7 @@ export interface PurchaseOrderInput {
   changeManagement?: boolean;
   lines: PurchaseOrderLineInput[];
   /** Give calc and value, or a chargeCodeId whose calc applies (a value given overrides the code's default). */
-  charges?: { chargeCodeId?: string; calc?: ChargeCalc; value?: string }[];
+  charges?: { chargeCodeId?: string; calc?: ChargeCalc; value?: string; lineNo?: number }[];
   /** Adds the charges of the active auto charges that apply to the order (FR-17.9). */
   applyAutoCharges?: boolean;
 }
@@ -2037,6 +2039,8 @@ export type ChargeSide = "ITEM" | "LEDGER" | "VENDOR";
 export type AllocationRule = "QTY" | "AMOUNT" | "LINES";
 export type ChargeStatus = "ACTIVE" | "INACTIVE";
 export type AutoChargeKey = "VENDOR" | "GROUP" | "ALL";
+/** What an auto charge is keyed on besides the vendor: ALL adds a header charge, PRODUCT or GROUP a line charge on each matching line. */
+export type AutoChargeItemKey = "PRODUCT" | "GROUP" | "ALL";
 
 export interface ChargeCode {
   id: string;
@@ -2078,6 +2082,8 @@ export interface AutoCharge {
   chargeCodeId: string;
   accountCode: AutoChargeKey;
   accountId?: string;
+  itemCode: AutoChargeItemKey;
+  itemId?: string;
   value?: string;
   minOrderAmount?: string;
   currency?: string;
@@ -2094,6 +2100,8 @@ export interface AutoChargeInput {
   chargeCodeId: string;
   accountCode: AutoChargeKey;
   accountId?: string;
+  itemCode?: AutoChargeItemKey;
+  itemId?: string;
   value?: string;
   minOrderAmount?: string;
   currency?: string;

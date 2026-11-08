@@ -110,6 +110,35 @@ type PurchaseOrderCharge struct {
 	AllocationRule  string `json:"allocationRule"`
 	// Auto marks a charge an auto charge added to the PO (FR-17.9).
 	Auto bool `json:"auto"`
+	// LineNo is the line a line charge belongs to (PER_UNIT takes that line's quantity, PERCENT its
+	// amount after discount); 0 is a header charge over the whole order.
+	LineNo int `json:"lineNo,omitempty"`
+}
+
+// LiveCharges turns the charges of a PO into pricing inputs over its live lines, which are priced in the
+// order given. A line charge whose line is not among them (it was cancelled) is dropped with the line;
+// the charges kept are returned beside their inputs and renumbered from 1.
+func LiveCharges(charges []PurchaseOrderCharge, live []PurchaseOrderLine) ([]domain.ChargeInput, []PurchaseOrderCharge) {
+	pos := make(map[int]int, len(live))
+	for i, l := range live {
+		pos[l.LineNo] = i + 1
+	}
+	inputs := make([]domain.ChargeInput, 0, len(charges))
+	kept := make([]PurchaseOrderCharge, 0, len(charges))
+	for _, c := range charges {
+		in := domain.ChargeInput{Calc: c.Calc, Value: c.Value}
+		if c.LineNo != 0 {
+			at, ok := pos[c.LineNo]
+			if !ok {
+				continue
+			}
+			in.Line = at
+		}
+		inputs = append(inputs, in)
+		c.Seq = len(kept) + 1
+		kept = append(kept, c)
+	}
+	return inputs, kept
 }
 
 // insertCharge writes one header charge of a PO.
@@ -126,10 +155,10 @@ func insertCharge(ctx context.Context, tx pgx.Tx, poID string, c PurchaseOrderCh
 		rule = "AMOUNT"
 	}
 	_, err := tx.Exec(ctx, `insert into purchase_order_charge (tenant_id, purchase_order_id, seq, calc, value, amount, charge_code_id,
-		charge_code, debit_type, credit_type, debit_account_id, credit_account_id, vendor_id, allocation_rule, auto)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		charge_code, debit_type, credit_type, debit_account_id, credit_account_id, vendor_id, allocation_rule, auto, line_no)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		p.TenantID, poID, c.Seq, c.Calc, c.Value, c.Amount, nullable(c.ChargeCodeID), c.ChargeCode, debit, credit,
-		nullable(c.DebitAccountID), nullable(c.CreditAccountID), nullable(c.VendorID), rule, c.Auto)
+		nullable(c.DebitAccountID), nullable(c.CreditAccountID), nullable(c.VendorID), rule, c.Auto, nullableInt(c.LineNo))
 	return err
 }
 
@@ -176,7 +205,7 @@ func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (Purc
 	if _, err := tx.Exec(ctx, `insert into purchase_order (tenant_id, id, legal_entity_id, number, vendor_id, site_id, warehouse_id,
 		currency, approval_status, document_status, version_no, change_management, subtotal, discount_total, charges_total, tax_total, total, created_by,
 		auto_charge_codes)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, coalesce($19::uuid[], '{}'))`,
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, coalesce($19::text[], '{}'))`,
 		p.TenantID, in.ID, in.LegalEntityID, in.Number, in.VendorID, nullable(in.SiteID), nullable(in.WarehouseID), in.Currency,
 		in.ApprovalStatus, in.DocumentStatus, in.VersionNo, in.ChangeManagement, in.Subtotal, in.DiscountTotal, in.ChargesTotal,
 		in.TaxTotal, in.Total, userOrNil(p.UserID), in.AutoChargeCodes); err != nil {
@@ -262,7 +291,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 		return PurchaseOrder{}, err
 	}
 	charges, err := tx.Query(ctx, `select seq, calc, value, amount, coalesce(charge_code_id::text, ''), charge_code, debit_type, credit_type,
-		coalesce(debit_account_id::text, ''), coalesce(credit_account_id::text, ''), coalesce(vendor_id::text, ''), allocation_rule, auto
+		coalesce(debit_account_id::text, ''), coalesce(credit_account_id::text, ''), coalesce(vendor_id::text, ''), allocation_rule, auto, coalesce(line_no, 0)
 		from purchase_order_charge
 		where tenant_id = $1 and purchase_order_id = $2 order by seq`, p.TenantID, id)
 	if err != nil {
@@ -273,7 +302,7 @@ func loadPurchaseOrder(ctx context.Context, tx pgx.Tx, id string) (PurchaseOrder
 	for charges.Next() {
 		var c PurchaseOrderCharge
 		if err := charges.Scan(&c.Seq, &c.Calc, &c.Value, &c.Amount, &c.ChargeCodeID, &c.ChargeCode, &c.DebitType, &c.CreditType,
-			&c.DebitAccountID, &c.CreditAccountID, &c.VendorID, &c.AllocationRule, &c.Auto); err != nil {
+			&c.DebitAccountID, &c.CreditAccountID, &c.VendorID, &c.AllocationRule, &c.Auto, &c.LineNo); err != nil {
 			return PurchaseOrder{}, err
 		}
 		o.Charges = append(o.Charges, c)

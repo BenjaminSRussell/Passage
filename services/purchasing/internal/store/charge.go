@@ -196,7 +196,7 @@ func (s *Postgres) UpdateChargeCode(ctx context.Context, id string, ifMatch int,
 	return out, err
 }
 
-const autoChargeColumns = `id, legal_entity_id, charge_code_id, account_code, coalesce(account_id::text, ''), value, min_order_amount,
+const autoChargeColumns = `id, legal_entity_id, charge_code_id, account_code, coalesce(account_id::text, ''), item_code, coalesce(item_id::text, ''), value, min_order_amount,
 	coalesce(currency, ''), valid_from, valid_to, status, row_version, coalesce(created_by::text, ''), created_at,
 	coalesce(updated_by::text, ''), updated_at`
 
@@ -204,7 +204,7 @@ func scanAutoCharge(row pgx.Row, a *domain.AutoCharge) error {
 	var from time.Time
 	var to *time.Time
 	var value, min *decimal.Decimal
-	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.ChargeCodeID, &a.AccountCode, &a.AccountID, &value, &min, &a.Currency,
+	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.ChargeCodeID, &a.AccountCode, &a.AccountID, &a.ItemCode, &a.ItemID, &value, &min, &a.Currency,
 		&from, &to, &a.Status, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedBy, &a.UpdatedAt); err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func loadAutoCharge(ctx context.Context, tx pgx.Tx, id string) (domain.AutoCharg
 
 func autoChargeData(a domain.AutoCharge, by string) purchasingevents.AutoChargeData {
 	d := purchasingevents.AutoChargeData{AutoChargeID: a.ID, LegalEntityID: a.LegalEntityID, ChargeCodeID: a.ChargeCodeID,
-		AccountCode: a.AccountCode, AccountID: a.AccountID, Currency: a.Currency, ValidFrom: a.ValidFrom.String(),
+		AccountCode: a.AccountCode, AccountID: a.AccountID, ItemCode: a.ItemCode, ItemID: a.ItemID, Currency: a.Currency, ValidFrom: a.ValidFrom.String(),
 		Status: a.Status, Version: a.Version, ChangedBy: by}
 	if a.Value != nil {
 		d.Value = a.Value.String()
@@ -242,6 +242,9 @@ func autoChargeData(a domain.AutoCharge, by string) purchasingevents.AutoChargeD
 func (s *Postgres) CreateAutoCharge(ctx context.Context, in domain.AutoCharge, idem Idem) (domain.AutoCharge, error) {
 	p, _ := tenant.FromContext(ctx)
 	in.ID = ids.New()
+	if in.ItemCode == "" {
+		in.ItemCode = domain.AutoChargeItemAll
+	}
 	var out domain.AutoCharge
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		existing, replay, err := claimKey(ctx, tx, idem, in.ID)
@@ -252,11 +255,12 @@ func (s *Postgres) CreateAutoCharge(ctx context.Context, in domain.AutoCharge, i
 			out, err = loadAutoCharge(ctx, tx, existing)
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into auto_charge (tenant_id, id, legal_entity_id, charge_code_id, account_code, account_id, value,
-			min_order_amount, currency, valid_from, valid_to, status, created_by, updated_by)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+		if _, err := tx.Exec(ctx, `insert into auto_charge (tenant_id, id, legal_entity_id, charge_code_id, account_code, account_id, item_code, item_id,
+			value, min_order_amount, currency, valid_from, valid_to, status, created_by, updated_by)
+			values ($1, $2, $3, $4, $5, $6, $14, $15, $7, $8, $9, $10, $11, $12, $13, $13)`,
 			p.TenantID, in.ID, in.LegalEntityID, in.ChargeCodeID, in.AccountCode, nullable(in.AccountID), in.Value, in.MinOrderAmount,
-			nullable(in.Currency), in.ValidFrom.Time, dayPtr(in.ValidTo), in.Status, userOrNil(p.UserID)); err != nil {
+			nullable(in.Currency), in.ValidFrom.Time, dayPtr(in.ValidTo), in.Status, userOrNil(p.UserID),
+			in.ItemCode, nullable(in.ItemID)); err != nil {
 			return err
 		}
 		if out, err = loadAutoCharge(ctx, tx, in.ID); err != nil {

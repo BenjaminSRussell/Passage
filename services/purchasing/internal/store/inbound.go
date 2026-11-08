@@ -465,10 +465,7 @@ func applyPlan(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, line PurchaseO
 	for _, l := range next.Lines {
 		inputs = append(inputs, domain.LineInput{Qty: l.Qty, UnitPrice: l.UnitPrice, PriceUnit: l.PriceUnit, DiscountPct: l.DiscountPct, Tax: l.TaxAmount})
 	}
-	charges := make([]domain.ChargeInput, 0, len(cur.Charges))
-	for _, c := range cur.Charges {
-		charges = append(charges, domain.ChargeInput{Calc: c.Calc, Value: c.Value})
-	}
+	charges, kept := LiveCharges(cur.Charges, next.Lines)
 	doc, err := domain.Price(inputs, charges, money.MinorUnits(cur.Currency))
 	if err != nil {
 		return editResult{}, err
@@ -477,8 +474,7 @@ func applyPlan(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, line PurchaseO
 		la := doc.Lines[i]
 		next.Lines[i].GrossAmount, next.Lines[i].DiscountAmount, next.Lines[i].LineAmount, next.Lines[i].TaxAmount = la.Gross, la.Discount, la.Amount, la.Tax
 	}
-	next.Charges = make([]PurchaseOrderCharge, len(cur.Charges))
-	copy(next.Charges, cur.Charges)
+	next.Charges = kept
 	for i := range next.Charges {
 		next.Charges[i].Amount = doc.Charges[i]
 	}

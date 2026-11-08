@@ -84,10 +84,13 @@ func (a *API) editOrder(w http.ResponseWriter, r *http.Request) {
 	body.curSiteID, body.curWarehouseID = cur.SiteID, cur.WarehouseID
 	body.keepCharges = map[string]store.PurchaseOrderCharge{}
 	for _, c := range cur.Charges {
-		if _, ok := body.keepCharges[c.ChargeCodeID]; !ok && c.ChargeCodeID != "" {
-			body.keepCharges[c.ChargeCodeID] = c
+		if k := chargeKey(c.ChargeCodeID, c.LineNo); c.ChargeCodeID != "" {
+			if _, ok := body.keepCharges[k]; !ok {
+				body.keepCharges[k] = c
+			}
 		}
 	}
+	body.lineNos = lineNumbers(cur, body.Lines)
 	body.autoApplied = map[string]bool{}
 	for _, id := range cur.AutoChargeCodes {
 		body.autoApplied[id] = true
@@ -97,7 +100,9 @@ func (a *API) editOrder(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	numberLines(cur, body.Lines, next.Lines)
+	for i, n := range body.lineNos {
+		next.Lines[i].LineNo = n
+	}
 	// FR-17.20: the vendor of a PO never changes and an existing line keeps its category,
 	// so only the lines this edit adds are checked.
 	warnings, err := a.checkOrderCategoryAccess(r.Context(), next, func(i int) bool { return body.Lines[i].keep == nil })
@@ -155,21 +160,23 @@ func matchExistingLines(cur store.PurchaseOrder, lines []orderLineBody) error {
 	return nil
 }
 
-// numberLines gives each built line the number its body line names, and new
-// lines the numbers after the highest on the PO (cancelled lines included).
-func numberLines(cur store.PurchaseOrder, body []orderLineBody, lines []store.PurchaseOrderLine) {
+// lineNumbers gives each body line the number it names, and new lines the numbers after the
+// highest on the PO (cancelled lines included).
+func lineNumbers(cur store.PurchaseOrder, body []orderLineBody) []int {
 	top := 0
 	for _, l := range cur.Lines {
 		top = max(top, l.LineNo)
 	}
-	for i := range lines {
+	out := make([]int, len(body))
+	for i := range body {
 		if body[i].LineNo > 0 {
-			lines[i].LineNo = body[i].LineNo
+			out[i] = body[i].LineNo
 			continue
 		}
 		top++
-		lines[i].LineNo = top
+		out[i] = top
 	}
+	return out
 }
 
 // orderAction handles POST /purchase-orders/{id}:submit|approve|reject|confirm|cancel.

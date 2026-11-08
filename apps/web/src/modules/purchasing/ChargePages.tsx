@@ -15,6 +15,7 @@ import {
   type AllocationRule,
   type AutoCharge,
   type AutoChargeInput,
+  type AutoChargeItemKey,
   type AutoChargeKey,
   type ChargeCalc,
   type ChargeCode,
@@ -40,6 +41,12 @@ const KEYS: { value: AutoChargeKey; label: string }[] = [
   { value: "VENDOR", label: "One vendor" },
   { value: "GROUP", label: "A vendor group" },
   { value: "ALL", label: "Every vendor" },
+];
+
+const ITEM_KEYS: { value: AutoChargeItemKey; label: string }[] = [
+  { value: "ALL", label: "The whole order (header charge)" },
+  { value: "PRODUCT", label: "Lines of one product (line charge)" },
+  { value: "GROUP", label: "Lines of a product group (line charge)" },
 ];
 
 const calcLabel = (calc: ChargeCalc, value: string) =>
@@ -510,6 +517,9 @@ export function ChargeCodeDetailPage() {
 const keyLabel = (a: AutoCharge) =>
   a.accountCode === "ALL" ? "Every vendor" : `${a.accountCode === "GROUP" ? "Vendor group" : "Vendor"} ${(a.accountId ?? "").slice(0, 8)}`;
 
+const itemLabel = (a: AutoCharge) =>
+  a.itemCode === "PRODUCT" ? `Product ${(a.itemId ?? "").slice(0, 8)}` : a.itemCode === "GROUP" ? `Product group ${(a.itemId ?? "").slice(0, 8)}` : "Whole order";
+
 function autoColumns(codes: Map<string, ChargeCode>): DataTableColumn<AutoCharge>[] {
   return [
     {
@@ -519,6 +529,7 @@ function autoColumns(codes: Map<string, ChargeCode>): DataTableColumn<AutoCharge
       render: (a) => codes.get(a.chargeCodeId)?.code ?? <ShortId id={a.chargeCodeId} />,
     },
     { key: "accountCode", header: "Applies to", render: keyLabel },
+    { key: "itemCode", header: "Charged on", render: itemLabel },
     {
       key: "value",
       header: "Value",
@@ -611,6 +622,8 @@ interface AutoForm {
   chargeCodeId: string;
   accountCode: AutoChargeKey;
   accountId: string;
+  itemCode: AutoChargeItemKey;
+  itemId: string;
   value: string;
   minOrderAmount: string;
   currency: string;
@@ -625,6 +638,7 @@ function validateAuto(f: AutoForm, calc: ChargeCalc | undefined, creating: boole
     if (!uuidPattern.test(f.legalEntityId.trim())) e.legalEntityId = "Enter the legal entity id (a UUID).";
     if (!uuidPattern.test(f.chargeCodeId)) e.chargeCodeId = "Choose a charge code.";
     if (f.accountCode !== "ALL" && !uuidPattern.test(f.accountId.trim())) e.accountId = "Enter the vendor or vendor group id (a UUID).";
+    if (f.itemCode !== "ALL" && !uuidPattern.test(f.itemId.trim())) e.itemId = "Enter the product or product group id (a UUID).";
   }
   if (f.value.trim() !== "" && !decimalPattern.test(f.value.trim())) e.value = "Enter a decimal value.";
   else if (calc === "PERCENT" && Number(f.value) > 100) e.value = "A percentage is at most 100.";
@@ -647,6 +661,8 @@ function toAutoInput(f: AutoForm): AutoChargeInput {
     chargeCodeId: f.chargeCodeId,
     accountCode: f.accountCode,
     accountId: f.accountCode === "ALL" ? undefined : opt(f.accountId),
+    itemCode: f.itemCode,
+    itemId: f.itemCode === "ALL" ? undefined : opt(f.itemId),
     value: opt(f.value),
     minOrderAmount: opt(f.minOrderAmount),
     currency: opt(f.currency),
@@ -689,6 +705,8 @@ export function AutoChargeCreatePage() {
     chargeCodeId: preselected,
     accountCode: "VENDOR",
     accountId: "",
+    itemCode: "ALL",
+    itemId: "",
     value: "",
     minOrderAmount: "",
     currency: "",
@@ -762,6 +780,22 @@ export function AutoChargeCreatePage() {
                 {(c) => <Input {...c} value={form.accountId} onChange={(e) => set({ accountId: e.target.value })} />}
               </FormField>
             ) : null}
+            <FormField id="ac-item-key" label="Charged on" hint="A product or product group adds the charge to each matching line">
+              {(c) => (
+                <Select {...c} value={form.itemCode} onChange={(e) => set({ itemCode: e.target.value as AutoChargeItemKey })}>
+                  {ITEM_KEYS.map((k) => (
+                    <option key={k.value} value={k.value}>
+                      {k.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+            {form.itemCode !== "ALL" ? (
+              <FormField id="ac-item" label={form.itemCode === "GROUP" ? "Product group id" : "Product id"} error={errors.itemId}>
+                {(c) => <Input {...c} value={form.itemId} onChange={(e) => set({ itemId: e.target.value })} />}
+              </FormField>
+            ) : null}
             <AutoWindowFields id="ac" form={form} set={set} errors={errors} />
           </div>
         </Card>
@@ -798,6 +832,8 @@ export function AutoChargeDetailPage() {
     chargeCodeId: a.chargeCodeId,
     accountCode: a.accountCode,
     accountId: a.accountId ?? "",
+    itemCode: a.itemCode ?? "ALL",
+    itemId: a.itemId ?? "",
     value: a.value ?? "",
     minOrderAmount: a.minOrderAmount ?? "",
     currency: a.currency ?? "",
@@ -860,6 +896,7 @@ export function AutoChargeDetailPage() {
               items={[
                 { label: "Charge code", value: code.data ? `${code.data.code} - ${code.data.name}` : saved.chargeCodeId, mono: !code.data },
                 { label: "Applies to", value: keyLabel(saved) },
+                { label: "Charged on", value: itemLabel(saved) },
                 { label: "Legal entity", value: saved.legalEntityId, mono: true },
                 { label: "Status", value: <StatusBadge status={saved.status} /> },
                 { label: "Version", value: String(saved.version), mono: true },

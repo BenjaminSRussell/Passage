@@ -39,6 +39,8 @@ type AutoChargeData struct {
 	ChargeCodeID   string `json:"charge_code_id"`
 	AccountCode    string `json:"account_code"`
 	AccountID      string `json:"account_id,omitempty"`
+	ItemCode       string `json:"item_code"`
+	ItemID         string `json:"item_id,omitempty"`
 	Value          string `json:"value,omitempty"`
 	MinOrderAmount string `json:"min_order_amount,omitempty"`
 	Currency       string `json:"currency,omitempty"`

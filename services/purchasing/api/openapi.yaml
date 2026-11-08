@@ -326,6 +326,8 @@ components:
         chargeCodeId: { type: string, format: uuid }
         accountCode: { type: string, enum: [VENDOR, GROUP, ALL] }
         accountId: { type: string, format: uuid, description: "The vendor or vendor group; absent for ALL." }
+        itemCode: { type: string, enum: [PRODUCT, GROUP, ALL], description: "What the charge is keyed on besides the vendor: ALL adds a header charge, PRODUCT or GROUP a line charge on each line of that product or product group." }
+        itemId: { type: string, format: uuid, description: "The product or product group; absent for ALL." }
         value: { $ref: '#/components/schemas/Money', description: "Overrides the charge code's default value." }
         minOrderAmount: { $ref: '#/components/schemas/Money', description: "Applies only to POs in currency whose lines total at least this after discount and before any charge." }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
@@ -341,12 +343,14 @@ components:
       type: object
       required: [legalEntityId, chargeCodeId, accountCode]
       additionalProperties: false
-      description: On PUT only value, minOrderAmount, currency, validFrom, validTo and status are read and replace the stored ones; the charge code and the key do not change.
+      description: On PUT only value, minOrderAmount, currency, validFrom, validTo and status are read and replace the stored ones; the charge code and the key (accountCode, accountId, itemCode, itemId) do not change.
       properties:
         legalEntityId: { type: string, format: uuid }
         chargeCodeId: { type: string, format: uuid, description: "An ACTIVE charge code of the same legal entity (PRC-CHG-004)." }
         accountCode: { type: string, enum: [VENDOR, GROUP, ALL] }
         accountId: { type: string, format: uuid, description: "Required for VENDOR and GROUP, empty for ALL." }
+        itemCode: { type: string, enum: [PRODUCT, GROUP, ALL], default: ALL, description: "ALL adds a header charge to the PO. PRODUCT or GROUP adds a line charge to each line of that product or product group (the groups come from the product group membership lookup)." }
+        itemId: { type: string, format: uuid, description: "Required for PRODUCT and GROUP, empty for ALL." }
         value: { $ref: '#/components/schemas/Money' }
         minOrderAmount: { $ref: '#/components/schemas/Money', description: "Needs currency." }
         currency: { type: string, pattern: '^[A-Z]{3}$', description: "Required for a FIXED or PER_UNIT charge code (an amount of money) and with minOrderAmount." }
@@ -581,8 +585,9 @@ components:
         nextCursor: { type: string, format: uuid }
     PriceChargeInput:
       type: object
-      description: A header charge. Give calc and value, or a chargeCodeId whose calc and default value apply (a value given then overrides the default; a calc given must be the code's).
+      description: A header charge, or a line charge with lineNo. Give calc and value, or a chargeCodeId whose calc and default value apply (a value given then overrides the default; a calc given must be the code's).
       properties:
+        lineNo: { type: integer, minimum: 1, description: "Makes it a line charge (FR-17.9): PER_UNIT takes that line's quantity and PERCENT that line's amount after discount. On create the line's position (1-based); on PATCH the number of an existing line, or of a new line (the numbers after the highest on the order, cancelled lines included). 422 when it is not a line of the order." }
         chargeCodeId: { type: string, format: uuid, description: "An ACTIVE charge code of the PO's legal entity (PRC-CHG-004 otherwise). The code's debit and credit sides, vendor and allocation rule are copied to the charge." }
         calc: { type: string, enum: [FIXED, PER_UNIT, PERCENT] }
         value: { $ref: '#/components/schemas/Money' }
@@ -749,10 +754,11 @@ components:
               vendorId: { type: string, format: uuid, description: "The vendor a VENDOR side is payable to; the PO vendor when absent." }
               allocationRule: { type: string, enum: [QTY, AMOUNT, LINES], description: "How wave 18 allocates the charge to lines at invoice time." }
               auto: { type: boolean, description: "True when an auto charge added the charge." }
+              lineNo: { type: integer, description: "The line a line charge belongs to; absent for a header charge. A charge on a cancelled line is dropped when the order is repriced or changed by a planning message." }
         autoChargeCodes:
           type: array
-          description: The charge codes auto charges have added to the PO (FR-17.9); applyAutoCharges does not add them again. The set only grows.
-          items: { type: string, format: uuid }
+          description: The charges auto charges have added to the PO (FR-17.9); applyAutoCharges does not add them again. Each is a charge code id (header charge) or "<charge code id>#<line no>" (line charge). The set only grows.
+          items: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         warnings:

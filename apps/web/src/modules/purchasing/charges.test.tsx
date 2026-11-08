@@ -1,11 +1,13 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { chargesFollowingLines, type ChargeDraft } from "./PurchaseOrderPages";
 import { json, pageViolations, problem, renderAt, stubFetch } from "./testHarness";
 
 const LE = "11111111-1111-4111-8111-111111111111";
 const VENDOR = "22222222-2222-4222-8222-222222222222";
 const ID = "44444444-4444-4444-8444-444444444444";
 const AUTO = "55555555-5555-4555-8555-555555555555";
+const PRODUCT = "33333333-3333-4333-8333-333333333333";
 const BASE = "/api/v1/procurement";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -259,6 +261,42 @@ describe("auto charges", () => {
     });
   });
 
+  it("keys an auto charge on a product so it becomes a line charge", async () => {
+    const mock = stubFetch((url, init) => {
+      if (init.method === "POST") return json({ ...auto, itemCode: "PRODUCT", itemId: PRODUCT }, 201, { ETag: '"1"' });
+      if (String(url).endsWith(`/auto-charges/${AUTO}`)) return json({ ...auto, itemCode: "PRODUCT", itemId: PRODUCT });
+      if (String(url).endsWith(`/charge-codes/${ID}`)) return json(code);
+      return json({ items: [code] });
+    });
+    const { router } = renderAt(`/purchasing/auto-charges/new?chargeCodeId=${ID}`);
+    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    await screen.findByRole("option", { name: "FREIGHT - Freight" });
+    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "USD" } });
+    expect(screen.queryByLabelText("Product id")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Charged on"), { target: { value: "PRODUCT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save auto charge" }));
+    expect(await screen.findByText("Enter the product or product group id (a UUID).")).toBeInTheDocument();
+    expect(mock.mock.calls.some(([, i]) => (i as RequestInit).method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.click(screen.getByRole("button", { name: "Save auto charge" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/auto-charges/${AUTO}`));
+    const post = mock.mock.calls.find(([, i]) => (i as RequestInit).method === "POST")!;
+    expect(JSON.parse((post[1] as RequestInit).body as string)).toMatchObject({ itemCode: "PRODUCT", itemId: PRODUCT, accountCode: "VENDOR" });
+    expect(await screen.findByText(/Product 33333333/)).toBeInTheDocument();
+  });
+
+  it("lists what each auto charge is charged on", async () => {
+    stubFetch((url) =>
+      String(url).includes("/auto-charges")
+        ? json({ items: [{ ...auto, itemCode: "GROUP", itemId: PRODUCT }, auto] })
+        : json({ items: [code] }),
+    );
+    renderAt("/purchasing/auto-charges");
+    expect(await screen.findByText(/Product group 33333333/)).toBeInTheDocument();
+    expect(screen.getByText("Whole order")).toBeInTheDocument();
+  });
+
   it("needs no vendor for every-vendor charges", async () => {
     stubFetch(() => json({ items: [{ ...code, calc: "PERCENT", defaultValue: "2" }] }));
     renderAt(`/purchasing/auto-charges/new?chargeCodeId=${ID}`);
@@ -362,7 +400,7 @@ describe("charges on a purchase order", () => {
     });
     renderAt(`/purchasing/purchase-orders/${po.id}/edit`);
     expect(await screen.findByRole("option", { name: "FREIGHT (on this order)" })).toBeInTheDocument();
-    expect(screen.getByText(/Auto charges have added a charge code to this order before/)).toBeInTheDocument();
+    expect(screen.getByText(/Auto charges have added a charge to this order before/)).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(/Add the charges from auto charges/));
     fireEvent.click(screen.getByRole("button", { name: /Save/ }));
     await waitFor(() => expect(mock.mock.calls.some(([, i]) => (i as RequestInit).method === "PATCH")).toBe(true));
@@ -372,11 +410,89 @@ describe("charges on a purchase order", () => {
     expect(body.applyAutoCharges).toBe(true);
   });
 
+  it("puts a charge on one line of a new order", async () => {
+    const mock = stubFetch((url, init) => {
+      if (init.method === "POST") return json(po, 201);
+      if (String(url).endsWith(`/purchase-orders/${po.id}`)) return json(po);
+      return json({ items: [] });
+    });
+    renderAt("/purchasing/purchase-orders/new");
+    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Steel" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add charge" }));
+    expect(screen.getByLabelText("Charged on")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Charged on"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Calculation"), { target: { value: "PERCENT" } });
+    fireEvent.change(screen.getByLabelText("Value"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    await waitFor(() => expect(mock.mock.calls.some(([, i]) => (i as RequestInit).method === "POST")).toBe(true));
+    const post = mock.mock.calls.find(([, i]) => (i as RequestInit).method === "POST")!;
+    expect(JSON.parse((post[1] as RequestInit).body as string).charges).toEqual([{ calc: "PERCENT", value: "10", lineNo: 1 }]);
+  });
+
+  it("keeps the line of a line charge on an edit and offers the existing lines", async () => {
+    const lineCharge = {
+      ...po,
+      lines: [
+        { lineNo: 1, description: "Steel", qty: "5", unit: "EA", unitPrice: "10", priceUnit: "1", discountPct: "0", grossAmount: "50", discountAmount: "0", lineAmount: "50", taxAmount: "0", deliveryDate: "2026-04-01", priceSource: "MANUAL", status: "OPEN" },
+        { lineNo: 2, description: "Bolts", qty: "5", unit: "EA", unitPrice: "1", priceUnit: "1", discountPct: "0", grossAmount: "5", discountAmount: "0", lineAmount: "5", taxAmount: "0", deliveryDate: "2026-04-01", priceSource: "MANUAL", status: "OPEN" },
+      ],
+      charges: [{ seq: 1, calc: "PERCENT", value: "10", amount: "0.5", lineNo: 2 }],
+    };
+    const mock = stubFetch((url, init) => {
+      if (init.method === "PATCH") return json(lineCharge);
+      if (String(url).endsWith(`/purchase-orders/${po.id}`)) return json(lineCharge);
+      return json({ items: [] });
+    });
+    renderAt(`/purchasing/purchase-orders/${po.id}/edit`);
+    const select = await screen.findByLabelText("Charged on");
+    expect(select).toHaveValue("2");
+    expect(screen.getByRole("option", { name: "Line 1 - Steel" })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
+    await waitFor(() => expect(mock.mock.calls.some(([, i]) => (i as RequestInit).method === "PATCH")).toBe(true));
+    const patch = mock.mock.calls.find(([, i]) => (i as RequestInit).method === "PATCH")!;
+    expect(JSON.parse((patch[1] as RequestInit).body as string).charges).toEqual([{ calc: "PERCENT", value: "10", lineNo: 1 }]);
+  });
+
+  it("shows the line of a line charge on the order", async () => {
+    const withLine = { ...po, charges: [{ ...po.charges[0], lineNo: 3 }, { seq: 2, calc: "FIXED", value: "5", amount: "5" }] };
+    stubFetch((url) => (String(url).endsWith(`/purchase-orders/${po.id}`) ? json(withLine) : json({ items: [] })));
+    renderAt(`/purchasing/purchase-orders/${po.id}`);
+    expect(await screen.findByText("Line 3")).toBeInTheDocument();
+    expect(screen.getByText("Whole order")).toBeInTheDocument();
+  });
+
   it("shows the code and sides of each charge on the order", async () => {
     stubFetch((url) => (String(url).endsWith(`/purchase-orders/${po.id}`) ? json(po) : json({ items: [] })));
     renderAt(`/purchasing/purchase-orders/${po.id}`);
     expect(await screen.findByText("FREIGHT (auto)")).toBeInTheDocument();
     expect(screen.getByText("Item / Vendor")).toBeInTheDocument();
     expect(screen.getByText("Qty")).toBeInTheDocument();
+  });
+});
+
+describe("line charges on a new order follow their lines", () => {
+  const line = (key: string) => ({ key }) as unknown as Parameters<typeof chargesFollowingLines>[0][number];
+  const charge = (key: string, lineNo?: number): ChargeDraft => ({ key, calc: "FIXED", value: "1", lineNo });
+
+  it("moves a charge after a removed line up with its line and drops the removed line's charges", () => {
+    const before = [line("a"), line("b"), line("c")];
+    const after = [line("a"), line("c")];
+    const out = chargesFollowingLines(before, after, [charge("h"), charge("on-a", 1), charge("on-b", 2), charge("on-c", 3)]);
+    expect(out.map((c) => [c.key, c.lineNo])).toEqual([
+      ["h", undefined],
+      ["on-a", 1],
+      ["on-c", 2],
+    ]);
+  });
+
+  it("leaves the charges alone when a line is added or edited", () => {
+    const before = [line("a")];
+    const charges = [charge("on-a", 1)];
+    expect(chargesFollowingLines(before, [line("a"), line("b")], charges)).toEqual(charges);
   });
 });

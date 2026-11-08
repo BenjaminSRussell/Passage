@@ -45,6 +45,14 @@ const (
 	AutoChargeAll    = "ALL"
 )
 
+// What an auto charge is keyed on besides the vendor: every item (a header charge on the PO), one
+// product, or the products of one product group (a line charge on each matching line).
+const (
+	AutoChargeItemAll     = "ALL"
+	AutoChargeItemProduct = "PRODUCT"
+	AutoChargeItemGroup   = "GROUP"
+)
+
 // ValidChargeCalc reports whether c is FIXED, PER_UNIT or PERCENT.
 func ValidChargeCalc(c string) bool { return c == CalcFixed || c == CalcPerUnit || c == CalcPercent }
 
@@ -136,11 +144,15 @@ func (c ChargeCode) Validate() *Error {
 // amount of money, so it applies only to POs in Currency; a PERCENT charge with no Currency applies
 // in every currency. The window and status decide whether it applies on a day.
 type AutoCharge struct {
-	ID             string           `json:"id"`
-	LegalEntityID  string           `json:"legalEntityId"`
-	ChargeCodeID   string           `json:"chargeCodeId"`
-	AccountCode    string           `json:"accountCode"`
-	AccountID      string           `json:"accountId,omitempty"`
+	ID            string `json:"id"`
+	LegalEntityID string `json:"legalEntityId"`
+	ChargeCodeID  string `json:"chargeCodeId"`
+	AccountCode   string `json:"accountCode"`
+	AccountID     string `json:"accountId,omitempty"`
+	// ItemCode and ItemID key the charge on products (FR-17.9): ALL (no ItemID) adds a header charge,
+	// PRODUCT or GROUP adds a line charge to each line of that product or product group.
+	ItemCode       string           `json:"itemCode"`
+	ItemID         string           `json:"itemId,omitempty"`
 	Value          *decimal.Decimal `json:"value,omitempty"`
 	MinOrderAmount *decimal.Decimal `json:"minOrderAmount,omitempty"`
 	Currency       string           `json:"currency,omitempty"`
@@ -162,6 +174,10 @@ func (a AutoCharge) Validate(code ChargeCode) *Error {
 		return fail(CodeValidation, "accountCode must be VENDOR, GROUP or ALL")
 	case (a.AccountCode == AutoChargeAll) != (a.AccountID == ""):
 		return fail(CodeValidation, "accountId is required for VENDOR and GROUP and must be empty for ALL")
+	case a.ItemCode != AutoChargeItemAll && a.ItemCode != AutoChargeItemProduct && a.ItemCode != AutoChargeItemGroup:
+		return fail(CodeValidation, "itemCode must be PRODUCT, GROUP or ALL")
+	case (a.ItemCode == AutoChargeItemAll) != (a.ItemID == ""):
+		return fail(CodeValidation, "itemId is required for PRODUCT and GROUP and must be empty for ALL")
 	case !ValidChargeStatus(a.Status):
 		return fail(CodeValidation, "status must be ACTIVE or INACTIVE")
 	case a.Value != nil && a.Value.Sign() < 0:
@@ -216,4 +232,26 @@ func (a AutoCharge) Applies(vendorID string, vendorGroups []string, currency str
 		return false
 	}
 	return a.MinOrderAmount == nil || !orderBase.LessThan(*a.MinOrderAmount)
+}
+
+// OnLines reports whether the auto charge is a line charge (keyed on a product or product group)
+// and not a header charge.
+func (a AutoCharge) OnLines() bool {
+	return a.ItemCode == AutoChargeItemProduct || a.ItemCode == AutoChargeItemGroup
+}
+
+// MatchesLine reports whether a line charge of the auto charge belongs on a line of productID, a member
+// of productGroups. A header auto charge matches no line.
+func (a AutoCharge) MatchesLine(productID string, productGroups []string) bool {
+	switch a.ItemCode {
+	case AutoChargeItemProduct:
+		return productID != "" && a.ItemID == productID
+	case AutoChargeItemGroup:
+		for _, g := range productGroups {
+			if g == a.ItemID {
+				return true
+			}
+		}
+	}
+	return false
 }

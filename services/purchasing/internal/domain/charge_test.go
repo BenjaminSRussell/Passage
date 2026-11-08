@@ -77,7 +77,7 @@ func TestChargeCode_Validate(t *testing.T) {
 func TestAutoCharge_Validate(t *testing.T) {
 	money, pct := goodCode(), goodCode()
 	pct.Calc = CalcPercent
-	base := AutoCharge{AccountCode: AutoChargeVendor, AccountID: "v", Currency: "USD", ValidFrom: chgDay("2026-01-01"), Status: ChargeActive}
+	base := AutoCharge{AccountCode: AutoChargeVendor, AccountID: "v", ItemCode: AutoChargeItemAll, Currency: "USD", ValidFrom: chgDay("2026-01-01"), Status: ChargeActive}
 	if err := base.Validate(money); err != nil {
 		t.Fatalf("good auto charge: %v", err)
 	}
@@ -94,6 +94,9 @@ func TestAutoCharge_Validate(t *testing.T) {
 		"minimum without currency": {pct, func(a *AutoCharge) { a.MinOrderAmount, a.Currency = chgDec("5"), "" }},
 		"money without currency":   {money, func(a *AutoCharge) { a.Currency = "" }},
 		"window reversed":          {money, func(a *AutoCharge) { to := chgDay("2025-12-31"); a.ValidTo = &to }},
+		"bad item key":             {money, func(a *AutoCharge) { a.ItemCode = "SKU" }},
+		"product key, no product":  {money, func(a *AutoCharge) { a.ItemCode = AutoChargeItemProduct }},
+		"ALL item with a product":  {money, func(a *AutoCharge) { a.ItemID = "p" }},
 		"bad status":               {money, func(a *AutoCharge) { a.Status = "GONE" }},
 	} {
 		a := base
@@ -158,5 +161,31 @@ func TestAutoCharge_Applies(t *testing.T) {
 		if got := a.Applies(tc.vendor, groups, tc.cur, tc.base, tc.on); got != tc.want {
 			t.Errorf("%s: Applies = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestAutoCharge_MatchesLine(t *testing.T) {
+	prod := AutoCharge{ItemCode: AutoChargeItemProduct, ItemID: "p1"}
+	grp := AutoCharge{ItemCode: AutoChargeItemGroup, ItemID: "g1"}
+	all := AutoCharge{ItemCode: AutoChargeItemAll}
+	for name, tc := range map[string]struct {
+		a      AutoCharge
+		prod   string
+		groups []string
+		want   bool
+	}{
+		"product match":     {prod, "p1", nil, true},
+		"product mismatch":  {prod, "p2", []string{"g1"}, false},
+		"no product":        {prod, "", nil, false},
+		"group member":      {grp, "p2", []string{"g0", "g1"}, true},
+		"group non-member":  {grp, "p2", []string{"g0"}, false},
+		"header is no line": {all, "p1", []string{"g1"}, false},
+	} {
+		if got := tc.a.MatchesLine(tc.prod, tc.groups); got != tc.want {
+			t.Errorf("%s: got %v, want %v", name, got, tc.want)
+		}
+	}
+	if all.OnLines() || !prod.OnLines() || !grp.OnLines() {
+		t.Error("OnLines: only PRODUCT and GROUP are line charges")
 	}
 }

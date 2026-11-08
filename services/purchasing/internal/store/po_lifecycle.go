@@ -589,7 +589,7 @@ func snapshotOf(po PurchaseOrder, lines []PurchaseOrderLine) domain.Snapshot {
 	}
 	charges := make([]domain.SnapshotCharge, 0, len(po.Charges))
 	for _, c := range po.Charges {
-		charges = append(charges, domain.SnapshotCharge{Calc: c.Calc, Value: c.Value, Amount: c.Amount, ChargeCode: c.ChargeCode})
+		charges = append(charges, domain.SnapshotCharge{Calc: c.Calc, Value: c.Value, Amount: c.Amount, ChargeCode: c.ChargeCode, LineNo: c.LineNo})
 	}
 	return domain.NewSnapshot(po.Currency, po.Total, out, charges)
 }
@@ -675,7 +675,7 @@ func addAutoChargeCodes(ctx context.Context, tx pgx.Tx, id string, codes []strin
 	}
 	p, _ := tenant.FromContext(ctx)
 	_, err := tx.Exec(ctx, `update purchase_order set auto_charge_codes = array(
-		select c from unnest(auto_charge_codes || $3::uuid[]) with ordinality as t(c, n) group by c order by min(n))
+		select c from unnest(auto_charge_codes || $3::text[]) with ordinality as t(c, n) group by c order by min(n))
 		where tenant_id = $1 and id = $2`, p.TenantID, id, codes)
 	return err
 }

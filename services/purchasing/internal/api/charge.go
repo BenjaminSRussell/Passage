@@ -188,10 +188,14 @@ func (a *API) changeChargeCode(w http.ResponseWriter, r *http.Request) {
 // autoChargeBody is the POST body of an auto charge. PUT takes value, minOrderAmount, currency,
 // validFrom, validTo and status; the charge code and the key do not change.
 type autoChargeBody struct {
-	LegalEntityID  string      `json:"legalEntityId"`
-	ChargeCodeID   string      `json:"chargeCodeId"`
-	AccountCode    string      `json:"accountCode"`
-	AccountID      string      `json:"accountId,omitempty"`
+	LegalEntityID string `json:"legalEntityId"`
+	ChargeCodeID  string `json:"chargeCodeId"`
+	AccountCode   string `json:"accountCode"`
+	AccountID     string `json:"accountId,omitempty"`
+	// ItemCode (PRODUCT, GROUP or ALL, the default) and ItemID key the charge on products: PRODUCT and
+	// GROUP add a line charge to each matching line, ALL a header charge.
+	ItemCode       string      `json:"itemCode,omitempty"`
+	ItemID         string      `json:"itemId,omitempty"`
 	Value          string      `json:"value,omitempty"`
 	MinOrderAmount string      `json:"minOrderAmount,omitempty"`
 	Currency       string      `json:"currency,omitempty"`
@@ -216,6 +220,9 @@ func (a *API) autoChargeFrom(body autoChargeBody, code domain.ChargeCode) (domai
 	if err := uuidField("accountId", body.AccountID, false); err != nil {
 		return domain.AutoCharge{}, err
 	}
+	if err := uuidField("itemId", body.ItemID, false); err != nil {
+		return domain.AutoCharge{}, err
+	}
 	value, err := optionalDecimal("value", body.Value)
 	if err != nil {
 		return domain.AutoCharge{}, err
@@ -235,7 +242,7 @@ func (a *API) autoChargeFrom(body autoChargeBody, code domain.ChargeCode) (domai
 		from = *body.ValidFrom
 	}
 	ac := domain.AutoCharge{LegalEntityID: code.LegalEntityID, ChargeCodeID: code.ID, AccountCode: body.AccountCode,
-		AccountID: body.AccountID, Value: value, MinOrderAmount: min, Currency: cur, ValidFrom: from, ValidTo: body.ValidTo,
+		AccountID: body.AccountID, ItemCode: orDefault(body.ItemCode, domain.AutoChargeItemAll), ItemID: body.ItemID, Value: value, MinOrderAmount: min, Currency: cur, ValidFrom: from, ValidTo: body.ValidTo,
 		Status: orDefault(body.Status, domain.ChargeActive)}
 	if err := ac.Validate(code); err != nil {
 		return domain.AutoCharge{}, err
@@ -361,7 +368,7 @@ func (a *API) changeAutoCharge(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	body.AccountCode, body.AccountID = cur.AccountCode, cur.AccountID
+	body.AccountCode, body.AccountID, body.ItemCode, body.ItemID = cur.AccountCode, cur.AccountID, cur.ItemCode, cur.ItemID
 	ac, err := a.autoChargeFrom(body, code)
 	if err != nil {
 		fail(w, r, err)
@@ -381,25 +388,36 @@ func (a *API) changeAutoCharge(w http.ResponseWriter, r *http.Request) {
 // A charge with a chargeCodeId takes its calculation and value from the code unless the body gives a
 // value (a calc given must be the code's, PRC-CHG-005) and copies the code's sides; the code must be
 // ACTIVE and of the PO's legal entity (PRC-CHG-004), unless the PO already carries that code: an edit
-// keeps the calculation, value and sides it was entered with. With applyAutoCharges the active auto
-// charges that apply to the vendor, currency and order total add their codes, once each: a code among
-// the charges, or one an auto charge added to the PO before (and the buyer may since have removed), is
-// not added again. It also returns the codes the auto charges added.
+// keeps the calculation, value and sides it was entered with. A charge with a lineNo belongs to that
+// line. With applyAutoCharges the active auto charges that apply to the vendor, currency and order
+// total add their codes, once each: a header auto charge adds a header charge, one keyed on a product
+// or product group a charge on each line of it. A charge already among the charges, or one an auto
+// charge added to the PO before (and the buyer may since have removed), is not added again. It also
+// returns the keys of the charges the auto charges added (chargeKey).
 func (a *API) orderCharges(ctx context.Context, body orderBody, inputs []domain.LineInput) ([]domain.ChargeInput, []store.PurchaseOrderCharge, []string, error) {
 	charges := make([]domain.ChargeInput, 0, len(body.Charges))
 	sides := make([]store.PurchaseOrderCharge, 0, len(body.Charges))
 	have := map[string]bool{}
+	numbers := body.lineNumbers()
+	position := make(map[int]int, len(numbers))
+	for i, n := range numbers {
+		position[n] = i + 1
+	}
 	for i, c := range body.Charges {
 		field := "charges[" + strconv.Itoa(i) + "]."
 		if err := uuidField(field+"chargeCodeId", c.ChargeCodeID, false); err != nil {
 			return nil, nil, nil, err
 		}
+		if c.LineNo != 0 && position[c.LineNo] == 0 {
+			return nil, nil, nil, invalid(field+"lineNo", "is not a line of this purchase order")
+		}
 		in, side, err := a.chargeFromBody(ctx, field, c, body)
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		in.Line, side.LineNo = position[c.LineNo], c.LineNo
 		if c.ChargeCodeID != "" {
-			have[c.ChargeCodeID] = true
+			have[chargeKey(c.ChargeCodeID, c.LineNo)] = true
 		}
 		charges, sides = append(charges, in), append(sides, side)
 	}
@@ -424,29 +442,78 @@ func (a *API) orderCharges(ctx context.Context, body orderBody, inputs []domain.
 		return nil, nil, nil, err
 	}
 	var added []string
+	headers := 0
+	productGroups := map[string][]string{}
 	for _, ac := range autos {
-		if have[ac.ChargeCodeID] || body.autoApplied[ac.ChargeCodeID] || !ac.Applies(body.VendorID, groups, cur, base, today) {
+		if !ac.Applies(body.VendorID, groups, cur, base, today) {
 			continue
 		}
-		code, err := a.store.GetChargeCode(ctx, ac.ChargeCodeID)
-		if err != nil {
-			return nil, nil, nil, err
+		// The lines the charge goes on: none for a header charge, which is keyed on line 0.
+		targets := []int{0}
+		if ac.OnLines() {
+			targets = targets[:0]
+			for i, l := range body.Lines {
+				pg, ok := productGroups[l.ProductID]
+				if !ok && l.ProductID != "" && ac.ItemCode == domain.AutoChargeItemGroup {
+					if pg, err = a.memberships.ProductGroups(ctx, l.ProductID); err != nil {
+						return nil, nil, nil, err
+					}
+					productGroups[l.ProductID] = pg
+				}
+				if ac.MatchesLine(l.ProductID, pg) {
+					targets = append(targets, i+1)
+				}
+			}
 		}
-		if code.Status != domain.ChargeActive {
-			continue
+		var code domain.ChargeCode
+		for _, at := range targets {
+			lineNo := 0
+			if at != 0 {
+				lineNo = numbers[at-1]
+			}
+			key := chargeKey(ac.ChargeCodeID, lineNo)
+			if have[key] || body.autoApplied[key] {
+				continue
+			}
+			if code.ID == "" {
+				if code, err = a.store.GetChargeCode(ctx, ac.ChargeCodeID); err != nil {
+					return nil, nil, nil, err
+				}
+			}
+			if code.Status != domain.ChargeActive {
+				break
+			}
+			// Header charges are bounded by maxAutoCharges and all of them by maxAutoLineCharges, so line
+			// charges added before do not count against the header bound.
+			if !ac.OnLines() && headers == maxAutoCharges || len(added) == maxAutoLineCharges {
+				return nil, nil, nil, invalid("applyAutoCharges", "adds too many charges; deactivate auto charges that overlap")
+			}
+			if !ac.OnLines() {
+				headers++
+			}
+			calc, value := ac.Resolve(code)
+			have[key] = true
+			added = append(added, key)
+			charges = append(charges, domain.ChargeInput{Calc: calc, Value: value, Line: at})
+			side := sidesOf(code)
+			side.Auto, side.LineNo = true, lineNo
+			sides = append(sides, side)
 		}
-		if len(added) == maxAutoCharges {
-			return nil, nil, nil, invalid("applyAutoCharges", "adds more than "+strconv.Itoa(maxAutoCharges)+" charges; deactivate auto charges that overlap")
-		}
-		calc, value := ac.Resolve(code)
-		have[code.ID] = true
-		added = append(added, code.ID)
-		charges = append(charges, domain.ChargeInput{Calc: calc, Value: value})
-		side := sidesOf(code)
-		side.Auto = true
-		sides = append(sides, side)
 	}
 	return charges, sides, added, nil
+}
+
+// maxAutoLineCharges bounds the charges auto charges keyed on products add to a PO (one per line at most
+// for each such auto charge, and a PO has at most 500 lines).
+const maxAutoLineCharges = 500
+
+// chargeKey names a charge by its code and, for a line charge, its line: the charge code id, or
+// "<code id>#<line no>". PO.autoChargeCodes holds these keys.
+func chargeKey(chargeCodeID string, lineNo int) string {
+	if lineNo == 0 {
+		return chargeCodeID
+	}
+	return chargeCodeID + "#" + strconv.Itoa(lineNo)
 }
 
 // sidesOf copies the code's identity and sides into a PO charge.
@@ -474,7 +541,7 @@ func (a *API) chargeFromBody(ctx context.Context, field string, c chargeBody, bo
 	var side store.PurchaseOrderCharge
 	var calc string
 	var value decimal.Decimal
-	if kept, ok := body.keepCharges[c.ChargeCodeID]; ok {
+	if kept, ok := body.keepCharges[chargeKey(c.ChargeCodeID, c.LineNo)]; ok {
 		// The PO already carries this code: keep the calculation, value and sides it was entered
 		// with, even if the code has since been changed or deactivated.
 		side, calc, value = kept, kept.Calc, kept.Value
@@ -516,6 +583,7 @@ func copyChargeSides(out *store.PurchaseOrder, sides []store.PurchaseOrderCharge
 		c := &out.Charges[i]
 		c.ChargeCodeID, c.ChargeCode, c.DebitType, c.CreditType = s.ChargeCodeID, s.ChargeCode, s.DebitType, s.CreditType
 		c.DebitAccountID, c.CreditAccountID, c.VendorID, c.AllocationRule, c.Auto = s.DebitAccountID, s.CreditAccountID, s.VendorID, s.AllocationRule, s.Auto
+		c.LineNo = s.LineNo
 	}
 }
 

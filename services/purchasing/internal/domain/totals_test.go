@@ -100,6 +100,34 @@ func TestPrice_HeaderAndLinesAgree(t *testing.T) {
 	}
 }
 
+// TestPrice_LineCharges prices charges on one line (FR-17.9): PER_UNIT takes that line's quantity and
+// PERCENT its amount after discount, and they count in the charges total.
+func TestPrice_LineCharges(t *testing.T) {
+	lines := []domain.LineInput{line(t, "10", "1.00", "1", "10", "0"), line(t, "2", "50", "1", "0", "0")}
+	doc, err := domain.Price(lines, []domain.ChargeInput{
+		{Calc: domain.CalcPercent, Value: dec(t, "10"), Line: 1},   // 10% of 9.00
+		{Calc: domain.CalcPerUnit, Value: dec(t, "1.50"), Line: 2}, // 2 x 1.50
+		{Calc: domain.CalcPercent, Value: dec(t, "1")},             // 1% of 109.00 (header)
+		{Calc: domain.CalcFixed, Value: dec(t, "4"), Line: 2},
+	}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"0.90", "3.00", "1.09", "4.00"} {
+		if !doc.Charges[i].Equal(dec(t, want)) {
+			t.Errorf("charge %d = %s, want %s", i, doc.Charges[i], want)
+		}
+	}
+	if !doc.Totals.ChargesTotal.Equal(dec(t, "8.99")) || !doc.Totals.Total.Equal(dec(t, "117.99")) {
+		t.Errorf("charges %s total %s, want 8.99 and 117.99", doc.Totals.ChargesTotal, doc.Totals.Total)
+	}
+	for _, bad := range []int{-1, 3} {
+		if _, err := domain.Price(lines, []domain.ChargeInput{{Calc: domain.CalcFixed, Value: dec(t, "1"), Line: bad}}, 2); err == nil {
+			t.Errorf("a charge on line %d of 2 should be refused", bad)
+		}
+	}
+}
+
 // TestPrice_TotalsIdentityOver1000RandomPOs is AC4 and AC5: for 1,000 seeded
 // random POs with 1 to 50 lines, charges and tax, the total equals
 // subtotal − discount + charges + tax to the cent and equals the sum of parts.
@@ -120,7 +148,8 @@ func TestPrice_TotalsIdentityOver1000RandomPOs(t *testing.T) {
 		}
 		charges := make([]domain.ChargeInput, r.Intn(4))
 		for i := range charges {
-			charges[i] = domain.ChargeInput{Calc: calcs[r.Intn(len(calcs))], Value: decimal.New(int64(r.Intn(100_000)), -2)}
+			charges[i] = domain.ChargeInput{Calc: calcs[r.Intn(len(calcs))], Value: decimal.New(int64(r.Intn(100_000)), -2),
+				Line: r.Intn(len(lines) + 1)}
 		}
 		doc, err := domain.Price(lines, charges, 2)
 		if err != nil {

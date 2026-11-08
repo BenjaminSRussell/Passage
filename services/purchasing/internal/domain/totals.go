@@ -33,10 +33,13 @@ type LineAmounts struct {
 	Tax      decimal.Decimal
 }
 
-// ChargeInput is a header charge before it is priced.
+// ChargeInput is a charge before it is priced. Line is the 1-based position among the priced lines of
+// the one line the charge belongs to (FR-17.9 line charge: PER_UNIT takes that line's quantity and
+// PERCENT its amount after discount); 0 is a header charge over the whole document.
 type ChargeInput struct {
 	Calc  string
 	Value decimal.Decimal
+	Line  int
 }
 
 // Totals are the persisted document totals (FR-17.11).
@@ -100,6 +103,7 @@ func Price(lines []LineInput, charges []ChargeInput, minor int32) (Document, err
 		return doc, fail(CodeValidation, "a document needs at least one line")
 	}
 	qty := decimal.Zero
+	lineQty := make([]decimal.Decimal, 0, len(lines))
 	t := Totals{Subtotal: decimal.Zero, DiscountTotal: decimal.Zero, ChargesTotal: decimal.Zero, TaxTotal: decimal.Zero}
 	for _, in := range lines {
 		la, err := ComputeLine(in, minor)
@@ -108,13 +112,21 @@ func Price(lines []LineInput, charges []ChargeInput, minor int32) (Document, err
 		}
 		doc.Lines = append(doc.Lines, la)
 		qty = qty.Add(in.Qty)
+		lineQty = append(lineQty, in.Qty)
 		t.Subtotal = t.Subtotal.Add(la.Gross)
 		t.DiscountTotal = t.DiscountTotal.Add(la.Discount)
 		t.TaxTotal = t.TaxTotal.Add(la.Tax)
 	}
 	base := t.Subtotal.Sub(t.DiscountTotal)
 	for _, c := range charges {
-		amt, err := ChargeAmount(c, qty, base, minor)
+		cq, cb := qty, base
+		if c.Line != 0 {
+			if c.Line < 0 || c.Line > len(lines) {
+				return Document{}, fail(CodeValidation, "a line charge names line %d of %d", c.Line, len(lines))
+			}
+			cq, cb = lineQty[c.Line-1], doc.Lines[c.Line-1].Amount
+		}
+		amt, err := ChargeAmount(c, cq, cb, minor)
 		if err != nil {
 			return Document{}, err
 		}

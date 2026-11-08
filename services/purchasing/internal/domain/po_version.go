@@ -36,6 +36,8 @@ type SnapshotCharge struct {
 	Amount decimal.Decimal `json:"amount"`
 	// ChargeCode is the charge code the charge was entered with; empty for a charge without one.
 	ChargeCode string `json:"chargeCode,omitempty"`
+	// LineNo is the line a line charge belongs to; 0 for a header charge.
+	LineNo int `json:"lineNo,omitempty"`
 }
 
 // Snapshot is the full commercial content of a PO at one version (FR-17.8).

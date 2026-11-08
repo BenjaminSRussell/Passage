@@ -1360,7 +1360,7 @@ components:
         changed_by: { type: string, format: uuid }
     AutoChargeData:
       type: object
-      required: [auto_charge_id, legal_entity_id, charge_code_id, account_code, valid_from, status, version]
+      required: [auto_charge_id, legal_entity_id, charge_code_id, account_code, item_code, valid_from, status, version]
       additionalProperties: false
       properties:
         auto_charge_id: { type: string, format: uuid }
@@ -1368,6 +1368,8 @@ components:
         charge_code_id: { type: string, format: uuid }
         account_code: { type: string, enum: [VENDOR, GROUP, ALL] }
         account_id: { type: string, format: uuid }
+        item_code: { type: string, enum: [PRODUCT, GROUP, ALL] }
+        item_id: { type: string, format: uuid }
         value: { type: string, description: decimal }
         min_order_amount: { type: string, description: decimal }
         currency: { type: string }

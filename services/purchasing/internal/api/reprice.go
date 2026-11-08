@@ -410,15 +410,12 @@ func repriceDocument(cur store.PurchaseOrder, plan domain.RepricePlan) (store.Pu
 		next.Lines = append(next.Lines, l)
 		inputs = append(inputs, repriceInput(l))
 	}
-	charges := make([]domain.ChargeInput, 0, len(cur.Charges))
-	for _, c := range cur.Charges {
-		charges = append(charges, domain.ChargeInput{Calc: c.Calc, Value: c.Value})
-	}
+	charges, kept := store.LiveCharges(cur.Charges, next.Lines)
 	next.Charges = nil
 	if err := priceDocument(&next, inputs, charges); err != nil {
 		return store.PurchaseOrder{}, err
 	}
-	copyChargeSides(&next, cur.Charges)
+	copyChargeSides(&next, kept)
 	return next, nil
 }
 

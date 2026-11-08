@@ -33,7 +33,10 @@ type orderBody struct {
 	// curSiteID and curWarehouseID are the stored header's on an edit: an existing line that
 	// delivered to them follows the header when the edit moves it.
 	curSiteID, curWarehouseID string
-	// autoApplied are the charge codes auto charges added to the PO before: applyAutoCharges on an
+	// lineNos are the numbers the body's lines have (an edit numbers them before charges name them);
+	// nil on create, where line i is number i+1.
+	lineNos []int
+	// autoApplied are the charge keys auto charges added to the PO before: applyAutoCharges on an
 	// edit does not add them again, so a charge the buyer removed stays removed.
 	autoApplied map[string]bool
 }
@@ -76,6 +79,22 @@ type chargeBody struct {
 	ChargeCodeID string `json:"chargeCodeId,omitempty"`
 	Calc         string `json:"calc,omitempty"`
 	Value        string `json:"value,omitempty"`
+	// LineNo makes it a line charge (FR-17.9): PER_UNIT takes that line's quantity and PERCENT that
+	// line's amount after discount. On create it is the line's position (1-based); on an edit the
+	// number of an existing line, or of a new one (the numbers after the highest on the order).
+	LineNo int `json:"lineNo,omitempty"`
+}
+
+// lineNumbers returns the number of each body line.
+func (b orderBody) lineNumbers() []int {
+	if b.lineNos != nil {
+		return b.lineNos
+	}
+	out := make([]int, len(b.Lines))
+	for i := range out {
+		out[i] = i + 1
+	}
+	return out
 }
 
 func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {

@@ -174,7 +174,7 @@ interface LineDraft {
   receivedQty?: string;
 }
 
-interface ChargeDraft {
+export interface ChargeDraft {
   key: string;
   calc: ChargeCalc;
   value: string;
@@ -182,6 +182,8 @@ interface ChargeDraft {
   chargeCodeId?: string;
   /** The code string of a charge already on the order, shown when the code is no longer active. */
   chargeCode?: string;
+  /** The line a line charge belongs to; unset for a header charge. On a new order it is the line's position, on an edit an existing line's number. */
+  lineNo?: number;
 }
 
 function emptyLine(): LineDraft {
@@ -257,6 +259,9 @@ export function validateOrder(legalEntityId: string, vendorId: string, currency:
   });
   charges.forEach((c, i) => {
     if (!decimalPattern.test(c.value)) errors[`charges[${i}].value`] = "Enter a decimal value.";
+    if (c.lineNo !== undefined && !lineChoices(lines, lines.some((l) => l.lineNo !== undefined)).some((o) => o.no === c.lineNo)) {
+      errors[`charges[${i}].lineNo`] = "Choose a line of this order.";
+    }
   });
   return errors;
 }
@@ -292,7 +297,9 @@ function toInput(
     charges:
       charges.length > 0
         ? charges.map((c) =>
-            c.chargeCodeId ? { chargeCodeId: c.chargeCodeId, value: c.value.trim() } : { calc: c.calc, value: c.value.trim() },
+            c.chargeCodeId
+              ? { chargeCodeId: c.chargeCodeId, value: c.value.trim(), lineNo: c.lineNo }
+              : { calc: c.calc, value: c.value.trim(), lineNo: c.lineNo },
           )
         : undefined,
     applyAutoCharges: applyAutoCharges || undefined,
@@ -435,9 +442,44 @@ function LinesCard({
   );
 }
 
-/** Header charges of the create and edit forms; a charge may take its calculation and sides from a charge code (FR-17.9). */
+/**
+ * The lines a charge can be put on: on a new order every line by position, on an edit the lines that
+ * already have a number (a line added in the same edit is numbered by the service after saving).
+ */
+export function lineChoices(lines: LineDraft[], editing: boolean): { no: number; label: string }[] {
+  const out: { no: number; label: string }[] = [];
+  lines.forEach((l, i) => {
+    const no = editing ? l.lineNo : i + 1;
+    if (no !== undefined) out.push({ no, label: `Line ${no}${l.description.trim() ? ` - ${l.description.trim()}` : l.productId ? ` - ${l.productId.slice(0, 8)}` : ""}` });
+  });
+  return out;
+}
+
+/**
+ * On a new order a line charge names its line by position, so when the lines change the charges follow
+ * their lines: a charge after a removed line moves up with it, and the charges of a removed line go with
+ * the line (as the service drops the charges of a cancelled line).
+ */
+export function chargesFollowingLines(before: LineDraft[], after: LineDraft[], charges: ChargeDraft[]): ChargeDraft[] {
+  const position = new Map(after.map((l, i) => [l.key, i + 1]));
+  const out: ChargeDraft[] = [];
+  for (const c of charges) {
+    if (c.lineNo === undefined) {
+      out.push(c);
+      continue;
+    }
+    const line = before[c.lineNo - 1];
+    const at = line ? position.get(line.key) : undefined;
+    if (at !== undefined) out.push(at === c.lineNo ? c : { ...c, lineNo: at });
+  }
+  return out;
+}
+
+/** Charges of the create and edit forms, on the whole order or on one line; a charge may take its calculation and sides from a charge code (FR-17.9). */
 function ChargesCard({
   charges,
+  lines,
+  editing = false,
   setCharges,
   errors,
   legalEntityId,
@@ -446,6 +488,8 @@ function ChargesCard({
   autoAdded = 0,
 }: {
   charges: ChargeDraft[];
+  lines: LineDraft[];
+  editing?: boolean;
   setCharges: (fn: (cs: ChargeDraft[]) => ChargeDraft[]) => void;
   errors: Errors;
   legalEntityId: string;
@@ -477,9 +521,10 @@ function ChargesCard({
         </Button>
       }
     >
-      {charges.length === 0 ? <p className={styles.muted}>No header charges. Freight, handling and fees go here.</p> : null}
+      {charges.length === 0 ? <p className={styles.muted}>No charges. Freight, handling and fees go here, on the whole order or on one line.</p> : null}
       {charges.map((charge, i) => {
         const coded = charge.chargeCodeId !== undefined;
+        const choices = lineChoices(lines, editing);
         return (
           <fieldset key={charge.key} className={styles.lineCard} aria-label={`Charge ${i + 1}`}>
             <div className={styles.lineHead}>
@@ -506,6 +551,25 @@ function ChargesCard({
                   )}
                 </FormField>
               ) : null}
+              <FormField id={`po-charge-${i}-line`} label="Charged on" hint="Per unit and percent then use that line only" error={errors[`charges[${i}].lineNo`]}>
+                {(c) => (
+                  <Select
+                    {...c}
+                    value={charge.lineNo === undefined ? "" : String(charge.lineNo)}
+                    onChange={(e) => updateCharge(i, { lineNo: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  >
+                    <option value="">The whole order</option>
+                    {charge.lineNo !== undefined && !choices.some((o) => o.no === charge.lineNo) ? (
+                      <option value={charge.lineNo}>Line {charge.lineNo}</option>
+                    ) : null}
+                    {choices.map((o) => (
+                      <option key={o.no} value={o.no}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
               <FormField id={`po-charge-${i}-calc`} label="Calculation">
                 {(c) => (
                   <Select {...c} disabled={coded} value={charge.calc} onChange={(e) => updateCharge(i, { calc: e.target.value as ChargeCalc })}>
@@ -531,7 +595,7 @@ function ChargesCard({
       </div>
       {autoAdded > 0 ? (
         <p className={styles.muted}>
-          Auto charges have added {autoAdded === 1 ? "a charge code" : `${autoAdded} charge codes`} to this order before; they are not added again, so a
+          Auto charges have added {autoAdded === 1 ? "a charge" : `${autoAdded} charges`} to this order before; they are not added again, so a
           charge you removed stays removed.
         </p>
       ) : null}
@@ -594,9 +658,18 @@ export function PurchaseOrderCreatePage() {
             </FormField>
           </div>
         </Card>
-        <LinesCard lines={lines} setLines={setLines} errors={errors} />
+        <LinesCard
+          lines={lines}
+          setLines={(fn) => {
+            const next = fn(lines);
+            setCharges((cs) => chargesFollowingLines(lines, next, cs));
+            setLines(next);
+          }}
+          errors={errors}
+        />
         <ChargesCard
           charges={charges}
+          lines={lines}
           setCharges={setCharges}
           errors={errors}
           legalEntityId={legalEntityId.trim()}
@@ -639,7 +712,7 @@ function EditForm({ po }: { po: PurchaseOrder }) {
   const navigate = useNavigate();
   const [lines, setLines] = useState<LineDraft[]>(() => po.lines.filter((l) => l.status !== "CANCELLED").map(draftOf));
   const [charges, setCharges] = useState<ChargeDraft[]>(() =>
-    po.charges.map((c) => ({ key: newIdempotencyKey(), calc: c.calc, value: c.value, chargeCodeId: c.chargeCodeId, chargeCode: c.chargeCode })),
+    po.charges.map((c) => ({ key: newIdempotencyKey(), calc: c.calc, value: c.value, chargeCodeId: c.chargeCodeId, chargeCode: c.chargeCode, lineNo: c.lineNo })),
   );
   const [applyAuto, setApplyAuto] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -682,6 +755,8 @@ function EditForm({ po }: { po: PurchaseOrder }) {
       <LinesCard lines={lines} setLines={setLines} errors={errors} editing />
       <ChargesCard
         charges={charges}
+        lines={lines}
+        editing
         setCharges={setCharges}
         errors={errors}
         legalEntityId={po.legalEntityId}
@@ -1181,6 +1256,7 @@ export function PurchaseOrderDetailPage() {
         columns={[
           { key: "seq", header: "Charge", align: "end" },
           { key: "chargeCode", header: "Code", mono: true, render: (c) => (c.chargeCode ? `${c.chargeCode}${c.auto ? " (auto)" : ""}` : dash) },
+          { key: "lineNo", header: "On", render: (c) => (c.lineNo ? `Line ${c.lineNo}` : "Whole order") },
           { key: "calc", header: "Calculation", render: (c) => statusLabel(c.calc) },
           { key: "value", header: "Value", align: "end", mono: true },
           { key: "sides", header: "Debit / credit", render: (c) => (c.debitType && c.creditType ? `${statusLabel(c.debitType)} / ${statusLabel(c.creditType)}` : dash) },
@@ -1189,7 +1265,7 @@ export function PurchaseOrderDetailPage() {
         ]}
         rows={po.charges}
         getRowKey={(c) => String(c.seq)}
-        empty={{ title: "No charges", description: "This order has no header charges." }}
+        empty={{ title: "No charges", description: "This order has no charges." }}
       />
       {versions.error ? <LoadError what="the version history" error={versions.error} onRetry={versions.reload} /> : null}
       <DataTable
