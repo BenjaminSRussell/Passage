@@ -26,13 +26,17 @@ import {
   getCampaign,
   listResources,
   newKey,
+  placeCampaign,
   removeCampaignOrder,
   SEQUENCE_RULE_LABELS,
   sequenceCampaign,
   startCampaign,
+  unplaceCampaign,
   type Allocation,
   type AllocationBasis,
   type Campaign,
+  type CampaignCleanoutWindow,
+  type CampaignJob,
   type CampaignOrder,
   type Changeover,
   type CleanoutCounter,
@@ -140,7 +144,9 @@ export function CampaignDetailPage() {
   const campaign = updated && updated.id === state.data.campaign.id && updated.version >= state.data.campaign.version ? updated : state.data.campaign;
   const codes = state.data.codes;
   const orders = campaign.orders ?? [];
-  const open = editable(campaign);
+  const placed = Boolean(campaign.placedAt);
+  // A placed campaign keeps its orders and sequence until it is unplaced (SCHED-0152).
+  const open = editable(campaign) && !placed;
   const cancellable = campaign.status !== "completed" && campaign.status !== "cancelled";
 
   /** Runs a campaign command; resolves to the problem, or null when it succeeded. */
@@ -210,6 +216,7 @@ export function CampaignDetailPage() {
     ["Changeover", formatMinutes(campaign.changeoverMinutes)],
     ["Cleanout", formatMinutes(campaign.cleanoutMinutes)],
     ["Sequenced", formatDateTime(campaign.sequencedAt)],
+    ["On the schedule", placed ? `${formatDateTime(campaign.placement?.jobs[0]?.start ?? null)} to ${formatDateTime(campaign.plannedEnd ?? null)}` : "Not placed"],
     ["Started", formatDateTime(campaign.startedAt)],
     ...(campaign.status === "completed" ? ([["Completed", formatDateTime(campaign.completedAt ?? null)]] as [string, ReactNode][]) : []),
     ...(campaign.status === "cancelled"
@@ -237,6 +244,26 @@ export function CampaignDetailPage() {
                 onClick={() => run("sequence", () => sequenceCampaign(campaign.id, campaign.version), "Campaign sequenced.")}
               >
                 Sequence
+              </Button>
+            ) : null}
+            {campaign.status === "planned" ? (
+              <Button
+                variant={placed ? "secondary" : "primary"}
+                loading={busy === "place"}
+                disabled={busy !== null}
+                onClick={() => run("place", () => placeCampaign(campaign.id, campaign.version), placed ? "Campaign placed again." : "Campaign placed on the schedule.")}
+              >
+                {placed ? "Place again" : "Place on schedule"}
+              </Button>
+            ) : null}
+            {campaign.status === "planned" && placed ? (
+              <Button
+                variant="secondary"
+                loading={busy === "unplace"}
+                disabled={busy !== null}
+                onClick={() => run("unplace", () => unplaceCampaign(campaign.id, campaign.version), "Campaign taken off the schedule.")}
+              >
+                Take off schedule
               </Button>
             ) : null}
             {campaign.status === "planned" ? (
@@ -336,6 +363,7 @@ export function CampaignDetailPage() {
         </div>
       </Card>
       <PlanCard campaign={campaign} />
+      <PlacementCard campaign={campaign} />
       <AllocationCard campaign={campaign} />
     </div>
   );
@@ -477,6 +505,17 @@ function CancelCampaignForm({ started, busy, onCancel, onKeep }: CancelCampaignF
 }
 
 const failureTitles: Record<string, string> = {
+  "SCHED-0002": "The campaign does not fit in open capacity",
+  "SCHED-0117": "Sequence the campaign before you place it",
+  "SCHED-0138": "A job of this campaign is firmed",
+  "SCHED-0149": "No stretch of the horizon holds the whole campaign",
+  "SCHED-0150": "An order has no single operation to place",
+  "SCHED-0151": "The campaign is not placed",
+  "SCHED-0152": "Take the campaign off the schedule first",
+  "SCHED-0153": "Schedule the orders' earlier operations first",
+  "SCHED-0008": "A later operation of an order is firmed",
+  "SCHED-0009": "A network step of an order would break",
+  "SCHED-0010": "A network step of an order would wait too long",
   "SCHED-0115": "Someone else changed this campaign",
   "SCHED-0123": "Sequence the campaign again before you start it",
   "SCHED-0125": "Start the campaign before you complete it",
@@ -557,6 +596,68 @@ function PlanCard({ campaign }: { campaign: Campaign }) {
           rows={plan.cleanouts}
           getRowKey={(c, i) => `${c.afterOrderId}-${i}`}
           empty={{ title: "No cleanouts", description: "No cleanout rule of these setup groups is triggered." }}
+        />
+      </div>
+    </Card>
+  );
+}
+
+function PlacementCard({ campaign }: { campaign: Campaign }) {
+  const placement = campaign.placement;
+  if (campaign.status === "cancelled" || campaign.status === "completed") return null;
+  if (!placement) {
+    return (
+      <Card title="On the schedule">
+        <EmptyState
+          compact
+          headingLevel={3}
+          title="Not placed"
+          description={
+            campaign.status === "planned"
+              ? "Place the campaign to book its orders back to back on the resource, with the changeovers and the cleanout windows."
+              : "Sequence the campaign, then place it on the schedule."
+          }
+        />
+      </Card>
+    );
+  }
+  const jobColumns: DataTableColumn<CampaignJob>[] = [
+    { key: "orderId", header: "Order", mono: true, render: (j) => shortId(j.orderId) },
+    { key: "operNumber", header: "Operation", align: "end" },
+    { key: "start", header: "Start", render: (j) => formatDateTime(j.start) },
+    { key: "end", header: "End", render: (j) => formatDateTime(j.end) },
+    { key: "changeoverMinutes", header: "Changeover", align: "end", render: (j) => formatMinutes(j.changeoverMinutes) },
+    { key: "lateMinutes", header: "Late", align: "end", render: (j) => (j.lateMinutes > 0 ? <Badge tone="warning">{formatMinutes(j.lateMinutes)}</Badge> : dash) },
+  ];
+  const windowColumns: DataTableColumn<CampaignCleanoutWindow>[] = [
+    { key: "afterOrderId", header: "After order", mono: true, render: (w) => shortId(w.afterOrderId) },
+    { key: "start", header: "Start", render: (w) => formatDateTime(w.start) },
+    { key: "end", header: "End", render: (w) => formatDateTime(w.end) },
+    { key: "minutes", header: "Duration", align: "end", render: (w) => formatMinutes(w.minutes) },
+    { key: "reason", header: "Reason", render: (w) => cleanoutReasons[w.reason as PlannedCleanout["reason"]] ?? w.reason },
+  ];
+  return (
+    <Card title="On the schedule">
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          {`Placed ${formatDateTime(placement.placedAt)} by run ${shortId(placement.runId)}. Jobs show their times now, so a job moved on the Gantt shows its new time here. The cleanout windows are closed capacity: nothing else is planned into them.`}
+        </p>
+        {placement.warnings.length > 0 ? (
+          <Alert tone="warning" title="Findings of the placement" live="off">
+            <ul className={styles.messages}>
+              {placement.warnings.map((w) => (
+                <li key={`${w.code}-${w.operationId}-${w.detail}`}>{`${w.code}: ${w.detail}`}</li>
+              ))}
+            </ul>
+          </Alert>
+        ) : null}
+        <DataTable label="Campaign jobs" columns={jobColumns} rows={placement.jobs} getRowKey={(j) => j.operationId} empty={{ title: "No jobs", description: "The jobs were taken off the schedule." }} />
+        <DataTable
+          label="Cleanout windows"
+          columns={windowColumns}
+          rows={placement.cleanouts}
+          getRowKey={(w) => w.afterOrderId}
+          empty={{ title: "No cleanout windows", description: "No cleanout rule of these setup groups is triggered." }}
         />
       </div>
     </Card>

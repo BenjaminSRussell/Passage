@@ -269,6 +269,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns/{id}:cancel", a.cancelCampaign)
 	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns/{id}:allocate-cost", a.allocateCampaignCost)
 
+	// Slice 37: a sequenced campaign laid on its resource, and taken off again (FR-23.14).
+	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/campaigns/{id}:place", a.placeCampaign)
+	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/campaigns/{id}:unplace", a.unplaceCampaign)
+
 	// Slice 8: campaign proposals from scheduled orders sharing a key (FR-23.14).
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaign-proposals", a.campaignProposals)
 

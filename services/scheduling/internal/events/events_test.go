@@ -17,6 +17,8 @@ func TestEveryTypeFollowsTheNamingRule(t *testing.T) {
 		"dev.passage.scheduling.campaign.started.v1":         true,
 		"dev.passage.scheduling.campaign.completed.v1":       true,
 		"dev.passage.scheduling.campaign.cancelled.v1":       true,
+		"dev.passage.scheduling.campaign.placed.v1":          true,
+		"dev.passage.scheduling.campaign.unplaced.v1":        true,
 		"dev.passage.scheduling.cleanoutcounter.reset.v1":    true,
 		"dev.passage.scheduling.capacityoverride.created.v1": true,
 		"dev.passage.scheduling.capacityoverride.deleted.v1": true,

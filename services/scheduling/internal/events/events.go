@@ -17,6 +17,8 @@ var (
 	CampaignStarted   = events.Type(Context, "campaign", "started", 1)
 	CampaignCompleted = events.Type(Context, "campaign", "completed", 1)
 	CampaignCancelled = events.Type(Context, "campaign", "cancelled", 1)
+	CampaignPlaced    = events.Type(Context, "campaign", "placed", 1)
+	CampaignUnplaced  = events.Type(Context, "campaign", "unplaced", 1)
 
 	CapacityOverrideCreated = events.Type(Context, "capacityoverride", "created", 1)
 	CapacityOverrideDeleted = events.Type(Context, "capacityoverride", "deleted", 1)
@@ -41,7 +43,7 @@ var (
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CleanoutCounterReset, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated, BottleneckDetected}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CampaignCompleted, CampaignCancelled, CampaignPlaced, CampaignUnplaced, CleanoutCounterReset, CapacityOverrideCreated, CapacityOverrideDeleted, ResourceUpdated, CapacityBlockUpdated, NetworkUpdated, OrderImportRecorded, OperationUpdated, OperationDeleted, OrderUnscheduled, ParametersUpdated, BottleneckDetected}
 }
 
 type RunCompletedData struct {
@@ -144,6 +146,49 @@ type CampaignCancelledData struct {
 	OrderIDs        []string `json:"orderIds"`
 	CounterRestored bool     `json:"counterRestored"`
 	Version         int      `json:"version"`
+}
+
+// CampaignJobRef is the job of one order of a placed campaign.
+type CampaignJobRef struct {
+	OrderID           string `json:"orderId"`
+	JobID             string `json:"jobId"`
+	Start             string `json:"start"`
+	End               string `json:"end"`
+	ChangeoverMinutes int    `json:"changeoverMinutes"`
+}
+
+// CampaignCleanoutWindow is the closed window of a planned cleanout on a placed
+// campaign (BR-23.13): wave 21 creates the cleanout order for exactly this time.
+type CampaignCleanoutWindow struct {
+	AfterOrderID  string `json:"afterOrderId"`
+	SetupGroup    string `json:"setupGroup"`
+	Minutes       int    `json:"minutes"`
+	Reason        string `json:"reason"`
+	CleaningSetID string `json:"cleaningSetId,omitempty"`
+	Start         string `json:"start"`
+	End           string `json:"end"`
+}
+
+// CampaignPlacedData tells production and planning where a campaign sits on
+// its resource (FR-23.14): every job and every cleanout window, in sequence.
+type CampaignPlacedData struct {
+	CampaignID string                   `json:"campaignId"`
+	ResourceID string                   `json:"resourceId"`
+	RunID      string                   `json:"runId"`
+	Start      string                   `json:"start"`
+	End        string                   `json:"end"`
+	Jobs       []CampaignJobRef         `json:"jobs"`
+	Cleanouts  []CampaignCleanoutWindow `json:"cleanouts"`
+	Version    int                      `json:"version"`
+}
+
+// CampaignUnplacedData says a campaign was taken off the schedule: its jobs
+// are gone and its cleanout windows are open capacity again.
+type CampaignUnplacedData struct {
+	CampaignID string   `json:"campaignId"`
+	ResourceID string   `json:"resourceId"`
+	OrderIDs   []string `json:"orderIds"`
+	Version    int      `json:"version"`
 }
 
 // BottleneckDetectedData announces that a resource entered a bottleneck

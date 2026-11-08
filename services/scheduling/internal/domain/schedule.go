@@ -778,69 +778,7 @@ func PlanMove(in MoveInput) MovePlan {
 	bookSecondaries(busy, caps, moved)
 	touch(in.ResourceID, moved.Start)
 
-	// push re-places the placed operations of chain (sorted by operation
-	// number) on their resources so the first starts no earlier than pred and
-	// each later one no earlier than the one before it ends. Operations that
-	// already start late enough and keep their changeover stay as they are.
-	push := func(chain []Operation, pred time.Time, predEnd time.Time, predOp *Operation, firmedDetail string) ([]Placement, *Conflict) {
-		var out []Placement
-		for i := range chain {
-			op := chain[i]
-			cur, ok := in.Current[op.ID]
-			if !ok {
-				continue
-			}
-			hasPred := predOp != nil
-			if predOp != nil {
-				gap := queueGap(*predOp, op)
-				pred = pred.Add(gap)
-				if predOp.OverlapBP > 0 {
-					// Overlapped: not before the predecessor's end plus the
-					// queue, less its own process minutes (BR-23.5).
-					if t := predEnd.Add(gap - minutes(BookedMinutes(op.Minutes, caps[cur.ResourceID].res.EfficiencyPct))); t.After(pred) {
-						pred = t
-					}
-				}
-			}
-			predOp = &chain[i]
-			ready := cur.Start
-			floor := pred
-			if in.DailyBuckets && hasPred {
-				floor = DayCeil(pred, caps[cur.ResourceID].res.Location)
-			}
-			if floor.After(ready) {
-				ready = floor
-			}
-			if in.Firmed[op.ID] {
-				if ready.After(cur.Start) {
-					return nil, &Conflict{Code: CodeFirmed, Detail: firmedDetail, JobID: op.ID}
-				}
-				pred, predEnd = cur.Release(), cur.End
-				continue
-			}
-			cc := caps[cur.ResourceID]
-			dropJob(busy, op.ID)
-			var sbs []Busy
-			if cc.res.Finite {
-				sbs = busy[cur.ResourceID]
-			}
-			ns, conf := placeOnSec(cc, op, sbs, ready, sequenced(cc, op, false), secondaryChecker(caps, busy, op, false))
-			if conf != nil {
-				return nil, conf
-			}
-			next := newPlacement(op, cur.ResourceID, ns.segs).withSlot(ns)
-			if cc.res.Finite {
-				busy[cur.ResourceID] = insertBusy(busy[cur.ResourceID], busyOf(op, next)...)
-			}
-			bookSecondaries(busy, caps, next)
-			if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || !sameChangeover(next, cur) {
-				out = append(out, next)
-				touch(cur.ResourceID, cur.Start)
-			}
-			pred, predEnd = next.Release(), next.End
-		}
-		return out, nil
-	}
+	push := chainPusher{caps: caps, busy: busy, current: in.Current, firmed: in.Firmed, daily: in.DailyBuckets, touch: touch}.push
 
 	successors := byOperNumber(slices.DeleteFunc(slices.Clone(in.Order), func(op Operation) bool { return op.OperNumber <= mv.OperNumber }))
 	pushed, conf := push(successors, moved.Release(), moved.End, mv, "move would push a firmed successor; unfirm it first")
@@ -909,6 +847,83 @@ func PlanMove(in MoveInput) MovePlan {
 		}
 	}
 	return MovePlan{Changes: changes, Dependents: dependents, Overridden: overridden}
+}
+
+// chainPusher re-places placed operations of an order behind a job that now
+// ends later (a move, a placed campaign): successors keep their resource and
+// only move forward. busy is updated as jobs move; touch records each resource
+// whose bookings changed and from when, for checkSequence.
+type chainPusher struct {
+	caps    map[string]capacity
+	busy    map[string][]Busy
+	current map[string]Placement
+	firmed  map[string]bool
+	daily   bool
+	touch   func(rid string, t time.Time)
+}
+
+// push re-places the placed operations of chain (sorted by operation
+// number) on their resources so the first starts no earlier than pred and
+// each later one no earlier than the one before it ends. Operations that
+// already start late enough and keep their changeover stay as they are.
+func (p chainPusher) push(chain []Operation, pred time.Time, predEnd time.Time, predOp *Operation, firmedDetail string) ([]Placement, *Conflict) {
+	var out []Placement
+	for i := range chain {
+		op := chain[i]
+		cur, ok := p.current[op.ID]
+		if !ok {
+			continue
+		}
+		hasPred := predOp != nil
+		if predOp != nil {
+			gap := queueGap(*predOp, op)
+			pred = pred.Add(gap)
+			if predOp.OverlapBP > 0 {
+				// Overlapped: not before the predecessor's end plus the
+				// queue, less its own process minutes (BR-23.5).
+				if t := predEnd.Add(gap - minutes(BookedMinutes(op.Minutes, p.caps[cur.ResourceID].res.EfficiencyPct))); t.After(pred) {
+					pred = t
+				}
+			}
+		}
+		predOp = &chain[i]
+		ready := cur.Start
+		floor := pred
+		if p.daily && hasPred {
+			floor = DayCeil(pred, p.caps[cur.ResourceID].res.Location)
+		}
+		if floor.After(ready) {
+			ready = floor
+		}
+		if p.firmed[op.ID] {
+			if ready.After(cur.Start) {
+				return nil, &Conflict{Code: CodeFirmed, Detail: firmedDetail, JobID: op.ID}
+			}
+			pred, predEnd = cur.Release(), cur.End
+			continue
+		}
+		cc := p.caps[cur.ResourceID]
+		dropJob(p.busy, op.ID)
+		var sbs []Busy
+		if cc.res.Finite {
+			sbs = p.busy[cur.ResourceID]
+		}
+		ns, conf := placeOnSec(cc, op, sbs, ready, sequenced(cc, op, false), secondaryChecker(p.caps, p.busy, op, false))
+		if conf != nil {
+			return nil, conf
+		}
+		next := newPlacement(op, cur.ResourceID, ns.segs).withSlot(ns)
+		if cc.res.Finite {
+			p.busy[cur.ResourceID] = insertBusy(p.busy[cur.ResourceID], busyOf(op, next)...)
+		}
+		bookSecondaries(p.busy, p.caps, next)
+		if !next.Start.Equal(cur.Start) || !next.End.Equal(cur.End) || !sameChangeover(next, cur) {
+			out = append(out, next)
+			p.touch(cur.ResourceID, cur.Start)
+		}
+		pred, predEnd = next.Release(), next.End
+	}
+	return out, nil
 }
 
 // firstOpenAtOrAfter is t when it lies in one of the sorted intervals iv, else

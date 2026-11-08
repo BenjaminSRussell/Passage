@@ -1862,6 +1862,79 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:place:
+    post:
+      operationId: placeCampaign
+      summary: >
+        Lay a sequenced (planned) campaign on its resource (FR-23.14). One schedule run of scope
+        campaign books the job of each order back to back in plan sequence, with the setup matrix
+        changeover in front of each (the first is the leading setup, from the campaign's current
+        setup group or the resource's last booked group) and each planned cleanout as a closed
+        window after its order, never split across closed time (BR-23.13). The window is not open
+        capacity for any run, move or inquiry. The campaign is never interleaved with other work:
+        a booked job in the way moves the start behind it. Each order places its only operation
+        that can run on the campaign resource (operationIds names one when there are several);
+        the job takes the order's run minutes, setup group, route setup and due date from the
+        campaign. The order's route holds: a job starts no earlier than the order's earlier
+        operations allow (their release plus the queue between, as for a move), and the order's
+        later operations that are scheduled move forward behind it on their own resources, in the
+        same run. A repeat replaces the earlier placement. Publishes run.completed, job.scheduled
+        per job (pushed later operations included), orderdates.changed and campaign.placed. 422
+        SCHED-0117 when not sequenced or SCHED-0011 when started; 422 SCHED-0150 for an order
+        without a single operation; 422 SCHED-0153 when an earlier operation of an order is not
+        scheduled; 422 SCHED-0002 when no open capacity is left in the horizon; 422 SCHED-0009 or
+        SCHED-0010 when a network step of an order would break; 409 SCHED-0149 or SCHED-0001 when
+        no stretch holds the campaign without other jobs in between; 409 SCHED-0138 when a job of
+        the campaign is firmed; 409 SCHED-0008 when a later operation held by a firmed job would
+        have to move.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start: { type: string, format: date-time, description: Earliest start; the campaign's planned start when omitted. }
+                horizonDays: { type: integer, minimum: 30, maximum: 730, description: Planning horizon in days; the service default when omitted. }
+                operationIds:
+                  type: object
+                  description: Order id to the operation of that order that carries the campaign, for orders with several operations that can run on the campaign resource.
+                  additionalProperties: { type: string, format: uuid }
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/campaigns/{id}:unplace:
+    post:
+      operationId: unplaceCampaign
+      summary: >
+        Take a placed campaign off the schedule. The jobs of its orders are removed and the
+        operations are open again, the cleanout windows are open capacity again, and each order is
+        announced as unscheduled. The campaign stays sequenced, so it can be placed again.
+        campaign.unplaced is published. 409 SCHED-0151 when it is not placed; 409 SCHED-0138 when a
+        job of the campaign is firmed.
+      x-passage-duty: scheduling.schedule.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/Campaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: healthz
@@ -2221,7 +2294,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection, order, move, rollback] }
+        scope: { type: string, enum: [site, selection, order, move, rollback, campaign] }
         mode: { type: string }
         direction: { type: string, enum: [forward, backward] }
         finite: { type: boolean }
@@ -3058,10 +3131,61 @@ components:
         cancelReason: { type: [string, 'null'] }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
+        plannedEnd: { type: [string, 'null'], format: date-time, description: End of the last job or cleanout window while the campaign is placed. }
+        placedAt: { type: [string, 'null'], format: date-time }
+        placement:
+          description: Where the campaign sits on its resource now; null while it is not placed. Jobs show their current times, so a job moved after the placement shows its new time.
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/CampaignPlacement'
         orders:
           type: array
           description: Present on the single-campaign read and command responses, in run order
           items: { $ref: '#/components/schemas/CampaignOrder' }
+    CampaignPlacement:
+      type: object
+      required: [runId, placedAt, jobs, cleanouts, warnings]
+      properties:
+        runId: { type: string, format: uuid, description: The schedule run (scope campaign) that wrote the jobs. }
+        placedAt: { type: string, format: date-time }
+        jobs:
+          type: array
+          description: One job per campaign order, in sequence.
+          items:
+            type: object
+            required: [orderId, operationId, operNumber, start, end, changeoverMinutes, lateMinutes]
+            properties:
+              orderId: { type: string, format: uuid }
+              operationId: { type: string, format: uuid }
+              operNumber: { type: integer }
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
+              changeoverMinutes: { type: integer, minimum: 0, description: 'Changeover at the start of the job, inside [start, end).' }
+              lateMinutes: { type: integer, minimum: 0 }
+        cleanouts:
+          type: array
+          description: Closed windows of the plan's cleanouts, in time order.
+          items:
+            type: object
+            required: [afterOrderId, setupGroup, minutes, reason, start, end]
+            properties:
+              afterOrderId: { type: string, format: uuid }
+              setupGroup: { type: string }
+              minutes: { type: integer, minimum: 1 }
+              reason: { type: string }
+              cleaningSetId: { type: string }
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
+        warnings:
+          type: array
+          description: Findings of the run that did not stop it, such as SCHED-0012.
+          items:
+            type: object
+            required: [code, operationId, detail]
+            properties:
+              code: { type: string }
+              operationId: { type: string }
+              detail: { type: string }
     AllocationRequest:
       type: object
       required: [amount, currency]

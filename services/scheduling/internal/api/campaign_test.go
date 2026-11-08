@@ -23,6 +23,7 @@ const (
 	ordC   = "00000000-0000-0000-0000-0000000000d2"
 	ordD   = "00000000-0000-0000-0000-0000000000d3"
 	resF1  = "00000000-0000-0000-0000-0000000000b2"
+	opB    = "00000000-0000-0000-0000-0000000000e1"
 )
 
 // Slice 2 fake store methods: they record what reached the store and answer
@@ -122,6 +123,14 @@ func (f *fakeStore) CompleteCampaign(_ context.Context, cmd store.CampaignComman
 }
 
 func (f *fakeStore) CancelCampaign(_ context.Context, cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+	return f.command(cmd, idem)
+}
+
+func (f *fakeStore) PlaceCampaign(_ context.Context, cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+	return f.command(cmd, idem)
+}
+
+func (f *fakeStore) UnplaceCampaign(_ context.Context, cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
 	return f.command(cmd, idem)
 }
 
@@ -429,5 +438,41 @@ func TestCampaignCompleteAndCancel(t *testing.T) {
 	if rec := doWith(h, http.MethodPost, "/v1/scheduling/campaigns/"+campID+":complete", "", allDuties, hdr); rec.Code != http.StatusUnprocessableEntity ||
 		problemOf(t, rec).Code != "SCHED-0125" {
 		t.Fatalf("not started: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCampaignPlaceAndUnplace(t *testing.T) {
+	f := &fakeStore{campaign: seededCampaign()}
+	h := newRouter(f)
+	hdr := map[string]string{"If-Match": `"5"`, "Idempotency-Key": "k1"}
+	place := "/v1/scheduling/campaigns/" + campID + ":place"
+	// An empty body places from the planned start with the configured horizon.
+	if rec := doWith(h, http.MethodPost, place, "", allDuties, hdr); rec.Code != http.StatusOK || f.lastCmd.Version != 5 ||
+		f.lastCmd.Start != nil || f.lastCmd.HorizonDays != DefaultConfig.HorizonDays || rec.Header().Get("ETag") != `"6"` {
+		t.Fatalf("place: %d %+v", rec.Code, f.lastCmd)
+	}
+	body := `{"start":"2031-03-04T05:00:00+01:00","horizonDays":60,"operationIds":{"` + strings.ToUpper(ordB) + `":"` + opB + `"}}`
+	if rec := doWith(h, http.MethodPost, place, body, allDuties, hdr); rec.Code != http.StatusOK || f.lastCmd.Start == nil ||
+		!f.lastCmd.Start.Equal(time.Date(2031, 3, 4, 4, 0, 0, 0, time.UTC)) || f.lastCmd.HorizonDays != 60 || f.lastCmd.OperationIDs[ordB] != opB {
+		t.Fatalf("place with body: %d %+v", rec.Code, f.lastCmd)
+	}
+	for _, bad := range []string{`{"horizonDays":5}`, `{"operationIds":{"x":"y"}}`, `{"start":"nonsense"}`} {
+		if rec := doWith(h, http.MethodPost, place, bad, allDuties, hdr); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d", bad, rec.Code)
+		}
+	}
+	if rec := doWith(h, http.MethodPost, place, "", allDuties, map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("place without If-Match: %d", rec.Code)
+	}
+	if rec := doWith(h, http.MethodPost, place, "", "scheduling.read,scheduling.campaign.write", hdr); rec.Code != http.StatusForbidden {
+		t.Fatalf("placing needs the maintain-schedule duty, got %d", rec.Code)
+	}
+	unplace := "/v1/scheduling/campaigns/" + campID + ":unplace"
+	if rec := doWith(h, http.MethodPost, unplace, "", allDuties, hdr); rec.Code != http.StatusOK || f.lastCmd.CampaignID != campID {
+		t.Fatalf("unplace: %d %+v", rec.Code, f.lastCmd)
+	}
+	f.err = httpx.NewProblem(http.StatusConflict, store.CodeCampaignNotPlacedYet, "the campaign is not placed on the schedule")
+	if rec := doWith(h, http.MethodPost, unplace, "", allDuties, hdr); rec.Code != http.StatusConflict || problemOf(t, rec).Code != "SCHED-0151" {
+		t.Fatalf("not placed: %d %s", rec.Code, rec.Body)
 	}
 }

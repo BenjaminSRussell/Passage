@@ -58,6 +58,11 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
   `POST /resources/{id}/cleanout-counter:reset` needs the counts the caller
   saw (SCHED-0148 when they moved) and lists the planned campaigns it makes
   stale.
+- **CampaignCleanout** (`scheduling_campaign_cleanout`): the closed window a
+  placed campaign's planned cleanout holds on its resource (one per order the
+  plan cleans after). Every read of a resource's overrides adds these windows as
+  downtime, so no run, move or inquiry treats them as open capacity; removed on
+  unplace, re-place and cancel.
 - **Campaign / CampaignOrder** (`scheduling_campaign`, `scheduling_campaign_order`):
   resource, key, planned start, limits (orders, quantity, minutes), sequence
   rule, current setup group, status `proposed` → `planned` (sequenced) →
@@ -310,6 +315,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/campaigns/{id}:start` (Idempotency-Key, If-Match) | `scheduling.campaign.write` |
 | POST | `/v1/scheduling/campaigns/{id}:complete` (Idempotency-Key, If-Match) | `scheduling.campaign.write` |
 | POST | `/v1/scheduling/campaigns/{id}:cancel` (Idempotency-Key, If-Match, optional `reason`) | `scheduling.campaign.write` |
+| POST | `/v1/scheduling/campaigns/{id}:place` (Idempotency-Key, If-Match, optional `start`, `horizonDays`, `operationIds`; a planned campaign only) | `scheduling.schedule.write` |
+| POST | `/v1/scheduling/campaigns/{id}:unplace` (Idempotency-Key, If-Match; 409 `SCHED-0151` when not placed) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/campaigns/{id}:allocate-cost` (computes only; nothing is stored) | `scheduling.campaign.write` |
 | GET | `/v1/scheduling/campaign-proposals?from&windowDays&resourceId` (computes only; nothing is stored) | `scheduling.read` |
 | GET | `/v1/scheduling/parameters` (ETag; built-in defaults at version 1 until the first change) | `scheduling.read` |
@@ -390,6 +397,11 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0145` | 422 | Rollback: no job of the run can be restored (all firmed, or operation changed or gone, or resource gone) |
 | `SCHED-0146` | 409 | Rollback: a restored job would break a rule as the plan is now (open capacity, a block, the order's sequence and queue times, a peg, a changeover); nothing was changed, `errors` names the jobs |
 | `SCHED-0147` | 404 | Bottleneck episode not found |
+| `SCHED-0149` | 409 | Campaign placement: no stretch of the planning horizon holds the whole campaign without other jobs in between |
+| `SCHED-0150` | 422 | Campaign placement: an order has no operation, or more than one, that can run on the campaign resource (name it in `operationIds`) |
+| `SCHED-0151` | 409 | Unplace: the campaign is not placed |
+| `SCHED-0152` | 409 | A placed campaign keeps its orders and sequence: unplace it before adding, removing or re-sequencing orders |
+| `SCHED-0153` | 422 | Campaign placement: an earlier operation of a campaign order is not scheduled, so the campaign job could run ahead of it; schedule the order first |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

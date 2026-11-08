@@ -34,6 +34,10 @@ channels:
         $ref: '#/components/messages/CampaignCompleted'
       campaignCancelled:
         $ref: '#/components/messages/CampaignCancelled'
+      campaignPlaced:
+        $ref: '#/components/messages/CampaignPlaced'
+      campaignUnplaced:
+        $ref: '#/components/messages/CampaignUnplaced'
   cleanoutCounter:
     address: passage.scheduling.cleanoutcounter
     messages:
@@ -125,6 +129,18 @@ operations:
     messages:
       - $ref: '#/channels/campaign/messages/campaignCancelled'
     summary: A campaign was cancelled and its orders released (production and planning consume it)
+  publishCampaignPlaced:
+    action: send
+    channel: { $ref: '#/channels/campaign' }
+    messages:
+      - $ref: '#/channels/campaign/messages/campaignPlaced'
+    summary: A sequenced campaign was laid on its resource with its job times and cleanout windows (production and planning consume it)
+  publishCampaignUnplaced:
+    action: send
+    channel: { $ref: '#/channels/campaign' }
+    messages:
+      - $ref: '#/channels/campaign/messages/campaignUnplaced'
+    summary: A placed campaign was taken off the schedule (production and planning consume it)
   publishCleanoutCounterReset:
     action: send
     channel: { $ref: '#/channels/cleanoutCounter' }
@@ -354,13 +370,27 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/CampaignCancelledData'
+    CampaignPlaced:
+      title: Campaign placed
+      summary: A sequenced campaign was laid on its resource; carries every job time and cleanout window.
+      name: dev.passage.scheduling.campaign.placed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CampaignPlacedData'
+    CampaignUnplaced:
+      title: Campaign unplaced
+      summary: A placed campaign was taken off the schedule; its jobs are removed and its cleanout windows are open again.
+      name: dev.passage.scheduling.campaign.unplaced.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CampaignUnplacedData'
   schemas:
     RunCompletedData:
       type: object
       required: [runId, scope, operations, makespanMinutes, totalLatenessMinutes]
       properties:
         runId: { type: string, format: uuid }
-        scope: { type: string, enum: [site, selection, order, rollback] }
+        scope: { type: string, enum: [site, selection, order, rollback, campaign] }
         operations: { type: integer }
         makespanMinutes: { type: integer }
         totalLatenessMinutes: { type: integer }
@@ -641,4 +671,51 @@ components:
         dragSnapMinutes: { type: integer }
         propagationOrders: { type: integer }
         propagationLevels: { type: integer }
+        version: { type: integer }
+    CampaignPlacedData:
+      type: object
+      required: [campaignId, resourceId, runId, start, end, jobs, cleanouts, version]
+      properties:
+        campaignId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        runId: { type: string, format: uuid, description: The schedule run (scope campaign) that wrote the jobs. }
+        start: { type: string, format: date-time, description: Start of the first job, its leading setup included. }
+        end: { type: string, format: date-time, description: End of the last job or cleanout window. }
+        jobs:
+          type: array
+          description: One entry per campaign order, in sequence.
+          items:
+            type: object
+            required: [orderId, jobId, start, end, changeoverMinutes]
+            properties:
+              orderId: { type: string, format: uuid }
+              jobId: { type: string, format: uuid, description: The scheduling operation that was placed. }
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
+              changeoverMinutes: { type: integer, minimum: 0, description: 'Changeover at the start of the job, inside [start, end).' }
+        cleanouts:
+          type: array
+          description: Closed windows the plan's cleanouts hold on the resource, never split (BR-23.13).
+          items:
+            type: object
+            required: [afterOrderId, setupGroup, minutes, reason, start, end]
+            properties:
+              afterOrderId: { type: string, format: uuid }
+              setupGroup: { type: string }
+              minutes: { type: integer, minimum: 1 }
+              reason: { type: string }
+              cleaningSetId: { type: string, description: Cleaning standard operation set of the rule. Omitted when none. }
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
+        version: { type: integer }
+    CampaignUnplacedData:
+      type: object
+      required: [campaignId, resourceId, orderIds, version]
+      properties:
+        campaignId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        orderIds:
+          type: array
+          description: Orders whose jobs were removed.
+          items: { type: string, format: uuid }
         version: { type: integer }

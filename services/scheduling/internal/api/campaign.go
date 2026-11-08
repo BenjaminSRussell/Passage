@@ -378,6 +378,88 @@ func (a *API) cancelCampaign(w http.ResponseWriter, r *http.Request) {
 	}, store.CampaignCommand{CampaignID: id, Reason: req.Reason})
 }
 
+type placeCampaignRequest struct {
+	Start        *time.Time        `json:"start"`
+	HorizonDays  *int              `json:"horizonDays"`
+	OperationIDs map[string]string `json:"operationIds"`
+}
+
+// placeCampaign lays a sequenced campaign on its resource: the jobs of its
+// orders back to back in plan sequence with their changeovers, and the plan's
+// cleanouts as closed windows (FR-23.14, BR-23.13). The body is optional.
+func (a *API) placeCampaign(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := campaignID(w, r)
+	if !ok {
+		return
+	}
+	var req placeCampaignRequest
+	body, err := readBody(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if len(strings.TrimSpace(string(body))) > 0 {
+		if err := httpx.Decode(r, &req); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	fields := map[string]string{}
+	horizon := a.cfg.HorizonDays
+	if req.HorizonDays != nil {
+		horizon = *req.HorizonDays
+		if horizon < 30 || horizon > 730 {
+			fields["horizonDays"] = "must be 30 to 730"
+		}
+	}
+	named := map[string]string{}
+	if len(req.OperationIDs) > maxCampaignOrders {
+		fields["operationIds"] = fmt.Sprintf("must name at most %d orders", maxCampaignOrders)
+	}
+	for orderID, opID := range req.OperationIDs {
+		orderID, opID = strings.ToLower(orderID), strings.ToLower(opID)
+		if !ids.Valid(orderID) || !ids.Valid(opID) {
+			fields["operationIds"] = "must map order UUIDs to operation UUIDs"
+			break
+		}
+		named[orderID] = opID
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	var start *time.Time
+	if req.Start != nil {
+		t := req.Start.UTC()
+		start = &t
+	}
+	a.campaignCommand(w, r, "place", body, func(cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+		return a.store.PlaceCampaign(r.Context(), cmd, idem)
+	}, store.CampaignCommand{CampaignID: id, Start: start, OperationIDs: named, HorizonDays: horizon})
+}
+
+// unplaceCampaign takes a placed campaign off the schedule.
+func (a *API) unplaceCampaign(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := campaignID(w, r)
+	if !ok {
+		return
+	}
+	body, err := readBody(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.campaignCommand(w, r, "unplace", body, func(cmd store.CampaignCommand, idem store.Idem) (store.Campaign, bool, error) {
+		return a.store.UnplaceCampaign(r.Context(), cmd, idem)
+	}, store.CampaignCommand{CampaignID: id})
+}
+
 type allocationActual struct {
 	OrderID    string           `json:"orderId"`
 	Quantity   *decimal.Decimal `json:"quantity"`

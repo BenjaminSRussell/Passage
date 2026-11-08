@@ -66,7 +66,12 @@ func scanOverride(row pgx.Row) (CapacityOverride, error) {
 // loadOverrides returns the overrides of one resource, or of every resource
 // when resourceID is empty, keyed by resource id.
 func loadOverrides(ctx context.Context, tx pgx.Tx, resourceID string) (map[string][]domain.CapacityOverride, error) {
+	// A placed campaign's cleanout window closes the resource like a
+	// downtime (BR-23.13): nothing else is planned into it.
 	rows, err := tx.Query(ctx, `select resource_id::text, kind, start_at, end_at from scheduling_capacity_override
+		where ($1 = '' or resource_id::text = $1)
+		union all
+		select resource_id::text, 'downtime', start_at, end_at from scheduling_campaign_cleanout
 		where ($1 = '' or resource_id::text = $1) order by start_at`, resourceID)
 	if err != nil {
 		return nil, err

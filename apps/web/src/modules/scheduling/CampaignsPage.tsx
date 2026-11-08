@@ -37,6 +37,7 @@ export function CampaignsPage() {
     { key: "orderCount", header: "Orders", align: "end" },
     { key: "sequenceRule", header: "Sequence rule", render: (row) => SEQUENCE_RULE_LABELS[row.sequenceRule] ?? sentence(row.sequenceRule) },
     { key: "changeoverMinutes", header: "Changeover", align: "end", render: (row) => formatMinutes(row.changeoverMinutes) },
+    { key: "plannedEnd", header: "On the schedule until", render: (row) => (row.placedAt ? formatDateTime(row.plannedEnd ?? null) : "Not placed") },
   ];
 
   return (

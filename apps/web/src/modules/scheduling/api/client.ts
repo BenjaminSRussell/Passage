@@ -969,6 +969,40 @@ export interface Campaign {
   version: number;
   createdAt: string;
   orders?: CampaignOrder[];
+  /** End of the last job or cleanout window while the campaign is placed. */
+  plannedEnd?: string | null;
+  placedAt?: string | null;
+  placement?: CampaignPlacement | null;
+}
+
+/** One campaign order's job as it sits on the schedule now. */
+export interface CampaignJob {
+  orderId: string;
+  operationId: string;
+  operNumber: number;
+  start: string;
+  end: string;
+  changeoverMinutes: number;
+  lateMinutes: number;
+}
+
+/** The closed window a planned cleanout holds on the resource (BR-23.13). */
+export interface CampaignCleanoutWindow {
+  afterOrderId: string;
+  setupGroup: string;
+  minutes: number;
+  reason: string;
+  cleaningSetId?: string;
+  start: string;
+  end: string;
+}
+
+export interface CampaignPlacement {
+  runId: string;
+  placedAt: string;
+  jobs: CampaignJob[];
+  cleanouts: CampaignCleanoutWindow[];
+  warnings: { code: string; operationId: string; detail: string }[];
 }
 
 export interface NewCampaign {
@@ -1175,6 +1209,16 @@ export function completeCampaign(id: string, version: number, key: string = newK
 /** Cancels a campaign that is not finished; its orders are released for another campaign. */
 export function cancelCampaign(id: string, version: number, reason?: string, key: string = newKey()): Promise<Campaign> {
   return campaignCommand(id, ":cancel", "POST", version, reason ? { reason } : {}, key);
+}
+
+/** Lays a sequenced campaign on its resource back to back; a repeat replaces the earlier placement. */
+export function placeCampaign(id: string, version: number, options: { start?: string; operationIds?: Record<string, string> } = {}, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, ":place", "POST", version, options, key);
+}
+
+/** Takes a placed campaign off the schedule; the campaign stays sequenced. */
+export function unplaceCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
+  return campaignCommand(id, ":unplace", "POST", version, {}, key);
 }
 
 /** Computes the split of a campaign's setup and cleanout cost; nothing is posted. */
