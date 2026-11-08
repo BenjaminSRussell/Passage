@@ -57,13 +57,26 @@ func TestGenerateYear_MatchesGoldenFixtures(t *testing.T) {
 		spec domain.CalendarSpec
 		year int
 	}{
+		{"calendar-2025", cal, 2025},
 		{"calendar-2026", cal, 2026},
+		{"calendar-2027", cal, 2027},
+		{"calendar-2028", cal, 2028},
+		{"4-4-5-2025", withPattern(febSunday, domain.Pattern445), 2025},
 		{"4-4-5-2026", withPattern(febSunday, domain.Pattern445), 2026},
+		{"4-4-5-2027", withPattern(febSunday, domain.Pattern445), 2027},
 		{"4-4-5-2028", withPattern(febSunday, domain.Pattern445), 2028},
-		{"13-period-2026", withPattern(febSunday, domain.Pattern13), 2026},
-		{"13-period-2028", withPattern(febSunday, domain.Pattern13), 2028},
+		{"4-5-4-2025", withPattern(febSunday, domain.Pattern454), 2025},
 		{"4-5-4-2026", withPattern(febSunday, domain.Pattern454), 2026},
+		{"4-5-4-2027", withPattern(febSunday, domain.Pattern454), 2027},
+		{"4-5-4-2028", withPattern(febSunday, domain.Pattern454), 2028},
+		{"5-4-4-2025", withPattern(febSunday, domain.Pattern544), 2025},
 		{"5-4-4-2026", withPattern(febSunday, domain.Pattern544), 2026},
+		{"5-4-4-2027", withPattern(febSunday, domain.Pattern544), 2027},
+		{"5-4-4-2028", withPattern(febSunday, domain.Pattern544), 2028},
+		{"13-period-2025", withPattern(febSunday, domain.Pattern13), 2025},
+		{"13-period-2026", withPattern(febSunday, domain.Pattern13), 2026},
+		{"13-period-2027", withPattern(febSunday, domain.Pattern13), 2027},
+		{"13-period-2028", withPattern(febSunday, domain.Pattern13), 2028},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
@@ -317,4 +330,40 @@ func TestGenerateYear_PropertyTilesEveryYear(t *testing.T) {
 			t.Fatalf("year %d starts %s, want %s", year+1, nextStart, end.AddDate(0, 0, 1))
 		}
 	})
+}
+
+// The NRF retail calendar (4-5-4 reference, weeks starting on the Sunday nearest
+// 1 February) is the hand check behind the 2025-2028 fixtures: each year's first
+// and last day, and the 53rd week of 2028 on the last operating period (BR-6.6).
+func TestGenerateYear_NRFYearBoundaries(t *testing.T) {
+	want := map[int][2]time.Time{
+		2025: {ymd(2025, 2, 2), ymd(2026, 1, 31)},
+		2026: {ymd(2026, 2, 1), ymd(2027, 1, 30)},
+		2027: {ymd(2027, 1, 31), ymd(2028, 1, 29)},
+		2028: {ymd(2028, 1, 30), ymd(2029, 2, 3)},
+	}
+	for _, p := range []domain.Pattern{domain.Pattern445, domain.Pattern454, domain.Pattern544, domain.Pattern13} {
+		for y, w := range want {
+			periods, err := domain.GenerateYear(withPattern(febSunday, p), y)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, last := periods[0], periods[len(periods)-1]
+			if !first.Start.Equal(w[0]) || !last.End.Equal(w[1]) {
+				t.Fatalf("%s %d spans %s..%s, want %s..%s", p, y, first.Start.Format("2006-01-02"), last.End.Format("2006-01-02"), w[0].Format("2006-01-02"), w[1].Format("2006-01-02"))
+			}
+			// BR-6.6: only the 53-week year flags a period, and it is the last operating one.
+			lastOp := -1
+			for i, per := range periods {
+				if per.Type == domain.PeriodOperating {
+					lastOp = i
+				}
+			}
+			for i, per := range periods {
+				if want := y == 2028 && i == lastOp; per.Week53 != want {
+					t.Fatalf("%s %d period %d week53=%v, want %v", p, y, per.PeriodNo, per.Week53, want)
+				}
+			}
+		}
+	}
 }

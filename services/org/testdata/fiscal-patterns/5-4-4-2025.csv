@@ -1,0 +1,15 @@
+fiscal_year,period_no,name,start_date,end_date,type,week53
+2025,0,Opening,2025-02-02,2025-02-02,opening,false
+2025,1,P01,2025-02-02,2025-03-08,operating,false
+2025,2,P02,2025-03-09,2025-04-05,operating,false
+2025,3,P03,2025-04-06,2025-05-03,operating,false
+2025,4,P04,2025-05-04,2025-06-07,operating,false
+2025,5,P05,2025-06-08,2025-07-05,operating,false
+2025,6,P06,2025-07-06,2025-08-02,operating,false
+2025,7,P07,2025-08-03,2025-09-06,operating,false
+2025,8,P08,2025-09-07,2025-10-04,operating,false
+2025,9,P09,2025-10-05,2025-11-01,operating,false
+2025,10,P10,2025-11-02,2025-12-06,operating,false
+2025,11,P11,2025-12-07,2026-01-03,operating,false
+2025,12,P12,2026-01-04,2026-01-31,operating,false
+2025,99,Closing,2026-01-31,2026-01-31,closing,false
