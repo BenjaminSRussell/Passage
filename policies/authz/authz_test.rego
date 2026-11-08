@@ -423,6 +423,11 @@ test_maintain_batch_jobs_can_start_run_and_replay if {
 	replay.allow
 }
 
+test_production_reads_product_site_defaults if {
+	data.service_grants.production.product == ["product.read"]
+	allowed("product.read", "GET", "/v1/product/released-products/rp-1/site-defaults/s-1")
+}
+
 test_view_exchange_rates_cannot_post_rates if {
 	result := decision with input as {
 		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
