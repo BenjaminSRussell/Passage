@@ -105,6 +105,8 @@ export interface RunSummary {
   hierarchy?: { code: string; version: number };
   /** Set when the run is limited to a unit of a reporting tree; unit is empty for the whole tree. */
   tree?: { code: string; unit: string; revision: number };
+  /** Set when the run is consolidated by entity: the ledgers in column order (ledgerId is the first). */
+  consolidation?: { ledgerId: string; label: string }[];
 }
 
 export interface CellSummary {
@@ -141,6 +143,8 @@ export interface DrillResponse {
 export interface DrillLine {
   /** Position of the line's balance key in the drill level 1 list. */
   key: number;
+  /** Ledger of the line; the lines of a consolidated column span the run's ledgers. */
+  ledgerId: string;
   postingDate: string;
   postingSequence: number;
   lineNumber: number;
@@ -244,7 +248,8 @@ export interface CalendarPeriod {
 export interface RunRequest {
   definition: string;
   definitionVersion?: number;
-  ledgerId: string;
+  /** Left out for a consolidated run, which names its ledgers in consolidation. */
+  ledgerId?: string;
   currencyType: CurrencyType;
   period: CalendarPeriod;
   calendar: CalendarPeriod[];
@@ -255,6 +260,8 @@ export interface RunRequest {
   hierarchy?: HierarchyRunRequest;
   /** Limits the run to the balances of one unit of a reporting tree, rolled up; no unit means the whole tree. */
   tree?: TreeRunRequest;
+  /** Consolidated by entity (FR-15.5): a column per ledger and their sum; reporting currency type only. */
+  consolidation?: { ledgers: { ledgerId: string; label?: string }[] };
 }
 
 export interface TreeRunRequest {

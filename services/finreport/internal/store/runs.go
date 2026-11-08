@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -43,6 +44,12 @@ type RunSpec struct {
 	// Tree, when set, limits the run to the balances of one unit of a reporting
 	// tree, rolled up (FR-15.4).
 	Tree *TreeRun
+	// Consolidation, when set (two to MaxConsolidationLedgers ledgers), makes
+	// the run a consolidated-by-entity run (FR-15.5): LedgerID is the first of
+	// them and the definition's columns are expanded per ledger. It is
+	// refused with a tree, a hierarchy, a cash flow definition, CALC columns
+	// and any currency type but rpt.
+	Consolidation []domain.LedgerColumn
 }
 
 // TreeRun names the reporting tree and unit a run is limited to. An empty Unit
@@ -102,8 +109,11 @@ type Run struct {
 	Hierarchy *RunHierarchy `json:"hierarchy,omitempty"`
 	// Tree is set when the run is limited to a unit of a reporting tree; unit
 	// is empty for the whole tree.
-	Tree     *RunTree `json:"tree,omitempty"`
-	Replayed bool     `json:"-"`
+	Tree *RunTree `json:"tree,omitempty"`
+	// Consolidation lists the ledgers of a consolidated-by-entity run in column
+	// order; LedgerID is the first. Absent for a single-ledger run.
+	Consolidation []domain.LedgerColumn `json:"consolidation,omitempty"`
+	Replayed      bool                  `json:"-"`
 }
 
 // CreateRun evaluates a published definition over the reporting read model and
@@ -141,17 +151,52 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if !ok {
 			return problem(422, domain.CodePeriodNotFound, fmt.Sprintf("period %04d-%02d does not exist in ledger %s", spec.PeriodYear, spec.PeriodNo, spec.LedgerID))
 		}
-		entity, err := requireLedgerEntityTx(ctx, tx, spec.LedgerID, spec.LegalEntityID)
-		if err != nil {
-			return err
+		consolidated := len(spec.Consolidation) > 0
+		if consolidated {
+			if def, err = consolidateRun(def, spec); err != nil {
+				return err
+			}
 		}
-		stale, err := staleCheckTx(ctx, tx, spec.LedgerID, spec.MaxLagSeconds, spec.AllowStale)
-		if err != nil {
-			return err
+		ledgers := []string{spec.LedgerID}
+		if consolidated {
+			ledgers = ledgers[:0]
+			for _, l := range spec.Consolidation {
+				ledgers = append(ledgers, l.LedgerID)
+			}
 		}
-		balances, hwm, err := loadBalancesTx(ctx, tx, spec.LedgerID, def.CurrencyTypes(spec.CurrencyType), cal)
-		if err != nil {
-			return err
+		// Every ledger is read under the caller's legal-entity scope: a ledger the
+		// caller cannot see is REPORT-0031, never a silently smaller consolidation.
+		var entity string
+		var entities []string
+		var stale []domain.Check
+		var balances []domain.Balance
+		hwm := map[string]int64{}
+		for i, ledger := range ledgers {
+			asserted := ""
+			if !consolidated {
+				asserted = spec.LegalEntityID
+			}
+			e, err := requireLedgerEntityTx(ctx, tx, ledger, asserted)
+			if err != nil {
+				return err
+			}
+			if i == 0 {
+				entity = e
+			}
+			entities = append(entities, e)
+			st, err := staleCheckTx(ctx, tx, ledger, spec.MaxLagSeconds, spec.AllowStale)
+			if err != nil {
+				return err
+			}
+			stale = append(stale, st...)
+			b, h, err := loadBalancesTx(ctx, tx, ledger, def.CurrencyTypes(spec.CurrencyType), cal)
+			if err != nil {
+				return err
+			}
+			balances = append(balances, b...)
+			for k, v := range h {
+				hwm[k] = v
+			}
 		}
 		var tree *RunTree
 		var extra []domain.Check
@@ -173,7 +218,7 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 			extra = append(extra, hierChecks...)
 		}
 		in := domain.Input{Definition: def, LedgerID: spec.LedgerID, CurrencyType: spec.CurrencyType,
-			IncludeAdjustmentPeriods: spec.IncludeAdjustment, Calendar: cal, At: at, Balances: balances}
+			IncludeAdjustmentPeriods: spec.IncludeAdjustment, Calendar: cal, At: at, Balances: balances, Consolidated: consolidated}
 		res, err := domain.Evaluate(in)
 		if err != nil {
 			return err
@@ -219,16 +264,26 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 			ID:        ids.New(), DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID,
 			CurrencyType: spec.CurrencyType, PeriodYear: spec.PeriodYear, PeriodNo: spec.PeriodNo, Status: "completed",
 			HWMByLedger: hwm, ResultHash: res.Hash, CellCount: len(res.Cells), RequestedBy: spec.RequestedBy, StartedAt: started,
-			Checks: checks, Tree: tree,
+			Checks: checks, Tree: tree, Consolidation: spec.Consolidation,
+		}
+		var consolidationJSON any
+		var entityIDs any
+		if consolidated {
+			if consolidationJSON, err = json.Marshal(spec.Consolidation); err != nil {
+				return err
+			}
+			// A ledger without an assigned entity makes the run visible to
+			// all-entity callers only (a NULL list matches no scoped caller).
+			entityIDs = scopedEntities(entities)
 		}
 		_, err = tx.Exec(ctx, `insert into statement_run(tenant_id, id, definition_code, definition_version, ledger_id, currency_type,
 			period_year, period_no, include_adjustment, status, hwm, result_hash, cell_count, requested_by, request_hash, idempotency_key,
 			started_at, completed_at, duration_ms, checks, legal_entity_id, hierarchy_code, hierarchy_version, run_definition,
-			tree_code, tree_unit, tree_revision)
-			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18,nullif($19,'')::uuid,$20,$21,$22,$23,$24,$25)`,
+			tree_code, tree_unit, tree_revision, consolidation, legal_entity_ids)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18,nullif($19,'')::uuid,$20,$21,$22,$23,$24,$25,$26,$27::uuid[])`,
 			tenantID(ctx), run.ID, def.Code, def.Version, spec.LedgerID, spec.CurrencyType, spec.PeriodYear, spec.PeriodNo,
 			spec.IncludeAdjustment, hwmJSON, hash, len(res.Cells), spec.RequestedBy, spec.RequestHash, nullable(spec.IdempotencyKey),
-			started, int(time.Since(started).Milliseconds()), checksJSON, entity, hierCode, hierVersion, runDef, treeCode, treeUnit, treeRev)
+			started, int(time.Since(started).Milliseconds()), checksJSON, entityOf(entity, consolidated), hierCode, hierVersion, runDef, treeCode, treeUnit, treeRev, consolidationJSON, entityIDs)
 		if err != nil {
 			return err
 		}
@@ -255,7 +310,7 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err := enqueue(ctx, tx, "statement", run.ID, events.StatementGenerated, tenantID(ctx), events.StatementGeneratedData{
 			RunID: run.ID, DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID, Period: period,
 			CurrencyType: spec.CurrencyType, HWMByLedger: hwm, ResultHash: res.Hash, Outputs: []events.OutputRef{},
-			Parameters: runParameters(period, hier, tree),
+			Parameters: consolidatedParameters(runParameters(period, hier, tree), spec.Consolidation),
 		}); err != nil {
 			return err
 		}
@@ -269,8 +324,25 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if tree != nil {
 			details["tree"] = treeRef(tree)
 		}
-		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditStatementRun, LedgerID: spec.LedgerID, LegalEntityID: entity, Period: period,
-			ActorID: spec.RequestedBy, ObjectRef: "run:" + run.ID, Details: details})
+		// One entry per ledger, each in its own entity's scope, so a caller sees
+		// the entries of the entities it may see and no others.
+		for i, ledger := range ledgers {
+			own := map[string]any{}
+			for k, v := range details {
+				own[k] = v
+			}
+			own["hwm"] = hwm[ledger]
+			if consolidated {
+				// The entry names the consolidation it belongs to, not the other
+				// ledgers, which may belong to entities outside this entry's scope.
+				own["consolidatedLedgers"] = len(ledgers)
+			}
+			if err := recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditStatementRun, LedgerID: ledger, LegalEntityID: entities[i], Period: period,
+				ActorID: spec.RequestedBy, ObjectRef: "run:" + run.ID, Details: own}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return run, err
 }
@@ -434,7 +506,7 @@ func loadBalancesTx(ctx context.Context, tx pgx.Tx, ledgerID string, currencies 
 }
 
 const runColumns = `id::text, definition_code, definition_version, ledger_id::text, currency_type, period_year, period_no,
-	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms, checks, hierarchy_code, hierarchy_version, tree_code, tree_unit, tree_revision`
+	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms, checks, hierarchy_code, hierarchy_version, tree_code, tree_unit, tree_revision, consolidation`
 
 func getRunTx(ctx context.Context, tx pgx.Tx, id string) (Run, error) {
 	run, err := scanRun(tx.QueryRow(ctx, `select `+runColumns+` from statement_run where id=$1::uuid`, id))
@@ -449,9 +521,15 @@ func scanRun(r rowScanner) (Run, error) {
 	var hwm, hash, checks []byte
 	var duration, hierVersion, treeRev *int
 	var hierCode, treeCode, treeUnit *string
+	var consolidation []byte
 	if err := r.Scan(&run.ID, &run.DefinitionCode, &run.DefinitionVersion, &run.LedgerID, &run.CurrencyType, &run.PeriodYear, &run.PeriodNo,
-		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration, &checks, &hierCode, &hierVersion, &treeCode, &treeUnit, &treeRev); err != nil {
+		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration, &checks, &hierCode, &hierVersion, &treeCode, &treeUnit, &treeRev, &consolidation); err != nil {
 		return run, err
+	}
+	if len(consolidation) > 0 {
+		if err := json.Unmarshal(consolidation, &run.Consolidation); err != nil {
+			return run, err
+		}
 	}
 	if hierCode != nil && hierVersion != nil {
 		run.Hierarchy = &RunHierarchy{Code: *hierCode, Version: *hierVersion}
@@ -501,4 +579,63 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
+}
+
+// consolidateRun expands def for a consolidated-by-entity run and refuses the
+// combinations the expansion cannot honour: only the reporting currency type
+// sums across ledgers (there is no translation between ledger currencies), and
+// a tree unit or a hierarchy replaces the rows or the balances per ledger.
+func consolidateRun(def domain.Definition, spec RunSpec) (domain.Definition, error) {
+	switch {
+	case spec.Tree != nil || spec.Hierarchy != nil:
+		return def, problem(422, domain.CodeConsolidation, "a consolidated run cannot also use a reporting tree or a hierarchy.")
+	case spec.LedgerID != spec.Consolidation[0].LedgerID:
+		return def, problem(422, domain.CodeConsolidation, "ledgerId must be the first consolidation ledger.")
+	}
+	for _, ct := range def.CurrencyTypes(spec.CurrencyType) {
+		if ct != "rpt" {
+			return def, problem(422, domain.CodeConsolidation, "ledgers are added as stored, without currency translation; a consolidated run needs the reporting currency type (rpt) in every column.")
+		}
+	}
+	return domain.Consolidate(def, spec.Consolidation)
+}
+
+// consolidatedParameters adds the ledgers of a consolidated run to the event
+// parameters (comma separated, in column order).
+func consolidatedParameters(p map[string]string, c []domain.LedgerColumn) map[string]string {
+	if len(c) > 0 {
+		list := make([]string, len(c))
+		for i, l := range c {
+			list[i] = l.LedgerID
+		}
+		p["ledgers"] = strings.Join(list, ",")
+	}
+	return p
+}
+
+// entityOf is the legal_entity_id column of a run: empty for a consolidated run,
+// whose entities are in legal_entity_ids.
+func entityOf(entity string, consolidated bool) string {
+	if consolidated {
+		return ""
+	}
+	return entity
+}
+
+// scopedEntities lists the distinct entities of a consolidated run, or nil when
+// a ledger has no assigned entity: the run is then visible to all-entity callers
+// only, like the ledger itself.
+func scopedEntities(entities []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range entities {
+		if e == "" {
+			return nil
+		}
+		if !seen[e] {
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
+	return out
 }

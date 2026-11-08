@@ -62,6 +62,21 @@ func TestRunOutput_HTMLAndXLSX(t *testing.T) {
 	}
 }
 
+// The header of a consolidated run's output names every ledger with its label,
+// not only the first.
+func TestRunOutput_ConsolidatedHeaderNamesEveryLedger(t *testing.T) {
+	second := "7b0b1a3e-6f0f-4b52-9d38-2f1c5a0c9a02"
+	w := call(scheduleRouter(outputStore{consolidation: []domain.LedgerColumn{{LedgerID: ledgerUUID, Label: "Plant A"}, {LedgerID: second, Label: "Plant B"}}}),
+		http.MethodGet, "/v1/reporting/runs/"+runUUID+"/outputs/csv", "", nil, DutyView)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	want := `ledger,"` + ledgerUUID + " (Plant A), " + second + ` (Plant B)"`
+	if !strings.Contains(w.Body.String(), want) {
+		t.Errorf("csv header lacks %q:\n%s", want, w.Body.String())
+	}
+}
+
 // A failing renderer answers REPORT-0016 naming the format and the run.
 func TestRunOutput_RenderFailure(t *testing.T) {
 	saved := outputFormats["html"]

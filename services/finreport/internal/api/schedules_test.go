@@ -181,12 +181,15 @@ func TestListSchedules_NextRunInTheScheduleZone(t *testing.T) {
 
 // outputStore serves one stored run with a header, an account row and a
 // missing prior-year cell.
-type outputStore struct{ Store }
+type outputStore struct {
+	Store
+	consolidation []domain.LedgerColumn
+}
 
-func (outputStore) RunOutput(_ context.Context, id string) (store.Run, domain.Definition, []domain.Cell, error) {
+func (o outputStore) RunOutput(_ context.Context, id string) (store.Run, domain.Definition, []domain.Cell, error) {
 	run := store.Run{ID: id, DefinitionCode: "TB-STD", DefinitionVersion: 1, LedgerID: ledgerUUID, CurrencyType: "acct",
 		PeriodYear: 2026, PeriodNo: 3, ResultHash: "h1", HWMByLedger: map[string]int64{ledgerUUID: 42},
-		StartedAt: time.Date(2026, 4, 1, 6, 0, 0, 0, time.UTC), RequestedBy: "u7"}
+		StartedAt: time.Date(2026, 4, 1, 6, 0, 0, 0, time.UTC), RequestedBy: "u7", Consolidation: o.consolidation}
 	def := domain.Definition{Code: "TB-STD", Name: "Trial balance",
 		Rows:    []domain.Row{{Code: "CASH", Kind: domain.RowAccountRange, Label: "=HYPERLINK(1)", NormalBalance: "debit"}},
 		Columns: []domain.Column{{Code: "CUR", Label: "Closing", PeriodExpr: "P"}, {Code: "PY", Label: "Prior year", PeriodExpr: "PY"}}}

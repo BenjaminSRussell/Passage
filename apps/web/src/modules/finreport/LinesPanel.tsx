@@ -81,6 +81,9 @@ const lineColumns: DataTableColumn<DrillLine>[] = [
   { key: "trace", header: "Trace", render: (l) => <TraceCell line={l} /> },
 ];
 
+/** Shown first when the lines span ledgers (a consolidated column). */
+const ledgerColumn: DataTableColumn<DrillLine> = { key: "ledgerId", header: "Ledger", mono: true, render: (l) => <span title={l.ledgerId}>{l.ledgerId.slice(0, 8)}</span> };
+
 function failure(problem: Problem, retry: () => void) {
   if (problem.status === 403) {
     return (
@@ -144,6 +147,7 @@ export function LinesPanel({ runId, row, column, keyIndex, title, keyLabel, onCl
     body = <p className={styles.note}>This amount is calculated from other rows or columns, so no journal lines sit behind it.</p>;
   } else {
     const items = pages.flatMap((p) => p.items);
+    const columns = new Set(items.map((l) => l.ledgerId)).size > 1 ? [ledgerColumn, ...lineColumns] : lineColumns;
     body = (
       <>
         {last.reconciled ? (
@@ -158,7 +162,7 @@ export function LinesPanel({ runId, row, column, keyIndex, title, keyLabel, onCl
         )}
         <DataTable
           label="Journal lines"
-          columns={lineColumns}
+          columns={columns}
           rows={items}
           getRowKey={(l) => `${l.key}/${l.postingSequence}/${l.lineNumber}`}
           empty={{ title: "No journal lines", description: "No lines in the reporting read model sit behind this amount." }}
@@ -167,7 +171,8 @@ export function LinesPanel({ runId, row, column, keyIndex, title, keyLabel, onCl
         <div className={styles.drillFooter}>
           <p className={styles.note}>
             Showing {items.length} {items.length === 1 ? "line" : "lines"}, running sum{" "}
-            <span className={styles.amount}>{displayAmount(last.cumulativeSum)}</span>, as of posting sequence {last.hwm}.
+            <span className={styles.amount}>{displayAmount(last.cumulativeSum)}</span>,{" "}
+            {last.hwm > 0 ? `as of posting sequence ${last.hwm}` : "each ledger as of its posting sequence in the run"}.
           </p>
           {last.nextCursor ? (
             <Button size="sm" onClick={loadMore} loading={loadingMore}>

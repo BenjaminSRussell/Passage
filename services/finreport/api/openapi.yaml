@@ -415,7 +415,7 @@ paths:
                   blank: {type: boolean}
                   computed: {type: boolean}
                   value: {$ref: '#/components/schemas/Decimal'}
-                  hwm: {type: integer, format: int64, description: Posting sequence the run reflects; later lines are not listed}
+                  hwm: {type: integer, format: int64, description: "Posting sequence the run reflects; later lines are not listed. For a consolidated run, the mark of the column's ledger, or 0 on a consolidated column, whose lines each follow their own ledger's mark (the run's hwmByLedger)"}
                   limit: {type: integer}
                   items:
                     type: array
@@ -1485,11 +1485,11 @@ components:
         updatedBy: {type: string, readOnly: true}
     RunRequest:
       type: object
-      required: [definition, ledgerId, currencyType, period, calendar]
+      required: [definition, currencyType, period, calendar]
       properties:
         definition: {type: string}
         definitionVersion: {type: integer, minimum: 0, description: 0 or omitted means the latest published version}
-        ledgerId: {type: string, format: uuid}
+        ledgerId: {type: string, format: uuid, description: Required unless consolidation is given; with consolidation it must be the first consolidation ledger or be left out}
         legalEntityId: {type: string, format: uuid, description: "Assertion only: the run is owned by the legal entity of the ledger's reporting rows. A different value is refused with 422 REPORT-0032."}
         currencyType: {type: string, enum: [acct, rpt, txn]}
         period: {$ref: '#/components/schemas/Period'}
@@ -1500,6 +1500,7 @@ components:
         includeAdjustmentPeriods: {type: boolean, description: Counts adjustment periods in P-n, YTD, Q and FY even when the definition does not}
         hierarchy: {$ref: '#/components/schemas/HierarchyRun'}
         tree: {$ref: '#/components/schemas/TreeRun'}
+        consolidation: {$ref: '#/components/schemas/ConsolidationRun'}
         allowStale: {type: boolean, default: false, description: "Accepts a read model behind reporting.max_lag_seconds. The run completes with a REPORT-0004 warning in checks instead of being refused with 409 REPORT-0004."}
     HierarchyRun:
       type: object
@@ -1558,6 +1559,35 @@ components:
           maxItems: 200
           description: Values of the tree's dimension attribute that belong to this unit itself; the unit also covers the values of every unit below it
           items: {type: string, minLength: 1, maxLength: 60}
+    ConsolidationRun:
+      type: object
+      required: [ledgers]
+      description: >-
+        Runs the definition consolidated by entity (FR-15.5). Every column of the definition
+        becomes one column for the sum of all the ledgers (the column's own code, label suffixed
+        "- Consolidated") followed by one column per ledger (code CODE_E1, CODE_E2 in the order
+        given, label suffixed with the ledger's label). Ledger amounts are added as stored: there
+        is no currency translation, so every column must read the reporting currency type rpt,
+        and no intercompany elimination. A CALC column is expanded too: the consolidated column
+        calculates over the consolidated columns, each entity column over that entity's columns.
+        A cash flow definition, a tree and a hierarchy are refused, as are fewer than 2 or more
+        than 12 ledgers, more than 60 columns after the expansion, or a definition column whose
+        code equals an expanded entity column code (422 REPORT-0042). Every ledger is read under
+        the caller's legal-entity scope; a ledger the caller cannot see is 404 REPORT-0031, never
+        left out. The run is visible only to callers whose scope covers every entity of its
+        ledgers. Level 1 balance keys name the ledger; the journal lines of a cell are read per
+        key from that key's ledger at that ledger's high-water mark in the run.
+      properties:
+        ledgers:
+          type: array
+          minItems: 2
+          maxItems: 12
+          items:
+            type: object
+            required: [ledgerId]
+            properties:
+              ledgerId: {type: string, format: uuid}
+              label: {type: string, maxLength: 40, description: Column suffix naming the entity; the first 8 characters of the ledger id when empty}
     TreeRun:
       type: object
       required: [code]
@@ -1601,6 +1631,14 @@ components:
           properties:
             code: {type: string}
             version: {type: integer}
+        consolidation:
+          type: array
+          description: Present when the run is consolidated by entity; the ledgers in column order (ledgerId is the first)
+          items:
+            type: object
+            properties:
+              ledgerId: {type: string, format: uuid}
+              label: {type: string}
         tree:
           type: object
           description: Present when the run is limited to a unit of a reporting tree
@@ -1675,9 +1713,10 @@ components:
         amount: {$ref: '#/components/schemas/Decimal'}
     DrillLine:
       type: object
-      required: [key, postingDate, postingSequence, lineNumber, voucher, period, account, combination, currencyType, debit, credit, amount, closingEntry]
+      required: [key, ledgerId, postingDate, postingSequence, lineNumber, voucher, period, account, combination, currencyType, debit, credit, amount, closingEntry]
       properties:
         key: {type: integer, description: Position of the line's balance key in the drill level 1 list}
+        ledgerId: {type: string, format: uuid, description: Ledger of the line; the lines of a consolidated column span the run's ledgers}
         postingDate: {type: string, format: date}
         postingSequence: {type: integer, format: int64}
         lineNumber: {type: integer}

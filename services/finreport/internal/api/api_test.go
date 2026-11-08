@@ -427,3 +427,46 @@ func TestLag_ReportsTheGate(t *testing.T) {
 		t.Fatalf("lag:check = %d, want no such route", w.Code)
 	}
 }
+
+func TestCreateRun_ConsolidationOption(t *testing.T) {
+	key := map[string]string{"Idempotency-Key": "k1"}
+	l2, l3 := "7b0b1a3e-6f0f-4b52-9d38-2f1c5a0c9a01", "7b0b1a3e-6f0f-4b52-9d38-2f1c5a0c9a02"
+	body := func(ledgerID, consolidation string) string {
+		b := `{"definition":"TB-STD","currencyType":"rpt","period":{"year":2026,"no":3,"quarter":1},"calendar":[{"year":2026,"no":3,"quarter":1}],"consolidation":` + consolidation
+		if ledgerID != "" {
+			b += `,"ledgerId":"` + ledgerID + `"`
+		}
+		return b + "}"
+	}
+	list := `{"ledgers":[{"ledgerId":"` + ledgerUUID + `","label":" Plant A "},{"ledgerId":"` + strings.ToUpper(l2) + `"}]}`
+	for _, id := range []string{"", ledgerUUID, strings.ToUpper(ledgerUUID)} {
+		f := &fakeStore{}
+		w := call(router(f), http.MethodPost, "/v1/reporting/runs", body(id, list), key, DutyRun)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("ledgerId %q: status %d: %s", id, w.Code, w.Body.String())
+		}
+		got := f.runSpec.Consolidation
+		if f.runSpec.LedgerID != ledgerUUID || len(got) != 2 || got[0].Label != "Plant A" || got[1].LedgerID != l2 || got[1].Label != l2[:8] {
+			t.Fatalf("spec = %+v", f.runSpec)
+		}
+	}
+	for name, c := range map[string]string{
+		"one ledger":  `{"ledgers":[{"ledgerId":"` + ledgerUUID + `"}]}`,
+		"repeat":      `{"ledgers":[{"ledgerId":"` + ledgerUUID + `"},{"ledgerId":"` + strings.ToUpper(ledgerUUID) + `"}]}`,
+		"not a uuid":  `{"ledgers":[{"ledgerId":"` + ledgerUUID + `"},{"ledgerId":"L2"}]}`,
+		"long label":  `{"ledgers":[{"ledgerId":"` + ledgerUUID + `","label":"` + strings.Repeat("x", 41) + `"},{"ledgerId":"` + l3 + `"}]}`,
+		"unknown key": `{"ledgers":[{"ledgerId":"` + ledgerUUID + `"},{"ledgerId":"` + l3 + `","name":"x"}]}`,
+		"wrong first": `{"ledgers":[{"ledgerId":"` + l3 + `"},{"ledgerId":"` + l2 + `"}]}`,
+	} {
+		f := &fakeStore{}
+		w := call(router(f), http.MethodPost, "/v1/reporting/runs", body(ledgerUUID, c), key, DutyRun)
+		if w.Code < 400 || w.Code >= 500 || f.runSpec != nil {
+			t.Errorf("%s: status %d, store reached %v; want a 4xx before the store", name, w.Code, f.runSpec != nil)
+		}
+	}
+	f := &fakeStore{}
+	asserted := strings.Replace(body("", list), `"consolidation"`, `"legalEntityId":"`+l3+`","consolidation"`, 1)
+	if w := call(router(f), http.MethodPost, "/v1/reporting/runs", asserted, key, DutyRun); w.Code != http.StatusUnprocessableEntity || f.runSpec != nil {
+		t.Errorf("asserted legalEntityId: status %d", w.Code)
+	}
+}

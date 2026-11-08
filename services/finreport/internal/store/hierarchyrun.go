@@ -27,7 +27,12 @@ func runDefinitionTx(ctx context.Context, tx pgx.Tx, run Run) (domain.Definition
 		run.DefinitionCode, run.DefinitionVersion).Scan(&body); err != nil {
 		return def, fmt.Errorf("definition %s v%d of run %s: %w", run.DefinitionCode, run.DefinitionVersion, run.ID, err)
 	}
-	return def, json.Unmarshal(body, &def)
+	if err := json.Unmarshal(body, &def); err != nil || len(run.Consolidation) == 0 {
+		return def, err
+	}
+	// A consolidated run rebuilds its columns from the published definition and
+	// its ledger list; the expansion is deterministic.
+	return domain.Consolidate(def, run.Consolidation)
 }
 
 // RunDefinition returns the definition a run was evaluated with, so a client

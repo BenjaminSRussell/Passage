@@ -96,6 +96,9 @@ type Column struct {
 	// column's filter both match. Not allowed on CALC columns, which read
 	// other columns.
 	DimensionFilter map[string][]string `json:"dimensionFilter,omitempty"`
+	// Ledger limits the column to one ledger. It is set only by Consolidate for
+	// a consolidated-by-entity run and never stored or exported.
+	Ledger string `json:"-"`
 }
 
 // Definition is a statement design: the rows, the columns and the presentation

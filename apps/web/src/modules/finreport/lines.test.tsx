@@ -64,6 +64,7 @@ const balances = {
 function line(over: Partial<DrillLine>): DrillLine {
   return {
     key: 0,
+    ledgerId: LEDGER,
     postingDate: "2026-03-05",
     postingSequence: 1,
     lineNumber: 1,
@@ -143,6 +144,37 @@ async function openRevenueBalances() {
 const lineCalls = () => server.calls.filter((c) => c.url.pathname.endsWith("/lines"));
 
 describe("drill level 2: journal lines", () => {
+  it("names the ledger of each line when the lines span ledgers (consolidated column)", async () => {
+    const other = "0190f0a0-0000-7000-8000-000000000303";
+    drillServer(() =>
+      json(
+        200,
+        page({
+          hwm: 0,
+          items: [line({ voucher: "GJ-A" }), line({ ledgerId: other, voucher: "GJ-B", credit: "100.000000", amount: "100.000000" })],
+          sumOfLines: "110.000000",
+          cumulativeSum: "110.000000",
+        }),
+      ),
+    );
+    await openRevenueBalances();
+    fireEvent.click(screen.getByRole("button", { name: "Show all journal lines" }));
+    const table = await findTable({ name: "Journal lines" });
+    expect(within(table).getByRole("columnheader", { name: "Ledger" })).toBeInTheDocument();
+    const b = within(table).getByText("GJ-B").closest("tr") as HTMLElement;
+    expect(within(b).getByTitle(other)).toHaveTextContent(other.slice(0, 8));
+    expect(screen.getByText(/Showing 2 lines, running sum/)).toHaveTextContent("Showing 2 lines, running sum 110.00, each ledger as of its posting sequence in the run.");
+  });
+
+  it("shows no ledger column for the lines of one ledger", async () => {
+    drillServer(() => json(200, firstPage));
+    await openRevenueBalances();
+    fireEvent.click(screen.getByRole("button", { name: "Show all journal lines" }));
+    const table = await findTable({ name: "Journal lines" });
+    await within(table).findByText("AP-7");
+    expect(within(table).queryByRole("columnheader", { name: "Ledger" })).not.toBeInTheDocument();
+  });
+
   it("lists every line of a cell page by page with source and trace links", async () => {
     drillServer((url) => (url.searchParams.get("cursor") === "CURSOR-1" ? json(200, secondPage) : json(200, firstPage)));
     const { container } = await openRevenueBalances();

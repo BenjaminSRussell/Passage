@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
 )
 
 // CodeRenderFailed is REPORT-0016 REPORT_RENDER_FAILED (PRD §2.15.18): a
@@ -54,7 +56,7 @@ func (a *API) runOutput(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := out.render(def, cells, domain.Stamp{
 		RunID: run.ID, DefinitionCode: run.DefinitionCode, DefinitionVersion: run.DefinitionVersion,
-		LedgerID: run.LedgerID, Period: fmt.Sprintf("%04d-%02d", run.PeriodYear, run.PeriodNo), CurrencyType: run.CurrencyType,
+		LedgerID: stampLedger(run), Period: fmt.Sprintf("%04d-%02d", run.PeriodYear, run.PeriodNo), CurrencyType: run.CurrencyType,
 		HWM: run.HWMByLedger, ResultHash: run.ResultHash, GeneratedAt: run.StartedAt, GeneratedBy: run.RequestedBy,
 	})
 	if err != nil {
@@ -67,4 +69,17 @@ func (a *API) runOutput(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.%s"`, run.DefinitionCode, run.ID, format))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+// stampLedger is the ledger line of an output's header: the run's ledger, or
+// every ledger of a consolidated run with its label, in column order.
+func stampLedger(run store.Run) string {
+	if len(run.Consolidation) == 0 {
+		return run.LedgerID
+	}
+	parts := make([]string, len(run.Consolidation))
+	for i, l := range run.Consolidation {
+		parts[i] = fmt.Sprintf("%s (%s)", l.LedgerID, l.Label)
+	}
+	return strings.Join(parts, ", ")
 }

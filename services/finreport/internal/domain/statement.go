@@ -96,6 +96,9 @@ type Input struct {
 	Calendar                 Calendar
 	At                       int
 	Balances                 []Balance
+	// Consolidated reads the balances of every ledger in Balances instead of
+	// only LedgerID; the definition's columns then name their ledger (Consolidate).
+	Consolidated bool
 }
 
 // Result holds the cells in row-major order and their SHA-256 (hex). The hash
@@ -112,6 +115,8 @@ type colPlan struct {
 	include  map[int]bool
 	// dims is the column's dimension filter; nil keeps every balance.
 	dims map[string][]string
+	// ledger, when set, keeps only that ledger's balances (consolidated runs).
+	ledger string
 }
 
 type slot struct {
@@ -183,7 +188,7 @@ func Evaluate(in Input) (Result, error) {
 		}
 	}
 	for _, b := range in.Balances {
-		if b.LedgerID != in.LedgerID || b.Period < 0 || b.Period >= len(periods) {
+		if (!in.Consolidated && b.LedgerID != in.LedgerID) || b.Period < 0 || b.Period >= len(periods) {
 			continue
 		}
 		k := slot{b.CurrencyType, b.Period}
@@ -194,7 +199,10 @@ func Evaluate(in Input) (Result, error) {
 			if list[i].Account != list[j].Account {
 				return list[i].Account < list[j].Account
 			}
-			return list[i].Combination < list[j].Combination
+			if list[i].Combination != list[j].Combination {
+				return list[i].Combination < list[j].Combination
+			}
+			return list[i].LedgerID < list[j].LedgerID
 		})
 	}
 
@@ -262,7 +270,7 @@ func planColumns(in Input) ([]colPlan, error) {
 		if currency == "" {
 			currency = in.CurrencyType
 		}
-		plans[j] = colPlan{found: true, currency: currency, include: include, dims: c.DimensionFilter}
+		plans[j] = colPlan{found: true, currency: currency, include: include, dims: c.DimensionFilter, ledger: c.Ledger}
 	}
 	return plans, nil
 }
@@ -466,6 +474,9 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 		for _, j := range e.matching(row, k, list) {
 			b := list[j]
 			if plan.dims != nil && !dimsMatch(plan.dims, b.Dims) {
+				continue
+			}
+			if plan.ledger != "" && b.LedgerID != plan.ledger {
 				continue
 			}
 			net := b.Net

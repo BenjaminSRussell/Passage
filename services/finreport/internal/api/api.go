@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -361,6 +362,9 @@ type runRequest struct {
 	IncludeAdjustment bool             `json:"includeAdjustmentPeriods"`
 	Hierarchy         *hierarchyRunDTO `json:"hierarchy"`
 	Tree              *treeRunDTO      `json:"tree"`
+	// Consolidation makes the run consolidated by entity (FR-15.5): one column
+	// per ledger and the sum of all of them. ledgerId may then be left out.
+	Consolidation *consolidationDTO `json:"consolidation"`
 	// AllowStale accepts a read model behind the lag gate: the run completes
 	// with the REPORT-0004 warning instead of being refused (FR-15.1).
 	AllowStale bool `json:"allowStale"`
@@ -374,6 +378,15 @@ type hierarchyRunDTO struct {
 	NormalBalance string `json:"normalBalance"`
 	AccountFrom   string `json:"accountFrom"`
 	AccountTo     string `json:"accountTo"`
+}
+
+type consolidationDTO struct {
+	Ledgers []consolidationLedgerDTO `json:"ledgers"`
+}
+
+type consolidationLedgerDTO struct {
+	LedgerID string `json:"ledgerId"`
+	Label    string `json:"label"`
 }
 
 // treeRunDTO limits the run to the balances of one reporting unit, rolled up
@@ -421,7 +434,19 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	if t := req.Tree; t != nil {
 		tree = &store.TreeRun{Code: t.Code, Unit: t.Unit}
 	}
-	run, err := a.store.CreateRun(r.Context(), store.RunSpec{Hierarchy: hier, Tree: tree,
+	var consolidation []domain.LedgerColumn
+	if c := req.Consolidation; c != nil {
+		for _, l := range c.Ledgers {
+			id, _ := ids.Canonical(l.LedgerID)
+			label := strings.TrimSpace(l.Label)
+			if label == "" {
+				label = id[:8]
+			}
+			consolidation = append(consolidation, domain.LedgerColumn{LedgerID: id, Label: label})
+		}
+		req.LedgerID = consolidation[0].LedgerID
+	}
+	run, err := a.store.CreateRun(r.Context(), store.RunSpec{Hierarchy: hier, Tree: tree, Consolidation: consolidation,
 		Code: req.Definition, Version: req.DefinitionVersion, LedgerID: req.LedgerID, LegalEntityID: req.LegalEntityID, CurrencyType: req.CurrencyType,
 		PeriodYear: req.Period.Year, PeriodNo: req.Period.No, IncludeAdjustment: req.IncludeAdjustment, Calendar: cal,
 		RequestedBy: p.UserID, IdempotencyKey: key, RequestHash: hex.EncodeToString(sum[:]),
@@ -472,7 +497,7 @@ func validateRun(req runRequest) error {
 		return bad("definition is required")
 	case req.DefinitionVersion < 0:
 		return bad("definitionVersion must be 0 (latest published) or a published version")
-	case !ids.Valid(req.LedgerID):
+	case req.Consolidation == nil && !ids.Valid(req.LedgerID):
 		return bad("ledgerId must be a UUID")
 	case req.Period.Year <= 0 || req.Period.No < 0:
 		return bad("period.year and period.no are required")
@@ -499,6 +524,33 @@ func validateRun(req runRequest) error {
 			return bad("hierarchy.version must be 0 (latest published) or a published version")
 		case h.NormalBalance != "" && h.NormalBalance != "debit" && h.NormalBalance != "credit":
 			return bad("hierarchy.normalBalance must be debit or credit")
+		}
+	}
+	if c := req.Consolidation; c != nil {
+		if n := len(c.Ledgers); n < 2 || n > domain.MaxConsolidationLedgers {
+			return bad(fmt.Sprintf("consolidation.ledgers needs 2 to %d ledgers", domain.MaxConsolidationLedgers))
+		}
+		seen := map[string]bool{}
+		for i, l := range c.Ledgers {
+			id, ok := ids.Canonical(l.LedgerID)
+			switch {
+			case !ok:
+				return bad(fmt.Sprintf("consolidation.ledgers[%d].ledgerId must be a UUID", i))
+			case seen[id]:
+				return bad(fmt.Sprintf("consolidation.ledgers[%d] repeats a ledger", i))
+			case utf8.RuneCountInString(strings.TrimSpace(l.Label)) > domain.MaxLedgerLabel:
+				return bad(fmt.Sprintf("consolidation.ledgers[%d].label may have at most %d characters", i, domain.MaxLedgerLabel))
+			}
+			seen[id] = true
+		}
+		if req.LedgerID != "" {
+			given, _ := ids.Canonical(req.LedgerID)
+			if first, _ := ids.Canonical(c.Ledgers[0].LedgerID); given != first {
+				return bad("ledgerId, when given with consolidation, must be the first consolidation ledger")
+			}
+		}
+		if req.LegalEntityID != "" {
+			return bad("legalEntityId cannot be asserted for a consolidated run; each ledger's entity is derived from its balances")
 		}
 	}
 	if t := req.Tree; t != nil && !domain.ValidReportCode(t.Code) {
@@ -608,6 +660,7 @@ func (a *API) drillBalances(w http.ResponseWriter, r *http.Request) {
 
 type lineDTO struct {
 	Key             int    `json:"key"`
+	LedgerID        string `json:"ledgerId"`
 	PostingDate     string `json:"postingDate"`
 	PostingSequence int64  `json:"postingSequence"`
 	LineNumber      int    `json:"lineNumber"`
@@ -669,7 +722,7 @@ func (a *API) drillLines(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]lineDTO, 0, len(page.Items))
 	for _, l := range page.Items {
-		items = append(items, lineDTO{Key: l.Key, PostingDate: l.PostingDate, PostingSequence: l.PostingSequence, LineNumber: l.LineNumber,
+		items = append(items, lineDTO{Key: l.Key, LedgerID: l.LedgerID, PostingDate: l.PostingDate, PostingSequence: l.PostingSequence, LineNumber: l.LineNumber,
 			Voucher: l.Voucher, Period: l.Period(), Account: l.Account, Combination: l.Combination, CurrencyType: l.CurrencyType,
 			Debit: l.Debit.StringFixed(6), Credit: l.Credit.StringFixed(6), Amount: l.Amount.StringFixed(6), ClosingEntry: l.ClosingEntry,
 			SourceURI: l.SourceURI, TraceID: l.TraceID, TraceURL: a.traceLink(l.TraceID)})

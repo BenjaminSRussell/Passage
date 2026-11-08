@@ -74,7 +74,7 @@ func (s *Postgres) DrillLines(ctx context.Context, runID, row, column string, q 
 		if err != nil {
 			return err
 		}
-		page.Cell, page.Value, page.HWM = cell, cell.Value, run.HWMByLedger[run.LedgerID]
+		page.Cell, page.Value, page.HWM = cell, cell.Value, cellHWM(run, def, column)
 		if cell.Computed {
 			if q.Key >= 0 {
 				return problem(404, CodeCellNotFound, fmt.Sprintf("cell %s/%s is computed and has no balance keys", row, column))
@@ -94,26 +94,47 @@ func (s *Postgres) DrillLines(ctx context.Context, runID, row, column string, q 
 		if q.Key >= 0 {
 			offset = q.Key
 		}
-		return drillPageTx(ctx, tx, run.LedgerID, scope, offset, q, &page)
+		return drillPageTx(ctx, tx, run, scope, offset, q, &page)
 	})
 	return page, err
 }
 
-// lineJoin restricts journal lines to the scope's balances ($2..$7, aligned
-// arrays with the key position first), the run's HWM ($8) and, for income
-// statements and cash flows, to lines that are not closing entries ($9).
-const lineJoin = `from unnest($2::int[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[]) as k(idx, py, pn, acct, combo, cur)
+// cellHWM is the high-water mark a cell's lines are read at: the run's for a
+// single-ledger run; for a consolidated run that of the column's ledger, or 0
+// for a consolidated column, whose keys each read their own ledger's mark
+// (hwmByLedger of the run).
+func cellHWM(run Run, def domain.Definition, column string) int64 {
+	if len(run.Consolidation) == 0 {
+		return run.HWMByLedger[run.LedgerID]
+	}
+	for _, c := range def.Columns {
+		if c.Code == column && c.Ledger != "" {
+			return run.HWMByLedger[c.Ledger]
+		}
+	}
+	return 0
+}
+
+// lineJoin restricts journal lines to the scope's balances ($2..$7 and $1,
+// $8: aligned arrays with the key position first, the key's ledger and that
+// ledger's HWM in the run, since the keys of a consolidated cell span ledgers)
+// and, for income statements and cash flows, to lines that are not closing
+// entries ($9).
+const lineJoin = `from unnest($2::int[], $3::int[], $4::int[], $5::text[], $6::text[], $7::text[], $1::uuid[], $8::bigint[]) as k(idx, py, pn, acct, combo, cur, ledger, hwm)
 	join reporting_journal_line l
-	  on l.ledger_id = $1::uuid and l.period_year = k.py and l.period_no = k.pn and l.account = k.acct
+	  on l.ledger_id = k.ledger and l.period_year = k.py and l.period_no = k.pn and l.account = k.acct
 	 and l.combination = k.combo and l.currency_type = k.cur
-	 and l.posting_sequence <= $8 and not ($9::boolean and l.closing_entry)`
+	 and l.posting_sequence <= k.hwm and not ($9::boolean and l.closing_entry)`
 
 // drillPageTx reads one page for scope; offset is the level 1 position of
-// scope.Keys[0], so items and cursors name keys as the cell lists them.
-func drillPageTx(ctx context.Context, tx pgx.Tx, ledgerID string, scope domain.LineScope, offset int, q LineQuery, page *LinePage) error {
+// scope.Keys[0], so items and cursors name keys as the cell lists them. A
+// single-ledger run reads the run's ledger at scope.HWM; each key of a
+// consolidated run reads its own ledger at that ledger's mark in the run.
+func drillPageTx(ctx context.Context, tx pgx.Tx, run Run, scope domain.LineScope, offset int, q LineQuery, page *LinePage) error {
 	n := len(scope.Keys)
 	idx, years, nos := make([]int32, n), make([]int32, n), make([]int32, n)
 	accts, combos, curs := make([]string, n), make([]string, n), make([]string, n)
+	ledgers, hwms := make([]string, n), make([]int64, n)
 	for i, k := range scope.Keys {
 		var year, no int
 		if _, err := fmt.Sscanf(k.Period, "%d-%d", &year, &no); err != nil {
@@ -121,8 +142,16 @@ func drillPageTx(ctx context.Context, tx pgx.Tx, ledgerID string, scope domain.L
 		}
 		idx[i], years[i], nos[i] = int32(i), int32(year), int32(no)
 		accts[i], combos[i], curs[i] = k.Account, k.Combination, k.CurrencyType
+		ledgers[i], hwms[i] = run.LedgerID, scope.HWM
+		if len(run.Consolidation) > 0 {
+			hwm, ok := run.HWMByLedger[k.LedgerID]
+			if !ok {
+				return fmt.Errorf("balance key ledger %q is not a ledger of run %s", k.LedgerID, run.ID)
+			}
+			ledgers[i], hwms[i] = k.LedgerID, hwm
+		}
 	}
-	args := []any{ledgerID, idx, years, nos, accts, combos, curs, scope.HWM, scope.ExcludeClosing}
+	args := []any{ledgers, idx, years, nos, accts, combos, curs, hwms, scope.ExcludeClosing}
 	var cDate *string
 	var cSeq int64
 	var cLine, cKey int
@@ -181,7 +210,7 @@ func drillPageTx(ctx context.Context, tx pgx.Tx, ledgerID string, scope domain.L
 			&l.CurrencyType, &l.Voucher, &debit, &credit, &l.ClosingEntry, &l.SourceURI, &l.TraceID); err != nil {
 			return err
 		}
-		l.LedgerID = ledgerID
+		l.LedgerID = ledgers[i]
 		var err1, err2 error
 		l.Debit, err1 = decimal.NewFromString(debit)
 		l.Credit, err2 = decimal.NewFromString(credit)

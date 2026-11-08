@@ -30,7 +30,7 @@ interface Statement {
 
 async function loadStatement(runId: string, signal: AbortSignal): Promise<Statement> {
   const [run, cells] = await Promise.all([getRun(runId, signal), listCells(runId, signal)]);
-  const definition = run.hierarchy ? await getRunDefinition(runId, signal) : (await getDefinition(run.definitionCode, run.definitionVersion, signal)).definition;
+  const definition = run.hierarchy || run.consolidation ? await getRunDefinition(runId, signal) : (await getDefinition(run.definitionCode, run.definitionVersion, signal)).definition;
   return { run, definition, cells: new Map(cells.map((c) => [`${c.row}/${c.column}`, c])) };
 }
 
@@ -116,7 +116,7 @@ export function RunPage() {
     <div className={styles.stack}>
       <PageHeader
         title={definition.name}
-        description={`${run.definitionCode} version ${run.definitionVersion}${run.hierarchy ? `, rows from hierarchy ${run.hierarchy.code} version ${run.hierarchy.version}` : ""}${run.tree ? `, ${run.tree.unit ? `unit ${run.tree.unit} of` : "all units of"} tree ${run.tree.code} revision ${run.tree.revision}` : ""}, period ${periodLabel(run.periodYear, run.periodNo)}, ${CURRENCY_TYPE_LABELS[run.currencyType as keyof typeof CURRENCY_TYPE_LABELS] ?? run.currencyType} currency.`}
+        description={`${run.definitionCode} version ${run.definitionVersion}${run.hierarchy ? `, rows from hierarchy ${run.hierarchy.code} version ${run.hierarchy.version}` : ""}${run.consolidation ? `, consolidated by entity over ${run.consolidation.length} ledgers (${run.consolidation.map((l) => l.label).join(", ")})` : ""}${run.tree ? `, ${run.tree.unit ? `unit ${run.tree.unit} of` : "all units of"} tree ${run.tree.code} revision ${run.tree.revision}` : ""}, period ${periodLabel(run.periodYear, run.periodNo)}, ${CURRENCY_TYPE_LABELS[run.currencyType as keyof typeof CURRENCY_TYPE_LABELS] ?? run.currencyType} currency.`}
         meta={<StatusPill status={run.status} />}
         actions={DOWNLOAD_FORMATS.map((format) => (
           <a key={format} className={buttonClassName("secondary")} href={runOutputUrl(run.id, format)} download>

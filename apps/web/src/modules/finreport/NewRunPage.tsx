@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import { Alert, Button, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
 import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, listHierarchies, listTrees, newKey, type CurrencyType, type Problem, type RunRequest } from "./api/client";
 import { CURRENCY_TYPE_LABELS, fiscalCalendar, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -28,18 +28,45 @@ export interface RunValues {
   tree?: string;
   /** Unit of the tree; empty is the whole tree (the roll-up of every unit). */
   treeUnit?: string;
+  /** One ledger per line, "ledger id" or "ledger id, label"; two to 12 lines consolidate the run by entity. */
+  consolidation?: string;
 }
 
 type Errors = Partial<Record<keyof RunValues, string>>;
 
 const INTEGER = /^\d+$/;
+const MAX_CONSOLIDATION_LEDGERS = 12;
+const MAX_LEDGER_LABEL = 40;
+
+/** Parses the consolidation lines; an unparsable line keeps its text so the check can name it. */
+export function parseConsolidation(text: string | undefined): { ledgerId: string; label?: string }[] {
+  return (text ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => {
+      const at = line.search(/[\s,]/);
+      if (at < 0) return { ledgerId: line };
+      const label = line.slice(at).replace(/^[\s,]+/, "").trim();
+      return { ledgerId: line.slice(0, at), ...(label !== "" ? { label } : {}) };
+    });
+}
 
 /** Client checks that mirror the service (POST /runs); the service has the last word. */
 export function validateRun(v: RunValues): Errors {
   const errors: Errors = {};
   if (v.definition === "") errors.definition = "Choose a published definition.";
   if (v.version !== "" && (!INTEGER.test(v.version) || Number(v.version) < 1)) errors.version = "Enter a published version number, or leave it empty for the latest.";
-  if (!UUID.test(v.ledgerId.trim())) errors.ledgerId = "Enter the ledger id (a UUID).";
+  const ledgers = parseConsolidation(v.consolidation);
+  if (ledgers.length > 0) {
+    const ids = ledgers.map((l) => l.ledgerId.toLowerCase());
+    if (ledgers.length < 2 || ledgers.length > MAX_CONSOLIDATION_LEDGERS) errors.consolidation = `List 2 to ${MAX_CONSOLIDATION_LEDGERS} ledgers, one per line.`;
+    else if (ledgers.some((l) => !UUID.test(l.ledgerId))) errors.consolidation = "Each line starts with a ledger id (a UUID).";
+    else if (new Set(ids).size !== ids.length) errors.consolidation = "A ledger is listed twice.";
+    else if (ledgers.some((l) => (l.label ?? "").length > MAX_LEDGER_LABEL)) errors.consolidation = `A label may have at most ${MAX_LEDGER_LABEL} characters.`;
+    else if (v.currencyType !== "rpt") errors.consolidation = "Ledger amounts are added as stored, so a consolidated run needs the reporting currency type.";
+    else if (v.hierarchy !== "" || v.tree) errors.consolidation = "A consolidated run cannot also use a hierarchy or a reporting tree.";
+  } else if (!UUID.test(v.ledgerId.trim())) errors.ledgerId = "Enter the ledger id (a UUID).";
   if (!INTEGER.test(v.year) || Number(v.year) < 1900) errors.year = "Enter the fiscal year, such as 2026.";
   if (!INTEGER.test(v.periodsPerYear) || Number(v.periodsPerYear) < 1 || Number(v.periodsPerYear) > 16) errors.periodsPerYear = "Enter 1 to 16 periods per year.";
   else if (!INTEGER.test(v.period) || Number(v.period) > Number(v.periodsPerYear)) errors.period = `Enter a period from 0 to ${v.periodsPerYear}.`;
@@ -59,10 +86,11 @@ export function toRunRequest(v: RunValues): RunRequest {
   const no = Number(v.period);
   const calendar = fiscalCalendar(Number(v.firstYear), year, Number(v.periodsPerYear));
   const period = calendar.find((p) => p.year === year && p.no === no) ?? { year, no, quarter: 1 };
+  const ledgers = parseConsolidation(v.consolidation);
   return {
     definition: v.definition,
     ...(v.version !== "" ? { definitionVersion: Number(v.version) } : {}),
-    ledgerId: v.ledgerId.trim(),
+    ...(ledgers.length > 0 ? { consolidation: { ledgers } } : { ledgerId: v.ledgerId.trim() }),
     currencyType: v.currencyType,
     period,
     calendar,
@@ -105,6 +133,7 @@ export function NewRunPage() {
     accountTo: "",
     tree: "",
     treeUnit: "",
+    consolidation: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -277,6 +306,17 @@ export function NewRunPage() {
               )}
             </FormField>
           ) : null}
+          <FormField
+            id="fr-run-consolidation"
+            label="Consolidate by entity"
+            optional
+            hint="One ledger per line, as the ledger id and an optional label. The statement then has a column per ledger and their sum; amounts are added as stored (no translation or elimination), so use the reporting currency type. When filled, the ledger id above is not used."
+            error={errors.consolidation}
+          >
+            {(control) => (
+              <Textarea {...control} rows={4} className={styles.mono} value={values.consolidation ?? ""} onChange={(e) => update({ consolidation: e.target.value })} invalid={Boolean(errors.consolidation)} />
+            )}
+          </FormField>
           {text("fr-run-year", "year", "Fiscal year", { inputMode: "numeric" })}
           {text("fr-run-period", "period", "Period", { hint: "0 is the opening period.", inputMode: "numeric" })}
           {text("fr-run-periods", "periodsPerYear", "Periods per year", { inputMode: "numeric" })}
