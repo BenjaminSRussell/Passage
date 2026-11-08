@@ -29,6 +29,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/production/internal/productclient"
 	"github.com/BenjaminSRussell/passage/services/production/internal/store"
 )
 
@@ -114,6 +115,7 @@ type API struct {
 	glBooked atomic.Int64
 	gl       store.GLBooks
 	ledger   ledgerclient.Ledger
+	products productclient.Resolver
 }
 
 // New returns the API over st.
@@ -226,10 +228,13 @@ type createRequest struct {
 	// ReworkReference names the original order, batch or serial of a rework
 	// order (FR-21.20); it implies originType Rework.
 	ReworkReference *domain.ReworkRef `json:"reworkReference"`
-	// MinimumQty, MaximumQty and Multiple are the item's order settings (FR-21.1),
-	// passed by the caller until released-product settings (wave 8) are read.
-	// Absent or 0 means no rule; omitempty keeps the request hash of a body
-	// without them as it was.
+	// ReleasedProductID names the released product (wave 8) whose site default supplies the minimum and
+	// multiple order quantity and, when quantity is omitted, the standard quantity (FR-21.1). omitempty
+	// keeps the request hash of a body without it as it was.
+	ReleasedProductID string `json:"releasedProductId,omitempty"`
+	// MinimumQty, MaximumQty and Multiple are the item's order settings (FR-21.1). They apply on top of the
+	// released product's minimum and multiple (tightening, never loosening them); the product carries no maximum. Absent or 0 means no rule; omitempty
+	// keeps the request hash of a body without them as it was.
 	MinimumQty *decimal.Decimal `json:"minimumQty,omitempty"`
 	MaximumQty *decimal.Decimal `json:"maximumQty,omitempty"`
 	Multiple   *decimal.Decimal `json:"multiple,omitempty"`
@@ -298,6 +303,33 @@ func (a *API) createWith(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		}
 	}
 	key, fields := idempotencyKey(r)
+	requestHash := hashOf(req)
+	var settings productSettings
+	if ids.Valid(req.LegalEntityID) && ids.Valid(req.SiteID) && tenant.InLegalEntityScope(p, req.LegalEntityID) {
+		if req.ReleasedProductID != "" && len(fields) == 0 && (fromSalesLine || (req.OriginType != domain.OriginSalesLine && req.ConfigurationID == nil)) {
+			// A replay returns the stored order (or the key-reuse refusal) without reading the product, so a
+			// product outage does not fail a retry of an order already created.
+			used, err := a.store.OrderKeyUsed(r.Context(), key)
+			if err != nil {
+				a.fail(w, r, "read production order idempotency key", err)
+				return
+			}
+			if used {
+				a.storeOrder(w, r, store.NewOrder{LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, OriginType: req.OriginType, OriginID: req.OriginID, ConfigurationID: req.ConfigurationID,
+					IdempotencyKey: key, RequestHash: requestHash})
+				return
+			}
+		}
+		var ok bool
+		if settings, ok = a.readProductSettings(w, r, req.LegalEntityID, req.ReleasedProductID, req.SiteID); !ok {
+			return
+		}
+		if req.Quantity.IsZero() {
+			req.Quantity = settings.defaultQuantity()
+		}
+	} else if req.ReleasedProductID != "" {
+		fields["releasedProductId"] = "needs a valid legalEntityId in the caller's scope and siteId"
+	}
 	validateCreate(req, fields)
 	if intake == nil && req.OriginType == "PlannedOrder" {
 		fields["originType"] = "PlannedOrder is set only by converting a planned order (POST /v1/production/planned-intake/{id}:convert)"
@@ -321,6 +353,10 @@ func (a *API) createWith(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		return
 	}
 	if err := domain.CheckOrderQuantity(req.Quantity, rules); err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	if err := settings.check(req.Quantity); err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
@@ -353,14 +389,19 @@ func (a *API) createWith(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	order, created, err := a.store.CreateOrder(r.Context(), store.NewOrder{
+	a.storeOrder(w, r, store.NewOrder{
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID, ConfigurationID: req.ConfigurationID,
 		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
-		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: hashOf(req),
+		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: requestHash,
 		ID: intakeOrderID(intake), PlannedIntakeID: intakeRowID(intake),
 		QuotaArrangementID: intakeQuota(intake, false), QuotaSourceID: intakeQuota(intake, true),
 	})
+}
+
+// storeOrder creates in, or replays the order already stored under its Idempotency-Key, and writes the answer.
+func (a *API) storeOrder(w http.ResponseWriter, r *http.Request, in store.NewOrder) {
+	order, created, err := a.store.CreateOrder(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, "create production order", err)
 		return
@@ -465,6 +506,9 @@ func (a *API) getEndCheck(w http.ResponseWriter, r *http.Request) {
 type patchRequest struct {
 	Quantity     *decimal.Decimal `json:"quantity"`
 	DeliveryDate json.RawMessage  `json:"deliveryDate"`
+	// ReleasedProductID supplies the minimum and multiple a new quantity must meet from the released
+	// product's site default for the order's site (FR-21.1); minimumQty and multiple sent here apply as well.
+	ReleasedProductID string `json:"releasedProductId"`
 	// MinimumQty, MaximumQty and Multiple are the item's order settings that a
 	// new quantity must meet (FR-21.1); they accompany a quantity.
 	MinimumQty *decimal.Decimal `json:"minimumQty"`
@@ -496,8 +540,8 @@ func (a *API) patchOrder(w http.ResponseWriter, r *http.Request) {
 	rules := quantityRules(req.MinimumQty, req.MaximumQty, req.Multiple, fields)
 	if req.Quantity != nil {
 		checkQuantity("quantity", *req.Quantity, true, fields)
-	} else if req.MinimumQty != nil || req.MaximumQty != nil || req.Multiple != nil {
-		fields["quantity"] = "is required with minimumQty, maximumQty or multiple"
+	} else if req.MinimumQty != nil || req.MaximumQty != nil || req.Multiple != nil || req.ReleasedProductID != "" {
+		fields["quantity"] = "is required with minimumQty, maximumQty, multiple or releasedProductId"
 	}
 	if len(req.DeliveryDate) > 0 {
 		u.SetDeliveryDate = true
@@ -517,6 +561,21 @@ func (a *API) patchOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Quantity != nil {
+		if req.ReleasedProductID != "" {
+			current, err := a.store.GetOrder(r.Context(), id)
+			if err != nil {
+				a.fail(w, r, "read production order", err)
+				return
+			}
+			settings, ok := a.readProductSettings(w, r, current.LegalEntityID, req.ReleasedProductID, current.SiteID)
+			if !ok {
+				return
+			}
+			if err := settings.check(*req.Quantity); err != nil {
+				httpx.Fail(w, r, problemFrom(err))
+				return
+			}
+		}
 		if err := domain.CheckOrderQuantity(*req.Quantity, rules); err != nil {
 			httpx.Fail(w, r, problemFrom(err))
 			return

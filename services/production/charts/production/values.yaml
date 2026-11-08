@@ -17,6 +17,8 @@ serviceMonitor: { enabled: false }
 
 ledgerUrl: ""
 inventoryUrl: ""
+# productUrl: the product service that releasedProductId reads order quantity rules from (FR-21.1); needs serviceIdentity.
+productUrl: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

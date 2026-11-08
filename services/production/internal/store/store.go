@@ -219,6 +219,7 @@ type Transition struct {
 type Store interface {
 	Ping(ctx context.Context) error
 	CreateOrder(ctx context.Context, in NewOrder) (Order, bool, error)
+	OrderKeyUsed(ctx context.Context, idempotencyKey string) (bool, error)
 	GetPlannedIntake(ctx context.Context, id string) (PlannedIntake, error)
 	ListPlannedIntake(ctx context.Context, f IntakeFilter) (IntakePage, error)
 	DismissPlannedIntake(ctx context.Context, in IntakeDismiss) (PlannedIntake, error)
@@ -559,6 +560,18 @@ func insertOperations(ctx context.Context, tx pgx.Tx, tenantID, orderID string, 
 		}
 	}
 	return nil
+}
+
+// OrderKeyUsed reports whether an order (a create or a split) already carries idempotencyKey, so the API can
+// send a replay straight to the store without first reading the released product (FR-21.1).
+func (s *Postgres) OrderKeyUsed(ctx context.Context, idempotencyKey string) (bool, error) {
+	p, _ := tenant.FromContext(ctx)
+	var used bool
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select exists(select 1 from production_order where tenant_id = $1 and idempotency_key = $2)`,
+			p.TenantID, idempotencyKey).Scan(&used)
+	})
+	return used, err
 }
 
 // GetOrder returns one order with its lines, operations and planned cost.

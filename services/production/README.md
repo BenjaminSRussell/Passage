@@ -115,6 +115,16 @@ Slice 4:
   `<Idempotency-Key>:X`, so a retried batch replays what it moved and retries the rest. The route
   needs the release duty and the command its own duty too. It runs in the request, not as the
   Temporal job of 4.21.12 (wave 4).
+- Released product order rules (slice 31, FR-21.1, FR-8.4): create, quantity PATCH and split accept
+  `releasedProductId`; with `PRODUCT_URL` set the service reads the product's site default for the
+  order's site (`GET /v1/product/released-products/{id}/site-defaults/{siteId}`, signed with the
+  `product.read` duty) and applies its minimum and multiple order quantity (PRODUCTION_ORDER_QUANTITY
+  on a breach). A create without `quantity` takes the standard quantity. `minimumQty`, `maximumQty`,
+  `multiple` sent in the request apply as well and can only tighten the product's rules; the maximum
+  stays in the request (the site default has none). A retry under a used Idempotency-Key replays the
+  stored result without reading the product. An unknown released
+  product is 422, an unset or unreachable product service 503 `PRODUCTION_PRODUCT_UNAVAILABLE`, and a
+  product with no default for the site gives no rules. Needs the authz seed in NOT-IMPLEMENTED.md.
 - Split (FR-21.15): `POST /v1/production/orders/{id}:split` with `splitQty` (and the item's
   `minimumQty` and `multiple` until wave 8 supplies them, PROD-0015) on a Created to Released
   order. The new order takes the header, BOM and route snapshot and status, origin `Split` with

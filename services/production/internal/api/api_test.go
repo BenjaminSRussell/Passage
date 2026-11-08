@@ -113,6 +113,11 @@ func (f *fakeStore) CreateOrder(_ context.Context, in store.NewOrder) (store.Ord
 	return store.Order{ID: ids.New(), Version: 1, Status: domain.Created, Lines: in.Lines, Operations: in.Operations}, true, nil
 }
 
+func (f *fakeStore) OrderKeyUsed(_ context.Context, key string) (bool, error) {
+	_, ok := f.replayHash[key]
+	return ok, nil
+}
+
 func (f *fakeStore) GetOrder(context.Context, string) (store.Order, error) { return f.order, f.getErr }
 
 func (f *fakeStore) ListOrders(_ context.Context, lf store.ListFilter) (store.OrderPage, error) {

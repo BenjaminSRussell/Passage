@@ -146,6 +146,16 @@ func TestStore_CreateAndIdempotency(t *testing.T) {
 		t.Fatalf("lines or date: %+v %v", o.Lines, o.DeliveryDate)
 	}
 
+	if used, err := s.OrderKeyUsed(ctx, in.IdempotencyKey); err != nil || !used {
+		t.Fatalf("OrderKeyUsed of the stored key: %v %v", used, err)
+	}
+	if used, err := s.OrderKeyUsed(ctx, "key-never-used"); err != nil || used {
+		t.Fatalf("OrderKeyUsed of a fresh key: %v %v", used, err)
+	}
+	if used, err := s.OrderKeyUsed(tenantCtx(testkit.TenantID(22)), in.IdempotencyKey); err != nil || used {
+		t.Fatalf("OrderKeyUsed must not see another tenant's key: %v %v", used, err)
+	}
+
 	replay, created, err := s.CreateOrder(ctx, in)
 	if err != nil || created || replay.ID != o.ID {
 		t.Fatalf("replay: created=%v id=%s err=%v", created, replay.ID, err)

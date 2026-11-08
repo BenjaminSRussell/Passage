@@ -32,12 +32,15 @@ type bulkResponse struct {
 }
 
 // splitRequest is the body of POST /v1/production/orders/{id}:split (FR-21.15).
-// minimumQty and multiple are the item's settings, passed by the caller until
-// released-product settings (wave 8) are read by the service.
+// minimumQty and multiple are the item's settings sent by the caller; releasedProductId
+// adds the released product's (slice 31).
 type splitRequest struct {
-	SplitQty   *decimal.Decimal `json:"splitQty"`
-	MinimumQty *decimal.Decimal `json:"minimumQty"`
-	Multiple   *decimal.Decimal `json:"multiple"`
+	SplitQty *decimal.Decimal `json:"splitQty"`
+	// ReleasedProductID enforces the released product's minimum and multiple (site default for the order's
+	// site, FR-21.1) on the split quantity; minimumQty and multiple sent in the request may only tighten them.
+	ReleasedProductID string           `json:"releasedProductId"`
+	MinimumQty        *decimal.Decimal `json:"minimumQty"`
+	Multiple          *decimal.Decimal `json:"multiple"`
 	// Allocation is proportional (default) or keep-on-original; it matters for a Started order (BR-21.11).
 	Allocation string `json:"allocation"`
 }
@@ -142,6 +145,30 @@ func (a *API) split(w http.ResponseWriter, r *http.Request, id string) {
 		checkQuantity("multiple", *req.Multiple, false, fields)
 		in.Multiple = *req.Multiple
 	}
+	sentMin, sentMultiple := in.MinQty, in.Multiple // the request hash covers what was sent, not what the product answered
+	if req.ReleasedProductID != "" && len(fields) == 0 {
+		// A replay goes to the store without reading the product: it returns the stored split or refuses the key.
+		used, err := a.store.OrderKeyUsed(r.Context(), key)
+		if err != nil {
+			a.refuse(w, r, err)
+			return
+		}
+		if !used {
+			current, err := a.store.GetOrder(r.Context(), id)
+			if err != nil {
+				a.refuse(w, r, err)
+				return
+			}
+			settings, ok := a.readProductSettings(w, r, current.LegalEntityID, req.ReleasedProductID, current.SiteID)
+			if !ok {
+				return
+			}
+			if in.MinQty, in.Multiple, err = settings.splitRules(in.SplitQty, in.MinQty, in.Multiple); err != nil {
+				httpx.Fail(w, r, problemFrom(err))
+				return
+			}
+		}
+	}
 	// An empty allocation is resolved by the store from the site's split allocation default.
 	in.Allocation = domain.Allocation(req.Allocation)
 	if in.Allocation != "" && !in.Allocation.Valid() {
@@ -155,7 +182,8 @@ func (a *API) split(w http.ResponseWriter, r *http.Request, id string) {
 		Command                    domain.Command
 		SplitQty, MinQty, Multiple string
 		Allocation                 domain.Allocation
-	}{domain.CmdSplit, in.SplitQty.String(), in.MinQty.String(), in.Multiple.String(), in.Allocation})
+		ReleasedProductID          string `json:",omitempty"` // omitempty keeps the hash of a body without it
+	}{domain.CmdSplit, in.SplitQty.String(), sentMin.String(), sentMultiple.String(), in.Allocation, req.ReleasedProductID})
 	res, err := a.store.SplitOrder(r.Context(), in)
 	if err != nil {
 		a.refuse(w, r, err)

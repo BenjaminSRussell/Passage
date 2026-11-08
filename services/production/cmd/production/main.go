@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/api"
+	"github.com/BenjaminSRussell/passage/services/production/internal/productclient"
 	"github.com/BenjaminSRussell/passage/services/production/internal/store"
 	"github.com/BenjaminSRussell/passage/services/production/migrations"
 )
@@ -132,6 +133,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	st := store.New(pool).WithHolds(holds)
 	a := api.New(st, cfg)
+	products, err := productclient.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("product client: %w", err)
+	}
+	a.WithProducts(products)
 	ledger, err := ledgerclient.FromEnv(getenv, "production")
 	if err != nil {
 		return fmt.Errorf("ledger client: %w", err)

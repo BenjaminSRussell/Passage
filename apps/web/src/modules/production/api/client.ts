@@ -286,8 +286,10 @@ export interface CreateOrderInput {
   siteId: string;
   warehouseId: string;
   currency: string;
-  quantity: string;
+  quantity?: string;
   deliveryDate?: string;
+  /** The released product whose site default supplies the order rules and, without a quantity, the standard quantity (FR-21.1). */
+  releasedProductId?: string;
   /** The item's order rules (FR-21.1); absent or 0 means no rule. */
   minimumQty?: string;
   maximumQty?: string;

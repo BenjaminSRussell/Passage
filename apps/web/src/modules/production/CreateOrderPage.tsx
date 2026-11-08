@@ -61,6 +61,8 @@ export interface OrderValues {
   currency: string;
   quantity: string;
   deliveryDate: string;
+  /** The released product whose site default supplies the minimum, multiple and standard quantity (FR-21.1); empty to enter the rules. */
+  releasedProductId: string;
   /** The item's minimum, maximum and multiple order quantity (FR-21.1); empty for no rule. */
   minimumQty: string;
   maximumQty: string;
@@ -101,6 +103,7 @@ export const initialValues = (): OrderValues => ({
   currency: "USD",
   quantity: "",
   deliveryDate: "",
+  releasedProductId: "",
   minimumQty: "",
   maximumQty: "",
   multiple: "",
@@ -126,7 +129,12 @@ export function validateOrder(values: OrderValues): OrderErrors {
   if (!currencyPattern.test(values.currency)) {
     errors.currency = "Enter a three-letter currency code such as USD.";
   }
-  if (!positive(values.quantity)) {
+  const releasedProductId = values.releasedProductId.trim();
+  if (releasedProductId !== "" && !uuidPattern.test(releasedProductId)) {
+    errors.releasedProductId = "Enter the released product's id (a UUID), or leave it empty.";
+  }
+  // With a released product the standard quantity fills an empty quantity (FR-21.1).
+  if (!positive(values.quantity) && !(releasedProductId !== "" && values.quantity === "")) {
     errors.quantity = "Enter a positive quantity with up to 6 decimals.";
   }
   if (values.deliveryDate !== "" && !datePattern.test(values.deliveryDate)) {
@@ -234,8 +242,9 @@ export function toInput(values: OrderValues): CreateOrderInput {
     siteId: values.siteId.trim(),
     warehouseId: values.warehouseId.trim(),
     currency: values.currency,
-    quantity: values.quantity,
+    quantity: optional(values.quantity),
     deliveryDate: optional(values.deliveryDate),
+    releasedProductId: optional(values.releasedProductId.trim()),
     minimumQty: optional(values.minimumQty),
     maximumQty: optional(values.maximumQty),
     multiple: optional(values.multiple),
@@ -438,9 +447,16 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
         <Card title="Order quantity rules">
           <p className={styles.hint}>
             The released product&apos;s default order settings. The quantity must be at least the minimum, at most the maximum
-            and a whole multiple of the multiple; leave a rule empty when the item has none.
+            and a whole multiple of the multiple; leave a rule empty when the item has none. Name the released product to read its
+            minimum, multiple and standard quantity for the site; the product&apos;s rules always apply and a rule typed here can only tighten them.
           </p>
           <div className={styles.fields}>
+            {intake
+              ? null
+              : text("po-releasedProductId", "Released product", values.releasedProductId, (v) => set({ releasedProductId: v }), {
+                  optional: true,
+                  hint: "Leave the quantity empty to use the product's standard quantity.",
+                })}
             {text("po-minimumQty", "Minimum order quantity", values.minimumQty, (v) => set({ minimumQty: v }), { optional: true, inputMode: "decimal" })}
             {text("po-maximumQty", "Maximum order quantity", values.maximumQty, (v) => set({ maximumQty: v }), { optional: true, inputMode: "decimal" })}
             {text("po-multiple", "Order multiple", values.multiple, (v) => set({ multiple: v }), { optional: true, inputMode: "decimal" })}

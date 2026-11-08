@@ -64,6 +64,9 @@ spec:
 {{- if .Values.inventoryUrl }}
             - { name: INVENTORY_URL, value: {{ .Values.inventoryUrl | quote }} }
 {{- end }}
+{{- if .Values.productUrl }}
+            - { name: PRODUCT_URL, value: {{ .Values.productUrl | quote }} }
+{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key
