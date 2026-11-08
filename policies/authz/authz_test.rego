@@ -1546,6 +1546,12 @@ test_org_operating_unit_import if {
 	not allowed("org.read", "POST", "/v1/org/operating-units:import")
 }
 
+# Wave 15 slice 18: ad-hoc statement run retention sweeps.
+test_reporting_run_sweeps if {
+	allowed("reporting.statement.view", "GET", "/v1/reporting/run-sweeps")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/run-sweeps")
+}
+
 # Wave 26 slice 24: commission settlement export records.
 test_pricing_commission_settlement_exports if {
 	allowed("pricing.commission.maintain", "POST", "/v1/pricing/commission/settlement-exports")

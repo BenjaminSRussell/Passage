@@ -269,7 +269,8 @@
       {"resource": "/v1/reporting/library/*/content", "methods": ["GET"]},
       {"resource": "/v1/reporting/legal-holds", "methods": ["GET"]},
       {"resource": "/v1/reporting/legal-holds/*", "methods": ["GET"]},
-      {"resource": "/v1/reporting/library-sweeps", "methods": ["GET"]}
+      {"resource": "/v1/reporting/library-sweeps", "methods": ["GET"]},
+      {"resource": "/v1/reporting/run-sweeps", "methods": ["GET"]}
     ]},
     "reporting.definition.maintain": {"permissions": [
       {"resource": "/v1/reporting/definitions/*", "methods": ["PUT"]},
