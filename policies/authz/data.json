@@ -2848,7 +2848,8 @@
       {"resource": "/v1/production/planned-intake", "methods": ["GET"]},
       {"resource": "/v1/production/planned-intake/*", "methods": ["GET"]},
       {"resource": "/v1/production/material-requirements", "methods": ["GET"]},
-      {"resource": "/v1/production/material-requirements/by-item", "methods": ["GET"]}
+      {"resource": "/v1/production/material-requirements/by-item", "methods": ["GET"]},
+      {"resource": "/v1/production/orders/*/end-check", "methods": ["GET"]}
     ]},
     "production.order.release": {"permissions": [
       {"resource": "/v1/production/orders/*:cancel", "methods": ["POST"]},

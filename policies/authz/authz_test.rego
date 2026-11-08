@@ -1644,3 +1644,9 @@ test_sales_credit_exposure if {
 	allowed("sales.order.read", "GET", "/v1/sales/credit-exposure")
 	not allowed("sales.order.read", "POST", "/v1/sales/credit-exposure")
 }
+
+# Wave 21 slice 29: production order end-readiness check.
+test_production_order_end_check if {
+	allowed("production.order.read", "GET", "/v1/production/orders/o-1/end-check")
+	not allowed("production.order.read", "POST", "/v1/production/orders/o-1/end-check")
+}
