@@ -525,6 +525,13 @@ test_payment_hold_and_vendor_block_duties_open_only_their_routes if {
 	not allowed("payment-proposal.approve", "POST", "/v1/payables/open-items/i1:release")
 }
 
+test_fulfillment_operation_rules if {
+	allowed("fulfillment.warehouse.view", "GET", "/v1/fulfillment/operation-rules")
+	allowed("fulfillment.warehouse.view", "GET", "/v1/fulfillment/operation-rules/w-1")
+	allowed("fulfillment.warehouse.release", "PUT", "/v1/fulfillment/operation-rules/w-1")
+	not allowed("fulfillment.warehouse.view", "PUT", "/v1/fulfillment/operation-rules/w-1")
+}
+
 test_inventory_hold_duties_open_only_their_routes if {
 	allowed("inventory.hold.write", "POST", "/v1/inventory/holds")
 	allowed("inventory.hold.write", "POST", "/v1/inventory/holds/h1:release")

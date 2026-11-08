@@ -1822,7 +1822,8 @@
       {"resource": "/v1/fulfillment/drop-ships/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/drop-ships/*:close-remainder", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/release-rules/*", "methods": ["PUT"]},
-      {"resource": "/v1/fulfillment/exceptions/*:resolve", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/exceptions/*:resolve", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/operation-rules/*", "methods": ["PUT"]}
     ]},
     "fulfillment.warehouse.ship": {"permissions": [
       {"resource": "/v1/fulfillment/shipments/*/tracking", "methods": ["POST"]},
@@ -1858,7 +1859,9 @@
       {"resource": "/v1/fulfillment/exceptions", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/exceptions/*", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/returnable-packaging/movements", "methods": ["GET"]},
-      {"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["GET"]}
+      {"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/operation-rules", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/operation-rules/*", "methods": ["GET"]}
     ]},
     "fulfillment.returnable-packaging.maintain": {"permissions": [{"resource": "/v1/fulfillment/returnable-packaging:adjust", "methods": ["POST"]}]},
     "audit.read": {"permissions": [
