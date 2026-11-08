@@ -3031,7 +3031,8 @@
       {"resource": "/v1/scheduling/campaigns/*:allocate-cost", "methods": ["POST"]},
       {"resource": "/v1/scheduling/campaigns/*:start", "methods": ["POST"]},
       {"resource": "/v1/scheduling/campaigns/*:complete", "methods": ["POST"]},
-      {"resource": "/v1/scheduling/campaigns/*:cancel", "methods": ["POST"]}
+      {"resource": "/v1/scheduling/campaigns/*:cancel", "methods": ["POST"]},
+      {"resource": "/v1/scheduling/resources/*/cleanout-counter:reset", "methods": ["POST"]}
     ]},
     "scheduling.capacity.write": {"permissions": [
       {"resource": "/v1/scheduling/capacity-blocks", "methods": ["POST"]},
@@ -3080,7 +3081,9 @@
       {"resource": "/v1/scheduling/runs/*/compare", "methods": ["GET"]},
       {"resource": "/v1/scheduling/bottlenecks", "methods": ["GET"]},
       {"resource": "/v1/scheduling/bottlenecks/*", "methods": ["GET"]},
-      {"resource": "/v1/scheduling/block-utilization", "methods": ["GET"]}
+      {"resource": "/v1/scheduling/block-utilization", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/cleanout-counters", "methods": ["GET"]},
+      {"resource": "/v1/scheduling/resources/*/cleanout-counter", "methods": ["GET"]}
     ]},
     "scheduling.run": {"permissions": [
       {"resource": "/v1/scheduling/runs", "methods": ["POST"]},

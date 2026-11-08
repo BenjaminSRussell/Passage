@@ -1527,6 +1527,14 @@ test_carrier_gateway_duties_are_service_only_and_open_only_their_routes if {
 	not allowed("fulfillment.warehouse.view", "POST", "/v1/fulfillment/shipments/s-1:carrier-label")
 }
 
+# Wave 23 slice 36: cleanout counters and their manual reset.
+test_scheduling_cleanout_counters if {
+	allowed("scheduling.read", "GET", "/v1/scheduling/cleanout-counters")
+	allowed("scheduling.read", "GET", "/v1/scheduling/resources/r-1/cleanout-counter")
+	allowed("scheduling.campaign.write", "POST", "/v1/scheduling/resources/r-1/cleanout-counter:reset")
+	not allowed("scheduling.read", "POST", "/v1/scheduling/resources/r-1/cleanout-counter:reset")
+}
+
 # Wave 23 slice 33: network feasibility inquiry.
 test_scheduling_network_feasibility_read if {
 	allowed("scheduling.read", "GET", "/v1/scheduling/network-feasibility")
