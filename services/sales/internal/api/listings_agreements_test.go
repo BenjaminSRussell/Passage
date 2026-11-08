@@ -67,6 +67,10 @@ func (s *slice3Store) ReleaseAgreement(_ context.Context, id string, in store.Ag
 	return store.ReleaseResult{Agreement: store.Agreement{ID: id, Version: 3}, Order: store.Order{ID: ids.New(), Channel: "AGREEMENT"}}, s.releaseFresh, nil
 }
 
+func (s *slice3Store) GetAgreement(_ context.Context, id string) (store.Agreement, error) {
+	return store.Agreement{ID: id, LegalEntityID: testLE, CustomerID: ids.New(), Version: 2}, nil
+}
+
 func (s *slice3Store) ApplyHold(_ context.Context, id string, version int, in store.HoldRequest, actor string) (store.Order, error) {
 	s.hold, s.holdVersion, s.holdActor = &in, version, actor
 	return store.Order{ID: id, Version: version + 1}, nil
@@ -245,7 +249,8 @@ func TestReleaseOrder(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || res.Agreement.Version != 3 || res.Order.Channel != "AGREEMENT" {
 		t.Fatalf("body %s err %v", rec.Body.String(), err)
 	}
-	if !s.release.Quantity.Equal(decimal.NewFromInt(40)) || s.release.IdempotencyKey != "r1" || s.release.RequestHash == "" || s.release.Actor != "u1" {
+	if !s.release.Quantity.Equal(decimal.NewFromInt(40)) || s.release.IdempotencyKey != "r1" || s.release.RequestHash == "" || s.release.Actor != "u1" ||
+		s.release.CustomerGroup == nil || *s.release.CustomerGroup != "EU-RETAIL" {
 		t.Fatalf("store got %+v", s.release)
 	}
 	s.releaseFresh = false

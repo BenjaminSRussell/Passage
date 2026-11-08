@@ -112,6 +112,9 @@ type QuotationConversion struct {
 // CanOverrideListing and ListingOverrideReason pass the caller's listing
 // override to the order, which is checked like any other (FR-27.15).
 type ConvertRequest struct {
+	// CustomerGroup is the customer's group read from the party service; when
+	// set it replaces the stored group for the listing check and the order.
+	CustomerGroup         *string
 	Version               int
 	LineNos               []int
 	Actor                 string
@@ -411,7 +414,7 @@ func orderFromQuotation(q Quotation, selected []int, in ConvertRequest, now time
 	if err != nil {
 		return NewOrder{}, err
 	}
-	order := NewOrder{LegalEntityID: q.LegalEntityID, CustomerID: q.CustomerID, InvoiceAccountID: q.InvoiceAccountID, CustomerGroup: q.CustomerGroup,
+	order := NewOrder{LegalEntityID: q.LegalEntityID, CustomerID: q.CustomerID, InvoiceAccountID: q.InvoiceAccountID, CustomerGroup: firstGroup(in.CustomerGroup, q.CustomerGroup),
 		OrderType: "ORDER", Currency: q.Currency, Channel: quoteChannel, RequestHash: hash, OrderDate: now, Actor: in.Actor,
 		CanOverrideListing: in.CanOverrideListing, ListingOverrideReason: in.ListingOverrideReason}
 	for i, n := range selected {
@@ -466,6 +469,8 @@ func loadQuotation(ctx context.Context, tx pgx.Tx, tenantID, id string, lock boo
 // QuotationChange is one PATCH of a quotation. Nil fields are left as they are;
 // Lines, when set, replaces the whole line set (DRAFT only) and carries LineNet.
 type QuotationChange struct {
+	// CustomerGroup, when set, replaces the stored group for the listing check.
+	CustomerGroup  *string
 	Version        int
 	ValidUntil     *time.Time
 	ProbabilityPct *int
@@ -547,7 +552,7 @@ func (s *Postgres) ChangeQuotation(ctx context.Context, id string, in QuotationC
 			// The whole replacement line set is checked against the listings
 			// on the day of the change, for the quotation's customer group, and
 			// its overrides replace the stored log.
-			overrides, err := checkListings(ctx, tx, p.TenantID, listingCheckInput(q.LegalEntityID, q.CustomerID, q.CustomerGroup, in.Lines,
+			overrides, err := checkListings(ctx, tx, p.TenantID, listingCheckInput(q.LegalEntityID, q.CustomerID, firstGroup(in.CustomerGroup, q.CustomerGroup), in.Lines,
 				now, in.Actor, in.CanOverrideListing, in.ListingOverrideReason))
 			if err != nil {
 				return err
@@ -605,4 +610,11 @@ func insertQuotationLines(ctx context.Context, tx pgx.Tx, tenantID, quotationID 
 		}
 	}
 	return nil
+}
+
+func firstGroup(override, stored *string) *string {
+	if override != nil {
+		return override
+	}
+	return stored
 }

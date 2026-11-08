@@ -74,7 +74,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if signer == nil || getenv("PRODUCT_URL") == "" || getenv("PRODUCTION_URL") == "" {
 		slog.Warn("PRODUCT_URL, PRODUCTION_URL or the service signing key is unset: configured order lines are refused (SLS-0048) and production cannot be planned (SLS-0050)")
 	}
-	up := upstream.New(getenv("PRODUCT_URL"), getenv("PRODUCTION_URL"), signer)
+	if signer == nil || getenv("PARTY_URL") == "" {
+		slog.Warn("PARTY_URL or the service signing key is unset: order and quotation creation is refused (SLS-0152) because the customer group cannot be read")
+	}
+	up := upstream.New(getenv("PRODUCT_URL"), getenv("PRODUCTION_URL"), signer).WithParty(getenv("PARTY_URL"))
 	keys, err := fieldcrypt.FromEnv(getenv)
 	if err != nil {
 		return fmt.Errorf("field encryption keys: %w", err)
@@ -83,7 +86,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Warn("FIELDCRYPT_KEYS is unset: one-time customer orders are refused (SLS-0054)")
 	}
 	st := wireReturns(store.New(pool).WithFieldCrypt(keys), up, signer != nil, getenv)
-	a := api.New(st).WithConfigurations(up).WithProduction(up)
+	a := api.New(st).WithConfigurations(up).WithProduction(up).WithCustomerGroups(up)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

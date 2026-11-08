@@ -56,7 +56,7 @@ func serveBody(t *testing.T, s store.Store, method, path, body string, p tenant.
 			next.ServeHTTP(w, req.WithContext(tenant.With(req.Context(), p)))
 		})
 	})
-	New(s).Register(r)
+	New(s).WithCustomerGroups(fakeGroups{group: "EU-RETAIL"}).Register(r)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")

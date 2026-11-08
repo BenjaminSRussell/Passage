@@ -45,9 +45,9 @@ type orderLineRequest struct {
 	CatchWeight         *catchWeightSpec `json:"catchWeight,omitempty"`
 }
 
-// createOrderRequest is the body of POST /v1/sales/orders. customerGroup
-// stands in for the w7 customer group so GROUP listing entries apply;
-// listingOverrideReason is required, with duty sales.order.approve, to accept a
+// createOrderRequest is the body of POST /v1/sales/orders. customerGroup is
+// never trusted: the group comes from the party service (resolveGroup) and a
+// typed value that differs is refused; listingOverrideReason is required, with duty sales.order.approve, to accept a
 // line the product listing denies (FR-27.15).
 type createOrderRequest struct {
 	LegalEntityID         string  `json:"legalEntityId"`
@@ -253,6 +253,11 @@ func (a *API) submitOrder(ctx context.Context, p tenant.Principal, req createOrd
 	if err := a.checkConfigurations(ctx, in.LegalEntityID, in.Lines); err != nil {
 		return store.Order{}, false, err
 	}
+	group, err := a.resolveGroup(ctx, in.LegalEntityID, in.CustomerID, req.CustomerGroup)
+	if err != nil {
+		return store.Order{}, false, err
+	}
+	in.CustomerGroup = group
 	hash, err := domain.RequestHash(req)
 	if err != nil {
 		return store.Order{}, false, err

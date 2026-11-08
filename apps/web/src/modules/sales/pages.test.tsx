@@ -415,7 +415,7 @@ describe("ATP check", () => {
 
 describe("form validation", () => {
   it("validateOrder invoices the customer by default and rejects bad lines", () => {
-    const base = { legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: "", orderType: "ORDER" as const, currency: "USD", requestedShipDate: "2027-03-04", externalRef: "", customerGroup: "", listingOverrideReason: "" };
+    const base = { legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: "", orderType: "ORDER" as const, currency: "USD", requestedShipDate: "2027-03-04", externalRef: "", listingOverrideReason: "" };
     const ok = validateOrder({ ...base, lines: [{ ...emptyLine("2027-03-04"), productId: PRODUCT, siteId: SITE, warehouseId: WAREHOUSE, unitPrice: "10.5" }] });
     expect(ok.input?.invoiceAccountId).toBe(CUSTOMER);
     expect(ok.input?.lines[0].unitPrice).toBe("10.5");

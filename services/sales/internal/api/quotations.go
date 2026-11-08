@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -30,8 +31,8 @@ type createQuotationRequest struct {
 	ValidUntil       *string            `json:"validUntil,omitempty"`
 	ProbabilityPct   *int               `json:"probabilityPct,omitempty"`
 	Lines            []orderLineRequest `json:"lines"`
-	// CustomerGroup stands in for the w7 customer group so GROUP listing
-	// entries apply; the order a conversion creates carries it.
+	// CustomerGroup is never trusted: the group comes from the party service
+	// (resolveGroup) and a typed value that differs is refused.
 	CustomerGroup *string `json:"customerGroup,omitempty"`
 	// ListingOverrideReason, with duty sales.order.approve, accepts a line the
 	// product listing denies (FR-27.15).
@@ -145,6 +146,12 @@ func (a *API) createQuotation(w http.ResponseWriter, r *http.Request) {
 	if !inScope(w, r, in.LegalEntityID) {
 		return
 	}
+	group, err := a.resolveGroup(r.Context(), in.LegalEntityID, in.CustomerID, req.CustomerGroup)
+	if err != nil {
+		a.fail(w, r, "create quotation", err)
+		return
+	}
+	in.CustomerGroup = group
 	hash, err := domain.RequestHash(req)
 	if err != nil {
 		a.fail(w, r, "hash request", err)
@@ -306,7 +313,12 @@ func (a *API) convertQuotation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p, _ := tenant.FromContext(r.Context())
-		res, err := a.store.ConvertQuotation(r.Context(), id, store.ConvertRequest{Version: version, LineNos: req.LineNos, Actor: p.UserID,
+		group, err := a.quotationGroup(r.Context(), id)
+		if err != nil {
+			a.fail(w, r, "convert quotation", err)
+			return
+		}
+		res, err := a.store.ConvertQuotation(r.Context(), id, store.ConvertRequest{CustomerGroup: group, Version: version, LineNos: req.LineNos, Actor: p.UserID,
 			CanOverrideListing: p.HasDuty(dutyOrderApprove), ListingOverrideReason: req.ListingOverrideReason}, a.now())
 		if err != nil {
 			a.fail(w, r, "convert quotation", err)
@@ -404,6 +416,13 @@ func (a *API) changeQuotation(w http.ResponseWriter, r *http.Request) {
 		p, _ := tenant.FromContext(r.Context())
 		in.Actor = p.UserID
 		in.CanOverrideListing = p.HasDuty(dutyOrderApprove)
+		if in.Lines != nil {
+			var err error
+			if in.CustomerGroup, err = a.quotationGroup(r.Context(), id); err != nil {
+				a.fail(w, r, "change quotation", err)
+				return
+			}
+		}
 		q, err := a.store.ChangeQuotation(r.Context(), id, in, a.now())
 		if err != nil {
 			a.fail(w, r, "change quotation", err)
@@ -440,4 +459,14 @@ func (a *API) cancelQuotation(w http.ResponseWriter, r *http.Request) {
 		setETag(w, q.Version)
 		httpx.JSON(w, http.StatusOK, q)
 	})(w, r)
+}
+
+// quotationGroup re-reads the group of the quotation's customer from the party
+// service, so a customer moved to another group is checked against the new one.
+func (a *API) quotationGroup(ctx context.Context, id string) (*string, error) {
+	q, err := a.store.GetQuotation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return a.resolveGroup(ctx, q.LegalEntityID, q.CustomerID, nil)
 }

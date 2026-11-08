@@ -20,7 +20,6 @@ export interface OrderValues {
   currency: string;
   requestedShipDate: string;
   externalRef: string;
-  customerGroup: string;
   listingOverrideReason: string;
   /** Present for a one-time customer order (FR-27.22): the walk-in buyer. */
   oneTime?: OneTimeValues;
@@ -42,8 +41,6 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
   if (!DATE.test(values.requestedShipDate)) errors.requestedShipDate = "Choose the requested ship date.";
   const ref = values.externalRef.trim();
   if (ref.length > 100) errors.externalRef = "Use at most 100 characters.";
-  const group = values.customerGroup.trim();
-  if (group.length > 80) errors.customerGroup = "Use at most 80 characters.";
   const override = values.listingOverrideReason.trim();
   if (override.length > 500) errors.listingOverrideReason = "Use at most 500 characters.";
   const oneTime = values.oneTime ? validateOneTime(values.oneTime, errors) : undefined;
@@ -59,7 +56,6 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
       currency: values.currency,
       requestedShipDate: values.requestedShipDate,
       ...(ref ? { externalRef: ref } : {}),
-      ...(group ? { customerGroup: group } : {}),
       ...(override ? { listingOverrideReason: override } : {}),
       ...(oneTime ? { oneTime } : {}),
       lines,
@@ -79,7 +75,6 @@ export function NewOrderPage() {
     currency: "USD",
     requestedShipDate: start,
     externalRef: "",
-    customerGroup: "",
     listingOverrideReason: "",
     lines: [emptyLine(start)],
   });
@@ -161,7 +156,6 @@ export function NewOrderPage() {
           {header("currency", "Currency")}
           {header("requestedShipDate", "Requested ship date", undefined, { type: "date" })}
           {header("externalRef", "Customer reference", "For example the customer's PO number.", { optional: true })}
-          {header("customerGroup", "Customer group", "Applies group listing entries, for example EU-RETAIL.", { optional: true })}
           {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
           <FormField id="order-oneTime" label="One-time customer" hint="Walk-in buyer sold to the shared one-time account, with the name and address on the invoice." optional>
             {(control) => (

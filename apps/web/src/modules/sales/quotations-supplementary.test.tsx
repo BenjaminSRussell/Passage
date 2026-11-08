@@ -114,7 +114,6 @@ const quoteValues = (): QuotationValues => ({
   currency: "USD",
   validUntil: "",
   probabilityPct: "",
-  customerGroup: "",
   listingOverrideReason: "",
   lines: [{ ...emptyLine("2027-03-04"), productId: PRODUCT, siteId: SITE, warehouseId: WAREHOUSE, unitPrice: "19.99", quantity: "3" }],
 });
@@ -145,15 +144,14 @@ describe("validateQuotation", () => {
     expect(input?.probabilityPct).toBe(0);
   });
 
-  it("sends the customer group and listing override reason when given, and bounds them like the service", () => {
-    const { input } = validateQuotation({ ...quoteValues(), customerGroup: " EU-RETAIL ", listingOverrideReason: " customer accepted " }, "2027-03-01");
-    expect(input?.customerGroup).toBe("EU-RETAIL");
+  it("sends the listing override reason when given, bounds it like the service, and never sends a customer group", () => {
+    const { input } = validateQuotation({ ...quoteValues(), listingOverrideReason: " customer accepted " }, "2027-03-01");
     expect(input?.listingOverrideReason).toBe("customer accepted");
+    expect(input).not.toHaveProperty("customerGroup");
     const plain = validateQuotation(quoteValues(), "2027-03-01").input;
-    expect(plain).not.toHaveProperty("customerGroup");
     expect(plain).not.toHaveProperty("listingOverrideReason");
-    const { errors } = validateQuotation({ ...quoteValues(), customerGroup: "g".repeat(81), listingOverrideReason: "r".repeat(501) }, "2027-03-01");
-    expect(Object.keys(errors).sort()).toEqual(["customerGroup", "listingOverrideReason"]);
+    const { errors } = validateQuotation({ ...quoteValues(), listingOverrideReason: "r".repeat(501) }, "2027-03-01");
+    expect(Object.keys(errors)).toEqual(["listingOverrideReason"]);
   });
 });
 
@@ -211,20 +209,20 @@ describe("New sales quotation", () => {
     expect(post?.body).toMatchObject({ legalEntityId: LE, customerId: CUSTOMER, probabilityPct: 70, lines: [{ productId: PRODUCT, unitPrice: "19.99" }] });
   });
 
-  it("posts the customer group and shows a listing refusal from the service against the form", async () => {
+  it("posts no customer group (party owns it) and shows a listing refusal from the service against the form", async () => {
     handler = (_url, init) =>
       init.method === "POST" ? { status: 422, body: { code: "SLS-0011", detail: "PRODUCT_NOT_LISTED: line 1" } } : { status: 200, body: {} };
     renderAt("/sales/quotations/new");
     fill("Legal entity", LE);
     fill("Customer", CUSTOMER);
-    fill("Customer group", "EU-RETAIL");
+    expect(screen.queryByLabelText(/Customer group/)).not.toBeInTheDocument();
     fill("Product", PRODUCT);
     fill("Unit price", "19.99");
     fill("Site", SITE);
     fill("Warehouse", WAREHOUSE);
     fireEvent.click(screen.getByRole("button", { name: "Save draft quotation" }));
     expect(await screen.findByText(/SLS-0011/)).toBeInTheDocument();
-    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ customerGroup: "EU-RETAIL" });
+    expect(calls.find((c) => c.method === "POST")?.body).not.toHaveProperty("customerGroup");
   });
 
   it("shows field errors without calling the service", async () => {

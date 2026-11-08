@@ -92,7 +92,6 @@ type loadResult struct {
 func loadDraw(rng *rand.Rand, les, customers, products []string, i int) loadOrder {
 	c := rng.Intn(loadCustomers)
 	le := les[c%loadLegalEntities]
-	group := fmt.Sprintf("G%d", c%10)
 	n := 1
 	switch r := rng.Intn(100); {
 	case r < 30:
@@ -129,8 +128,8 @@ func loadDraw(rng *rand.Rand, les, customers, products []string, i int) loadOrde
 	if rng.Intn(10) < 3 {
 		orderType = ""
 	}
-	body := fmt.Sprintf(`{"legalEntityId":%q,"customerId":%q,"invoiceAccountId":%q,%s"currency":"USD","requestedShipDate":"2027-03-15","channel":%q,%s"customerGroup":%q,"lines":[%s]}`,
-		le, customers[c], customers[c], orderType, channel, ext, group, strings.Join(lines, ","))
+	body := fmt.Sprintf(`{"legalEntityId":%q,"customerId":%q,"invoiceAccountId":%q,%s"currency":"USD","requestedShipDate":"2027-03-15","channel":%q,%s"lines":[%s]}`,
+		le, customers[c], customers[c], orderType, channel, ext, strings.Join(lines, ","))
 	return loadOrder{le: le, key: ids.New(), body: []byte(body), lines: n, suppLines: supp, redelivery: -1}
 }
 
@@ -190,18 +189,24 @@ func TestPostgres_OrderIntake500PerMinuteP99Under500ms(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil))) // request logs are still formatted, not printed
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	router := httpx.NewRouter()
-	New(store.New(loadAppPool(t, admin))).Register(router)
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 256}, Timeout: 30 * time.Second}
-
 	les, customers, products := make([]string, loadLegalEntities), make([]string, loadCustomers), make([]string, loadProducts)
 	for _, s := range [][]string{les, customers, products} {
 		for i := range s {
 			s[i] = ids.New()
 		}
 	}
+	// Customer c is in group G(c mod 10), as the party service holds it; the
+	// party lookup is an in-process fake, so the budget is sales' own path.
+	groups := mapGroups{}
+	for c, id := range customers {
+		groups[id] = fmt.Sprintf("G%d", c%10)
+	}
+
+	router := httpx.NewRouter()
+	New(store.New(loadAppPool(t, admin))).WithCustomerGroups(groups).Register(router)
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 256}, Timeout: 30 * time.Second}
 	manual := ids.New()
 	seed := func(path, le, body string) {
 		resp, err := loadPost(client, srv.URL, path, le, "sales.listing.maintain", "", []byte(body))
@@ -333,4 +338,11 @@ func TestPostgres_OrderIntake500PerMinuteP99Under500ms(t *testing.T) {
 	if p99 >= 500*time.Millisecond {
 		t.Errorf("p99 %s; want < 500 ms at %d orders/min", p99, loadPerMinute)
 	}
+}
+
+// mapGroups is a read-only customer -> group table standing in for party.
+type mapGroups map[string]string
+
+func (m mapGroups) CustomerGroup(_ context.Context, _, customerID string) (string, error) {
+	return m[customerID], nil
 }

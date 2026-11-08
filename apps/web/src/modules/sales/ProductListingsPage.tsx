@@ -39,7 +39,7 @@ export function validateListing(values: ListingValues): { errors: Errors; input?
   const key = values.scopeKey.trim();
   if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity's UUID.";
   if (values.scopeType === "CUSTOMER" && !UUID.test(key)) errors.scopeKey = "Enter the customer's UUID.";
-  if (values.scopeType === "GROUP" && (key.length < 1 || key.length > 80)) errors.scopeKey = "Enter the customer group code (up to 80 characters).";
+  if (values.scopeType === "GROUP" && (key.length < 1 || key.length > 80)) errors.scopeKey = "Enter the customer group id (up to 80 characters).";
   if (!UUID.test(values.productId.trim())) errors.productId = "Enter the product's UUID.";
   if (values.validFrom && !DATE.test(values.validFrom)) errors.validFrom = "Choose a date.";
   if (values.validTo && !DATE.test(values.validTo)) errors.validTo = "Choose a date.";
@@ -244,7 +244,7 @@ export function NewProductListingPage() {
               </Select>
             )}
           </FormField>
-          {text("scopeKey", values.scopeType === "CUSTOMER" ? "Customer" : "Customer group", values.scopeType === "CUSTOMER" ? "UUID of the customer party." : "The group code, for example EU-RETAIL.")}
+          {text("scopeKey", values.scopeType === "CUSTOMER" ? "Customer" : "Customer group", values.scopeType === "CUSTOMER" ? "UUID of the customer party." : "The customer group id from the customer record in party (customerGroupId, a UUID); orders and quotations read it from there.")}
           {text("productId", "Product", "UUID of the product.")}
           {date("validFrom", "Valid from")}
           {date("validTo", "Valid to")}

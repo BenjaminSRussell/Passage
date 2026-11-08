@@ -79,6 +79,8 @@ spec:
               value: {{ .Values.upstream.productUrl | quote }}
             - name: PRODUCTION_URL
               value: {{ .Values.upstream.productionUrl | quote }}
+            - name: PARTY_URL
+              value: {{ .Values.upstream.partyUrl | quote }}
             - name: BILLING_URL
               value: {{ .Values.upstream.billingUrl | quote }}
             - name: FULFILLMENT_URL

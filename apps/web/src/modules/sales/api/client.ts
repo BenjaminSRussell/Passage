@@ -214,7 +214,6 @@ export interface NewOrder {
   requestedShipDate: string;
   channel?: string;
   externalRef?: string;
-  customerGroup?: string;
   listingOverrideReason?: string;
   /** Makes the order a one-time customer order held to the one-time order limit (SLS-0016). */
   oneTime?: OneTimeParty;
@@ -820,7 +819,7 @@ export interface Quotation {
   lostReason?: string;
   /** Why a CANCELLED quotation was cancelled. */
   cancelReason?: string;
-  /** The customer group the listing check used; a converted order carries it. */
+  /** The customer's group (party customerGroupId) the listing check used; a converted order carries the group read at conversion. */
   customerGroup?: string;
   /** Denied lines accepted at entry with sales.order.approve, and why. */
   listingOverrides?: ListingOverride[];
@@ -841,8 +840,6 @@ export interface NewQuotation {
   currency: string;
   validUntil?: string;
   probabilityPct?: number;
-  /** Applies GROUP listing entries; the order a conversion creates carries it. */
-  customerGroup?: string;
   /** Needs sales.order.approve; accepts lines the product listing denies. */
   listingOverrideReason?: string;
   lines: NewOrderLine[];

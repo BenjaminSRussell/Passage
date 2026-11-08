@@ -95,12 +95,16 @@ paths:
         "422":
           description: >-
             validation of the lines, SLS-0011 PRODUCT_NOT_LISTED, SLS-0013 allocation, SLS-0016 a one-time order (oneTime)
-            whose net total is over the one-time order limit, or idempotency_key_reuse
+            whose net total is over the one-time order limit, SLS-0151 a customerGroup that differs from the customer's
+            group in the party service, SLS-0153 the customer is unknown to the party service in the legal entity, or
+            idempotency_key_reuse
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "503":
-          description: SLS-0054 a one-time order (oneTime) while the service has no field encryption keys; nothing is stored
+          description: >-
+            SLS-0054 a one-time order (oneTime) while the service has no field encryption keys; SLS-0152 the party service
+            is not configured or could not confirm the customer's group (the GROUP listing check needs it); nothing is stored
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -604,7 +608,13 @@ paths:
         "422":
           description: >-
             SLS-0008 AGREEMENT_EXHAUSTED (AC-27.9), SLS-0029 outside the validity period, SLS-0052 the agreement is closed,
-            SLS-0011 PRODUCT_NOT_LISTED, or idempotency_key_reuse
+            SLS-0011 PRODUCT_NOT_LISTED (checked for the customer's group read from the party service), SLS-0153 the
+            customer is unknown to the party service, or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "503":
+          description: SLS-0152 the party service is not configured or could not confirm the customer's group; nothing is stored, retry
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -1741,7 +1751,12 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
         "422":
-          description: idempotency_key_reuse - the key was used with a different body; SLS-0011 PRODUCT_NOT_LISTED - a line's product is not listed for the customer or group on the issue date (a caller with sales.order.approve may accept it with listingOverrideReason)
+          description: idempotency_key_reuse - the key was used with a different body; SLS-0011 PRODUCT_NOT_LISTED - a line's product is not listed for the customer or group on the issue date (a caller with sales.order.approve may accept it with listingOverrideReason); SLS-0151 a customerGroup that differs from the customer's group in the party service; SLS-0153 the customer is unknown to the party service in the legal entity
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "503":
+          description: SLS-0152 the party service is not configured or could not confirm the customer's group; nothing is stored, retry
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -1790,11 +1805,16 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0030 the status does not allow it (not DRAFT or SENT, or lines on a SENT quotation); SLS-0031 the validity has passed; SLS-0011 a replacement line's product is not listed for the customer or the quotation's group
+          description: SLS-0030 the status does not allow it (not DRAFT or SENT, or lines on a SENT quotation); SLS-0031 the validity has passed; SLS-0011 a replacement line's product is not listed for the customer or the customer's group, read again from the party service when lines are replaced; SLS-0153 the customer is unknown to the party service
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+        "503":
+          description: SLS-0152 the party service is not configured or could not confirm the customer's group for replaced lines; nothing is stored, retry
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
   /v1/sales/quotations/{id}:send:
     post:
       summary: Move a DRAFT quotation that is still valid to SENT
@@ -1916,11 +1936,17 @@ paths:
         "422":
           description: >-
             SLS-0030 not SENT or CONVERTED; SLS-0031 the validity has passed; SLS-0032 a line is not open;
-            SLS-0011 a line is not listed for the customer
+            SLS-0011 a line is not listed for the customer or the customer's group, read again from the party service;
+            SLS-0153 the customer is unknown to the party service
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+        "503":
+          description: SLS-0152 the party service is not configured or could not confirm the customer's group; nothing is stored, retry
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
   /v1/sales/quotations:expire:
     post:
       summary: Expire lapsed quotations - every DRAFT or SENT quotation past its validity becomes EXPIRED, up to 500 per run (FR-27.1)
@@ -3228,7 +3254,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          description: The customer's group for GROUP listing entries (BR-27.13), until the w7 party lookup supplies it.
+          description: Optional and never trusted. The customer's group for GROUP listing entries (BR-27.13) is read from the party service (the customer's customerGroupId); a value that differs is refused 422 SLS-0151, an unknown customer is 422 SLS-0153, and the party service failing or unconfigured is 503 SLS-0152 (the typed group is never a fallback).
         listingOverrideReason:
           type: string
           maxLength: 500
@@ -4026,7 +4052,7 @@ components:
           minItems: 1
           maxItems: 2000
           items: {$ref: "#/components/schemas/OrderLineRequest"}
-        customerGroup: {type: string, minLength: 1, maxLength: 80, description: "stands in for the w7 customer group so GROUP listing entries apply at entry; the order a conversion creates carries it"}
+        customerGroup: {type: string, minLength: 1, maxLength: 80, description: "optional and never trusted: the group is read from the party service (the customer's customerGroupId); a value that differs is refused 422 SLS-0151, the party service failing or unconfigured is 503 SLS-0152, an unknown customer 422 SLS-0153"}
         listingOverrideReason: {type: string, maxLength: 500, description: With duty sales.order.approve, accepts lines the product listing denies and logs the reason on the quotation (FR-27.15).}
     ChangeQuotationRequest:
       type: object

@@ -36,9 +36,9 @@ var (
 )
 
 type Client struct {
-	productURL, productionURL string
-	signer                    *tenant.ServiceSigner
-	http                      *http.Client
+	productURL, productionURL, partyURL string
+	signer                              *tenant.ServiceSigner
+	http                                *http.Client
 }
 
 func New(productURL, productionURL string, signer *tenant.ServiceSigner) *Client {

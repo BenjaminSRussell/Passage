@@ -350,12 +350,12 @@ describe("Order holds and listing overrides", () => {
     expect(screen.queryByRole("button", { name: "Apply hold" })).not.toBeInTheDocument();
   });
 
-  it("new order sends the customer group and override reason, and names a listing denial", async () => {
+  it("new order sends the override reason, never a customer group (party owns it), and names a listing denial", async () => {
     handler = () => ({ status: 422, body: { code: "SLS-0011", detail: "PRODUCT_NOT_LISTED: the product is not listed for this customer on line 1 (CUSTOMER_DENY)" } });
     renderAt("/sales/orders/new");
     fill("Legal entity", LE);
     fill("Customer", CUSTOMER);
-    fill(/Customer group/, "EU-RETAIL");
+    expect(screen.queryByLabelText(/Customer group/)).not.toBeInTheDocument();
     fill(/Listing override reason/, "replacement for recalled batch");
     fill("Product", PRODUCT);
     fill("Unit price", "10");
@@ -363,6 +363,7 @@ describe("Order holds and listing overrides", () => {
     fill("Warehouse", WAREHOUSE);
     fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
     expect(await screen.findByText("A product is not listed for this customer")).toBeInTheDocument();
-    expect(calls[0].body).toMatchObject({ customerGroup: "EU-RETAIL", listingOverrideReason: "replacement for recalled batch" });
+    expect(calls[0].body).toMatchObject({ listingOverrideReason: "replacement for recalled batch" });
+    expect(calls[0].body).not.toHaveProperty("customerGroup");
   });
 });

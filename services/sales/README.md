@@ -353,6 +353,9 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0044` | 409 | The change request was already decided |
 | `SLS-0045` | 403 | A change cannot be approved by the user who requested it |
 | `SLS-0150` | 403 | The customer names its change approvers and the caller is not one |
+| `SLS-0151` | 422 | A typed `customerGroup` differs from the customer's group in the party service |
+| `SLS-0152` | 503 | The party service is not configured or could not confirm the customer group |
+| `SLS-0153` | 422 | The customer is unknown to the party service in the legal entity |
 | `SLS-0046` | 409 | The order changed since the change request was made; reject it and ask for a new change |
 | `SLS-0047` | 422 | A line's `configurationId` does not exist, is not valid or does not belong to the line's product |
 | `SLS-0048` | 503 | The product service could not confirm a line's configuration (or is not configured); nothing is stored, retry |

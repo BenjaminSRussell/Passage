@@ -232,6 +232,40 @@ func TestPostgres_AgreementReleases(t *testing.T) {
 	}
 }
 
+// TestPostgres_AgreementReleaseGroupListing: a release order is checked
+// against the GROUP listings of the customer's group (BR-27.13), so a group
+// DENY cannot be dodged by releasing against an agreement; the order carries
+// the group.
+func TestPostgres_AgreementReleaseGroupListing(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	le := ids.New()
+	now := time.Date(2027, 3, 10, 9, 0, 0, 0, time.UTC)
+	a := agreementFixture(t, s, ctx, le, 100, nil, nil)
+	group := ids.New()
+	if _, err := s.CreateListing(ctx, ProductListing{LegalEntityID: le, ScopeType: domain.ScopeGroup, ScopeKey: group, ProductID: a.ProductID,
+		ListingType: domain.ListingDeny, CreatedBy: "listing-admin"}); err != nil {
+		t.Fatal(err)
+	}
+	denied := release(10, "g1")
+	denied.CustomerGroup = &group
+	if _, _, err := s.ReleaseAgreement(ctx, a.ID, denied, now); problemCode(t, err) != CodeProductNotListed {
+		t.Fatalf("group DENY on a release order: %v", err)
+	}
+	if got, err := s.GetAgreement(ctx, a.ID); err != nil || !got.Released.IsZero() || len(got.Releases) != 0 {
+		t.Fatalf("a refused release must draw nothing: %+v %v", got, err)
+	}
+	if n := countWhere(t, pool, `select count(*) from sales_order where channel = 'AGREEMENT'`); n != 0 {
+		t.Fatalf("a refused release left %d orders", n)
+	}
+	other := ids.New()
+	allowed := release(10, "g2")
+	allowed.CustomerGroup = &other
+	res, _, err := s.ReleaseAgreement(ctx, a.ID, allowed, now)
+	if err != nil || res.Order.CustomerGroup == nil || *res.Order.CustomerGroup != other {
+		t.Fatalf("release for another group: %+v %v", res.Order.CustomerGroup, err)
+	}
+}
+
 // TestPostgres_AgreementValidityAndConcurrency: a release outside the validity
 // period is refused, and concurrent releases never draw more than the
 // commitment (the row lock serializes them).

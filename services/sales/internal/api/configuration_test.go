@@ -67,6 +67,9 @@ func serveWith(a *API, method, path, body string, p tenant.Principal) *httptest.
 			next.ServeHTTP(w, req.WithContext(tenant.With(req.Context(), p)))
 		})
 	})
+	if a.groups == nil {
+		a.groups = fakeGroups{group: "EU-RETAIL"}
+	}
 	a.Register(r)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Idempotency-Key", "k-1")

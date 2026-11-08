@@ -107,6 +107,9 @@ type AgreementRelease struct {
 	IdempotencyKey    string
 	RequestHash       string
 	Actor             string
+	// CustomerGroup is the customer's group read from the party service; the
+	// release order's lines are checked against its GROUP listings (BR-27.13).
+	CustomerGroup *string
 }
 
 // ReleaseResult is the agreement after a release and the DRAFT order the
@@ -323,7 +326,7 @@ func (s *Postgres) ReleaseAgreement(ctx context.Context, id string, in Agreement
 			return problem(http.StatusBadRequest, "COM-0001", err.Error())
 		}
 		order, err := createOrderTx(ctx, tx, p.TenantID, NewOrder{LegalEntityID: a.LegalEntityID, CustomerID: a.CustomerID,
-			InvoiceAccountID: a.InvoiceAccountID, OrderType: "ORDER", Currency: a.Currency, RequestedShipDate: in.RequestedShipDate,
+			InvoiceAccountID: a.InvoiceAccountID, CustomerGroup: in.CustomerGroup, OrderType: "ORDER", Currency: a.Currency, RequestedShipDate: in.RequestedShipDate,
 			Channel: agreementChannel, RequestHash: in.RequestHash, OrderDate: now, Actor: in.Actor,
 			Lines: []Line{{LineNo: 1, ProductID: a.ProductID, Quantity: in.Quantity, Unit: a.Unit, SiteID: in.SiteID, WarehouseID: in.WarehouseID,
 				UnitPrice: a.UnitPrice, DiscPct: decimal.Zero, LineNet: lineNet, RequestedShipDate: in.RequestedShipDate}}})

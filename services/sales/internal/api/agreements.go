@@ -239,6 +239,17 @@ func (a *API) releaseOrder(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, "hash request", err)
 			return
 		}
+		// The release order is checked against the listings like any other
+		// order, for the customer's group as party holds it (BR-27.13).
+		saved, err := a.store.GetAgreement(r.Context(), id)
+		if err != nil {
+			a.fail(w, r, "release agreement", err)
+			return
+		}
+		if in.CustomerGroup, err = a.resolveGroup(r.Context(), saved.LegalEntityID, saved.CustomerID, nil); err != nil {
+			a.fail(w, r, "release agreement", err)
+			return
+		}
 		p, _ := tenant.FromContext(r.Context())
 		in.IdempotencyKey, in.RequestHash, in.Actor = key, hash, p.UserID
 		res, created, err := a.store.ReleaseAgreement(r.Context(), id, in, a.now().UTC().Truncate(time.Microsecond))

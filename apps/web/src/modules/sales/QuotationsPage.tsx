@@ -45,7 +45,6 @@ export interface QuotationValues {
   currency: string;
   validUntil: string;
   probabilityPct: string;
-  customerGroup: string;
   listingOverrideReason: string;
   lines: LineValues[];
 }
@@ -62,8 +61,6 @@ export function validateQuotation(values: QuotationValues, on: string = today())
   else if (values.validUntil && values.validUntil < on) errors.validUntil = "The quotation must be valid at least until today.";
   const probability = values.probabilityPct.trim();
   if (probability && (!/^\d{1,3}$/.test(probability) || Number(probability) > 100)) errors.probabilityPct = "Enter a whole percentage from 0 to 100.";
-  const group = values.customerGroup.trim();
-  if (group.length > 80) errors.customerGroup = "Use at most 80 characters.";
   const override = values.listingOverrideReason.trim();
   if (override.length > 500) errors.listingOverrideReason = "Use at most 500 characters.";
   const lines = validateLines(values.lines, errors);
@@ -77,7 +74,6 @@ export function validateQuotation(values: QuotationValues, on: string = today())
       currency: values.currency,
       ...(values.validUntil ? { validUntil: values.validUntil } : {}),
       ...(probability ? { probabilityPct: Number(probability) } : {}),
-      ...(group ? { customerGroup: group } : {}),
       ...(override ? { listingOverrideReason: override } : {}),
       lines,
     },
@@ -173,7 +169,6 @@ export function NewQuotationPage() {
     currency: "USD",
     validUntil: "",
     probabilityPct: "",
-    customerGroup: "",
     listingOverrideReason: "",
     lines: [emptyLine(start)],
   });
@@ -234,7 +229,6 @@ export function NewQuotationPage() {
           {header("currency", "Currency")}
           {header("validUntil", "Valid until", "Leave empty for the legal entity's quotation expiry (30 days unless changed in Sales parameters).", { type: "date", optional: true })}
           {header("probabilityPct", "Win probability %", "Leave empty for the legal entity's default (50% unless changed in Sales parameters).", { optional: true, numeric: true })}
-          {header("customerGroup", "Customer group", "Applies group listing entries, for example EU-RETAIL; a converted order carries it.", { optional: true })}
           {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
           <LinesEditor lines={values.lines} errors={errors} newLineDate={start} onChange={(lines) => update({ lines })} />
           {failure ? (
