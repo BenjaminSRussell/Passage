@@ -1074,14 +1074,14 @@ test_integration_hub_reaches_only_render_and_xref_record if {
 }
 
 test_migration_factory_grant_reaches_only_the_receivables_import if {
-	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"]}
+	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
 	allowed("receivables.view", "GET", "/v1/receivables/open-item-imports")
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
 }
 
 test_migration_loader_principal_holds_only_the_import_duties if {
-	data.service_principals["migration-loader"] == ["party.import.write", "product.import.write", "receivables.import.write"]
+	data.service_principals["migration-loader"] == ["party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"]
 	principal_allowed("migration-loader", "POST", "/v1/receivables/open-items:batch")
 	not principal_allowed("migration-loader", "GET", "/v1/receivables/worklist")
 	principal_allowed("migration-loader", "POST", "/v1/party/parties")
@@ -1525,4 +1525,17 @@ test_carrier_gateway_duties_are_service_only_and_open_only_their_routes if {
 	allowed("fulfillment.warehouse.ship", "POST", "/v1/fulfillment/shipments/s-1:carrier-label")
 	allowed("fulfillment.warehouse.ship", "POST", "/v1/fulfillment/shipments/s-1:carrier-track")
 	not allowed("fulfillment.warehouse.view", "POST", "/v1/fulfillment/shipments/s-1:carrier-label")
+}
+
+# Wave 23 slice 33: network feasibility inquiry.
+test_scheduling_network_feasibility_read if {
+	allowed("scheduling.read", "GET", "/v1/scheduling/network-feasibility")
+	not allowed("scheduling.read", "POST", "/v1/scheduling/network-feasibility")
+}
+
+# Wave 27 slice 34: sales reads the customer's group from party on order, quotation and release entry.
+test_sales_reads_party_customer if {
+	data.service_grants.sales.party == ["party.read"]
+	allowed("party.read", "GET", "/v1/party/customers/c-1")
+	not allowed("party.read", "POST", "/v1/party/customers/c-1")
 }
