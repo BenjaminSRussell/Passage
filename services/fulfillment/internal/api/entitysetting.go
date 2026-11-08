@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -27,7 +29,42 @@ func (a *API) routesLegalEntitySetting(r chi.Router) {
 type legalEntitySettingRequest struct {
 	CogsAtShipment *bool `json:"cogsAtShipment"`
 	AsnEnabled     *bool `json:"asnEnabled"`
+	// GS1CompanyPrefix (6 to 12 digits), SSCCExtensionDigit (0 to 9) and
+	// PackagingFeeBillable came after the two flags: left out, the saved value
+	// stays (a client that predates them never clears them); null returns the
+	// prefix or digit to the process default.
+	GS1CompanyPrefix     optional[string] `json:"gs1CompanyPrefix"`
+	SSCCExtensionDigit   optional[int]    `json:"ssccExtensionDigit"`
+	PackagingFeeBillable optional[bool]   `json:"packagingFeeBillable"`
 }
+
+// optional records whether a JSON member was present at all; null is present
+// with Null set.
+type optional[T any] struct {
+	Set   bool
+	Null  bool
+	Value T
+}
+
+func (o *optional[T]) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Null = true
+		return nil
+	}
+	return json.Unmarshal(b, &o.Value)
+}
+
+// nullable is the store change of a member that null resets.
+func (o optional[T]) nullable() store.Change[*T] {
+	if !o.Set || o.Null {
+		return store.Change[*T]{Set: o.Set}
+	}
+	v := o.Value
+	return store.Change[*T]{Set: true, Value: &v}
+}
+
+var gs1PrefixPattern = regexp.MustCompile(`^[0-9]{6,12}$`)
 
 func legalEntityParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := chi.URLParam(r, "legalEntityId")
@@ -90,8 +127,22 @@ func (a *API) saveLegalEntitySetting(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "asnEnabled", "is required (true or false)")
 		return
 	}
+	if g := req.GS1CompanyPrefix; g.Set && !g.Null && !gs1PrefixPattern.MatchString(g.Value) {
+		fail(w, r, "gs1CompanyPrefix", "must be 6 to 12 digits, or null for the process default")
+		return
+	}
+	if d := req.SSCCExtensionDigit; d.Set && !d.Null && (d.Value < 0 || d.Value > 9) {
+		fail(w, r, "ssccExtensionDigit", "must be a digit from 0 to 9, or null for the process default")
+		return
+	}
+	if req.PackagingFeeBillable.Null {
+		fail(w, r, "packagingFeeBillable", "must be true or false (leave it out to keep the saved value)")
+		return
+	}
 	p, _ := passagetenant.FromContext(r.Context())
-	in := store.LegalEntitySettingInput{CogsAtShipment: *req.CogsAtShipment, AsnEnabled: *req.AsnEnabled, CanChangeCogs: p.HasDuty(store.DutyCogsPolicy)}
+	in := store.LegalEntitySettingInput{CogsAtShipment: *req.CogsAtShipment, AsnEnabled: *req.AsnEnabled,
+		GS1CompanyPrefix: req.GS1CompanyPrefix.nullable(), SSCCExtensionDigit: req.SSCCExtensionDigit.nullable(),
+		PackagingFeeBillable: store.Change[bool]{Set: req.PackagingFeeBillable.Set, Value: req.PackagingFeeBillable.Value}, CanChangeCogs: p.HasDuty(store.DutyCogsPolicy)}
 	s, err := a.store.SaveLegalEntitySetting(r.Context(), id, version, in, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)

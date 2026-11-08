@@ -81,6 +81,38 @@ func TestLegalEntitySetting_ReadSaveValidateAndDuty(t *testing.T) {
 	}
 }
 
+func TestLegalEntitySetting_GS1PrefixAndExtensionAreValidated(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	path := "/v1/fulfillment/legal-entity-settings/" + ids.New()
+	hdr := map[string]string{"If-Match": `"2"`, "Idempotency-Key": "g-1"}
+	for _, extra := range []string{`,"gs1CompanyPrefix":"12345"`, `,"gs1CompanyPrefix":"1234567890123"`, `,"gs1CompanyPrefix":"12345A7"`,
+		`,"ssccExtensionDigit":10`, `,"ssccExtensionDigit":-1`, `,"packagingFeeBillable":null`, `,"ssccExtensionDigit":"5"`} {
+		if rec := do(t, h, http.MethodPut, path, `{"cogsAtShipment":false,"asnEnabled":false`+extra+`}`, hdr); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %s", extra, rec.Code, rec.Body.String())
+		}
+	}
+	ok := `{"cogsAtShipment":false,"asnEnabled":false,"gs1CompanyPrefix":"9876543","ssccExtensionDigit":5,"packagingFeeBillable":true}`
+	if rec := do(t, h, http.MethodPut, path, ok, hdr); rec.Code != http.StatusOK {
+		t.Fatalf("valid: %d %s", rec.Code, rec.Body.String())
+	}
+	if g, d, f := savedEntitySetting.GS1CompanyPrefix, savedEntitySetting.SSCCExtensionDigit, savedEntitySetting.PackagingFeeBillable; !g.Set || g.Value == nil || *g.Value != "9876543" ||
+		!d.Set || d.Value == nil || *d.Value != 5 || !f.Set || !f.Value {
+		t.Fatalf("valid: %+v", savedEntitySetting)
+	}
+	// Left out, the saved values stay (a client that predates the fields).
+	hdr["Idempotency-Key"] = "g-2"
+	if rec := do(t, h, http.MethodPut, path, `{"cogsAtShipment":false,"asnEnabled":false}`, hdr); rec.Code != http.StatusOK ||
+		savedEntitySetting.GS1CompanyPrefix.Set || savedEntitySetting.SSCCExtensionDigit.Set || savedEntitySetting.PackagingFeeBillable.Set {
+		t.Fatalf("left out: %d %+v", rec.Code, savedEntitySetting)
+	}
+	// Null returns the prefix and digit to the process default.
+	hdr["Idempotency-Key"] = "g-3"
+	if rec := do(t, h, http.MethodPut, path, `{"cogsAtShipment":false,"asnEnabled":false,"gs1CompanyPrefix":null,"ssccExtensionDigit":null}`, hdr); rec.Code != http.StatusOK ||
+		!savedEntitySetting.GS1CompanyPrefix.Set || savedEntitySetting.GS1CompanyPrefix.Value != nil || !savedEntitySetting.SSCCExtensionDigit.Set || savedEntitySetting.SSCCExtensionDigit.Value != nil {
+		t.Fatalf("null: %d %+v", rec.Code, savedEntitySetting)
+	}
+}
+
 // A post that names a flag passes it as given; one that omits it leaves the
 // choice to the legal entity setting.
 func TestPostPackingSlip_OmittedFlagsTakeTheSetting(t *testing.T) {

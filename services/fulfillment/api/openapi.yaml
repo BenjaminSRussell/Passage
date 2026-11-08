@@ -239,7 +239,10 @@ components:
         legalEntityId: { type: string, format: uuid }
         cogsAtShipment: { type: boolean, description: "The legal entity's COGS posting policy (BR-28.1): every packing slip books Dr 5000 (cost of goods sold) instead of Dr 1405 (delivered not invoiced). A post cannot override it." }
         asnEnabled: { type: boolean, description: "A post that does not name asnEnabled publishes the advance ship notice." }
-        version: { type: integer, minimum: 0, description: "0 when no setting is saved (both flags false)." }
+        gs1CompanyPrefix: { type: [string, "null"], pattern: '^[0-9]{6,12}$', description: "The legal entity's GS1 company prefix (BR-28.5); its containers' SSCCs are issued under it. Null takes the process default." }
+        ssccExtensionDigit: { type: [integer, "null"], minimum: 0, maximum: 9, description: "The SSCC extension digit; null takes the process default." }
+        packagingFeeBillable: { type: boolean, description: "Packing slips posted from now on tell billing to charge their packaging fee lines (BR-28.12)." }
+        version: { type: integer, minimum: 0, description: "0 when no setting is saved (flags false, GS1 prefix and extension digit null)." }
         updatedAt: { type: [string, "null"], format: date-time }
     DropShip:
       type: object
@@ -361,6 +364,7 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         totalCost: { $ref: "#/components/schemas/Decimal" }
         reversalOfId: { type: [string, "null"], format: uuid, description: "Set on a reversing slip; names the slip it cancels." }
+        packagingFeeBillable: { type: boolean, description: "The legal entity's packaging_fee_billable when the slip posted (BR-28.12); a reversing slip repeats the original's." }
         lines:
           type: array
           description: On a reversing slip quantities and costs are negative.
@@ -840,7 +844,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0020 shipment or FUL-0041 line not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0023 over-pack, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0023 over-pack, FUL-0050 the serial references of the GS1 company prefix are used up, FUL-0007 the SSCC was issued before (nested prefixes), idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}:post-packing-slip:
     post:
@@ -1120,7 +1124,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0020 shipment not found, FUL-0041 a unit weight names a line not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0013 one unit exceeds the rule's max weight, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0013 one unit exceeds the rule's max weight, FUL-0050 the serial references of the GS1 company prefix are used up, FUL-0007 the SSCC was issued before (nested prefixes), idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packaging-fee-rates:
     get:
@@ -1961,7 +1965,14 @@ paths:
         (FUL-0059). Changing it is an accounting policy change and needs the
         ledger.setup.write duty as well (403 AUTH-0003 without it); a save that keeps
         it needs only fulfillment.warehouse.release. asnEnabled is the default of a post that does
-        not name asnEnabled. Both flags are required. If-Match carries the version
+        not name asnEnabled. Both flags are required. gs1CompanyPrefix (6 to 12 digits)
+        and ssccExtensionDigit (0 to 9) set the SSCCs of the legal entity's containers
+        from the next container on; SSCCs already issued keep their prefix. null returns
+        either to the process default. A prefix that nests with the process prefix or
+        another legal entity's (one is the start of the other) is refused (422 FUL-0050):
+        the two would issue the same SSCCs. packagingFeeBillable is stored on each slip
+        posted afterwards for billing (BR-28.12). The three are optional: left out, the
+        saved value stays. If-Match carries the version
         read, 0 when none is saved. A legal entity outside the caller's legal-entity
         scope is refused (FUL-0058). Publishes legalentitysetting.changed.
       x-passage-duty: fulfillment.warehouse.release
@@ -1980,16 +1991,19 @@ paths:
               properties:
                 cogsAtShipment: { type: boolean }
                 asnEnabled: { type: boolean }
+                gs1CompanyPrefix: { type: [string, "null"], pattern: '^[0-9]{6,12}$', description: "Left out keeps the saved prefix; null takes the process default." }
+                ssccExtensionDigit: { type: [integer, "null"], minimum: 0, maximum: 9, description: "Left out keeps the saved digit; null takes the process default." }
+                packagingFeeBillable: { type: boolean, description: "Left out keeps the saved value (false when none is saved)." }
       responses:
         "200":
           description: The saved setting; ETag carries the new version
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LegalEntitySetting" }
-        "400": { description: "FUL-0050 validation (If-Match, cogsAtShipment, asnEnabled), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "400": { description: "FUL-0050 validation (If-Match, cogsAtShipment, asnEnabled, gs1CompanyPrefix, ssccExtensionDigit), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { description: "AUTH-0003 fulfillment.warehouse.release missing, or cogsAtShipment changed without ledger.setup.write", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0058 the legal entity is outside your scope, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0058 the legal entity is outside your scope, FUL-0050 the gs1CompanyPrefix nests with one in use, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers/{cid}:unpack:
     post:
@@ -2073,7 +2087,7 @@ paths:
         "404": { description: "FUL-0020 shipment, FUL-0054 container not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: "FUL-0021 shipment status does not allow nesting", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0056 a carton is not CLOSED, is on a pallet or is a pallet; or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0056 a carton is not CLOSED, is on a pallet or is a pallet, FUL-0050 the serial references of the GS1 company prefix are used up, FUL-0007 the SSCC was issued before (nested prefixes), idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers/{cid}:unnest:
     post:

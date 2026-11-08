@@ -161,7 +161,15 @@ type LegalEntitySettingChangedData struct {
 	AsnEnabled             bool   `json:"asn_enabled"`
 	PreviousCogsAtShipment bool   `json:"previous_cogs_at_shipment"`
 	PreviousAsnEnabled     bool   `json:"previous_asn_enabled"`
-	Version                int    `json:"version"`
+	// GS1CompanyPrefix is empty when the process default is in force.
+	GS1CompanyPrefix         string `json:"gs1_company_prefix,omitempty"`
+	PreviousGS1CompanyPrefix string `json:"previous_gs1_company_prefix,omitempty"`
+	// SSCCExtensionDigit is absent when the process default is in force.
+	SSCCExtensionDigit           *int `json:"sscc_extension_digit,omitempty"`
+	PreviousSSCCExtensionDigit   *int `json:"previous_sscc_extension_digit,omitempty"`
+	PackagingFeeBillable         bool `json:"packaging_fee_billable"`
+	PreviousPackagingFeeBillable bool `json:"previous_packaging_fee_billable"`
+	Version                      int  `json:"version"`
 }
 
 // WarehouseReleaseRuleChangedData is published when the release and wave
@@ -393,18 +401,21 @@ type ReturnableMovementData struct {
 // Inventory consumes the lines to issue stock; the ledger posts the journal
 // with Idempotency-Key = packing_slip_id.
 type PackingSlipPostedData struct {
-	PackingSlipID     string           `json:"packing_slip_id"`
-	PackingSlipNumber string           `json:"packing_slip_number"`
-	ShipmentID        string           `json:"shipment_id"`
-	OrderID           string           `json:"order_id"`
-	CustomerID        string           `json:"customer_id"`
-	PostingDate       string           `json:"posting_date"`
-	Currency          string           `json:"currency"`
-	TotalCost         string           `json:"total_cost"`
-	Lines             []SlipLine       `json:"lines"`
-	Journal           []JournalEntry   `json:"journal"`
-	PackagingFees     []PackagingFee   `json:"packaging_fees"`
-	Returnables       []ReturnableMove `json:"returnables"`
+	PackingSlipID     string         `json:"packing_slip_id"`
+	PackingSlipNumber string         `json:"packing_slip_number"`
+	ShipmentID        string         `json:"shipment_id"`
+	OrderID           string         `json:"order_id"`
+	CustomerID        string         `json:"customer_id"`
+	PostingDate       string         `json:"posting_date"`
+	Currency          string         `json:"currency"`
+	TotalCost         string         `json:"total_cost"`
+	Lines             []SlipLine     `json:"lines"`
+	Journal           []JournalEntry `json:"journal"`
+	PackagingFees     []PackagingFee `json:"packaging_fees"`
+	// PackagingFeeBillable is the legal entity's packaging_fee_billable when the
+	// slip posted: billing charges the fee lines when true (BR-28.12).
+	PackagingFeeBillable bool             `json:"packaging_fee_billable"`
+	Returnables          []ReturnableMove `json:"returnables"`
 }
 
 // PackingSlipCancelledData names the cancelled slip and the reversing slip that

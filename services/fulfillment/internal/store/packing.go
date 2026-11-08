@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -392,16 +393,42 @@ func (s *Postgres) AutoPack(ctx context.Context, id string, version int, unitWei
 // lines, adds the packed quantities to the shipment lines in the database and
 // in sh, and appends the container to sh. The caller has checked the quantities.
 func (s *Postgres) insertContainer(ctx context.Context, tx pgx.Tx, tenantID string, sh *Shipment, cont *Container) error {
-	serial, err := nextNumber(ctx, tx, tenantID, "sscc:"+s.gs1Prefix)
+	// The legal entity's own GS1 company prefix and extension digit win over the
+	// process default (BR-28.5); the serial counter is per prefix, so two
+	// entities that share a prefix never issue the same SSCC.
+	prefix, extension := s.gs1Prefix, s.extension
+	le, err := loadLegalEntitySetting(ctx, tx, sh.LegalEntityID, false)
 	if err != nil {
 		return err
 	}
-	if cont.SSCC, err = domain.SSCC(s.extension, s.gs1Prefix, uint64(serial)); err != nil {
+	if le.GS1CompanyPrefix != nil {
+		prefix = *le.GS1CompanyPrefix
+	}
+	if le.SSCCExtensionDigit != nil {
+		extension = *le.SSCCExtensionDigit
+	}
+	serial, err := nextNumber(ctx, tx, tenantID, "sscc:"+prefix)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `insert into container (tenant_id, id, shipment_id, container_type, sscc, tare_weight_kg, gross_weight_kg, returnable, packaging_material_code)
+	if cont.SSCC, err = domain.SSCC(extension, prefix, uint64(serial)); errors.Is(err, domain.ErrSerialRange) {
+		// A long prefix leaves few serial references (a 12-digit prefix 9,999).
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeValidation, "request failed validation")
+		p.Errors = map[string]string{"gs1CompanyPrefix": fmt.Sprintf("the serial references of GS1 company prefix %s are used up; give the legal entity another prefix", prefix)}
+		return p
+	} else if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `insert into container (tenant_id, id, shipment_id, container_type, sscc, tare_weight_kg, gross_weight_kg, returnable, packaging_material_code)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		tenantID, cont.ID, sh.ID, cont.ContainerType, cont.SSCC, cont.TareKg, cont.GrossKg, cont.Returnable, cont.PackagingMaterial); err != nil {
+		tenantID, cont.ID, sh.ID, cont.ContainerType, cont.SSCC, cont.TareKg, cont.GrossKg, cont.Returnable, cont.PackagingMaterial)
+	// The SSCC was issued before: under a prefix that nests with this one
+	// (another legal entity outside the caller's scope, see checkPrefixNesting).
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "container_tenant_id_sscc_key" {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeSSCCInvalid, fmt.Sprintf("SSCC %s is already used; check the GS1 company prefixes of the legal entities", cont.SSCC))
+	}
+	if err != nil {
 		return err
 	}
 	for _, cl := range cont.Lines {

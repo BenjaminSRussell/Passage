@@ -454,6 +454,38 @@ Handoffs and gaps from slice 23:
 | The tolerance is looked up per product and customer of the shipment; the PRD's "product group" scope and a per-line override are not modelled. | deviation | Product groups belong to the product master (wave 8). |
 | The wave detail pick form (`WaveDetailPage`) still refuses a quantity above plan before calling (FUL-0004); the service accepts it within the tolerance. Over-picking in a wave goes through the shipment detail pick form. | later slice of PSG-28 | The wave line payload carries no customer to resolve the tolerance with. |
 
+Slice 24 moves the GS1 company prefix and the packaging fee flag to the legal entity (section 5.28.13, BR-28.5,
+BR-28.12). Migration 0031 adds `gs1_company_prefix` (6 to 12 digits), `sscc_extension_digit` (0 to 9) and
+`packaging_fee_billable` to `legal_entity_setting`, and `packaging_fee_billable` to `packing_slip` (no new table, so the
+existing grants cover it). Every container, carton or pallet, takes its SSCC under the prefix and extension digit of
+its shipment's legal entity; an entity with neither saved keeps the process `GS1_COMPANY_PREFIX` and extension, which is
+what every container used before. The serial counter stays per prefix, so two entities that share a prefix never issue
+the same SSCC, and a change of prefix affects the next container only (SSCCs already issued are stored and keep their
+prefix). `PUT /legal-entity-settings/{id}` takes optional `gs1CompanyPrefix`, `ssccExtensionDigit` and
+`packagingFeeBillable`, refused with FUL-0050 when malformed; the legal entity setting read,
+`legalentitysetting.changed.v1` (new and previous prefix, extension digit and flag) and the OpenAPI/AsyncAPI carry them.
+Review fixes: (1) a field left out of the PUT keeps its saved value and only an explicit null returns the prefix or
+digit to the process default (the builder reset them on omission, which silently cleared a legal entity's prefix and
+billable flag on every save by a client that predates the fields, such as an integration written against slice 14;
+every other setting PUT in this service names all of its fields, so a missing field had never meant "clear");
+(2) a prefix that nests with the process prefix or another visible legal entity's (one is the start of the other) is
+refused with 422 FUL-0050: GS1 never allocates nested prefixes, and two nested prefixes with separate serial counters
+issue the same SSCCs; (3) a pack whose prefix has no serial reference left (a 12-digit prefix has 9,999) is 422
+FUL-0050 naming the prefix instead of a 500, and a pack that would repeat an SSCC (nested prefixes of legal entities
+outside the caller's scope, which the save check cannot see) is 422 FUL-0007 instead of a 500. A slip stores the
+flag it posted under, `PackingSlip` returns `packagingFeeBillable`, a reversing slip repeats the original's, and
+`packingslip.posted.v1` carries `packaging_fee_billable` so billing (wave 29) charges the `packaging_fees` lines when
+true; `packingslip.cancelled.v1` is unchanged (inventory pins its members; billing reads the cancelled slip by id).
+Store tests (Postgres, as the application role), API validation tests and web tests (the posting settings page shows
+the prefix and fee columns and has the three fields, checked before calling) cover it. No new duty or route (the same
+`fulfillment.warehouse.view` and `fulfillment.warehouse.release`), so there is nothing new for #313 or the authz seed.
+Not built: `consolidation_enabled`, `rtp_tracking_enabled`, `rtp_charge_days`, `dni_check_time`, `sscc_no_reuse_months`;
+rtp aging is per customer and carries no legal entity, so a per-entity `chargeDays` needs the balance to carry one first.
+The nested-prefix check sees only the legal entities in the caller's scope (row-level security); one saved by a caller
+scoped to other entities is caught at pack time (FUL-0007) instead. The serial counter is per prefix only, not per
+extension digit, so the extension digit does not add capacity (BR-28.5 says "per prefix").
+The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
+
 ## Important gaps (read first)
 
 | Item | Status | Reason |
@@ -467,7 +499,7 @@ Handoffs and gaps from slice 23:
 | Post, pick, pack, auto-pack, wave pick and release honour sales' order holds only after the consumer runs: until `service:fulfillment-order` is seeded and the consumer deployment is enabled, no hold is known and none is checked (slices 19 and 20). | handoff (authz seed and deploy, see slice 19 below) | The check itself is built: post, pick, pack and auto-pack are refused with FUL-0001 while the order has an active hold, a wave pick of the rest leaves a held order's shipment out, and release skips its lines as `held`.
 | The cost on each line comes from the caller (`costs[]`), not from wave 20 cost snapshots. | handoff to inventory costing (wave 20) | Cost snapshot ownership is outside this wave. The caller supplies `costSnapshotId` and `unitCost`. |
 | AC-28.4: a short pick leaves the remainder on the shipment (re-picked from `PARTIALLY_SHIPPED`), `pick.confirmed` carries the `backordered` quantity, and the short picks and backorders report shows the open remainder (slice 6). Releasing the unpicked reservation is not done here. | handoff to inventory reservations (wave 16) | Reservations are owned by wave 16; inventory consumes `pick.confirmed` (`backordered`), `shipment.cancelled` and `shipment.closed` (`qty` to unreserve, `picked_unpacked` to put back). No inventory consumer exists yet. |
-| The packaging fee is statistical only. The `packaging_fee_billable` SURCHARGE / FREIGHT line with its own tax code (BR-28.12) is not created here. | handoff to billing (wave 29) | Billing owns invoice lines. The fee lines are on the slip and in `packingslip.posted.v1` (`packaging_fees`), so wave 29 can bill them when `packaging_fee_billable` is set. The setting itself is not modelled here. |
+| The packaging fee is statistical only. The `packaging_fee_billable` SURCHARGE / FREIGHT line with its own tax code (BR-28.12) is not created here; since slice 24 the flag is a legal entity setting and `packingslip.posted.v1` carries `packaging_fee_billable`. | handoff to billing (wave 29) | Billing owns invoice lines. The fee lines are on the slip and in `packingslip.posted.v1` (`packaging_fees`), so wave 29 can bill them when `packaging_fee_billable` is set. |
 | Auto-pack takes unit weights per shipment line from the caller (`unitWeights`); a line without one is limited by quantity only. | handoff to product (wave 8) for unit weights | Product weights and packaging units belong to the product master (wave 8). |
 | The ship-to country of the packaging fee comes from the caller (`countryCode` on the post), not from the order's ship-to address. | handoff to sales (wave 27) | The order ship-to is not read yet. Without a country no fee is posted. |
 | Whether an order is a JOURNAL order is now taken from the stored `order.confirmed.v1` type (slice 19); a release or drop-ship for an order fulfillment has not heard of (the event not yet consumed, or the consumer not yet enabled) still takes the caller's `orderType`, and a JOURNAL order whose lines are then offered without it **is released and shipped**. | handoff to sales (wave 27) to keep sending `orderType`, `priority` and `atpQty` on its release call until the consumer is enabled everywhere; authz seed and deploy handoffs below | Sales must also read `shipment.released` line quantities as what was released (a partial release releases less than the order line and a later run the rest), not mark the line fully released. The per-line `atp_qty` of `order.confirmed.v1` (sales slice 22) is optional and not stored or used yet; release still takes `atpQty` from the caller.
@@ -672,7 +704,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Config `COGS_AT_SHIPMENT` per legal entity | built (slice 14) | `cogs_at_shipment` is a legal entity setting every post follows; a post naming the other value is FUL-0059. Changing it needs `ledger.setup.write` on top of `fulfillment.warehouse.release`. The PRD names no duty for section 5.28.13 parameters; `ledger.setup.write` is the existing ledger posting setup duty. The process-wide `COGS_AT_SHIPMENT=false` of section 5.28.10 is the default of an unsaved legal entity and is not an environment variable. The open question of section 5.28.12 (default `true` for migrated SAP entities) is for the migration factory (wave 49) to set per legal entity through this API. |
 | Route permissions for `/v1/fulfillment/legal-entity-settings` (GET under `fulfillment.warehouse.view`, `legal-entity-settings/*` GET under `fulfillment.warehouse.view` and PUT under `fulfillment.warehouse.release`) and slice 13's `/v1/fulfillment/warehouse-settings` (same pattern) in `policies/authz/data.json` | done (seeded in `policies/authz/data.json`) | `fulfillment.warehouse.view` carries GET `/v1/fulfillment/legal-entity-settings[/*]` and `/warehouse-settings[/*]`; `fulfillment.warehouse.release` carries PUT `/legal-entity-settings/*` and `/warehouse-settings/*` (and POST `/shipments/*:backorder-remainder`). |
 | Billing (wave 29) reading the COGS timing of each slip | handoff to billing (wave 29) | A legal entity may change its policy while slips are uninvoiced. Billing must decide what to reverse at invoice from each slip's own journal (1405 or 5000 lines, in `packingslip.posted`), never from the current setting. |
-| `GS1_COMPANY_PREFIX` per legal entity (BR-28.5) | deviation | Slice 1 has one prefix per process. It is not per legal entity. The serial counter is per tenant and prefix, gap-free, and a serial that no longer fits the prefix is refused. |
+| `GS1_COMPANY_PREFIX` per legal entity (BR-28.5) | built (slice 24) | `gs1_company_prefix` and `sscc_extension_digit` on the legal entity setting win over the process prefix, which stays the default of an entity with none saved. The serial counter is per tenant and prefix, gap-free, and a serial that no longer fits the prefix is refused. |
 | SSCC no reuse for 12 months (`sscc_no_reuse_months`) | deviation | `UNIQUE (tenant_id, sscc)` means an SSCC is never issued twice in a tenant, which is stricter than 12 months. The tenant setting `sscc_no_reuse_months` (12 to 60) is not stored: this service has no tenant settings yet, so the register's `noReuseUntil` always uses the default 12. |
 | SSCC register columns `printed_at` and "reused flag" (section 5.28.14) | deviation | Labels are rendered on request and not stored (`label_ref` is not built, see D1), so there is no print time; the register returns `issuedAt` instead. An SSCC cannot be reused (unique per tenant), so a reused flag would always be false; the register returns `noReuseUntil` instead. |
 | SSCC sequence check (nightly 00:30, alert on duplicates or check-digit failures) | later slice of PSG-28 | No scheduler is wired in this service. The database refuses duplicates and the label endpoint checks the check digit (FUL-0007). |

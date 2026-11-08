@@ -156,7 +156,13 @@ export interface LegalEntitySetting {
   cogsAtShipment: boolean;
   /** A post that does not name asnEnabled publishes the advance ship notice. */
   asnEnabled: boolean;
-  /** 0 when no setting is saved (both flags false). */
+  /** The GS1 company prefix (6 to 12 digits) of the entity's SSCCs (BR-28.5); null takes the process default. */
+  gs1CompanyPrefix: string | null;
+  /** The SSCC extension digit (0 to 9); null takes the process default. */
+  ssccExtensionDigit: number | null;
+  /** Slips posted from now on tell billing to charge their packaging fee lines (BR-28.12). */
+  packagingFeeBillable: boolean;
+  /** 0 when no setting is saved (flags false, prefix and digit null). */
   version: number;
   updatedAt: string | null;
 }
@@ -196,6 +202,8 @@ export interface PackingSlip extends PackingSlipSummary {
   lines: { orderLineId: string; shipmentLineId: string; qty: string; costAmount: string; costSnapshotId: string }[];
   journal: JournalEntry[];
   packagingFees: PackagingFeeLine[];
+  /** The legal entity's packaging_fee_billable when the slip posted: billing charges the fee lines (BR-28.12). */
+  packagingFeeBillable?: boolean;
   /** On the post response only: the warehouse's short pick action closed or moved the open remainder. */
   remainderAction?: "CANCEL_REMAINDER" | "REMAINDER_BACKORDER";
   backorderShipmentId?: string;
@@ -777,7 +785,7 @@ export function getLegalEntitySetting(legalEntityId: string, signal?: AbortSigna
 export function saveLegalEntitySetting(
   legalEntityId: string,
   version: number,
-  input: { cogsAtShipment: boolean; asnEnabled: boolean },
+  input: { cogsAtShipment: boolean; asnEnabled: boolean; gs1CompanyPrefix: string | null; ssccExtensionDigit: number | null; packagingFeeBillable: boolean },
   key: string,
 ): Promise<LegalEntitySetting> {
   const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };

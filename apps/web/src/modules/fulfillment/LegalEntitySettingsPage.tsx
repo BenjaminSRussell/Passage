@@ -16,12 +16,20 @@ const columns: DataTableColumn<LegalEntitySetting>[] = [
     render: (row) => <Badge tone={row.cogsAtShipment ? "info" : "neutral"}>{row.cogsAtShipment ? "At shipment (Dr 5000)" : "Delivered not invoiced (Dr 1405)"}</Badge>,
   },
   { key: "asnEnabled", header: "Advance ship notice", render: (row) => <Badge tone={row.asnEnabled ? "info" : "neutral"}>{row.asnEnabled ? "Sent with each post" : "Not sent"}</Badge> },
+  {
+    key: "gs1CompanyPrefix",
+    header: "GS1 prefix (extension digit)",
+    mono: true,
+    render: (row) => `${row.gs1CompanyPrefix ?? "Process default"} (${row.ssccExtensionDigit ?? "default"})`,
+  },
+  { key: "packagingFeeBillable", header: "Packaging fee", render: (row) => <Badge tone={row.packagingFeeBillable ? "info" : "neutral"}>{row.packagingFeeBillable ? "Billed to the customer" : "Statistical only"}</Badge> },
   { key: "updatedAt", header: "Changed", render: (row) => (row.updatedAt ? formatDateTime(row.updatedAt) : dash) },
 ];
 
 /**
- * Posting settings per legal entity (section 5.28.13): the COGS posting policy every packing slip follows and the
- * ASN default of a post. Changing the COGS policy needs the ledger setup duty; the service enforces it.
+ * Posting settings per legal entity (section 5.28.13): the COGS posting policy every packing slip follows, the
+ * ASN default of a post, the GS1 company prefix and extension digit of the entity's SSCCs and whether its packaging
+ * fees are billed. Changing the COGS policy needs the ledger setup duty; the service enforces it.
  */
 export function LegalEntitySettingsPage() {
   const canChangeCogs = holdsDuty(usePrincipalDuties(), DUTY_COGS_POLICY);
@@ -29,8 +37,13 @@ export function LegalEntitySettingsPage() {
   const [legalEntityId, setLegalEntityId] = useState("");
   const [cogsAtShipment, setCogsAtShipment] = useState(false);
   const [asnEnabled, setAsnEnabled] = useState(false);
+  const [gs1Prefix, setGs1Prefix] = useState("");
+  const [extension, setExtension] = useState("");
+  const [billable, setBillable] = useState(false);
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | undefined>();
+  const [prefixError, setPrefixError] = useState<string | undefined>();
+  const [digitError, setDigitError] = useState<string | undefined>();
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,6 +53,9 @@ export function LegalEntitySettingsPage() {
     setLegalEntityId(row.legalEntityId);
     setCogsAtShipment(row.cogsAtShipment);
     setAsnEnabled(row.asnEnabled);
+    setGs1Prefix(row.gs1CompanyPrefix ?? "");
+    setExtension(row.ssccExtensionDigit === null ? "" : String(row.ssccExtensionDigit));
+    setBillable(row.packagingFeeBillable);
     setVersion(row.version);
     setError(undefined);
     setNotice(null);
@@ -53,11 +69,20 @@ export function LegalEntitySettingsPage() {
     setNotice(null);
     const bad = !UUID.test(legalEntityId.trim());
     setError(bad ? "Enter the legal entity id, or open a legal entity above." : undefined);
-    if (bad) return;
+    const prefix = gs1Prefix.trim();
+    const digit = extension.trim();
+    const prefixBad = prefix !== "" && !/^[0-9]{6,12}$/.test(prefix);
+    const digitBad = digit !== "" && !/^[0-9]$/.test(digit);
+    setPrefixError(prefixBad ? "Enter 6 to 12 digits, or leave it empty for the process default." : undefined);
+    setDigitError(digitBad ? "Enter a single digit from 0 to 9, or leave it empty." : undefined);
+    if (bad || prefixBad || digitBad) return;
     setBusy(true);
     try {
       const known = state.data?.find((l) => l.legalEntityId === legalEntityId.trim());
-      const saved = await saveLegalEntitySetting(legalEntityId.trim(), known ? known.version : version, { cogsAtShipment, asnEnabled }, key.current());
+      const saved = await saveLegalEntitySetting(legalEntityId.trim(), known ? known.version : version,
+        { cogsAtShipment, asnEnabled, gs1CompanyPrefix: prefix === "" ? null : prefix, ssccExtensionDigit: digit === "" ? null : Number(digit), packagingFeeBillable: billable },
+        key.current(),
+      );
       key.renew();
       setVersion(saved.version);
       setNotice("Saved. New packing slip posts use these settings.");
@@ -83,7 +108,7 @@ export function LegalEntitySettingsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Posting settings"
-        description="Per legal entity: the cost of goods sold policy every packing slip follows (at shipment, or delivered not invoiced until the invoice), and whether a post sends the advance ship notice. A poster cannot change the policy; the ASN is a default the poster can turn off."
+        description="Per legal entity: the cost of goods sold policy every packing slip follows (at shipment, or delivered not invoiced until the invoice), whether a post sends the advance ship notice, the GS1 company prefix its containers' SSCCs are issued under, and whether billing charges its packaging fees. A poster cannot change the policy; the ASN is a default the poster can turn off."
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the posting settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
@@ -118,6 +143,15 @@ export function LegalEntitySettingsPage() {
           </FormField>
           <FormField id="le-asn" label="Send an advance ship notice (ASN)" hint="Publishes the containers, SSCCs and quantities of each posted slip for EDI.">
             {(control) => <Input {...control} type="checkbox" checked={asnEnabled} onChange={(event) => { setAsnEnabled(event.target.checked); key.renew(); }} />}
+          </FormField>
+          <FormField id="le-gs1" label="GS1 company prefix" error={prefixError} hint="6 to 12 digits. The SSCCs of this legal entity's containers are issued under it from the next container on. Empty takes the process default.">
+            {(control) => <Input {...control} value={gs1Prefix} invalid={Boolean(prefixError)} inputMode="numeric" onChange={(event) => { setGs1Prefix(event.target.value); key.renew(); }} />}
+          </FormField>
+          <FormField id="le-ext" label="SSCC extension digit" error={digitError} hint="0 to 9. Empty takes the process default.">
+            {(control) => <Input {...control} value={extension} invalid={Boolean(digitError)} inputMode="numeric" onChange={(event) => { setExtension(event.target.value); key.renew(); }} />}
+          </FormField>
+          <FormField id="le-fee" label="Bill the packaging fee" hint="Packing slips posted from now on tell billing to charge their packaging fee lines. Off keeps the fee statistical.">
+            {(control) => <Input {...control} type="checkbox" checked={billable} onChange={(event) => { setBillable(event.target.checked); key.renew(); }} />}
           </FormField>
           <ProblemAlert title="Could not save the settings" problem={failure} />
           <div className={styles.formActions}>

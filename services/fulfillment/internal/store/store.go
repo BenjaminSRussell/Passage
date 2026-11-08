@@ -206,6 +206,9 @@ type PackingSlip struct {
 	// PackagingFees are the statistical packaging fee lines (BR-28.12). They
 	// are not journal lines; a reversing slip carries them negated.
 	PackagingFees []PackagingFeeLine `json:"packagingFees"`
+	// PackagingFeeBillable is the legal entity's packaging_fee_billable when the
+	// slip posted (BR-28.12); a reversing slip repeats the original's.
+	PackagingFeeBillable bool `json:"packagingFeeBillable"`
 	// RemainderAction is the warehouse's short pick action when posting this
 	// slip closed (CANCEL_REMAINDER) or moved (BACKORDER) the shipment's open
 	// remainder, and BackorderShipmentID the new shipment; both only on the
@@ -1222,7 +1225,8 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			var postLines []domain.PostingLine
 			slip := PackingSlip{ID: ids.New(), ShipmentID: sh.ID, OrderID: sh.OrderID,
-				Status: "POSTED", PostingDate: in.PostingDate, Currency: in.Currency, Lines: []PackingSlipLine{}, PackagingFees: []PackagingFeeLine{}}
+				Status: "POSTED", PostingDate: in.PostingDate, Currency: in.Currency, Lines: []PackingSlipLine{}, PackagingFees: []PackagingFeeLine{},
+				PackagingFeeBillable: le.PackagingFeeBillable}
 			for _, l := range sh.Lines {
 				q := l.Packed.Sub(l.Shipped)
 				if !q.IsPositive() {
@@ -1378,7 +1382,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 				return PackingSlip{}, mapDomain(err)
 			}
 			rev := PackingSlip{ID: ids.New(), ShipmentID: orig.ShipmentID, OrderID: orig.OrderID, Status: "POSTED",
-				PostingDate: dateOnly(time.Now()), Currency: orig.Currency, TotalCost: orig.TotalCost.Neg(), ReversalOfID: &orig.ID,
+				PostingDate: dateOnly(time.Now()), Currency: orig.Currency, TotalCost: orig.TotalCost.Neg(), ReversalOfID: &orig.ID, PackagingFeeBillable: orig.PackagingFeeBillable,
 				Journal: toEntries(domain.Reverse(toJournal(orig.Journal))), Lines: []PackingSlipLine{}, PackagingFees: []PackagingFeeLine{}}
 			seq, err := nextNumber(ctx, tx, p.TenantID, "PS:"+sh.LegalEntityID)
 			if err != nil {
@@ -1480,9 +1484,9 @@ func insertSlip(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, 
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `insert into packing_slip (tenant_id, id, legal_entity_id, shipment_id, order_id, packing_slip_number, status, posting_date, currency, total_cost, journal, reversal_of_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, tenantID, slip.ID, legalEntityID, slip.ShipmentID, slip.OrderID, slip.Number,
-		slip.Status, slip.PostingDate, slip.Currency, slip.TotalCost, journal, slip.ReversalOfID); err != nil {
+	if _, err := tx.Exec(ctx, `insert into packing_slip (tenant_id, id, legal_entity_id, shipment_id, order_id, packing_slip_number, status, posting_date, currency, total_cost, journal, reversal_of_id, packaging_fee_billable)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, tenantID, slip.ID, legalEntityID, slip.ShipmentID, slip.OrderID, slip.Number,
+		slip.Status, slip.PostingDate, slip.Currency, slip.TotalCost, journal, slip.ReversalOfID, slip.PackagingFeeBillable); err != nil {
 		return err
 	}
 	for _, l := range slip.Lines {
@@ -1498,8 +1502,8 @@ func loadSlip(ctx context.Context, tx pgx.Tx, id string) (PackingSlip, error) {
 	var slip PackingSlip
 	var journal []byte
 	var total string
-	err := tx.QueryRow(ctx, `select id, packing_slip_number, shipment_id, order_id, status, posting_date, currency, total_cost::text, journal, reversal_of_id
-		from packing_slip where id = $1`, id).Scan(&slip.ID, &slip.Number, &slip.ShipmentID, &slip.OrderID, &slip.Status, &slip.PostingDate, &slip.Currency, &total, &journal, &slip.ReversalOfID)
+	err := tx.QueryRow(ctx, `select id, packing_slip_number, shipment_id, order_id, status, posting_date, currency, total_cost::text, journal, reversal_of_id, packaging_fee_billable
+		from packing_slip where id = $1`, id).Scan(&slip.ID, &slip.Number, &slip.ShipmentID, &slip.OrderID, &slip.Status, &slip.PostingDate, &slip.Currency, &total, &journal, &slip.ReversalOfID, &slip.PackagingFeeBillable)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return slip, httpx.NewProblem(http.StatusNotFound, CodeSlipNotFound, "packing slip not found")
 	}
@@ -1558,6 +1562,6 @@ func slipPostedData(slip PackingSlip, sh Shipment, returnables []returnableCount
 		PackingSlipID: slip.ID, PackingSlipNumber: slip.Number, ShipmentID: sh.ID, OrderID: sh.OrderID, CustomerID: sh.CustomerID,
 		PostingDate: slip.PostingDate.Format("2006-01-02"), Currency: slip.Currency, TotalCost: slip.TotalCost.String(),
 		Lines: slipLineData(slip.Lines), Journal: journalData(slip.Journal),
-		PackagingFees: feeData(slip.PackagingFees), Returnables: returnableData(returnables, 1),
+		PackagingFees: feeData(slip.PackagingFees), PackagingFeeBillable: slip.PackagingFeeBillable, Returnables: returnableData(returnables, 1),
 	}
 }

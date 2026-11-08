@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,18 +32,46 @@ type LegalEntitySetting struct {
 	// Dr 1405 / Cr 1400 when the post request does not say.
 	CogsAtShipment bool `json:"cogsAtShipment"`
 	// AsnEnabled publishes the advance ship notice with a post that does not say.
-	AsnEnabled bool       `json:"asnEnabled"`
-	Version    int        `json:"version"`
-	UpdatedAt  *time.Time `json:"updatedAt"`
+	AsnEnabled bool `json:"asnEnabled"`
+	// GS1CompanyPrefix and SSCCExtensionDigit are the SSCC parameters of the
+	// entity's containers (BR-28.5); nil takes the process default.
+	GS1CompanyPrefix   *string `json:"gs1CompanyPrefix"`
+	SSCCExtensionDigit *int    `json:"ssccExtensionDigit"`
+	// PackagingFeeBillable marks the packing slips posted from now on as
+	// carrying packaging fees billing is to charge (BR-28.12).
+	PackagingFeeBillable bool       `json:"packagingFeeBillable"`
+	Version              int        `json:"version"`
+	UpdatedAt            *time.Time `json:"updatedAt"`
 }
 
 // LegalEntitySettingInput is the value saved for a legal entity.
 type LegalEntitySettingInput struct {
 	CogsAtShipment bool
 	AsnEnabled     bool
+	// GS1CompanyPrefix (6 to 12 digits) and SSCCExtensionDigit (0 to 9) are
+	// validated by the caller. A field whose Set is false keeps the saved
+	// value, so a client that predates a field never clears it; Set with a nil
+	// Value returns the entity to the process default.
+	GS1CompanyPrefix   Change[*string]
+	SSCCExtensionDigit Change[*int]
+	// PackagingFeeBillable keeps the saved value unless Set.
+	PackagingFeeBillable Change[bool]
 	// CanChangeCogs says the caller holds the finance setup duty that changing
 	// cogs_at_shipment needs (an accounting policy, not a warehouse default).
 	CanChangeCogs bool
+}
+
+// Change is an optional field of a save: Set false keeps the saved value.
+type Change[T any] struct {
+	Set   bool
+	Value T
+}
+
+func (c Change[T]) or(saved T) T {
+	if c.Set {
+		return c.Value
+	}
+	return saved
 }
 
 // DutyCogsPolicy is the ledger setup duty that changing cogs_at_shipment needs
@@ -54,7 +83,8 @@ const DutyCogsPolicy = "ledger.setup.write"
 func (s *Postgres) ListLegalEntitySettings(ctx context.Context) ([]LegalEntitySetting, error) {
 	out := []LegalEntitySetting{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select l.legal_entity_id, coalesce(ls.cogs_at_shipment, false), coalesce(ls.asn_enabled, false), coalesce(ls.version, 0), ls.updated_at
+		rows, err := tx.Query(ctx, `select l.legal_entity_id, coalesce(ls.cogs_at_shipment, false), coalesce(ls.asn_enabled, false),
+			ls.gs1_company_prefix, ls.sscc_extension_digit::int, coalesce(ls.packaging_fee_billable, false), coalesce(ls.version, 0), ls.updated_at
 			from (select legal_entity_id from shipment union select legal_entity_id from legal_entity_setting) l
 			left join legal_entity_setting ls on ls.legal_entity_id = l.legal_entity_id
 			order by l.legal_entity_id`)
@@ -64,7 +94,7 @@ func (s *Postgres) ListLegalEntitySettings(ctx context.Context) ([]LegalEntitySe
 		defer rows.Close()
 		for rows.Next() {
 			var l LegalEntitySetting
-			if err := rows.Scan(&l.LegalEntityID, &l.CogsAtShipment, &l.AsnEnabled, &l.Version, &l.UpdatedAt); err != nil {
+			if err := rows.Scan(&l.LegalEntityID, &l.CogsAtShipment, &l.AsnEnabled, &l.GS1CompanyPrefix, &l.SSCCExtensionDigit, &l.PackagingFeeBillable, &l.Version, &l.UpdatedAt); err != nil {
 				return err
 			}
 			out = append(out, l)
@@ -78,11 +108,11 @@ func (s *Postgres) ListLegalEntitySettings(ctx context.Context) ([]LegalEntitySe
 // default (version 0) when none is saved or visible.
 func loadLegalEntitySetting(ctx context.Context, tx pgx.Tx, legalEntityID string, lock bool) (LegalEntitySetting, error) {
 	l := LegalEntitySetting{LegalEntityID: legalEntityID}
-	q := `select cogs_at_shipment, asn_enabled, version, updated_at from legal_entity_setting where legal_entity_id = $1`
+	q := `select cogs_at_shipment, asn_enabled, gs1_company_prefix, sscc_extension_digit::int, packaging_fee_billable, version, updated_at from legal_entity_setting where legal_entity_id = $1`
 	if lock {
 		q += ` for update`
 	}
-	err := tx.QueryRow(ctx, q, legalEntityID).Scan(&l.CogsAtShipment, &l.AsnEnabled, &l.Version, &l.UpdatedAt)
+	err := tx.QueryRow(ctx, q, legalEntityID).Scan(&l.CogsAtShipment, &l.AsnEnabled, &l.GS1CompanyPrefix, &l.SSCCExtensionDigit, &l.PackagingFeeBillable, &l.Version, &l.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return l, nil
 	}
@@ -124,11 +154,20 @@ func (s *Postgres) SaveLegalEntitySetting(ctx context.Context, legalEntityID str
 			if in.CogsAtShipment != cur.CogsAtShipment && !in.CanChangeCogs {
 				return cur, httpx.NewProblem(http.StatusForbidden, CodeDutyMissing, "changing cogs_at_shipment needs the "+DutyCogsPolicy+" duty")
 			}
-			next := LegalEntitySetting{LegalEntityID: legalEntityID, CogsAtShipment: in.CogsAtShipment, AsnEnabled: in.AsnEnabled}
-			err = tx.QueryRow(ctx, `insert into legal_entity_setting (tenant_id, legal_entity_id, cogs_at_shipment, asn_enabled, version) values ($1, $2, $3, $4, 1)
+			next := LegalEntitySetting{LegalEntityID: legalEntityID, CogsAtShipment: in.CogsAtShipment, AsnEnabled: in.AsnEnabled,
+				GS1CompanyPrefix: in.GS1CompanyPrefix.or(cur.GS1CompanyPrefix), SSCCExtensionDigit: in.SSCCExtensionDigit.or(cur.SSCCExtensionDigit),
+				PackagingFeeBillable: in.PackagingFeeBillable.or(cur.PackagingFeeBillable)}
+			if next.GS1CompanyPrefix != nil && deref(next.GS1CompanyPrefix) != deref(cur.GS1CompanyPrefix) {
+				if err := s.checkPrefixNesting(ctx, tx, legalEntityID, *next.GS1CompanyPrefix); err != nil {
+					return cur, err
+				}
+			}
+			err = tx.QueryRow(ctx, `insert into legal_entity_setting (tenant_id, legal_entity_id, cogs_at_shipment, asn_enabled, gs1_company_prefix, sscc_extension_digit, packaging_fee_billable, version)
+				values ($1, $2, $3, $4, $5, $6, $7, 1)
 				on conflict (tenant_id, legal_entity_id) do update set cogs_at_shipment = excluded.cogs_at_shipment, asn_enabled = excluded.asn_enabled,
-					version = legal_entity_setting.version + 1, updated_at = now()
-				returning version, updated_at`, p.TenantID, legalEntityID, in.CogsAtShipment, in.AsnEnabled).Scan(&next.Version, &next.UpdatedAt)
+					gs1_company_prefix = excluded.gs1_company_prefix, sscc_extension_digit = excluded.sscc_extension_digit,
+					packaging_fee_billable = excluded.packaging_fee_billable, version = legal_entity_setting.version + 1, updated_at = now()
+				returning version, updated_at`, p.TenantID, legalEntityID, next.CogsAtShipment, next.AsnEnabled, next.GS1CompanyPrefix, next.SSCCExtensionDigit, next.PackagingFeeBillable).Scan(&next.Version, &next.UpdatedAt)
 			// A legal entity outside the caller's scope trips the row-level security policy.
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "42501" {
@@ -139,10 +178,44 @@ func (s *Postgres) SaveLegalEntitySetting(ctx context.Context, legalEntityID str
 			}
 			return next, enqueueFor(ctx, tx, "legal_entity_setting", legalEntityID, fulevents.LegalEntitySettingChanged, p.TenantID, fulevents.LegalEntitySettingChangedData{
 				LegalEntityID: legalEntityID, CogsAtShipment: next.CogsAtShipment, AsnEnabled: next.AsnEnabled,
-				PreviousCogsAtShipment: cur.CogsAtShipment, PreviousAsnEnabled: cur.AsnEnabled, Version: next.Version})
+				PreviousCogsAtShipment: cur.CogsAtShipment, PreviousAsnEnabled: cur.AsnEnabled,
+				GS1CompanyPrefix: deref(next.GS1CompanyPrefix), PreviousGS1CompanyPrefix: deref(cur.GS1CompanyPrefix),
+				SSCCExtensionDigit: next.SSCCExtensionDigit, PreviousSSCCExtensionDigit: cur.SSCCExtensionDigit,
+				PackagingFeeBillable: next.PackagingFeeBillable, PreviousPackagingFeeBillable: cur.PackagingFeeBillable, Version: next.Version})
 		})
 		out = res
 		return err
 	})
 	return out, err
+}
+
+// checkPrefixNesting refuses a GS1 company prefix that is a proper prefix of,
+// or extends, the process prefix or another legal entity's saved prefix.
+// GS1 never allocates nested company prefixes, so such a pair is a typo, and
+// the two would issue the same SSCC from their separate serial counters (an
+// 8-digit prefix and its 7-digit head share every SSCC body whose serial
+// starts with the eighth digit). An equal prefix is allowed: it shares the
+// serial counter. Another entity's prefix outside the caller's legal-entity
+// scope is not visible here; the container's unique SSCC still refuses a
+// duplicate at pack time (FUL-0007).
+func (s *Postgres) checkPrefixNesting(ctx context.Context, tx pgx.Tx, legalEntityID, prefix string) error {
+	refuse := func(other string) error {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeValidation, "request failed validation")
+		p.Errors = map[string]string{"gs1CompanyPrefix": "nests with the GS1 company prefix " + other + " already in use; the two would issue the same SSCCs"}
+		return p
+	}
+	if prefix != s.gs1Prefix && (strings.HasPrefix(prefix, s.gs1Prefix) || strings.HasPrefix(s.gs1Prefix, prefix)) {
+		return refuse(s.gs1Prefix)
+	}
+	var other string
+	err := tx.QueryRow(ctx, `select gs1_company_prefix from legal_entity_setting
+		where legal_entity_id <> $1 and gs1_company_prefix <> $2 and (starts_with($2, gs1_company_prefix) or starts_with(gs1_company_prefix, $2))
+		order by gs1_company_prefix limit 1`, legalEntityID, prefix).Scan(&other)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return refuse(other)
 }

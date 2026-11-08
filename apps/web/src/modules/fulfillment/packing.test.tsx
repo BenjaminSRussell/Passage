@@ -372,6 +372,17 @@ describe("packing slip packaging fees (BR-28.12)", () => {
     const fees = await findTable({ name: "Packaging fees" });
     expect(within(fees).getByText("CARDBOARD").closest("tr")?.textContent).toContain("10.00 EUR");
     expect(within(screen.getByRole("table", { name: "Journal" })).queryByText("CARDBOARD")).toBeNull();
+    expect(screen.getByText(/Statistical lines/)).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("says when the slip's packaging fees are billable", async () => {
+    server.handler = () =>
+      json(200, {
+        id: SLIP, packingSlipNumber: "PS-0000002", shipmentId: SH, orderId: ID, status: "POSTED", postingDate: "2026-10-26T00:00:00Z",
+        currency: "EUR", totalCost: "0", reversalOfId: null, lines: [], journal: [], packagingFees: [], packagingFeeBillable: true,
+      });
+    renderAt(`/fulfillment/packing-slips/${SLIP}`);
+    expect(await screen.findByText(/billing charges these lines to the customer/)).toBeInTheDocument();
   });
 });

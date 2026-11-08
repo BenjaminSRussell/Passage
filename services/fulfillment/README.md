@@ -57,8 +57,8 @@ exits non-zero on an invalid value.
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
 | `DATABASE_URL` | yes | | Postgres URL for the `passage_app` role (no BYPASSRLS) |
-| `GS1_COMPANY_PREFIX` | yes | | 6 to 12 digits (BR-28.5) |
-| `SSCC_EXTENSION_DIGIT` | no | `0` | 0 to 9 |
+| `GS1_COMPANY_PREFIX` | yes | | 6 to 12 digits (BR-28.5); the prefix of a legal entity that has none saved on its legal entity setting |
+| `SSCC_EXTENSION_DIGIT` | no | `0` | 0 to 9; the extension digit of a legal entity that has none saved |
 | `RELEASE_HORIZON_DAYS` | no | `2` | 0 to 30 (FR-28.1) |
 | `RELEASE_REQUIRES_FULL_ATP` | no | `true` | `false` allows partial release |
 | `MIGRATE_ON_START` | no | `false` | dev only; stage and prod use the Argo PreSync migration Job |
@@ -229,9 +229,9 @@ the post response names it (`remainderAction`, `backorderShipmentId`).
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/v1/fulfillment/legal-entity-settings` | fulfillment.warehouse.view | The posting defaults of every legal entity the caller sees shipments or a saved setting for; both flags false at version 0 when none is saved |
+| GET | `/v1/fulfillment/legal-entity-settings` | fulfillment.warehouse.view | The posting and packing defaults of every legal entity the caller sees shipments or a saved setting for; flags false and `gs1CompanyPrefix` / `ssccExtensionDigit` null (the process default) at version 0 when none is saved |
 | GET | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | fulfillment.warehouse.view | One legal entity; ETag carries the version (0 when none is saved) |
-| PUT | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | fulfillment.warehouse.release (+ `ledger.setup.write` to change `cogsAtShipment`) | Idempotency-Key, If-Match (0 when none is saved); body `cogsAtShipment` and `asnEnabled`, both required; FUL-0058 outside the caller's legal-entity scope; 403 AUTH-0003 for a `cogsAtShipment` change without `ledger.setup.write`; `legalentitysetting.changed` |
+| PUT | `/v1/fulfillment/legal-entity-settings/{legalEntityId}` | fulfillment.warehouse.release (+ `ledger.setup.write` to change `cogsAtShipment`) | Idempotency-Key, If-Match (0 when none is saved); body `cogsAtShipment` and `asnEnabled`, both required, and optional `gs1CompanyPrefix` (6 to 12 digits), `ssccExtensionDigit` (0 to 9) and `packagingFeeBillable` (left out keeps the saved value, null returns the prefix or digit to the process default; a prefix nesting with the process prefix or another entity's is 422 FUL-0050); FUL-0058 outside the caller's legal-entity scope; 403 AUTH-0003 for a `cogsAtShipment` change without `ledger.setup.write`; `legalentitysetting.changed` |
 
 `cogs_at_shipment` and `asn_enabled` (section 5.28.13) are per legal entity.
 `cogs_at_shipment` is the COGS posting policy (BR-28.1): every
@@ -289,7 +289,7 @@ Codes raised in this slice:
 | `FUL-0001` | Shipment status does not allow the command (for example, not PACKED) |
 | `FUL-0004` | Over-pick: picked exceeds planned and no over-delivery tolerance applies |
 | `FUL-0005` | Over-ship: picked exceeds planned plus the customer's over-delivery tolerance (422) |
-| `FUL-0007` | The container's stored SSCC failed its check digit; no label is printed (422) |
+| `FUL-0007` | The container's stored SSCC failed its check digit, so no label is printed; or a pack would issue an SSCC already issued in the tenant (nested GS1 company prefixes) (422) |
 | `FUL-0010` | Cannot cancel: the packing slip is invoiced (409) |
 | `FUL-0012` | Warning in the auto-pack response: no packing rule for the product; the line stays unpacked |
 | `FUL-0013` | Auto-pack: one unit is heavier than the rule's max weight (422) |
@@ -310,7 +310,7 @@ Codes raised in this slice:
 | `FUL-0042` | Cost snapshot missing for a stocked line |
 | `FUL-0043` | Packing slip cannot be cancelled: already cancelled, or itself a reversal (409) |
 | `FUL-0044` | Nothing to ship: no packed quantity is waiting on the shipment |
-| `FUL-0050` | Request failed validation; `errors` names the field (also a repeated line, lines of one order with different customers or legal entities, or more than 6 decimals) |
+| `FUL-0050` | Request failed validation; `errors` names the field (also a repeated line, lines of one order with different customers or legal entities, or more than 6 decimals; a GS1 company prefix that nests with one in use, or whose serial references are used up, 422) |
 | `FUL-0051` | `Idempotency-Key` header missing or longer than 255 characters |
 | `FUL-0052` | Wave not found (404) |
 | `FUL-0053` | A shipment left RELEASED, or a line is already in a wave, since the preview (409) |
