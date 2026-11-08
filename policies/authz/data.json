@@ -485,12 +485,14 @@
     ]},
     "procurement.requisition.create": {"permissions": [
       {"resource": "/v1/procurement/requisitions", "methods": ["GET", "POST"]},
-      {"resource": "/v1/procurement/requisitions/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/requisitions/*", "methods": ["GET", "PATCH"]},
       {"resource": "/v1/procurement/requisitions/*:submit", "methods": ["POST"]},
       {"resource": "/v1/procurement/catalog-entries", "methods": ["GET"]},
       {"resource": "/v1/procurement/signing-limit-requests", "methods": ["POST"]},
       {"resource": "/v1/procurement/requisitions/*:reopen", "methods": ["POST"]},
-      {"resource": "/v1/procurement/requisitions/*:cancel", "methods": ["POST"]}
+      {"resource": "/v1/procurement/requisitions/*:cancel", "methods": ["POST"]},
+      {"resource": "/v1/procurement/requisitions/*:withdraw", "methods": ["POST"]},
+      {"resource": "/v1/procurement/requisitions/*:cancel-line", "methods": ["POST"]}
     ]},
     "procurement.requisition.approve": {"permissions": [
       {"resource": "/v1/procurement/requisitions/*", "methods": ["GET"]},

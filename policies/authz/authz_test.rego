@@ -1617,6 +1617,14 @@ test_org_name_translation_writes if {
 }
 
 # Wave 17 slice 28: requisition release runs.
+test_procurement_requisition_edit_withdraw_cancel_line if {
+	allowed("procurement.requisition.create", "PATCH", "/v1/procurement/requisitions/r-1")
+	allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r-1:withdraw")
+	allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r-1:cancel-line")
+	not allowed("procurement.requisition.approve", "PATCH", "/v1/procurement/requisitions/r-1")
+	not allowed("procurement.requisition.approve", "POST", "/v1/procurement/requisitions/r-1:cancel-line")
+}
+
 test_procurement_requisition_releases if {
 	allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/requisition-releases")
 	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/requisition-releases")
