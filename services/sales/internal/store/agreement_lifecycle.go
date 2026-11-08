@@ -23,9 +23,12 @@ const agreementReasonMaxSize = 500
 // AgreementRevision is a partial change of an agreement (PATCH). A nil field
 // is kept; the empty string clears ValidFrom or ValidTo.
 type AgreementRevision struct {
-	Commitment   *decimal.Decimal
-	UnitPrice    *decimal.Decimal
-	CumTolerance *decimal.Decimal
+	Commitment *decimal.Decimal
+	// CommitmentIsAmount is set when Commitment came from commitmentAmount: it is
+	// refused on a QUANTITY agreement, and commitmentQty on an AMOUNT one.
+	CommitmentIsAmount bool
+	UnitPrice          *decimal.Decimal
+	CumTolerance       *decimal.Decimal
 	// OverdeliveryPct changes the tolerance above the commitment (BR-27.9).
 	OverdeliveryPct *decimal.Decimal
 	ValidFrom       *string
@@ -63,7 +66,7 @@ func insertAgreementVersion(ctx context.Context, tx pgx.Tx, tenantID string, a A
 
 func lifecycleData(a Agreement, status string, commitment, pct, released decimal.Decimal, price decimal.Decimal, diff []domain.FieldChange, version int, actor string) salesevents.AgreementLifecycleData {
 	return salesevents.AgreementLifecycleData{AgreementID: a.ID, AgreementNumber: a.AgreementNumber, LegalEntityID: a.LegalEntityID,
-		CustomerID: a.CustomerID, ProductID: a.ProductID, Commitment: commitment.String(), OverdeliveryPct: pct.String(), Released: released.String(),
+		CustomerID: a.CustomerID, ProductID: a.ProductID, CommitmentType: a.CommitmentType, Commitment: commitment.String(), OverdeliveryPct: pct.String(), Released: released.String(),
 		Remaining: domain.AgreementCeiling(commitment, pct).Sub(released).String(), UnitPrice: price.String(), Status: status, Diff: salesevents.DiffOf(diff),
 		Version: version, Actor: actor}
 }
@@ -89,7 +92,17 @@ func (s *Postgres) ReviseAgreement(ctx context.Context, id string, version int, 
 		if a.Version != version {
 			return versionConflict()
 		}
-		next, diff, err := domain.ReviseAgreement(domain.AgreementState{Commitment: a.Commitment, Released: a.Released, UnitPrice: a.UnitPrice,
+		if in.Commitment != nil && in.CommitmentIsAmount != (a.CommitmentType == domain.CommitmentAmount) {
+			field, want := "commitmentQty", "commitmentAmount"
+			if in.CommitmentIsAmount {
+				field, want = want, field
+			}
+			return problem(http.StatusBadRequest, "COM-0001", field+" does not apply to a "+a.CommitmentType+" agreement; use "+want)
+		}
+		if in.UnitPrice != nil && !in.UnitPrice.IsPositive() && a.CommitmentType == domain.CommitmentAmount {
+			return problem(http.StatusBadRequest, "COM-0001", "unitPrice must be greater than 0 on an AMOUNT agreement")
+		}
+		next, diff, err := domain.ReviseAgreement(domain.AgreementState{Type: a.CommitmentType, Commitment: a.Commitment, Released: a.Released, UnitPrice: a.UnitPrice,
 			CumTolerance: a.CumTolerance, OverdeliveryPct: a.OverdeliveryPct, ValidFrom: a.ValidFrom, ValidTo: a.ValidTo, Status: a.Status},
 			domain.AgreementRevision{Commitment: in.Commitment, UnitPrice: in.UnitPrice, CumTolerance: in.CumTolerance, OverdeliveryPct: in.OverdeliveryPct,
 				ValidFrom: in.ValidFrom, ValidTo: in.ValidTo})
@@ -99,7 +112,7 @@ func (s *Postgres) ReviseAgreement(ctx context.Context, id string, version int, 
 			return agreementClosed(a)
 		case domain.ErrCommitmentBelowReleased:
 			return problem(http.StatusUnprocessableEntity, CodeCommitmentBelow,
-				fmt.Sprintf("commitment, with its over-delivery tolerance, cannot fall below the %s %s already released", a.Released, a.Unit))
+				fmt.Sprintf("commitment, with its over-delivery tolerance, cannot fall below the %s %s already released", a.Released, a.CommitmentUnit))
 		default:
 			return problem(http.StatusBadRequest, "COM-0001", err.Error())
 		}
@@ -200,18 +213,37 @@ func (s *Postgres) ListAgreementVersions(ctx context.Context, id string) ([]Agre
 // agreementRelease is a release of an order, with what is still drawn on it.
 type agreementRelease struct {
 	id, agreementID string
-	outstanding     decimal.Decimal
+	// kind is the agreement's commitment type and unitPrice the price the release
+	// line was created at; outstanding is in the commitment unit.
+	kind        string
+	unitPrice   decimal.Decimal
+	outstanding decimal.Decimal
+}
+
+// commitmentWorth is what qty of a release line is worth against its
+// agreement: the quantity on a QUANTITY agreement, its value at the price the
+// release was made at (no discount, rounded like a line net) on an AMOUNT one.
+// Every draw and return of a release is valued this way, so a price or
+// discount edit on the order line never moves the commitment and what a
+// release gives back matches what it drew (BR-27.9: agreement lines re-price
+// only when the agreement price changes).
+func commitmentWorth(kind string, qty, releasePrice decimal.Decimal) (decimal.Decimal, error) {
+	if kind != domain.CommitmentAmount || !qty.IsPositive() {
+		return qty, nil
+	}
+	return domain.LineNet(qty, releasePrice, decimal.Zero)
 }
 
 // outstandingReleasesTx lists the releases that created order o and still hold
 // quantity: the release quantity plus later draws less returns, above zero, in
 // agreement and release order so the locks are taken in a fixed order.
 func outstandingReleasesTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) ([]agreementRelease, error) {
-	rows, err := tx.Query(ctx, `select r.id::text, r.agreement_id::text,
-			(r.quantity
+	rows, err := tx.Query(ctx, `select r.id::text, r.agreement_id::text, a.commitment_type, r.unit_price::text,
+			(r.units
 			 + coalesce((select sum(d.quantity) from agreement_draw d where d.tenant_id = r.tenant_id and d.release_id = r.id), 0)
 			 - coalesce((select sum(x.quantity) from agreement_return x where x.tenant_id = r.tenant_id and x.release_id = r.id), 0))::text
-		from agreement_release r where r.tenant_id = $1 and r.sales_order_id = $2 order by r.agreement_id, r.id`, tenantID, o.ID)
+		from agreement_release r join sales_agreement a on a.tenant_id = r.tenant_id and a.id = r.agreement_id
+		where r.tenant_id = $1 and r.sales_order_id = $2 order by r.agreement_id, r.id`, tenantID, o.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -219,10 +251,11 @@ func outstandingReleasesTx(ctx context.Context, tx pgx.Tx, tenantID string, o Or
 	var out []agreementRelease
 	for rows.Next() {
 		var t agreementRelease
-		var qty string
-		if err := rows.Scan(&t.id, &t.agreementID, &qty); err != nil {
+		var qty, price string
+		if err := rows.Scan(&t.id, &t.agreementID, &t.kind, &price, &qty); err != nil {
 			return nil, err
 		}
+		t.unitPrice = decimal.RequireFromString(price)
 		if t.outstanding = decimal.RequireFromString(qty); t.outstanding.IsPositive() {
 			out = append(out, t)
 		}
@@ -243,20 +276,42 @@ func returnAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order,
 	if limit != nil {
 		reason = "remainder of order " + o.OrderNumber + " cancelled"
 	}
+	return giveBackReleasesTx(ctx, tx, tenantID, o, limit, actor, reason, now)
+}
+
+// giveBackReleasesTx gives back what the releases of order o still hold, in
+// lock order. A limit is a quantity of the release line: each release gives
+// back at most its worth (commitmentWorth) and the limit shrinks by the
+// quantity that covered; nil gives back everything outstanding.
+func giveBackReleasesTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, limit *decimal.Decimal, actor, reason string, now time.Time) error {
 	todo, err := outstandingReleasesTx(ctx, tx, tenantID, o)
 	if err != nil {
 		return err
 	}
 	for _, t := range todo {
-		qty := t.outstanding
+		give := t.outstanding
 		if limit != nil {
-			if limit.LessThan(qty) {
-				qty = *limit
+			if !limit.IsPositive() {
+				return nil
 			}
-			left := limit.Sub(qty)
+			worth, err := commitmentWorth(t.kind, *limit, t.unitPrice)
+			if err != nil {
+				return err
+			}
+			used := *limit
+			if worth.GreaterThan(give) {
+				// Only part of the limit is needed to clear this release.
+				used = give
+				if t.kind == domain.CommitmentAmount {
+					used = limit.Mul(give).Div(worth)
+				}
+			} else {
+				give = worth
+			}
+			left := limit.Sub(used)
 			limit = &left
 		}
-		if err := giveBackTx(ctx, tx, tenantID, o, t, qty, actor, reason, now); err != nil {
+		if err := giveBackTx(ctx, tx, tenantID, o, t, give, actor, reason, now); err != nil {
 			return err
 		}
 	}
@@ -287,7 +342,7 @@ func giveBackTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, t agre
 		values ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9)`, tenantID, ids.New(), a.LegalEntityID, a.ID, t.id, o.ID, qty.String(), actor, now); err != nil {
 		return err
 	}
-	diff := []domain.FieldChange{{Field: "releasedQty", Old: a.Released.String(), New: next.String()}}
+	diff := []domain.FieldChange{{Field: domain.ReleasedField(a.CommitmentType), Old: a.Released.String(), New: next.String()}}
 	if status != a.Status {
 		diff = append(diff, domain.FieldChange{Field: "status", Old: a.Status, New: status})
 	}
@@ -299,21 +354,22 @@ func giveBackTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, t agre
 	return enqueue(ctx, tx, "agreement", a.ID, salesevents.AgreementReturned, tenantID, data)
 }
 
-// drawAgreementTx draws qty more against the agreement a release of order o
-// came from, when the quantity of the release line is raised by PATCH (BR-27.9:
+// drawAgreementTx draws the worth of raise, a quantity of the release line
+// (commitmentWorth), against the agreement a release of order o came from,
+// when the quantity of the release line is raised by PATCH (BR-27.9:
 // a released order may not take more than the commitment and its tolerance). It
 // runs under the agreement's row lock; beyond the ceiling it is 422
 // AGREEMENT_EXHAUSTED (SLS-0008), outside the validity period SLS-0029, on a
 // closed agreement SLS-0052, and the whole PATCH is refused with nothing
 // stored. An order that was not released from an agreement draws nothing. The
 // draw, a DRAWN version and agreement.drawn.v1 are written together.
-func drawAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, qty decimal.Decimal, actor string, now time.Time) error {
-	if !qty.IsPositive() {
+func drawAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, raise decimal.Decimal, actor string, now time.Time) error {
+	if !raise.IsPositive() {
 		return nil
 	}
-	var releaseID, agreementID string
-	err := tx.QueryRow(ctx, `select id::text, agreement_id::text from agreement_release where tenant_id = $1 and sales_order_id = $2
-		order by released_at, id limit 1`, tenantID, o.ID).Scan(&releaseID, &agreementID)
+	var releaseID, agreementID, price string
+	err := tx.QueryRow(ctx, `select id::text, agreement_id::text, unit_price::text from agreement_release where tenant_id = $1 and sales_order_id = $2
+		order by released_at, id limit 1`, tenantID, o.ID).Scan(&releaseID, &agreementID, &price)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -323,6 +379,13 @@ func drawAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, q
 	a, err := loadAgreement(ctx, tx, tenantID, agreementID, true)
 	if err != nil {
 		return err
+	}
+	qty, err := commitmentWorth(a.CommitmentType, raise, decimal.RequireFromString(price))
+	if err != nil {
+		return problem(http.StatusBadRequest, "COM-0001", err.Error())
+	}
+	if !qty.IsPositive() {
+		return nil
 	}
 	if a.Status == domain.AgreementClosed {
 		return agreementClosed(a)
@@ -341,7 +404,7 @@ func drawAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, q
 	next, status, err := domain.ReleaseAgreement(a.Commitment, a.OverdeliveryPct, a.Released, qty)
 	if errors.Is(err, domain.ErrAgreementExhausted) {
 		return problem(http.StatusUnprocessableEntity, CodeAgreementExhausted,
-			"AGREEMENT_EXHAUSTED: agreement "+a.AgreementNumber+" has "+a.Remaining.String()+" "+a.Unit+" remaining; the change asks for "+qty.String()+" more")
+			"AGREEMENT_EXHAUSTED: agreement "+a.AgreementNumber+" has "+a.Remaining.String()+" "+a.CommitmentUnit+" remaining; the change asks for "+qty.String()+" more")
 	}
 	if err != nil {
 		return problem(http.StatusBadRequest, "COM-0001", err.Error())
@@ -355,7 +418,7 @@ func drawAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, q
 		values ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9)`, tenantID, ids.New(), a.LegalEntityID, a.ID, releaseID, o.ID, qty.String(), actor, now); err != nil {
 		return err
 	}
-	diff := []domain.FieldChange{{Field: "releasedQty", Old: a.Released.String(), New: next.String()}}
+	diff := []domain.FieldChange{{Field: domain.ReleasedField(a.CommitmentType), Old: a.Released.String(), New: next.String()}}
 	if status != a.Status {
 		diff = append(diff, domain.FieldChange{Field: "status", Old: a.Status, New: status})
 	}
@@ -373,7 +436,9 @@ func drawAgreementTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, q
 // ReleaseAgreement creates (a supplementary line 1 is never the release line).
 // A lowered quantity gives the difference back to the agreement (the order's
 // outstanding release quantity is the ceiling for it), a raised one draws the
-// difference. A removed line 1 is handled by followRemovalsTx.
+// difference; on an AMOUNT agreement both are valued at the release price
+// (commitmentWorth), so a price or discount edit on the line moves nothing. A
+// removed line 1 is handled by followRemovalsTx.
 func followReleaseLineTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, before map[int]Line, actor string, now time.Time) error {
 	b, ok := before[1]
 	if !ok || b.SupplementaryOf != nil || b.LineStatus == domain.LineCancelled {
@@ -392,20 +457,5 @@ func followReleaseLineTx(ctx context.Context, tx pgx.Tx, tenantID string, o Orde
 		return drawAgreementTx(ctx, tx, tenantID, o, l.Quantity.Sub(b.Quantity), actor, now)
 	}
 	cut := b.Quantity.Sub(l.Quantity)
-	reason := "quantity of order " + o.OrderNumber + " lowered"
-	todo, err := outstandingReleasesTx(ctx, tx, tenantID, o)
-	if err != nil {
-		return err
-	}
-	for _, t := range todo {
-		give := cut
-		if t.outstanding.LessThan(give) {
-			give = t.outstanding
-		}
-		if err := giveBackTx(ctx, tx, tenantID, o, t, give, actor, reason, now); err != nil {
-			return err
-		}
-		cut = cut.Sub(give)
-	}
-	return nil
+	return giveBackReleasesTx(ctx, tx, tenantID, o, &cut, actor, "quantity of order "+o.OrderNumber+" lowered", now)
 }

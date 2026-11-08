@@ -15,6 +15,47 @@ const (
 	AgreementExhausted = "EXHAUSTED"
 )
 
+// Commitment types of a sales agreement (FR-27.10): the commitment is a
+// quantity of the agreement unit, or an amount in the agreement currency that
+// each release draws down by the net value of its line.
+const (
+	CommitmentQuantity = "QUANTITY"
+	CommitmentAmount   = "AMOUNT"
+)
+
+// ErrInvalidCommitmentType is returned for a commitment type that is neither
+// QUANTITY nor AMOUNT.
+var ErrInvalidCommitmentType = errors.New("commitmentType must be QUANTITY or AMOUNT")
+
+// ValidCommitmentType reports whether t is a known commitment type.
+func ValidCommitmentType(t string) bool { return t == CommitmentQuantity || t == CommitmentAmount }
+
+// CommitmentUnits is what a quantity of the agreement product draws from (or
+// gives back to) the commitment: the quantity for a QUANTITY agreement, its net
+// value at price and discPct (rounded like the order line) for an AMOUNT one.
+func CommitmentUnits(kind string, qty, price, discPct decimal.Decimal) (decimal.Decimal, error) {
+	if kind != CommitmentAmount {
+		return qty, ValidateQuantity(qty)
+	}
+	net, err := LineNet(qty, price, discPct)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if !net.IsPositive() {
+		return decimal.Zero, errors.New("the quantity is worth nothing at the agreement price")
+	}
+	return net, nil
+}
+
+// ReleasedField names the released figure in a version diff: releasedQty, or
+// releasedAmount for an AMOUNT agreement.
+func ReleasedField(kind string) string {
+	if kind == CommitmentAmount {
+		return "releasedAmount"
+	}
+	return "releasedQty"
+}
+
 // ErrAgreementExhausted is returned when a release would exceed the commitment
 // plus its over-delivery tolerance (BR-27.9).
 var ErrAgreementExhausted = errors.New("agreement commitment exhausted")
@@ -91,6 +132,9 @@ var (
 
 // AgreementState is the part of an agreement a revision can change.
 type AgreementState struct {
+	// Type is the commitment type; the commitment and released figures are in
+	// its unit (quantity or currency amount). Empty means QUANTITY.
+	Type         string
 	Commitment   decimal.Decimal
 	Released     decimal.Decimal
 	UnitPrice    decimal.Decimal
@@ -175,7 +219,11 @@ func ReviseAgreement(cur AgreementState, rev AgreementRevision) (AgreementState,
 			diff = append(diff, FieldChange{Field: field, Old: a.String(), New: b.String()})
 		}
 	}
-	num("commitmentQty", cur.Commitment, next.Commitment)
+	field := "commitmentQty"
+	if cur.Type == CommitmentAmount {
+		field = "commitmentAmount"
+	}
+	num(field, cur.Commitment, next.Commitment)
 	num("unitPrice", cur.UnitPrice, next.UnitPrice)
 	num("cumTolerance", cur.CumTolerance, next.CumTolerance)
 	num("overdeliveryPct", cur.OverdeliveryPct, next.OverdeliveryPct)

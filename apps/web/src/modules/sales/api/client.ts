@@ -236,6 +236,9 @@ export interface ProductListing extends ProductListingInput {
   createdAt: string;
 }
 
+export const COMMITMENT_TYPES = ["QUANTITY", "AMOUNT"] as const;
+export type CommitmentType = (typeof COMMITMENT_TYPES)[number];
+
 export interface AgreementInput {
   legalEntityId: string;
   customerId: string;
@@ -244,7 +247,10 @@ export interface AgreementInput {
   unit: string;
   unitPrice: Decimal;
   currency: string;
-  commitmentQty: Decimal;
+  /** QUANTITY (default) commits commitmentQty of the unit; AMOUNT commits commitmentAmount in the currency and each release draws its line value. */
+  commitmentType?: CommitmentType;
+  commitmentQty?: Decimal;
+  commitmentAmount?: Decimal;
   validFrom?: string;
   validTo?: string;
   /** How far a scheduling release's cumulative received quantity may differ from the shipped quantity (default 0). */
@@ -256,6 +262,8 @@ export interface AgreementInput {
 export interface AgreementRelease {
   id: string;
   quantity: Decimal;
+  /** What the release drew from the commitment, in the commitment unit (the line value of an AMOUNT agreement); absent on older responses. */
+  units?: Decimal;
   /** Drawn after the release by raising its order line; absent on older responses. */
   drawnQty?: Decimal;
   /** Given back by lowering or removing the line or cancelling the order; absent on older responses. */
@@ -268,9 +276,15 @@ export interface AgreementRelease {
   returnedAt?: string;
 }
 
-export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo" | "cumTolerance" | "overdeliveryPct">> {
+export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo" | "cumTolerance" | "overdeliveryPct" | "commitmentType" | "commitmentQty" | "commitmentAmount">> {
   id: string;
   agreementNumber: string;
+  /** QUANTITY when absent (older responses). */
+  commitmentType?: CommitmentType;
+  /** The unit of the three figures below: the agreement unit, or the currency for an AMOUNT agreement. */
+  commitmentUnit?: string;
+  /** The commitment, in commitmentUnit (an amount when commitmentType is AMOUNT). */
+  commitmentQty: Decimal;
   releasedQty: Decimal;
   remainingQty: Decimal;
   status: AgreementStatus;
@@ -772,6 +786,8 @@ export function releaseAgreementOrder(id: string, input: ReleaseOrderInput, key:
 /** A partial change of an agreement; an empty validFrom or validTo clears that bound. */
 export interface AgreementRevisionInput {
   commitmentQty?: Decimal;
+  /** The commitment of an AMOUNT agreement. */
+  commitmentAmount?: Decimal;
   unitPrice?: Decimal;
   cumTolerance?: Decimal;
   overdeliveryPct?: Decimal;

@@ -3346,23 +3346,25 @@ components:
         createdAt: {type: string, format: date-time}
     SalesAgreementRequest:
       type: object
-      required: [legalEntityId, customerId, productId, unit, unitPrice, currency, commitmentQty]
+      required: [legalEntityId, customerId, productId, unit, unitPrice, currency]
       properties:
         legalEntityId: {type: string, format: uuid}
         customerId: {type: string, format: uuid}
         invoiceAccountId: {type: string, format: uuid, description: defaults to the customer}
         productId: {type: string, format: uuid}
         unit: {type: string, minLength: 1, maxLength: 10}
-        unitPrice: {$ref: "#/components/schemas/Money"}
+        unitPrice: {$ref: "#/components/schemas/Money", description: the agreed price; above 0 on an AMOUNT agreement}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        commitmentQty: {$ref: "#/components/schemas/Money"}
+        commitmentType: {type: string, enum: [QUANTITY, AMOUNT], default: QUANTITY, description: QUANTITY commits a quantity of the unit (commitmentQty required); AMOUNT commits an amount in the currency (commitmentAmount required) and each release draws the net value of its line}
+        commitmentQty: {$ref: "#/components/schemas/Money", description: the committed quantity; required for QUANTITY and refused for AMOUNT}
+        commitmentAmount: {$ref: "#/components/schemas/Money", description: the committed amount in the currency, at most 4 places; required for AMOUNT and refused for QUANTITY}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
         cumTolerance: {$ref: "#/components/schemas/Money", description: how far a release's cumulative received quantity may differ from the shipped quantity (BR-27.12); default 0}
         overdeliveryPct: {$ref: "#/components/schemas/Percent", description: releases may draw up to the commitment plus this percent (BR-27.9); default 0}
     SalesAgreement:
       type: object
-      required: [id, legalEntityId, agreementNumber, customerId, invoiceAccountId, productId, unit, unitPrice, currency, commitmentQty, overdeliveryPct, ceilingQty, releasedQty, remainingQty, status, version]
+      required: [id, legalEntityId, agreementNumber, customerId, invoiceAccountId, productId, unit, unitPrice, currency, commitmentType, commitmentUnit, commitmentQty, overdeliveryPct, ceilingQty, releasedQty, remainingQty, status, version]
       properties:
         id: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
@@ -3373,8 +3375,10 @@ components:
         unit: {type: string}
         unitPrice: {$ref: "#/components/schemas/Money"}
         currency: {type: string}
-        commitmentQty: {$ref: "#/components/schemas/Money"}
-        releasedQty: {$ref: "#/components/schemas/Money"}
+        commitmentType: {type: string, enum: [QUANTITY, AMOUNT], description: whether the commitment is a quantity of the unit or an amount in the currency}
+        commitmentUnit: {type: string, description: the unit of the commitment figures below; the agreement unit for QUANTITY, the currency for AMOUNT}
+        commitmentQty: {$ref: "#/components/schemas/Money", description: the commitment in commitmentUnit (an amount when commitmentType is AMOUNT)}
+        releasedQty: {$ref: "#/components/schemas/Money", description: released so far in commitmentUnit (the net value of the released lines when AMOUNT)}
         overdeliveryPct: {$ref: "#/components/schemas/Percent", description: tolerance above the commitment in percent (BR-27.9)}
         ceilingQty: {$ref: "#/components/schemas/Money", description: the commitment plus the over-delivery tolerance, the most that can be released}
         remainingQty: {$ref: "#/components/schemas/Money", description: ceilingQty less releasedQty, what can still be released}
@@ -3457,12 +3461,13 @@ components:
         version: {type: integer, minimum: 1}
     AgreementReleaseRecord:
       type: object
-      required: [id, quantity, drawnQty, returnedQty, salesOrderId, orderNumber, actor, releasedAt]
+      required: [id, quantity, units, drawnQty, returnedQty, salesOrderId, orderNumber, actor, releasedAt]
       properties:
         id: {type: string, format: uuid}
-        quantity: {$ref: "#/components/schemas/Money", description: quantity drawn by the release itself}
-        drawnQty: {$ref: "#/components/schemas/Money", description: quantity drawn later by raising the order line}
-        returnedQty: {$ref: "#/components/schemas/Money", description: quantity given back by lowering or removing the line or cancelling the order; the release is outstanding for quantity plus drawnQty less returnedQty}
+        quantity: {$ref: "#/components/schemas/Money", description: quantity of the product on the release order line}
+        units: {$ref: "#/components/schemas/Money", description: "what the release itself drew from the commitment, in commitmentUnit; equal to quantity for QUANTITY, the line net value for AMOUNT"}
+        drawnQty: {$ref: "#/components/schemas/Money", description: "drawn later by raising the order line, in commitmentUnit"}
+        returnedQty: {$ref: "#/components/schemas/Money", description: "given back by lowering or removing the line or cancelling the order, in commitmentUnit; the release is outstanding for units plus drawnQty less returnedQty"}
         salesOrderId: {type: string, format: uuid}
         orderNumber: {type: string}
         actor: {type: string}
@@ -3472,7 +3477,8 @@ components:
       type: object
       minProperties: 1
       properties:
-        commitmentQty: {$ref: "#/components/schemas/Money", description: the commitment with its over-delivery tolerance cannot fall below the released quantity}
+        commitmentQty: {$ref: "#/components/schemas/Money", description: the commitment of a QUANTITY agreement; with its over-delivery tolerance it cannot fall below the released quantity; refused on an AMOUNT agreement}
+        commitmentAmount: {$ref: "#/components/schemas/Money", description: the commitment of an AMOUNT agreement, at most 4 places; with its over-delivery tolerance it cannot fall below the released amount; refused on a QUANTITY agreement}
         overdeliveryPct: {$ref: "#/components/schemas/Percent"}
         unitPrice: {$ref: "#/components/schemas/Money", description: applies to later releases only}
         cumTolerance: {$ref: "#/components/schemas/Money"}
@@ -3495,7 +3501,7 @@ components:
             required: [lineNo, field, old, new]
             properties:
               lineNo: {type: integer}
-              field: {type: string, example: commitmentQty}
+              field: {type: string, example: commitmentQty, description: "commitmentQty, commitmentAmount (AMOUNT agreements), unitPrice, cumTolerance, overdeliveryPct, validFrom, validTo, releasedQty or releasedAmount, status"}
               old: {type: string}
               new: {type: string}
     AgreementReleaseRequest:

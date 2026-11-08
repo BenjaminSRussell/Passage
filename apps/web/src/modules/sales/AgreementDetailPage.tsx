@@ -6,13 +6,14 @@ import {
   getAgreement,
   newKey,
   releaseAgreementOrder,
+  type Agreement,
   type AgreementRelease,
   type Order,
   type Problem,
   type ReleaseOrderInput,
 } from "./api/client";
 import { AgreementLifecycle } from "./AgreementLifecycle";
-import { DECIMAL, formatDateTime, money, supplementaryNote, today, UUID } from "./format";
+import { commitmentText, DECIMAL, formatDateTime, money, supplementaryNote, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -38,15 +39,20 @@ export function validateRelease(values: ReleaseValues): { errors: Errors; input?
   return { errors, input: { quantity: values.quantity, siteId: values.siteId.trim(), warehouseId: values.warehouseId.trim(), requestedShipDate: values.requestedShipDate } };
 }
 
-const releaseColumns: DataTableColumn<AgreementRelease>[] = [
-  { key: "releasedAt", header: "Released", render: (r) => formatDateTime(r.releasedAt) },
-  { key: "quantity", header: "Quantity", align: "end" },
-  { key: "drawnQty", header: "Drawn later", align: "end", render: (r) => r.drawnQty ?? "0" },
-  { key: "returnedQty", header: "Returned", align: "end", render: (r) => r.returnedQty ?? "0" },
-  { key: "orderNumber", header: "Order", mono: true, render: (r) => <Link to={`/sales/orders/${r.salesOrderId}`}>{r.orderNumber}</Link> },
-  { key: "actor", header: "By" },
-  { key: "returnedAt", header: "Last returned", render: (r) => (r.returnedAt ? formatDateTime(r.returnedAt) : "—") },
-];
+/** The release history; the drawn and returned figures are in the commitment unit, shown as money on an AMOUNT agreement. */
+const releaseColumns = (a: Agreement): DataTableColumn<AgreementRelease>[] => {
+  const figure = (v: string) => (a.commitmentType === "AMOUNT" ? money(v, a.currency) : v);
+  return [
+    { key: "releasedAt", header: "Released", render: (r) => formatDateTime(r.releasedAt) },
+    { key: "quantity", header: "Quantity", align: "end" },
+    { key: "units", header: "Drawn at release", align: "end", render: (r) => figure(r.units ?? r.quantity) },
+    { key: "drawnQty", header: "Drawn later", align: "end", render: (r) => figure(r.drawnQty ?? "0") },
+    { key: "returnedQty", header: "Returned", align: "end", render: (r) => figure(r.returnedQty ?? "0") },
+    { key: "orderNumber", header: "Order", mono: true, render: (r) => <Link to={`/sales/orders/${r.salesOrderId}`}>{r.orderNumber}</Link> },
+    { key: "actor", header: "By" },
+    { key: "returnedAt", header: "Last returned", render: (r) => (r.returnedAt ? formatDateTime(r.returnedAt) : "—") },
+  ];
+};
 
 /** One agreement with its commitment, release history and the release-order form (FR-27.10). */
 export function AgreementDetailPage() {
@@ -109,18 +115,20 @@ export function AgreementDetailPage() {
     }
   }
 
+  const byAmount = agreement.commitmentType === "AMOUNT";
   const facts: [string, ReactNode][] = [
     ["Customer", agreement.customerId],
     ["Invoice account", agreement.invoiceAccountId],
     ["Product", agreement.productId],
     ["Legal entity", agreement.legalEntityId],
+    ["Committed by", byAmount ? "Amount" : "Quantity"],
     ["Agreed price", `${money(agreement.unitPrice, agreement.currency)} per ${agreement.unit}`],
-    ["Committed", `${agreement.commitmentQty} ${agreement.unit}`],
-    ["Released", `${agreement.releasedQty} ${agreement.unit}`],
+    ["Committed", commitmentText(agreement, agreement.commitmentQty)],
+    ["Released", commitmentText(agreement, agreement.releasedQty)],
     ...(agreement.overdeliveryPct && agreement.overdeliveryPct !== "0" && agreement.ceilingQty
-      ? ([["Over-delivery tolerance", `${agreement.overdeliveryPct}% (up to ${agreement.ceilingQty} ${agreement.unit})`]] as [string, ReactNode][])
+      ? ([["Over-delivery tolerance", `${agreement.overdeliveryPct}% (up to ${commitmentText(agreement, agreement.ceilingQty)})`]] as [string, ReactNode][])
       : []),
-    ["Remaining", `${agreement.remainingQty} ${agreement.unit}`],
+    ["Remaining", commitmentText(agreement, agreement.remainingQty)],
     ["Valid", agreement.validFrom || agreement.validTo ? `${agreement.validFrom ?? "…"} to ${agreement.validTo ?? "…"}` : "Open-ended"],
     ["Created", `${formatDateTime(agreement.createdAt)} by ${agreement.createdBy}`],
   ];
@@ -174,10 +182,10 @@ export function AgreementDetailPage() {
         {closed ? (
           <EmptyState compact headingLevel={3} title="Agreement closed" description="A closed agreement takes no more releases." />
         ) : exhausted ? (
-          <EmptyState compact headingLevel={3} title="Commitment used up" description="Every committed unit has been released. Create a new agreement to commit more." />
+          <EmptyState compact headingLevel={3} title="Commitment used up" description="The whole commitment has been released. Create a new agreement to commit more." />
         ) : (
           <form className={styles.form} onSubmit={submit} noValidate aria-label="Release an order">
-            {field("quantity", "Quantity", { decimal: true, hint: `Up to ${agreement.remainingQty} ${agreement.unit}.` })}
+            {field("quantity", "Quantity", { decimal: true, hint: byAmount ? `Each unit draws ${money(agreement.unitPrice, agreement.currency)}; up to ${commitmentText(agreement, agreement.remainingQty)} is left.` : `Up to ${agreement.remainingQty} ${agreement.unit}.` })}
             {field("siteId", "Site", { mono: true })}
             {field("warehouseId", "Warehouse", { mono: true })}
             {field("requestedShipDate", "Requested ship date", { type: "date" })}
@@ -205,7 +213,7 @@ export function AgreementDetailPage() {
       </Card>
       <Card title="Releases">
         {agreement.releases && agreement.releases.length > 0 ? (
-          <DataTable label="Releases" columns={releaseColumns} rows={agreement.releases} getRowKey={(r) => r.id} />
+          <DataTable label="Releases" columns={releaseColumns(agreement)} rows={agreement.releases} getRowKey={(r) => r.id} />
         ) : (
           <EmptyState compact headingLevel={3} title="No releases yet" description="Each release creates a draft order and appears here." />
         )}

@@ -13,7 +13,7 @@ import {
   type Problem,
 } from "./api/client";
 import { diffColumns } from "./ChangeOrderPage";
-import { DECIMAL, formatDateTime, PERCENT, subtractDecimal } from "./format";
+import { commitmentText, DECIMAL, formatDateTime, PERCENT, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -64,9 +64,12 @@ export function revisionValues(a: Agreement): RevisionValues {
 export function validateRevision(values: RevisionValues, current: Agreement): { errors: Record<string, string>; input?: AgreementRevisionInput } {
   const errors: Record<string, string> = {};
   const input: AgreementRevisionInput = {};
-  if (!DECIMAL.test(values.commitmentQty) || /^0+(\.0+)?$/.test(values.commitmentQty)) errors.commitmentQty = "Enter a quantity above 0 with up to 6 decimals.";
+  const byAmount = current.commitmentType === "AMOUNT";
+  const commitmentOk = byAmount ? /^\d+(\.\d{1,4})?$/.test(values.commitmentQty) : DECIMAL.test(values.commitmentQty);
+  if (!commitmentOk || /^0+(\.0+)?$/.test(values.commitmentQty)) errors.commitmentQty = byAmount ? "Enter an amount above 0 with up to 4 decimals." : "Enter a quantity above 0 with up to 6 decimals.";
   else if (isZeroPercent(values.overdeliveryPct) && isZeroPercent(current.overdeliveryPct ?? "0") && compare(values.commitmentQty, current.releasedQty) < 0) errors.commitmentQty = `Cannot be below the ${current.releasedQty} already released.`;
-  else if (compare(values.commitmentQty, current.commitmentQty) !== 0) input.commitmentQty = values.commitmentQty;
+  else if (compare(values.commitmentQty, current.commitmentQty) !== 0) input[byAmount ? "commitmentAmount" : "commitmentQty"] = values.commitmentQty;
+  if (byAmount && /^0+(\.0+)?$/.test(values.unitPrice)) errors.unitPrice = "An amount commitment needs a price above 0.";
   if (!/^\d+(\.\d{1,4})?$/.test(values.unitPrice)) errors.unitPrice = "Enter a price of at least 0 with up to 4 decimals.";
   else if (compare(values.unitPrice, current.unitPrice) !== 0) input.unitPrice = values.unitPrice;
   if (!PERCENT.test(values.overdeliveryPct)) errors.overdeliveryPct = "Enter a percent from 0 to 100 with up to 2 decimals.";
@@ -203,7 +206,7 @@ export function AgreementLifecycle({ agreement, etag, onChanged }: Props) {
         <>
           <Card title="Revise the agreement">
             <form className={styles.form} onSubmit={revise} noValidate aria-label="Revise the agreement">
-              {field("commitmentQty", "Committed quantity", { decimal: true, hint: `With the tolerance, not below the ${agreement.releasedQty} ${agreement.unit} already released.` })}
+              {field("commitmentQty", agreement.commitmentType === "AMOUNT" ? "Committed amount" : "Committed quantity", { decimal: true, hint: `With the tolerance, not below the ${commitmentText(agreement, agreement.releasedQty)} already released.` })}
               {field("overdeliveryPct", "Over-delivery tolerance (%)", { decimal: true, hint: "Releases may go this many percent above the commitment." })}
               {field("unitPrice", "Agreed price", { decimal: true, hint: "Applies to later releases; existing orders keep their price." })}
               {field("cumTolerance", "Cumulative tolerance", { decimal: true })}

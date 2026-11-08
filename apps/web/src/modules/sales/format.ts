@@ -46,6 +46,12 @@ export function money(amount: string | undefined, currency: string): string {
   return amount === undefined || amount === "" ? dash : `${amount} ${currency}`;
 }
 
+/** A commitment figure of a sales agreement: an amount in its currency, or a quantity of its unit. */
+export function commitmentText(a: { commitmentType?: string; currency: string; unit: string }, value: string | undefined): string {
+  if (value === undefined || value === "") return dash;
+  return a.commitmentType === "AMOUNT" ? money(value, a.currency) : `${value} ${a.unit}`;
+}
+
 /** "2026-10-26 08:00 UTC". */
 export function formatDateTime(iso?: string | null): string {
   if (!iso) return dash;

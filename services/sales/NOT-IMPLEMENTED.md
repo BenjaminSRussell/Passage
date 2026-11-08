@@ -1155,4 +1155,40 @@ returned quantities, and the history names DRAWN entries.
 | Remainder close returns only the release line | implemented (review) | Closing the remainder of a partly shipped released order (whole order or `/lines/{n}:cancel-remainder`) gives back only what line 1, the release line, did not deliver. A line added by PATCH drew nothing from the agreement, so its cut gives nothing back; before, its cut was counted too, and with returns now repeatable per release a later close of line 1 would have returned again. `TestPostgres_RemainderOfAnAddedLineReturnsNothing`. |
 | EXHAUSTED at the ceiling, not at the commitment | decision to confirm | With a tolerance above 0 the agreement stays ACTIVE once the commitment itself is released and turns EXHAUSTED only at the commitment plus the tolerance. Reporting "commitment fulfilled" at 100 percent would need a separate flag. |
 | Draw on a raised release line before confirmation | decision to confirm | A DRAFT or OPEN order draws on a raise too, because the release already holds the commitment from the moment of release. A rep who needs more than the ceiling must raise the agreement (revision) first. |
-| Amounts and several products | not built | Commitments by amount, and agreements for several products, are still open (the first row of the ticket deliverables). Both change the release body and the order line link and are a separate slice. |
+| Several products on one agreement | not built | An agreement is still one product (the first row of the ticket deliverables). Several products change the agreement shape, the release body and the order line link (`agreement_line_id`) and are a separate slice. Commitment by amount is built in slice 36 (see below). |
+
+## Slice 36: sales agreements committed by amount
+
+FR-27.10 allows a commitment by quantity or by value. `commitmentType` is now
+`QUANTITY` (the default, unchanged) or `AMOUNT` on `POST /agreements`. An AMOUNT
+agreement takes `commitmentAmount` (above 0, 4 places, in the agreement currency;
+`commitmentQty` is refused) at a price above 0, and every release draws the net
+value of its line, the quantity times the agreed price rounded like an order line
+(50 units at 12.00 draw 600.00 of 1,000.00). The ceiling, the over-delivery
+tolerance, `SLS-0008` AGREEMENT_EXHAUSTED, the validity check (`SLS-0029`), the
+EXHAUSTED status and `SLS-0053` all work on the amount. `commitmentQty`,
+`releasedQty`, `ceilingQty` and `remainingQty` keep their names and hold amounts
+for an AMOUNT agreement; the response adds `commitmentType` and `commitmentUnit`
+(the unit, or the currency). PATCH takes `commitmentAmount` for an AMOUNT
+agreement and `commitmentQty` for a QUANTITY one (the other is 400); the type
+cannot be changed. The follow-the-line rules of slice 35 are valued at the
+release price (the agreement price the release was made at, no discount):
+lowering the release line returns the value of the difference, raising it draws
+the value (refused beyond the ceiling), a cancel returns what is outstanding,
+and closing the remainder of the release line returns the value of the
+undelivered quantity. Migration 0043 adds
+`sales_agreement.commitment_type` and `agreement_release.units` (what the release
+drew, the quantity for QUANTITY) and `unit_price` (the price of the release line),
+backfilled for existing releases; no new table, so no new grant. The release
+history shows `units`; `drawnQty` and `returnedQty` are in the commitment unit.
+The web agreement form chooses quantity or amount, and the list, detail, revision
+form and history show money for an AMOUNT agreement.
+
+| Item | Status | Reason |
+|---|---|---|
+| Events | implemented | `agreement.released.v1` carries `commitment_type` and `drawn_units`; every agreement lifecycle event carries `commitment_type`, and for an AMOUNT agreement its commitment, released, remaining, returned and drawn figures are amounts. Diff fields are `commitmentAmount` and `releasedAmount` for AMOUNT. Consumers of `remaining_qty` and `released_qty` must read `commitment_type`. |
+| Authz seed | none needed | No new duty or route: the type rides `POST` and `PATCH /v1/sales/agreements` (`sales.agreement.maintain`) and the release rides `:release-order`. |
+| Price or discount edit on the release line of an AMOUNT agreement | implemented (review) | Every draw and return of a release is valued at the release price, never at the line's current price or discount. The builder valued a quantity change at the edited line price while a remainder close valued at the release price, so a discount followed by a lower quantity and a remainder close left value drawn for nothing (release 50 at 12.00, 50 percent discount, lower to 40, deliver 10, close 30: 180.00 stayed drawn for 120.00 delivered). `TestPostgres_AmountAgreementValuesAtReleasePrice`. |
+| Commitment consumed at list value, not at the discounted line value | decision to confirm | A discount or price edit on a released line does not change what it consumed (BR-27.9: agreement lines re-price only when the agreement price changes). Alternative: consume the net line value and re-value the draw on every price or discount edit. |
+| Amount commitment in another currency than the order | not built | The order currency is the agreement currency, so no conversion exists; a multi-currency amount commitment waits for the currency conversion rules. |
+| Amount commitment reporting (percent used, expiry warnings) | not built | The list shows committed, released and remaining; the 90 percent warning and the expiring-agreements inquiry belong with the agreement inquiries slice. |

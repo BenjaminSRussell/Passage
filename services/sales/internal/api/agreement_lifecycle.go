@@ -15,9 +15,12 @@ import (
 // reviseAgreementRequest is the body of PATCH /v1/sales/agreements/{id}. Every
 // field is optional; an empty validFrom or validTo clears that bound.
 type reviseAgreementRequest struct {
-	CommitmentQty *string `json:"commitmentQty"`
-	UnitPrice     *string `json:"unitPrice"`
-	CumTolerance  *string `json:"cumTolerance"`
+	// CommitmentQty changes a QUANTITY agreement's commitment, CommitmentAmount an
+	// AMOUNT agreement's; the other one is refused.
+	CommitmentQty    *string `json:"commitmentQty"`
+	CommitmentAmount *string `json:"commitmentAmount"`
+	UnitPrice        *string `json:"unitPrice"`
+	CumTolerance     *string `json:"cumTolerance"`
 	// OverdeliveryPct changes the tolerance above the commitment (BR-27.9).
 	OverdeliveryPct *string `json:"overdeliveryPct"`
 	ValidFrom       *string `json:"validFrom"`
@@ -42,6 +45,19 @@ func buildRevision(req reviseAgreementRequest) (store.AgreementRevision, map[str
 			f["commitmentQty"] = err.Error()
 		} else {
 			out.Commitment = &q
+		}
+	}
+	if req.CommitmentAmount != nil {
+		q, err := decimal.NewFromString(*req.CommitmentAmount)
+		switch {
+		case err != nil:
+			f["commitmentAmount"] = "must be a decimal"
+		case !q.IsPositive() || !q.Round(4).Equal(q):
+			f["commitmentAmount"] = "must be greater than 0 with at most 4 decimal places"
+		case req.CommitmentQty != nil:
+			f["commitmentAmount"] = "send commitmentQty or commitmentAmount, not both"
+		default:
+			out.Commitment, out.CommitmentIsAmount = &q, true
 		}
 	}
 	if req.UnitPrice != nil {
@@ -82,8 +98,8 @@ func buildRevision(req reviseAgreementRequest) (store.AgreementRevision, map[str
 	if len(req.Reason) > 500 {
 		f["reason"] = "must be at most 500 characters"
 	}
-	if req.CommitmentQty == nil && req.UnitPrice == nil && req.CumTolerance == nil && req.OverdeliveryPct == nil && req.ValidFrom == nil && req.ValidTo == nil {
-		f["body"] = "at least one of commitmentQty, unitPrice, cumTolerance, overdeliveryPct, validFrom or validTo is required"
+	if req.CommitmentQty == nil && req.CommitmentAmount == nil && req.UnitPrice == nil && req.CumTolerance == nil && req.OverdeliveryPct == nil && req.ValidFrom == nil && req.ValidTo == nil {
+		f["body"] = "at least one of commitmentQty, commitmentAmount, unitPrice, cumTolerance, overdeliveryPct, validFrom or validTo is required"
 	}
 	return out, f
 }

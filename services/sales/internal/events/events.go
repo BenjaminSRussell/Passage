@@ -213,11 +213,15 @@ type AgreementReleasedData struct {
 	ProductID       string `json:"product_id"`
 	SalesOrderID    string `json:"sales_order_id"`
 	Quantity        string `json:"quantity"`
-	Released        string `json:"released_qty"`
-	Remaining       string `json:"remaining_qty"`
-	Status          string `json:"status"`
-	Version         int    `json:"version"`
-	Actor           string `json:"actor"`
+	// CommitmentType is QUANTITY or AMOUNT; DrawnUnits is what the release drew
+	// from the commitment in its unit (the quantity, or the line net value).
+	CommitmentType string `json:"commitment_type"`
+	DrawnUnits     string `json:"drawn_units"`
+	Released       string `json:"released_qty"`
+	Remaining      string `json:"remaining_qty"`
+	Status         string `json:"status"`
+	Version        int    `json:"version"`
+	Actor          string `json:"actor"`
 }
 
 // AgreementLifecycleData is the data member of agreement.changed.v1,
@@ -228,11 +232,14 @@ type AgreementReleasedData struct {
 // on returned, sales_order_id and drawn_qty on drawn. remaining_qty is what can
 // still be released: the commitment with overdelivery_pct, less released_qty.
 type AgreementLifecycleData struct {
-	AgreementID     string        `json:"agreement_id"`
-	AgreementNumber string        `json:"agreement_number"`
-	LegalEntityID   string        `json:"legal_entity_id"`
-	CustomerID      string        `json:"customer_id"`
-	ProductID       string        `json:"product_id"`
+	AgreementID     string `json:"agreement_id"`
+	AgreementNumber string `json:"agreement_number"`
+	LegalEntityID   string `json:"legal_entity_id"`
+	CustomerID      string `json:"customer_id"`
+	ProductID       string `json:"product_id"`
+	// CommitmentType is QUANTITY or AMOUNT; the commitment, released, remaining,
+	// returned and drawn figures are in that unit (quantity or currency amount).
+	CommitmentType  string        `json:"commitment_type"`
 	Commitment      string        `json:"commitment_qty"`
 	OverdeliveryPct string        `json:"overdelivery_pct"`
 	Released        string        `json:"released_qty"`

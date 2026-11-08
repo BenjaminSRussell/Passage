@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   AGREEMENT_STATUSES,
+  COMMITMENT_TYPES,
   createAgreement,
   describeProblem,
   listAgreements,
@@ -11,9 +12,10 @@ import {
   type AgreementFilter,
   type AgreementInput,
   type AgreementStatus,
+  type CommitmentType,
   type Problem,
 } from "./api/client";
-import { DECIMAL, money, PERCENT, sentence, shortId, UUID } from "./format";
+import { commitmentText, DECIMAL, money, PERCENT, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -28,7 +30,11 @@ export interface AgreementValues {
   unit: string;
   unitPrice: string;
   currency: string;
+  /** QUANTITY when absent. */
+  commitmentType?: CommitmentType;
   commitmentQty: string;
+  /** Used when commitmentType is AMOUNT. */
+  commitmentAmount?: string;
   validFrom: string;
   validTo: string;
   cumTolerance: string;
@@ -48,7 +54,12 @@ export function validateAgreement(values: AgreementValues): { errors: Errors; in
   if (values.unit.trim().length < 1 || values.unit.trim().length > 10) errors.unit = "Enter a unit of up to 10 characters.";
   if (!PRICE.test(values.unitPrice)) errors.unitPrice = "Enter a price of 0 or more with up to 4 decimals.";
   if (!/^[A-Z]{3}$/.test(values.currency)) errors.currency = "Enter a three-letter ISO currency code, such as USD.";
-  if (!DECIMAL.test(values.commitmentQty) || /^0+(\.0+)?$/.test(values.commitmentQty)) errors.commitmentQty = "Enter a quantity above 0 with up to 6 decimals.";
+  const byAmount = values.commitmentType === "AMOUNT";
+  if (byAmount) {
+    const amount = values.commitmentAmount ?? "";
+    if (!PRICE.test(amount) || /^0+(\.0+)?$/.test(amount)) errors.commitmentAmount = "Enter an amount above 0 with up to 4 decimals.";
+    if (/^0+(\.0+)?$/.test(values.unitPrice)) errors.unitPrice = "An amount commitment needs a price above 0.";
+  } else if (!DECIMAL.test(values.commitmentQty) || /^0+(\.0+)?$/.test(values.commitmentQty)) errors.commitmentQty = "Enter a quantity above 0 with up to 6 decimals.";
   if (values.validFrom && !DATE.test(values.validFrom)) errors.validFrom = "Choose a date.";
   if (values.validTo && !DATE.test(values.validTo)) errors.validTo = "Choose a date.";
   if (values.cumTolerance !== "" && !DECIMAL.test(values.cumTolerance)) errors.cumTolerance = "Enter 0 or more with up to 6 decimals, or leave it empty for 0.";
@@ -65,7 +76,7 @@ export function validateAgreement(values: AgreementValues): { errors: Errors; in
       unit: values.unit.trim(),
       unitPrice: values.unitPrice,
       currency: values.currency,
-      commitmentQty: values.commitmentQty,
+      ...(byAmount ? { commitmentType: "AMOUNT" as const, commitmentAmount: values.commitmentAmount } : { commitmentQty: values.commitmentQty }),
       ...(values.validFrom ? { validFrom: values.validFrom } : {}),
       ...(values.validTo ? { validTo: values.validTo } : {}),
       ...(values.cumTolerance !== "" ? { cumTolerance: values.cumTolerance } : {}),
@@ -79,9 +90,9 @@ const columns: DataTableColumn<Agreement>[] = [
   { key: "customerId", header: "Customer", mono: true, render: (a) => shortId(a.customerId) },
   { key: "productId", header: "Product", mono: true, render: (a) => shortId(a.productId) },
   { key: "unitPrice", header: "Price", align: "end", render: (a) => `${money(a.unitPrice, a.currency)} / ${a.unit}` },
-  { key: "commitmentQty", header: "Committed", align: "end", render: (a) => `${a.commitmentQty} ${a.unit}` },
-  { key: "releasedQty", header: "Released", align: "end", render: (a) => `${a.releasedQty} ${a.unit}` },
-  { key: "remainingQty", header: "Remaining", align: "end", render: (a) => `${a.remainingQty} ${a.unit}` },
+  { key: "commitmentQty", header: "Committed", align: "end", render: (a) => commitmentText(a, a.commitmentQty) },
+  { key: "releasedQty", header: "Released", align: "end", render: (a) => commitmentText(a, a.releasedQty) },
+  { key: "remainingQty", header: "Remaining", align: "end", render: (a) => commitmentText(a, a.remainingQty) },
   { key: "validity", header: "Valid", render: (a) => (a.validFrom || a.validTo ? `${a.validFrom ?? "…"} to ${a.validTo ?? "…"}` : "Open-ended") },
   { key: "status", header: "Status", render: (a) => <StatusPill status={a.status} /> },
 ];
@@ -100,7 +111,7 @@ export function AgreementsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Sales agreements"
-        description="Blanket quantity commitments at an agreed price. Each release creates a draft order and draws down the commitment; a release beyond it and its over-delivery tolerance is refused."
+        description="Blanket commitments, by quantity or by amount, at an agreed price. Each release creates a draft order and draws down the commitment; a release beyond it and its over-delivery tolerance is refused."
         actions={
           <Link className={buttonClassName("primary")} to="/sales/agreements/new">
             New agreement
@@ -164,7 +175,9 @@ export function NewAgreementPage() {
     unit: "EA",
     unitPrice: "",
     currency: "USD",
+    commitmentType: "QUANTITY",
     commitmentQty: "",
+    commitmentAmount: "",
     validFrom: "",
     validTo: "",
     cumTolerance: "",
@@ -200,7 +213,7 @@ export function NewAgreementPage() {
     }
   }
 
-  const field = (name: keyof AgreementValues, label: string, hint?: string, extra: { type?: string; mono?: boolean; optional?: boolean; decimal?: boolean } = {}) => (
+  const field = (name: Exclude<keyof AgreementValues, "commitmentType">, label: string, hint?: string, extra: { type?: string; mono?: boolean; optional?: boolean; decimal?: boolean } = {}) => (
     <FormField id={`agreement-${name}`} label={label} hint={hint} error={errors[name]} optional={extra.optional}>
       {(control) => (
         <Input
@@ -208,7 +221,7 @@ export function NewAgreementPage() {
           type={extra.type ?? "text"}
           inputMode={extra.decimal ? "decimal" : undefined}
           className={extra.mono ? styles.mono : undefined}
-          value={values[name]}
+          value={values[name] ?? ""}
           onChange={(e) => update({ [name]: name === "currency" ? e.target.value.toUpperCase() : e.target.value })}
           invalid={Boolean(errors[name])}
         />
@@ -218,14 +231,27 @@ export function NewAgreementPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New sales agreement" description="Commit a customer to a quantity of one product at an agreed price. Releases against it create orders at this price." />
+      <PageHeader title="New sales agreement" description="Commit a customer to a quantity or an amount of one product at an agreed price. Releases against it create orders at this price." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales agreement">
           {field("legalEntityId", "Legal entity", "UUID of the selling legal entity.", { mono: true })}
           {field("customerId", "Customer", "UUID of the customer party.", { mono: true })}
           {field("invoiceAccountId", "Invoice account", "Leave empty to invoice the customer.", { mono: true, optional: true })}
           {field("productId", "Product", "UUID of the product.", { mono: true })}
-          {field("commitmentQty", "Committed quantity", undefined, { decimal: true })}
+          <FormField id="agreement-commitmentType" label="Commitment by" hint="A quantity commits units; an amount commits money, and each release draws its line value (quantity times price).">
+            {(control) => (
+              <Select {...control} value={values.commitmentType ?? "QUANTITY"} onChange={(e) => update({ commitmentType: e.target.value as CommitmentType })}>
+                {COMMITMENT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {sentence(t)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {values.commitmentType === "AMOUNT"
+            ? field("commitmentAmount", "Committed amount", "In the agreement currency, up to 4 decimals.", { decimal: true })
+            : field("commitmentQty", "Committed quantity", undefined, { decimal: true })}
           {field("unit", "Unit")}
           {field("unitPrice", "Unit price", undefined, { decimal: true })}
           {field("currency", "Currency")}

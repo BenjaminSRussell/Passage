@@ -13,7 +13,7 @@ a stateless evaluation at line commit and recorded acceptance. Wave 27, slices
 1 to 6 of PSG-27. Reference:
 `docs/prd/phase-5-order-to-cash.md` §5.27.
 
-Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
+Out of these slices (see `NOT-IMPLEMENTED.md`): agreements for several products and
 scheduling releases driven by w28 shipments and EDI, the ATP projection and reservations,
 the committed backorder run,
 allocation, consignment, OPTIONAL supplementary items prompted in an order-entry

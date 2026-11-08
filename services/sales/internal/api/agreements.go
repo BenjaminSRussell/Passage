@@ -16,16 +16,21 @@ import (
 )
 
 // createAgreementRequest is the body of POST /v1/sales/agreements (FR-27.10):
-// a quantity commitment for one product at an agreed price.
+// a quantity or amount commitment for one product at an agreed price.
 type createAgreementRequest struct {
-	LegalEntityID    string  `json:"legalEntityId"`
-	CustomerID       string  `json:"customerId"`
-	InvoiceAccountID string  `json:"invoiceAccountId"`
-	ProductID        string  `json:"productId"`
-	Unit             string  `json:"unit"`
-	UnitPrice        string  `json:"unitPrice"`
-	Currency         string  `json:"currency"`
+	LegalEntityID    string `json:"legalEntityId"`
+	CustomerID       string `json:"customerId"`
+	InvoiceAccountID string `json:"invoiceAccountId"`
+	ProductID        string `json:"productId"`
+	Unit             string `json:"unit"`
+	UnitPrice        string `json:"unitPrice"`
+	Currency         string `json:"currency"`
+	// CommitmentType is QUANTITY (default; commitmentQty is required) or AMOUNT
+	// (commitmentAmount in the agreement currency is required, and each release
+	// draws the net value of its line).
+	CommitmentType   string  `json:"commitmentType"`
 	CommitmentQty    string  `json:"commitmentQty"`
+	CommitmentAmount string  `json:"commitmentAmount"`
 	ValidFrom        *string `json:"validFrom"`
 	ValidTo          *string `json:"validTo"`
 	// CumTolerance is how far a scheduling release's cumulative received
@@ -70,11 +75,37 @@ func buildAgreement(req createAgreementRequest) (store.NewAgreement, map[string]
 	if err != nil || price.IsNegative() || !price.Round(4).Equal(price) {
 		f["unitPrice"] = "must be a decimal of at least 0 with at most 4 places"
 	}
-	commitment, err := decimal.NewFromString(req.CommitmentQty)
-	if err != nil {
-		f["commitmentQty"] = "must be a decimal"
-	} else if err := domain.ValidateQuantity(commitment); err != nil {
-		f["commitmentQty"] = err.Error()
+	kind := req.CommitmentType
+	if kind == "" {
+		kind = domain.CommitmentQuantity
+	}
+	var commitment decimal.Decimal
+	switch kind {
+	case domain.CommitmentQuantity:
+		var err error
+		if commitment, err = decimal.NewFromString(req.CommitmentQty); err != nil {
+			f["commitmentQty"] = "must be a decimal"
+		} else if err := domain.ValidateQuantity(commitment); err != nil {
+			f["commitmentQty"] = err.Error()
+		}
+		if req.CommitmentAmount != "" {
+			f["commitmentAmount"] = "applies to AMOUNT agreements only"
+		}
+	case domain.CommitmentAmount:
+		var err error
+		if commitment, err = decimal.NewFromString(req.CommitmentAmount); err != nil {
+			f["commitmentAmount"] = "must be a decimal"
+		} else if !commitment.IsPositive() || !commitment.Round(4).Equal(commitment) {
+			f["commitmentAmount"] = "must be greater than 0 with at most 4 decimal places"
+		}
+		if req.CommitmentQty != "" {
+			f["commitmentQty"] = "applies to QUANTITY agreements only; use commitmentAmount"
+		}
+		if !price.IsPositive() {
+			f["unitPrice"] = "must be greater than 0 on an AMOUNT agreement"
+		}
+	default:
+		f["commitmentType"] = domain.ErrInvalidCommitmentType.Error()
 	}
 	validityFields(req.ValidFrom, req.ValidTo, f)
 	tolerance := decimal.Zero
@@ -95,7 +126,7 @@ func buildAgreement(req createAgreementRequest) (store.NewAgreement, map[string]
 			f["overdeliveryPct"] = err.Error()
 		}
 	}
-	return store.NewAgreement{CumTolerance: tolerance, OverdeliveryPct: overdelivery, LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice, ProductID: req.ProductID,
+	return store.NewAgreement{CommitmentType: kind, CumTolerance: tolerance, OverdeliveryPct: overdelivery, LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice, ProductID: req.ProductID,
 		Unit: req.Unit, UnitPrice: price, Currency: req.Currency, Commitment: commitment, ValidFrom: req.ValidFrom, ValidTo: req.ValidTo}, f
 }
 

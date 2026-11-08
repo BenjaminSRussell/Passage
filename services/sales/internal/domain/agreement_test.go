@@ -253,3 +253,41 @@ func TestReturnToAgreement(t *testing.T) {
 		t.Fatal("a zero return must fail")
 	}
 }
+
+func TestCommitmentUnits(t *testing.T) {
+	got, err := CommitmentUnits(CommitmentAmount, d(50), dpct("12.5"), d(0))
+	if err != nil || !got.Equal(dpct("625")) {
+		t.Fatalf("50 x 12.50 = 625.00: %s %v", got, err)
+	}
+	got, err = CommitmentUnits(CommitmentAmount, d(10), d(100), d(25))
+	if err != nil || !got.Equal(d(750)) {
+		t.Fatalf("a 25 percent discount: %s %v", got, err)
+	}
+	if got, err = CommitmentUnits(CommitmentQuantity, d(7), d(100), d(0)); err != nil || !got.Equal(d(7)) {
+		t.Fatalf("a quantity agreement draws the quantity: %s %v", got, err)
+	}
+	if got, err = CommitmentUnits("", dpct("0.5"), d(100), d(0)); err != nil || !got.Equal(dpct("0.5")) {
+		t.Fatalf("the empty type is a quantity agreement: %s %v", got, err)
+	}
+	if _, err = CommitmentUnits(CommitmentAmount, dpct("0.0001"), dpct("0.01"), d(0)); err == nil {
+		t.Fatal("a quantity worth nothing must be refused")
+	}
+	if _, err = CommitmentUnits(CommitmentAmount, d(0), d(5), d(0)); err == nil {
+		t.Fatal("a zero quantity must be refused")
+	}
+	if !ValidCommitmentType("AMOUNT") || !ValidCommitmentType("QUANTITY") || ValidCommitmentType("VALUE") {
+		t.Fatal("commitment types")
+	}
+}
+
+func TestReviseAgreementAmountDiffNamesTheAmount(t *testing.T) {
+	cur := AgreementState{Type: CommitmentAmount, Commitment: d(1000), Released: d(600), UnitPrice: d(12), Status: AgreementActive}
+	more := d(2000)
+	_, diff, err := ReviseAgreement(cur, AgreementRevision{Commitment: &more})
+	if err != nil || len(diff) == 0 || diff[0].Field != "commitmentAmount" {
+		t.Fatalf("%+v %v", diff, err)
+	}
+	if ReleasedField(CommitmentAmount) != "releasedAmount" || ReleasedField(CommitmentQuantity) != "releasedQty" {
+		t.Fatal("released field names")
+	}
+}
