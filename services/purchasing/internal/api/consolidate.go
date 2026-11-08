@@ -188,14 +188,16 @@ func (a *API) listOpenRequisitionLines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.SourcingFilter{Sourcing: q.Get("sourcing"), VendorID: q.Get("vendorId")}
+	f := store.SourcingFilter{Sourcing: q.Get("sourcing"), VendorID: q.Get("vendorId"), LegalEntityID: q.Get("legalEntityId")}
 	if f.Sourcing != "" && f.Sourcing != store.SourcingNeedsSourcing && f.Sourcing != store.SourcingHasVendor {
 		fail(w, r, invalid("sourcing", "must be NEEDS_SOURCING or HAS_VENDOR"))
 		return
 	}
-	if err := uuidField("vendorId", f.VendorID, false); err != nil {
-		fail(w, r, err)
-		return
+	for name, v := range map[string]string{"vendorId": f.VendorID, "legalEntityId": f.LegalEntityID} {
+		if err := uuidField(name, v, false); err != nil {
+			fail(w, r, err)
+			return
+		}
 	}
 	page, err := a.store.ListOpenRequisitionLines(r.Context(), f, after, limit)
 	if err != nil {

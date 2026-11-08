@@ -123,6 +123,12 @@ channels:
         $ref: '#/components/messages/InboundChangeRefused'
       inboundChangeResolved:
         $ref: '#/components/messages/InboundChangeResolved'
+  requisitionrelease:
+    address: passage.procurement.requisitionrelease
+    description: Requisition release runs (FR-17.3, PRD 3.17.16) that ordered or tried to order approved requisition lines; the Kafka key is the run id.
+    messages:
+      requisitionReleaseCompleted:
+        $ref: '#/components/messages/RequisitionReleaseCompleted'
   fulfillmentDropShip:
     address: passage.fulfillment.dropship
     description: Drop-ship events of fulfillment (wave 28); purchasing follows dropship.closed.v1 and dropship.cancelled.v1 (slice 19). Other events on the topic are skipped.
@@ -176,6 +182,12 @@ operations:
       $ref: '#/channels/inboundchange'
     messages:
       - $ref: '#/channels/inboundchange/messages/inboundChangeResolved'
+  publishRequisitionReleaseCompleted:
+    action: send
+    channel:
+      $ref: '#/channels/requisitionrelease'
+    messages:
+      - $ref: '#/channels/requisitionrelease/messages/requisitionReleaseCompleted'
   receiveDropShipCancelled:
     action: receive
     channel:
@@ -407,6 +419,21 @@ components:
               type: { type: string, const: dev.passage.procurement.inboundchange.resolved.v1 }
               subject: { type: string, format: uuid, description: change id }
               data: { $ref: '#/components/schemas/InboundChangeResolvedData' }
+    RequisitionReleaseCompleted:
+      name: RequisitionReleaseCompleted
+      title: requisitionrelease.completed.v1
+      x-passage-type: dev.passage.procurement.requisitionrelease.completed.v1
+      summary: A release run consolidated the approved requisition lines it found into DRAFT purchase orders; skipped_count above zero means lines were left in the consolidation queue (PRD 3.17.16 buyer notification).
+      description: Not written for a run that found no line (status EMPTY). The skipped lines carry the problem code that stopped them, for example PRC-CONS-002 (no vendor) or PRC-CAT-002 (category access).
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.requisitionrelease.completed.v1 }
+              subject: { type: string, format: uuid, description: run id }
+              data: { $ref: '#/components/schemas/RequisitionReleaseData' }
     DropShipCancelledConsumed:
       name: DropShipCancelledConsumed
       title: dropship.cancelled.v1 (consumed)
@@ -1296,6 +1323,44 @@ components:
           type: array
           items: { $ref: '#/components/schemas/RequisitionSplitLine' }
         split_by: { type: string, format: uuid }
+    ReleasedOrder:
+      type: object
+      required: [purchase_order_id, number, vendor_id, currency, total, line_count]
+      additionalProperties: false
+      properties:
+        purchase_order_id: { type: string, format: uuid }
+        number: { type: string }
+        vendor_id: { type: string, format: uuid }
+        currency: { type: string }
+        total: { type: string, description: decimal string }
+        line_count: { type: integer }
+    ReleaseSkippedLine:
+      type: object
+      required: [requisition_line_id, code]
+      additionalProperties: false
+      properties:
+        requisition_line_id: { type: string, format: uuid }
+        code: { type: string, example: PRC-CONS-002 }
+    RequisitionReleaseData:
+      type: object
+      description: lines_released plus skipped_count equals lines_considered.
+      required: [run_id, legal_entity_id, status, window_days, lines_considered, lines_released, skipped_count, purchase_orders, skipped]
+      additionalProperties: false
+      properties:
+        run_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        status: { type: string, enum: [COMPLETED, PARTIAL, FAILED] }
+        window_days: { type: integer }
+        lines_considered: { type: integer }
+        lines_released: { type: integer }
+        skipped_count: { type: integer }
+        purchase_orders:
+          type: array
+          items: { $ref: '#/components/schemas/ReleasedOrder' }
+        skipped:
+          type: array
+          items: { $ref: '#/components/schemas/ReleaseSkippedLine' }
+        requested_by: { type: string, format: uuid }
     CategoryManagerData:
       type: object
       required: [manager_id, legal_entity_id, category, worker_id]

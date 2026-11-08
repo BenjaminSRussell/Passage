@@ -943,6 +943,60 @@ components:
           type: array
           description: SOFT category access findings (PRC-CAT-002) and PROVISIONAL vendor assignments (PRC-CAT-010); lineNo is the position in the request.
           items: { $ref: '#/components/schemas/Warning' }
+    ReleaseRunInput:
+      type: object
+      required: [legalEntityId]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        windowDays: { type: integer, minimum: 1, maximum: 60, default: 7, description: "Delivery window of the consolidation, as in ConsolidationInput." }
+        maxLines: { type: integer, minimum: 1, maximum: 500, default: 200, description: "The most open lines with a vendor the run orders, oldest first (the order they joined the queue); run again for a larger backlog. Lines with no vendor are reported up to the same number and do not count against it." }
+    ReleasedOrder:
+      type: object
+      required: [purchaseOrderId, number, vendorId, currency, total, lineCount]
+      properties:
+        purchaseOrderId: { type: string, format: uuid }
+        number: { type: string }
+        vendorId: { type: string, format: uuid }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        total: { type: string, description: Decimal string }
+        lineCount: { type: integer }
+    ReleaseSkip:
+      type: object
+      required: [requisitionLineId, requisitionNumber, lineNo, code, reason]
+      properties:
+        requisitionLineId: { type: string, format: uuid }
+        requisitionNumber: { type: string }
+        lineNo: { type: integer }
+        vendorId: { type: string, format: uuid }
+        code: { type: string, example: PRC-CONS-002 }
+        reason: { type: string }
+    ReleaseRun:
+      type: object
+      required: [id, legalEntityId, status, windowDays, maxLines, linesConsidered, linesReleased, linesSkipped, purchaseOrders, skipped, warnings, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        status: { type: string, enum: [EMPTY, COMPLETED, PARTIAL, FAILED] }
+        windowDays: { type: integer }
+        maxLines: { type: integer }
+        linesConsidered: { type: integer, description: "Open lines the run read: up to maxLines with a vendor plus up to maxLines without one" }
+        linesReleased: { type: integer }
+        linesSkipped: { type: integer, description: Lines left in the consolidation queue; linesReleased + linesSkipped = linesConsidered }
+        purchaseOrders: { type: array, items: { $ref: '#/components/schemas/ReleasedOrder' } }
+        skipped: { type: array, items: { $ref: '#/components/schemas/ReleaseSkip' } }
+        warnings:
+          type: array
+          description: SOFT category access findings, PROVISIONAL vendor assignments and agreement thresholds reached (PRC-AGR-004) of the orders created; lineNo is the position in the vendor's request or on the PO. A skipped vendor's warnings are not reported.
+          items: { $ref: '#/components/schemas/Warning' }
+        requestedBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    ReleaseRunPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ReleaseRun' } }
+        nextCursor: { type: string, format: uuid }
     PurchaseAgreementLineInput:
       type: object
       required: [commitmentType]
@@ -2057,6 +2111,7 @@ paths:
       parameters:
         - { name: sourcing, in: query, required: false, description: "NEEDS_SOURCING keeps lines with no preferred vendor; HAS_VENDOR those with one.", schema: { type: string, enum: [NEEDS_SOURCING, HAS_VENDOR] } }
         - { name: vendorId, in: query, required: false, description: Preferred vendor, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: false, description: Only lines of requisitions of this legal entity, schema: { type: string, format: uuid } }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/Cursor' }
       responses:
@@ -2340,6 +2395,74 @@ paths:
         '404': { description: Requisition line not found (PRC-REQ-LINE-NOT-FOUND) or agreement line not found (PRC-AGR-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: "A line is not OPEN on an APPROVED requisition, or was split since it was read (PRC-REQ-STATE)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: "Validation, no vendor for a line (PRC-CONS-002), window outside 1-60 (PRC-CONS-001), agreement rules (PRC-AGR-003/005/006/007/008), a vendor not assigned to a restricted category under HARD (PRC-CAT-002) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisition-releases:
+    post:
+      operationId: releaseRequisitions
+      x-passage-duty: procurement.purchase-order.maintain
+      summary: Release the approved requisition lines of a legal entity into DRAFT purchase orders and record the run (FR-17.3, PRD 3.17.16; duty procurement.purchase-order.maintain)
+      description: >-
+        Reads the OPEN lines of APPROVED requisitions of the legal entity that no running RFQ holds and that have a
+        preferred vendor (oldest first, up to maxLines; lines with no vendor are listed up to the same number without
+        counting against it) and consolidates them, one vendor at a time, the way POST
+        /requisitions:consolidate does (one DRAFT PO per legal entity, vendor, currency, site, warehouse and delivery
+        window, priced from agreements and trade agreements, falling back to the requisition estimate). A line with no
+        vendor (PRC-CONS-002), and every line of a vendor whose POs cannot be built or written (a HARD category rule
+        PRC-CAT-002, an agreement over its limit PRC-AGR-003, a line changed or ordered by a concurrent write
+        PRC-REQ-STATE), stays in the consolidation queue and is listed in skipped with its code and reason; the other
+        vendors are still released. The vendor groups are written in one transaction, each under a savepoint, with
+        the run record and requisitionrelease.completed.v1 (not for a run that found nothing). Status is EMPTY (no
+        line found), COMPLETED (all released), PARTIAL (some skipped) or FAILED (lines found, none released). A
+        replayed Idempotency-Key returns the stored run.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReleaseRunInput' }
+      responses:
+        '201':
+          description: The recorded run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty procurement.purchase-order.maintain or the legal entity is outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: "Validation (COM-0001), window outside 1-60 (PRC-CONS-001) or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listReleaseRuns
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: List requisition release runs, newest first (duty procurement.purchase-order.inquire)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, description: Only runs for this legal entity, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, description: Only runs with this status, schema: { type: string, enum: [EMPTY, COMPLETED, PARTIAL, FAILED] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseRunPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty procurement.purchase-order.inquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisition-releases/{id}:
+    get:
+      operationId: getReleaseRun
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: Read one requisition release run with the orders it created and the lines it skipped (duty procurement.purchase-order.inquire)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseRun' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty procurement.purchase-order.inquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Release run not found (PRC-REL-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/purchase-orders:reprice:
     post:
       operationId: repricePurchaseOrders

@@ -51,8 +51,10 @@ type fakeStore struct {
 	lastOpenLines      store.OpenLineFilter
 	lastAgrFilter      store.AgreementFilter
 	lastSourcing       store.SourcingFilter
+	sourcingCalls      []store.SourcingFilter
 	lastConsolidated   []string
 	lastSplit          splitCall
+	release            releaseLog
 	lastIdem           store.Idem
 
 	// PO lifecycle: stored orders by id, and what edits and actions received.
@@ -243,7 +245,14 @@ func (f *fakeStore) ChangeAgreementStatus(_ context.Context, id string, version 
 
 func (f *fakeStore) ListOpenRequisitionLines(_ context.Context, sf store.SourcingFilter, after string, limit int) (store.Page[store.SourcingLine], error) {
 	f.lastSourcing, f.lastAfter, f.lastLimit = sf, after, limit
-	return store.Page[store.SourcingLine]{Items: f.sourcing}, nil
+	f.sourcingCalls = append(f.sourcingCalls, sf)
+	items := []store.SourcingLine{}
+	for _, l := range f.sourcing {
+		if sf.Sourcing == "" || (sf.Sourcing == store.SourcingNeedsSourcing) == (l.PreferredVendorID == "") {
+			items = append(items, l)
+		}
+	}
+	return store.Page[store.SourcingLine]{Items: items}, nil
 }
 
 func (f *fakeStore) ListOpenOrderLines(_ context.Context, of store.OpenLineFilter, after string, limit int) (store.Page[store.OpenOrderLine], error) {
@@ -673,4 +682,48 @@ func TestWriteWithoutLegalEntityScopeIsForbidden(t *testing.T) {
 	if rec.Code != http.StatusForbidden || problemCode(t, rec) != codeScope {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
+}
+
+// releaseLog records what the release run methods received and answer.
+type releaseLog struct {
+	in      store.ReleaseInput
+	idem    store.Idem
+	runs    map[string]store.ReleaseRun
+	lastRun store.ReleaseRunFilter
+}
+
+func (f *fakeStore) ReleaseRequisitions(_ context.Context, in store.ReleaseInput, idem store.Idem) (store.ReleaseRun, error) {
+	f.release.in, f.release.idem = in, idem
+	run := store.ReleaseRun{ID: ids.New(), LegalEntityID: in.LegalEntityID, WindowDays: in.WindowDays, MaxLines: in.MaxLines, LinesConsidered: in.Considered,
+		Status: store.ReleaseCompleted, PurchaseOrders: []store.ReleasedOrder{}, Skipped: in.Skipped, Warnings: []store.Warning{}}
+	for _, g := range in.Groups {
+		run.Warnings = append(run.Warnings, g.Warnings...)
+		for _, o := range g.Orders {
+			run.PurchaseOrders = append(run.PurchaseOrders, store.ReleasedOrder{PurchaseOrderID: ids.New(), VendorID: o.VendorID, Currency: o.Currency, Total: o.Total, LineCount: len(o.Lines)})
+		}
+		run.LinesReleased += len(g.Lines)
+	}
+	run.LinesSkipped = len(run.Skipped)
+	if f.release.runs == nil {
+		f.release.runs = map[string]store.ReleaseRun{}
+	}
+	f.release.runs[run.ID] = run
+	return run, nil
+}
+
+func (f *fakeStore) GetReleaseRun(_ context.Context, id string) (store.ReleaseRun, error) {
+	r, ok := f.release.runs[id]
+	if !ok {
+		return store.ReleaseRun{}, httpx.NewProblem(http.StatusNotFound, store.CodeReleaseRunNotFound, "release run not found")
+	}
+	return r, nil
+}
+
+func (f *fakeStore) ListReleaseRuns(_ context.Context, rf store.ReleaseRunFilter, after string, limit int) (store.Page[store.ReleaseRun], error) {
+	f.release.lastRun, f.lastAfter, f.lastLimit = rf, after, limit
+	items := []store.ReleaseRun{}
+	for _, r := range f.release.runs {
+		items = append(items, r)
+	}
+	return store.Page[store.ReleaseRun]{Items: items}, nil
 }

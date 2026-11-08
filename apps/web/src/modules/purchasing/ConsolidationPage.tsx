@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
   consolidateRequisitions,
   createRFQFromRequisitions,
@@ -281,6 +281,11 @@ export function ConsolidationPage() {
       <PageHeader
         title="Consolidation"
         description="Approved requisition lines waiting to be ordered. Select lines and create purchase orders: one per vendor, currency, site, warehouse and delivery window. Lines with no vendor can start an RFQ instead; they stay out of this list until the RFQ is awarded or cancelled."
+        actions={
+          <Link className={buttonClassName("secondary")} to="/purchasing/releases/new">
+            Release all lines with a vendor
+          </Link>
+        }
       />
       <div className={styles.toolbar}>
         <div className={styles.filter}>

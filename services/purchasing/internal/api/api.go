@@ -90,6 +90,7 @@ type API struct {
 	requisitionsCreated   atomic.Int64
 	requisitionsSubmitted atomic.Int64
 	requisitionLinesSplit atomic.Int64
+	releaseRuns           atomic.Int64
 	ordersCreated         atomic.Int64
 	agreementsCreated     atomic.Int64
 	priceLookups          atomic.Int64
@@ -277,6 +278,7 @@ func (a *API) Register(r chi.Router) {
 		// Service lines and model service specifications (FR-17.23).
 		a.registerServiceRoutes(r)
 		// Signing limits and their requests (FR-17.17).
+		a.registerReleaseRoutes(r)
 		a.registerSigningRoutes(r)
 		// Changes other services asked of purchase orders (slice 18).
 		a.registerInboundRoutes(r)
@@ -295,6 +297,7 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_requisitions_created_total", "Requisitions created; idempotent replays are counted.", a.requisitionsCreated.Load()},
 			{"purchasing_requisitions_submitted_total", "Requisitions submitted for approval.", a.requisitionsSubmitted.Load()},
 			{"purchasing_requisition_lines_split_total", "Requisition lines split into several lines (FR-17.3).", a.requisitionLinesSplit.Load()},
+			{"purchasing_requisition_release_runs_total", "Requisition release runs answered (PRD 3.17.16); idempotent replays are counted.", a.releaseRuns.Load()},
 			{"purchasing_purchase_orders_created_total", "Purchase orders created.", a.ordersCreated.Load()},
 			{"purchasing_trade_agreements_created_total", "Trade agreement rows created.", a.agreementsCreated.Load()},
 			{"purchasing_price_lookups_total", "Trade agreement price lookups answered.", a.priceLookups.Load()},

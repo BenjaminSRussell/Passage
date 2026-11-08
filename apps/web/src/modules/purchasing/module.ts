@@ -21,6 +21,7 @@ import {
 import { OpenSupplyPage } from "./OpenSupplyPage";
 import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
 import { PriceLookupPage } from "./PricingPage";
+import { ReleaseRunCreatePage, ReleaseRunDetailPage, ReleaseRunsPage } from "./ReleasePages";
 import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage, PurchaseOrdersPage } from "./PurchaseOrderPages";
 import { RepricePage, RepriceRunPage } from "./RepricePages";
 import { RequisitionCreatePage, RequisitionDetailPage, RequisitionsPage } from "./RequisitionPages";
@@ -53,6 +54,9 @@ const purchasing: PassageModule = {
     { path: "/purchasing/requisitions/new", element: createElement(RequisitionCreatePage), handle: { title: "New requisition" } },
     { path: "/purchasing/requisitions/:id", element: createElement(RequisitionDetailPage), handle: { title: "Requisition" } },
     { path: "/purchasing/consolidation", element: createElement(ConsolidationPage) },
+    { path: "/purchasing/releases", element: createElement(ReleaseRunsPage) },
+    { path: "/purchasing/releases/new", element: createElement(ReleaseRunCreatePage), handle: { title: "Start a release run" } },
+    { path: "/purchasing/releases/:id", element: createElement(ReleaseRunDetailPage), handle: { title: "Release run" } },
     { path: "/purchasing/open-supply", element: createElement(OpenSupplyPage), handle: { title: "Open supply" } },
     { path: "/purchasing/inquiries", element: createElement(OpenOrdersByVendorPage), handle: { title: "Open orders by vendor" } },
     { path: "/purchasing/inquiries/backordered", element: createElement(BackorderedLinesPage), handle: { title: "Backordered lines" } },
@@ -137,6 +141,7 @@ const purchasing: PassageModule = {
     { label: "Overview", to: "/purchasing", duty: "procurement.purchase-order.inquire" },
     { label: "Requisitions", to: "/purchasing/requisitions", duty: "procurement.requisition.create" },
     { label: "Consolidation", to: "/purchasing/consolidation", duty: "procurement.purchase-order.maintain" },
+    { label: "Release runs", to: "/purchasing/releases", duty: "procurement.purchase-order.inquire" },
     { label: "Requests for quotation", to: "/purchasing/rfqs", duty: "procurement.rfq.maintain" },
     { label: "Purchase orders", to: "/purchasing/purchase-orders", duty: "procurement.purchase-order.inquire" },
     { label: "Open supply", to: "/purchasing/open-supply", duty: "procurement.purchase-order.inquire" },

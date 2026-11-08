@@ -32,10 +32,13 @@ type SourcingLine struct {
 	RequisitionVersion int `json:"requisitionVersion"`
 }
 
-// SourcingFilter narrows ListOpenRequisitionLines; empty fields do not filter.
+// SourcingFilter narrows ListOpenRequisitionLines; empty fields do not filter. OldestFirst pages by line id ascending
+// (the order lines joined the queue) instead of the board's newest first; the release run reads the queue that way.
 type SourcingFilter struct {
-	Sourcing string
-	VendorID string
+	Sourcing      string
+	VendorID      string
+	LegalEntityID string
+	OldestFirst   bool
 }
 
 const sourcingColumns = `l.id, l.line_no, coalesce(l.product_id::text, ''), l.description, l.category, l.qty, l.unit,
@@ -54,11 +57,16 @@ func scanSourcingLine(row pgx.CollectableRow) (SourcingLine, error) {
 }
 
 // ListOpenRequisitionLines is the consolidation queue: OPEN lines of APPROVED
-// requisitions that no running RFQ is sourcing (DRAFT, SENT, REPLIES_OPEN or CLOSED), newest first by line id. NEEDS_SOURCING keeps lines without a
+// requisitions that no running RFQ is sourcing (DRAFT, SENT, REPLIES_OPEN or CLOSED), newest first by line id (oldest first
+// with OldestFirst). NEEDS_SOURCING keeps lines without a
 // preferred vendor, HAS_VENDOR those with one; VendorID keeps one vendor's lines.
 func (s *Postgres) ListOpenRequisitionLines(ctx context.Context, f SourcingFilter, after string, limit int) (Page[SourcingLine], error) {
 	p, _ := tenant.FromContext(ctx)
 	limit = clampLimit(limit)
+	past, order := "<", "desc"
+	if f.OldestFirst {
+		past, order = ">", "asc"
+	}
 	var items []SourcingLine
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+sourcingColumns+`
@@ -69,8 +77,8 @@ func (s *Postgres) ListOpenRequisitionLines(ctx context.Context, f SourcingFilte
 			and ($3 = '' or l.preferred_vendor_id::text = $3)
 			and not exists (select 1 from purchase_rfq_line rl join purchase_rfq q on q.tenant_id = rl.tenant_id and q.id = rl.rfq_id
 				where rl.tenant_id = l.tenant_id and rl.requisition_line_id = l.id and q.status in ('DRAFT', 'SENT', 'REPLIES_OPEN', 'CLOSED'))
-			and ($4::uuid is null or l.id < $4::uuid)
-			order by l.id desc limit $5`, p.TenantID, f.Sourcing, f.VendorID, nullable(after), limit+1)
+			and ($4::uuid is null or l.id `+past+` $4::uuid) and ($6 = '' or r.legal_entity_id::text = $6)
+			order by l.id `+order+` limit $5`, p.TenantID, f.Sourcing, f.VendorID, nullable(after), limit+1, f.LegalEntityID)
 		if err != nil {
 			return err
 		}

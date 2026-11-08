@@ -12,6 +12,8 @@ import {
   changeRFQ,
   createRFQFromRequisitions,
   splitRequisitionLine,
+  releaseRequisitions,
+  listReleaseRuns,
   compareRFQ,
   confirmDeliveryDate,
   deleteDeliverySchedule,
@@ -216,6 +218,19 @@ describe("purchasing API client", () => {
     expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-s");
     expect((init.headers as Record<string, string>)["If-Match"]).toBe('"4"');
     expect(JSON.parse(String(init.body))).toEqual({ quantities: ["40", "35"] });
+  });
+
+  it("starts a release run with an Idempotency-Key and lists runs by status", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: "run1", items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await releaseRequisitions({ legalEntityId: "le1", windowDays: 14 }, "key-r");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/procurement/requisition-releases");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-r");
+    expect(JSON.parse(String(init.body))).toEqual({ legalEntityId: "le1", windowDays: 14 });
+    await listReleaseRuns({ legalEntityId: "le1", status: "PARTIAL" });
+    expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe("/api/v1/procurement/requisition-releases?legalEntityId=le1&status=PARTIAL");
   });
 
   it("awards and closes RFQs with If-Match and an Idempotency-Key", async () => {

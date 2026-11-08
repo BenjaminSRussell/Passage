@@ -640,6 +640,74 @@ export function consolidateRequisitions(input: ConsolidationInput, idempotencyKe
   });
 }
 
+// --- Requisition release runs (FR-17.3, PRD 3.17.16) ---
+
+export type ReleaseStatus = "EMPTY" | "COMPLETED" | "PARTIAL" | "FAILED";
+
+/** A draft purchase order a release run created. */
+export interface ReleasedOrder {
+  purchaseOrderId: string;
+  number: string;
+  vendorId: string;
+  currency: string;
+  total: string;
+  lineCount: number;
+}
+
+/** A requisition line a run left in the consolidation queue, with the problem that stopped it. */
+export interface ReleaseSkip {
+  requisitionLineId: string;
+  requisitionNumber: string;
+  lineNo: number;
+  vendorId?: string;
+  code: string;
+  reason: string;
+}
+
+/** The buyer's record of one release run: linesReleased + linesSkipped = linesConsidered. */
+export interface ReleaseRun {
+  id: string;
+  legalEntityId: string;
+  status: ReleaseStatus;
+  windowDays: number;
+  maxLines: number;
+  linesConsidered: number;
+  linesReleased: number;
+  linesSkipped: number;
+  purchaseOrders: ReleasedOrder[];
+  skipped: ReleaseSkip[];
+  warnings: Warning[];
+  requestedBy?: string;
+  createdAt: string;
+}
+
+export interface RequisitionReleaseInput {
+  legalEntityId: string;
+  windowDays?: number;
+  maxLines?: number;
+}
+
+export function listReleaseRuns(filters: { legalEntityId?: string; status?: ReleaseStatus | "" } = {}, options: ListOptions = {}) {
+  return list<ReleaseRun>(
+    "/requisition-releases",
+    { legalEntityId: filters.legalEntityId || undefined, status: filters.status || undefined },
+    options,
+  );
+}
+
+export function getReleaseRun(id: string, signal?: AbortSignal) {
+  return send<ReleaseRun>("GET", `/requisition-releases/${encodeURIComponent(id)}`, { signal });
+}
+
+/**
+ * Releases the approved requisition lines of a legal entity that have a vendor into draft purchase orders (needs
+ * procurement.purchase-order.maintain). Lines that could not be ordered stay in the consolidation queue and are
+ * listed in the run's skipped lines.
+ */
+export function releaseRequisitions(input: RequisitionReleaseInput, idempotencyKey = newIdempotencyKey()) {
+  return send<ReleaseRun>("POST", "/requisition-releases", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
 // --- Open supply (FR-17.14, read by master planning) ---
 
 /** A line of a confirmed purchase order with quantity still to receive. */
