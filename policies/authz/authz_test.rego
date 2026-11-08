@@ -1545,3 +1545,22 @@ test_org_operating_unit_import if {
 	allowed("org.operating-unit.write", "POST", "/v1/org/operating-units:import")
 	not allowed("org.read", "POST", "/v1/org/operating-units:import")
 }
+
+# Wave 26 slice 24: commission settlement export records.
+test_pricing_commission_settlement_exports if {
+	allowed("pricing.commission.maintain", "POST", "/v1/pricing/commission/settlement-exports")
+	allowed("pricing.commission.maintain", "POST", "/v1/pricing/commission/settlement-exports/e-1:void")
+	allowed("pricing.commission.view", "GET", "/v1/pricing/commission/settlement-exports")
+	allowed("pricing.commission.view", "GET", "/v1/pricing/commission/settlement-exports/e-1")
+	allowed("pricing.commission.view", "GET", "/v1/pricing/commission/settlement-exports/e-1/file")
+	not allowed("pricing.commission.view", "POST", "/v1/pricing/commission/settlement-exports/e-1:void")
+}
+
+# Wave 6 slice 48: name translations of legal entities, operating units, sites and warehouses.
+test_org_name_translation_writes if {
+	allowed("org.legal-entity.write", "PUT", "/v1/org/legal-entities/le-1/translations/fr")
+	allowed("org.operating-unit.write", "DELETE", "/v1/org/operating-units/ou-1/translations/fr")
+	allowed("org.site.write", "PUT", "/v1/org/sites/s-1/translations/fr-CA")
+	allowed("org.site.write", "DELETE", "/v1/org/warehouses/w-1/translations/fr")
+	not allowed("org.read", "PUT", "/v1/org/sites/s-1/translations/fr")
+}

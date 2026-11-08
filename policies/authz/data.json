@@ -2317,7 +2317,8 @@
     ]},
     "org.legal-entity.write": {"permissions": [
       {"resource": "/v1/org/legal-entities", "methods": ["POST"]},
-      {"resource": "/v1/org/legal-entities/*", "methods": ["PATCH"]}
+      {"resource": "/v1/org/legal-entities/*", "methods": ["PATCH"]},
+      {"resource": "/v1/org/legal-entities/*/translations/*", "methods": ["PUT", "DELETE"]}
     ]},
     "org.operating-unit.write": {"permissions": [
       {"resource": "/v1/org/operating-units", "methods": ["POST"]},
@@ -2328,7 +2329,8 @@
       {"resource": "/v1/org/teams/*", "methods": ["PATCH"]},
       {"resource": "/v1/org/teams/*/members", "methods": ["POST"]},
       {"resource": "/v1/org/teams/*/members/*", "methods": ["DELETE"]},
-      {"resource": "/v1/org/teams/*/members/*:end", "methods": ["POST"]}
+      {"resource": "/v1/org/teams/*/members/*:end", "methods": ["POST"]},
+      {"resource": "/v1/org/operating-units/*/translations/*", "methods": ["PUT", "DELETE"]}
     ]},
     "org.package.manage": {"permissions": [
       {"resource": "/v1/org/export", "methods": ["POST"]},
@@ -2405,7 +2407,9 @@
       {"resource": "/v1/org/sites", "methods": ["POST"]},
       {"resource": "/v1/org/sites/*", "methods": ["PATCH"]},
       {"resource": "/v1/org/warehouses", "methods": ["POST"]},
-      {"resource": "/v1/org/warehouses/*", "methods": ["PATCH"]}
+      {"resource": "/v1/org/warehouses/*", "methods": ["PATCH"]},
+      {"resource": "/v1/org/sites/*/translations/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/org/warehouses/*/translations/*", "methods": ["PUT", "DELETE"]}
     ]},
     "payroll.run.maintain": {"permissions": [
       {"resource": "/v1/payroll/calculations", "methods": ["POST"]},
@@ -2507,7 +2511,9 @@
     "pricing.commission.maintain": {"permissions": [
       {"resource": "/v1/pricing/commission/postings", "methods": ["POST"]},
       {"resource": "/v1/pricing/commission/rules", "methods": ["POST"]},
-      {"resource": "/v1/pricing/commission/sales-groups", "methods": ["POST"]}
+      {"resource": "/v1/pricing/commission/sales-groups", "methods": ["POST"]},
+      {"resource": "/v1/pricing/commission/settlement-exports", "methods": ["POST"]},
+      {"resource": "/v1/pricing/commission/settlement-exports/*:void", "methods": ["POST"]}
     ]},
     "pricing.commission.view": {"permissions": [
       {"resource": "/v1/pricing/commission/rules", "methods": ["GET"]},
@@ -2515,7 +2521,10 @@
       {"resource": "/v1/pricing/commission/sales-groups/*", "methods": ["GET"]},
       {"resource": "/v1/pricing/commission/settlement-export", "methods": ["GET"]},
       {"resource": "/v1/pricing/commission/transactions", "methods": ["GET"]},
-      {"resource": "/v1/pricing/commission/reps/*/statement", "methods": ["GET"]}
+      {"resource": "/v1/pricing/commission/reps/*/statement", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commission/settlement-exports", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commission/settlement-exports/*", "methods": ["GET"]},
+      {"resource": "/v1/pricing/commission/settlement-exports/*/file", "methods": ["GET"]}
     ]},
     "pricing.fund.maintain": {"permissions": [
       {"resource": "/v1/pricing/funds", "methods": ["GET", "POST"]},
