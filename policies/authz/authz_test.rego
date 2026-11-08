@@ -1565,6 +1565,14 @@ test_org_name_translation_writes if {
 	not allowed("org.read", "PUT", "/v1/org/sites/s-1/translations/fr")
 }
 
+# Wave 17 slice 28: requisition release runs.
+test_procurement_requisition_releases if {
+	allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/requisition-releases")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/requisition-releases")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/requisition-releases/r-1")
+	not allowed("procurement.purchase-order.inquire", "POST", "/v1/procurement/requisition-releases")
+}
+
 # Wave 15 slice 16: report library and schedule firings.
 test_reporting_library_and_firings if {
 	allowed("reporting.statement.view", "GET", "/v1/reporting/library")

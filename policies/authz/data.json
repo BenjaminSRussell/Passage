@@ -503,7 +503,8 @@
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/service", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/procurement/inbound-changes/*:retry", "methods": ["POST"]},
       {"resource": "/v1/procurement/inbound-changes/*:acknowledge", "methods": ["POST"]},
-      {"resource": "/v1/procurement/requisition-lines/*:split", "methods": ["POST"]}
+      {"resource": "/v1/procurement/requisition-lines/*:split", "methods": ["POST"]},
+      {"resource": "/v1/procurement/requisition-releases", "methods": ["POST"]}
     ]},
     "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
@@ -556,7 +557,9 @@
       {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes/*", "methods": ["GET"]},
-      {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]}
+      {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/requisition-releases", "methods": ["GET"]},
+      {"resource": "/v1/procurement/requisition-releases/*", "methods": ["GET"]}
     ]},
     "purchasing.inbound.apply": {"flag": true, "permissions": []},
     "procurement.purchase-order.confirm": {"permissions": [
