@@ -416,10 +416,12 @@ paths:
         - $ref: "#/components/parameters/LegalEntityQuery"
         - {name: customerId, in: query, schema: {type: string, format: uuid}}
         - {name: status, in: query, schema: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED]}}
+        - {name: expiringBy, in: query, description: "only agreements whose validTo is on or before this day (YYYY-MM-DD), soonest first; open-ended agreements never match", schema: {type: string, format: date}}
+        - {name: minUsedPct, in: query, description: "only agreements whose released figure is at least this percent of the commitment (0 to 1000, up to 2 decimals)", schema: {type: string, pattern: "^[0-9]{1,4}(\\.[0-9]{1,2})?$"}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
         "200":
-          description: agreements
+          description: agreements, newest first or by validTo with expiringBy
           content:
             application/json:
               schema:
@@ -1110,6 +1112,45 @@ paths:
                   items:
                     type: array
                     items: {$ref: "#/components/schemas/CreditProfile"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/credit-exposure:
+    get:
+      summary: Credit exposure by customer, ranked by the share of the credit limit used (PRD 5.27.14)
+      description: >-
+        One row per credit profile in the caller's scope with the exposure behind it
+        and how much of the limit it uses, highest use first, customers without a
+        limit last. The balance is what the profile's limit type counts against the
+        limit, the figure the CR-1 credit check starts from: open AR less unapplied
+        cash, plus delivered-not-invoiced goods for BALANCE_PACKING_SLIP and
+        BALANCE_ALL, plus open orders for BALANCE_ALL. Open orders and
+        delivered-not-invoiced are computed by sales from the orders now; open AR and
+        unapplied cash are the values stored on the profile until the receivables
+        projection exists (waves 29/30). Every profile in scope is measured before
+        the ranking is cut to the page, up to 50,000 profiles; past that the
+        response says the ranking is partial.
+      operationId: listCreditExposure
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: legalEntityId, in: query, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: string, enum: [NO_LIMIT, WITHIN, OVER_LIMIT, OVER_TOLERANCE]}, description: "WITHIN is at or under the limit, OVER_LIMIT above it within the tolerance (CR-1 warns), OVER_TOLERANCE above it (CR-1 fails), NO_LIMIT for limit type NONE or a limit of 0"}
+        - {name: minUtilizationPct, in: query, description: "only customers using at least this percent of their limit (0 or more, up to 2 decimals); customers without a limit are left out", schema: {type: string, pattern: "^[0-9]+(\\.[0-9]{1,2})?$"}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: the ranked rows, with the number of customers that matched before the page was cut
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CreditExposureRow"}
+                  total: {type: integer, description: customers that matched the filters}
+                  truncated: {type: boolean, description: true when the scope holds more than 50000 credit profiles; only the first 50000 in legal entity and customer order were measured, so the ranking may leave some out}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/credit-profiles/{customerId}:
@@ -3382,6 +3423,7 @@ components:
         overdeliveryPct: {$ref: "#/components/schemas/Percent", description: tolerance above the commitment in percent (BR-27.9)}
         ceilingQty: {$ref: "#/components/schemas/Money", description: the commitment plus the over-delivery tolerance, the most that can be released}
         remainingQty: {$ref: "#/components/schemas/Money", description: ceilingQty less releasedQty, what can still be released}
+        usedPct: {type: string, description: "releasedQty as a percent of commitmentQty, 2 decimals, half-even; above 100 when the over-delivery tolerance is drawn on; absent for a commitment of 0", example: "62.5"}
         status: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED], description: EXHAUSTED once releasedQty reaches ceilingQty}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
@@ -3705,6 +3747,22 @@ components:
         exposure: {$ref: "#/components/schemas/Exposure"}
         version: {type: integer}
         updatedAt: {type: string, format: date-time}
+    CreditExposureRow:
+      type: object
+      required: [legalEntityId, customerId, currency, limitType, limit, threshold, exposure, balance, status, understated]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        currency: {type: string}
+        limitType: {type: string, enum: [NONE, BALANCE, BALANCE_PACKING_SLIP, BALANCE_ALL]}
+        limit: {$ref: "#/components/schemas/Money"}
+        threshold: {$ref: "#/components/schemas/Money", description: the limit with the larger of the percentage and the amount tolerance; above it CR-1 holds an order}
+        exposure: {$ref: "#/components/schemas/Exposure"}
+        balance: {$ref: "#/components/schemas/Money", description: the exposure the limit type counts against the limit; negative when unapplied cash exceeds the open AR}
+        utilizationPct: {type: string, description: "balance as a percent of the limit, 2 decimals, half-even; absent when status is NO_LIMIT", example: "87.5"}
+        status: {type: string, enum: [NO_LIMIT, WITHIN, OVER_LIMIT, OVER_TOLERANCE]}
+        understated: {type: boolean, description: true when amounts in other currencies that the limit type counts were left out for want of an FX rate, so the balance is a floor}
+        reviewDate: {type: string, format: date}
     SalesParametersRequest:
       type: object
       description: every value except the one-time order limit is required; the PUT replaces them all. Names are the PRD 5.27.13 parameter names.

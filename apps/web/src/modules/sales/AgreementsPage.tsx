@@ -15,12 +15,13 @@ import {
   type CommitmentType,
   type Problem,
 } from "./api/client";
-import { commitmentText, DECIMAL, money, PERCENT, sentence, shortId, UUID } from "./format";
+import { commitmentText, dash, DECIMAL, money, PERCENT, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const PRICE = /^\d+(\.\d{1,4})?$/;
+const PERCENT_USED = /^\d{1,4}(\.\d{1,2})?$/;
 
 export interface AgreementValues {
   legalEntityId: string;
@@ -93,6 +94,7 @@ const columns: DataTableColumn<Agreement>[] = [
   { key: "commitmentQty", header: "Committed", align: "end", render: (a) => commitmentText(a, a.commitmentQty) },
   { key: "releasedQty", header: "Released", align: "end", render: (a) => commitmentText(a, a.releasedQty) },
   { key: "remainingQty", header: "Remaining", align: "end", render: (a) => commitmentText(a, a.remainingQty) },
+  { key: "usedPct", header: "Used", align: "end", render: (a) => (a.usedPct === undefined ? dash : `${a.usedPct}%`) },
   { key: "validity", header: "Valid", render: (a) => (a.validFrom || a.validTo ? `${a.validFrom ?? "…"} to ${a.validTo ?? "…"}` : "Open-ended") },
   { key: "status", header: "Status", render: (a) => <StatusPill status={a.status} /> },
 ];
@@ -100,11 +102,19 @@ const columns: DataTableColumn<Agreement>[] = [
 /** Sales agreements and releases (PRD §5.27.14): commitment, released and remaining per agreement (FR-27.10). */
 export function AgreementsPage() {
   const navigate = useNavigate();
-  const [draft, setDraft] = useState<{ legalEntityId: string; customerId: string; status: AgreementStatus | "" }>({ legalEntityId: "", customerId: "", status: "" });
+  const [draft, setDraft] = useState<{ legalEntityId: string; customerId: string; status: AgreementStatus | ""; expiringBy: string; minUsedPct: string }>({
+    legalEntityId: "",
+    customerId: "",
+    status: "",
+    expiringBy: "",
+    minUsedPct: "",
+  });
   const [filter, setFilter] = useState<AgreementFilter>({});
   const invalid: Errors = {};
   if (draft.legalEntityId.trim() && !UUID.test(draft.legalEntityId.trim())) invalid.legalEntityId = "Enter a legal entity UUID.";
   if (draft.customerId.trim() && !UUID.test(draft.customerId.trim())) invalid.customerId = "Enter a customer UUID.";
+  if (draft.expiringBy !== "" && !DATE.test(draft.expiringBy)) invalid.expiringBy = "Choose a date.";
+  if (draft.minUsedPct !== "" && !PERCENT_USED.test(draft.minUsedPct)) invalid.minUsedPct = "Enter a percent such as 80 or 92.5.";
   const state = useLoad((signal) => listAgreements(filter, signal), JSON.stringify(filter));
 
   return (
@@ -122,7 +132,7 @@ export function AgreementsPage() {
         className={styles.toolbar}
         onSubmit={(e) => {
           e.preventDefault();
-          if (Object.keys(invalid).length === 0) setFilter({ legalEntityId: draft.legalEntityId.trim(), customerId: draft.customerId.trim(), status: draft.status });
+          if (Object.keys(invalid).length === 0) setFilter({ legalEntityId: draft.legalEntityId.trim(), customerId: draft.customerId.trim(), status: draft.status, expiringBy: draft.expiringBy, minUsedPct: draft.minUsedPct });
         }}
       >
         <FormField id="agreements-le" label="Legal entity" error={invalid.legalEntityId} optional>
@@ -142,6 +152,12 @@ export function AgreementsPage() {
               ))}
             </Select>
           )}
+        </FormField>
+        <FormField id="agreements-expiring" label="Ending by" hint="Only agreements that end on or before this day, soonest first." error={invalid.expiringBy} optional>
+          {(control) => <Input {...control} type="date" value={draft.expiringBy} onChange={(e) => setDraft({ ...draft, expiringBy: e.target.value })} invalid={Boolean(invalid.expiringBy)} />}
+        </FormField>
+        <FormField id="agreements-used" label="Used at least (%)" hint="Share of the commitment already released." error={invalid.minUsedPct} optional>
+          {(control) => <Input {...control} inputMode="decimal" value={draft.minUsedPct} onChange={(e) => setDraft({ ...draft, minUsedPct: e.target.value })} invalid={Boolean(invalid.minUsedPct)} />}
         </FormField>
         <Button type="submit">Filter</Button>
       </form>

@@ -14,6 +14,7 @@ import { ChangePolicyPage } from "./ChangePolicyPage";
 import { ChangeRequestDetailPage } from "./ChangeRequestDetailPage";
 import { ChangeRequestsPage } from "./ChangeRequestsPage";
 import { DeliveryTermsDetailPage, DeliveryTermsListPage, NewDeliveryTermsPage } from "./DeliveryTermsPage";
+import { CreditExposurePage } from "./CreditExposurePage";
 import { CreditProfilePage, NewCreditProfilePage } from "./CreditProfileFormPage";
 import { CreditProfilesPage } from "./CreditProfilesPage";
 import { NewOrderPage } from "./NewOrderPage";
@@ -41,7 +42,7 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, customer delivery terms, supplementary items, product proposals, allocation quotas and sales agreements, record deliveries and invoices against orders, close invoiced orders, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
+    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles and rank customers by credit limit used, the per legal entity sales parameters, product listings, customer delivery terms, supplementary items, product proposals, allocation quotas and sales agreements, record deliveries and invoices against orders, close invoiced orders, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/workspace", element: createElement(SalesWorkspacePage), handle: { title: "Sales workspace", duty: "sales.order.read" } },
@@ -58,6 +59,7 @@ const sales: PassageModule = {
     { path: "/sales/change-policy", element: createElement(ChangePolicyPage), handle: { title: "Customer change approval", duty: "sales.order.read" } },
     { path: "/sales/backorders", element: createElement(BackordersPage), handle: { title: "Backorders" } },
     { path: "/sales/credit-holds", element: createElement(HoldQueuePage) },
+    { path: "/sales/credit-exposure", element: createElement(CreditExposurePage), handle: { title: "Credit exposure", duty: "sales.order.read" } },
     { path: "/sales/credit-profiles", element: createElement(CreditProfilesPage) },
     { path: "/sales/credit-profiles/new", element: createElement(NewCreditProfilePage), handle: { title: "New credit profile" } },
     { path: "/sales/credit-profiles/:legalEntityId/:customerId", element: createElement(CreditProfilePage), handle: { title: "Credit profile" } },
@@ -103,6 +105,7 @@ const sales: PassageModule = {
     { label: "Change requests", to: "/sales/change-requests", duty: "sales.order.read" },
     { label: "Quotations", to: "/sales/quotations", duty: "sales.order.read" },
     { label: "Credit release queue", to: "/sales/credit-holds", duty: "sales.credit.release" },
+    { label: "Credit exposure", to: "/sales/credit-exposure", duty: "sales.order.read" },
     { label: "Credit profiles", to: "/sales/credit-profiles", duty: "sales.order.read" },
     { label: "ATP check", to: "/sales/atp", duty: "sales.order.read" },
     { label: "Scheduling release check", to: "/sales/schedule-releases", duty: "sales.agreement.maintain" },

@@ -69,9 +69,13 @@ type Agreement struct {
 	OverdeliveryPct decimal.Decimal `json:"overdeliveryPct"`
 	CeilingQty      decimal.Decimal `json:"ceilingQty"`
 	Remaining       decimal.Decimal `json:"remainingQty"`
-	Status          string          `json:"status"`
-	ValidFrom       *string         `json:"validFrom,omitempty"`
-	ValidTo         *string         `json:"validTo,omitempty"`
+	// UsedPct is the released figure as a percent of the commitment to two
+	// places (it passes 100 when the over-delivery tolerance is drawn on); absent
+	// for a commitment of 0.
+	UsedPct   *decimal.Decimal `json:"usedPct,omitempty"`
+	Status    string           `json:"status"`
+	ValidFrom *string          `json:"validFrom,omitempty"`
+	ValidTo   *string          `json:"validTo,omitempty"`
 	// CumTolerance, CumShipped and CumResetDate are the cumulative quantity
 	// settings of scheduling-agreement releases (BR-27.12): the tolerance a
 	// release's cumulative received quantity may differ from CumShipped, the
@@ -118,7 +122,13 @@ type AgreementFilter struct {
 	LegalEntityID string
 	CustomerID    string
 	Status        string
-	Limit         int
+	// ExpiringBy (YYYY-MM-DD) keeps agreements whose validTo is on or before the
+	// day, soonest first; an open-ended agreement never matches.
+	ExpiringBy string
+	// MinUsedPct keeps agreements whose released figure is at least that percent
+	// of the commitment (a decimal string); empty keeps all.
+	MinUsedPct string
+	Limit      int
 }
 
 // AgreementRelease is one release request: the quantity to draw and the
@@ -171,6 +181,10 @@ func scanAgreement(row pgx.Row) (Agreement, error) {
 	a.OverdeliveryPct = decimal.RequireFromString(pct)
 	a.CeilingQty = domain.AgreementCeiling(a.Commitment, a.OverdeliveryPct)
 	a.Remaining = a.CeilingQty.Sub(a.Released)
+	if a.Commitment.IsPositive() {
+		used := a.Released.Mul(decimal.NewFromInt(100)).Div(a.Commitment).RoundBank(2)
+		a.UsedPct = &used
+	}
 	return a, nil
 }
 
@@ -247,7 +261,10 @@ func (s *Postgres) ListAgreements(ctx context.Context, f AgreementFilter) ([]Agr
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+agreementColumns+` from sales_agreement
 			where tenant_id = $1 and ($2 = '' or legal_entity_id::text = $2) and ($3 = '' or customer_id::text = $3) and ($4 = '' or status = $4)
-			order by created_at desc, id desc limit $5`, p.TenantID, f.LegalEntityID, f.CustomerID, f.Status, f.Limit)
+				and ($6::date is null or valid_to <= $6::date)
+				and ($7::numeric is null or (commitment_qty > 0 and released_qty * 100 >= $7::numeric * commitment_qty))
+			order by case when $6::date is null then null else valid_to end, created_at desc, id desc limit $5`,
+			p.TenantID, f.LegalEntityID, f.CustomerID, f.Status, f.Limit, nullIfEmpty(f.ExpiringBy), nullIfEmpty(f.MinUsedPct))
 		if err != nil {
 			return err
 		}

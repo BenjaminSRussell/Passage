@@ -212,6 +212,18 @@ func (a *API) listAgreements(w http.ResponseWriter, r *http.Request) {
 	if f.Status != "" && f.Status != domain.AgreementActive && f.Status != domain.AgreementExhausted && f.Status != domain.AgreementClosed {
 		fields["status"] = "must be ACTIVE, EXHAUSTED or CLOSED"
 	}
+	if by := q.Get("expiringBy"); by != "" {
+		if _, err := time.Parse(dayLayout, by); err != nil {
+			fields["expiringBy"] = "must be a date such as 2027-03-04"
+		}
+		f.ExpiringBy = by
+	}
+	if raw := q.Get("minUsedPct"); raw != "" {
+		if pct, err := decimal.NewFromString(raw); err != nil || pct.IsNegative() || pct.GreaterThan(decimal.NewFromInt(1000)) || pct.Exponent() < -2 {
+			fields["minUsedPct"] = "must be a percent from 0 to 1000 with up to 2 decimals"
+		}
+		f.MinUsedPct = raw
+	}
 	limit, ok := pageLimit(q.Get("limit"))
 	if !ok {
 		fields["limit"] = fmt.Sprintf("must be 1 to %d", maxPageSize)

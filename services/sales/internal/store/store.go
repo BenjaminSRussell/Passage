@@ -286,6 +286,7 @@ type Store interface {
 	GetCreditProfile(ctx context.Context, legalEntityID, customerID string) (CreditProfile, error)
 	ListCreditProfiles(ctx context.Context, legalEntityID string, limit int) ([]CreditProfile, error)
 	ListCreditProfilesReviewDue(ctx context.Context, legalEntityID, dueBy string, limit int) ([]CreditProfile, error)
+	ScanCreditProfiles(ctx context.Context, legalEntityID, customerID string, batch int, fn func([]CreditProfile) error) error
 	PutCreditProfile(ctx context.Context, in CreditProfile, version int) (CreditProfile, error)
 	ApplyHold(ctx context.Context, orderID string, version int, in HoldRequest, actor string) (Order, error)
 	CreateListing(ctx context.Context, in ProductListing) (ProductListing, error)
@@ -1380,6 +1381,55 @@ func (s *Postgres) ListCreditProfiles(ctx context.Context, legalEntityID string,
 // manager works from before the CR-4 review-date rule holds orders (PRD 5.27.6).
 func (s *Postgres) ListCreditProfilesReviewDue(ctx context.Context, legalEntityID, dueBy string, limit int) ([]CreditProfile, error) {
 	return s.listProfiles(ctx, legalEntityID, dueBy, limit)
+}
+
+// ScanCreditProfiles calls fn with every credit profile in the caller's scope
+// (one legal entity and one customer when set), in legal entity and customer
+// order, batch profiles at a time with their computed open orders and
+// delivered-not-invoiced figures. It reads in one transaction and pages by key,
+// so a report sees every profile rather than the first page. An error from fn
+// stops the scan and is returned.
+func (s *Postgres) ScanCreditProfiles(ctx context.Context, legalEntityID, customerID string, batch int, fn func([]CreditProfile) error) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var afterLE, afterCustomer *string // nil starts at the first profile
+		for {
+			rows, err := tx.Query(ctx, `select `+profileColumns+` from credit_profile
+				where tenant_id = $1 and ($2 = '' or legal_entity_id::text = $2) and ($3 = '' or customer_id::text = $3)
+					and ($4::uuid is null or (legal_entity_id, customer_id) > ($4::uuid, $5::uuid))
+				order by legal_entity_id, customer_id limit $6`, p.TenantID, legalEntityID, customerID, afterLE, afterCustomer, batch)
+			if err != nil {
+				return err
+			}
+			page := []CreditProfile{}
+			for rows.Next() {
+				c, err := scanProfile(rows)
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				page = append(page, c)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if len(page) == 0 {
+				return nil
+			}
+			if err := listOpenOrdersTx(ctx, tx, p.TenantID, page); err != nil {
+				return err
+			}
+			if err := fn(page); err != nil {
+				return err
+			}
+			if len(page) < batch {
+				return nil
+			}
+			last := page[len(page)-1]
+			afterLE, afterCustomer = &last.LegalEntityID, &last.CustomerID
+		}
+	})
 }
 
 func (s *Postgres) listProfiles(ctx context.Context, legalEntityID, dueBy string, limit int) ([]CreditProfile, error) {

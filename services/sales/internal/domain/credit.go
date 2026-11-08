@@ -140,19 +140,8 @@ func EvaluateCredit(in CreditInput) CreditEvaluation {
 		rules = append(rules, RuleResult{ID: "CR-1", Result: RuleFail, Value: in.Order.String() + " " + in.OrderCurrency,
 			Threshold: p.Limit.String() + " " + p.Currency, Note: "order currency differs from the credit profile currency; no FX rate is available to convert it"})
 	} else if p.LimitType != LimitNone {
-		// Unapplied cash is a credit the customer already paid, so it lowers the
-		// balance (BR-27.3 "open AR + unapplied" with unapplied as a credit).
-		base := e.OpenAR.Sub(e.Unapplied)
-		if p.LimitType == LimitBalancePackingSlip || p.LimitType == LimitBalanceAll {
-			base = base.Add(e.DeliveredNotInvoiced)
-		}
-		if p.LimitType == LimitBalanceAll {
-			base = base.Add(e.OpenOrders)
-		}
-		exposure := base.Add(in.Order)
-		byPct := p.Limit.Mul(decimal.NewFromInt(100).Add(p.TolerancePct)).Div(decimal.NewFromInt(100))
-		byAmount := p.Limit.Add(p.ToleranceAmount)
-		threshold := decimal.Max(byPct, byAmount)
+		exposure := CountedBalance(*p, e).Add(in.Order)
+		threshold := LimitThreshold(*p)
 		result := RulePass
 		switch {
 		case exposure.GreaterThan(threshold):
@@ -229,4 +218,73 @@ func currencyList(amounts []CurrencyAmount) string {
 		out += " " + o.Amount.String() + " " + o.Currency
 	}
 	return out
+}
+
+// CountedBalance is the balance CR-1 compares with the limit before an order is
+// added: open AR less unapplied cash (a credit the customer already paid, so it
+// lowers the balance), plus delivered-not-invoiced goods for the packing-slip
+// and all-in limit types and open orders for the all-in type.
+func CountedBalance(p CreditProfile, e Exposure) decimal.Decimal {
+	base := e.OpenAR.Sub(e.Unapplied)
+	if p.LimitType == LimitBalancePackingSlip || p.LimitType == LimitBalanceAll {
+		base = base.Add(e.DeliveredNotInvoiced)
+	}
+	if p.LimitType == LimitBalanceAll {
+		base = base.Add(e.OpenOrders)
+	}
+	return base
+}
+
+// LimitThreshold is the balance above which CR-1 fails: the limit with the
+// larger of the percentage and the amount tolerance.
+func LimitThreshold(p CreditProfile) decimal.Decimal {
+	byPct := p.Limit.Mul(decimal.NewFromInt(100).Add(p.TolerancePct)).Div(decimal.NewFromInt(100))
+	byAmount := p.Limit.Add(p.ToleranceAmount)
+	return decimal.Max(byPct, byAmount)
+}
+
+// Utilization statuses of the credit exposure report.
+const (
+	UtilNoLimit       = "NO_LIMIT"
+	UtilWithin        = "WITHIN"
+	UtilOverLimit     = "OVER_LIMIT"
+	UtilOverTolerance = "OVER_TOLERANCE"
+)
+
+// Utilization is how much of a customer's credit limit the exposure uses.
+type Utilization struct {
+	// Balance is CountedBalance; Threshold the limit with tolerance.
+	Balance   decimal.Decimal
+	Threshold decimal.Decimal
+	// Pct is Balance as a percent of the limit to two places; nil when the
+	// profile has no limit (type NONE or a limit of 0).
+	Pct *decimal.Decimal
+	// Status is NO_LIMIT, WITHIN (at or under the limit), OVER_LIMIT (above the
+	// limit, within the tolerance: CR-1 warns) or OVER_TOLERANCE (CR-1 fails).
+	Status string
+	// Understated is true when amounts in other currencies that the limit type
+	// counts were left out for want of an FX rate, so Balance is a floor.
+	Understated bool
+}
+
+// Utilize measures a customer's exposure against the profile's limit.
+func Utilize(p CreditProfile, e Exposure) Utilization {
+	u := Utilization{Balance: CountedBalance(p, e), Threshold: LimitThreshold(p), Status: UtilNoLimit}
+	counted := p.LimitType == LimitBalancePackingSlip || p.LimitType == LimitBalanceAll
+	u.Understated = (counted && len(e.DeliveredNotInvoicedOtherCurrencies) > 0) ||
+		(p.LimitType == LimitBalanceAll && len(e.OpenOrdersOtherCurrencies) > 0)
+	if p.LimitType == LimitNone || !p.Limit.IsPositive() {
+		return u
+	}
+	pct := u.Balance.Mul(decimal.NewFromInt(100)).Div(p.Limit).RoundBank(2)
+	u.Pct = &pct
+	switch {
+	case u.Balance.GreaterThan(u.Threshold):
+		u.Status = UtilOverTolerance
+	case u.Balance.GreaterThan(p.Limit):
+		u.Status = UtilOverLimit
+	default:
+		u.Status = UtilWithin
+	}
+	return u
 }

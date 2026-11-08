@@ -156,6 +156,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}:record-shipped", a.recordShipped)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/sales/atp:check", a.atpCheck)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles, a.listCreditProfiles)
+	r.With(authz.RequireDuty(dutyRead)).Get(creditExposure, a.listCreditExposure)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles+"/{customerId}", a.getCreditProfile)
 	r.With(authz.RequireDuty(dutyCreditMaintain)).Put(creditProfiles+"/{customerId}", a.putCreditProfile)
 	r.With(authz.RequireDuty(dutyRead)).Get(changeRequests, a.listChangeRequests)

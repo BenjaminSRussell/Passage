@@ -287,6 +287,8 @@ export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "
   commitmentQty: Decimal;
   releasedQty: Decimal;
   remainingQty: Decimal;
+  /** Released as a percent of the commitment (2 decimals); above 100 when the over-delivery tolerance is drawn on; absent for a commitment of 0 or on older responses. */
+  usedPct?: string;
   status: AgreementStatus;
   validFrom?: string;
   validTo?: string;
@@ -627,6 +629,53 @@ export async function listCreditProfiles(legalEntityId = "", signal?: AbortSigna
   return body.items ?? [];
 }
 
+export const UTILIZATION_STATUSES = ["NO_LIMIT", "WITHIN", "OVER_LIMIT", "OVER_TOLERANCE"] as const;
+export type UtilizationStatus = (typeof UTILIZATION_STATUSES)[number];
+
+/** One customer of the credit exposure report (PRD §5.27.14). */
+export interface CreditExposureRow {
+  legalEntityId: string;
+  customerId: string;
+  currency: string;
+  limitType: LimitType;
+  limit: Decimal;
+  /** The limit with the tolerance: above it the credit check holds an order. */
+  threshold: Decimal;
+  exposure: Exposure;
+  /** What the limit type counts against the limit. */
+  balance: Decimal;
+  /** Balance as a percent of the limit; absent when the customer has no limit. */
+  utilizationPct?: string;
+  status: UtilizationStatus;
+  /** The balance leaves out amounts in other currencies, so it is a floor. */
+  understated: boolean;
+  reviewDate?: string;
+}
+
+export interface CreditExposureFilter {
+  legalEntityId?: string;
+  customerId?: string;
+  status?: UtilizationStatus | "";
+  minUtilizationPct?: string;
+}
+
+export interface CreditExposureReport {
+  items: CreditExposureRow[];
+  /** Customers that matched the filters, before the page was cut. */
+  total: number;
+  /** The scope has more credit profiles than the report measures (50,000), so the ranking may leave some out. */
+  truncated: boolean;
+}
+
+export async function listCreditExposure(filter: CreditExposureFilter = {}, signal?: AbortSignal): Promise<CreditExposureReport> {
+  const body = await json<Partial<CreditExposureReport>>(
+    `/credit-exposure${query({ legalEntityId: filter.legalEntityId, customerId: filter.customerId, status: filter.status, minUtilizationPct: filter.minUtilizationPct, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return { items: body.items ?? [], total: body.total ?? 0, truncated: body.truncated ?? false };
+}
+
 export function getCreditProfile(legalEntityId: string, customerId: string, signal?: AbortSignal): Promise<Versioned<CreditProfile>> {
   return versioned<CreditProfile>(`/credit-profiles/${encodeURIComponent(customerId)}${query({ legalEntityId })}`, {}, signal);
 }
@@ -755,11 +804,15 @@ export interface AgreementFilter {
   legalEntityId?: string;
   customerId?: string;
   status?: AgreementStatus | "";
+  /** Only agreements ending on or before this day (YYYY-MM-DD), soonest first. */
+  expiringBy?: string;
+  /** Only agreements that released at least this percent of the commitment. */
+  minUsedPct?: string;
 }
 
 export async function listAgreements(filter: AgreementFilter = {}, signal?: AbortSignal): Promise<Agreement[]> {
   const body = await json<{ items?: Agreement[] }>(
-    `/agreements${query({ legalEntityId: filter.legalEntityId, customerId: filter.customerId, status: filter.status, limit: 200 })}`,
+    `/agreements${query({ legalEntityId: filter.legalEntityId, customerId: filter.customerId, status: filter.status, expiringBy: filter.expiringBy, minUsedPct: filter.minUsedPct, limit: 200 })}`,
     {},
     signal,
   );
