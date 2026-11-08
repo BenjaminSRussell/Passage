@@ -1119,7 +1119,8 @@ export interface FreeGoodsRuleInput {
   productId: string;
   unit: string;
   kind: FreeGoodsKind;
-  calcRule: FreeGoodsCalcRule;
+  /** Left out, the legal entity's freeGoodsCalcRule parameter applies (WHOLE_UNITS unless changed). */
+  calcRule?: FreeGoodsCalcRule;
   everyQuantity: string;
   freeQuantity: string;
   minQuantity: string;
@@ -1128,6 +1129,7 @@ export interface FreeGoodsRuleInput {
 }
 
 export interface FreeGoodsRule extends FreeGoodsRuleInput {
+  calcRule: FreeGoodsCalcRule;
   id: string;
   withdrawn: boolean;
   version: number;
@@ -1157,6 +1159,21 @@ export function getFreeGoodsRule(id: string, signal?: AbortSignal): Promise<Free
 
 export function createFreeGoodsRule(body: FreeGoodsRuleInput, key: string = newKey()): Promise<FreeGoodsRule> {
   return post<FreeGoodsRule>("/free-goods-rules", body, key);
+}
+
+/** The values a revise replaces; the rule's customers, product, unit and variant never change. */
+export interface FreeGoodsRuleRevision {
+  calcRule: FreeGoodsCalcRule;
+  everyQuantity: string;
+  freeQuantity: string;
+  minQuantity: string;
+  validFrom: string;
+  validTo: string;
+}
+
+/** POST /free-goods-rules/{id}:revise - the next resolve uses the revised values (FR-26.22). */
+export function reviseFreeGoodsRule(id: string, version: number, body: FreeGoodsRuleRevision, key: string = newKey()): Promise<FreeGoodsRule> {
+  return post<FreeGoodsRule>(`/free-goods-rules/${encodeURIComponent(id)}:revise`, { version, ...body }, key);
 }
 
 /** POST /free-goods-rules/{id}:withdraw - the rule leaves the next resolve. */
@@ -1593,6 +1610,8 @@ export interface PricingParameters {
   priceSearchMode?: PriceSearchMode;
   /** SURCHARGE threshold per currency (FR-26.6); a currency not named keeps the reference threshold (250 USD, 200 EUR). */
   smallOrderThresholds?: Record<string, string>;
+  /** Calculation rule a new free goods rule takes when its create request names none (BR-26.13); WHOLE_UNITS by default. */
+  freeGoodsCalcRule?: FreeGoodsCalcRule;
   /** 0 when the legal entity has no stored parameters. */
   version: number;
   updatedBy?: string;
@@ -1611,8 +1630,9 @@ export function getPricingParameters(legalEntityId: string, signal?: AbortSignal
   return send<PricingParameters>(`/parameters${query({ legalEntityId })}`, {}, signal);
 }
 
-export type PricingParametersInput = Omit<PricingParameters, "updatedBy" | "updatedAt" | "priceSearchMode" | "smallOrderThresholds"> & {
+export type PricingParametersInput = Omit<PricingParameters, "updatedBy" | "updatedAt" | "priceSearchMode" | "smallOrderThresholds" | "freeGoodsCalcRule"> & {
   priceSearchMode: PriceSearchMode;
+  freeGoodsCalcRule: FreeGoodsCalcRule;
   smallOrderThresholds: Record<string, string>;
 };
 

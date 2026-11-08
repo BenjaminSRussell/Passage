@@ -18,7 +18,21 @@ const (
 	freeGoodsPath         = "/v1/pricing/free-goods-rules"
 	freeGoodsRulePath     = "/v1/pricing/free-goods-rules/{id}"
 	freeGoodsWithdrawPath = "/v1/pricing/free-goods-rules/{id}:withdraw"
+	freeGoodsRevisePath   = "/v1/pricing/free-goods-rules/{id}:revise"
 )
+
+// freeGoodsReviseRequest is the body of :revise. Every value is required, since the revision
+// replaces the quantities, the calculation rule and the validity (the rule's customer, product,
+// unit and kind never change).
+type freeGoodsReviseRequest struct {
+	Version       int    `json:"version"`
+	CalcRule      string `json:"calcRule"`
+	EveryQuantity string `json:"everyQuantity"`
+	FreeQuantity  string `json:"freeQuantity"`
+	MinQuantity   string `json:"minQuantity"`
+	ValidFrom     string `json:"validFrom"`
+	ValidTo       string `json:"validTo"`
+}
 
 type freeGoodsRequest struct {
 	LegalEntityID string `json:"legalEntityId"`
@@ -67,6 +81,7 @@ func (a *API) registerFreeGoodsRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get(freeGoodsPath, a.listFreeGoods)
 	r.With(authz.RequireDuty(dutyView)).Get(freeGoodsRulePath, a.getFreeGoods)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(freeGoodsWithdrawPath, a.withdrawFreeGoods)
+	r.With(authz.RequireDuty(dutyMaintain)).Post(freeGoodsRevisePath, a.reviseFreeGoods)
 }
 
 func optionalDecimal(raw string, field string, fields map[string]string) decimal.Decimal {
@@ -107,10 +122,15 @@ func (a *API) createFreeGoods(w http.ResponseWriter, r *http.Request) {
 		fields["freeQuantity"] = "must be a decimal"
 	}
 	min := optionalDecimal(req.MinQuantity, "minQuantity", fields)
-	if req.CalcRule == "" {
-		// The PRD's free_goods_calc_rule parameter defaults to WHOLE_UNITS (§5.26.13);
-		// there is no per-entity parameter table yet, so the default is fixed.
-		req.CalcRule = domain.CalcWholeUnits
+	if req.CalcRule == "" && ids.Valid(req.LegalEntityID) {
+		// A create that names no calcRule takes the legal entity's free_goods_calc_rule
+		// parameter (§5.26.13; WHOLE_UNITS when none is stored).
+		params, err := a.entityParameters(r, req.LegalEntityID)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		req.CalcRule = params.FreeGoodsCalcRule
 	}
 	def := domain.FreeGoodsDef{LegalEntityID: req.LegalEntityID, CustomerKind: domain.CustomerKind(req.CustomerKind), CustomerKey: req.CustomerKey,
 		ProductID: req.ProductID, Unit: req.Unit, Kind: req.Kind, Calc: req.CalcRule, Every: every, Free: free, MinQty: min,
@@ -187,6 +207,65 @@ func (a *API) withdrawFreeGoods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule, err := a.store.WithdrawFreeGoodsRule(r.Context(), id, req.Version, r.Header.Get(idempotencyKey))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, freeGoodsResponse(rule))
+}
+
+func (a *API) reviseFreeGoods(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := uuidParam(w, r, domain.CodeFreeGoodsRuleNotFound, "free goods rule")
+	if !ok {
+		return
+	}
+	var req freeGoodsReviseRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.Version < 1 {
+		fields["version"] = "is required and must be at least 1"
+	}
+	if req.CalcRule == "" {
+		fields["calcRule"] = "is required"
+	}
+	from, err1 := time.Parse(dateLayout, req.ValidFrom)
+	to, err2 := time.Parse(dateLayout, req.ValidTo)
+	if err1 != nil || err2 != nil {
+		fields["validity"] = "validFrom and validTo must be dates in YYYY-MM-DD form"
+	}
+	every, err := decimal.NewFromString(req.EveryQuantity)
+	if err != nil {
+		fields["everyQuantity"] = "must be a decimal"
+	}
+	free, err := decimal.NewFromString(req.FreeQuantity)
+	if err != nil {
+		fields["freeQuantity"] = "must be a decimal"
+	}
+	min := optionalDecimal(req.MinQuantity, "minQuantity", fields)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	// The rule's kind decides one check (an inclusive rule gives fewer than it counts), so the
+	// stored rule is read before the revision is validated.
+	cur, err := a.store.GetFreeGoodsRule(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	rev := domain.FreeGoodsRevision{ID: id, Version: req.Version, Calc: req.CalcRule, Every: every, Free: free, MinQty: min,
+		ValidFrom: from, ValidTo: to}
+	if faults := domain.ValidateFreeGoods(rev.Apply(cur)); len(faults) > 0 {
+		validationFailed(w, r, faults)
+		return
+	}
+	rule, err := a.store.ReviseFreeGoodsRule(r.Context(), rev, r.Header.Get(idempotencyKey))
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

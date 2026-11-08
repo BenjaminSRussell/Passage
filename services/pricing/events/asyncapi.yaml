@@ -82,10 +82,12 @@ channels:
         $ref: "#/components/messages/CampaignRevised"
   freeGoodsRule:
     address: passage.pricing.freegoodsrule
-    description: Free goods rule created or withdrawn (FR-26.22).
+    description: Free goods rule created, revised or withdrawn (FR-26.22).
     messages:
       freeGoodsRuleCreated:
         $ref: "#/components/messages/FreeGoodsRuleCreated"
+      freeGoodsRuleRevised:
+        $ref: "#/components/messages/FreeGoodsRuleRevised"
       freeGoodsRuleWithdrawn:
         $ref: "#/components/messages/FreeGoodsRuleWithdrawn"
   commodity:
@@ -262,7 +264,7 @@ operations:
   publishParametersChanged:
     action: send
     channel: {$ref: "#/channels/parameters"}
-    summary: A legal entity's pricing parameters (journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode, small_order_thresholds) were changed (PricingAdmin).
+    summary: A legal entity's pricing parameters (journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode, small_order_thresholds, free_goods_calc_rule) were changed (PricingAdmin).
     messages:
       - {$ref: "#/channels/parameters/messages/parametersChanged"}
   publishTenantParametersChanged:
@@ -301,6 +303,12 @@ operations:
     summary: A free goods rule was created live; the sales cache drops its free goods snapshot for the legal entity.
     messages:
       - {$ref: "#/channels/freeGoodsRule/messages/freeGoodsRuleCreated"}
+  publishFreeGoodsRuleRevised:
+    action: send
+    channel: {$ref: "#/channels/freeGoodsRule"}
+    summary: A live free goods rule's quantities, calculation rule or validity were revised; the sales cache drops its free goods snapshot for the legal entity.
+    messages:
+      - {$ref: "#/channels/freeGoodsRule/messages/freeGoodsRuleRevised"}
   publishFreeGoodsRuleWithdrawn:
     action: send
     channel: {$ref: "#/channels/freeGoodsRule"}
@@ -559,6 +567,12 @@ components:
     FreeGoodsRuleCreated:
       name: dev.passage.pricing.freegoodsrule.created.v1
       title: Free goods rule created
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/FreeGoodsRuleEvent"
+    FreeGoodsRuleRevised:
+      name: dev.passage.pricing.freegoodsrule.revised.v1
+      title: Free goods rule revised
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/FreeGoodsRuleEvent"
@@ -843,8 +857,8 @@ components:
     FreeGoodsRuleEvent:
       type: object
       description: >
-        A free goods rule (FR-26.22) after create or withdraw. Sales (w27) proposes supplementary
-        free goods lines from the live rules (FR-27.14) and drops its snapshot on either event.
+        A free goods rule (FR-26.22) after create, revise or withdraw. Sales (w27) proposes supplementary
+        free goods lines from the live rules (FR-27.14) and drops its snapshot on any of them.
       required: [rule_id, legal_entity_id, customer_kind, customer_key, product_id, unit, kind, calc_rule, every_quantity, free_quantity, min_quantity, valid_from, valid_to, withdrawn, version]
       properties:
         rule_id: {type: string, format: uuid}
@@ -881,7 +895,7 @@ components:
     ParametersChanged:
       type: object
       description: A legal entity's pricing parameters after a change (PRD 5.26.13).
-      required: [legal_entity_id, journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode, small_order_thresholds, version, updated_by]
+      required: [legal_entity_id, journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode, small_order_thresholds, free_goods_calc_rule, version, updated_by]
       properties:
         legal_entity_id: {type: string, format: uuid}
         journal_four_eyes: {type: boolean, description: "True when the user who created a price journal cannot post it."}
@@ -890,6 +904,7 @@ components:
         smart_rounding_bands: {$ref: "#/components/schemas/SmartRoundingBands"}
         price_search_mode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT], description: "Default of search_next on a new condition record (BR-26.1 step 5)."}
         small_order_thresholds: {type: object, additionalProperties: {type: string}, description: "Small order surcharge threshold per currency (FR-26.6), decimal strings. Empty means the reference table (250 USD, 200 EUR)."}
+        free_goods_calc_rule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS], description: "Calculation rule a new free goods rule takes when its create request names none (BR-26.13)."}
         version: {type: integer, minimum: 1}
         updated_by: {type: string}
     TenantParametersChanged:

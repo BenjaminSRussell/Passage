@@ -47,6 +47,7 @@ describe("Pricing parameters", () => {
       smartRoundingBands: [{ upTo: "10", ending: "0.99" }, { upTo: "100", ending: "0.95" }, { ending: "0" }],
       priceSearchMode: "FIRST_MATCH",
       smallOrderThresholds: {},
+      freeGoodsCalcRule: "WHOLE_UNITS",
       version: 0,
     });
     expect(idempotencyKey(put)).toBeTruthy();
@@ -88,6 +89,7 @@ describe("Pricing parameters", () => {
       smartRoundingBands: [{ upTo: "20", ending: "0.5" }, { upTo: "50", ending: "0.95" }, { ending: "0" }],
       priceSearchMode: "FIRST_MATCH",
       smallOrderThresholds: {},
+      freeGoodsCalcRule: "WHOLE_UNITS",
       version: 4,
     });
     fireEvent.click(screen.getByRole("button", { name: "Remove band 2" }));
@@ -189,6 +191,45 @@ describe("Pricing parameters", () => {
     expect(await screen.findByText("Parameters saved")).toBeInTheDocument();
     const put = server.calls.find((c) => c.method === "PUT")!;
     expect(put.body).toMatchObject({ priceSearchMode: "FIRST_MATCH", smallOrderThresholds: { USD: "150.50", GBP: "75" }, version: 2 });
+  });
+
+  it("shows and saves the free goods calculation rule, and locks it without pricing.admin", async () => {
+    server.handler = (url, init) => {
+      if (!url.pathname.endsWith("/parameters")) return undefined;
+      if (init.method === "PUT") return json(200, { ...(init.body ? JSON.parse(String(init.body)) : {}), version: 3 });
+      return json(200, { legalEntityId: LE, journalFourEyes: false, smartRoundingBands: [{ ending: "0" }], freeGoodsCalcRule: "UNIT_REFERENCE", version: 2 });
+    };
+    const view = renderAt("/pricing/parameters", ADMIN);
+    load();
+    const select = await screen.findByLabelText("Free goods calculation rule");
+    expect(select).toHaveValue("UNIT_REFERENCE");
+    expect(pageViolations(view.container)).toEqual([]);
+    fireEvent.change(select, { target: { value: "PROPORTIONAL" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await screen.findByText("Parameters saved")).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "PUT")!.body).toMatchObject({ freeGoodsCalcRule: "PROPORTIONAL", version: 2 });
+    view.unmount();
+    // A service that sends none (an older one) reads as WHOLE_UNITS; a viewer cannot change it.
+    server.handler = () => json(200, { legalEntityId: LE, journalFourEyes: false, smartRoundingBands: [{ ending: "0" }], version: 1 });
+    renderAt("/pricing/parameters", ["pricing.view"]);
+    load();
+    const locked = await screen.findByLabelText("Free goods calculation rule");
+    expect(locked).toHaveValue("WHOLE_UNITS");
+    expect(locked).toBeDisabled();
+  });
+
+  it("shows a refused calculation rule on its own field", async () => {
+    server.handler = (url, init) => {
+      if (!url.pathname.endsWith("/parameters")) return undefined;
+      if (init.method === "PUT") return json(422, { code: "COM-0001", detail: "validation failed", errors: { freeGoodsCalcRule: "must be PROPORTIONAL, UNIT_REFERENCE or WHOLE_UNITS" } });
+      return json(200, { legalEntityId: LE, journalFourEyes: false, smartRoundingBands: [{ ending: "0" }], version: 1 });
+    };
+    renderAt("/pricing/parameters", ADMIN);
+    load();
+    await screen.findByLabelText("Free goods calculation rule");
+    fireEvent.click(screen.getByRole("button", { name: "Save parameters" }));
+    expect(await screen.findByText("must be PROPORTIONAL, UNIT_REFERENCE or WHOLE_UNITS")).toBeInTheDocument();
+    expect(screen.getByLabelText("Free goods calculation rule")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("shows a refused threshold on its own currency, and no threshold controls without pricing.admin", async () => {

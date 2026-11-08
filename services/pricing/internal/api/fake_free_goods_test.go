@@ -115,3 +115,41 @@ func (f *fakeStore) WithdrawFreeGoodsRule(_ context.Context, id string, version 
 	st.rules[id] = r
 	return r, nil
 }
+
+func (f *fakeStore) ReviseFreeGoodsRule(_ context.Context, rev domain.FreeGoodsRevision, key string) (domain.FreeGoodsDef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := f.freeData()
+	if prev, ok := st.replays["rev|"+key]; ok && key != "" {
+		return prev, nil
+	}
+	r, ok := st.rules[rev.ID]
+	if !ok {
+		return domain.FreeGoodsDef{}, httpx.NewProblem(http.StatusNotFound, domain.CodeFreeGoodsRuleNotFound, "no free goods rule "+rev.ID)
+	}
+	if r.Version != rev.Version {
+		return domain.FreeGoodsDef{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersionConflict, "free goods rule version does not match")
+	}
+	if r.Withdrawn {
+		return domain.FreeGoodsDef{}, httpx.NewProblem(http.StatusConflict, store.CodeStateInvalid, "free goods rule is withdrawn and cannot be revised")
+	}
+	next := rev.Apply(r)
+	if fields := domain.FreeGoodsPastChanges(r, next, time.Now().UTC()); len(fields) > 0 {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "free goods rule revision is invalid")
+		p.Errors = fields
+		return domain.FreeGoodsDef{}, p
+	}
+	var others []domain.FreeGoodsDef
+	for _, o := range st.rules {
+		others = append(others, o)
+	}
+	if c, clash := domain.FreeGoodsOverlap(next, others); clash {
+		return domain.FreeGoodsDef{}, httpx.NewProblem(http.StatusConflict, domain.CodeOverlap, "overlapping free goods rule "+c.ID)
+	}
+	next.Version++
+	st.rules[rev.ID] = next
+	if key != "" {
+		st.replays["rev|"+key] = next
+	}
+	return next, nil
+}

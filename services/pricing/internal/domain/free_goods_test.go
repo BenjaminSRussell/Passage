@@ -156,3 +156,50 @@ func TestResolveWithFreeGoods_BreaksCountTheOrderedQuantity(t *testing.T) {
 		t.Fatalf("unpriced line: %+v proposals %+v; want no proposal", res.Lines[0], props)
 	}
 }
+
+// A revise never changes what a day before today proposed (§5.26.4): a started rule keeps its
+// offer and start, its end moves only within yesterday and later, and a rule that has not
+// started cannot start in the past.
+func TestFreeGoodsPastChanges(t *testing.T) {
+	today := fgDay("2026-11-03")
+	on := func(from, to string) domain.FreeGoodsDef {
+		r := fgRule("r", domain.CustomerKindAll, "", domain.FreeGoodsInclusive, domain.CalcWholeUnits)
+		r.ValidFrom, r.ValidTo = fgDay(from), fgDay(to)
+		return r
+	}
+	offer := func(r domain.FreeGoodsDef, every, free, min, calc string) domain.FreeGoodsDef {
+		r.Every, r.Free, r.MinQty, r.Calc = d(every), d(free), d(min), calc
+		return r
+	}
+	running, ended, future := on("2026-10-01", "2026-11-30"), on("2026-09-01", "2026-09-30"), on("2026-12-01", "2026-12-31")
+	for _, tc := range []struct {
+		name      string
+		cur, next domain.FreeGoodsDef
+		want      []string
+	}{
+		{"running: shorten to today", running, on("2026-10-01", "2026-11-03"), nil},
+		{"running: end yesterday stops it now", running, on("2026-10-01", "2026-11-02"), nil},
+		{"running: extend", running, on("2026-10-01", "2027-01-31"), nil},
+		{"running: same offer written another way", running, offer(running, "10.00", "1", "0", domain.CalcWholeUnits), nil},
+		{"running: end before yesterday drops applied days", running, on("2026-10-01", "2026-10-15"), []string{"validTo"}},
+		{"running: move the start", running, on("2026-10-10", "2026-11-30"), []string{"validFrom"}},
+		{"running: change the offer", running, offer(running, "5", "2", "20", domain.CalcProportional),
+			[]string{"everyQuantity", "freeQuantity", "minQuantity", "calcRule"}},
+		{"ended: extend over past days", ended, on("2026-09-01", "2026-12-31"), []string{"validTo"}},
+		{"ended: unchanged", ended, ended, nil},
+		{"future: new offer and a start from today", future, offer(on("2026-11-03", "2026-12-15"), "5", "2", "20", domain.CalcProportional), nil},
+		{"future: start in the past", future, on("2026-11-01", "2026-12-31"), []string{"validFrom"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := domain.FreeGoodsPastChanges(tc.cur, tc.next, today)
+			if len(got) != len(tc.want) {
+				t.Fatalf("fields = %v; want %v", got, tc.want)
+			}
+			for _, f := range tc.want {
+				if got[f] == "" {
+					t.Fatalf("fields = %v; want %s", got, f)
+				}
+			}
+		})
+	}
+}

@@ -39,16 +39,20 @@ type Parameters struct {
 	// strings; a currency it does not name keeps the reference threshold, and an empty table
 	// is the reference table.
 	SmallOrderThresholds map[string]string
-	Version              int
-	UpdatedBy            string
-	UpdatedAt            *time.Time
+	// FreeGoodsCalcRule is the calculation rule a new free goods rule takes when its create
+	// request names none (BR-26.13): WHOLE_UNITS (default), PROPORTIONAL or UNIT_REFERENCE.
+	FreeGoodsCalcRule string
+	Version           int
+	UpdatedBy         string
+	UpdatedAt         *time.Time
 }
 
 // DefaultParameters are the parameters of a legal entity with nothing stored (version 0).
 func DefaultParameters(legalEntityID string) Parameters {
 	return Parameters{LegalEntityID: legalEntityID, PricingDateBasis: domain.DateBasisShip,
 		TotalDiscountBasis: domain.TotalBasisAfterLineDisc, SmartRoundingBands: domain.DefaultBandSpecs(),
-		PriceSearchMode: domain.SearchModeFirstMatch, SmallOrderThresholds: map[string]string{}}
+		PriceSearchMode: domain.SearchModeFirstMatch, SmallOrderThresholds: map[string]string{},
+		FreeGoodsCalcRule: domain.CalcWholeUnits}
 }
 
 // GetParameters returns the parameters of a legal entity, or the defaults when none are stored.
@@ -84,6 +88,12 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 	if in.PriceSearchMode == "" {
 		in.PriceSearchMode = d.PriceSearchMode
 	}
+	if in.FreeGoodsCalcRule == "" {
+		in.FreeGoodsCalcRule = d.FreeGoodsCalcRule
+	}
+	if !domain.ValidCalcRule(in.FreeGoodsCalcRule) {
+		return Parameters{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "free goods calculation rule is not allowed")
+	}
 	if !domain.ValidDateBasis(in.PricingDateBasis) || !domain.ValidTotalBasis(in.TotalDiscountBasis) || !domain.ValidSearchMode(in.PriceSearchMode) {
 		return Parameters{}, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "parameter basis is not allowed")
 	}
@@ -113,7 +123,7 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 			thresholdsStored = string(thresholdsJSON)
 		}
 		hash := commandHash("parameters-set", in.LegalEntityID, strconv.FormatBool(in.JournalFourEyes), strconv.Itoa(version),
-			in.PricingDateBasis, in.TotalDiscountBasis, string(bandsJSON), in.PriceSearchMode, string(thresholdsJSON))
+			in.PricingDateBasis, in.TotalDiscountBasis, string(bandsJSON), in.PriceSearchMode, string(thresholdsJSON), in.FreeGoodsCalcRule)
 		if ok, err := replayJSON(ctx, tx, p.TenantID, idempotencyKey, hash, &out); err != nil || ok {
 			return err
 		}
@@ -126,20 +136,20 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 		var tag pgconn.CommandTag
 		if version == 0 {
 			tag, err = tx.Exec(ctx, `insert into pricing_parameter (tenant_id, legal_entity_id, journal_four_eyes, pricing_date_basis,
-					total_discount_basis, smart_rounding_bands, updated_by, price_search_mode, small_order_thresholds)
-				values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb) on conflict (tenant_id, legal_entity_id) do nothing`,
+					total_discount_basis, smart_rounding_bands, updated_by, price_search_mode, small_order_thresholds, free_goods_calc_rule)
+				values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10) on conflict (tenant_id, legal_entity_id) do nothing`,
 				p.TenantID, in.LegalEntityID, in.JournalFourEyes, in.PricingDateBasis, in.TotalDiscountBasis, stored, p.UserID,
-				in.PriceSearchMode, thresholdsStored)
+				in.PriceSearchMode, thresholdsStored, in.FreeGoodsCalcRule)
 			if err != nil {
 				return err
 			}
 		} else {
 			tag, err = tx.Exec(ctx, `update pricing_parameter set journal_four_eyes = $3, pricing_date_basis = $6, total_discount_basis = $7,
-					smart_rounding_bands = $8::jsonb, price_search_mode = $9, small_order_thresholds = $10::jsonb,
+					smart_rounding_bands = $8::jsonb, price_search_mode = $9, small_order_thresholds = $10::jsonb, free_goods_calc_rule = $11,
 					version = version + 1, updated_by = $4, updated_at = now()
 				where tenant_id = $5 and legal_entity_id = $1 and version = $2`,
 				in.LegalEntityID, version, in.JournalFourEyes, p.UserID, p.TenantID, in.PricingDateBasis, in.TotalDiscountBasis, stored,
-				in.PriceSearchMode, thresholdsStored)
+				in.PriceSearchMode, thresholdsStored, in.FreeGoodsCalcRule)
 			if err != nil {
 				return err
 			}
@@ -155,7 +165,7 @@ func (s *Postgres) SetParameters(ctx context.Context, in Parameters, version int
 		if err := enqueueEvent(ctx, tx, "parameters", in.LegalEntityID, pevents.ParametersChanged, pevents.ParametersChangedData{
 			LegalEntityID: out.LegalEntityID, JournalFourEyes: out.JournalFourEyes, PricingDateBasis: out.PricingDateBasis,
 			TotalDiscountBasis: out.TotalDiscountBasis, SmartRoundingBands: bandData(out.SmartRoundingBands), PriceSearchMode: out.PriceSearchMode,
-			SmallOrderThresholds: out.SmallOrderThresholds, Version: out.Version, UpdatedBy: out.UpdatedBy}); err != nil {
+			SmallOrderThresholds: out.SmallOrderThresholds, FreeGoodsCalcRule: out.FreeGoodsCalcRule, Version: out.Version, UpdatedBy: out.UpdatedBy}); err != nil {
 			return err
 		}
 		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
@@ -167,10 +177,10 @@ func loadParameters(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID stri
 	out := DefaultParameters(legalEntityID)
 	var bands, thresholds []byte
 	err := tx.QueryRow(ctx, `select journal_four_eyes, pricing_date_basis, total_discount_basis, smart_rounding_bands, price_search_mode,
-			small_order_thresholds, version, updated_by, updated_at
+			small_order_thresholds, free_goods_calc_rule, version, updated_by, updated_at
 		from pricing_parameter where tenant_id = $1 and legal_entity_id = $2`, tenantID, legalEntityID).
 		Scan(&out.JournalFourEyes, &out.PricingDateBasis, &out.TotalDiscountBasis, &bands, &out.PriceSearchMode, &thresholds,
-			&out.Version, &out.UpdatedBy, &out.UpdatedAt)
+			&out.FreeGoodsCalcRule, &out.Version, &out.UpdatedBy, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultParameters(legalEntityID), nil
 	}

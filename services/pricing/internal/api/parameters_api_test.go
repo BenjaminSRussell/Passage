@@ -11,7 +11,7 @@ const parametersURL = "/v1/pricing/parameters"
 
 // inEntity scopes a call to the test legal entity, as the gateway's legal-entity claim does.
 // allValues are the other values every PUT carries.
-const allValues = `"pricingDateBasis":"SHIP_DATE","totalDiscountBasis":"AFTER_LINE_DISC","smartRoundingBands":[{"upTo":"10","ending":"0.99"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`
+const allValues = `"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"SHIP_DATE","totalDiscountBasis":"AFTER_LINE_DISC","smartRoundingBands":[{"upTo":"10","ending":"0.99"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`
 
 var inEntity = []string{"X-Passage-Legal-Entity", legalEntity}
 
@@ -79,11 +79,11 @@ func TestParameters_BasesAndBandsValidated(t *testing.T) {
 		return call(t, h, http.MethodPut, parametersURL, "pricing.admin", body, inEntity...)
 	}
 	bad := map[string]string{
-		"pricingDateBasis":             `"pricingDateBasis":"TODAY","totalDiscountBasis":"GROSS","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
-		"totalDiscountBasis":           `"pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"NET","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
-		"smartRoundingBands[0].upTo":   `"pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"0","ending":"0.99"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
-		"smartRoundingBands[1].upTo":   `"pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"10","ending":"0.99"},{"upTo":"5","ending":"0.95"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
-		"smartRoundingBands[0].ending": `"pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"10","ending":"1.5"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
+		"pricingDateBasis":             `"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"TODAY","totalDiscountBasis":"GROSS","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
+		"totalDiscountBasis":           `"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"NET","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
+		"smartRoundingBands[0].upTo":   `"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"0","ending":"0.99"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
+		"smartRoundingBands[1].upTo":   `"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"10","ending":"0.99"},{"upTo":"5","ending":"0.95"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
+		"smartRoundingBands[0].ending": `"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"10","ending":"1.5"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`,
 	}
 	for field, extra := range bad {
 		status, out := put(extra)
@@ -92,7 +92,7 @@ func TestParameters_BasesAndBandsValidated(t *testing.T) {
 			t.Fatalf("%s: %d %v, want 422 naming it", field, status, out)
 		}
 	}
-	status, out := put(`"pricingDateBasis":"DELIVERY_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"20","ending":"0.5"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`)
+	status, out := put(`"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"DELIVERY_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"upTo":"20","ending":"0.5"},{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},`)
 	if status != http.StatusOK || out["pricingDateBasis"] != "DELIVERY_DATE" || out["totalDiscountBasis"] != "GROSS" || len(out["smartRoundingBands"].([]any)) != 2 {
 		t.Fatalf("valid set = %d %v", status, out)
 	}
@@ -121,7 +121,7 @@ func TestResolve_PricingDateFollowsTheBasis(t *testing.T) {
 	if status != http.StatusUnprocessableEntity || fields["pricingDate"] == nil || !strings.Contains(fields["pricingDate"].(string), "SHIP_DATE") {
 		t.Fatalf("no ship date = %d %v; want 422 naming the basis", status, out)
 	}
-	put := fmt.Sprintf(`{"legalEntityId":"%s","journalFourEyes":false,"pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"AFTER_LINE_DISC","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},"version":0}`, legalEntity)
+	put := fmt.Sprintf(`{"legalEntityId":"%s","journalFourEyes":false,"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"ORDER_DATE","totalDiscountBasis":"AFTER_LINE_DISC","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},"version":0}`, legalEntity)
 	if status, out := call(t, h, http.MethodPut, parametersURL, "pricing.admin", put, inEntity...); status != http.StatusOK {
 		t.Fatalf("set = %d %v", status, out)
 	}
@@ -169,7 +169,7 @@ func TestSimulate_TotalDiscountBasisFromTheLegalEntity(t *testing.T) {
 	if out["totalDiscount"] != "1.8" {
 		t.Fatalf("after line discounts: total discount = %v; want 1.8", out["totalDiscount"])
 	}
-	put := fmt.Sprintf(`{"legalEntityId":"%s","journalFourEyes":false,"pricingDateBasis":"SHIP_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},"version":0}`, legalEntity)
+	put := fmt.Sprintf(`{"legalEntityId":"%s","journalFourEyes":false,"freeGoodsCalcRule":"WHOLE_UNITS","pricingDateBasis":"SHIP_DATE","totalDiscountBasis":"GROSS","smartRoundingBands":[{"ending":"0"}],"priceSearchMode":"FIRST_MATCH","smallOrderThresholds":{},"version":0}`, legalEntity)
 	if status, out := call(t, h, http.MethodPut, parametersURL, "pricing.admin", put, inEntity...); status != http.StatusOK {
 		t.Fatalf("set = %d %v", status, out)
 	}

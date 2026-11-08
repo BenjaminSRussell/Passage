@@ -4,16 +4,19 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, Card, EmptyState, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
 import {
   describeProblem,
+  FREE_GOODS_CALC_RULES,
   getPricingParameters,
   newKey,
   PricingApiError,
   setPricingParameters,
+  type FreeGoodsCalcRule,
   type PriceSearchMode,
   type PricingDateBasis,
   type PricingParameters,
   type Problem,
   type TotalDiscountBasis,
 } from "./api/client";
+import { CALC_LABELS } from "./freeGoodsFormat";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 
@@ -67,6 +70,7 @@ export function ParametersPage() {
   const [totalBasis, setTotalBasis] = useState<TotalDiscountBasis>("AFTER_LINE_DISC");
   const [bands, setBands] = useState<BandRow[]>(DEFAULT_BANDS);
   const [searchMode, setSearchMode] = useState<PriceSearchMode>("FIRST_MATCH");
+  const [calcRule, setCalcRule] = useState<FreeGoodsCalcRule>("WHOLE_UNITS");
   const [thresholds, setThresholds] = useState<ThresholdRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -94,6 +98,7 @@ export function ParametersPage() {
       setTotalBasis(params.totalDiscountBasis ?? "AFTER_LINE_DISC");
       setBands(params.smartRoundingBands?.length ? params.smartRoundingBands.map((b) => ({ upTo: b.upTo ?? "", ending: b.ending })) : DEFAULT_BANDS);
       setSearchMode(params.priceSearchMode ?? "FIRST_MATCH");
+      setCalcRule(params.freeGoodsCalcRule ?? "WHOLE_UNITS");
       setThresholds(thresholdRows(params.smallOrderThresholds));
       key.current = newKey();
     } catch (error) {
@@ -146,6 +151,7 @@ export function ParametersPage() {
           totalDiscountBasis: totalBasis,
           smartRoundingBands: bands.map((b, i) => (i === bands.length - 1 ? { ending: b.ending.trim() } : { upTo: b.upTo.trim(), ending: b.ending.trim() })),
           priceSearchMode: searchMode,
+          freeGoodsCalcRule: calcRule,
           smallOrderThresholds: Object.fromEntries(thresholds.map((r) => [r.currency.trim(), r.amount.trim()])),
           version: loaded.version,
         },
@@ -268,6 +274,31 @@ export function ParametersPage() {
                   {SEARCH_MODES.map((m) => (
                     <option key={m.value} value={m.value}>
                       {m.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
+          </div>
+        </Card>
+      ) : null}
+      {!loading && loaded ? (
+        <Card title="Free goods">
+          <div className={styles.form}>
+            <FormField id="pp-calc-rule" label="Free goods calculation rule" error={fieldError("freeGoodsCalcRule")} hint="A new free goods rule that does not name its own calculation takes this one. Rules already saved keep theirs.">
+              {(c) => (
+                <Select
+                  {...c}
+                  value={calcRule}
+                  disabled={!canSave}
+                  onChange={(e) => {
+                    setCalcRule(e.target.value as FreeGoodsCalcRule);
+                    edited();
+                  }}
+                >
+                  {FREE_GOODS_CALC_RULES.map((k) => (
+                    <option key={k} value={k}>
+                      {CALC_LABELS[k]}
                     </option>
                   ))}
                 </Select>

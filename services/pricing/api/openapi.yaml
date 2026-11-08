@@ -719,7 +719,9 @@ paths:
         stored), priceSearchMode (FIRST_MATCH, or SEARCH_NEXT to make searchNext true on a new
         condition record that leaves it out) and smallOrderThresholds (the SURCHARGE threshold per
         currency; a currency it does not name keeps the reference threshold, 250 USD and 200 EUR,
-        and 0 switches the surcharge off for that currency). A legal entity outside the caller's scope is 403 AUTH-0003.
+        and 0 switches the surcharge off for that currency) and freeGoodsCalcRule (PROPORTIONAL,
+        UNIT_REFERENCE or WHOLE_UNITS, default WHOLE_UNITS: the calculation rule a new free goods
+        rule takes when its create request names none). A legal entity outside the caller's scope is 403 AUTH-0003.
       x-passage-duty: pricing.view
       parameters:
         - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
@@ -740,7 +742,7 @@ paths:
         412 conflict_version. The change writes dev.passage.pricing.parameters.changed.v1 to the
         outbox in the same transaction (the audit record: value, version and the user). Every
         value is required, since the PUT replaces them all (a body with only journalFourEyes, as
-        before slice 18, or without priceSearchMode and smallOrderThresholds before slice 19, is 422 naming the missing fields). A change applies from the next resolve
+        before slice 18, without priceSearchMode and smallOrderThresholds before slice 19, or without freeGoodsCalcRule before slice 26, is 422 naming the missing fields). A change applies from the next resolve
         whatever its pricing date: the parameters are not effective-dated. A legal entity outside the caller's
         scope is 403 AUTH-0003. A retry with the same Idempotency-Key replays the first response.
       x-passage-duty: pricing.admin
@@ -752,7 +754,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version]
+              required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, freeGoodsCalcRule, version]
               properties:
                 legalEntityId: {type: string, format: uuid}
                 journalFourEyes: {type: boolean}
@@ -761,6 +763,7 @@ paths:
                 smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
                 priceSearchMode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT]}
                 smallOrderThresholds: {$ref: "#/components/schemas/SmallOrderThresholds"}
+                freeGoodsCalcRule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS]}
                 version: {type: integer, minimum: 0}
       responses:
         "200":
@@ -2507,6 +2510,45 @@ paths:
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/free-goods-rules/{id}:revise:
+    post:
+      operationId: reviseFreeGoodsRule
+      summary: >
+        Revise a live free goods rule (FR-26.22): replace its calculation rule, every and free
+        quantities, minimum quantity and validity at the expected version. The customer, product,
+        unit and kind never change; withdraw the rule and create another for that. The next
+        resolve uses the revised values; documents already priced keep theirs. A revise never
+        changes what a day before today proposed (resolve stays reproducible for a past pricing
+        date): a rule that has not started may change anything but cannot start before today;
+        once it has started, its calculation, quantities, minimum and start are fixed and its end
+        moves only within yesterday and later (end it, then create another rule from today, to
+        change the offer). 409 PRC-0031 when the rule is withdrawn or the revision changes
+        nothing; 409 PRC-0002 when the new validity overlaps another live rule of the same
+        customer, product and unit; 412 on a stale version; 422 COM-0001 with field errors when
+        a value is invalid (an inclusive rule must give fewer units than it counts) or would
+        change a past day. A retry with the same
+        Idempotency-Key replays the first response. Writes dev.passage.pricing.freegoodsrule.revised.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FreeGoodsRuleRevision"}
+      responses:
+        "200":
+          description: Revised; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FreeGoodsRule"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/commodity/bases:
     get:
       operationId: listCommodityBases
@@ -3611,10 +3653,22 @@ components:
         productId: {type: string, maxLength: 64}
         unit: {type: string, maxLength: 16, description: "The rule applies to lines ordered in this unit."}
         kind: {type: string, enum: [INCLUSIVE, EXCLUSIVE], description: "INCLUSIVE gives the free units out of the ordered quantity (1 free within every 10); EXCLUSIVE adds them on top (1 extra per 10)."}
-        calcRule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS], default: WHOLE_UNITS, description: "Defaults to WHOLE_UNITS (free_goods_calc_rule). PROPORTIONAL gives fractional free units (6 decimals); UNIT_REFERENCE rounds the proportional quantity down to whole units; WHOLE_UNITS counts only whole multiples of everyQuantity."}
+        calcRule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS], description: "Left out, the legal entity's freeGoodsCalcRule parameter applies (WHOLE_UNITS when none is stored). PROPORTIONAL gives fractional free units (6 decimals); UNIT_REFERENCE rounds the proportional quantity down to whole units; WHOLE_UNITS counts only whole multiples of everyQuantity."}
         everyQuantity: {type: string, description: "Ordered quantity that earns freeQuantity, decimal greater than 0."}
         freeQuantity: {type: string, description: "Free units per everyQuantity, decimal greater than 0 (less than everyQuantity when INCLUSIVE)."}
         minQuantity: {type: string, description: "Smallest ordered quantity that earns free goods; default 0."}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
+    FreeGoodsRuleRevision:
+      type: object
+      description: The values a revise replaces; every one is required.
+      required: [version, calcRule, everyQuantity, freeQuantity, minQuantity, validFrom, validTo]
+      properties:
+        version: {type: integer, minimum: 1, description: "The version read."}
+        calcRule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS]}
+        everyQuantity: {type: string, description: "Ordered quantity that earns freeQuantity, decimal greater than 0."}
+        freeQuantity: {type: string, description: "Free units per everyQuantity, decimal greater than 0 (less than everyQuantity when the rule is INCLUSIVE)."}
+        minQuantity: {type: string, description: "Smallest ordered quantity that earns free goods, 0 or more."}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
     FreeGoodsProposal:
@@ -3775,7 +3829,7 @@ components:
           ending: {type: string, description: "Decimal string, 0 to 0.9999."}
     PricingParameters:
       type: object
-      required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version]
+      required: [legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, freeGoodsCalcRule, version]
       properties:
         legalEntityId: {type: string, format: uuid}
         journalFourEyes: {type: boolean}
@@ -3784,6 +3838,7 @@ components:
         smartRoundingBands: {$ref: "#/components/schemas/SmartRoundingBands"}
         priceSearchMode: {type: string, enum: [FIRST_MATCH, SEARCH_NEXT], description: "Default FIRST_MATCH. The default of searchNext on a new condition record that leaves it out."}
         smallOrderThresholds: {$ref: "#/components/schemas/SmallOrderThresholds"}
+        freeGoodsCalcRule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS], description: "Default WHOLE_UNITS. The calculation rule a new free goods rule takes when its create request names none (BR-26.13)."}
         version: {type: integer, minimum: 0, description: "0 when the legal entity has no stored parameters."}
         updatedBy: {type: string}
         updatedAt: {type: string, format: date-time}

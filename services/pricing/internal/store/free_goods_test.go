@@ -1,10 +1,13 @@
 package store_test
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/domain"
 	pevents "github.com/BenjaminSRussell/passage/services/pricing/internal/events"
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/store"
@@ -122,4 +125,128 @@ func TestPostgres_FreeGoodsConcurrentRetryReplays(t *testing.T) {
 	if a.err != nil || b.err != nil || a.id != b.id {
 		t.Fatalf("concurrent retries = %+v / %+v; want one rule replayed", a, b)
 	}
+}
+
+// TestPostgres_ReviseFreeGoodsRule covers the revise of a live rule against the database with
+// RLS enforced: values replaced at the next version, replay by key, the version check, the
+// overlap guard against a neighbour rule (the rule itself excluded), validation with field
+// errors, the past-days guard on a started rule, the withdrawn and unchanged refusals, tenant
+// isolation, and the revised event.
+func TestPostgres_ReviseFreeGoodsRule(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	at := func(n int) string { return time.Now().UTC().AddDate(0, 0, n).Format("2006-01-02") }
+	first, err := s.CreateFreeGoodsRule(ctx, testFreeGoods(at(10), at(60)), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateFreeGoodsRule(ctx, testFreeGoods(at(61), at(120)), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := domain.FreeGoodsRevision{ID: first.ID, Version: 1, Calc: domain.CalcProportional, Every: decimal.NewFromInt(5), Free: decimal.NewFromInt(2),
+		MinQty: decimal.NewFromInt(20), ValidFrom: day(at(10)), ValidTo: day(at(60))}
+	got, err := s.ReviseFreeGoodsRule(ctx, rev, "rv-1")
+	if err != nil || got.Version != 2 || got.Calc != domain.CalcProportional || !got.Every.Equal(decimal.NewFromInt(5)) ||
+		!got.Free.Equal(decimal.NewFromInt(2)) || !got.MinQty.Equal(decimal.NewFromInt(20)) || got.Kind != domain.FreeGoodsInclusive || got.ProductID != "P1" {
+		t.Fatalf("revise = %+v err %v", got, err)
+	}
+	if again, err := s.ReviseFreeGoodsRule(ctx, rev, "rv-1"); err != nil || again.Version != 2 {
+		t.Fatalf("replayed revise = %+v err %v; want the first response", again, err)
+	}
+	live, err := s.ActiveFreeGoodsRules(ctx, legalEntity, []string{"P1"}, day(at(20)))
+	if err != nil || len(live) != 1 || !live[0].Every.Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("live after revise = %+v err %v; want the revised rule", live, err)
+	}
+	if _, err := s.ReviseFreeGoodsRule(ctx, rev, ""); problemCode(err) != store.CodeVersionConflict {
+		t.Fatalf("stale revise = %v; want conflict_version", err)
+	}
+	// Stretching the validity into the neighbour's dates is refused; ending it earlier is fine
+	// (the rule's own row never counts as an overlap).
+	clash := rev
+	clash.Version, clash.ValidTo = 2, day(at(70))
+	if _, err := s.ReviseFreeGoodsRule(ctx, clash, ""); problemCode(err) != domain.CodeOverlap {
+		t.Fatalf("overlapping revise = %v; want PRC-0002", err)
+	}
+	short := rev
+	short.Version, short.ValidTo = 2, day(at(50))
+	if r, err := s.ReviseFreeGoodsRule(ctx, short, ""); err != nil || r.Version != 3 || dayStrTest(r.ValidTo) != at(50) {
+		t.Fatalf("shorter validity = %+v err %v", r, err)
+	}
+	// An inclusive rule must give fewer than it counts; the refusal names the field.
+	bad := short
+	bad.Version, bad.Free, bad.Every = 3, decimal.NewFromInt(5), decimal.NewFromInt(5)
+	if _, err := s.ReviseFreeGoodsRule(ctx, bad, ""); problemCode(err) != domain.CodeValidation || problemFields(err)["freeQuantity"] == "" {
+		t.Fatalf("free = every = %v; want COM-0001 naming freeQuantity", err)
+	}
+	// A rule that has not started cannot be moved to start in the past.
+	past := short
+	past.Version, past.ValidFrom = 3, day(at(-1))
+	if _, err := s.ReviseFreeGoodsRule(ctx, past, ""); problemCode(err) != domain.CodeValidation || problemFields(err)["validFrom"] == "" {
+		t.Fatalf("start in the past = %v; want COM-0001 naming validFrom", err)
+	}
+	same := short
+	same.Version = 3
+	if _, err := s.ReviseFreeGoodsRule(ctx, same, ""); problemCode(err) != store.CodeStateInvalid {
+		t.Fatalf("unchanged revise = %v; want PRC-0031", err)
+	}
+	if _, err := s.ReviseFreeGoodsRule(ctx, domain.FreeGoodsRevision{ID: "00000000-0000-4000-8000-0000000000ff", Version: 1}, ""); problemCode(err) != domain.CodeFreeGoodsRuleNotFound {
+		t.Fatalf("unknown rule = %v; want PRC-0047", err)
+	}
+	if _, err := s.ReviseFreeGoodsRule(principal(2, ""), short, ""); problemCode(err) != domain.CodeFreeGoodsRuleNotFound {
+		t.Fatalf("another tenant must not revise the rule: %v", err)
+	}
+	// A started rule keeps what it proposed on past days: its offer is fixed, its end moves
+	// only within yesterday and later.
+	started, err := s.CreateFreeGoodsRule(ctx, testFreeGoods(at(-30), at(5)), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep := domain.FreeGoodsRevision{ID: started.ID, Version: 1, Calc: started.Calc, Every: started.Every, Free: started.Free,
+		MinQty: started.MinQty, ValidFrom: started.ValidFrom, ValidTo: started.ValidTo}
+	offer := keep
+	offer.Free = decimal.NewFromInt(2)
+	if _, err := s.ReviseFreeGoodsRule(ctx, offer, ""); problemCode(err) != domain.CodeValidation || problemFields(err)["freeQuantity"] == "" {
+		t.Fatalf("offer change on a started rule = %v; want COM-0001 naming freeQuantity", err)
+	}
+	early := keep
+	early.ValidTo = day(at(-10))
+	if _, err := s.ReviseFreeGoodsRule(ctx, early, ""); problemCode(err) != domain.CodeValidation || problemFields(err)["validTo"] == "" {
+		t.Fatalf("end before yesterday = %v; want COM-0001 naming validTo", err)
+	}
+	stop := keep
+	stop.ValidTo = day(at(-1))
+	if r, err := s.ReviseFreeGoodsRule(ctx, stop, ""); err != nil || dayStrTest(r.ValidTo) != at(-1) {
+		t.Fatalf("end it yesterday = %+v err %v", r, err)
+	}
+	if _, err := s.WithdrawFreeGoodsRule(ctx, second.ID, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	wd := domain.FreeGoodsRevision{ID: second.ID, Version: 2, Calc: second.Calc, Every: second.Every, Free: decimal.NewFromInt(2),
+		MinQty: second.MinQty, ValidFrom: second.ValidFrom, ValidTo: second.ValidTo}
+	if _, err := s.ReviseFreeGoodsRule(ctx, wd, ""); problemCode(err) != store.CodeStateInvalid {
+		t.Fatalf("revise of a withdrawn rule = %v; want PRC-0031", err)
+	}
+	var revised []map[string]any
+	for _, row := range outboxRows(t, ctx, pool) {
+		if row.Type == pevents.FreeGoodsRuleRevised {
+			revised = append(revised, row.Data)
+		}
+	}
+	if len(revised) != 3 || revised[0]["rule_id"] != first.ID || revised[0]["version"] != float64(2) || revised[0]["calc_rule"] != "PROPORTIONAL" ||
+		revised[1]["valid_to"] != at(50) || revised[2]["rule_id"] != started.ID {
+		t.Fatalf("revised events = %v; want two for the first rule and one for the started rule", revised)
+	}
+}
+
+func dayStrTest(t time.Time) string { return t.Format("2006-01-02") }
+
+// problemFields returns a problem's field errors (nil for any other error).
+func problemFields(err error) map[string]string {
+	var p *httpx.Problem
+	if errors.As(err, &p) {
+		return p.Errors
+	}
+	return nil
 }

@@ -76,8 +76,11 @@ type ParametersChangedData struct {
 	// reference table) are the other two values of a legal entity.
 	PriceSearchMode      string            `json:"price_search_mode"`
 	SmallOrderThresholds map[string]string `json:"small_order_thresholds"`
-	Version              int               `json:"version"`
-	UpdatedBy            string            `json:"updated_by"`
+	// FreeGoodsCalcRule is the calculation rule a new free goods rule takes when its create
+	// request names none (BR-26.13).
+	FreeGoodsCalcRule string `json:"free_goods_calc_rule"`
+	Version           int    `json:"version"`
+	UpdatedBy         string `json:"updated_by"`
 }
 
 // TenantParametersChangedData is the payload of tenantparameter.changed. CacheTTLSeconds is 0
@@ -257,14 +260,15 @@ type ConditionRecordWithdrawnData struct {
 	Reason  string `json:"reason"`
 }
 
-// Free goods rules (FR-26.22): a rule was created, or withdrawn. The sales cache drops its
-// free goods snapshot for the legal entity on either event.
+// Free goods rules (FR-26.22): a rule was created, revised or withdrawn. The sales cache drops
+// its free goods snapshot for the legal entity on any of them.
 const (
 	FreeGoodsRuleCreated   = "dev.passage.pricing.freegoodsrule.created.v1"
 	FreeGoodsRuleWithdrawn = "dev.passage.pricing.freegoodsrule.withdrawn.v1"
+	FreeGoodsRuleRevised   = "dev.passage.pricing.freegoodsrule.revised.v1"
 )
 
-// FreeGoodsRuleData is the payload of freegoodsrule.created and .withdrawn.
+// FreeGoodsRuleData is the payload of freegoodsrule.created, .revised and .withdrawn.
 type FreeGoodsRuleData struct {
 	RuleID        string `json:"rule_id"`
 	LegalEntityID string `json:"legal_entity_id"`

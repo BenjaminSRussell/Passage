@@ -26,7 +26,6 @@ export const emptyFreeGoods: FreeGoodsRuleInput = {
   productId: "",
   unit: "EA",
   kind: "INCLUSIVE",
-  calcRule: "WHOLE_UNITS",
   everyQuantity: "",
   freeQuantity: "",
   minQuantity: "0",
@@ -65,7 +64,8 @@ export function toFreeGoodsInput(v: FreeGoodsRuleInput): FreeGoodsRuleInput {
     productId: v.productId.trim(),
     unit: v.unit.trim(),
     kind: v.kind,
-    calcRule: v.calcRule,
+    // No calcRule means the legal entity's free goods calculation rule (pricing parameters).
+    calcRule: v.calcRule || undefined,
     everyQuantity: v.everyQuantity.trim(),
     freeQuantity: v.freeQuantity.trim(),
     minQuantity: v.minQuantity.trim() === "" ? "0" : v.minQuantity.trim(),
@@ -164,9 +164,10 @@ export function NewFreeGoodsPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="fg-calc" label="Calculation">
+          <FormField id="fg-calc" label="Calculation" hint="Legal entity default takes the free goods calculation rule on the Pricing parameters page.">
             {(c) => (
-              <Select {...c} value={values.calcRule} onChange={(e) => update({ calcRule: e.target.value as FreeGoodsCalcRule })}>
+              <Select {...c} value={values.calcRule ?? ""} onChange={(e) => update({ calcRule: (e.target.value || undefined) as FreeGoodsCalcRule | undefined })}>
+                <option value="">Legal entity default</option>
                 {FREE_GOODS_CALC_RULES.map((k) => (
                   <option key={k} value={k}>
                     {CALC_LABELS[k]}

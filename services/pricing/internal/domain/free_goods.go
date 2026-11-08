@@ -14,6 +14,11 @@ const (
 	CalcWholeUnits    = "WHOLE_UNITS"
 )
 
+// ValidCalcRule reports whether s is a free goods calculation rule.
+func ValidCalcRule(s string) bool {
+	return s == CalcProportional || s == CalcUnitReference || s == CalcWholeUnits
+}
+
 // CodeFreeGoodsRuleNotFound is raised for an unknown free goods rule id.
 const CodeFreeGoodsRuleNotFound = "PRC-0047"
 
@@ -67,9 +72,7 @@ func ValidateFreeGoods(r FreeGoodsDef) map[string]string {
 	if r.Kind != FreeGoodsInclusive && r.Kind != FreeGoodsExclusive {
 		f["kind"] = "must be INCLUSIVE or EXCLUSIVE"
 	}
-	switch r.Calc {
-	case CalcProportional, CalcUnitReference, CalcWholeUnits:
-	default:
+	if !ValidCalcRule(r.Calc) {
 		f["calcRule"] = "must be PROPORTIONAL, UNIT_REFERENCE or WHOLE_UNITS"
 	}
 	if !r.Every.IsPositive() {
@@ -91,6 +94,71 @@ func ValidateFreeGoods(r FreeGoodsDef) map[string]string {
 		f["validity"] = "validTo must not be before validFrom"
 	}
 	return f
+}
+
+// FreeGoodsRevision is the change a revise applies to a live free goods rule: the quantities,
+// the calculation rule and the validity. The customer, product, unit and kind identify the rule
+// and never change (withdraw it and create another for that).
+type FreeGoodsRevision struct {
+	ID        string
+	Version   int
+	Calc      string
+	Every     decimal.Decimal
+	Free      decimal.Decimal
+	MinQty    decimal.Decimal
+	ValidFrom time.Time
+	ValidTo   time.Time
+}
+
+// Apply returns cur with the revision's values.
+func (v FreeGoodsRevision) Apply(cur FreeGoodsDef) FreeGoodsDef {
+	cur.Calc, cur.Every, cur.Free, cur.MinQty, cur.ValidFrom, cur.ValidTo = v.Calc, v.Every, v.Free, v.MinQty, v.ValidFrom, v.ValidTo
+	return cur
+}
+
+// FreeGoodsPastChanges returns field errors where a revision (cur to next) would change what a
+// day before today proposed: resolve stays reproducible for a past pricing date (§5.26.4
+// invariant), so a document priced or re-priced on that day keeps the rule's answer, as a
+// campaign revise does (CampaignPastChanges). A rule that has not started may change anything
+// but may not start in the past. Once it has started, its offer (calculation, every and free
+// quantities, minimum) and its start date are fixed, and its end date moves only within
+// yesterday and later (ending it yesterday stops it now); an ended rule keeps its end date. To
+// change the offer of a running rule, end it and create another rule from today. An empty map
+// means the revision keeps the past.
+func FreeGoodsPastChanges(cur, next FreeGoodsDef, today time.Time) map[string]string {
+	fields := map[string]string{}
+	t, yesterday := dayOf(today), dayOf(today.AddDate(0, 0, -1))
+	if dayOf(cur.ValidFrom) >= t {
+		if dayOf(next.ValidFrom) < t {
+			fields["validFrom"] = "must not be before today (" + t + "): a past day cannot gain free goods"
+		}
+		return fields
+	}
+	since := dayOf(cur.ValidFrom)
+	fixed := "cannot change: the rule has applied since " + since + "; end it and create another rule from today"
+	if next.Calc != cur.Calc {
+		fields["calcRule"] = fixed
+	}
+	if !next.Every.Equal(cur.Every) {
+		fields["everyQuantity"] = fixed
+	}
+	if !next.Free.Equal(cur.Free) {
+		fields["freeQuantity"] = fixed
+	}
+	if !next.MinQty.Equal(cur.MinQty) {
+		fields["minQuantity"] = fixed
+	}
+	if dayOf(next.ValidFrom) != since {
+		fields["validFrom"] = "cannot change: the rule has applied since " + since
+	}
+	if min(dayOf(next.ValidTo), yesterday) != min(dayOf(cur.ValidTo), yesterday) {
+		if dayOf(cur.ValidTo) < t {
+			fields["validTo"] = "cannot change: the rule ended on " + dayOf(cur.ValidTo)
+		} else {
+			fields["validTo"] = "must be " + yesterday + " or later: the days the rule already applied to keep it"
+		}
+	}
+	return fields
 }
 
 // FreeGoodsKey is the identity two live rules must not share on overlapping dates.

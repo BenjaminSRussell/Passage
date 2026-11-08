@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
 import { describeProblem, getFreeGoodsRule, newKey, PricingApiError, withdrawFreeGoodsRule, type FreeGoodsRule, type Problem } from "./api/client";
 import { CALC_LABELS, describeOffer, describeWho, FREE_GOODS_STATES, freeGoodsState, KIND_LABELS } from "./freeGoodsFormat";
+import { FreeGoodsEditCard } from "./FreeGoodsEditCard";
 import { today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -105,6 +106,7 @@ export function FreeGoodsDetailPage() {
           </Detail>
         </dl>
       </Card>
+      {rule.withdrawn ? null : <FreeGoodsEditCard rule={rule} onChange={setChanged} />}
       <Card title="Withdraw">
         <div className={styles.stack}>
           <p className={styles.note}>

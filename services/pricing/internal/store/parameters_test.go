@@ -68,7 +68,16 @@ func TestPostgres_ParametersVersionedAndAnnounced(t *testing.T) {
 	if _, err := s.SetParameters(scoped, store.Parameters{LegalEntityID: legalEntity}, 1, ""); err == nil {
 		t.Fatal("update from another legal entity's scope succeeded")
 	}
-	off, err := s.SetParameters(asUser("admin-2"), store.Parameters{LegalEntityID: legalEntity}, 1, "")
+	if set.FreeGoodsCalcRule != domain.CalcWholeUnits {
+		t.Fatalf("free goods calc rule left empty = %q; want the default WHOLE_UNITS", set.FreeGoodsCalcRule)
+	}
+	if _, err := s.SetParameters(ctx, store.Parameters{LegalEntityID: legalEntity, FreeGoodsCalcRule: "ROUNDED"}, 1, ""); problemCode(err) != domain.CodeValidation {
+		t.Fatalf("unknown calc rule = %v; want COM-0001", err)
+	}
+	off, err := s.SetParameters(asUser("admin-2"), store.Parameters{LegalEntityID: legalEntity, FreeGoodsCalcRule: domain.CalcProportional}, 1, "")
+	if err == nil && off.FreeGoodsCalcRule != domain.CalcProportional {
+		t.Fatalf("calc rule not stored: %+v", off)
+	}
 	if err != nil || off.Version != 2 || off.JournalFourEyes || off.UpdatedBy != "admin-2" {
 		t.Fatalf("update = %+v, %v", off, err)
 	}
@@ -81,7 +90,7 @@ func TestPostgres_ParametersVersionedAndAnnounced(t *testing.T) {
 		}
 	}
 	if len(changes) != 2 || changes[0]["journal_four_eyes"] != true || changes[0]["updated_by"] != "admin-1" ||
-		changes[1]["journal_four_eyes"] != false || changes[1]["updated_by"] != "admin-2" || changes[1]["version"] != float64(2) {
+		changes[1]["journal_four_eyes"] != false || changes[1]["updated_by"] != "admin-2" || changes[1]["version"] != float64(2) || changes[1]["free_goods_calc_rule"] != "PROPORTIONAL" {
 		t.Errorf("parameters.changed events = %v; want two, on by admin-1 then off by admin-2 at version 2", changes)
 	}
 	if other, err := s.GetParameters(principal(2, ""), legalEntity); err != nil || other.Version != 0 {

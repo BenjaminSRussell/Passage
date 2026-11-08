@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { FreeGoodsRule, ResolveResponse } from "./api/client";
 import { describeOffer, describeWho, freeGoodsState } from "./freeGoodsFormat";
 import { addDays, today } from "./format";
+import { validateRevision } from "./FreeGoodsEditCard";
 import { emptyFreeGoods, toFreeGoodsInput, validateFreeGoods } from "./NewFreeGoodsPage";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
@@ -96,6 +97,9 @@ describe("New free goods rule", () => {
       Object.keys(validateFreeGoods({ ...ok, legalEntityId: "x", customerKind: "customer", customerKey: "", everyQuantity: "0", validTo: "2025-01-01", minQuantity: "-1" })).sort(),
     ).toEqual(["customerKey", "everyQuantity", "legalEntityId", "minQuantity", "validTo"]);
     expect(toFreeGoodsInput({ ...ok, productId: " BOLT ", customerKind: "all", customerKey: "ignored", minQuantity: "" })).toMatchObject({ productId: "BOLT", customerKey: "", minQuantity: "0" });
+    // Left on "Legal entity default", no calcRule is sent and the pricing parameter applies; a chosen one is sent.
+    expect(toFreeGoodsInput(ok).calcRule).toBeUndefined();
+    expect(toFreeGoodsInput({ ...ok, calcRule: "PROPORTIONAL" }).calcRule).toBe("PROPORTIONAL");
   });
 
   it("checks the form before calling the service", async () => {
@@ -129,7 +133,6 @@ describe("New free goods rule", () => {
       productId: "BOLT",
       unit: "EA",
       kind: "INCLUSIVE",
-      calcRule: "WHOLE_UNITS",
       everyQuantity: "10",
       freeQuantity: "1",
       minQuantity: "0",
@@ -181,6 +184,112 @@ describe("Free goods rule detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw rule" }));
     expect(await findAlert()).toHaveTextContent("(conflict_version)");
     expect(server.calls.find((c) => c.method === "POST")!.body).toEqual({ version: 4 });
+  });
+
+  const scheduled: FreeGoodsRule = { ...rule, validFrom: addDays(day, 5), validTo: addDays(day, 60) };
+
+  it("revises the offer of a rule that has not started, at the rule's version", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/free-goods-rules/${FG}:revise`)) {
+        return json(200, { ...scheduled, ...(init.body ? JSON.parse(String(init.body)) : {}), version: 2 });
+      }
+      if (url.pathname.endsWith(`/free-goods-rules/${FG}`)) return json(200, scheduled);
+      return undefined;
+    };
+    const { container } = renderAt(`/pricing/free-goods/${FG}`);
+    expect(await screen.findByRole("heading", { name: "BOLT: 1 free within every 10 EA" })).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    expect(screen.getByLabelText("For every quantity ordered")).toHaveValue("10");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Change at least one term.")).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText("For every quantity ordered"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Free quantity"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Calculation"), { target: { value: "PROPORTIONAL" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("heading", { name: "BOLT: 2 free within every 5 EA" })).toBeInTheDocument();
+    expect(screen.getByText(/Price resolution uses the new terms/)).toBeInTheDocument();
+    const post = server.calls.find((c) => c.method === "POST")!;
+    expect(post.body).toEqual({
+      version: 1,
+      calcRule: "PROPORTIONAL",
+      everyQuantity: "5",
+      freeQuantity: "2",
+      minQuantity: "0",
+      validFrom: scheduled.validFrom,
+      validTo: scheduled.validTo,
+    });
+    expect(idempotencyKey(post)).toBeTruthy();
+  });
+
+  it("keeps a started rule's offer and first day, and lets it end from yesterday", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/free-goods-rules/${FG}:revise`)) {
+        return json(200, { ...rule, ...(init.body ? JSON.parse(String(init.body)) : {}), version: 2 });
+      }
+      if (url.pathname.endsWith(`/free-goods-rules/${FG}`)) return json(200, rule);
+      return undefined;
+    };
+    renderAt(`/pricing/free-goods/${FG}`);
+    await screen.findByLabelText("Free quantity");
+    for (const label of ["For every quantity ordered", "Free quantity", "Valid from"]) {
+      expect(screen.getByLabelText(label)).toHaveAttribute("readonly");
+    }
+    expect(screen.getByLabelText("Calculation")).toBeDisabled();
+    expect(screen.getByLabelText("Valid to")).not.toHaveAttribute("readonly");
+    fireEvent.change(screen.getByLabelText("Valid to"), { target: { value: addDays(day, -3) } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/or later: the days already priced keep the rule/)).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Valid to"), { target: { value: addDays(day, -1) } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/Price resolution uses the new terms/)).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "POST")!.body).toMatchObject({ everyQuantity: "10", freeQuantity: "1", validFrom: rule.validFrom, validTo: addDays(day, -1) });
+  });
+
+  it("checks a revision before calling the service, like the service does", async () => {
+    server.handler = (url) => (url.pathname.endsWith(`/free-goods-rules/${FG}`) ? json(200, scheduled) : undefined);
+    renderAt(`/pricing/free-goods/${FG}`);
+    await screen.findByLabelText("Free quantity");
+    fireEvent.change(screen.getByLabelText("Free quantity"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/must give fewer free units/)).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+    const terms = { calcRule: "WHOLE_UNITS" as const, everyQuantity: "10", freeQuantity: "10", minQuantity: "", validFrom: scheduled.validFrom, validTo: scheduled.validTo };
+    expect(validateRevision({ ...scheduled, kind: "EXCLUSIVE" }, terms, day)).toEqual({});
+    expect(validateRevision(scheduled, { ...terms, everyQuantity: "0", freeQuantity: "x", minQuantity: "-", validFrom: addDays(day, 9), validTo: addDays(day, 8) }, day)).toMatchObject({
+      everyQuantity: expect.any(String),
+      freeQuantity: expect.any(String),
+      minQuantity: expect.any(String),
+      validTo: expect.any(String),
+    });
+    expect(validateRevision(scheduled, { ...terms, freeQuantity: "1", validFrom: addDays(day, -1) }, day)).toEqual({ validFrom: "The first day cannot be in the past." });
+    // A started rule: the offer is fixed; an ended rule keeps its last day.
+    expect(Object.keys(validateRevision(rule, { ...terms, freeQuantity: "2", validFrom: rule.validFrom, validTo: rule.validTo }, day))).toEqual(["freeQuantity"]);
+    const ended = { ...rule, validFrom: addDays(day, -30), validTo: addDays(day, -10) };
+    expect(Object.keys(validateRevision(ended, { ...terms, freeQuantity: "1", validFrom: ended.validFrom, validTo: addDays(day, 10) }, day))).toEqual(["validTo"]);
+  });
+
+  it("reports a refused revision, such as overlapping dates, and keeps the form", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST") return json(409, { code: "PRC-0002", detail: "overlapping free goods rule r-9" });
+      if (url.pathname.endsWith(`/free-goods-rules/${FG}`)) return json(200, rule);
+      return undefined;
+    };
+    renderAt(`/pricing/free-goods/${FG}`);
+    await screen.findByLabelText("Valid to");
+    fireEvent.change(screen.getByLabelText("Valid to"), { target: { value: addDays(day, 90) } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await findAlert()).toHaveTextContent("overlapping free goods rule r-9 (PRC-0002)");
+    expect(screen.getByText("Another rule covers those dates")).toBeInTheDocument();
+    expect(screen.getByLabelText("Valid to")).toHaveValue(addDays(day, 90));
+  });
+
+  it("offers no edit on a withdrawn rule", async () => {
+    server.handler = (url) => (url.pathname.endsWith(`/free-goods-rules/${FG}`) ? json(200, { ...rule, withdrawn: true, version: 2 }) : undefined);
+    renderAt(`/pricing/free-goods/${FG}`);
+    expect(await screen.findByText(/This rule is withdrawn/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
   });
 
   it("shows the error state when the rule is unknown", async () => {

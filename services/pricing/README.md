@@ -305,6 +305,11 @@ testdata/               fixtures
 | POST | `/v1/pricing/campaigns/{id}:kill` | pricing.maintain | body `{version}`; next resolve drops the campaign's records; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/campaigns/{id}:restore` | pricing.maintain | body `{version}`; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/campaigns/{id}:revise` | pricing.maintain | body `{version, name?, validFrom?, validTo?, targetCustomerGroup?, budget?}`; days before today keep their pricing (422); `Idempotency-Key` honoured |
+| POST | `/v1/pricing/free-goods-rules` | pricing.maintain | body `{legalEntityId, customerKind, customerKey, productId, unit, kind, calcRule?, everyQuantity, freeQuantity, minQuantity?, validFrom, validTo}`; an omitted `calcRule` takes the legal entity's `freeGoodsCalcRule`; 409 PRC-0002 on an overlapping live rule; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/free-goods-rules?legalEntityId=&productId=` | pricing.view | |
+| GET | `/v1/pricing/free-goods-rules/{id}` | pricing.view | |
+| POST | `/v1/pricing/free-goods-rules/{id}:withdraw` | pricing.maintain | body `{version}`; `Idempotency-Key` honoured |
+| POST | `/v1/pricing/free-goods-rules/{id}:revise` | pricing.maintain | body `{version, calcRule, everyQuantity, freeQuantity, minQuantity, validFrom, validTo}` (all required; customers, product, unit and variant never change); a started rule keeps its offer and start and its end moves only within yesterday and later (422 naming the field); 409 PRC-0031 (withdrawn or nothing changed), 409 PRC-0002 (overlap), 412; `freegoodsrule.revised`; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/procedures?legalEntityId=` | pricing.view | by name, newest version first |
 | POST | `/v1/pricing/procedures` | pricing.admin | DRAFT with the next version number; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/procedures/{id}` | pricing.view | |
@@ -314,7 +319,7 @@ testdata/               fixtures
 | PUT | `/v1/pricing/procedure-assignments` | pricing.admin | body `{legalEntityId, salesChannel, procedureName, version}`; the procedure needs an ACTIVE version (PRC-0063); 412 on a stale version |
 | DELETE | `/v1/pricing/procedure-assignments?legalEntityId=&salesChannel=&version=` | pricing.admin | 204; the channel falls back to the default or the reference order |
 | GET | `/v1/pricing/parameters?legalEntityId=` | pricing.view | stored parameters or the defaults at version 0; 403 AUTH-0003 outside the caller's legal-entity scope |
-| PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
+| PUT | `/v1/pricing/parameters` | pricing.admin | body `{legalEntityId, journalFourEyes, pricingDateBasis, totalDiscountBasis, smartRoundingBands, priceSearchMode, smallOrderThresholds, freeGoodsCalcRule, version}` (all required); 412 conflict_version; `parameters.changed`; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/tenant-parameters` | pricing.view | the tenant's `cacheTtlSeconds` and `campaignKillSwitchEffect`, or the defaults at version 0 |
 | PUT | `/v1/pricing/tenant-parameters` | pricing.admin | body `{cacheTtlSeconds (0 or 10-600), campaignKillSwitchEffect, version}` (all required); 412 conflict_version; `tenantparameter.changed`; `Idempotency-Key` honoured |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |

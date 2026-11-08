@@ -36,6 +36,7 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		{events.CampaignRestored, events.CampaignStatusData{}},
 		{events.CampaignRevised, events.CampaignRevisedData{}},
 		{events.FreeGoodsRuleCreated, events.FreeGoodsRuleData{}},
+		{events.FreeGoodsRuleRevised, events.FreeGoodsRuleData{}},
 		{events.FreeGoodsRuleWithdrawn, events.FreeGoodsRuleData{}},
 		{events.RebateAgreementRevised, events.RebateAgreementData{}},
 		{events.RebateAgreementClosed, events.RebateAgreementData{}},

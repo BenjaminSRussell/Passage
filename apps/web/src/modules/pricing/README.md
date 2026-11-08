@@ -9,8 +9,8 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/agreements/new` | Create a DRAFT agreement, optionally in a campaign; `?copy=<id>` starts from an existing one, `?campaign=<id>` fills the campaign | `POST /condition-records` |
 | `/pricing/agreements/:id` | Detail with its campaign, activate (overlap 409 shown) and withdraw | `GET`, `:activate`, `:withdraw` |
 | `/pricing/free-goods` | Free goods rules (FR-26.22) with status | `GET /free-goods-rules` |
-| `/pricing/free-goods/new` | Create a rule: customers, product, unit, inclusive or exclusive, calculation, quantities, validity (overlap 409 shown) | `POST /free-goods-rules` |
-| `/pricing/free-goods/:id` | Rule detail and withdraw | `GET /free-goods-rules/{id}`, `:withdraw` |
+| `/pricing/free-goods/new` | Create a rule: customers, product, unit, inclusive or exclusive, calculation ("Legal entity default" sends none, so the entity's `freeGoodsCalcRule` applies), quantities, validity (overlap 409 shown) | `POST /free-goods-rules` |
+| `/pricing/free-goods/:id` | Rule detail, Edit rule (calculation, quantities, minimum, validity at the version read; once the rule has started its offer and first day are read-only and its last day moves only within yesterday and later) and withdraw | `GET /free-goods-rules/{id}`, `:revise`, `:withdraw` |
 | `/pricing/commodity/bases` | Commodity cost basis types (FR-26.21) | `GET /commodity/bases` |
 | `/pricing/commodity/bases/new` | Create a cost basis type: code, name, currency, unit (duplicate code 409 shown) | `POST /commodity/bases` |
 | `/pricing/commodity/bases/:id` | Cost basis type, record an index quote (a second quote for a day is the next revision) and the quotes inquiry | `GET /commodity/bases/{id}`, `GET`/`POST …/index-values` |
@@ -53,7 +53,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/promotions` | Promotions with event, window, baseline, forecast lift and actual lift | `GET /promotions` |
 | `/pricing/promotions/new` | Plan a promotion: event category and type, fund, product, window, 13 baseline weeks, lift and spend | `POST /promotions` |
 | `/pricing/promotions/:id` | Plan, baseline weeks, actuals and effectiveness; record actuals | `GET /promotions/{id}`, `:actuals` |
-| `/pricing/parameters` | Pricing parameters of a legal entity: `journalFourEyes` (default off), saved at the version read; read with pricing.view, the save is offered only with pricing.admin | `GET`/`PUT /parameters` |
+| `/pricing/parameters` | Pricing parameters of a legal entity: `journalFourEyes` (default off), the pricing date and total discount bases, smart rounding bands, price search mode, small order thresholds and the free goods calculation rule (`freeGoodsCalcRule`, default WHOLE_UNITS), saved at the version read; read with pricing.view, the save is offered only with pricing.admin | `GET`/`PUT /parameters` |
 | `/pricing/simulate` | Simulation / explain: price lines and read the access-by-access trace | `POST /resolve?explain=true` |
 | `/pricing/compare` | Compare procedure versions: one tuple under two versions, line by line | `GET /procedures`, `POST /compare` |
 | `/pricing/price-list` | Price list by customer: the active agreements that apply on a date, and the net price at each quantity break (by product, product group and sales channel; CSV export) | `GET /price-list`, `GET /price-list/net-prices` |

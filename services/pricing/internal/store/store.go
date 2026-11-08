@@ -153,6 +153,7 @@ type Store interface {
 	ListFreeGoodsRules(ctx context.Context, legalEntityID, productID string, limit int) ([]domain.FreeGoodsDef, error)
 	ActiveFreeGoodsRules(ctx context.Context, legalEntityID string, productIDs []string, asOf time.Time) ([]domain.FreeGoodsDef, error)
 	WithdrawFreeGoodsRule(ctx context.Context, id string, version int, idempotencyKey string) (domain.FreeGoodsDef, error)
+	ReviseFreeGoodsRule(ctx context.Context, rev domain.FreeGoodsRevision, idempotencyKey string) (domain.FreeGoodsDef, error)
 	ReviseAgreement(ctx context.Context, rev AgreementRevision, idempotencyKey string) (domain.RebateAgreement, error)
 	CloseAgreement(ctx context.Context, id string, version int, closeDate time.Time, idempotencyKey string) (domain.RebateAgreement, error)
 	ReopenAgreement(ctx context.Context, id string, version int, validTo time.Time, idempotencyKey string) (domain.RebateAgreement, error)

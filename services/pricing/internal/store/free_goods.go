@@ -229,3 +229,93 @@ func (s *Postgres) WithdrawFreeGoodsRule(ctx context.Context, id string, version
 	})
 	return out, err
 }
+
+// ReviseFreeGoodsRule changes the quantities, calculation rule and validity of a live rule at
+// the expected version (412 conflict_version otherwise; 409 PRC-0031 when withdrawn or when
+// nothing changes; 409 PRC-0002 when the new validity overlaps another live rule of the same
+// customer, product and unit; 422 COM-0001 with field errors when a value is invalid or the
+// revision would change what a day before today proposed, domain.FreeGoodsPastChanges). The
+// next resolve uses the revised values; documents already priced keep theirs. It is announced
+// through the outbox in the same transaction. A repeated Idempotency-Key replays the first
+// response. The advisory lock is create's, so a create and a revise of the same key serialize.
+func (s *Postgres) ReviseFreeGoodsRule(ctx context.Context, rev domain.FreeGoodsRevision, idempotencyKey string) (domain.FreeGoodsDef, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out domain.FreeGoodsDef
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, err := scanFreeGoods(tx.QueryRow(ctx, `select `+freeGoodsColumns+` from free_goods_rule where id = $1 for update`, rev.ID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return freeGoodsNotFound(rev.ID)
+		}
+		if err != nil {
+			return err
+		}
+		hash := commandHash("freegoods-revise", rev.ID, strconv.Itoa(rev.Version), rev.Calc, rev.Every.String(), rev.Free.String(),
+			rev.MinQty.String(), dayStr(rev.ValidFrom), dayStr(rev.ValidTo))
+		if ok, err := replayJSON(ctx, tx, p.TenantID, idempotencyKey, hash, &out); err != nil || ok {
+			return err
+		}
+		if cur.Version != rev.Version {
+			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "free goods rule version does not match")
+		}
+		if cur.Withdrawn {
+			return httpx.NewProblem(http.StatusConflict, CodeStateInvalid, "free goods rule is withdrawn and cannot be revised")
+		}
+		next := rev.Apply(cur)
+		var today time.Time
+		if err := tx.QueryRow(ctx, `select current_date`).Scan(&today); err != nil {
+			return err
+		}
+		fields := domain.ValidateFreeGoods(next)
+		for k, v := range domain.FreeGoodsPastChanges(cur, next, today) {
+			if _, ok := fields[k]; !ok {
+				fields[k] = v
+			}
+		}
+		if len(fields) > 0 {
+			problem := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "free goods rule revision is invalid")
+			problem.Errors = fields
+			return problem
+		}
+		if sameFreeGoods(cur, next) {
+			return httpx.NewProblem(http.StatusConflict, CodeStateInvalid, "the revision changes nothing")
+		}
+		// Same lock as create, so a concurrent create or revise of the same key waits.
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, p.TenantID+"|fg|"+domain.FreeGoodsKey(cur)); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select `+freeGoodsColumns+` from free_goods_rule
+			where legal_entity_id = $1 and customer_kind = $2 and customer_key = $3 and product_id = $4 and unit = $5 and not withdrawn and id <> $6`,
+			cur.LegalEntityID, string(cur.CustomerKind), cur.CustomerKey, cur.ProductID, cur.Unit, cur.ID)
+		if err != nil {
+			return err
+		}
+		var live []domain.FreeGoodsDef
+		for rows.Next() {
+			r, err := scanFreeGoods(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			live = append(live, r)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if c, clash := domain.FreeGoodsOverlap(next, live); clash {
+			return httpx.NewProblem(http.StatusConflict, domain.CodeOverlap, fmt.Sprintf("overlapping free goods rule %s for the same customer, product and unit", c.ID))
+		}
+		out, err = scanFreeGoods(tx.QueryRow(ctx, `update free_goods_rule set calc_rule = $2, every_quantity = $3::numeric,
+			free_quantity = $4::numeric, min_quantity = $5::numeric, valid_from = $6, valid_to = $7, version = version + 1
+			where id = $1 returning `+freeGoodsColumns,
+			cur.ID, next.Calc, next.Every.String(), next.Free.String(), next.MinQty.String(), dayStr(next.ValidFrom), dayStr(next.ValidTo)))
+		if err != nil {
+			return err
+		}
+		if err := enqueueEvent(ctx, tx, "freegoodsrule", out.ID, pevents.FreeGoodsRuleRevised, freeGoodsEventData(out)); err != nil {
+			return err
+		}
+		return rememberJSON(ctx, tx, p.TenantID, idempotencyKey, hash, out)
+	})
+	return out, err
+}

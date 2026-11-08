@@ -34,6 +34,8 @@ type parametersRequest struct {
 	// decimal string; an empty object is the reference table) are required too.
 	PriceSearchMode      *string           `json:"priceSearchMode"`
 	SmallOrderThresholds map[string]string `json:"smallOrderThresholds"`
+	// FreeGoodsCalcRule (PROPORTIONAL, UNIT_REFERENCE or WHOLE_UNITS) is required too.
+	FreeGoodsCalcRule *string `json:"freeGoodsCalcRule"`
 	// Version is the version read (0 when the legal entity has no stored parameters).
 	Version int `json:"version"`
 }
@@ -51,23 +53,26 @@ type parametersView struct {
 	// SmallOrderThresholds of a currency replace the reference threshold (250 USD, 200 EUR).
 	PriceSearchMode      string            `json:"priceSearchMode"`
 	SmallOrderThresholds map[string]string `json:"smallOrderThresholds"`
-	Version              int               `json:"version"`
-	UpdatedBy            string            `json:"updatedBy,omitempty"`
-	UpdatedAt            *time.Time        `json:"updatedAt,omitempty"`
+	// FreeGoodsCalcRule is the calculation rule a new free goods rule takes when its create
+	// request names none (BR-26.13).
+	FreeGoodsCalcRule string     `json:"freeGoodsCalcRule"`
+	Version           int        `json:"version"`
+	UpdatedBy         string     `json:"updatedBy,omitempty"`
+	UpdatedAt         *time.Time `json:"updatedAt,omitempty"`
 }
 
 func parametersResponse(p store.Parameters) parametersView {
 	if p.PricingDateBasis == "" { // a store with nothing for the entity
 		d := store.DefaultParameters(p.LegalEntityID)
 		p.PricingDateBasis, p.TotalDiscountBasis, p.SmartRoundingBands = d.PricingDateBasis, d.TotalDiscountBasis, d.SmartRoundingBands
-		p.PriceSearchMode = d.PriceSearchMode
+		p.PriceSearchMode, p.FreeGoodsCalcRule = d.PriceSearchMode, d.FreeGoodsCalcRule
 	}
 	if p.SmallOrderThresholds == nil {
 		p.SmallOrderThresholds = map[string]string{}
 	}
 	return parametersView{LegalEntityID: p.LegalEntityID, JournalFourEyes: p.JournalFourEyes, PricingDateBasis: p.PricingDateBasis,
 		TotalDiscountBasis: p.TotalDiscountBasis, SmartRoundingBands: p.SmartRoundingBands, PriceSearchMode: p.PriceSearchMode,
-		SmallOrderThresholds: p.SmallOrderThresholds, Version: p.Version, UpdatedBy: p.UpdatedBy, UpdatedAt: p.UpdatedAt}
+		SmallOrderThresholds: p.SmallOrderThresholds, FreeGoodsCalcRule: p.FreeGoodsCalcRule, Version: p.Version, UpdatedBy: p.UpdatedBy, UpdatedAt: p.UpdatedAt}
 }
 
 func (a *API) getParameters(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +141,11 @@ func (a *API) setParameters(w http.ResponseWriter, r *http.Request) {
 			fields[k] = v
 		}
 	}
+	if req.FreeGoodsCalcRule == nil {
+		fields["freeGoodsCalcRule"] = "is required"
+	} else if !domain.ValidCalcRule(*req.FreeGoodsCalcRule) {
+		fields["freeGoodsCalcRule"] = "must be PROPORTIONAL, UNIT_REFERENCE or WHOLE_UNITS"
+	}
 	if req.Version < 0 {
 		fields["version"] = "must be the version read, or 0 when none was stored"
 	}
@@ -149,7 +159,7 @@ func (a *API) setParameters(w http.ResponseWriter, r *http.Request) {
 	p, err := a.store.SetParameters(r.Context(), store.Parameters{LegalEntityID: req.LegalEntityID,
 		JournalFourEyes: *req.JournalFourEyes, PricingDateBasis: *req.PricingDateBasis, TotalDiscountBasis: *req.TotalDiscountBasis,
 		SmartRoundingBands: req.SmartRoundingBands, PriceSearchMode: *req.PriceSearchMode,
-		SmallOrderThresholds: req.SmallOrderThresholds}, req.Version, r.Header.Get(idempotencyKey))
+		SmallOrderThresholds: req.SmallOrderThresholds, FreeGoodsCalcRule: *req.FreeGoodsCalcRule}, req.Version, r.Header.Get(idempotencyKey))
 	if err != nil {
 		slog.Error("set pricing parameters failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
