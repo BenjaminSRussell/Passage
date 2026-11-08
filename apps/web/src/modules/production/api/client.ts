@@ -212,6 +212,21 @@ export interface StatusLogEntry {
   occurredAt: string;
 }
 
+/** One blocker or warning of the End check (PROD-0012, PROD-0013, PROD-0020, PROD-0021). */
+export interface EndFinding {
+  code: string;
+  message: string;
+  count?: number;
+}
+
+/** Whether `:end` would be accepted now (FR-21.8): what would refuse it and what it accepts with a warning. */
+export interface EndCheck {
+  orderId: string;
+  canEnd: boolean;
+  blockers: EndFinding[];
+  warnings: EndFinding[];
+}
+
 export interface BOMComponentInput {
   lineNo: string;
   itemId: string;
@@ -1010,6 +1025,12 @@ export function getOrder(id: string, signal?: AbortSignal): Promise<ProductionOr
 export async function getStatusLog(id: string, signal?: AbortSignal): Promise<StatusLogEntry[]> {
   const body = await request<{ items?: StatusLogEntry[] }>(`/${encodeURIComponent(id)}/status-log`, { signal });
   return Array.isArray(body.items) ? body.items : [];
+}
+
+export async function getEndCheck(id: string, signal?: AbortSignal): Promise<EndCheck> {
+  const body = await request<Partial<EndCheck>>(`/${encodeURIComponent(id)}/end-check`, { signal });
+  const blockers = Array.isArray(body.blockers) ? body.blockers : [];
+  return { orderId: body.orderId ?? id, canEnd: body.canEnd ?? blockers.length === 0, blockers, warnings: Array.isArray(body.warnings) ? body.warnings : [] };
 }
 
 export async function getCosts(id: string, signal?: AbortSignal): Promise<CostView> {

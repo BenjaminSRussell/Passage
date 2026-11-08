@@ -26,6 +26,8 @@ type fakeStore struct {
 	replayHash     map[string]string // idempotency key → request hash already stored
 	order          store.Order
 	getErr         error
+	endReport      domain.EndReport
+	endCheckDuty   bool
 	listFilter     store.ListFilter
 	transitions    []store.Transition
 	transErr       error
@@ -120,6 +122,11 @@ func (f *fakeStore) ListOrders(_ context.Context, lf store.ListFilter) (store.Or
 
 func (f *fakeStore) StatusLog(context.Context, string) ([]store.StatusLogEntry, error) {
 	return f.log, f.getErr
+}
+
+func (f *fakeStore) EndCheck(_ context.Context, _ string, zeroOutputDuty bool) (domain.EndReport, error) {
+	f.endCheckDuty = zeroOutputDuty
+	return f.endReport, f.getErr
 }
 
 func (f *fakeStore) UpdateOrder(_ context.Context, u store.OrderUpdate) (store.Order, error) {
@@ -690,6 +697,35 @@ func TestStatusLog(t *testing.T) {
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.OrderID != id || len(body.Items) != 1 || body.Items[0].TraceID != "req-1" {
 		t.Fatalf("status log: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEndCheck(t *testing.T) {
+	id := ids.New()
+	f := &fakeStore{endReport: domain.EndReport{Blockers: []domain.EndFinding{{Code: domain.CodeUnpostedJournals, Message: "cannot end: 2 journals are unposted; post or delete them", Count: 2}},
+		Warnings: []domain.EndFinding{}}}
+	_, h := newServer(t, f)
+	path := "/v1/production/orders/" + id + "/end-check"
+	rec := do(h, call{method: http.MethodGet, path: path, duties: []string{DutyRead}})
+	var body struct {
+		OrderID  string              `json:"orderId"`
+		CanEnd   bool                `json:"canEnd"`
+		Blockers []domain.EndFinding `json:"blockers"`
+		Warnings []domain.EndFinding `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != http.StatusOK || body.OrderID != id || body.CanEnd ||
+		len(body.Blockers) != 1 || body.Blockers[0].Count != 2 || body.Warnings == nil || f.endCheckDuty || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("end check: %d %s", rec.Code, rec.Body.String())
+	}
+	do(h, call{method: http.MethodGet, path: path, duties: []string{DutyRead, DutyZeroOutput}})
+	if !f.endCheckDuty {
+		t.Fatal("the zero-output duty of the caller is passed on")
+	}
+	if rec := do(h, call{method: http.MethodGet, path: path}); rec.Code != http.StatusForbidden {
+		t.Fatalf("read duty required: %d", rec.Code)
+	}
+	if rec := do(h, call{method: http.MethodGet, path: "/v1/production/orders/not-an-id/end-check", duties: []string{DutyRead}}); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad id: %d", rec.Code)
 	}
 }
 

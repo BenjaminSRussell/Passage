@@ -225,6 +225,7 @@ type Store interface {
 	GetOrder(ctx context.Context, id string) (Order, error)
 	ListOrders(ctx context.Context, f ListFilter) (OrderPage, error)
 	StatusLog(ctx context.Context, orderID string) ([]StatusLogEntry, error)
+	EndCheck(ctx context.Context, orderID string, zeroOutputDuty bool) (domain.EndReport, error)
 	UpdateOrder(ctx context.Context, u OrderUpdate) (Order, error)
 	Transition(ctx context.Context, t Transition) (Order, bool, error)
 	Costs(ctx context.Context, orderID string) (CostSummary, error)
@@ -689,20 +690,34 @@ func (h orderHead) rework() bool { return h.originType == domain.OriginRework }
 // one order (BR-21.4) and checks If-Match against the version; ifMatch 0
 // skips the check (journal posts carry no If-Match).
 func lockOrder(ctx context.Context, tx pgx.Tx, tenantID, orderID string, ifMatch int) (orderHead, error) {
+	h, err := readOrderHead(ctx, tx, tenantID, orderID, true)
+	if err != nil {
+		return h, err
+	}
+	if ifMatch != 0 && h.version != ifMatch {
+		return h, httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, fmt.Sprintf("order was changed by another user; current version is %d", h.version))
+	}
+	return h, nil
+}
+
+// readOrderHead reads the order's head, under the row lock when lock is set (commands)
+// and without it for reads such as the End check.
+func readOrderHead(ctx context.Context, q querier, tenantID, orderID string, lock bool) (orderHead, error) {
 	h := orderHead{id: orderID}
 	var status, qty, raf, qerr string
-	err := tx.QueryRow(ctx, `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text,
+	sql := `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text,
 			product_id::text, site_id::text, warehouse_id::text, item_group, currency::text, (created_at at time zone 'UTC')::date::text, origin_type
-		from production_order where tenant_id = $1 and id = $2 for update`, tenantID, orderID).Scan(&status, &h.version, &qty, &raf, &qerr,
+		from production_order where tenant_id = $1 and id = $2`
+	if lock {
+		sql += ` for update`
+	}
+	err := q.QueryRow(ctx, sql, tenantID, orderID).Scan(&status, &h.version, &qty, &raf, &qerr,
 		&h.legalEntityID, &h.productID, &h.siteID, &h.warehouseID, &h.itemGroup, &h.currency, &h.createdOn, &h.originType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return h, notFound()
 	}
 	if err != nil {
 		return h, err
-	}
-	if ifMatch != 0 && h.version != ifMatch {
-		return h, httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, fmt.Sprintf("order was changed by another user; current version is %d", h.version))
 	}
 	h.status = domain.Status(status)
 	h.quantity, h.qtyRAF, h.qtyError = dec(qty), dec(raf), dec(qerr)
@@ -1032,7 +1047,7 @@ func domainProblem(err error) error {
 	switch de.Code {
 	case domain.CodeIllegalTransition, domain.CodeNotEditable, domain.CodeAsBuiltState,
 		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState, domain.CodeChangeNotEligible,
-		domain.CodeChangeSuperseded, domain.CodeSplitRefused, domain.CodeFiniteState, domain.CodeFiniteLocked:
+		domain.CodeChangeSuperseded, domain.CodeSplitRefused, domain.CodeFiniteState, domain.CodeFiniteLocked, domain.CodeUnpostedJournals:
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)

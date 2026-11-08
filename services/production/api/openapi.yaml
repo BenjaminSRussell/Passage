@@ -419,6 +419,27 @@ components:
         actualCost: { $ref: '#/components/schemas/Decimal', description: Material, labor and overhead posted to WIP. }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
+    EndFinding:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, description: 'The stable code the matching refusal or warning carries, for example PRODUCTION_UNPOSTED_JOURNALS.' }
+        message: { type: string, description: 'The message `:end` refuses with, or the PRD warning, with its values filled in.' }
+        count: { type: integer, description: 'Journals or serials the message speaks of; absent when it counts nothing.' }
+    EndCheck:
+      type: object
+      required: [orderId, canEnd, blockers, warnings]
+      properties:
+        orderId: { type: string, format: uuid }
+        canEnd: { type: boolean, description: True when there is no blocker. }
+        blockers:
+          type: array
+          description: What would refuse `:end` now.
+          items: { $ref: '#/components/schemas/EndFinding' }
+        warnings:
+          type: array
+          description: What `:end` accepts with a warning.
+          items: { $ref: '#/components/schemas/EndFinding' }
     StatusLogEntry:
       type: object
       properties:
@@ -1713,6 +1734,29 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/StatusLogEntry' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/production/orders/{id}/end-check:
+    get:
+      operationId: getProductionOrderEndCheck
+      summary: Whether :end would be accepted now, with its blockers and warnings (FR-21.8, PROD-0012, PROD-0020, PROD-0021)
+      description: |
+        Reads what `:end` reads, through the same guards and settlement plan, and changes nothing. Blockers
+        are what would refuse the command, in the order it applies them: a status that cannot end, output
+        not reported or zero output without the caller's `production.order.zero-output` duty, a missing
+        as-built record where the site requires one (PROD-0021), unposted journals (PROD-0012), an end date
+        before the last posting, and no posting profile (or account) for the settlement. Warnings are
+        accepted: consumed serials of components that serial as-built records name but no finished serial
+        holds (PROD-0020). PROD-0014 (subcontract operations with no vendor invoice) is not reported yet.
+        The answer is a snapshot for this caller and is sent with `Cache-Control: no-store`.
+      x-passage-duty: production.order.read
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+      responses:
+        '200':
+          description: The readiness of the order to end.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EndCheck' }
         '404': { $ref: '#/components/responses/Problem' }
   /v1/production/orders/{id}/costs:
     get:

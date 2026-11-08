@@ -34,8 +34,8 @@ const (
 	// job card on one that route cards report on (FR-21.6: one feedback mode per operation).
 	CodeFeedbackMode        = "PRODUCTION_FEEDBACK_MODE_CONFLICT"
 	CodePostingBeforeOrder  = "PRODUCTION_POSTING_DATE_BEFORE_ORDER"
-	CodeUnpostedJournals    = "PRODUCTION_UNPOSTED_JOURNALS"
-	CodeEndBeforeLastPosted = "PRODUCTION_END_BEFORE_LAST_JOURNAL"
+	CodeUnpostedJournals    = domain.CodeUnpostedJournals
+	CodeEndBeforeLastPosted = domain.CodeEndBeforeLastPosted
 	// CodeQualityHold refuses a consume that would issue held stock (wave 33 AC2).
 	CodeQualityHold = "QUALITY_HOLD"
 )
@@ -1289,64 +1289,21 @@ func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, a
 		from production_journal where tenant_id = $1 and order_id = $2`, tenantID, h.id).Scan(&drafts, &lastPosted); err != nil {
 		return err
 	}
-	if drafts > 0 {
-		return httpx.NewProblem(http.StatusConflict, CodeUnpostedJournals, fmt.Sprintf("cannot end: %d journals are unposted; post or delete them", drafts))
+	if err := domain.CheckUnpostedJournals(drafts); err != nil {
+		return domainProblem(err)
 	}
 	date := today()
-	if lastPosted != nil && *lastPosted > date {
-		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeEndBeforeLastPosted,
-			fmt.Sprintf("the end date %s is before the last journal posting date %s", date, *lastPosted))
-	}
-	planned, err := loadCosts(ctx, tx, tenantID, h.id)
-	if err != nil {
-		return err
-	}
-	actual, err := loadActual(ctx, tx, tenantID, h.id)
-	if err != nil {
-		return err
-	}
-	balance, err := wipBalance(ctx, tx, tenantID, h.id)
-	if err != nil {
-		return err
-	}
-	var vars []domain.Variance
-	// FR-21.20: the site's rework.capitalize parameter moves the WIP balance of a rework
-	// order into finished goods (no variance rows), but only onto units it received: a
-	// rework order ended without output has no stock to carry the cost, so it is expensed.
-	capitalize := h.rework() && capitalizeRework && h.qtyRAF.IsPositive()
-	if h.rework() && !capitalize {
-		// AC-21.15: rework is not capitalized by default; the WIP balance is rework cost
-		// and settles as rework variances.
-		byGroup, err := wipBalanceByGroup(ctx, tx, tenantID, h.id)
-		if err != nil {
-			return err
-		}
-		vars = domain.ReworkVariances(byGroup)
-	} else if !h.rework() {
-		// FR-21.14: co-product output counts toward the share of planned cost earned.
-		cos, err := loadCoProducts(ctx, tx, tenantID, h.id)
-		if err != nil {
-			return err
-		}
-		basisQty, basisRAF := domain.SettleBasis(h.quantity, h.qtyRAF, cos)
-		if vars, err = domain.SettleWIP(basisQty, basisRAF, planned, actual, balance, h.currency); err != nil {
+	if lastPosted != nil {
+		if err := domain.CheckEndDate(*lastPosted, date); err != nil {
 			return domainProblem(err)
 		}
 	}
-	var postings []domain.Posting
-	if !balance.IsZero() || len(vars) > 0 {
-		profile, err := resolveProfile(ctx, tx, tenantID, h)
-		if err != nil {
-			return err
-		}
-		if capitalize {
-			postings, err = domain.ReworkCapitalizationPostings(profile, balance)
-		} else {
-			postings, err = domain.SettlementPostings(profile, balance, vars)
-		}
-		if err != nil {
-			return domainProblem(err)
-		}
+	st, err := planSettlement(ctx, tx, tenantID, h, capitalizeRework)
+	if err != nil {
+		return err
+	}
+	planned, actual, balance, vars, capitalize, postings := st.planned, st.actual, st.balance, st.vars, st.capitalize, st.postings
+	if st.post {
 		if err := insertPostings(ctx, tx, tenantID, h, nil, date, postings); err != nil {
 			return err
 		}
@@ -1365,6 +1322,76 @@ func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, a
 		data.Variances = append(data.Variances, prodevents.VarianceAmount{Type: string(v.Type), CostGroup: string(v.Group), Amount: v.Amount.String()})
 	}
 	return enqueue(ctx, tx, h.id, prodevents.OrderSettled, tenantID, actor, data)
+}
+
+// settlement is what End posts for an order: its planned and actual cost, the WIP
+// balance, the variances, whether rework is capitalized, and the ledger postings (post
+// says whether there is anything to post).
+type settlement struct {
+	planned, actual []domain.CostRow
+	balance         decimal.Decimal
+	vars            []domain.Variance
+	capitalize      bool
+	postings        []domain.Posting
+	post            bool
+}
+
+// planSettlement computes what End would post for the order and writes nothing (FR-21.8,
+// BR-21.6, FR-21.20). Its refusals are End's settlement refusals: no posting profile
+// resolves for the order, or the profile lacks an account the variances or the rework
+// capitalization need. settleOrder and the End check both read it.
+func planSettlement(ctx context.Context, q querier, tenantID string, h orderHead, capitalizeRework bool) (settlement, error) {
+	var st settlement
+	var err error
+	if st.planned, err = loadCosts(ctx, q, tenantID, h.id); err != nil {
+		return st, err
+	}
+	if st.actual, err = loadActual(ctx, q, tenantID, h.id); err != nil {
+		return st, err
+	}
+	if st.balance, err = wipBalance(ctx, q, tenantID, h.id); err != nil {
+		return st, err
+	}
+	// FR-21.20: the site's rework.capitalize parameter moves the WIP balance of a rework
+	// order into finished goods (no variance rows), but only onto units it received: a
+	// rework order ended without output has no stock to carry the cost, so it is expensed.
+	st.capitalize = h.rework() && capitalizeRework && h.qtyRAF.IsPositive()
+	if h.rework() && !st.capitalize {
+		// AC-21.15: rework is not capitalized by default; the WIP balance is rework cost
+		// and settles as rework variances.
+		byGroup, err := wipBalanceByGroup(ctx, q, tenantID, h.id)
+		if err != nil {
+			return st, err
+		}
+		st.vars = domain.ReworkVariances(byGroup)
+	} else if !h.rework() {
+		// FR-21.14: co-product output counts toward the share of planned cost earned.
+		cos, err := loadCoProducts(ctx, q, tenantID, h.id)
+		if err != nil {
+			return st, err
+		}
+		basisQty, basisRAF := domain.SettleBasis(h.quantity, h.qtyRAF, cos)
+		if st.vars, err = domain.SettleWIP(basisQty, basisRAF, st.planned, st.actual, st.balance, h.currency); err != nil {
+			return st, domainProblem(err)
+		}
+	}
+	st.post = !st.balance.IsZero() || len(st.vars) > 0
+	if !st.post {
+		return st, nil
+	}
+	profile, err := resolveProfile(ctx, q, tenantID, h)
+	if err != nil {
+		return st, err
+	}
+	if st.capitalize {
+		st.postings, err = domain.ReworkCapitalizationPostings(profile, st.balance)
+	} else {
+		st.postings, err = domain.SettlementPostings(profile, st.balance, st.vars)
+	}
+	if err != nil {
+		return st, domainProblem(err)
+	}
+	return st, nil
 }
 
 func byGroup(rows []domain.CostRow) prodevents.CostByGroup {

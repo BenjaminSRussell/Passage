@@ -118,13 +118,19 @@ func TestRework_AC2115(t *testing.T) {
 		t.Fatalf("WIP before End = %s, want the 60.00 of rework", c.WIPBalance)
 	}
 
-	// Ending needs a rework variance account on the profile.
-	_, err = st.step(domain.CmdEnd, nil)
-	wantProblem(t, err, http.StatusUnprocessableEntity, domain.CodeNoPostingProfile)
+	// Ending needs a rework variance account on the profile; the End check says so first.
+	rep := endCheck(t, st, false)
+	if len(rep.Blockers) != 1 || rep.Blockers[0].Code != domain.CodeNoPostingProfile {
+		t.Fatalf("end check without a rework account: %+v", rep)
+	}
+	refusedAsReported(t, st, rep, false)
 	prof := testProfile(domain.AllKey, domain.AllKey, "1450")
 	prof.VarRework = "5650"
 	if _, _, err := s.SavePostingProfile(ctx, ProfileSave{LegalEntityID: le, Profile: prof, IfMatch: 1, Actor: "admin"}); err != nil {
 		t.Fatal(err)
+	}
+	if rep := endCheck(t, st, false); !rep.CanEnd {
+		t.Fatalf("end check with a rework account: %+v", rep)
 	}
 	st.must(domain.CmdEnd, nil)
 

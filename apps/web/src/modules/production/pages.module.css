@@ -153,3 +153,9 @@
 .tableNote {
   padding: var(--space-3) var(--space-4);
 }
+
+/* The blockers and warnings of the End check inside an alert. */
+.findings {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+}

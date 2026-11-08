@@ -651,3 +651,20 @@ Slice 26:
   409 `PRODUCTION_INTAKE_NOT_OPEN`. 0026 refuses to run over existing duplicates and names them.
 - A converted order carries the planned order's `quotaArrangementId` and `quotaSourceId` (FR-22.17,
   migration 0025); the order page shows them. Releasing the allocation is planning's (NOT-IMPLEMENTED.md).
+
+Slice 29:
+
+- `GET /v1/production/orders/{id}/end-check` (duty `production.order.read`) answers whether `:end`
+  would be accepted now, without changing anything: `canEnd`, `blockers` and `warnings`, each finding
+  with its stable `code`, its message and a `count`. Blockers are exactly what `:end` refuses, in its
+  order and with its codes and messages: a status that cannot end (`PRODUCTION_ILLEGAL_TRANSITION`,
+  alone), output not reported (`PRODUCTION_END_REQUIRES_RAF`) or zero output without the caller's
+  `production.order.zero-output` (PROD-0013), "As-built required" with no record attached (PROD-0021),
+  unposted journals (PROD-0012), an end date before the last posting, and no posting profile or account
+  for the settlement (`PRODUCTION_POSTING_PROFILE_MISSING`). The guards are shared domain functions
+  (`CheckEnd`, `CheckAsBuiltRequired`, `CheckUnpostedJournals`, `CheckEndDate`) and the settlement is the
+  same `planSettlement` End posts from, so the check and the command cannot drift apart. The warning is
+  PROD-0020 (`PRODUCTION_AS_BUILT_UNRESOLVED`): consumed serials of components that serial as-built
+  records name but no record assigns. PROD-0014 is not reported until purchasing reports invoices (see
+  NOT-IMPLEMENTED.md). The answer depends on the caller's duty and is sent with `Cache-Control: no-store`.
+- The web module shows it as the "Ready to end?" card on a Started or Reported as finished order.

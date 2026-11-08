@@ -138,6 +138,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}", a.getOrder)
 	r.With(authz.RequireDuty(DutyWrite)).Patch("/v1/production/orders/{id}", a.patchOrder)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/status-log", a.getStatusLog)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/end-check", a.getEndCheck)
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/orders/{id}/costs", a.getCosts)
 	r.Post("/v1/production/orders/{id}", a.transition)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/journals", a.listJournals)
@@ -436,6 +437,27 @@ func (a *API) getStatusLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"orderId": id, "items": entries})
+}
+
+// getEndCheck answers whether `:end` would be accepted now (FR-21.8): the blockers that
+// would refuse it and the warnings it would accept (PROD-0012, PROD-0020, PROD-0021). The
+// zero-output rule is judged for this caller, so the answer is never stored by a cache.
+func (a *API) getEndCheck(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	id, ok := orderID(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	rep, err := a.store.EndCheck(r.Context(), id, p.HasDuty(DutyZeroOutput))
+	if err != nil {
+		a.fail(w, r, "check the order can end", err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.JSON(w, http.StatusOK, map[string]any{"orderId": id, "canEnd": rep.CanEnd, "blockers": rep.Blockers, "warnings": rep.Warnings})
 }
 
 // ---- PATCH ----

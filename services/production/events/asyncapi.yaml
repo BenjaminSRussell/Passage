@@ -225,6 +225,7 @@ components:
   messages:
     registrationPosted:
       name: posted
+      x-passage-type: dev.passage.shopfloor.registration.posted.v1
       title: A shop-floor registration was stored (received from the shop floor)
       description: 'Consumed, not published: the shop floor''s dev.passage.shopfloor.registration.posted.v1. Only the fields production reads are listed.'
       payload:
@@ -240,6 +241,7 @@ components:
           costRateCurrency: { type: string, description: The currency of costRate. }
     registrationCorrected:
       name: corrected
+      x-passage-type: dev.passage.shopfloor.registration.corrected.v1
       title: A shop-floor registration was corrected (received from the shop floor)
       description: 'Consumed, not published: the shop floor''s dev.passage.shopfloor.registration.corrected.v1. Only the fields production reads are listed.'
       payload:

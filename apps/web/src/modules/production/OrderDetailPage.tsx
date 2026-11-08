@@ -45,6 +45,7 @@ import {
   type Variance,
 } from "./api/client";
 import { AsBuiltPanel } from "./AsBuiltPanel";
+import { EndCheckPanel } from "./EndCheckPanel";
 import { FiniteDatesPanel } from "./FiniteDatesPanel";
 import { JournalsPanel } from "./JournalsPanel";
 import { OrderEditPanel } from "./OrderEditPanel";
@@ -501,6 +502,10 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
           </div>
         )}
       </Card>
+
+      {current.status === "Started" || current.status === "ReportedAsFinished" ? (
+        <EndCheckPanel orderId={current.id} version={current.version} status={current.status} />
+      ) : null}
 
       {canSplit(current.status) ? (
         <SplitPanel
