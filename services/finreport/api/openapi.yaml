@@ -1432,6 +1432,187 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/library/{id}/share-links:
+    parameters:
+      - $ref: '#/components/parameters/LibraryId'
+    get:
+      operationId: listShareLinks
+      summary: Share links of a stored statement file (FR-15.8)
+      description: >-
+        The links made to the file, newest first, with their status (active, expired or revoked), expiry and
+        download count. The secret of a link is never listed; it is shown once, when the link is created.
+      x-passage-duty: reporting.library.share
+      responses:
+        '200':
+          description: The share links of the file
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ShareLink'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0043 - no such entry, or it is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+    post:
+      operationId: createShareLink
+      summary: Share a stored statement file with a link that expires (FR-15.8)
+      description: >-
+        Makes a bearer link to the file. Anyone who holds the link can download the file until it expires or is
+        revoked, with no Passage sign-in, so hand it only to the people who should see the statement. The
+        link works for expiresInDays (1 to 90; the default is REPORTING_SHARE_LINK_EXPIRY_DAYS, 14), or until
+        the file's retention date when that is sooner. The response carries the secret token and the download
+        path once; only a hash of the secret is stored. A repeated request with the same Idempotency-Key
+        returns the stored link with 200 and without the token. The link, an audit trail entry and
+        sharelink.created.v1 are written in one transaction.
+      x-passage-duty: reporting.library.share
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expiresInDays: {type: integer, minimum: 1, maximum: 90, description: Lifetime of the link in days; the configured default when absent}
+      responses:
+        '201':
+          description: The link was created; token and path are in this response only
+          headers:
+            ETag:
+              description: Revision of the link; send it in If-Match to revoke it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ShareLink'}
+        '200':
+          description: Replay - the link stored for this Idempotency-Key and the same request, without its token
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ShareLink'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0043 - no such entry, or it is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: REPORT-0053 (the file is past its retention date) or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422':
+          description: Invalid body, REPORT-0052 (expiresInDays outside 1 to 90) or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/share-links/{id}:revoke:
+    parameters:
+      - $ref: '#/components/parameters/ShareLinkId'
+    post:
+      operationId: revokeShareLink
+      summary: Revoke a share link (FR-15.8)
+      description: >-
+        Ends the link at once; a download with it answers 410 from then on. If-Match carries the revision read
+        (428 when missing, 412 conflict_version when stale). The revocation, an audit trail entry and
+        sharelink.revoked.v1 are written in one transaction.
+      x-passage-duty: reporting.library.share
+      parameters:
+        - {name: If-Match, in: header, required: true, description: Revision of the link as read (the ETag), schema: {type: string}}
+      responses:
+        '200':
+          description: The revoked link
+          headers:
+            ETag:
+              description: New revision of the link
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ShareLink'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0050 - no such link, or it is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: REPORT-0054 - the link was revoked already
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '412':
+          description: conflict_version - the link changed since it was read
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '428':
+          description: precondition_required - If-Match is missing
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/shared/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: The secret token of a share link, as returned once when the link was created
+        schema: {type: string}
+    get:
+      operationId: getSharedFile
+      summary: Download a file through a share link (FR-15.8)
+      description: >-
+        Public: no Passage sign-in. The token is the only credential; the gateway route for this path must not
+        require a JWT. Serves exactly the stored file, with its SHA-256 in the ETag and in
+        X-Passage-Content-Sha256, and counts the download on the link. Answers are never cached, framed or
+        run as a page (Cache-Control no-store, Content-Disposition attachment, a sandbox Content-Security-Policy,
+        X-Frame-Options DENY, nosniff, Referrer-Policy no-referrer). The token is never logged: the access log
+        and problem instance carry /v1/reporting/shared/{token}. A token that names no link answers 404
+        REPORT-0050; a link that expired or was revoked answers 410 REPORT-0051.
+      x-passage-duty: public
+      security: []
+      responses:
+        '200':
+          description: The file
+          headers:
+            Content-Disposition:
+              description: attachment with the stored file name
+              schema: {type: string}
+            ETag:
+              description: The SHA-256 of the body in quotes
+              schema: {type: string}
+            X-Passage-Content-Sha256:
+              description: Hex SHA-256 of the response body
+              schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+            Cache-Control:
+              description: private, no-store
+              schema: {type: string}
+          content:
+            text/csv:
+              schema: {type: string}
+            text/html:
+              schema: {type: string}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+        '404':
+          description: REPORT-0050 - the token names no link
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '410':
+          description: REPORT-0051 - the link expired or was revoked
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
   /v1/reporting/legal-holds:
     get:
       operationId: listLegalHolds
@@ -1667,6 +1848,12 @@ components:
       in: path
       required: true
       description: Legal hold id
+      schema: {type: string, format: uuid}
+    ShareLinkId:
+      name: id
+      in: path
+      required: true
+      description: Share link id
       schema: {type: string, format: uuid}
     LibraryId:
       name: id
@@ -2326,13 +2513,31 @@ components:
           type: array
           items: {type: string}
 
+    ShareLink:
+      type: object
+      required: [id, libraryId, status, createdBy, createdAt, expiresAt, downloadCount, revision]
+      properties:
+        id: {type: string, format: uuid}
+        libraryId: {type: string, format: uuid, description: The report library file the link opens}
+        legalEntityId: {type: string, format: uuid, description: Legal entity of the file; absent when it has none}
+        status: {type: string, enum: [active, expired, revoked], description: Derived from the expiry and the revocation}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, description: When the link stops working; never later than the file's retention date}
+        revokedBy: {type: string}
+        revokedAt: {type: string, format: date-time}
+        downloadCount: {type: integer, description: Downloads served through the link}
+        lastDownloadedAt: {type: string, format: date-time}
+        revision: {type: integer, description: Echoed in If-Match to revoke the link}
+        token: {type: string, description: The secret token; present only in the response that creates the link}
+        path:  {type: string, description: 'Download path with the token (/v1/reporting/shared/{token}); present only in the response that creates the link'}
     AuditKind:
       type: string
       description: >-
         Ledger kinds (PRD AuditTrailEntry) then the reporting service's own kinds.
       enum: [posted, replayed, reversed, batch_submitted, batch_approved, batch_rejected, period_changed, reopen_approved,
         rate_override, tax_fallback, allocation_run, year_end_run, rebuild,
-        statement_run, definition_published, definition_retired, hierarchy_published, schedule_saved, audit_exported, legal_hold_placed, legal_hold_released, library_swept, runs_swept]
+        statement_run, definition_published, definition_retired, hierarchy_published, schedule_saved, audit_exported, legal_hold_placed, legal_hold_released, library_swept, runs_swept, share_link_created, share_link_revoked]
     AuditEntry:
       type: object
       required: [id, occurredAt, kind, actorId, objectRef, details]

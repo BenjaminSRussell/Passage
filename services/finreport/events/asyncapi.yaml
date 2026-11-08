@@ -44,6 +44,13 @@ channels:
         $ref: '#/components/messages/LegalHoldPlaced'
       legalHoldReleased:
         $ref: '#/components/messages/LegalHoldReleased'
+  shareLink:
+    address: passage.reporting.sharelink
+    messages:
+      shareLinkCreated:
+        $ref: '#/components/messages/ShareLinkCreated'
+      shareLinkRevoked:
+        $ref: '#/components/messages/ShareLinkRevoked'
   librarySwept:
     address: passage.reporting.library
     messages:
@@ -118,6 +125,20 @@ operations:
     summary: A legal hold on the report library of a legal entity was released (FR-15.8); written to the outbox in the transaction that releases it
     messages:
       - $ref: '#/channels/legalHold/messages/legalHoldReleased'
+  publishShareLinkCreated:
+    action: send
+    channel:
+      $ref: '#/channels/shareLink'
+    summary: A share link to a report library file was created (FR-15.8); written to the outbox in the transaction that stores the link
+    messages:
+      - $ref: '#/channels/shareLink/messages/shareLinkCreated'
+  publishShareLinkRevoked:
+    action: send
+    channel:
+      $ref: '#/channels/shareLink'
+    summary: A share link to a report library file was revoked (FR-15.8); written to the outbox in the transaction that revokes it
+    messages:
+      - $ref: '#/channels/shareLink/messages/shareLinkRevoked'
   publishLibrarySwept:
     action: send
     channel:
@@ -295,6 +316,34 @@ components:
           reason: {type: string, description: The reason the hold was placed with}
           actor: {type: string, description: User who released the hold}
           note: {type: string, description: Release note}
+    ShareLinkCreated:
+      name: dev.passage.reporting.sharelink.created.v1
+      title: Share link created
+      summary: A bearer link to a report library file was created; anyone holding it can download the file until it expires or is revoked. The secret is not in the event.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [link_id, library_id, expires_at, actor]
+        properties:
+          link_id: {type: string, format: uuid}
+          library_id: {type: string, format: uuid, description: The report library file the link opens}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity of the file (also the legalentityid extension); absent when it has none}
+          expires_at: {type: string, format: date-time}
+          actor: {type: string, description: User who created the link}
+    ShareLinkRevoked:
+      name: dev.passage.reporting.sharelink.revoked.v1
+      title: Share link revoked
+      summary: A share link to a report library file was revoked and no longer opens the file.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [link_id, library_id, expires_at, actor]
+        properties:
+          link_id: {type: string, format: uuid}
+          library_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity of the file (also the legalentityid extension); absent when it has none}
+          expires_at: {type: string, format: date-time, description: When the link would have expired}
+          actor: {type: string, description: User who revoked the link}
     LibrarySwept:
       name: dev.passage.reporting.library.swept.v1
       title: Library swept

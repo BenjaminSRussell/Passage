@@ -45,6 +45,8 @@ const (
 	AuditLegalHoldReleased   = "legal_hold_released"
 	AuditLibrarySwept        = "library_swept"
 	AuditRunsSwept           = "runs_swept"
+	AuditShareLinkCreated    = "share_link_created"
+	AuditShareLinkRevoked    = "share_link_revoked"
 )
 
 // AuditLedgerKinds are the PRD kinds, fed from other services' events.
@@ -58,6 +60,7 @@ var AuditLedgerKinds = []string{
 var AuditReportingKinds = []string{
 	AuditStatementRun, AuditDefinitionPublished, AuditDefinitionRetired, AuditHierarchyPublished,
 	AuditScheduleSaved, AuditExported, AuditLegalHoldPlaced, AuditLegalHoldReleased, AuditLibrarySwept, AuditRunsSwept,
+	AuditShareLinkCreated, AuditShareLinkRevoked,
 }
 
 // CodeAuditInvalid is a slice-local code for an audit entry the trail refuses

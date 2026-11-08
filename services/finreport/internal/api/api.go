@@ -99,6 +99,10 @@ type Store interface {
 	GetHold(ctx context.Context, id string) (store.LegalHold, error)
 	ListSweeps(ctx context.Context, limit int) ([]store.Sweep, error)
 	ListRunSweeps(ctx context.Context, limit int) ([]store.RunSweep, error)
+	CreateShareLink(ctx context.Context, spec store.ShareSpec) (store.ShareLink, error)
+	ListShareLinks(ctx context.Context, libraryID string) ([]store.ShareLink, error)
+	RevokeShareLink(ctx context.Context, id string, ifMatch *int, actor string) (store.ShareLink, error)
+	RedeemShareLink(ctx context.Context, token string) (store.SharedFile, error)
 }
 
 // API holds the handlers.
@@ -107,12 +111,13 @@ type API struct {
 	linePage  int                    // drill level 2 default page size (REPORTING_PAGE_SIZE)
 	traceLink func(id string) string // trace viewer link of a line (REPORTING_TRACE_URL)
 	maxLag    int                    // lag gate in seconds (REPORTING_MAX_LAG_S)
+	shareDays int                    // default share link lifetime in days (REPORTING_SHARE_LINK_EXPIRY_DAYS)
 	verifier  Verifier               // balance verification against the ledger; nil when LEDGER_URL is not set
 }
 
 // New returns the API over st with the default reporting tunables.
 func New(st Store) *API {
-	return &API{store: st, linePage: domain.DefaultLinePage, traceLink: config.Reporting{}.TraceLink, maxLag: 30}
+	return &API{store: st, linePage: domain.DefaultLinePage, traceLink: config.Reporting{}.TraceLink, maxLag: 30, shareDays: 14}
 }
 
 // WithConfig applies the reporting tunables the handlers use.
@@ -122,6 +127,9 @@ func (a *API) WithConfig(cfg config.Reporting) *API {
 	}
 	a.traceLink = cfg.TraceLink
 	a.maxLag = cfg.MaxLagSeconds
+	if cfg.ShareLinkExpiryDays > 0 {
+		a.shareDays = cfg.ShareLinkExpiryDays
+	}
 	return a
 }
 
@@ -173,6 +181,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/library", a.listLibrary)
 		r.With(authz.RequireDuty(DutyView)).Get("/library/{id}", a.getLibraryEntry)
 		r.With(authz.RequireDuty(DutyView)).Get("/library/{id}/content", a.libraryContent)
+		r.With(authz.RequireDuty(DutyShare)).Get("/library/{id}/share-links", a.listShareLinks)
+		r.With(authz.RequireDuty(DutyShare)).Post("/library/{id}/share-links", a.createShareLink)
+		r.With(authz.RequireDuty(DutyShare)).Post("/share-links/*", a.shareAction)
 		r.With(authz.RequireDuty(DutyView)).Get("/legal-holds", a.listHolds)
 		r.With(authz.RequireDuty(DutyHold)).Post("/legal-holds", a.placeHold)
 		r.With(authz.RequireDuty(DutyView)).Get("/legal-holds/{id}", a.getHold)
@@ -185,6 +196,14 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail", a.auditTrail)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/audit-trail:export", a.exportAuditTrail)
 	})
+}
+
+// RegisterPublic mounts the one route that has no Passage identity: the
+// download a share link holder opens (FR-15.8). The link's secret is the
+// authority. Serve it through PublicHandler, never on the platform router: that
+// router's access log writes the request path, which holds the secret.
+func (a *API) RegisterPublic(r chi.Router) {
+	r.Get(SharedPathPrefix+"{token}", a.sharedContent)
 }
 
 // --- definitions -----------------------------------------------------------

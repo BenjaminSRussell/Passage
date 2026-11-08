@@ -60,3 +60,6 @@ cell-by-cell navigation of the statement and the dimension-security
 "filtered amount" warning. See `services/finreport/NOT-IMPLEMENTED.md`.
 
 Needs: nothing outside the module. No npm dependencies were added.
+
+Slice 19: the Library file page has a "Share this file" card (`ShareLinks.tsx`) for callers holding
+`reporting.library.share`: create an expiring download link (shown once), list the links and revoke one.

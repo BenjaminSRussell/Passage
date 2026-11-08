@@ -139,20 +139,27 @@ func (s *Postgres) libraryEntry(ctx context.Context, id string, withContent bool
 	var content []byte
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		if withContent {
-			var sc LibraryEntry
-			row := tx.QueryRow(ctx, `select `+libraryColumns+`, content from report_library_entry where id=$1::uuid`, id)
-			err = row.Scan(&sc.ID, &sc.RunID, &sc.ScheduleCode, &sc.DefinitionCode, &sc.DefinitionVersion, &sc.LedgerID, &sc.LegalEntityID,
-				&sc.PeriodYear, &sc.PeriodNo, &sc.CurrencyType, &sc.Format, &sc.FileName, &sc.ContentType, &sc.SizeBytes, &sc.SHA256,
-				&sc.RetainUntil, &sc.CreatedAt, &sc.OnHold, &content)
-			e = sc
-		} else {
-			e, err = scanLibrary(tx.QueryRow(ctx, `select `+libraryColumns+` from report_library_entry where id=$1::uuid`, id))
-		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			return problem(404, CodeLibraryNotFound, "report library entry "+id+" does not exist")
-		}
+		e, content, err = libraryEntryTx(ctx, tx, id, withContent)
 		return err
 	})
+	return e, content, err
+}
+
+// libraryEntryTx reads one entry, and its file when withContent, inside tx.
+func libraryEntryTx(ctx context.Context, tx pgx.Tx, id string, withContent bool) (LibraryEntry, []byte, error) {
+	var e LibraryEntry
+	var content []byte
+	var err error
+	if withContent {
+		row := tx.QueryRow(ctx, `select `+libraryColumns+`, content from report_library_entry where id=$1::uuid`, id)
+		err = row.Scan(&e.ID, &e.RunID, &e.ScheduleCode, &e.DefinitionCode, &e.DefinitionVersion, &e.LedgerID, &e.LegalEntityID,
+			&e.PeriodYear, &e.PeriodNo, &e.CurrencyType, &e.Format, &e.FileName, &e.ContentType, &e.SizeBytes, &e.SHA256,
+			&e.RetainUntil, &e.CreatedAt, &e.OnHold, &content)
+	} else {
+		e, err = scanLibrary(tx.QueryRow(ctx, `select `+libraryColumns+` from report_library_entry where id=$1::uuid`, id))
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LibraryEntry{}, nil, problem(404, CodeLibraryNotFound, "report library entry "+id+" does not exist")
+	}
 	return e, content, err
 }

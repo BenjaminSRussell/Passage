@@ -851,6 +851,8 @@ export const AUDIT_KINDS = [
   "legal_hold_released",
   "library_swept",
   "runs_swept",
+  "share_link_created",
+  "share_link_revoked",
 ] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
@@ -987,6 +989,49 @@ export async function placeLegalHold(legalEntityId: string, reason: string, key:
 export async function releaseLegalHold(id: string, revision: number, note: string): Promise<LegalHold> {
   const headers = { "If-Match": `"${revision}"` };
   return (await send<LegalHold>(`/legal-holds/${seg(id)}:release`, { method: "POST", headers, body: JSON.stringify(note === "" ? {} : { note }) })).body;
+}
+
+/** A link to one stored file (FR-15.8). token is present only on the response that creates it. */
+export interface ShareLink {
+  id: string;
+  libraryId: string;
+  legalEntityId?: string;
+  status: "active" | "expired" | "revoked";
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedBy?: string;
+  revokedAt?: string;
+  downloadCount: number;
+  lastDownloadedAt?: string;
+  /** Echoed in If-Match to revoke the link. */
+  revision: number;
+  token?: string;
+  path?: string;
+}
+
+export const MIN_SHARE_DAYS = 1;
+export const MAX_SHARE_DAYS = 90;
+
+export async function listShareLinks(libraryId: string, signal?: AbortSignal): Promise<ShareLink[]> {
+  return (await get<{ items: ShareLink[] }>(`/library/${seg(libraryId)}/share-links`, signal)).items;
+}
+
+/** Makes a link that works for days. The secret is in the response only; a retry with the same key returns the stored link without it. */
+export async function createShareLink(libraryId: string, days: number, key: string): Promise<ShareLink> {
+  const init = { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ expiresInDays: days }) };
+  return (await send<ShareLink>(`/library/${seg(libraryId)}/share-links`, init)).body;
+}
+
+/** Ends a link; revision is the one read (a stale one answers 412 conflict_version). */
+export async function revokeShareLink(id: string, revision: number): Promise<ShareLink> {
+  const headers = { "If-Match": `"${revision}"` };
+  return (await send<ShareLink>(`/share-links/${seg(id)}:revoke`, { method: "POST", headers })).body;
+}
+
+/** The address a person opens to download the file with the link's token. */
+export function shareLinkUrl(token: string): string {
+  return `${window.location.origin}${base}/shared/${token}`;
 }
 
 export async function listLibrarySweeps(signal?: AbortSignal): Promise<LibrarySweep[]> {

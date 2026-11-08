@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -124,8 +125,12 @@ func withVerifier(v api.Verifier) func(*api.API) {
 	}
 }
 
-// newHandler mounts the reporting API on the platform router, which already
-// installs the tenant middleware and the health endpoints.
+// newHandler mounts the reporting API on the platform router, which installs
+// the tenant middleware and the health endpoints, exactly as before slice 19.
+// The one public route, the share link download (FR-15.8), never reaches that
+// router: every path under api.SharedPathPrefix goes to the API's public
+// handler, which serves that download alone (no other path answers there) and
+// keeps the token, which is in the path, out of the access log.
 func newHandler(st api.Store, cfg config.Reporting, opts ...func(*api.API)) http.Handler {
 	router := httpx.NewRouter()
 	a := api.New(st).WithConfig(cfg)
@@ -133,5 +138,12 @@ func newHandler(st api.Store, cfg config.Reporting, opts ...func(*api.API)) http
 		o(a)
 	}
 	a.Register(router)
-	return router
+	public := a.PublicHandler(httpx.ParseTrustedProxies(os.Getenv(httpx.TrustedProxiesEnv)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, api.SharedPathPrefix) {
+			public.ServeHTTP(w, r)
+			return
+		}
+		router.ServeHTTP(w, r)
+	})
 }

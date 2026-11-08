@@ -51,6 +51,7 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 	registered := map[string]bool{}
 	r := chi.NewRouter()
 	New(&fakeStore{}).Register(r)
+	New(&fakeStore{}).RegisterPublic(r)
 	err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		route = strings.ReplaceAll(route, "/*/", "/")
 		if strings.HasSuffix(route, "/definitions/*") {
@@ -65,6 +66,10 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 		}
 		if strings.HasSuffix(route, "/legal-holds/*") {
 			registered[method+" "+strings.TrimSuffix(route, "*")+"{id}:release"] = true
+			return nil
+		}
+		if strings.HasSuffix(route, "/share-links/*") {
+			registered[method+" "+strings.TrimSuffix(route, "*")+"{id}:revoke"] = true
 			return nil
 		}
 		registered[method+" "+route] = true

@@ -378,3 +378,12 @@ legal entity, except for entities under a legal hold (`report_legal_hold`, migra
 `POST /v1/reporting/legal-holds`, `.../legal-holds/{id}:release`, `GET /library-sweeps`).
 A delete trigger on `report_library_entry` refuses removing a retained or held file. Details
 and what is left: NOT-IMPLEMENTED.md, "Slice 17".
+
+## Slice 19: share links with expiry
+
+`POST /v1/reporting/library/{id}/share-links` makes a bearer link to a stored file that works for
+1 to 90 days (`REPORTING_SHARE_LINK_EXPIRY_DAYS`, default 14) or until the file's retention date;
+`GET /v1/reporting/shared/{token}` downloads it with no sign-in (`api.PublicHandler`: every path
+under `/v1/reporting/shared/` goes there, never to the platform router with the tenant middleware,
+and its access log leaves the token out; not reachable through the gateway yet); `POST /v1/reporting/share-links/{id}:revoke` ends it (`report_share_link`, migration
+0021; new duty `reporting.library.share`). Details and what is left: NOT-IMPLEMENTED.md, "Slice 19".

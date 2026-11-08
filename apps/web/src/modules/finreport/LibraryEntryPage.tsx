@@ -1,13 +1,17 @@
 import { Link, useParams } from "react-router-dom";
+import { holdsDuty } from "../../shell/dutyGate";
+import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
 import { getLibraryEntry, libraryContentUrl } from "./api/client";
 import { CURRENCY_TYPE_LABELS, formatBytes, periodLabel } from "./format";
 import styles from "./pages.module.css";
+import { ShareLinks } from "./ShareLinks";
 import { useLoad } from "./useLoad";
 
 /** One stored statement file (FR-15.8): what it is, its SHA-256 and retention, and the download. */
 export function LibraryEntryPage() {
   const { id = "" } = useParams();
+  const canShare = holdsDuty(usePrincipalDuties(), "reporting.library.share");
   const state = useLoad((signal) => getLibraryEntry(id, signal), id);
   const title = "Library file";
   if (state.error) {
@@ -76,6 +80,7 @@ export function LibraryEntryPage() {
           ))}
         </dl>
       </Card>
+      {canShare ? <ShareLinks libraryId={e.id} /> : null}
       <p className={styles.note}>
         The download is exactly the stored file. To check it, compute its SHA-256 and compare it with the value above; the download also carries it in the X-Passage-Content-Sha256 header.
       </p>

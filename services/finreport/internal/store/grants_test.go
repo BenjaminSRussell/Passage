@@ -54,6 +54,11 @@ func TestGrants_AppRoleLocksDraftsButCannotWriteReadModelOrRewriteAppendOnly(t *
 		`update statement_run set legal_entity_id = legal_entity_id`,
 		`update statement_run set legal_entity_ids = legal_entity_ids`,
 		`delete from report_legal_hold`,
+		`delete from report_share_link`,
+		`update report_share_link set expires_at = expires_at`,
+		`update report_share_link set library_id = library_id`,
+		`update report_share_link set token_hash = token_hash`,
+		`update report_share_link set created_by = created_by`,
 		`update outbox set type = type`,
 		`select count(*) from outbox`,
 	} {

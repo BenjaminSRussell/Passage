@@ -17,12 +17,14 @@ var (
 	LegalHoldReleased   = events.Type(Context, "legalhold", "released", 1)
 	LibrarySwept        = events.Type(Context, "library", "swept", 1)
 	RunsSwept           = events.Type(Context, "runs", "swept", 1)
+	ShareLinkCreated    = events.Type(Context, "sharelink", "created", 1)
+	ShareLinkRevoked    = events.Type(Context, "sharelink", "revoked", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded, StatementFailed, DistributionSent,
-		LegalHoldPlaced, LegalHoldReleased, LibrarySwept, RunsSwept}
+		LegalHoldPlaced, LegalHoldReleased, LibrarySwept, RunsSwept, ShareLinkCreated, ShareLinkRevoked}
 }
 
 // HierarchyUnassignedData is the payload of hierarchy.unassigned.v1: a member
@@ -188,5 +190,17 @@ type RunsSweptData struct {
 	DeletedCells  int64  `json:"deleted_cells"`
 	HeldRuns      int    `json:"held_runs"`
 	HoldID        string `json:"hold_id,omitempty"`
+	Actor         string `json:"actor"`
+}
+
+// ShareLinkData is the payload of sharelink.created.v1 and sharelink.revoked.v1
+// (FR-15.8): a link to a report library file was created or revoked. The secret
+// is never in the event. legal_entity_id (the file's, when it has one) also
+// becomes the event's legalentityid extension.
+type ShareLinkData struct {
+	LinkID        string `json:"link_id"`
+	LibraryID     string `json:"library_id"`
+	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	ExpiresAt     string `json:"expires_at"`
 	Actor         string `json:"actor"`
 }

@@ -4,8 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/api"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/config"
@@ -40,6 +43,48 @@ func TestNewHandler_ServesHealthAndTenantRoutes(t *testing.T) {
 		if w.Code != tc.want {
 			t.Fatalf("GET %s = %d, want %d: %s", tc.path, w.Code, tc.want, w.Body.String())
 		}
+	}
+}
+
+func (emptyStore) RedeemShareLink(context.Context, string) (store.SharedFile, error) {
+	return store.SharedFile{}, nil
+}
+
+// Slice 19 added a route without a Passage identity. Every other route must
+// still need the tenant headers: walk the authenticated route table and call
+// each route with none, and check the download is the only route that answers
+// without them.
+func TestNewHandler_EveryAPIRouteStillNeedsATenant(t *testing.T) {
+	h := newHandler(emptyStore{}, config.Reporting{})
+	routes := chi.NewRouter()
+	api.New(emptyStore{}).Register(routes)
+	param := regexp.MustCompile(`\{[^}]+\}`)
+	n := 0
+	err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		path := param.ReplaceAllString(route, "0190f0a0-0000-7000-8000-000000000001")
+		path = strings.ReplaceAll(path, "/*", "/0190f0a0-0000-7000-8000-000000000001:revoke")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(method, path, nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s without a tenant = %d, want 401", method, path, w.Code)
+		}
+		n++
+		return nil
+	})
+	if err != nil || n < 40 {
+		t.Fatalf("walked %d routes, err %v", n, err)
+	}
+	for _, path := range []string{"/v1/reporting/shared", "/v1/reporting/sharedx/" + strings.Repeat("a", 32), "/v1/reporting/unknown"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s without a tenant = %d, want 401", path, w.Code)
+		}
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/reporting/shared/0190f0a000007000800000000000000a."+strings.Repeat("A", 43), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("the share link download needs no tenant: %d %s", w.Code, w.Body.String())
 	}
 }
 
