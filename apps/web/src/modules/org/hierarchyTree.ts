@@ -274,7 +274,7 @@ export function replaceNode(nodes: readonly HierarchyNode[], oldId: string, newI
   );
 }
 
-const csvCell = (value: string) => {
+export const csvCell = (value: string) => {
   const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 };

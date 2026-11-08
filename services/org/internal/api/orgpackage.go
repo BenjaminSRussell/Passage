@@ -67,6 +67,8 @@ type packageLegalEntity struct {
 	TimeZone           string  `json:"timeZone"`
 	DefaultLanguage    string  `json:"defaultLanguage"`
 	RegistrationNumber *string `json:"registrationNumber,omitempty"`
+	// FiscalCalendar is the code of the assigned fiscal calendar, empty for none.
+	FiscalCalendar string `json:"fiscalCalendar,omitempty"`
 }
 
 type packageOperatingUnit struct {
@@ -78,11 +80,13 @@ type packageOperatingUnit struct {
 }
 
 type packageSite struct {
-	LegalEntity string             `json:"legalEntity"`
-	Code        string             `json:"code"`
-	Name        string             `json:"name"`
-	TimeZone    string             `json:"timeZone,omitempty"`
-	Warehouses  []packageWarehouse `json:"warehouses"`
+	LegalEntity string `json:"legalEntity"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	TimeZone    string `json:"timeZone,omitempty"`
+	// FiscalCalendar is the code of the site's own fiscal calendar, empty when it follows its legal entity.
+	FiscalCalendar string             `json:"fiscalCalendar,omitempty"`
+	Warehouses     []packageWarehouse `json:"warehouses"`
 }
 
 type packageWarehouse struct {
@@ -229,6 +233,10 @@ func tooLarge(kind string) error {
 func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 	pkg := OrgPackage{SchemaVersion: PackageSchemaVersion, LegalEntities: []packageLegalEntity{}, OperatingUnits: []packageOperatingUnit{},
 		Sites: []packageSite{}, HierarchyTypes: []packageHierarchyType{}, FiscalCalendars: []packageFiscalCalendar{}, TeamTypes: []packageTeamType{}, Teams: []packageTeam{}}
+	calendarCodes, err := exportCalendarCodes(ctx, st)
+	if err != nil {
+		return pkg, err
+	}
 	entities, err := st.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", packageRowCap)
 	if err != nil {
 		return pkg, err
@@ -244,7 +252,7 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 		refs[ownerLegalEntity+"/"+e.ID] = e.Code
 		nodeRefs[e.ID] = packageNodeRef{Kind: nodeKindLegalEntity, Code: e.Code}
 		pkg.LegalEntities = append(pkg.LegalEntities, packageLegalEntity{Code: e.Code, Name: e.Name, Country: e.Country, Currency: e.Currency,
-			TimeZone: e.TimeZone, DefaultLanguage: e.DefaultLanguage, RegistrationNumber: e.RegistrationNumber})
+			TimeZone: e.TimeZone, DefaultLanguage: e.DefaultLanguage, RegistrationNumber: e.RegistrationNumber, FiscalCalendar: calendarCodes[deref(e.FiscalCalendarID)]})
 	}
 	units, err := st.ListOperatingUnits(ctx, store.OperatingUnitFilter{}, store.OperatingUnitKey{}, packageRowCap)
 	if err != nil {
@@ -264,7 +272,7 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 		}
 		pkg.OperatingUnits = append(pkg.OperatingUnits, out)
 	}
-	if err := exportSites(ctx, st, entityCodes, refs, &pkg); err != nil {
+	if err := exportSites(ctx, st, entityCodes, calendarCodes, refs, &pkg); err != nil {
 		return pkg, err
 	}
 	types, err := st.ListHierarchyTypes(ctx, store.HierarchyTypeFilter{}, "", packageRowCap)
@@ -290,7 +298,24 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 	return pkg, exportReferenceData(ctx, st, entityCodes, refs, &pkg)
 }
 
-func exportSites(ctx context.Context, st store.Store, entityCodes, refs map[string]string, pkg *OrgPackage) error {
+// exportCalendarCodes maps each fiscal calendar id to its code, for the assignments of legal
+// entities and sites.
+func exportCalendarCodes(ctx context.Context, st store.Store) (map[string]string, error) {
+	page, err := st.ListFiscalCalendars(ctx, store.FiscalCalendarFilter{}, "", packageRowCap)
+	if err != nil {
+		return nil, err
+	}
+	if page.NextCode != "" {
+		return nil, tooLarge("fiscal calendars")
+	}
+	codes := map[string]string{}
+	for _, c := range page.Items {
+		codes[c.ID] = c.Code
+	}
+	return codes, nil
+}
+
+func exportSites(ctx context.Context, st store.Store, entityCodes, calendarCodes, refs map[string]string, pkg *OrgPackage) error {
 	ids := make([]string, 0, len(entityCodes))
 	for id := range entityCodes {
 		ids = append(ids, id)
@@ -324,12 +349,12 @@ func exportSites(ctx context.Context, st store.Store, entityCodes, refs map[stri
 		for _, w := range warehouses.Items {
 			refs[ownerWarehouse+"/"+w.ID] = entityCodes[entityID] + "/" + w.Code
 		}
-		appendSites(entityCodes[entityID], sites.Items, warehouses.Items, locations.Items, pkg)
+		appendSites(entityCodes[entityID], calendarCodes, sites.Items, warehouses.Items, locations.Items, pkg)
 	}
 	return nil
 }
 
-func appendSites(entityCode string, sites []store.Site, warehouses []store.Warehouse, locations []store.Location, pkg *OrgPackage) {
+func appendSites(entityCode string, calendarCodes map[string]string, sites []store.Site, warehouses []store.Warehouse, locations []store.Location, pkg *OrgPackage) {
 	locationsByWarehouse := map[string][]packageLocation{}
 	for _, l := range locations {
 		locationsByWarehouse[l.WarehouseID] = append(locationsByWarehouse[l.WarehouseID], packageLocation{Code: l.Code, Name: l.Name, Type: l.Type})
@@ -339,7 +364,7 @@ func appendSites(entityCode string, sites []store.Site, warehouses []store.Wareh
 		warehousesBySite[w.SiteID] = append(warehousesBySite[w.SiteID], w)
 	}
 	for _, s := range sites {
-		out := packageSite{LegalEntity: entityCode, Code: s.Code, Name: s.Name, TimeZone: s.TimeZone, Warehouses: []packageWarehouse{}}
+		out := packageSite{LegalEntity: entityCode, Code: s.Code, Name: s.Name, TimeZone: s.TimeZone, FiscalCalendar: calendarCodes[deref(s.FiscalCalendarID)], Warehouses: []packageWarehouse{}}
 		own := warehousesBySite[s.ID]
 		// The default warehouse comes first: import creates a site with its first warehouse as the default.
 		sort.SliceStable(own, func(i, j int) bool {
@@ -416,6 +441,9 @@ func validatePackage(pkg OrgPackage, p packageProblems, limits domain.TreeLimits
 			p.add(path+"."+field, rule)
 		}
 		dup(path+".code", "legal entity", in.Code)
+		if e.FiscalCalendar != "" && !siteCode.MatchString(strings.ToUpper(e.FiscalCalendar)) {
+			p.add(path+".fiscalCalendar", "must be the code of a fiscal calendar")
+		}
 	}
 	for i, u := range pkg.OperatingUnits {
 		path := fmt.Sprintf("operatingUnits[%d]", i)
@@ -485,6 +513,9 @@ func validatePackageSite(path string, s packageSite, p packageProblems, dup func
 		p.add(path+"."+field, rule)
 	}
 	dup(path+".code", "site", strings.ToUpper(s.LegalEntity)+"/"+code)
+	if s.FiscalCalendar != "" && !siteCode.MatchString(strings.ToUpper(s.FiscalCalendar)) {
+		p.add(path+".fiscalCalendar", "must be the code of a fiscal calendar")
+	}
 	if len(s.Warehouses) == 0 {
 		p.add(path+".warehouses", "a site needs at least one warehouse; the first is its default")
 	}

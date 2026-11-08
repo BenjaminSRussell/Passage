@@ -27,6 +27,7 @@ import {
   type NodeChange,
 } from "./hierarchyTree";
 import styles from "./pages.module.css";
+import { downloadCsv } from "./periodSchedule";
 
 interface LoadState<T> {
   key: string;
@@ -80,8 +81,6 @@ function downloadFile(filename: string, parts: BlobPart[], type: string) {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
-
-const downloadCsv = (filename: string, csv: string) => downloadFile(filename, ["\ufeff", csv], "text/csv;charset=utf-8");
 
 // Type codes are A-Z, 0-9, _ and - today; anything else would be a path separator or space in the saved file name.
 const fileSafe = (text: string) => text.replace(/[^A-Za-z0-9_-]/g, "_");

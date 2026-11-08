@@ -313,8 +313,10 @@ func (im *importer) loadCalendars() error {
 	if page.NextCode != "" {
 		return tooLarge("fiscal calendars")
 	}
+	im.calIDs = map[string]string{}
 	for _, c := range page.Items {
 		im.cals[c.Code] = c
+		im.calIDs[c.Code] = c.ID
 	}
 	return nil
 }
@@ -387,6 +389,7 @@ func (im *importer) fiscalCalendars(pkg OrgPackage) error {
 			}
 			im.tally(kindFiscalCalendar, false)
 		}
+		im.calIDs[wanted.Code] = id
 		for _, y := range c.Years {
 			code := fmt.Sprintf("%s/%d", wanted.Code, y.FiscalYear)
 			if generated[y.FiscalYear] {

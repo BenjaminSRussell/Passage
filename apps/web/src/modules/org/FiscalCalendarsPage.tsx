@@ -18,6 +18,7 @@ import {
 import { dayNumber } from "./hierarchyTree";
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
+import { downloadCsv, periodScheduleCsv, periodScheduleFilename } from "./periodSchedule";
 import { StatusAction, useRows } from "./referenceParts";
 
 const codePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,9}$/;
@@ -245,6 +246,13 @@ function CalendarDetail({ calendar, canWrite, onGenerated, onChanged }: { calend
               ))}
             </Select>
           </div>
+          <Button
+            size="sm"
+            disabled={shownYear === null || periods.loading || periods.rows.length === 0}
+            onClick={() => shownYear !== null && downloadCsv(periodScheduleFilename(calendar, shownYear), periodScheduleCsv(calendar, periods.rows))}
+          >
+            Export schedule (CSV)
+          </Button>
         </div>
         {canWrite ? (
           <form onSubmit={generate} noValidate className={styles.form}>

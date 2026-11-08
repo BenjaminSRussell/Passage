@@ -28,6 +28,7 @@ const kindLabels: Record<string, string> = {
   hierarchyVersions: "Hierarchy versions",
   fiscalCalendars: "Fiscal calendars",
   fiscalYears: "Fiscal years",
+  fiscalCalendarAssignments: "Fiscal calendar assignments",
   teamTypes: "Team types",
   teams: "Teams",
   units: "Units of measure",

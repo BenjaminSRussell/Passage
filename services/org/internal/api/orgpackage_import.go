@@ -21,7 +21,9 @@ const (
 	kindHierarchyType = "hierarchyTypes"
 	kindTeamType      = "teamTypes"
 	kindTeam          = "teams"
-	statusActive      = "active"
+	// kindCalendarAssignment counts the fiscal calendars the package assigns to legal entities and sites.
+	kindCalendarAssignment = "fiscalCalendarAssignments"
+	statusActive           = "active"
 )
 
 func strPtr(s string) *string { return &s }
@@ -30,6 +32,10 @@ func strPtr(s string) *string { return &s }
 // parent is the site id of a warehouse; empty for every other kind.
 type record struct {
 	id, name, status, parent string
+	// version and calendar (a fiscal calendar id) are read for legal entities and sites, which an
+	// import patches once to assign a calendar.
+	version  int
+	calendar string
 	// purposes and backdate describe a hierarchy type.
 	purposes []string
 	backdate bool
@@ -50,6 +56,7 @@ type importer struct {
 	teams    map[string]record // code
 	siteCode map[string]string // site id -> code, for messages
 	cals     map[string]store.FiscalCalendar
+	calIDs   map[string]string // fiscal calendar code -> id, "dry:" + code for one a dry run would create
 	// refUnits, refConvs, roundings, trans and currencies hold the tenant's units, conversions,
 	// rounding rules (key currency/purpose/legal entity id), name translations and currencies.
 	refUnits   map[string]store.Unit
@@ -106,7 +113,7 @@ func importOrgPackage(ctx context.Context, st store.Store, pkg OrgPackage, dryRu
 	if len(problems) > 0 {
 		return im.report, invalidPackage(problems)
 	}
-	steps := []func(OrgPackage) error{im.legalEntities, im.operatingUnits, im.sitesAndStock, im.hierarchyTypes, im.hierarchyVersions, im.fiscalCalendars, im.teamTypes, im.teamsOf, im.unitsOf, im.conversionsOf, im.roundingOf, im.translationsOf}
+	steps := []func(OrgPackage) error{im.legalEntities, im.operatingUnits, im.sitesAndStock, im.hierarchyTypes, im.hierarchyVersions, im.fiscalCalendars, im.calendarAssignments, im.teamTypes, im.teamsOf, im.unitsOf, im.conversionsOf, im.roundingOf, im.translationsOf}
 	for _, step := range steps {
 		if err := step(pkg); err != nil {
 			return im.report, err
@@ -167,7 +174,7 @@ func (im *importer) loadStock(ctx context.Context) error {
 		return tooLarge("locations")
 	}
 	for _, s := range sites.Items {
-		im.sites[s.LegalEntityID+"/"+s.Code] = record{id: s.ID, name: s.Name, status: s.Status}
+		im.sites[s.LegalEntityID+"/"+s.Code] = record{id: s.ID, name: s.Name, status: s.Status, version: s.Version, calendar: deref(s.FiscalCalendarID)}
 		im.siteCode[s.ID] = s.Code
 	}
 	for _, w := range houses.Items {
@@ -192,7 +199,7 @@ func (im *importer) load() error {
 		return tooLarge("legal entities")
 	}
 	for _, e := range entities.Items {
-		im.entities[e.Code] = record{id: e.ID, name: e.Name, status: e.Status}
+		im.entities[e.Code] = record{id: e.ID, name: e.Name, status: e.Status, version: e.Version, calendar: deref(e.FiscalCalendarID)}
 	}
 	units, err := im.st.ListOperatingUnits(im.ctx, store.OperatingUnitFilter{}, store.OperatingUnitKey{}, packageRowCap)
 	if err != nil {
@@ -289,6 +296,7 @@ func (im *importer) resolve(pkg OrgPackage, p packageProblems) error {
 	}
 	im.resolveTeams(pkg, p)
 	im.resolveCalendars(pkg, p)
+	im.resolveAssignments(pkg, p)
 	if err := im.resolveVersions(pkg, p); err != nil {
 		return err
 	}
@@ -413,16 +421,16 @@ func (im *importer) legalEntities(pkg OrgPackage) error {
 		if language == "" {
 			language = store.DefaultLanguage
 		}
-		id := "dry:" + code
+		id, version := "dry:"+code, 0
 		if !im.dryRun {
 			created, err := im.st.CreateLegalEntity(im.ctx, store.LegalEntity{Code: code, Name: strings.TrimSpace(e.Name), Country: e.Country, Currency: e.Currency,
 				TimeZone: e.TimeZone, DefaultLanguage: language, RegistrationNumber: e.RegistrationNumber}, keyPrefix+"le:"+code)
 			if err != nil {
 				return err
 			}
-			id = created.ID
+			id, version = created.ID, created.Version
 		}
-		im.entities[code] = record{id: id, status: statusActive}
+		im.entities[code] = record{id: id, status: statusActive, version: version}
 		im.tally(kindLegalEntity, false)
 	}
 	return nil
@@ -465,11 +473,11 @@ func (im *importer) sitesAndStock(pkg OrgPackage) error {
 		if existed {
 			im.unchanged(kindSite, entityCode+"/"+code, site, s.Name)
 		} else {
-			id, err := im.createSite(s, entityID, entityCode, code)
+			created, err := im.createSite(s, entityID, entityCode, code)
 			if err != nil {
 				return err
 			}
-			site = record{id: id, status: statusActive}
+			site = record{id: created.ID, status: statusActive, version: created.Version}
 			im.sites[siteKey] = site
 			im.tally(kindSite, false)
 		}
@@ -481,24 +489,25 @@ func (im *importer) sitesAndStock(pkg OrgPackage) error {
 }
 
 // createSite creates the site with the package's first warehouse as its default, records that
-// warehouse, and returns the site id.
-func (im *importer) createSite(s packageSite, entityID, entityCode, code string) (string, error) {
+// warehouse, and returns the site.
+func (im *importer) createSite(s packageSite, entityID, entityCode, code string) (store.Site, error) {
 	first := s.Warehouses[0]
 	firstCode := strings.ToUpper(first.Code)
-	siteID, houseID := "dry:"+entityCode+"/"+code, "dry:"+entityCode+"/"+firstCode
+	created := store.Site{ID: "dry:" + entityCode + "/" + code}
+	siteID, houseID := created.ID, "dry:"+entityCode+"/"+firstCode
 	if !im.dryRun {
 		site, err := im.st.CreateSite(scopedTo(im.ctx, entityID), store.Site{LegalEntityID: entityID, Code: code, Name: strings.TrimSpace(s.Name), TimeZone: s.TimeZone,
 			DefaultWarehouse: &store.Warehouse{Code: firstCode, Name: strings.TrimSpace(first.Name), Type: first.Type, TimeZone: first.TimeZone}}, keyPrefix+"site:"+entityCode+"/"+code)
 		if err != nil {
-			return "", err
+			return created, err
 		}
 		if site.DefaultWarehouseID == nil {
-			return "", fmt.Errorf("site %s/%s was created without its default warehouse", entityCode, code)
+			return created, fmt.Errorf("site %s/%s was created without its default warehouse", entityCode, code)
 		}
-		siteID, houseID = site.ID, *site.DefaultWarehouseID
+		created, siteID, houseID = site, site.ID, *site.DefaultWarehouseID
 	}
 	im.houses[entityID+"/"+firstCode] = record{id: houseID, status: statusActive, parent: siteID}
-	return siteID, nil
+	return created, nil
 }
 
 func (im *importer) warehouses(s packageSite, siteID, entityID, entityCode string, siteCreated bool) error {
@@ -609,4 +618,105 @@ func (im *importer) teamsOf(pkg OrgPackage) error {
 		im.tally(kindTeam, false)
 	}
 	return nil
+}
+
+// calendarAssignments assigns the fiscal calendar a package names for a legal entity or a site.
+// It runs after the calendars and their years exist, because the service refuses a calendar
+// without a generated year. A record that already has another calendar is reported under
+// differences and left alone; one with none (a record this import just created, or one an
+// earlier run stopped before assigning) gets the package's calendar, so a re-run finishes.
+func (im *importer) calendarAssignments(pkg OrgPackage) error {
+	for _, e := range pkg.LegalEntities {
+		if e.FiscalCalendar == "" {
+			continue
+		}
+		code := strings.ToUpper(e.Code)
+		rec := im.entities[code]
+		err := im.assign(kindLegalEntity, code, strings.ToUpper(e.FiscalCalendar), rec.calendar, func(calendarID string) error {
+			updated, err := im.st.UpdateLegalEntity(im.ctx, rec.id, rec.version, store.LegalEntityPatch{FiscalCalendarID: &calendarID})
+			if err == nil {
+				rec.version, rec.calendar = updated.Version, calendarID
+				im.entities[code] = rec
+			}
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	for _, s := range pkg.Sites {
+		if s.FiscalCalendar == "" {
+			continue
+		}
+		entityCode, code := strings.ToUpper(s.LegalEntity), strings.ToUpper(s.Code)
+		entityID := im.entities[entityCode].id
+		rec := im.sites[entityID+"/"+code]
+		err := im.assign(kindSite, entityCode+"/"+code, strings.ToUpper(s.FiscalCalendar), rec.calendar, func(calendarID string) error {
+			updated, err := im.st.UpdateSite(scopedTo(im.ctx, entityID), rec.id, rec.version, store.SitePatch{FiscalCalendarID: &calendarID})
+			if err == nil {
+				rec.version, rec.calendar = updated.Version, calendarID
+				im.sites[entityID+"/"+code] = rec
+			}
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (im *importer) assign(kind, key, calendarCode, current string, write func(calendarID string) error) error {
+	calendarID := im.calIDs[calendarCode]
+	switch {
+	case current == calendarID:
+		im.tally(kindCalendarAssignment, true)
+	case current != "":
+		im.report.Differences = append(im.report.Differences, ImportDifference{Kind: kind, Code: key, Field: "fiscalCalendar"})
+		im.tally(kindCalendarAssignment, true)
+	default:
+		if !im.dryRun {
+			if err := write(calendarID); err != nil {
+				return fmt.Errorf("assign fiscal calendar %s to %s %s: %w", calendarCode, kind, key, err)
+			}
+		}
+		im.tally(kindCalendarAssignment, false)
+	}
+	return nil
+}
+
+// resolveAssignments checks that each calendar a legal entity or site names is one the tenant
+// can assign: an active calendar with a generated year, in the tenant or generated by the
+// package. A record that already holds another calendar is only reported, so it is not checked.
+func (im *importer) resolveAssignments(pkg OrgPackage, p packageProblems) {
+	fromPackage := map[string]bool{}
+	for _, c := range pkg.FiscalCalendars {
+		if len(c.Years) > 0 {
+			fromPackage[strings.ToUpper(c.Code)] = true
+		}
+	}
+	usable := func(code string) bool {
+		if c, ok := im.cals[code]; ok {
+			return c.Status == statusActive && (len(c.GeneratedYears) > 0 || fromPackage[code])
+		}
+		return fromPackage[code]
+	}
+	check := func(path, code, current string) {
+		code = strings.ToUpper(code)
+		if current == "" && !usable(code) {
+			p.add(path+".fiscalCalendar", "fiscal calendar "+code+" is unknown, inactive or has no generated year in the tenant or the package")
+		}
+	}
+	for i, e := range pkg.LegalEntities {
+		if e.FiscalCalendar != "" {
+			check(indexPath(kindLegalEntity, i), e.FiscalCalendar, im.entities[strings.ToUpper(e.Code)].calendar)
+		}
+	}
+	for i, s := range pkg.Sites {
+		if s.FiscalCalendar == "" {
+			continue
+		}
+		entityID := im.entities[strings.ToUpper(s.LegalEntity)].id
+		check(indexPath(kindSite, i), s.FiscalCalendar, im.sites[entityID+"/"+strings.ToUpper(s.Code)].calendar)
+	}
 }

@@ -40,6 +40,12 @@ func TestPostgres_AddressSearchIndexMigration(t *testing.T) {
 	if _, err := admin.Exec(ctx, string(body)); err != nil {
 		t.Fatalf("re-applying 0026 = %v", err)
 	}
+	// The extension must not land in the migrating schema: a throwaway or service schema dropped
+	// later would take it, and every index on gin_trgm_ops, with it.
+	var extensionSchema string
+	if err := admin.QueryRow(ctx, `select extnamespace::regnamespace::text from pg_extension where extname = 'pg_trgm'`).Scan(&extensionSchema); err != nil || extensionSchema != "public" {
+		t.Fatalf("pg_trgm schema = %q, %v; want public", extensionSchema, err)
+	}
 	var indexes int
 	if err := admin.QueryRow(ctx, `select count(*) from pg_indexes where indexname = 'postal_address_formatted_trgm' and schemaname = current_schema()`).Scan(&indexes); err != nil || indexes != 1 {
 		t.Fatalf("indexes = %d, %v; want exactly one", indexes, err)

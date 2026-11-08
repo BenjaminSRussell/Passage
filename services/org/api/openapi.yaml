@@ -1977,6 +1977,7 @@ components:
               timeZone: { type: string }
               defaultLanguage: { type: string }
               registrationNumber: { type: string, maxLength: 40 }
+              fiscalCalendar: { type: string, description: Code of the assigned fiscal calendar; it must be in the package with a generated year or already exist active with one. Import assigns it only while the legal entity has none, and reports another calendar under differences. }
         operatingUnits:
           type: array
           items:
@@ -1997,6 +1998,7 @@ components:
               code: { type: string }
               name: { type: string }
               timeZone: { type: string }
+              fiscalCalendar: { type: string, description: Code of the site's own fiscal calendar, omitted when the site follows its legal entity; assigned on import under the same rules as a legal entity's. }
               warehouses:
                 type: array
                 minItems: 1
@@ -2178,7 +2180,7 @@ components:
         unchanged: { type: integer, description: Records that already existed. }
         kinds:
           type: object
-          description: Counts per kind (legalEntities, operatingUnits, sites, warehouses, locations, hierarchyTypes, hierarchyVersions, fiscalCalendars, fiscalYears, teamTypes, teams, units, conversions, currencyRoundingRules, nameTranslations).
+          description: Counts per kind (legalEntities, operatingUnits, sites, warehouses, locations, hierarchyTypes, hierarchyVersions, fiscalCalendars, fiscalYears, teamTypes, teams, units, conversions, currencyRoundingRules, nameTranslations, fiscalCalendarAssignments).
           additionalProperties: { $ref: '#/components/schemas/OrgImportCounts' }
         differences:
           type: array

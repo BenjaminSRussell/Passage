@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
@@ -37,13 +37,15 @@ import {
   type OperatingUnitType,
   type WarehouseType,
 } from "./api/write";
+import { listHierarchyTypes } from "./api/hierarchy";
 import { listFiscalCalendars, withFreshRowOnConflict } from "./api/structure";
 import { useLegalEntity } from "./legalEntityContext";
 import { ScopedListPage, type ListControls } from "./pages";
 import styles from "./pages.module.css";
 import { AddressAction } from "./AddressAction";
 import { EditAction } from "./RowEdit";
-import { StatusAction, useRows } from "./referenceParts";
+import { FilterSelect, StatusAction, useRows } from "./referenceParts";
+import { parentCell, useUnitParents } from "./unitParents";
 
 const dash = "—";
 const ouCode = /^[A-Za-z0-9][A-Za-z0-9_-]{1,19}$/;
@@ -280,19 +282,34 @@ const duplicateOf = (code: string, message: string) => ({ code, field: "code" as
 
 export function OperatingUnitsPage() {
   const entityCode = useEntityCode();
-  const { canWriteOperatingUnit } = useLegalEntity();
+  const { canWriteOperatingUnit, entities } = useLegalEntity();
+  // The Parent column reads one hierarchy type's version in force today; units name their parents only there.
+  const [hierarchyTypeId, setHierarchyTypeId] = useState("");
+  const [units, setUnits] = useState<OperatingUnit[]>([]);
+  const hierarchyTypes = useRows((signal) => listHierarchyTypes({ status: "active" }, { signal }), "ou-parent-types");
+  const parents = useUnitParents(hierarchyTypeId);
+  const codes = useMemo(
+    () => new Map<string, string>([...entities.map((e) => [e.id, e.code] as const), ...units.map((u) => [u.id, u.code] as const)]),
+    [entities, units],
+  );
   return (
     <ScopedListPage<OperatingUnit>
       title="Operating units"
       label="Operating units"
       emptyTitle="No operating units"
       getRowKey={(row) => row.id}
-      load={listOperatingUnits}
+      load={(scope, options) =>
+        listOperatingUnits(scope, options).then((page) => {
+          setUnits(page.items);
+          return page;
+        })
+      }
       columns={(controls) => [
         { key: "code", header: "Code", mono: true },
         { key: "name", header: "Name" },
         { key: "type", header: "Type", render: (row) => label(row.type) },
         { key: "defaultLegalEntityId", header: "Default legal entity", render: (row) => entityCode(row.defaultLegalEntityId) },
+        { key: "parent", header: "Parent", render: (row) => parentCell(parents, row.id, (id) => codes.get(id)) },
         ...statusColumns(canWriteOperatingUnit, controls, "operating unit", {
           set: (row, status) => setOperatingUnitStatus(row.id, row.version, status),
           get: (row) => getOperatingUnit(row.id),
@@ -330,8 +347,16 @@ export function OperatingUnitsPage() {
           />
         )),
       ]}
-      toolbar={({ reload }) =>
-        canWriteOperatingUnit ? (
+      toolbar={({ reload }) => (
+        <>
+          <ParentPicker
+            typeId={hierarchyTypeId}
+            onChange={setHierarchyTypeId}
+            types={hierarchyTypes.rows}
+            typesError={hierarchyTypes.error}
+            parents={parents}
+          />
+          {canWriteOperatingUnit ? (
           <>
             <p>
               <Link to="/org/operating-units/import">Import from CSV</Link>
@@ -383,9 +408,51 @@ export function OperatingUnitsPage() {
               )}
             />
           </>
-        ) : null
-      }
+          ) : null}
+        </>
+      )}
     />
+  );
+}
+
+function ParentPicker({
+  typeId,
+  onChange,
+  types,
+  typesError,
+  parents,
+}: {
+  typeId: string;
+  onChange(id: string): void;
+  types: { id: string; code: string; name: string }[];
+  typesError: Problem | null;
+  parents: ReturnType<typeof useUnitParents>;
+}) {
+  return (
+    <>
+      <FilterSelect
+        id="ou-parent-hierarchy"
+        label="Parent from hierarchy"
+        value={typeId}
+        options={[{ value: "", label: "None" }, ...types.map((type) => ({ value: type.id, label: `${type.code} - ${type.name}` }))]}
+        onChange={onChange}
+      />
+      {typesError ? (
+        <Alert tone="danger" title="Could not load hierarchy types" live="alert">
+          {typesError.message} ({typesError.code})
+        </Alert>
+      ) : null}
+      {parents.status === "error" ? (
+        <Alert tone="danger" title="Could not load the hierarchy" live="alert">
+          {parents.error.message} ({parents.error.code})
+        </Alert>
+      ) : null}
+      {parents.status === "ready" && parents.versionNo === null ? (
+        <Alert tone="info" title="No version in force today">
+          This hierarchy has no published version in force today, so no parents are shown.
+        </Alert>
+      ) : null}
+    </>
   );
 }
 
