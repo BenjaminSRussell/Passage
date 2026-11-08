@@ -120,7 +120,7 @@ export function NewRunPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="run-mode" label="Mode" hint="Jobs places every operation to the minute. Operations starts each operation that follows another no earlier than the day after the one it waits for ends, in its resource's time zone, so the plan steps in whole days.">
+          <FormField id="run-mode" label="Mode" hint="Jobs places every operation to the minute. Operations starts each operation that follows another no earlier than the day after the one it waits for ends, in its resource's time zone, so the plan steps in whole days. Moving a job later keeps the mode of the run that placed it.">
             {(control) => (
               <Select {...control} value={values.mode} onChange={(event) => update({ mode: event.target.value as Values["mode"] })}>
                 <option value="jobs">Jobs</option>

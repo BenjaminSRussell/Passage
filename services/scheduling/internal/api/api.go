@@ -679,6 +679,7 @@ type scheduleOrderRequest struct {
 	Start       *time.Time `json:"start"`
 	HorizonDays *int       `json:"horizonDays"`
 	Direction   string     `json:"direction"`
+	Mode        string     `json:"mode"`
 }
 
 // scheduleOrder schedules every operation of one order (scope order, FR-23.11):
@@ -707,6 +708,9 @@ func (a *API) scheduleOrder(w http.ResponseWriter, r *http.Request) {
 	if req.Direction != "" && req.Direction != "forward" && req.Direction != "backward" {
 		fields["direction"] = "must be forward or backward"
 	}
+	if req.Mode != "" && req.Mode != "jobs" && req.Mode != "operations" {
+		fields["mode"] = "must be jobs or operations"
+	}
 	if req.Start != nil && req.Start.Before(time.Now().UTC().Truncate(24*time.Hour)) {
 		fields["start"] = "must not be before today (FR-23.4: forward scheduling starts today or later)"
 	}
@@ -721,9 +725,8 @@ func (a *API) scheduleOrder(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
-	// The per-order command always runs in jobs mode; direction and finite
-	// default from the parameters.
-	def, err := a.resolveRunDefaults(r, "jobs", req.Direction, req.Finite)
+	// Mode, direction and finite default from the scheduling parameters.
+	def, err := a.resolveRunDefaults(r, req.Mode, req.Direction, req.Finite)
 	if err != nil {
 		slog.Error("read scheduling parameters failed", "err", err, "orderId", orderID, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -734,7 +737,7 @@ func (a *API) scheduleOrder(w http.ResponseWriter, r *http.Request) {
 		start = req.Start.UTC()
 	}
 	a.runs.Add(1)
-	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: "order", OrderID: orderID, Mode: "jobs", Finite: def.Finite,
+	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: "order", OrderID: orderID, Mode: def.Mode, Finite: def.Finite,
 		Start: start, HorizonDays: horizon, Backward: def.Backward}, idem)
 	if err != nil {
 		slog.Error("order schedule run failed", "err", err, "orderId", orderID, "correlationId", middleware.GetReqID(r.Context()))

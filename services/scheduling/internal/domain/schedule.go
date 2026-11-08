@@ -607,6 +607,11 @@ type MoveInput struct {
 	// that ends beyond the planning horizon, and conflicts of successors or
 	// dependents are never overridden.
 	Override bool
+	// DailyBuckets is the mode of the run that placed the moved job (FR-23.2,
+	// operations mode): the moved operation, its successors and the dependents'
+	// later operations may not start before the next local midnight of their
+	// resource after the operation before them, as in Problem.DailyBuckets.
+	DailyBuckets bool
 }
 
 // MovePlan is the proposed change set. Conflict is set when the move is
@@ -655,33 +660,50 @@ func PlanMove(in MoveInput) MovePlan {
 	if !known || !slices.Contains(mv.Candidates, in.ResourceID) {
 		return MovePlan{Conflict: &Conflict{Code: CodeNotCandidate, Detail: "resource is not a candidate for the operation"}}
 	}
-	at := in.At
+	// after is the time the operations before the moved one set; the asked
+	// start is not part of it, so operations mode rounds only this part.
+	var after time.Time
 	var before *Operation
 	for i, op := range in.Order {
 		if op.OperNumber < mv.OperNumber {
 			if before == nil || op.OperNumber > before.OperNumber {
 				before = &in.Order[i]
 			}
-			if pl, ok := in.Current[op.ID]; ok && pl.Release().After(at) {
-				at = pl.Release()
+			if pl, ok := in.Current[op.ID]; ok && pl.Release().After(after) {
+				after = pl.Release()
 			}
 		}
 	}
 	if before != nil {
 		// The wait between the operation before and the moved one (FR-23.3).
 		if pl, ok := in.Current[before.ID]; ok {
-			if t := pl.Release().Add(queueGap(*before, *mv)); t.After(at) {
-				at = t
+			if t := pl.Release().Add(queueGap(*before, *mv)); t.After(after) {
+				after = t
 			}
 			// An overlapped successor still cannot end before the operation
 			// before it does plus the queue its last units wait (BR-23.5,
 			// FR-23.3): it needs at least its process minutes after that.
-			if t := pl.End.Add(queueGap(*before, *mv) - minutes(BookedMinutes(mv.Minutes, c.res.EfficiencyPct))); pl.OverlapBP > 0 && t.After(at) {
-				at = t
+			if t := pl.End.Add(queueGap(*before, *mv) - minutes(BookedMinutes(mv.Minutes, c.res.EfficiencyPct))); pl.OverlapBP > 0 && t.After(after) {
+				after = t
 			}
 		}
 	}
 	iv := c.usable(*mv)
+	dayFloor := in.DailyBuckets && !after.IsZero()
+	if dayFloor {
+		// Operations mode: not on the day of the operation before it (a
+		// predecessor ending exactly at midnight lets it start then).
+		after = DayCeil(after, c.res.Location)
+	}
+	at := in.At
+	if after.After(at) {
+		at = after
+		if dayFloor {
+			// The floor is a day boundary the planner did not ask for: take the
+			// first open minute of that day rather than refusing the move.
+			at = firstOpenAtOrAfter(iv, at)
+		}
+	}
 	var overridden []Conflict
 	if t := ceilMinute(at); insideAny(c.iv, t) && !insideAny(iv, t) {
 		blocked := Conflict{Code: CodeOutsideCapacity, Detail: "start is inside a capacity block the job does not match (BR-23.15)"}
@@ -768,6 +790,7 @@ func PlanMove(in MoveInput) MovePlan {
 			if !ok {
 				continue
 			}
+			hasPred := predOp != nil
 			if predOp != nil {
 				gap := queueGap(*predOp, op)
 				pred = pred.Add(gap)
@@ -781,8 +804,12 @@ func PlanMove(in MoveInput) MovePlan {
 			}
 			predOp = &chain[i]
 			ready := cur.Start
-			if pred.After(ready) {
-				ready = pred
+			floor := pred
+			if in.DailyBuckets && hasPred {
+				floor = DayCeil(pred, caps[cur.ResourceID].res.Location)
+			}
+			if floor.After(ready) {
+				ready = floor
 			}
 			if in.Firmed[op.ID] {
 				if ready.After(cur.Start) {
@@ -882,6 +909,16 @@ func PlanMove(in MoveInput) MovePlan {
 		}
 	}
 	return MovePlan{Changes: changes, Dependents: dependents, Overridden: overridden}
+}
+
+// firstOpenAtOrAfter is t when it lies in one of the sorted intervals iv, else
+// the start of the next one; t itself when none follows (the caller's slot
+// search then reports the closed time).
+func firstOpenAtOrAfter(iv []Interval, t time.Time) time.Time {
+	if i := sort.Search(len(iv), func(k int) bool { return iv[k].End.After(t) }); i < len(iv) && iv[i].Start.After(t) {
+		return iv[i].Start
+	}
+	return t
 }
 
 // byOperNumber sorts operations by operation number in place and returns them.

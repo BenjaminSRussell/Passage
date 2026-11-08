@@ -459,8 +459,8 @@ export function startRun(input: NewRun, key: string = newKey()): Promise<Run> {
   return post<Run>("/runs", input, key);
 }
 
-/** Schedules every operation of one order (POST /orders/{orderId}:schedule, scope order). */
-export function scheduleOrder(orderId: string, input: { finite?: boolean; direction?: "forward" | "backward" } = {}, key: string = newKey()): Promise<Run> {
+/** Schedules every operation of one order (POST /orders/{orderId}:schedule, scope order); what it leaves out comes from the scheduling parameters. */
+export function scheduleOrder(orderId: string, input: { finite?: boolean; direction?: "forward" | "backward"; mode?: "jobs" | "operations" } = {}, key: string = newKey()): Promise<Run> {
   return post<Run>(`/orders/${encodeURIComponent(orderId)}:schedule`, input, key);
 }
 

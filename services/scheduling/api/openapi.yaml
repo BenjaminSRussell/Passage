@@ -354,8 +354,9 @@ paths:
               type: object
               description: All fields are optional; send an empty object for the defaults.
               properties:
-                finite: { type: boolean, default: true }
-                direction: { type: string, enum: [forward, backward], default: forward }
+                finite: { type: boolean, description: 'Left out, it takes defaultFinite of the scheduling parameters.' }
+                direction: { type: string, enum: [forward, backward], description: 'Left out, it takes defaultDirection of the scheduling parameters.' }
+                mode: { type: string, enum: [jobs, operations], description: 'As on createRun (FR-23.2). Left out, it takes defaultMode of the scheduling parameters, so on a site whose default is operations the command schedules in daily buckets.' }
                 start: { type: string, format: date-time, description: Defaults to now; must not be before today (UTC). }
                 horizonDays: { type: integer, minimum: 30, maximum: 730, default: 365 }
       responses:
@@ -540,8 +541,13 @@ paths:
       description: >
         A commit (dryRun false) requires Idempotency-Key; a replay returns the
         stored outcome with Idempotent-Replayed: true. A preview writes nothing
-        and needs no key. Firmed jobs cannot be moved (SCHED-0008). A move
-        keeps the run constraints: the start must not fall in a capacity block
+        and needs no key. Firmed jobs cannot be moved (SCHED-0008). A job
+        placed by a run in operations mode (FR-23.2) is moved in that mode: the
+        moved operation, its successors and propagated dependents (beyond their
+        first operation) start no earlier than the next local midnight of their
+        resource after the operation before them; a floor in closed time moves
+        to the first open minute of that day, and the move's run records the
+        mode. A move keeps the run constraints: the start must not fall in a capacity block
         the job does not match (SCHED-0002), changeovers are repriced and a
         later job on a touched resource left too short a changeover is a
         SCHED-0001 violation, and a changed network step needs an edge
@@ -2044,7 +2050,7 @@ components:
       required: [scope]
       properties:
         scope: { type: string, enum: [site, selection], description: 'site (every operation) or selection (operationIds)' }
-        mode: { type: string, enum: [operations, jobs], description: 'jobs places every operation to the minute. operations (FR-23.2) schedules in daily buckets: an operation that follows another in its order (placed in the run, fixed or firmed) starts no earlier than the next local midnight, in its candidate resource''s time zone, at or after the time its predecessor allows (end, queue times, overlap share, network transfer; a predecessor ending exactly at midnight lets it start then), and never before the run start, so the plan steps in whole days between operations. The first operation of an order, moves, POST /orders/{id}:schedule and campaign sequencing are placed as in jobs, and the minutes still book exactly. Left out, it takes defaultMode of the scheduling parameters (jobs until changed).' }
+        mode: { type: string, enum: [operations, jobs], description: 'jobs places every operation to the minute. operations (FR-23.2) schedules in daily buckets: an operation that follows another in its order (placed in the run, fixed or firmed) starts no earlier than the next local midnight, in its candidate resource''s time zone, at or after the time its predecessor allows (end, queue times, overlap share, network transfer; a predecessor ending exactly at midnight lets it start then), and never before the run start, so the plan steps in whole days between operations. The first operation of an order is placed as in jobs, and the minutes still book exactly. POST /orders/{id}:schedule takes the same mode (or the default); a move keeps the mode of the run that placed the job (its own run records it); campaign sequencing is placed as in jobs. Left out, it takes defaultMode of the scheduling parameters (jobs until changed).' }
         finite: { type: boolean, description: 'Left out, it takes defaultFinite of the scheduling parameters (true until changed).' }
         direction: { type: string, enum: [forward, backward], description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2). Left out, it takes defaultDirection of the scheduling parameters (forward until changed).' }
         operationIds:

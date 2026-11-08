@@ -144,10 +144,18 @@ func TestParameters_RunsTakeTheDefaultsTheRequestLeavesOut(t *testing.T) {
 	if rec.Code != http.StatusCreated || f.lastRun.Backward || !f.lastRun.Finite || f.lastRun.Mode != "jobs" || st.reads != before {
 		t.Fatalf("explicit run: %d %+v reads=%d", rec.Code, f.lastRun, st.reads-before)
 	}
-	// The per-order command stays in jobs mode and takes direction and finite.
+	// The per-order command takes mode, direction and finite from the parameters
+	// unless the request names them.
 	rec = send(h, http.MethodPost, scheduleOrderPath(ids.New()), `{}`, "scheduling.run", "r3", "")
-	if rec.Code != http.StatusCreated || !f.lastRun.Backward || f.lastRun.Finite || f.lastRun.Mode != "jobs" {
+	if rec.Code != http.StatusCreated || !f.lastRun.Backward || f.lastRun.Finite || f.lastRun.Mode != "operations" {
 		t.Fatalf("order run: %d %+v", rec.Code, f.lastRun)
+	}
+	rec = send(h, http.MethodPost, scheduleOrderPath(ids.New()), `{"mode":"jobs"}`, "scheduling.run", "r3b", "")
+	if rec.Code != http.StatusCreated || f.lastRun.Mode != "jobs" {
+		t.Fatalf("order run, explicit mode: %d %+v", rec.Code, f.lastRun)
+	}
+	if rec = send(h, http.MethodPost, scheduleOrderPath(ids.New()), `{"mode":"weekly"}`, "scheduling.run", "r3c", ""); rec.Code != http.StatusBadRequest && rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad order mode: %d", rec.Code)
 	}
 	// A parameters read failure fails the run instead of using other defaults.
 	bad := &fakeStore{err: httpx.NewProblem(http.StatusServiceUnavailable, "X", "down")}

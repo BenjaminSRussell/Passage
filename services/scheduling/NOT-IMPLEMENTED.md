@@ -279,7 +279,7 @@ idempotency key `eam-downtime:{downtimeId}`, so a republished event with a new
 id books nothing more. The window is widened to whole minutes (start down, end
 up) and split into consecutive spans of at most 31 days, keyed `eam-downtime:{id}` then `:{n}`. Booked jobs the window overlaps are listed in the log and the
 `capacityoverride.created` event, not moved, as for the route. EAM's `resourceId` is the asset's `production_resource_id`, which must be a scheduling resource id; EAM has no scheduling lookup, so it is not checked on asset save (documented in `asyncapi.yaml`) and a wrong one is dead-lettered. Alert on `event_consumer_dead_lettered_total{consumer="scheduling-downtime"}` > 0 (a non-empty `passage.eam.downtime.dlq`); replay per `platform/go/eventing/README.md`. Deploy: `consumer.enabled` in the chart, a
-`KafkaUser` `scheduling-consumer` (`deploy/kafka/scheduling-consumer.yaml`, dev Argo CD Application `kafka-consumer-users`)
+`KafkaUser` `scheduling-consumer` (`deploy/kafka/scheduling-consumer.yaml`)
 whose secret (key `password`, plus the cluster CA as `ca.crt`) must be copied
 into the release namespace. Not built: planned downtime of RELEASED work
 orders (EAM D3).
@@ -953,12 +953,54 @@ maximum wait) and `store/dailybuckets_test.go` (run end to end on Postgres).
 | Item | Status | Reason |
 |---|---|---|
 | Day-level capacity check in operations mode (a day bucket that refuses a job once its open minutes are used, instead of splitting it to the minute) | later slice of PSG-23 | Slice 31 aligns followers to day boundaries; the minutes still book exactly in open intervals, as FR-23.1 and the GiST invariant need. |
-| Mode on `POST /orders/{id}:schedule`, on moves and on the CP-SAT campaign path | later slice of PSG-23 | The per-order command and moves always run in jobs mode and the campaign sequencer ignores mode. A move or the successors it propagates can therefore land on the same day as the operation before them in a plan made in operations mode; the move's constraint check does not flag it. |
+| Mode on the CP-SAT campaign path | later slice of PSG-23 | The campaign sequencer ignores mode; campaign jobs are placed to the minute. Slice 32 covers the per-order command and moves. |
 | Day boundary of the follower's resource, not the predecessor's | decision for Ben | When the two resources are in different time zones the follower waits for midnight where it runs (a predecessor ending 10:00 UTC lets a New York follower start 05:00 UTC the next day). |
 | Queue times and transfer counted in minutes before the day is rounded | decision for Ben | A queue that ends after midnight moves the follower one more day; the alternative, whole days of queue on top of the next day, was not chosen. |
 | Overlap applied by the day | decision for Ben | With an overlap quantity (BR-23.5) the follower may start the day after the overlap share is through, while the predecessor still runs, and never ends before it; the alternative is to ignore overlap in operations mode. |
 | Backward runs use the same day ceiling | decision for Ben | Backward (BR-23.2) searches the latest start of the first operation with the forward engine, so followers sit on the next day boundary after it; there is no mirrored day floor that ends each operation on the day before its follower. |
 | Network maximum wait in operations mode | accepted | The wait (BR-23.11) stays a hard limit from the predecessor's end to the follower's day-aligned start; on a calendar closed overnight no pair meets a short wait and the order is unplaced with NETWORK_INFEASIBLE. |
+
+## Slice 32: mode on moves and the per-order command (FR-23.2)
+
+A move honours the mode of the run that placed the job. `MoveJob` reads the mode
+of the moved job's run (`scheduled_job.run_id` to `schedule_run.mode`) and
+`MoveInput.DailyBuckets` carries it into `domain.PlanMove`: the moved operation
+may start no earlier than the next local midnight (its resource's zone) after
+the time the operations before it set (end, queue times, overlap, as in jobs
+mode); a floor that falls in closed time moves to the first open minute of that
+day instead of refusing the move. The asked start is not rounded, so a start
+later than the floor is kept. Successors pushed by the move, and the second and
+later operations of each propagated dependent order, are rounded the same way;
+a dependent's first operation keeps the unrounded peg floor, as in a run. A
+firmed successor that would have to move to the next day is still refused
+(SCHED-0008). The move's own run now records the mode (it was always `jobs`), so
+a chain of moves keeps it. A job placed in jobs mode moves as before.
+`POST /orders/{id}:schedule` takes an optional `mode` (jobs or operations; left
+out it takes `defaultMode` of the parameters, where it was always jobs). No
+migration, event, duty or new endpoint; OpenAPI and the run form hint say so.
+Tests: `domain/dailybuckets_test.go` (move onto the predecessor's day, later
+start kept, successors pushed a whole day, firmed successor, dependents),
+`store/dailybuckets_test.go` (move on Postgres in both modes, mode recorded on
+the move run), `api/parameters_test.go` (order mode default, explicit, invalid).
+
+Review: a predecessor ending exactly at a local midnight now also sends the
+moved operation to the first open minute of that day (the move was refused as
+starting in closed time when the floor already sat on midnight); the order and
+mode of the moved job are read in one query; the web client's `scheduleOrder`
+takes `mode`; the OpenAPI request of `:schedule` says finite and direction
+default from the parameters too (it still showed fixed defaults). Added tests:
+predecessor ending at midnight, and a move across the New York spring-forward
+day (23-hour day, next midnight at 04:00 UTC). Unchanged by the slice and
+checked: the move still runs in `loadTx`, so the materialized capacity load
+(slice 30) follows it; it takes no new lock (the mode is read in the same plain
+select as the order). A job restored by a rollback (slice 29) belongs to the
+rollback run, which copies the source run's mode, so it moves in that mode.
+
+| Item | Status | Reason |
+|---|---|---|
+| Per-job mode when the jobs of one order were placed by runs in different modes | decision for Ben | A move uses the mode of the moved job's run for the whole move: successors of the same order and propagated dependents are rounded (or not) by that one mode, even when a jobs-mode run placed them. Every job the move changes is rewritten under the move's run, which records that mode, so the plan stays coherent with what the runs say; the alternative, each job keeping the mode of its own run, would leave a move run holding jobs placed under two rules. |
+| `POST /orders/{id}:schedule` on a site whose `defaultMode` is operations | decision for Ben | Left out, the mode now comes from the parameters, so on such a site the per-order command (and the "Schedule this order" button on the order import page, which sends no mode) schedules in daily buckets where it used to run in jobs mode. A caller that needs the old behaviour sends `"mode": "jobs"`. No other service calls the command (production's `:schedule` is its own). |
+| Moves of jobs placed by move runs made before this slice | accepted | Those move runs recorded `jobs` whatever the job's mode, so moving such a job again uses jobs mode until a run places it again. |
 
 ## Ticket deliverables
 
@@ -967,7 +1009,7 @@ maximum wait) and `store/dailybuckets_test.go` (run end to end on Postgres).
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
 | 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) | partial (slices 27 and 28) | Queue before and queue after are built (slice 27); setup that must not split is built (BR-23.3). Overlap quantity (BR-23.5) is built (slice 28); transit time apart from the network edge's transfer minutes is not modelled; queue times from the production route are a handoff to wave 21. |
-| 1 | Operations mode in daily buckets (FR-23.2) | built (slice 31) | `mode: operations` on `POST /runs` (or `defaultMode`): an operation that follows another starts at the next local midnight of its resource; see Slice 31. |
+| 1 | Operations mode in daily buckets (FR-23.2) | built (slices 31 and 32) | `mode: operations` on `POST /runs` and `POST /orders/{id}:schedule` (or `defaultMode`): an operation that follows another starts at the next local midnight of its resource; a move keeps the mode of the run that placed the job; see Slices 31 and 32. The CP-SAT campaign path ignores mode. |
 | 1 | Duration from route times and efficiency (BR-23.1) | built (slices 18 and 21) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); the scheduling resource's `efficiencyPct` stretches or shrinks them when the job is placed (slice 21). Efficiency from wave 9 resources and per-day overrides remain a handoff (row below). |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |

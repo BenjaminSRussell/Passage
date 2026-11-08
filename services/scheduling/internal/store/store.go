@@ -557,8 +557,12 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 				return err
 			}
 		}
-		var orderID string
-		err := tx.QueryRow(ctx, `select order_id::text from scheduled_job where job_id = $1 limit 1`, req.JobID).Scan(&orderID)
+		// The move honours the mode of the run that placed the job (FR-23.2)
+		// for the whole move, and its own run records it, so a chain of moves
+		// keeps the mode. Every segment of a job carries the same run.
+		var orderID, mode string
+		err := tx.QueryRow(ctx, `select j.order_id::text, r.mode from scheduled_job j
+			join schedule_run r on r.tenant_id = j.tenant_id and r.id = j.run_id where j.job_id = $1 limit 1`, req.JobID).Scan(&orderID, &mode)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, CodeJobNotFound, "scheduled job not found")
 		}
@@ -625,7 +629,7 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		}
 		plan := domain.PlanMove(domain.MoveInput{Resources: resources, Start: horizonStart, HorizonDays: req.HorizonDays,
 			Booked: booked, Order: ops, Current: placements, Moved: req.JobID, ResourceID: rid, At: req.Start, Firmed: firmed, Networks: networks,
-			Dependents: dependents, Pegs: pegs, Override: req.Override})
+			Dependents: dependents, Pegs: pegs, Override: req.Override, DailyBuckets: mode == "operations"})
 		if plan.Conflict != nil {
 			out.Conflict = plan.Conflict
 			return nil
@@ -658,7 +662,7 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if err != nil {
 			return err
 		}
-		run := Run{ID: ids.New(), Scope: scopeMove, Mode: "jobs", Direction: "forward", Finite: true, Algorithm: "heuristic",
+		run := Run{ID: ids.New(), Scope: scopeMove, Mode: mode, Direction: "forward", Finite: true, Algorithm: "heuristic",
 			Status: "completed", OperationsCount: len(plan.Changes), MakespanMinutes: domain.Makespan(plan.Changes),
 			TotalLatenessMinutes: domain.TotalLateness(plan.Changes), Messages: []string{}}
 		for _, v := range out.Overridden {

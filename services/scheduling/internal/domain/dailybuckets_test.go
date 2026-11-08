@@ -230,3 +230,160 @@ func TestSchedule_OperationsModeKeepsTheNetworkWait(t *testing.T) {
 		t.Fatalf("closed overnight: want both unplaced as network infeasible, got %+v", r.Unplaced)
 	}
 }
+
+// moveChain places a, b, c on separate days (operations mode) and returns the
+// input for moving one of them.
+func moveChain(t *testing.T, daily bool) MoveInput {
+	t.Helper()
+	rs, ops := dailyChain()
+	r := Schedule(Problem{Resources: rs, Operations: ops, Start: monday, HorizonDays: 14, DailyBuckets: daily})
+	cur := map[string]Placement{}
+	for _, p := range r.Placements {
+		cur[p.OperationID] = p
+	}
+	return MoveInput{Resources: rs, Start: monday, HorizonDays: 14, Order: ops, Current: cur, Moved: "b", ResourceID: "r", DailyBuckets: daily}
+}
+
+func TestPlanMove_OperationsModeKeepsTheFollowerOffThePredecessorsDay(t *testing.T) {
+	in := moveChain(t, true) // a Mon 08-09, b Tue 08-09, c Wed 08-09
+	in.At = at(0, 10, 0)     // the planner drops b on a's day
+	plan := PlanMove(in)
+	if plan.Conflict != nil || len(plan.Changes) == 0 {
+		t.Fatalf("plan %+v", plan)
+	}
+	if got := plan.Changes[0]; !got.Start.Equal(at(1, 8, 0)) {
+		t.Fatalf("b = %v, want Tuesday 08:00 (first open minute after a's day)", got.Start)
+	}
+	// Jobs mode lets it sit behind a on the same day, as before.
+	jobs := moveChain(t, false)
+	jobs.At = at(0, 10, 0)
+	if p := PlanMove(jobs); p.Conflict != nil || !p.Changes[0].Start.Equal(at(0, 10, 0)) {
+		t.Fatalf("jobs mode: %+v", p)
+	}
+}
+
+func TestPlanMove_OperationsModeAskedStartLaterIsKept(t *testing.T) {
+	in := moveChain(t, true)
+	in.At = at(1, 12, 0)
+	plan := PlanMove(in)
+	if plan.Conflict != nil || !plan.Changes[0].Start.Equal(at(1, 12, 0)) {
+		t.Fatalf("plan %+v", plan)
+	}
+	// c is already on the day after b's day (Wed), so nothing is pushed.
+	if len(plan.Changes) != 1 {
+		t.Fatalf("changes %+v", plan.Changes)
+	}
+}
+
+func TestPlanMove_OperationsModePushesSuccessorsAWholeDay(t *testing.T) {
+	in := moveChain(t, true)
+	in.At = at(2, 9, 0) // b to Wednesday 09:00, where c sits at 08:00
+	plan := PlanMove(in)
+	if plan.Conflict != nil || len(plan.Changes) != 2 {
+		t.Fatalf("plan %+v", plan)
+	}
+	if c := plan.Changes[1]; c.OperationID != "c" || !c.Start.Equal(at(3, 8, 0)) {
+		t.Fatalf("c = %+v, want Thursday 08:00 (not Wednesday behind b)", c)
+	}
+	jobs := moveChain(t, false)
+	jobs.At = at(2, 9, 0)
+	p := PlanMove(jobs)
+	if p.Conflict != nil || len(p.Changes) != 2 || !p.Changes[1].Start.Equal(at(2, 10, 0)) {
+		t.Fatalf("jobs mode pushes behind b on the same day: %+v", p)
+	}
+}
+
+func TestPlanMove_OperationsModeFirmedSuccessorOnTheSameDayRefuses(t *testing.T) {
+	in := moveChain(t, true)
+	in.At = at(2, 9, 0)
+	in.Firmed = map[string]bool{"c": true}
+	if plan := PlanMove(in); plan.Conflict == nil || plan.Conflict.Code != CodeFirmed {
+		t.Fatalf("plan %+v", plan)
+	}
+}
+
+func TestPlanMove_OperationsModeDependentsStartAfterTheirParentsThenByTheDay(t *testing.T) {
+	rs, ops := dailyChain()
+	dep := []Operation{
+		{ID: "d1", OrderID: "p", OperNumber: 10, Minutes: 60, Candidates: []string{"r"}},
+		{ID: "d2", OrderID: "p", OperNumber: 20, Minutes: 60, Candidates: []string{"r"}},
+	}
+	// d1 Thu 08:00, d2 Fri 08:00 in a plan made in operations mode.
+	cur := map[string]Placement{
+		"a": pl(ops[0], "r", at(0, 8, 0), 0), "b": pl(ops[1], "r", at(1, 8, 0), 0), "c": pl(ops[2], "r", at(2, 8, 0), 0),
+		"d1": pl(dep[0], "r", at(3, 8, 0), 0), "d2": pl(dep[1], "r", at(4, 8, 0), 0),
+	}
+	in := MoveInput{Resources: rs, Start: monday, HorizonDays: 21, Order: ops, Current: cur, Moved: "b", ResourceID: "r",
+		At: at(3, 9, 0), Dependents: dep, Pegs: []Peg{{ParentOrderID: "o", DependentOrderID: "p"}}, DailyBuckets: true}
+	plan := PlanMove(in)
+	if plan.Conflict != nil {
+		t.Fatalf("plan %+v", plan)
+	}
+	got := map[string]time.Time{}
+	for _, c := range plan.Changes {
+		got[c.OperationID] = c.Start
+	}
+	// b ends Thu 10:00, c moves to Fri 08:00 (order o ends Fri 09:00), so p's
+	// first operation (peg floor, not rounded) starts Fri 09:00 and d2 the day after.
+	if !got["c"].Equal(at(4, 8, 0)) || !got["d1"].Equal(at(4, 9, 0)) || !got["d2"].Equal(at(7, 8, 0)) {
+		t.Fatalf("starts %+v", got)
+	}
+}
+
+// A predecessor that ends exactly at midnight is already on a day boundary:
+// the moved follower still goes to the first open minute of that day instead
+// of the move being refused for starting in closed time.
+func TestPlanMove_OperationsModePredecessorEndingAtMidnight(t *testing.T) {
+	rs := []Resource{res("night", "NIGHT", true, allDays(0, 24*60)), res("r", "R", true, weekdayShift(8*60, 16*60))}
+	ops := []Operation{
+		{ID: "a", OrderID: "o", OperNumber: 10, Minutes: 60, Candidates: []string{"night"}},
+		{ID: "b", OrderID: "o", OperNumber: 20, Minutes: 60, Candidates: []string{"r"}},
+	}
+	cur := map[string]Placement{"a": pl(ops[0], "night", at(0, 23, 0), 0), "b": pl(ops[1], "r", at(1, 9, 0), 0)}
+	in := MoveInput{Resources: rs, Start: monday, HorizonDays: 14, Order: ops, Current: cur, Moved: "b", ResourceID: "r", At: at(0, 10, 0), DailyBuckets: true}
+	if plan := PlanMove(in); plan.Conflict != nil || !plan.Changes[0].Start.Equal(at(1, 8, 0)) {
+		t.Fatalf("plan %+v, want b at Tuesday 08:00", plan)
+	}
+	// Asked inside closed time after the floor, the planner's start is kept
+	// and refused as in jobs mode.
+	in.At = at(1, 6, 0)
+	if plan := PlanMove(in); plan.Conflict == nil || plan.Conflict.Code != CodeOutsideCapacity {
+		t.Fatalf("closed asked start: %+v", plan)
+	}
+}
+
+// Day boundaries are the resource's local midnights across a DST change: on
+// 2026-03-08 New York springs forward, so that day is 23 hours long and the
+// next midnight is 04:00 UTC, not 05:00.
+func TestPlanMove_OperationsModeAcrossDST(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	r := res("ny", "NY", true, allDays(0, 24*60))
+	r.Location = ny
+	local := func(d, hh, mm int) time.Time { return time.Date(2026, 3, d, hh, mm, 0, 0, ny) }
+	ops := []Operation{
+		{ID: "a", OrderID: "o", OperNumber: 10, Minutes: 60, Candidates: []string{"ny"}},
+		{ID: "b", OrderID: "o", OperNumber: 20, Minutes: 60, Candidates: []string{"ny"}},
+		{ID: "c", OrderID: "o", OperNumber: 30, Minutes: 60, Candidates: []string{"ny"}},
+	}
+	// a Saturday 10:00, b Sunday (the short day) 00:00, c Monday 00:00, local.
+	cur := map[string]Placement{"a": pl(ops[0], "ny", local(7, 10, 0), 0), "b": pl(ops[1], "ny", local(8, 0, 0), 0), "c": pl(ops[2], "ny", local(9, 0, 0), 0)}
+	in := MoveInput{Resources: []Resource{r}, Start: local(1, 0, 0), HorizonDays: 30, Order: ops, Current: cur, Moved: "b", ResourceID: "ny",
+		At: local(7, 12, 0), DailyBuckets: true}
+	if plan := PlanMove(in); plan.Conflict != nil || !plan.Changes[0].Start.Equal(local(8, 0, 0)) || plan.Changes[0].Start.UTC().Hour() != 5 {
+		t.Fatalf("b dropped on a's day: %+v, want Sunday 00:00 EST (05:00 UTC)", plan)
+	}
+	// b to Sunday 22:30 EDT ends 23:30, still Sunday: c stays at Monday 00:00 EDT (04:00 UTC).
+	in.At = local(8, 22, 30)
+	if plan := PlanMove(in); plan.Conflict != nil || len(plan.Changes) != 1 {
+		t.Fatalf("b late on Sunday: %+v", plan)
+	}
+	// b to Sunday 23:30 ends Monday 00:30: c moves to Tuesday 00:00 EDT.
+	in.At = local(8, 23, 30)
+	plan := PlanMove(in)
+	if plan.Conflict != nil || len(plan.Changes) != 2 || !plan.Changes[1].Start.Equal(local(10, 0, 0)) || plan.Changes[1].Start.UTC().Hour() != 4 {
+		t.Fatalf("c pushed: %+v, want Tuesday 00:00 EDT (04:00 UTC)", plan)
+	}
+}
