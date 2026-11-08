@@ -2,7 +2,10 @@ package domain
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -75,4 +78,70 @@ func safeCell(v string) string {
 		return "'" + v
 	}
 	return v
+}
+
+// Statuses of a recorded settlement export.
+const (
+	ExportIssued = "ISSUED"
+	ExportVoided = "VOIDED"
+)
+
+// Problem codes of the settlement export record (FR-26.18).
+const (
+	// CodeExportOverlap: an ISSUED export of the same legal entity and target already covers
+	// part of the period, so the commission would be handed over twice.
+	CodeExportOverlap = "PRC-0065"
+	// CodeExportEmpty: the period holds no commission to hand over.
+	CodeExportEmpty = "PRC-0066"
+	// CodeExportNotFound: no settlement export with the id.
+	CodeExportNotFound = "PRC-0067"
+	// CodeExportDigest: the file rebuilt from a record's frozen rows does not match the digest
+	// recorded when it was handed over (the CSV layout changed), so it is not served.
+	CodeExportDigest = "PRC-0068"
+)
+
+// SettlementExport is one recorded hand-over of commission to AP or payroll. Lines are the
+// rows as they were sent; later commission postings do not change them.
+type SettlementExport struct {
+	ID            string
+	LegalEntityID string
+	Target        string
+	From          string
+	To            string
+	Status        string
+	Lines         []SettlementRow
+	CSVSHA256     string
+	ExportedBy    string
+	VoidReason    string
+	VoidedBy      string
+	Version       int
+	CreatedAt     string
+}
+
+// CurrencyTotal is the sum of an export's rows in one currency.
+type CurrencyTotal struct {
+	Currency string
+	Amount   decimal.Decimal
+}
+
+// ExportTotals sums rows per currency, ordered by currency, each rounded to the currency's
+// minor units like the CSV amounts.
+func ExportTotals(rows []SettlementRow) []CurrencyTotal {
+	sums := map[string]decimal.Decimal{}
+	for _, r := range rows {
+		sums[r.Currency] = sums[r.Currency].Add(r.Amount.RoundBank(money.MinorUnits(r.Currency)))
+	}
+	out := make([]CurrencyTotal, 0, len(sums))
+	for c, a := range sums {
+		out = append(out, CurrencyTotal{Currency: c, Amount: a})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Currency < out[j].Currency })
+	return out
+}
+
+// CSVDigest is the lowercase hex SHA-256 of an export file, kept on the record so a second
+// download can be checked against the file that was handed over.
+func CSVDigest(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }

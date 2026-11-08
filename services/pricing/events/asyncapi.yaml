@@ -34,6 +34,14 @@ channels:
     messages:
       commissionCalculated:
         $ref: "#/components/messages/CommissionCalculated"
+  commissionExport:
+    address: passage.pricing.commissionexport
+    description: A commission settlement export was recorded for AP or payroll, or voided (FR-26.18).
+    messages:
+      commissionExportIssued:
+        $ref: "#/components/messages/CommissionExportIssued"
+      commissionExportVoided:
+        $ref: "#/components/messages/CommissionExportVoided"
   fund:
     address: passage.pricing.fund
     description: Trade promotion fund closed or reopened (FR-26.19, BR-26.15).
@@ -179,6 +187,18 @@ operations:
     summary: A condition record left the ACTIVE set - withdrawn by a user or a journal, or expired by the nightly job (reason EXPIRED).
     messages:
       - {$ref: "#/channels/conditionRecordActivated/messages/conditionRecordWithdrawn"}
+  publishCommissionExportIssued:
+    action: send
+    channel: {$ref: "#/channels/commissionExport"}
+    summary: A commission settlement export was recorded; the period cannot be exported again to the same target until it is voided.
+    messages:
+      - {$ref: "#/channels/commissionExport/messages/commissionExportIssued"}
+  publishCommissionExportVoided:
+    action: send
+    channel: {$ref: "#/channels/commissionExport"}
+    summary: A recorded commission settlement export was voided with a reason, so the period can be exported again.
+    messages:
+      - {$ref: "#/channels/commissionExport/messages/commissionExportVoided"}
   publishFundClosed:
     action: send
     channel: {$ref: "#/channels/fund"}
@@ -455,6 +475,18 @@ components:
           period_id: {type: string, description: "Invoice month, such as 2027-03."}
           debit_account: {type: string, description: "Commission expense (6200)."}
           credit_account: {type: string, description: "Commission payable (2170)."}
+    CommissionExportIssued:
+      name: dev.passage.pricing.commissionexport.issued.v1
+      title: Commission settlement export recorded
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CommissionExport"
+    CommissionExportVoided:
+      name: dev.passage.pricing.commissionexport.voided.v1
+      title: Commission settlement export voided
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CommissionExport"
     FundClosed:
       name: dev.passage.pricing.fund.closed.v1
       title: Trade fund closed
@@ -921,6 +953,25 @@ components:
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         killed: {type: boolean}
         version: {type: integer, minimum: 1}
+    CommissionExport:
+      type: object
+      description: >
+        A recorded commission settlement export (FR-26.18): the period of invoice dates handed
+        to AP (w19) or payroll (w43), with totals per currency and the digest of the file. Rep
+        ids and names never appear; the file is fetched through the API.
+      required: [export_id, legal_entity_id, target, period_from, period_to, line_count, totals, csv_sha256, version, user_id]
+      properties:
+        export_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        target: {type: string, enum: [AP, PAYROLL]}
+        period_from: {type: string, format: date}
+        period_to: {type: string, format: date}
+        line_count: {type: integer, minimum: 1, description: "Rows of the file (rep and currency)."}
+        totals: {type: array, description: "One entry per currency of the file, ordered by currency.", items: {type: object, required: [currency, amount], properties: {currency: {type: string, pattern: "^[A-Z]{3}$"}, amount: {type: string, description: "Decimal string in the currency's minor units."}}}}
+        csv_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        version: {type: integer, minimum: 1, description: "1 when issued, 2 when voided."}
+        user_id: {type: string, description: "The user who recorded the export, or who voided it."}
+        void_reason: {type: string, description: "Set on voided only."}
     FundStatus:
       type: object
       description: A trade promotion fund's open/closed state after close or reopen (BR-26.15).

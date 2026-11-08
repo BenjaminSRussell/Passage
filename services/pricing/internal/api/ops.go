@@ -151,22 +151,7 @@ func (a *API) settlementExport(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(le) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
-	from, errFrom := time.Parse(dateLayout, q.Get("from"))
-	if errFrom != nil {
-		fields["from"] = "must be a date in YYYY-MM-DD form"
-	}
-	to, errTo := time.Parse(dateLayout, q.Get("to"))
-	if errTo != nil {
-		fields["to"] = "must be a date in YYYY-MM-DD form"
-	}
-	if errFrom == nil && errTo == nil {
-		switch {
-		case to.Before(from):
-			fields["to"] = "must not be before from"
-		case to.Sub(from) >= maxSettlementDays*24*time.Hour:
-			fields["to"] = "an export covers at most 366 days"
-		}
-	}
+	from, to := settlementPeriod(fields, q.Get("from"), q.Get("to"))
 	target := q.Get("target")
 	if target == "" {
 		target = domain.SettlementTargetAP

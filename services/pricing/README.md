@@ -277,6 +277,11 @@ testdata/               fixtures
 | POST | `/v1/pricing/commission/postings` | pricing.commission.maintain | one posted invoice or credit note line; 201 new, 200 already posted (stand-in for the invoice.posted consumer) |
 | GET | `/v1/pricing/commission/transactions?legalEntityId=&salesGroupId=&repId=&customerId=&invoiceLineId=&period=` | pricing.commission.view | commission inquiry; period is a month |
 | GET | `/v1/pricing/commission/settlement-export?legalEntityId=&from=&to=&target=` | pricing.commission.view | `text/csv` per rep and currency for invoices dated from..to (≤ 366 days), credit notes netted; target AP (default) or PAYROLL |
+| POST | `/v1/pricing/commission/settlement-exports` | pricing.commission.maintain | body `{legalEntityId, from, to, target}` (AP default): records the hand-over of the period and freezes its rows; PRC-0065 when an ISSUED export of the same entity and target overlaps, PRC-0066 when the period holds no commission; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/commission/settlement-exports?legalEntityId=&target=&status=` | pricing.commission.view | recorded exports, newest period first (at most 100), totals per currency, no rows |
+| GET | `/v1/pricing/commission/settlement-exports/{id}` | pricing.commission.view | one export with its frozen rows (PRC-0067 when unknown) |
+| GET | `/v1/pricing/commission/settlement-exports/{id}/file` | pricing.commission.view | the CSV built from the frozen rows, byte for byte the first one; `X-Content-SHA256` equals the record's `csvSha256` |
+| POST | `/v1/pricing/commission/settlement-exports/{id}:void` | pricing.commission.maintain | body `{version, reason}`: VOIDED so the period can be exported again; 412 on a stale version, PRC-0031 when already voided |
 | GET | `/v1/pricing/funds?legalEntityId=` | pricing.view or pricing.fund.maintain | |
 | POST | `/v1/pricing/funds` | pricing.fund.maintain | `Idempotency-Key` honoured; open at version 1 |
 | GET | `/v1/pricing/funds/{id}` | pricing.view or pricing.fund.maintain | |
@@ -349,6 +354,10 @@ testdata/               fixtures
 | PRC-0062 | 409 | A royalty period is claimed before it is closed |
 | PRC-0063 | 422 | The named or assigned procedure has no ACTIVE version |
 | PRC-0064 | 409 | The audit extract of a price journal that is neither POSTED nor REVERSED |
+| PRC-0065 | 409 | A commission settlement export overlaps an ISSUED export of the same legal entity and target |
+| PRC-0066 | 422 | The period of a settlement export holds no commission |
+| PRC-0067 | 404 | No commission settlement export with the id |
+| PRC-0068 | 500 | The file rebuilt from a settlement export's frozen rows no longer matches its recorded digest (the CSV layout changed), so it is not served |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
@@ -365,6 +374,7 @@ Written to `outbox` in the same transaction as the change (see `events/asyncapi.
 - `dev.passage.pricing.rebateaccrual.posted.v1` (`retroactive=true` on a retroactive recompute delta; `party_role` CUSTOMER posts Dr 4150 / Cr 2150, VENDOR Dr 2160 / Cr 5100)
 - `dev.passage.pricing.vendorrebateclaim.created.v1` and `.approved.v1` (vendor rebate claims for w19 AP)
 - `dev.passage.pricing.commission.calculated.v1` (one per rep per invoice line; rep id only, never a name)
+- `dev.passage.pricing.commissionexport.issued.v1` and `dev.passage.pricing.commissionexport.voided.v1` (a settlement export recorded or voided; totals per currency and the file digest, no rep ids)
 - `dev.passage.pricing.fund.closed.v1`, `dev.passage.pricing.fund.reopened.v1`
 - `dev.passage.pricing.fundusage.recorded.v1` (one per attribution, with the period usage and budget after it)
 - `dev.passage.pricing.campaign.killed.v1`, `dev.passage.pricing.campaign.restored.v1` (kill switch)

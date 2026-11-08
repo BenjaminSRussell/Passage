@@ -110,6 +110,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerCommodityRoutes(r)
 	a.registerProcedureRoutes(r)
 	a.registerOpsRoutes(r)
+	a.registerSettlementExportRoutes(r)
 	a.registerStatementRoutes(r)
 	a.registerCommissionStatementRoutes(r)
 }

@@ -118,6 +118,10 @@ type Store interface {
 	ListCommissionTransactions(ctx context.Context, f CommissionFilter) ([]CommissionTxn, error)
 	StreamCommissionStatement(ctx context.Context, f CommissionStatementFilter, start func([]CommissionStatementTotal) error, line func(CommissionTxn) error) error
 	SettlementTotals(ctx context.Context, legalEntityID string, from, to time.Time) ([]domain.SettlementRow, error)
+	CreateSettlementExport(ctx context.Context, in SettlementExportInput, idempotencyKey string) (domain.SettlementExport, error)
+	GetSettlementExport(ctx context.Context, id string) (domain.SettlementExport, error)
+	ListSettlementExports(ctx context.Context, f SettlementExportFilter) ([]domain.SettlementExport, error)
+	VoidSettlementExport(ctx context.Context, id string, version int, reason, idempotencyKey string) (domain.SettlementExport, error)
 	CreateFund(ctx context.Context, f domain.Fund, idempotencyKey string) (domain.Fund, error)
 	GetFund(ctx context.Context, id string) (domain.Fund, error)
 	ListFunds(ctx context.Context, legalEntityID string, limit int) ([]domain.Fund, error)

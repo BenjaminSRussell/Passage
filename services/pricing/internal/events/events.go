@@ -10,6 +10,9 @@ const (
 	JournalPosted            = "dev.passage.pricing.journal.posted.v1"
 	RebateAccrualPosted      = "dev.passage.pricing.rebateaccrual.posted.v1"
 	CommissionCalculated     = "dev.passage.pricing.commission.calculated.v1"
+	// A commission settlement export was recorded for AP or payroll, and later voided (FR-26.18).
+	CommissionExportIssued = "dev.passage.pricing.commissionexport.issued.v1"
+	CommissionExportVoided = "dev.passage.pricing.commissionexport.voided.v1"
 	// Trade promotion funds (FR-26.19, BR-26.15).
 	FundClosed        = "dev.passage.pricing.fund.closed.v1"
 	FundReopened      = "dev.passage.pricing.fund.reopened.v1"
@@ -420,4 +423,27 @@ type ContractClaimData struct {
 	Currency      string `json:"currency"`
 	Status        string `json:"status"`
 	Version       int    `json:"version"`
+}
+
+// CommissionExportTotal is the amount an export hands over in one currency.
+type CommissionExportTotal struct {
+	Currency string `json:"currency"`
+	Amount   string `json:"amount"`
+}
+
+// CommissionExportData is the payload of commissionexport.issued and commissionexport.voided
+// (FR-26.18). It carries totals per currency, never rep ids or names: the file itself goes to
+// AP or payroll through the download. VoidReason is set on voided only.
+type CommissionExportData struct {
+	ExportID      string                  `json:"export_id"`
+	LegalEntityID string                  `json:"legal_entity_id"`
+	Target        string                  `json:"target"`
+	PeriodFrom    string                  `json:"period_from"`
+	PeriodTo      string                  `json:"period_to"`
+	LineCount     int                     `json:"line_count"`
+	Totals        []CommissionExportTotal `json:"totals"`
+	CSVSHA256     string                  `json:"csv_sha256"`
+	Version       int                     `json:"version"`
+	UserID        string                  `json:"user_id"`
+	VoidReason    string                  `json:"void_reason,omitempty"`
 }

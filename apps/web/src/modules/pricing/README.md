@@ -44,7 +44,9 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/commission/sales-groups/new` | Create a sales group; reps with shares that add up to 100 | `POST /commission/sales-groups` |
 | `/pricing/commission/sales-groups/:id` | Reps, commission rules in search order, add a rule (409 PRC-0038 shown) | `GET /commission/sales-groups/{id}`, `GET`/`POST /commission/rules` |
 | `/pricing/commission/transactions` | Commission inquiry by sales group, rep, month, customer and invoice line, with an exact total | `GET /commission/transactions` |
-| `/pricing/commission/settlement` | Commission settlement export (FR-26.18): totals per rep and currency for invoices dated in a period (previous month by default), preview and download the CSV for accounts payable or payroll | `GET /commission/settlement-export` |
+| `/pricing/commission/settlement` | Commission settlement export (FR-26.18): totals per rep and currency for invoices dated in a period (previous month by default), preview, download the CSV for accounts payable or payroll, and record the export (pricing.commission.maintain) | `GET /commission/settlement-export`, `POST /commission/settlement-exports` |
+| `/pricing/commission/exports` | Recorded settlement exports (FR-26.18): what was handed to accounts payable or payroll per period, filter by target and status, status issued or voided | `GET /commission/settlement-exports` |
+| `/pricing/commission/exports/:id` | One recorded export: the rows frozen when it was recorded, the file digest, download of the same file, void with a reason (pricing.commission.maintain) | `GET /commission/settlement-exports/{id}`, `GET …/{id}/file`, `POST …/{id}:void` |
 | `/pricing/funds` | Trade funds with budget per period, overspend and open/closed status | `GET /funds` |
 | `/pricing/funds/new` | Create a fund with its budget per period and overspend flag | `POST /funds` |
 | `/pricing/funds/:id` | Fund usage inquiry (per period: budget, used, remaining; per source), attribute usage (PRC-0011 / PRC-0012 shown), revise the budget, close and reopen | `GET /funds/{id}/usage`, `:attribute`, `:revise`, `:close`, `:reopen` |

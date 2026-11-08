@@ -100,3 +100,43 @@ func TestSettlementCSV_ReadsBackProperty(t *testing.T) {
 		}
 	})
 }
+
+func TestExportTotals_PerCurrencyInMinorUnits(t *testing.T) {
+	rows := []domain.SettlementRow{
+		{RepID: "r1", Currency: "USD", Amount: decimal.RequireFromString("100.005"), Transactions: 2},
+		{RepID: "r2", Currency: "USD", Amount: decimal.RequireFromString("50.10"), Transactions: 1},
+		{RepID: "r1", Currency: "JPY", Amount: decimal.RequireFromString("1200"), Transactions: 1},
+		{RepID: "r3", Currency: "USD", Amount: decimal.RequireFromString("-20"), Transactions: 1},
+	}
+	got := domain.ExportTotals(rows)
+	if len(got) != 2 || got[0].Currency != "JPY" || got[0].Amount.String() != "1200" ||
+		got[1].Currency != "USD" || got[1].Amount.String() != "130.1" {
+		t.Fatalf("totals = %+v", got)
+	}
+	if len(domain.ExportTotals(nil)) != 0 {
+		t.Fatal("no rows must give no totals")
+	}
+}
+
+func TestCSVDigest_StableAndSensitive(t *testing.T) {
+	a, _ := domain.SettlementCSV("AP", "2027-03-01", "2027-03-31", []domain.SettlementRow{{RepID: "r1", Currency: "USD", Amount: decimal.NewFromInt(5), Transactions: 1}})
+	b, _ := domain.SettlementCSV("AP", "2027-03-01", "2027-03-31", []domain.SettlementRow{{RepID: "r1", Currency: "USD", Amount: decimal.NewFromInt(6), Transactions: 1}})
+	if domain.CSVDigest(a) != domain.CSVDigest(a) || domain.CSVDigest(a) == domain.CSVDigest(b) || len(domain.CSVDigest(a)) != 64 {
+		t.Fatal("digest must be stable, 64 hex characters and change with the content")
+	}
+}
+
+// The recorded digest of every settlement export depends on these exact bytes: a change to the
+// CSV layout makes the files of earlier exports unservable (PRC-0068), so it must be deliberate.
+func TestSettlementCSV_LayoutIsPinned(t *testing.T) {
+	raw, err := domain.SettlementCSV("PAYROLL", "2027-03-01", "2027-03-31", []domain.SettlementRow{
+		{RepID: "R1", Currency: "USD", Amount: decimal.RequireFromString("360"), Transactions: 2},
+		{RepID: "=R2", Currency: "JPY", Amount: decimal.RequireFromString("-1200"), Transactions: 1},
+	})
+	want := "target,rep_id,currency,amount,transactions,from,to\n" +
+		"PAYROLL,R1,USD,360.00,2,2027-03-01,2027-03-31\n" +
+		"PAYROLL,'=R2,JPY,-1200,1,2027-03-01,2027-03-31\n"
+	if err != nil || string(raw) != want {
+		t.Fatalf("csv = %q, %v; want %q", raw, err, want)
+	}
+}

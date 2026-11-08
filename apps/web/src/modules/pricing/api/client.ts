@@ -1509,6 +1509,70 @@ export async function exportCommissionSettlement(
   return { csv, filename: disposition?.[1] ?? `commission-settlement-${filter.target}-${filter.from}-${filter.to}.csv`, rows };
 }
 
+// ---- Recorded commission settlement exports (FR-26.18, PRD 5.26.15).
+
+export type SettlementExportStatus = "ISSUED" | "VOIDED";
+
+export interface SettlementExportTotal {
+  currency: string;
+  amount: string;
+}
+
+/** One recorded hand-over of a period's commission to AP or payroll; lines are frozen at record time. */
+export interface SettlementExportRecord {
+  id: string;
+  legalEntityId: string;
+  target: SettlementTarget;
+  from: string;
+  to: string;
+  status: SettlementExportStatus;
+  lineCount: number;
+  totals: SettlementExportTotal[];
+  csvSha256: string;
+  exportedBy: string;
+  voidReason: string;
+  voidedBy: string;
+  version: number;
+  createdAt: string;
+  /** Present on create, read and void; absent in the list. */
+  lines?: SettlementRow[];
+}
+
+export interface SettlementExportFilter {
+  legalEntityId?: string;
+  target?: SettlementTarget | "";
+  status?: SettlementExportStatus | "";
+}
+
+/** POST /commission/settlement-exports - 409 PRC-0065 when the period overlaps an ISSUED export; 422 PRC-0066 when it holds no commission. */
+export function recordCommissionSettlementExport(
+  input: { legalEntityId: string; from: string; to: string; target: SettlementTarget },
+  key: string = newKey(),
+): Promise<SettlementExportRecord> {
+  return post<SettlementExportRecord>("/commission/settlement-exports", input, key);
+}
+
+/** GET /commission/settlement-exports - newest period first, at most 100. */
+export function listCommissionSettlementExports(filter: SettlementExportFilter = {}, signal?: AbortSignal): Promise<SettlementExportRecord[]> {
+  return items<SettlementExportRecord>(`/commission/settlement-exports${query({ ...filter })}`, signal);
+}
+
+export function getCommissionSettlementExport(id: string, signal?: AbortSignal): Promise<SettlementExportRecord> {
+  return send<SettlementExportRecord>(`/commission/settlement-exports/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /commission/settlement-exports/{id}:void - the reason is required; the period can then be exported again. */
+export function voidCommissionSettlementExport(id: string, version: number, reason: string, key: string = newKey()): Promise<SettlementExportRecord> {
+  return post<SettlementExportRecord>(`/commission/settlement-exports/${encodeURIComponent(id)}:void`, { version, reason }, key);
+}
+
+/** GET /commission/settlement-exports/{id}/file - the CSV built from the frozen rows, with the service's digest. */
+export async function downloadCommissionSettlementExport(id: string, signal?: AbortSignal): Promise<{ csv: string; filename: string; sha256: string }> {
+  const res = await sendRaw(`/commission/settlement-exports/${encodeURIComponent(id)}/file`, { headers: { Accept: "text/csv" } }, signal);
+  const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  return { csv: await res.text(), filename: disposition?.[1] ?? "commission-settlement.csv", sha256: res.headers.get("X-Content-SHA256") ?? "" };
+}
+
 // ---- Pricing parameters per legal entity (PRD 5.26.13).
 
 export interface PricingParameters {

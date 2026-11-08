@@ -1969,7 +1969,9 @@ paths:
         Sums the commission transactions of invoices dated from..to (inclusive, at most 366
         days), credit notes included, per rep and currency, ordered by rep then currency. Only
         rep ids are exported, never names. A rep id a spreadsheet would read as a formula is
-        written with a leading apostrophe.
+        written with a leading apostrophe. This is a preview and can be repeated: it records
+        nothing. POST /v1/pricing/commission/settlement-exports records the hand-over and stops
+        the same period going to the same target twice.
       x-passage-duty: pricing.commission.view
       parameters:
         - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
@@ -1986,6 +1988,139 @@ paths:
               schema: {type: string}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/settlement-exports:
+    get:
+      operationId: listCommissionSettlementExports
+      summary: List the recorded commission settlement exports, newest period first (FR-26.18).
+      description: >
+        At most 100 rows, ordered by period end then id. A row carries the totals per currency
+        and the digest of its file, not the rep lines (read one export for those).
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: target, in: query, required: false, schema: {type: string, enum: [AP, PAYROLL]}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [ISSUED, VOIDED]}}
+      responses:
+        "200":
+          description: The exports that match.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/CommissionSettlementExport"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createCommissionSettlementExport
+      summary: Record the hand-over of one period's commission to AP or payroll (FR-26.18, §5.26.15).
+      description: >
+        Sums the commission transactions of invoices dated from..to (inclusive, at most 366
+        days) per rep and currency, as the settlement-export preview does, and freezes the rows
+        on the record, so the file can be fetched again unchanged. A period that overlaps an
+        ISSUED export of the same legal entity and target is 409 PRC-0065 (void that export
+        first); a period without commission is 422 PRC-0066. Writes
+        dev.passage.pricing.commissionexport.issued.v1 in the same transaction. The target
+        defaults to AP.
+      x-passage-duty: pricing.commission.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommissionSettlementExportInput"}
+      responses:
+        "201":
+          description: Recorded at version 1, with the frozen rows.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionSettlementExport"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/settlement-exports/{id}:
+    get:
+      operationId: getCommissionSettlementExport
+      summary: Read one recorded commission settlement export with its frozen rows (FR-26.18).
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The export with its rows, ordered by rep then currency.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionSettlementExport"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/settlement-exports/{id}/file:
+    get:
+      operationId: downloadCommissionSettlementExport
+      summary: Download the CSV of a recorded commission settlement export (FR-26.18).
+      description: >
+        The file is built from the rows frozen on the record, so it is the same bytes every
+        time, whatever commission was posted afterwards. The X-Content-SHA256 header equals the
+        record's csvSha256. A voided export can still be downloaded. When the file rebuilt from
+        the frozen rows no longer matches the recorded digest (the CSV layout changed since), the
+        file is refused with 500 PRC-0068 rather than served under the record's name.
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: >
+            CSV with the header target,rep_id,currency,amount,transactions,from,to; amount has
+            the currency's minor units.
+          headers:
+            X-Content-SHA256: {description: Lowercase hex SHA-256 of the file., schema: {type: string}}
+          content:
+            text/csv:
+              schema: {type: string}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "500": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/settlement-exports/{id}:void:
+    post:
+      operationId: voidCommissionSettlementExport
+      summary: Void a recorded commission settlement export so its period can be exported again (FR-26.18).
+      description: >
+        The reason is required (1 to 500 characters after trimming). 409 PRC-0031 when already voided; 412 on a
+        stale version. Writes dev.passage.pricing.commissionexport.voided.v1. Voiding does not
+        recall the file: AP or payroll must discard it.
+      x-passage-duty: pricing.commission.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, reason]
+              properties:
+                version: {type: integer, minimum: 1}
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        "200":
+          description: Voided at the next version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommissionSettlementExport"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/funds:
     get:
@@ -3287,6 +3422,51 @@ components:
             id: {type: string, format: uuid}
             status: {type: string, enum: [DRAFT, ACTIVE, EXPIRED, WITHDRAWN]}
             version: {type: integer, minimum: 1}
+    CommissionSettlementExportInput:
+      type: object
+      required: [legalEntityId, from, to]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        from: {type: string, format: date}
+        to: {type: string, format: date, description: "Not before from; at most 366 days after it."}
+        target: {type: string, enum: [AP, PAYROLL], default: AP}
+    CommissionSettlementExport:
+      type: object
+      required: [id, legalEntityId, target, from, to, status, lineCount, totals, csvSha256, exportedBy, voidReason, voidedBy, version, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        target: {type: string, enum: [AP, PAYROLL]}
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        status: {type: string, enum: [ISSUED, VOIDED]}
+        lineCount: {type: integer, minimum: 1, description: "Rows of the file (rep and currency)."}
+        totals:
+          type: array
+          description: One entry per currency of the file, ordered by currency.
+          items:
+            type: object
+            required: [currency, amount]
+            properties:
+              currency: {type: string, pattern: "^[A-Z]{3}$"}
+              amount: {type: string, description: "Decimal string in the currency's minor units."}
+        csvSha256: {type: string, pattern: "^[0-9a-f]{64}$", description: "Digest of the file handed over."}
+        exportedBy: {type: string}
+        voidReason: {type: string, description: "Empty until voided."}
+        voidedBy: {type: string, description: "Empty until voided."}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        lines:
+          type: array
+          description: The frozen rows. Present on create, read and void; absent in the list.
+          items:
+            type: object
+            required: [repId, currency, amount, transactions]
+            properties:
+              repId: {type: string}
+              currency: {type: string, pattern: "^[A-Z]{3}$"}
+              amount: {type: string}
+              transactions: {type: integer, minimum: 1}
     VersionRequest:
       type: object
       required: [version]

@@ -64,31 +64,38 @@ func (s *Postgres) ExpireRecords(ctx context.Context, legalEntityID string, asOf
 // included with their negative amounts, so a rep's total is what is owed for the period.
 // Rows are ordered by rep, then currency, so the export is deterministic.
 func (s *Postgres) SettlementTotals(ctx context.Context, legalEntityID string, from, to time.Time) ([]domain.SettlementRow, error) {
-	out := []domain.SettlementRow{}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		out = out[:0]
-		rows, err := tx.Query(ctx, `select rep_id, currency::text, sum(amount)::text, count(*)::int
-			from commission_transaction
-			where legal_entity_id = $1::uuid and invoice_date between $2::date and $3::date
-			group by rep_id, currency order by rep_id, currency`, legalEntityID, dayStr(from), dayStr(to))
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var r domain.SettlementRow
-			var amount string
-			if err := rows.Scan(&r.RepID, &r.Currency, &amount, &r.Transactions); err != nil {
-				return fmt.Errorf("scan settlement row: %w", err)
-			}
-			if r.Amount, err = decimal.NewFromString(amount); err != nil {
-				return fmt.Errorf("settlement amount %q: %w", amount, err)
-			}
-			out = append(out, r)
-		}
-		return rows.Err()
+	var out []domain.SettlementRow
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		out, err = settlementTotals(ctx, tx, legalEntityID, from, to)
+		return err
 	})
 	return out, err
+}
+
+// settlementTotals runs the settlement query inside tx, so an export record freezes exactly
+// the rows it summed.
+func settlementTotals(ctx context.Context, tx pgx.Tx, legalEntityID string, from, to time.Time) ([]domain.SettlementRow, error) {
+	out := []domain.SettlementRow{}
+	rows, err := tx.Query(ctx, `select rep_id, currency::text, sum(amount)::text, count(*)::int
+		from commission_transaction
+		where legal_entity_id = $1::uuid and invoice_date between $2::date and $3::date
+		group by rep_id, currency order by rep_id, currency`, legalEntityID, dayStr(from), dayStr(to))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r domain.SettlementRow
+		var amount string
+		if err := rows.Scan(&r.RepID, &r.Currency, &amount, &r.Transactions); err != nil {
+			return nil, fmt.Errorf("scan settlement row: %w", err)
+		}
+		if r.Amount, err = decimal.NewFromString(amount); err != nil {
+			return nil, fmt.Errorf("settlement amount %q: %w", amount, err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // AccrualTotal is the rebate accrued in one currency for one party role (customer rebates

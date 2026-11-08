@@ -2,7 +2,10 @@ package api_test
 
 import (
 	"context"
+	"net/http"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/store"
@@ -26,6 +29,22 @@ func (f *fakeStore) ExpireRecords(_ context.Context, legalEntityID string, asOf 
 
 func (f *fakeStore) SettlementTotals(context.Context, string, time.Time, time.Time) ([]domain.SettlementRow, error) {
 	return []domain.SettlementRow{}, nil
+}
+
+func (f *fakeStore) CreateSettlementExport(context.Context, store.SettlementExportInput, string) (domain.SettlementExport, error) {
+	return domain.SettlementExport{}, nil
+}
+
+func (f *fakeStore) GetSettlementExport(_ context.Context, id string) (domain.SettlementExport, error) {
+	return domain.SettlementExport{}, httpx.NewProblem(http.StatusNotFound, domain.CodeExportNotFound, "no settlement export "+id)
+}
+
+func (f *fakeStore) ListSettlementExports(context.Context, store.SettlementExportFilter) ([]domain.SettlementExport, error) {
+	return []domain.SettlementExport{}, nil
+}
+
+func (f *fakeStore) VoidSettlementExport(_ context.Context, id string, _ int, _, _ string) (domain.SettlementExport, error) {
+	return domain.SettlementExport{}, httpx.NewProblem(http.StatusNotFound, domain.CodeExportNotFound, "no settlement export "+id)
 }
 
 func (f *fakeStore) WorkspaceSummary(_ context.Context, _ string, asOf time.Time) (store.WorkspaceSummary, error) {

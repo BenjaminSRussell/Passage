@@ -27,6 +27,8 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		{events.JournalPosted, events.JournalPostedData{ReversedJournalID: "x"}},
 		{events.RebateAccrualPosted, events.RebateAccrualPostedData{}},
 		{events.CommissionCalculated, events.CommissionCalculatedData{ReversesInvoiceLineID: "x"}},
+		{events.CommissionExportIssued, events.CommissionExportData{VoidReason: "x", Totals: []events.CommissionExportTotal{{}}}},
+		{events.CommissionExportVoided, events.CommissionExportData{VoidReason: "x"}},
 		{events.FundClosed, events.FundStatusData{}},
 		{events.FundReopened, events.FundStatusData{}},
 		{events.FundUsageRecorded, events.FundUsageRecordedData{}},
