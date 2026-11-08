@@ -454,6 +454,8 @@ describe("workspace", () => {
       if (url.includes("sourcing=NEEDS_SOURCING")) return json({ items: [{}, {}, {}] });
       if (url.includes("status=EFFECTIVE")) return json({ items: [{}] });
       if (url.includes("/rfqs?status=SENT%2CREPLIES_OPEN")) return json({ items: [{}, {}, {}, {}, {}] });
+      if (url.includes("/inquiries/near-limit-agreements")) return json({ items: [{}, {}, {}, {}, {}, {}] });
+      if (url.includes("/inquiries/change-orders")) return json({ items: [{}, {}] });
       return json({ items: [] });
     });
     const { container } = renderAt("/purchasing");
@@ -467,6 +469,8 @@ describe("workspace", () => {
     expect(tiles).toHaveTextContent("Lines needing a vendor 3");
     expect(tiles).toHaveTextContent("Effective purchase agreements 1");
     expect(tiles).toHaveTextContent("RFQs awaiting replies 5");
+    expect(tiles).toHaveTextContent("Agreement lines at 90 % or more 6");
+    expect(tiles).toHaveTextContent("Changes waiting for re-approval 2");
     expect(screen.getByRole("link", { name: "New RFQ" })).toHaveAttribute("href", "/purchasing/rfqs/new");
     expect(screen.getByRole("link", { name: "Consolidate approved lines" })).toHaveAttribute("href", "/purchasing/consolidation");
     expect(screen.getByRole("link", { name: "Purchase agreements" })).toHaveAttribute("href", "/purchasing/agreements");

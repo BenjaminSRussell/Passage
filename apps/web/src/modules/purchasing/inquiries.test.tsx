@@ -112,6 +112,88 @@ describe("purchasing inquiries", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
+  it("lists agreement lines near their limit with overruns marked, filters by threshold, and shows empty and error states", async () => {
+    const AGREEMENT = "66666666-6666-4666-8666-666666666666";
+    const row = {
+      agreementId: AGREEMENT,
+      number: "PA-00000006",
+      legalEntityId: "11111111-1111-4111-8111-111111111111",
+      vendorId: VENDOR,
+      currency: "USD",
+      lineId: "77777777-7777-4777-8777-777777777777",
+      lineNo: 2,
+      commitmentType: "TOTAL_VALUE",
+      maxEnforced: "SOFT",
+      committed: "500",
+      released: "520",
+      remaining: "-20",
+      pctReleased: "104",
+      overrun: true,
+    };
+    const qtyRow = { ...row, lineId: "88888888-8888-4888-8888-888888888888", lineNo: 1, commitmentType: "QUANTITY", productId: PRODUCT, unit: "EA", maxEnforced: "HARD", committed: "1000", released: "900", remaining: "100", pctReleased: "90", overrun: false };
+    const fetchMock = stubFetch(() => json({ items: [row, qtyRow] }));
+    renderAt("/purchasing/inquiries/near-limit-agreements");
+    const table = await findTable({ name: "Agreement lines near their limit" });
+    expect(await within(table).findAllByRole("link", { name: "PA-00000006" })).toHaveLength(2);
+    expect(within(table).getAllByRole("link", { name: "PA-00000006" })[0]).toHaveAttribute("href", `/purchasing/agreements/${AGREEMENT}`);
+    expect(within(table).getByText("104 % (over)")).toBeInTheDocument();
+    expect(within(table).getByText("-20 USD")).toBeInTheDocument();
+    expect(within(table).getByText("900 EA")).toBeInTheDocument();
+    expect(within(table).getByText("90 %")).toBeInTheDocument();
+    const inquiryNav = screen.getByRole("navigation", { name: "Inquiries" });
+    expect(within(inquiryNav).getByRole("link", { name: "Agreements near limit" })).toHaveAttribute("aria-current", "page");
+    fireEvent.change(screen.getByLabelText(/Released at least/), { target: { value: "40" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(await screen.findByText("Released at least must be a whole number from 50 to 100.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Released at least/), { target: { value: "95" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/inquiries/near-limit-agreements?thresholdPct=95"));
+    vi.unstubAllGlobals();
+    stubFetch(() => json({ items: [] }));
+    renderAt("/purchasing/inquiries/near-limit-agreements");
+    expect(await screen.findByRole("heading", { name: "No agreement line is near its limit" })).toBeInTheDocument();
+    vi.unstubAllGlobals();
+    stubFetch(() => problem(500, "PRC-INTERNAL", "boom"));
+    renderAt("/purchasing/inquiries/near-limit-agreements");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
+  it("lists change orders with both totals, filters by vendor, and shows empty and error states", async () => {
+    const row = {
+      purchaseOrderId: PO_ID,
+      number: "PO-00000011",
+      legalEntityId: "11111111-1111-4111-8111-111111111111",
+      vendorId: VENDOR,
+      currency: "USD",
+      confirmedVersion: 1,
+      pendingVersion: 2,
+      changeCount: 2,
+      confirmedTotal: "1000",
+      proposedTotal: "1100",
+      changedAt: "2027-01-07T09:30:15.123456Z",
+    };
+    const fetchMock = stubFetch(() => json({ items: [row] }));
+    renderAt("/purchasing/inquiries/change-orders");
+    const table = await findTable({ name: "Purchase order changes awaiting re-approval" });
+    expect(await within(table).findByRole("link", { name: "PO-00000011" })).toHaveAttribute("href", `/purchasing/purchase-orders/${PO_ID}`);
+    expect(within(table).getByText("1 to 2")).toBeInTheDocument();
+    expect(within(table).getByText("1000 USD")).toBeInTheDocument();
+    expect(within(table).getByText("1100 USD")).toBeInTheDocument();
+    expect(within(table).getByText("2027-01-07 09:30 UTC")).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Inquiries" })).getByRole("link", { name: "Change orders" })).toHaveAttribute("aria-current", "page");
+    fireEvent.change(screen.getByLabelText(/Vendor id/), { target: { value: VENDOR } });
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe(`/api/v1/procurement/inquiries/change-orders?vendorId=${VENDOR}`));
+    vi.unstubAllGlobals();
+    stubFetch(() => json({ items: [] }));
+    renderAt("/purchasing/inquiries/change-orders");
+    expect(await screen.findByRole("heading", { name: "No change is waiting" })).toBeInTheDocument();
+    vi.unstubAllGlobals();
+    stubFetch(() => problem(500, "PRC-INTERNAL", "boom"));
+    renderAt("/purchasing/inquiries/change-orders");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
   it("lists open orders by vendor and filters by vendor and as-of date", async () => {
     const fetchMock = stubFetch(() => json({ items: [vendorRow] }));
     const { container } = renderAt("/purchasing/inquiries");
@@ -218,7 +300,7 @@ describe("purchasing inquiries", () => {
   });
 
   it("validates ids, dates and the range", () => {
-    const base = { vendorId: "", productId: "", asOf: "", from: "", to: "", withinDays: "" };
+    const base = { vendorId: "", productId: "", asOf: "", from: "", to: "", withinDays: "", thresholdPct: "" };
     expect(validateInquiry({ ...base, vendorId: VENDOR, from: "2027-01-01", to: "2027-02-01" })).toEqual({});
     expect(validateInquiry({ ...base, vendorId: "x", productId: "y" })).toEqual({
       vendorId: "Vendor id must be a UUID.",
@@ -228,6 +310,9 @@ describe("purchasing inquiries", () => {
     expect(validateInquiry({ ...base, from: "2027-02-01", to: "2027-01-01" }).to).toBe("The end date is before the start date.");
     expect(validateInquiry({ ...base, withinDays: "0" })).toEqual({});
     expect(validateInquiry({ ...base, withinDays: " 366 " })).toEqual({});
+    expect(validateInquiry({ ...base, thresholdPct: "50" })).toEqual({});
+    expect(validateInquiry({ ...base, thresholdPct: " 100 " })).toEqual({});
+    for (const bad of ["49", "101", "90.5", "x"]) expect(validateInquiry({ ...base, thresholdPct: bad }).thresholdPct).toBe("Released at least must be a whole number from 50 to 100.");
     for (const bad of ["367", "-1", "1.5", "x"]) expect(validateInquiry({ ...base, withinDays: bad }).withinDays).toBe("Days ahead must be a whole number from 0 to 366.");
   });
 });

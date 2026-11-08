@@ -3,13 +3,17 @@ import { Link, NavLink } from "react-router-dom";
 import { Button, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import {
   listBackorderedLines,
+  listChangeOrders,
   listExpiringAgreements,
+  listNearLimitAgreements,
   listOpenOrdersByVendor,
   listOverdueLines,
   listPriceHistory,
   type BackorderedLine,
+  type ChangeOrder,
   type ExpiringAgreement,
   type InquiryFilters,
+  type NearLimitLine,
   type OverdueLine,
   type PriceHistoryEntry,
   type VendorOpenOrders,
@@ -17,13 +21,13 @@ import {
 import { LoadError, ShortId, datePattern, useResource, uuidPattern } from "./parts";
 import styles from "./pages.module.css";
 
-type Field = "vendorId" | "productId" | "asOf" | "from" | "to" | "withinDays";
+type Field = "vendorId" | "productId" | "asOf" | "from" | "to" | "withinDays" | "thresholdPct";
 type Draft = Record<Field, string>;
 type Errors = Partial<Record<Field, string>>;
 
-const emptyDraft: Draft = { vendorId: "", productId: "", asOf: "", from: "", to: "", withinDays: "" };
+const emptyDraft: Draft = { vendorId: "", productId: "", asOf: "", from: "", to: "", withinDays: "", thresholdPct: "" };
 
-const labels: Record<Field, string> = { vendorId: "Vendor id", productId: "Product id", asOf: "As of", from: "Ordered from", to: "Ordered to", withinDays: "Days ahead" };
+const labels: Record<Field, string> = { vendorId: "Vendor id", productId: "Product id", asOf: "As of", from: "Ordered from", to: "Ordered to", withinDays: "Days ahead", thresholdPct: "Released at least (%)" };
 
 /** Checks the filters before the round trip. productId is required where `needsProduct` is set. */
 export function validateInquiry(d: Draft, needsProduct = false): Errors {
@@ -39,13 +43,17 @@ export function validateInquiry(d: Draft, needsProduct = false): Errors {
   if (days !== "" && !(/^\d{1,3}$/.test(days) && Number(days) <= 366)) {
     errors.withinDays = "Days ahead must be a whole number from 0 to 366.";
   }
+  const pct = d.thresholdPct.trim();
+  if (pct !== "" && !(/^\d{2,3}$/.test(pct) && Number(pct) >= 50 && Number(pct) <= 100)) {
+    errors.thresholdPct = "Released at least must be a whole number from 50 to 100.";
+  }
   if (!errors.from && !errors.to && d.from !== "" && d.to !== "" && d.to < d.from) errors.to = "The end date is before the start date.";
   return errors;
 }
 
 const toFilters = (d: Draft): InquiryFilters => {
   const opt = (v: string) => (v.trim() === "" ? undefined : v.trim());
-  return { vendorId: opt(d.vendorId), productId: opt(d.productId), asOf: opt(d.asOf), from: opt(d.from), to: opt(d.to), withinDays: opt(d.withinDays) };
+  return { vendorId: opt(d.vendorId), productId: opt(d.productId), asOf: opt(d.asOf), from: opt(d.from), to: opt(d.to), withinDays: opt(d.withinDays), thresholdPct: opt(d.thresholdPct) };
 };
 
 /** The inquiry sub-navigation; NavLink marks the open inquiry with aria-current="page". */
@@ -63,6 +71,12 @@ function InquiryNav() {
       </NavLink>
       <NavLink className={styles.link} to="/purchasing/inquiries/expiring-agreements">
         Expiring agreements
+      </NavLink>
+      <NavLink className={styles.link} to="/purchasing/inquiries/near-limit-agreements">
+        Agreements near limit
+      </NavLink>
+      <NavLink className={styles.link} to="/purchasing/inquiries/change-orders">
+        Change orders
       </NavLink>
       <NavLink className={styles.link} to="/purchasing/inquiries/price-history">
         Price history
@@ -128,7 +142,7 @@ function InquiryFrame<T>(p: FrameProps<T>) {
                 <Input
                   {...c}
                   type={f === "asOf" || f === "from" || f === "to" ? "date" : "text"}
-                  inputMode={f === "withinDays" ? "numeric" : undefined}
+                  inputMode={f === "withinDays" || f === "thresholdPct" ? "numeric" : undefined}
                   value={draft[f]}
                   onChange={(e) => setDraft((d) => ({ ...d, [f]: e.target.value }))}
                 />
@@ -293,6 +307,79 @@ export function ExpiringAgreementsPage() {
       empty={{ title: "No agreement is about to end", description: "Agreements with an end date inside the look-ahead appear here." }}
       load={(f, cursor, signal) => listExpiringAgreements(f, { cursor, signal })}
       what="expiring agreements"
+    />
+  );
+}
+
+/** Agreement lines released to the threshold of their commitment (FR-17.14), most released first. */
+export function NearLimitAgreementsPage() {
+  const columns: DataTableColumn<NearLimitLine>[] = [
+    {
+      key: "number",
+      header: "Agreement",
+      render: (l) => (
+        <Link className={styles.link} to={`/purchasing/agreements/${l.agreementId}`}>
+          {l.number}
+        </Link>
+      ),
+    },
+    { key: "lineNo", header: "Line", align: "end" },
+    { key: "vendorId", header: "Vendor", render: (l) => <ShortId id={l.vendorId} /> },
+    { key: "commitmentType", header: "Commitment", render: (l) => l.commitmentType.replace(/_/g, " ").toLowerCase() },
+    { key: "item", header: "Item", render: (l) => l.category || (l.productId ? <ShortId id={l.productId} /> : "Whole agreement") },
+    { key: "maxEnforced", header: "Limit" },
+    { key: "committed", header: "Committed", align: "end", render: (l) => measure(l, l.committed) },
+    { key: "released", header: "Released", align: "end", render: (l) => measure(l, l.released) },
+    { key: "remaining", header: "Remaining", align: "end", render: (l) => measure(l, l.remaining) },
+    { key: "pctReleased", header: "Released %", align: "end", render: (l) => (l.overrun ? `${l.pctReleased} % (over)` : `${l.pctReleased} %`) },
+  ];
+  return (
+    <InquiryFrame<NearLimitLine>
+      title="Agreements near limit"
+      description="Lines of effective purchase agreements released to at least the chosen share of what was committed (90 % unless you change it), most released first. A line past 100 % is marked over. Quantity lines are measured in quantity and the others in amount."
+      fields={["vendorId", "thresholdPct"]}
+      tableLabel="Agreement lines near their limit"
+      columns={columns}
+      rowKey={(l) => l.lineId}
+      empty={{ title: "No agreement line is near its limit", description: "Lines appear here once releases reach the threshold of the commitment." }}
+      load={(f, cursor, signal) => listNearLimitAgreements(f, { cursor, signal })}
+      what="agreements near their limit"
+    />
+  );
+}
+
+const measure = (l: NearLimitLine, value: string) => (l.commitmentType === "QUANTITY" ? `${value} ${l.unit ?? ""}`.trim() : money(value, l.currency));
+
+/** Confirmed purchase orders with a change waiting for re-approval (FR-17.8, FR-17.14), longest waiting first. */
+export function ChangeOrdersPage() {
+  const columns: DataTableColumn<ChangeOrder>[] = [
+    {
+      key: "po",
+      header: "Purchase order",
+      render: (c) => (
+        <Link className={styles.link} to={`/purchasing/purchase-orders/${c.purchaseOrderId}`}>
+          {c.number}
+        </Link>
+      ),
+    },
+    { key: "vendorId", header: "Vendor", render: (c) => <ShortId id={c.vendorId} /> },
+    { key: "versions", header: "Version", align: "end", render: (c) => `${c.confirmedVersion} to ${c.pendingVersion}` },
+    { key: "changeCount", header: "Changes", align: "end" },
+    { key: "confirmedTotal", header: "Confirmed total", align: "end", render: (c) => money(c.confirmedTotal, c.currency) },
+    { key: "proposedTotal", header: "Proposed total", align: "end", render: (c) => money(c.proposedTotal, c.currency) },
+    { key: "changedAt", header: "Changed", mono: true, render: (c) => c.changedAt.slice(0, 16).replace("T", " ") + " UTC" },
+  ];
+  return (
+    <InquiryFrame<ChangeOrder>
+      title="Change orders"
+      description="Confirmed purchase orders whose latest change was held for re-approval, longest waiting first. The vendor still holds the confirmed version until the change is approved and confirmed."
+      fields={["vendorId"]}
+      tableLabel="Purchase order changes awaiting re-approval"
+      columns={columns}
+      rowKey={(c) => c.purchaseOrderId}
+      empty={{ title: "No change is waiting", description: "A change that a re-approval rule holds back appears here while it waits for approval." }}
+      load={(f, cursor, signal) => listChangeOrders(f, { cursor, signal })}
+      what="change orders"
     />
   );
 }

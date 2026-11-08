@@ -74,6 +74,8 @@ type Store interface {
 	ListOverdueLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[OverdueLine], error)
 	ListBackorderedLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[BackorderedLine], error)
 	ListExpiringAgreements(ctx context.Context, f InquiryFilter, after string, limit int) (Page[ExpiringAgreement], error)
+	ListNearLimitAgreementLines(ctx context.Context, f InquiryFilter, after string, limit int) (Page[NearLimitLine], error)
+	ListChangeOrders(ctx context.Context, f InquiryFilter, after string, limit int) (Page[ChangeOrder], error)
 	ListPriceHistory(ctx context.Context, f InquiryFilter, after string, limit int) (Page[PriceHistoryEntry], error)
 	ConsolidateRequisitionLines(ctx context.Context, orders []PurchaseOrder, lineIDs []string, idem Idem) ([]PurchaseOrder, error)
 	CreateRFQ(ctx context.Context, in domain.RFQ, idem Idem) (domain.RFQ, error)

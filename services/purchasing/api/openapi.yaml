@@ -833,6 +833,58 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/ExpiringAgreement' } }
         nextCursor: { type: string, description: "Opaque cursor, '<valid to>|<agreement id>'; pass it back as cursor." }
+    NearLimitLine:
+      type: object
+      description: "A line of an EFFECTIVE purchase agreement released to at least the threshold of what was committed."
+      required: [agreementId, number, legalEntityId, vendorId, currency, lineId, lineNo, commitmentType, maxEnforced, committed, released, remaining, pctReleased, overrun]
+      properties:
+        agreementId: { type: string, format: uuid }
+        number: { type: string, example: PA-00000001 }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        currency: { type: string, example: USD }
+        validTo: { $ref: '#/components/schemas/Day', description: Last day the agreement is valid; absent when it has no end date }
+        lineId: { type: string, format: uuid }
+        lineNo: { type: integer }
+        commitmentType: { type: string, enum: [QUANTITY, VALUE, CATEGORY_VALUE, TOTAL_VALUE] }
+        productId: { type: string, format: uuid, description: "Product of a QUANTITY or VALUE line" }
+        category: { type: string, description: "Category of a CATEGORY_VALUE line" }
+        unit: { type: string, description: "Unit of a QUANTITY line" }
+        maxEnforced: { type: string, enum: [HARD, SOFT, NONE] }
+        committed: { type: string, description: "Committed quantity in unit for a QUANTITY line, else committed amount in currency (rounded half to even to the currency's minor units)", example: "500.00" }
+        released: { type: string, description: Released on the same measure, example: "450.00" }
+        remaining: { type: string, description: "Committed minus released; negative after an overrun", example: "50.00" }
+        pctReleased: { type: string, description: "Released over committed in percent, rounded half to even to 2 places (the figure agreement.threshold.v1 uses)", example: "90.00" }
+        overrun: { type: boolean, description: "True when the released figure is above the committed one (a SOFT or NONE line), even when pctReleased rounds to 100.00" }
+    NearLimitLinePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NearLimitLine' } }
+        nextCursor: { type: string, description: "Opaque cursor, '<percent>|<line id>'; pass it back as cursor." }
+    ChangeOrder:
+      type: object
+      description: "A confirmed purchase order whose next version is stored and waiting for re-approval."
+      required: [purchaseOrderId, number, legalEntityId, vendorId, currency, confirmedVersion, pendingVersion, changeCount, confirmedTotal, proposedTotal, changedAt]
+      properties:
+        purchaseOrderId: { type: string, format: uuid }
+        number: { type: string, example: PO-00000007 }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        currency: { type: string, example: USD }
+        confirmedVersion: { type: integer, description: Version the vendor holds }
+        pendingVersion: { type: integer, description: Version waiting for re-approval }
+        changeCount: { type: integer, description: Operations in the pending version's RFC 6902 patch }
+        confirmedTotal: { type: string, description: "Total of the confirmed version, rounded half to even to the currency's minor units", example: "1000.00" }
+        proposedTotal: { type: string, description: Total of the pending version, example: "1100.00" }
+        changedAt: { type: string, format: date-time, description: "When the pending version was last written; editing the change again starts the wait over" }
+        changedBy: { type: string, format: uuid, description: User who made the change; absent when unknown }
+    ChangeOrderPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ChangeOrder' } }
+        nextCursor: { type: string, description: "Opaque cursor, '<changed at>|<purchase order id>'; pass it back as cursor." }
     PriceHistoryEntry:
       type: object
       description: "A priced line of an approved purchase order for one product."
@@ -2185,6 +2237,58 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExpiringAgreementPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/inquiries/near-limit-agreements:
+    get:
+      operationId: listNearLimitAgreementLines
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: Agreement lines released to the threshold of their commitment, most released first (FR-17.14; duty procurement.purchase-order.inquire)
+      description: |
+        Lines of EFFECTIVE purchase agreements whose released quantity (QUANTITY lines) or released
+        amount (the value types) is at or above thresholdPct (default 90, the level at which a release
+        writes agreement.threshold.v1) of the committed figure. The percentage is computed exactly as the
+        release computes it for that event (rounded half away from zero to 8 places, then half to even to
+        2), so this list and the event show the same figure and agree on which side of the threshold a line is. Lines past 100 % (a SOFT or NONE line) are listed with overrun true and a negative
+        remaining. ON_HOLD, DRAFT and CLOSED agreements take no releases and are left out. Pages by cursor
+        on (percent released, line id).
+      parameters:
+        - { name: legalEntityId, in: query, required: false, description: Legal entity of the agreement; must be in the caller's scope, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: query, required: false, description: Only this vendor, schema: { type: string, format: uuid } }
+        - { name: thresholdPct, in: query, required: false, description: Release level in percent (default 90), schema: { type: integer, minimum: 50, maximum: 100 } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of agreement lines near their limit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NearLimitLinePage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/inquiries/change-orders:
+    get:
+      operationId: listChangeOrders
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: Confirmed purchase orders with a change waiting for re-approval, longest waiting first (FR-17.14; duty procurement.purchase-order.inquire)
+      description: |
+        IN_REVIEW purchase orders that already have a confirmed version and an unconfirmed next version
+        (a quantity, price or other change that a re-approval rule held back, FR-17.8). A first submission
+        has no confirmed version and is not listed; neither is a rejected change until it is submitted again. Shows the confirmed and
+        proposed totals and the size of the patch. Pages by cursor on (time the change was written, purchase order id).
+      parameters:
+        - { name: legalEntityId, in: query, required: false, description: Legal entity of the purchase order; must be in the caller's scope, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: query, required: false, description: Only this vendor, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of purchase order changes waiting for re-approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeOrderPage' }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty or legalEntityId outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { $ref: '#/components/responses/Problem' }

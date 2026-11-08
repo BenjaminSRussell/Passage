@@ -58,6 +58,24 @@ func TestInquiries_Read(t *testing.T) {
 		h.fake.lastInquiry.WithinDays == nil || *h.fake.lastInquiry.WithinDays != 0 {
 		t.Fatalf("expiring, zero window: %d %v", rec.Code, h.fake.lastInquiry.WithinDays)
 	}
+	h.fake.nearLimit = []store.NearLimitLine{{AgreementID: ids.New(), Number: "PA-00000002", VendorID: vendor, Currency: "USD", LineID: ids.New(), LineNo: 2,
+		CommitmentType: "TOTAL_VALUE", MaxEnforced: "SOFT", Committed: decimal.NewFromInt(500), Released: decimal.NewFromInt(520), Remaining: decimal.NewFromInt(-20),
+		PctReleased: decimal.NewFromInt(104), Overrun: true}}
+	rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/near-limit-agreements?vendorId=" + vendor + "&thresholdPct=95&cursor=104.00|x&limit=4", duties: []string{dutyPurchaseOrderInquire}})
+	if rec.Code != http.StatusOK || h.fake.lastInquiry.VendorID != vendor || h.fake.lastInquiry.ThresholdPct == nil || *h.fake.lastInquiry.ThresholdPct != 95 || h.fake.lastLimit != 4 ||
+		h.fake.lastAfter != "104.00|x" || !strings.Contains(rec.Body.String(), `"overrun":true`) || !strings.Contains(rec.Body.String(), `"remaining":"-20"`) {
+		t.Fatalf("near limit: %d %s", rec.Code, rec.Body)
+	}
+	if rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/near-limit-agreements", duties: []string{dutyPurchaseOrderInquire}}); rec.Code != http.StatusOK || h.fake.lastInquiry.ThresholdPct != nil {
+		t.Fatalf("near limit, default threshold: %d %v", rec.Code, h.fake.lastInquiry.ThresholdPct)
+	}
+	h.fake.changeOrders = []store.ChangeOrder{{PurchaseOrderID: ids.New(), Number: "PO-00000009", VendorID: vendor, Currency: "USD", ConfirmedVersion: 1, PendingVersion: 2,
+		ChangeCount: 1, ConfirmedTotal: decimal.NewFromInt(1000), ProposedTotal: decimal.NewFromInt(1100)}}
+	rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/change-orders?vendorId=" + vendor + "&cursor=2027-01-01T00:00:00Z|x&limit=2", duties: []string{dutyPurchaseOrderInquire}})
+	if rec.Code != http.StatusOK || h.fake.lastInquiry.VendorID != vendor || h.fake.lastLimit != 2 || h.fake.lastAfter != "2027-01-01T00:00:00Z|x" ||
+		!strings.Contains(rec.Body.String(), `"pendingVersion":2`) || !strings.Contains(rec.Body.String(), `"proposedTotal":"1100"`) {
+		t.Fatalf("change orders: %d %s", rec.Code, rec.Body)
+	}
 	rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/price-history?productId=" + product + "&from=2027-01-01&to=2027-02-01", duties: []string{dutyPurchaseOrderInquire}})
 	if rec.Code != http.StatusOK || h.fake.lastInquiry.From == nil || h.fake.lastInquiry.To == nil || !strings.Contains(rec.Body.String(), `"unitPrice":"9.5"`) {
 		t.Fatalf("price history: %d %s", rec.Code, rec.Body)
@@ -70,13 +88,15 @@ func TestInquiries_Rejects(t *testing.T) {
 	for _, q := range []string{
 		"open-orders-by-vendor?vendorId=nope", "open-orders-by-vendor?asOf=yesterday", "overdue-lines?limit=0", "backordered-lines?vendorId=nope", "backordered-lines?asOf=x", "backordered-lines?limit=0",
 		"expiring-agreements?withinDays=-1", "expiring-agreements?withinDays=367", "expiring-agreements?withinDays=x", "expiring-agreements?vendorId=nope", "expiring-agreements?limit=0",
+		"near-limit-agreements?thresholdPct=49", "near-limit-agreements?thresholdPct=101", "near-limit-agreements?thresholdPct=x", "near-limit-agreements?thresholdPct=90.5",
+		"near-limit-agreements?vendorId=nope", "near-limit-agreements?limit=0", "change-orders?vendorId=nope", "change-orders?limit=0",
 		"price-history", "price-history?productId=" + product + "&from=2027-02-01&to=2027-01-01", "price-history?productId=" + product + "&from=x",
 	} {
 		if rec := h.do(call{method: "GET", path: "/v1/procurement/inquiries/" + q, duties: []string{dutyPurchaseOrderInquire}}); problemCode(t, rec) != codeInvalid {
 			t.Fatalf("%s: %d %s", q, rec.Code, rec.Body)
 		}
 	}
-	for _, p := range []string{"open-orders-by-vendor?", "overdue-lines?", "backordered-lines?", "price-history?productId=" + product + "&"} {
+	for _, p := range []string{"open-orders-by-vendor?", "overdue-lines?", "backordered-lines?", "expiring-agreements?", "near-limit-agreements?", "change-orders?", "price-history?productId=" + product + "&"} {
 		if rec := h.do(call{method: "GET", path: "/v1/procurement/inquiries/" + p, duties: []string{dutyRequisitionCreate}}); rec.Code != http.StatusForbidden {
 			t.Fatalf("%s without procurement.purchase-order.inquire: %d", p, rec.Code)
 		}

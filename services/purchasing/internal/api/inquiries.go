@@ -134,6 +134,54 @@ func (a *API) listExpiringAgreements(w http.ResponseWriter, r *http.Request) {
 	writePage(w, page)
 }
 
+// listNearLimitAgreements is GET /inquiries/near-limit-agreements (FR-17.14): lines of EFFECTIVE
+// agreements released to thresholdPct (default 90, 50 to 100) of their commitment, most released first.
+func (a *API) listNearLimitAgreements(w http.ResponseWriter, r *http.Request) {
+	limit, err := listLimit(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	f, ok := a.inquiryFilter(w, r)
+	if !ok {
+		return
+	}
+	if v := r.URL.Query().Get("thresholdPct"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < store.MinNearLimitPct || n > store.MaxNearLimitPct {
+			fail(w, r, invalid("thresholdPct", "must be a whole number from "+strconv.Itoa(store.MinNearLimitPct)+" to "+strconv.Itoa(store.MaxNearLimitPct)))
+			return
+		}
+		f.ThresholdPct = &n
+	}
+	page, err := a.store.ListNearLimitAgreementLines(r.Context(), f, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writePage(w, page)
+}
+
+// listChangeOrders is GET /inquiries/change-orders (FR-17.14): confirmed purchase orders with a
+// change waiting for re-approval, longest waiting first.
+func (a *API) listChangeOrders(w http.ResponseWriter, r *http.Request) {
+	limit, err := listLimit(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	f, ok := a.inquiryFilter(w, r)
+	if !ok {
+		return
+	}
+	page, err := a.store.ListChangeOrders(r.Context(), f, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writePage(w, page)
+}
+
 // listPriceHistory is GET /inquiries/price-history (PRD 3.17.14, ME1P): productId is required.
 func (a *API) listPriceHistory(w http.ResponseWriter, r *http.Request) {
 	limit, err := listLimit(r)

@@ -111,6 +111,8 @@ type InquiryFilter struct {
 	// WithinDays is the look-ahead of the expiring agreements inquiry; nil means the default (30).
 	// Zero is a real window: agreements ending on the as-of date, and lapsed ones.
 	WithinDays *int
+	// ThresholdPct is the release level of the near-limit queue in percent; nil means the default (90).
+	ThresholdPct *int
 }
 
 // ListOpenOrdersByVendor pages vendor and currency groups ordered by vendor then currency; the

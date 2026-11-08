@@ -181,6 +181,8 @@ func (a *API) Register(r chi.Router) {
 		inquire.Get("/inquiries/overdue-lines", a.listOverdueLines)
 		inquire.Get("/inquiries/backordered-lines", a.listBackorderedLines)
 		inquire.Get("/inquiries/expiring-agreements", a.listExpiringAgreements)
+		inquire.Get("/inquiries/near-limit-agreements", a.listNearLimitAgreements)
+		inquire.Get("/inquiries/change-orders", a.listChangeOrders)
 		inquire.Get("/inquiries/price-history", a.listPriceHistory)
 		inquire.Get("/purchase-orders/{id}/versions", a.orderVersions)
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)

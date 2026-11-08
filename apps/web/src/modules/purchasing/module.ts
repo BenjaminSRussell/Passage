@@ -9,7 +9,15 @@ import { ConsolidationPage } from "./ConsolidationPage";
 import { DeliverySchedulePage } from "./DeliverySchedulePage";
 import { InboundChangeDetailPage, InboundChangesPage } from "./InboundPages";
 import { InvoicingPlanPage } from "./InvoicingPlanPage";
-import { BackorderedLinesPage, ExpiringAgreementsPage, OpenOrdersByVendorPage, OverdueLinesPage, PriceHistoryPage } from "./InquiryPages";
+import {
+  BackorderedLinesPage,
+  ChangeOrdersPage,
+  ExpiringAgreementsPage,
+  NearLimitAgreementsPage,
+  OpenOrdersByVendorPage,
+  OverdueLinesPage,
+  PriceHistoryPage,
+} from "./InquiryPages";
 import { OpenSupplyPage } from "./OpenSupplyPage";
 import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
 import { PriceLookupPage } from "./PricingPage";
@@ -50,6 +58,8 @@ const purchasing: PassageModule = {
     { path: "/purchasing/inquiries/backordered", element: createElement(BackorderedLinesPage), handle: { title: "Backordered lines" } },
     { path: "/purchasing/inquiries/overdue", element: createElement(OverdueLinesPage), handle: { title: "Overdue lines" } },
     { path: "/purchasing/inquiries/expiring-agreements", element: createElement(ExpiringAgreementsPage), handle: { title: "Expiring agreements" } },
+    { path: "/purchasing/inquiries/near-limit-agreements", element: createElement(NearLimitAgreementsPage), handle: { title: "Agreements near limit" } },
+    { path: "/purchasing/inquiries/change-orders", element: createElement(ChangeOrdersPage), handle: { title: "Change orders" } },
     { path: "/purchasing/inquiries/price-history", element: createElement(PriceHistoryPage), handle: { title: "Order price history" } },
     { path: "/purchasing/inbound-changes", element: createElement(InboundChangesPage) },
     { path: "/purchasing/inbound-changes/:id", element: createElement(InboundChangeDetailPage), handle: { title: "Change from another service" } },

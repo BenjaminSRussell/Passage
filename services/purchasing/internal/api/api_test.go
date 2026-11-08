@@ -43,6 +43,8 @@ type fakeStore struct {
 	vendorOpen         []store.VendorOpenOrders
 	backordered        []store.BackorderedLine
 	expiring           []store.ExpiringAgreement
+	nearLimit          []store.NearLimitLine
+	changeOrders       []store.ChangeOrder
 	overdue            []store.OverdueLine
 	priceHist          []store.PriceHistoryEntry
 	lastInquiry        store.InquiryFilter
@@ -267,6 +269,16 @@ func (f *fakeStore) ListBackorderedLines(_ context.Context, qf store.InquiryFilt
 func (f *fakeStore) ListExpiringAgreements(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.ExpiringAgreement], error) {
 	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
 	return store.Page[store.ExpiringAgreement]{Items: f.expiring}, nil
+}
+
+func (f *fakeStore) ListNearLimitAgreementLines(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.NearLimitLine], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.NearLimitLine]{Items: f.nearLimit}, nil
+}
+
+func (f *fakeStore) ListChangeOrders(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.ChangeOrder], error) {
+	f.lastInquiry, f.lastAfter, f.lastLimit = qf, after, limit
+	return store.Page[store.ChangeOrder]{Items: f.changeOrders}, nil
 }
 
 func (f *fakeStore) ListPriceHistory(_ context.Context, qf store.InquiryFilter, after string, limit int) (store.Page[store.PriceHistoryEntry], error) {

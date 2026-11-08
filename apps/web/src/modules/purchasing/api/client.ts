@@ -722,6 +722,8 @@ export interface PriceHistoryEntry {
 export interface InquiryFilters {
   /** Expiring agreements: look-ahead in days from `asOf` (default 30). */
   withinDays?: string;
+  /** Near-limit agreements: release level in percent (default 90). */
+  thresholdPct?: string;
   vendorId?: string;
   productId?: string;
   asOf?: string;
@@ -761,6 +763,54 @@ export interface ExpiringAgreement {
 
 export function listExpiringAgreements(filters: InquiryFilters = {}, options: ListOptions = {}) {
   return list<ExpiringAgreement>("/inquiries/expiring-agreements", { ...filters }, options);
+}
+
+/** An agreement line released to the threshold of its commitment (FR-17.14). */
+export interface NearLimitLine {
+  agreementId: string;
+  number: string;
+  legalEntityId: string;
+  vendorId: string;
+  currency: string;
+  validTo?: string;
+  lineId: string;
+  lineNo: number;
+  commitmentType: "QUANTITY" | "VALUE" | "CATEGORY_VALUE" | "TOTAL_VALUE";
+  productId?: string;
+  category?: string;
+  unit?: string;
+  maxEnforced: "HARD" | "SOFT" | "NONE";
+  /** Quantity in `unit` for a QUANTITY line, else an amount in `currency`. */
+  committed: string;
+  released: string;
+  /** Negative after an overrun. */
+  remaining: string;
+  pctReleased: string;
+  overrun: boolean;
+}
+
+export function listNearLimitAgreements(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<NearLimitLine>("/inquiries/near-limit-agreements", { ...filters }, options);
+}
+
+/** A confirmed purchase order whose next version waits for re-approval (FR-17.8, FR-17.14). */
+export interface ChangeOrder {
+  purchaseOrderId: string;
+  number: string;
+  legalEntityId: string;
+  vendorId: string;
+  currency: string;
+  confirmedVersion: number;
+  pendingVersion: number;
+  changeCount: number;
+  confirmedTotal: string;
+  proposedTotal: string;
+  changedAt: string;
+  changedBy?: string;
+}
+
+export function listChangeOrders(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<ChangeOrder>("/inquiries/change-orders", { ...filters }, options);
 }
 
 export function listPriceHistory(filters: InquiryFilters = {}, options: ListOptions = {}) {
