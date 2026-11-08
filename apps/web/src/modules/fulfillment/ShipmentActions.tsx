@@ -9,10 +9,12 @@ import {
   autoPack,
   describeProblem,
   getLegalEntitySetting,
+  getOperationRule,
   listDeliveryTolerances,
   packContainer,
   postPackingSlip,
   type AutoPackResult,
+  type OperationRule,
   type PackingSlip,
   type Problem,
   type Shipment,
@@ -159,6 +161,17 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
   );
 }
 
+/** The warehouse's operation rule (BR-28.3, FR-28.15); null while loading or when it cannot be read, which leaves the form as it was. */
+function useOperationRule(warehouseId: string): OperationRule | null {
+  const [rule, setRule] = useState<OperationRule | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    getOperationRule(warehouseId, controller.signal).then(setRule, () => undefined);
+    return () => controller.abort();
+  }, [warehouseId]);
+  return rule;
+}
+
 /**
  * Auto-pack the picked, unpacked lines by packing rule (BR-28.11). Unit weights are
  * optional: with one, a container also closes at the rule's max weight. Lines
@@ -171,6 +184,8 @@ export function AutoPackForm({ shipment, onDone }: { shipment: Shipment; onDone(
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useCommandKey();
+  // auto_pack_enabled of the warehouse's operation rule: off keeps packing manual (FUL-0075).
+  const rule = useOperationRule(shipment.warehouseId);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -222,9 +237,14 @@ export function AutoPackForm({ shipment, onDone }: { shipment: Shipment; onDone(
             )}
           </FormField>
         ))}
+        {rule && !rule.autoPackEnabled ? (
+          <p className={styles.note} role="status">
+            Auto-pack is turned off for this warehouse (see Posting and packing rules). Pack the containers by hand.
+          </p>
+        ) : null}
         <ProblemAlert title="Could not auto-pack" problem={failure} />
         <div className={styles.formActions}>
-          <Button type="submit" variant="primary" loading={busy}>
+          <Button type="submit" variant="primary" loading={busy} disabled={rule ? !rule.autoPackEnabled : false}>
             Auto-pack
           </Button>
         </div>
@@ -370,6 +390,13 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
     );
     return () => controller.abort();
   }, [shipment.legalEntityId]);
+  // posting_date_source of the warehouse (BR-28.3): MANUAL asks for a date, TODAY takes the day of the post in the
+  // warehouse time zone unless the poster names another, SHIP_TIMESTAMP always takes that day. A rule that cannot be
+  // read leaves the form asking for a date, as before the rule existed.
+  const operationRule = useOperationRule(shipment.warehouseId);
+  const dateSource = operationRule?.postingDateSource ?? "MANUAL";
+  const manualDate = dateSource === "MANUAL";
+  const [overrideDate, setOverrideDate] = useState("");
   const [costs, setCosts] = useState<Record<string, CostValues>>(() => Object.fromEntries(open.map((l) => [l.id, { unitCost: "", costSnapshotId: "" }])));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -397,7 +424,8 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
   async function submit(event: FormEvent) {
     event.preventDefault();
     const found: Record<string, string> = {};
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(postingDate)) found.postingDate = "Enter the posting date.";
+    if (manualDate && !/^\d{4}-\d{2}-\d{2}$/.test(postingDate)) found.postingDate = "Enter the posting date.";
+    if (dateSource === "TODAY" && overrideDate !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(overrideDate)) found.postingDate = "Enter a date, or leave it empty for today.";
     if (!CURRENCY.test(currency.trim())) found.currency = "Enter a 3-letter currency code, such as USD.";
     if (countryCode.trim() !== "" && !COUNTRY.test(countryCode.trim())) found.countryCode = "Enter a 2-letter country code, such as DE, or leave it empty.";
     for (const l of open) {
@@ -414,7 +442,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
         shipment.id,
         shipment.version,
         {
-          postingDate,
+          ...(manualDate ? { postingDate } : dateSource === "TODAY" && overrideDate !== "" ? { postingDate: overrideDate } : {}),
           currency: currency.trim(),
           ...(countryCode.trim() ? { countryCode: countryCode.trim() } : {}),
           asnEnabled,
@@ -437,9 +465,25 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
   return (
     <Card title="Post packing slip">
       <form className={styles.form} onSubmit={submit} noValidate>
-        <FormField id="post-date" label="Posting date" error={errors.postingDate}>
-          {(control) => <Input {...control} type="date" value={postingDate} invalid={Boolean(errors.postingDate)} onChange={(event) => { setPostingDate(event.target.value); key.renew(); }} />}
-        </FormField>
+        {manualDate ? (
+          <FormField id="post-date" label="Posting date" error={errors.postingDate}>
+            {(control) => <Input {...control} type="date" value={postingDate} invalid={Boolean(errors.postingDate)} onChange={(event) => { setPostingDate(event.target.value); key.renew(); }} />}
+          </FormField>
+        ) : dateSource === "TODAY" ? (
+          <FormField
+            id="post-date"
+            label="Posting date"
+            hint={`Empty: today in the warehouse time zone (${operationRule?.timeZone}).`}
+            error={errors.postingDate}
+            optional
+          >
+            {(control) => <Input {...control} type="date" value={overrideDate} invalid={Boolean(errors.postingDate)} onChange={(event) => { setOverrideDate(event.target.value); key.renew(); }} />}
+          </FormField>
+        ) : (
+          <p className={styles.note} id="post-date-source">
+            {`The posting date is the day of the post in the warehouse time zone (${operationRule?.timeZone}).`}
+          </p>
+        )}
         <FormField id="post-currency" label="Currency" error={errors.currency}>
           {(control) => <Input {...control} maxLength={3} value={currency} invalid={Boolean(errors.currency)} onChange={(event) => { setCurrency(event.target.value.toUpperCase()); key.renew(); }} />}
         </FormField>

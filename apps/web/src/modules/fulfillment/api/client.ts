@@ -136,6 +136,28 @@ export interface ReleaseRule {
 
 export type ReleaseRuleInput = Pick<ReleaseRule, "horizonDays" | "requireFullAtp" | "waveMaxLines" | "waveMaxOrders"> & { legalEntityId: string };
 
+export type PostingDateSource = "SHIP_TIMESTAMP" | "TODAY" | "MANUAL";
+export const POSTING_DATE_SOURCES: PostingDateSource[] = ["SHIP_TIMESTAMP", "TODAY", "MANUAL"];
+
+/** Posting and packing parameters of a warehouse (section 5.28.13, BR-28.3). */
+export interface OperationRule {
+  warehouseId: string;
+  legalEntityId: string | null;
+  /** posting_date_source: MANUAL takes the posting date of the post; TODAY defaults to the day of the post, SHIP_TIMESTAMP is always that day (warehouse time zone). */
+  postingDateSource: PostingDateSource;
+  /** IANA time zone; SHIP_TIMESTAMP and TODAY take the day of the post in it. */
+  timeZone: string;
+  /** auto_pack_enabled: false refuses auto-pack in the warehouse. */
+  autoPackEnabled: boolean;
+  /** workbench_group_key_default: used when a workbench call names no group. */
+  workbenchGroupKeyDefault: WaveGroupBy;
+  /** 0 when no rule is saved (the defaults are shown). */
+  version: number;
+  updatedAt: string | null;
+}
+
+export type OperationRuleInput = Pick<OperationRule, "postingDateSource" | "timeZone" | "autoPackEnabled" | "workbenchGroupKeyDefault"> & { legalEntityId: string };
+
 /** The over-delivery tolerance of one scope (BR-28.7): the percentage of the planned quantity a pick may exceed. */
 export interface DeliveryTolerance {
   id: string;
@@ -446,7 +468,8 @@ export interface ReleaseResult {
 }
 
 export interface PostInput {
-  postingDate: string;
+  /** Required when the warehouse's posting_date_source is MANUAL; optional for TODAY (overrides the day of the post); omit it for SHIP_TIMESTAMP (FUL-0074 if it differs). */
+  postingDate?: string;
   currency: string;
   /**
    * Must equal the legal entity's cogs_at_shipment policy (FUL-0059 otherwise); omit it to post per the
@@ -471,7 +494,8 @@ export interface WorkbenchInput {
   zone?: string;
   shipFrom?: string;
   shipTo?: string;
-  groupBy: WaveGroupBy;
+  /** Omit to take the warehouse's workbench_group_key_default. */
+  groupBy?: WaveGroupBy;
   maxLines?: number;
   maxOrders?: number;
 }
@@ -757,6 +781,20 @@ export function listReleaseRules(signal?: AbortSignal): Promise<ReleaseRule[]> {
 export function saveReleaseRule(warehouseId: string, version: number, input: ReleaseRuleInput, key: string): Promise<ReleaseRule> {
   const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
   return send<ReleaseRule>(`/release-rules/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+export function listOperationRules(signal?: AbortSignal): Promise<OperationRule[]> {
+  return items<OperationRule>("/operation-rules", signal);
+}
+
+export function getOperationRule(warehouseId: string, signal?: AbortSignal): Promise<OperationRule> {
+  return send<OperationRule>(`/operation-rules/${encodeURIComponent(warehouseId)}`, {}, signal);
+}
+
+/** Sets the operation rule of a warehouse of a legal entity; version is the one read (0 when none is saved). */
+export function saveOperationRule(warehouseId: string, version: number, input: OperationRuleInput, key: string): Promise<OperationRule> {
+  const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };
+  return send<OperationRule>(`/operation-rules/${encodeURIComponent(warehouseId)}`, { method: "PUT", headers, body: JSON.stringify(input) });
 }
 
 export function listDeliveryTolerances(signal?: AbortSignal): Promise<DeliveryTolerance[]> {

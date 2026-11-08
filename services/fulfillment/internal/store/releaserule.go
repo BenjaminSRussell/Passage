@@ -99,13 +99,14 @@ func (s *Postgres) ListReleaseRules(ctx context.Context) ([]ReleaseRule, error) 
 
 // warehouseLegalEntity is the legal entity a warehouse belongs to as far as
 // this service knows it: the one of its short pick setting, else of its
-// release rule, else of its shipments; nil when none is visible to the caller.
+// release rule or operation rule, else of its shipments; nil when none is visible to the caller.
 func warehouseLegalEntity(ctx context.Context, tx pgx.Tx, warehouseID string) (*string, error) {
 	var le *string
 	err := tx.QueryRow(ctx, `select legal_entity_id from (
 			select legal_entity_id, 1 as src from warehouse_setting where warehouse_id = $1
 			union all select legal_entity_id, 2 from warehouse_release_rule where warehouse_id = $1
-			union all (select legal_entity_id, 3 from shipment where warehouse_id = $1 limit 1)) k
+			union all select legal_entity_id, 3 from warehouse_operation_rule where warehouse_id = $1
+			union all (select legal_entity_id, 4 from shipment where warehouse_id = $1 limit 1)) k
 		order by src limit 1`, warehouseID).Scan(&le)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

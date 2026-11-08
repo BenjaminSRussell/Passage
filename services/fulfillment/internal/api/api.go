@@ -86,6 +86,7 @@ func (a *API) Routes(r chi.Router) {
 	a.routesWorkbench(r)
 	a.routesCarrier(r)
 	a.routesReleaseRule(r)
+	a.routesOperationRule(r)
 	a.routesDeliveryTolerance(r)
 	a.routesInquiry(r)
 	a.routesException(r)
@@ -442,10 +443,15 @@ func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	postingDate, err := time.Parse(dateLayout, req.PostingDate)
-	if err != nil {
-		fail(w, r, "postingDate", "must be a date as YYYY-MM-DD")
-		return
+	// The warehouse's posting_date_source (BR-28.3) decides whether a date is
+	// needed (MANUAL) or derived from the post (SHIP_TIMESTAMP, TODAY).
+	var postingDate time.Time
+	if req.PostingDate != "" {
+		postingDate, err = time.Parse(dateLayout, req.PostingDate)
+		if err != nil {
+			fail(w, r, "postingDate", "must be a date as YYYY-MM-DD")
+			return
+		}
 	}
 	if !currencyCode.MatchString(req.Currency) {
 		fail(w, r, "currency", "must be an ISO 4217 alpha-3 code")
@@ -487,7 +493,8 @@ func (a *API) postPackingSlip(w http.ResponseWriter, r *http.Request) {
 	}
 	in := store.PostInput{PostingDate: postingDate, Currency: req.Currency, CogsAtShipment: req.CogsAtShipment != nil && *req.CogsAtShipment,
 		CountryCode: req.CountryCode, Costs: costs, EmitASN: req.AsnEnabled != nil && *req.AsnEnabled,
-		CogsFromSetting: req.CogsAtShipment == nil, AsnFromSetting: req.AsnEnabled == nil}
+		CogsFromSetting: req.CogsAtShipment == nil, AsnFromSetting: req.AsnEnabled == nil,
+		ShippedAt: a.now(), HasPostingDate: req.PostingDate != ""}
 	slip, err := a.store.PostPackingSlip(r.Context(), id, version, in, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)

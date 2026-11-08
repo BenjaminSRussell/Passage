@@ -26,10 +26,11 @@ var (
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
 	PickTracked          = events.Type(Context, "pick", "tracked", 1)
 
-	WarehouseSettingChanged     = events.Type(Context, "warehousesetting", "changed", 1)
-	LegalEntitySettingChanged   = events.Type(Context, "legalentitysetting", "changed", 1)
-	WarehouseReleaseRuleChanged = events.Type(Context, "warehousereleaserule", "changed", 1)
-	DeliveryToleranceChanged    = events.Type(Context, "deliverytolerance", "changed", 1)
+	WarehouseSettingChanged       = events.Type(Context, "warehousesetting", "changed", 1)
+	LegalEntitySettingChanged     = events.Type(Context, "legalentitysetting", "changed", 1)
+	WarehouseReleaseRuleChanged   = events.Type(Context, "warehousereleaserule", "changed", 1)
+	DeliveryToleranceChanged      = events.Type(Context, "deliverytolerance", "changed", 1)
+	WarehouseOperationRuleChanged = events.Type(Context, "warehouseoperationrule", "changed", 1)
 
 	DropShipCreated   = events.Type(Context, "dropship", "created", 1)
 	DropShipConfirmed = events.Type(Context, "dropship", "confirmed", 1)
@@ -47,7 +48,7 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged, DeliveryToleranceChanged,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged, DeliveryToleranceChanged, WarehouseOperationRuleChanged,
 		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved, ReturnableReturned, ReturnableAdjusted,
 	}
 }
@@ -190,6 +191,23 @@ type WarehouseReleaseRuleChangedData struct {
 	PreviousWaveMaxLines   int    `json:"previous_wave_max_lines"`
 	PreviousWaveMaxOrders  int    `json:"previous_wave_max_orders"`
 	Version                int    `json:"version"`
+}
+
+// WarehouseOperationRuleChangedData is published when the posting and packing
+// parameters of a warehouse are saved (BR-28.3, FR-28.15, FR-28.13), with the
+// values they replace.
+type WarehouseOperationRuleChangedData struct {
+	WarehouseID               string `json:"warehouse"`
+	LegalEntityID             string `json:"legal_entity_id"`
+	PostingDateSource         string `json:"posting_date_source"`
+	TimeZone                  string `json:"time_zone"`
+	AutoPackEnabled           bool   `json:"auto_pack_enabled"`
+	WorkbenchGroupKeyDefault  string `json:"workbench_group_key_default"`
+	PreviousPostingDateSource string `json:"previous_posting_date_source"`
+	PreviousTimeZone          string `json:"previous_time_zone"`
+	PreviousAutoPackEnabled   bool   `json:"previous_auto_pack_enabled"`
+	PreviousWorkbenchGroupKey string `json:"previous_workbench_group_key_default"`
+	Version                   int    `json:"version"`
 }
 
 // DeliveryToleranceChangedData is published when an over-delivery tolerance is

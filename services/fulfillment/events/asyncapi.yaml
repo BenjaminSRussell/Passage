@@ -71,6 +71,11 @@ channels:
     messages:
       warehouseReleaseRuleChanged:
         $ref: "#/components/messages/WarehouseReleaseRuleChanged"
+  warehouseOperationRuleChanged:
+    address: passage.fulfillment.warehouseoperationrule
+    messages:
+      warehouseOperationRuleChanged:
+        $ref: "#/components/messages/WarehouseOperationRuleChanged"
   deliveryToleranceChanged:
     address: passage.fulfillment.deliverytolerance
     messages:
@@ -259,6 +264,11 @@ operations:
     channel: { $ref: "#/channels/warehouseReleaseRuleChanged" }
     messages:
       - $ref: "#/channels/warehouseReleaseRuleChanged/messages/warehouseReleaseRuleChanged"
+  publishWarehouseOperationRuleChanged:
+    action: send
+    channel: { $ref: "#/channels/warehouseOperationRuleChanged" }
+    messages:
+      - $ref: "#/channels/warehouseOperationRuleChanged/messages/warehouseOperationRuleChanged"
   publishDeliveryToleranceChanged:
     action: send
     channel: { $ref: "#/channels/deliveryToleranceChanged" }
@@ -637,6 +647,29 @@ components:
           previous_release_requires_full_atp: { type: boolean }
           previous_wave_max_lines: { type: integer, minimum: 1, maximum: 2000 }
           previous_wave_max_orders: { type: integer, minimum: 1, maximum: 500 }
+          version: { type: integer, minimum: 1 }
+    WarehouseOperationRuleChanged:
+      name: dev.passage.fulfillment.warehouseoperationrule.changed.v1
+      title: Warehouse operation rule changed
+      summary: >
+        The posting and packing parameters of a warehouse were saved (section 5.28.13):
+        posting_date_source, the warehouse time zone, auto_pack_enabled and
+        workbench_group_key_default, with the values they replace.
+      contentType: application/json
+      payload:
+        type: object
+        required: [warehouse, legal_entity_id, posting_date_source, time_zone, auto_pack_enabled, workbench_group_key_default, previous_posting_date_source, previous_time_zone, previous_auto_pack_enabled, previous_workbench_group_key_default, version]
+        properties:
+          warehouse: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          posting_date_source: { type: string, enum: [SHIP_TIMESTAMP, TODAY, MANUAL] }
+          time_zone: { type: string }
+          auto_pack_enabled: { type: boolean }
+          workbench_group_key_default: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT] }
+          previous_posting_date_source: { type: string, enum: [SHIP_TIMESTAMP, TODAY, MANUAL] }
+          previous_time_zone: { type: string }
+          previous_auto_pack_enabled: { type: boolean }
+          previous_workbench_group_key_default: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT] }
           version: { type: integer, minimum: 1 }
     DeliveryToleranceChanged:
       name: dev.passage.fulfillment.deliverytolerance.changed.v1

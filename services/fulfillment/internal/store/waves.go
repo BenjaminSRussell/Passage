@@ -24,6 +24,7 @@ import (
 type WorkbenchStore interface {
 	RemainderStore
 	ReleaseRuleStore
+	OperationRuleStore
 	DeliveryToleranceStore
 	LegalEntitySettingStore
 	DropShipStore

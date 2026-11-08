@@ -311,6 +311,11 @@ type PostInput struct {
 	// overrides it.
 	CogsFromSetting bool
 	AsnFromSetting  bool
+	// ShippedAt is the moment of the post, from which the warehouse's
+	// posting_date_source derives the posting date (BR-28.3). PostingDate is
+	// the date the request named; HasPostingDate false means it named none.
+	ShippedAt      time.Time
+	HasPostingDate bool
 }
 
 // Idem is the Idempotency-Key and the hash of the request body.
@@ -1226,6 +1231,27 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			if in.AsnFromSetting {
 				in.EmitASN = le.AsnEnabled
+			}
+			// BR-28.3: the warehouse's posting_date_source decides the posting date.
+			if !in.ShippedAt.IsZero() {
+				rule, err := shipmentOperationRule(ctx, tx, sh)
+				if err != nil {
+					return PackingSlip{}, err
+				}
+				var requested *time.Time
+				if in.HasPostingDate {
+					requested = &in.PostingDate
+				}
+				date, err := domain.ResolvePostingDate(rule.PostingDateSource, rule.TimeZone, in.ShippedAt, requested)
+				switch {
+				case errors.Is(err, domain.ErrPostingDate):
+					return PackingSlip{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodePostingDate, err.Error())
+				case errors.Is(err, domain.ErrPostingDateRequired):
+					return PackingSlip{}, httpx.NewProblem(http.StatusBadRequest, CodeValidation, err.Error())
+				case err != nil:
+					return PackingSlip{}, err
+				}
+				in.PostingDate = date
 			}
 			var postLines []domain.PostingLine
 			slip := PackingSlip{ID: ids.New(), ShipmentID: sh.ID, OrderID: sh.OrderID,

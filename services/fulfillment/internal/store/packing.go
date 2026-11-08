@@ -320,6 +320,14 @@ func (s *Postgres) AutoPack(ctx context.Context, id string, version int, unitWei
 			if sh.Status != domain.StatusPicked && sh.Status != domain.StatusPacked {
 				return AutoPackResult{}, statusProblem("auto-pack", sh.Status)
 			}
+			// auto_pack_enabled (section 5.28.13): a warehouse may keep packing manual.
+			rule, err := shipmentOperationRule(ctx, tx, sh)
+			if err != nil {
+				return AutoPackResult{}, err
+			}
+			if !rule.AutoPackEnabled {
+				return AutoPackResult{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeAutoPackDisabled, "auto-pack is turned off for this warehouse (auto_pack_enabled); pack the containers by hand")
+			}
 			for lineID := range unitWeights {
 				if lineIndex(sh, lineID) < 0 {
 					return AutoPackResult{}, httpx.NewProblem(http.StatusNotFound, CodeLineNotFound, "unit weight names a line that is not on this shipment: "+lineID)

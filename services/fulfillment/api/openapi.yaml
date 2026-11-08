@@ -217,6 +217,23 @@ components:
         waveMaxOrders: { type: integer, minimum: 1, maximum: 500, description: "wave_max_orders: the picking workbench default when a call names no maxOrders." }
         version: { type: integer, minimum: 0, description: "0 when no rule is saved." }
         updatedAt: { type: [string, "null"], format: date-time }
+    OperationRule:
+      type: object
+      required: [warehouseId, legalEntityId, postingDateSource, timeZone, autoPackEnabled, workbenchGroupKeyDefault, version]
+      description: >
+        The posting and packing parameters of one warehouse (section 5.28.13). A warehouse
+        without a saved rule reads the defaults at version 0: MANUAL posting dates in UTC
+        (what every post did before the rule existed, a deviation from the PRD's
+        SHIP_TIMESTAMP default until a rule is saved), auto-pack on and CUSTOMER grouping.
+      properties:
+        warehouseId: { type: string, format: uuid }
+        legalEntityId: { type: [string, "null"], format: uuid, description: "The legal entity the warehouse belongs to: the saved one, else the one of its other settings or its shipments; null when none is known." }
+        postingDateSource: { type: string, enum: [SHIP_TIMESTAMP, TODAY, MANUAL], description: "posting_date_source: how a packing slip post gets its posting date (BR-28.3)." }
+        timeZone: { type: string, description: "IANA time zone of the warehouse; SHIP_TIMESTAMP and TODAY take the day of the post in it." }
+        autoPackEnabled: { type: boolean, description: "auto_pack_enabled: false refuses :auto-pack for the warehouse (FUL-0075); manual packing stays." }
+        workbenchGroupKeyDefault: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT], description: "workbench_group_key_default: the picking workbench grouping when a call names no groupBy." }
+        version: { type: integer, minimum: 0, description: "0 when no rule is saved." }
+        updatedAt: { type: [string, "null"], format: date-time }
     DeliveryTolerance:
       type: object
       required: [id, productId, customerId, overdeliveryPct, version, updatedAt]
@@ -859,7 +876,11 @@ paths:
         PARTIALLY_SHIPPED while a planned remainder is left (FR-28.8). The inventory
         issue and the ledger posting are made by their owners from the
         packingslip.posted event (see NOT-IMPLEMENTED.md). With asnEnabled the
-        asn.issued event lists the containers of this slip (FR-28.9).
+        asn.issued event lists the containers of this slip (FR-28.9). The posting date
+        follows the warehouse's operation rule (BR-28.3): MANUAL takes postingDate,
+        SHIP_TIMESTAMP the day of the post in the warehouse time zone, TODAY the same day
+        unless postingDate names another. The operation rule applies only when it was
+        saved under the shipment's legal entity; otherwise the post is MANUAL.
       x-passage-duty: fulfillment.packing-slip.post
       parameters:
         - { $ref: "#/components/parameters/ShipmentId" }
@@ -871,10 +892,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [postingDate, currency, costs]
+              required: [currency, costs]
               additionalProperties: false
               properties:
-                postingDate: { type: string, format: date }
+                postingDate: { type: string, format: date, description: "Required when the warehouse's posting_date_source is MANUAL (the default of a warehouse with no operation rule). For TODAY it is optional and overrides the day of the post in the warehouse time zone. For SHIP_TIMESTAMP omit it: the service derives the date from the post (BR-28.3); a date that differs from the derived one is refused with FUL-0074." }
                 currency: { type: string, pattern: '^[A-Z]{3}$' }
                 cogsAtShipment: { type: boolean, description: "Dr 5000 instead of Dr 1405. This is the legal entity's cogs_at_shipment policy (false when none is saved): omit it, or name the same value; another value is refused with FUL-0059." }
                 countryCode: { type: string, pattern: '^[A-Z]{2}$', description: "Ship-to country whose packaging fee rates apply (FR-28.14). Omit to post no packaging fee." }
@@ -899,7 +920,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 not PACKED or the order has an active hold (sales orderhold.applied.v1 without its release), FUL-0065 a JOURNAL order (the shipment's type or the type stored from sales' order.confirmed.v1), FUL-0066 the post would ship more of an order line than sales kept when it cancelled the remainder (order.remaindercancelled.v1), FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, FUL-0059 cogsAtShipment contradicts the legal entity's cogs_at_shipment policy, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED or the order has an active hold (sales orderhold.applied.v1 without its release), FUL-0065 a JOURNAL order (the shipment's type or the type stored from sales' order.confirmed.v1), FUL-0066 the post would ship more of an order line than sales kept when it cancelled the remainder (order.remaindercancelled.v1), FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, FUL-0059 cogsAtShipment contradicts the legal entity's cogs_at_shipment policy, FUL-0074 postingDate contradicts the warehouse's posting_date_source, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packing-slips/{id}:cancel:
     post:
@@ -1077,7 +1098,8 @@ paths:
         Fills containers line by line, most specific rule first, and closes a container
         when its quantity per container or max weight is reached. Each container gets an
         SSCC. Lines without a rule stay unpacked with a FUL-0012 warning. When nothing is
-        packed the shipment and its version are unchanged.
+        packed the shipment and its version are unchanged. A warehouse whose operation rule
+        turned auto_pack_enabled off refuses it with FUL-0075.
       x-passage-duty: fulfillment.warehouse.pack
       parameters:
         - { $ref: "#/components/parameters/ShipmentId" }
@@ -1127,7 +1149,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0020 shipment not found, FUL-0041 a unit weight names a line not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0013 one unit exceeds the rule's max weight, FUL-0050 the serial references of the GS1 company prefix are used up, FUL-0007 the SSCC was issued before (nested prefixes), idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0075 auto-pack is turned off for the warehouse, FUL-0001 status, FUL-0065 a JOURNAL order, FUL-0013 one unit exceeds the rule's max weight, FUL-0050 the serial references of the GS1 company prefix are used up, FUL-0007 the SSCC was issued before (nested prefixes), idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packaging-fee-rates:
     get:
@@ -1859,6 +1881,88 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ReleaseRule" }
         "400": { description: "FUL-0050 validation (If-Match, legalEntityId, horizonDays, requireFullAtp, waveMaxLines, waveMaxOrders), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/operation-rules:
+    get:
+      operationId: listOperationRules
+      summary: Posting and packing parameters per warehouse (BR-28.3, FR-28.15, FR-28.13)
+      description: >
+        Every warehouse the caller sees shipments, a short pick setting, a release rule or a
+        saved operation rule for (all scoped by legal entity). A warehouse without a saved
+        rule reads the defaults at version 0.
+      x-passage-duty: fulfillment.warehouse.view
+      responses:
+        "200":
+          description: Operation rules, ordered by warehouse
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/OperationRule" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/operation-rules/{warehouseId}:
+    get:
+      operationId: getOperationRule
+      summary: Read the operation rule of one warehouse
+      x-passage-duty: fulfillment.warehouse.view
+      parameters:
+        - { $ref: "#/components/parameters/WarehouseId" }
+      responses:
+        "200":
+          description: The rule; ETag carries its version (0 when none is saved)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperationRule" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: saveOperationRule
+      summary: Set the posting and packing parameters of a warehouse (BR-28.3, FR-28.15, FR-28.13)
+      description: >
+        postingDateSource decides how a packing slip post gets its posting date: MANUAL
+        takes the postingDate of the request, SHIP_TIMESTAMP the day of the post in
+        timeZone (a request date that differs is FUL-0074), TODAY defaults to that same
+        day and a request date overrides it. timeZone must be an IANA name.
+        autoPackEnabled false refuses :auto-pack for the warehouse (FUL-0075).
+        workbenchGroupKeyDefault is the grouping of a workbench call that names no
+        groupBy. If-Match carries the version read, 0 when none is saved; of two first
+        saves at the same moment one is written and the other gets 412. legalEntityId is
+        the legal entity the warehouse belongs to; another one than the warehouse's, or
+        one outside the caller's scope, is refused (FUL-0057). Publishes
+        warehouseoperationrule.changed with the values replaced.
+      x-passage-duty: fulfillment.warehouse.release
+      parameters:
+        - { $ref: "#/components/parameters/WarehouseId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, postingDateSource, autoPackEnabled, workbenchGroupKeyDefault]
+              properties:
+                legalEntityId: { type: string, format: uuid, description: "The legal entity the warehouse belongs to." }
+                postingDateSource: { type: string, enum: [SHIP_TIMESTAMP, TODAY, MANUAL] }
+                timeZone: { type: string, description: "IANA time zone name; UTC when omitted." }
+                autoPackEnabled: { type: boolean }
+                workbenchGroupKeyDefault: { type: string, enum: [CUSTOMER, CARRIER, ZONE, PRODUCT] }
+      responses:
+        "200":
+          description: The saved rule; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperationRule" }
+        "400": { description: "FUL-0050 validation (If-Match, legalEntityId, postingDateSource, timeZone, autoPackEnabled, workbenchGroupKeyDefault), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0057 the warehouse belongs to another legal entity, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }

@@ -308,22 +308,33 @@ func (a *API) unnestContainer(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, sh)
 }
 
-// waveDefaults gives a limit the call left out the value of the warehouse's
-// saved release rule (wave_max_lines, wave_max_orders); without a saved rule the
-// built-in defaults stay.
+// waveDefaults gives a limit or the group key the call left out the value of
+// the warehouse's saved rules: wave_max_lines and wave_max_orders of the
+// release rule, workbench_group_key_default of the operation rule. Without a
+// saved rule the built-in defaults stay.
 func (a *API) waveDefaults(r *http.Request, in waveRequest, req *store.WaveRequest) error {
-	if in.MaxLines != 0 && in.MaxOrders != 0 {
-		return nil
+	if in.MaxLines == 0 || in.MaxOrders == 0 {
+		rule, err := a.store.GetReleaseRule(r.Context(), req.WarehouseID)
+		if err != nil {
+			return err
+		}
+		if rule.Saved() {
+			if in.MaxLines == 0 {
+				req.Limits.MaxLines = rule.WaveMaxLines
+			}
+			if in.MaxOrders == 0 {
+				req.Limits.MaxOrders = rule.WaveMaxOrders
+			}
+		}
 	}
-	rule, err := a.store.GetReleaseRule(r.Context(), req.WarehouseID)
-	if err != nil || !rule.Saved() {
-		return err
-	}
-	if in.MaxLines == 0 {
-		req.Limits.MaxLines = rule.WaveMaxLines
-	}
-	if in.MaxOrders == 0 {
-		req.Limits.MaxOrders = rule.WaveMaxOrders
+	if in.GroupBy == "" {
+		op, err := a.store.GetOperationRule(r.Context(), req.WarehouseID)
+		if err != nil {
+			return err
+		}
+		if op.Saved() {
+			req.GroupBy = op.WorkbenchGroupKeyDefault
+		}
 	}
 	return nil
 }

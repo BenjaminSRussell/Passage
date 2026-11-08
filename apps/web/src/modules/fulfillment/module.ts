@@ -9,6 +9,7 @@ import { ExceptionsPage } from "./ExceptionsPage";
 import { DropShipDetailPage } from "./DropShipDetailPage";
 import { DropShipsPage } from "./DropShipsPage";
 import { LegalEntitySettingsPage } from "./LegalEntitySettingsPage";
+import { OperationRulesPage } from "./OperationRulesPage";
 import { PackagingFeesPage } from "./PackagingFeesPage";
 import { PackingRulesPage } from "./PackingRulesPage";
 import { PackingSlipDetailPage } from "./PackingSlipDetailPage";
@@ -57,6 +58,7 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/packaging-fees", element: createElement(PackagingFeesPage), handle: { title: "Packaging fees" } },
     { path: "/fulfillment/returnable-packaging", element: createElement(ReturnablePackagingPage), handle: { title: "Returnable packaging" } },
     { path: "/fulfillment/warehouse-settings", element: createElement(WarehouseSettingsPage), handle: { title: "Warehouse settings" } },
+    { path: "/fulfillment/operation-rules", element: createElement(OperationRulesPage), handle: { title: "Posting and packing rules" } },
     { path: "/fulfillment/release-rules", element: createElement(ReleaseRulesPage), handle: { title: "Release rules" } },
     { path: "/fulfillment/delivery-tolerances", element: createElement(DeliveryTolerancesPage), handle: { title: "Over-delivery tolerances" } },
     { path: "/fulfillment/legal-entity-settings", element: createElement(LegalEntitySettingsPage), handle: { title: "Posting settings" } },
@@ -85,6 +87,7 @@ const fulfillment: PassageModule = {
     { label: "Returnable aging", to: "/fulfillment/returnable-aging", duty: "fulfillment.warehouse.view" },
     { label: "Warehouse settings", to: "/fulfillment/warehouse-settings", duty: "fulfillment.warehouse.view" },
     { label: "Release rules", to: "/fulfillment/release-rules", duty: "fulfillment.warehouse.view" },
+    { label: "Posting and packing rules", to: "/fulfillment/operation-rules", duty: "fulfillment.warehouse.view" },
     { label: "Over-delivery tolerances", to: "/fulfillment/delivery-tolerances", duty: "fulfillment.warehouse.view" },
     { label: "Posting settings", to: "/fulfillment/legal-entity-settings", duty: "fulfillment.warehouse.view" },
   ],

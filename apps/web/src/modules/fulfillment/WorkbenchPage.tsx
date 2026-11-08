@@ -28,7 +28,8 @@ export interface WorkbenchValues {
   zone: string;
   shipFrom: string;
   shipTo: string;
-  groupBy: WaveGroupBy;
+  /** Empty takes the warehouse's workbench_group_key_default. */
+  groupBy: WaveGroupBy | "";
   maxLines: string;
   maxOrders: string;
 }
@@ -53,7 +54,8 @@ export function validateWorkbench(v: WorkbenchValues): { errors: Record<string, 
   if (t(v.maxLines) !== "" && !whole(t(v.maxLines), 2000)) errors.maxLines = "Enter 1 to 2000 lines.";
   if (t(v.maxOrders) !== "" && !whole(t(v.maxOrders), 500)) errors.maxOrders = "Enter 1 to 500 orders.";
   if (Object.keys(errors).length > 0) return { errors };
-  const input: WorkbenchInput = { warehouseId: t(v.warehouseId), groupBy: v.groupBy };
+  const input: WorkbenchInput = { warehouseId: t(v.warehouseId) };
+  if (v.groupBy) input.groupBy = v.groupBy;
   if (t(v.customerId)) input.customerId = t(v.customerId);
   if (t(v.carrier)) input.carrier = t(v.carrier);
   if (t(v.zone)) input.zone = t(v.zone);
@@ -80,7 +82,7 @@ const waveColumns: DataTableColumn<Wave>[] = [
   { key: "shipments", header: "Shipments", align: "end", render: (row) => String(row.shipments.length) },
 ];
 
-const initial: WorkbenchValues = { warehouseId: "", customerId: "", carrier: "", zone: "", shipFrom: "", shipTo: "", groupBy: "CUSTOMER", maxLines: "", maxOrders: "" };
+const initial: WorkbenchValues = { warehouseId: "", customerId: "", carrier: "", zone: "", shipFrom: "", shipTo: "", groupBy: "", maxLines: "", maxOrders: "" };
 
 /** Picking workbench: filter, group, preview, then create every wave in one action. */
 export function WorkbenchPage() {
@@ -167,7 +169,8 @@ export function WorkbenchPage() {
           {field("shipTo", "Ship to", undefined, { type: "date" })}
           <FormField id="workbench-groupBy" label="Group by">
             {(control) => (
-              <Select {...control} value={values.groupBy} onChange={(event) => update({ groupBy: event.target.value as WaveGroupBy })}>
+              <Select {...control} value={values.groupBy} onChange={(event) => update({ groupBy: event.target.value as WaveGroupBy | "" })}>
+                <option value="">Warehouse default</option>
                 {WAVE_GROUP_KEYS.map((g) => (
                   <option key={g} value={g}>
                     {GROUP_LABELS[g]}
