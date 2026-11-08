@@ -55,3 +55,11 @@ lagCheck:
   enabled: false
   schedule: "* * * * *"
   tenantIds: []
+# Statement schedules (FR-15.8): `finreport fire-schedules` every five minutes
+# for each tenant listed; runs the schedules that came due, stores the files in
+# the report library and hands them to distribution. In-process system actor,
+# so it needs no authz seed and no signing key.
+statementSchedules:
+  enabled: false
+  schedule: "*/5 * * * *"
+  tenantIds: []

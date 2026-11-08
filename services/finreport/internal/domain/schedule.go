@@ -21,7 +21,8 @@ const (
 )
 
 // ScheduleFormats are the output formats a schedule may request, in display
-// order. Only CSV is rendered so far (NOT-IMPLEMENTED.md).
+// order. CSV, HTML and XLSX are rendered; PDF needs the renderer sidecar and a
+// firing records it as skipped (NOT-IMPLEMENTED.md).
 var ScheduleFormats = []string{"pdf", "xlsx", "csv", "html"}
 
 // Schedule runs one published definition on a cron expression for a set of
@@ -40,7 +41,11 @@ type Schedule struct {
 	Recipients        []string `json:"recipients"`
 	AttachmentLimitMB int      `json:"attachmentLimitMb"`
 	Enabled           bool     `json:"enabled"`
-	UpdatedBy         string   `json:"updatedBy,omitempty"`
+	// FiscalYearStartMonth (1 to 12, default 1) places a firing in the fiscal
+	// calendar: a firing runs for the calendar month before its fire time (see
+	// FiringPeriod). It stands in for the ledger calendar of wave 14.
+	FiscalYearStartMonth int    `json:"fiscalYearStartMonth"`
+	UpdatedBy            string `json:"updatedBy,omitempty"`
 }
 
 // Normalize applies the documented defaults: attachment limit 20 MB and
@@ -52,6 +57,9 @@ func (s Schedule) Normalize() Schedule {
 	}
 	if s.CurrencyType == "" {
 		s.CurrencyType = "acct"
+	}
+	if s.FiscalYearStartMonth == 0 {
+		s.FiscalYearStartMonth = 1
 	}
 	rec := make([]string, len(s.Recipients))
 	for i, r := range s.Recipients {
@@ -127,6 +135,9 @@ func (s Schedule) Validate() []Issue {
 	}
 	if !uniqueAll(s.Recipients, plainAddress) {
 		add("recipients", "each recipient must be a plain email address, listed once")
+	}
+	if s.FiscalYearStartMonth < 1 || s.FiscalYearStartMonth > 12 {
+		add("fiscalYearStartMonth", "must be a month from 1 to 12")
 	}
 	if s.AttachmentLimitMB < MinAttachMB || s.AttachmentLimitMB > MaxAttachMB {
 		add("attachmentLimitMb", fmt.Sprintf("must be between %d and %d MB", MinAttachMB, MaxAttachMB))

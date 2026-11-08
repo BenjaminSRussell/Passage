@@ -31,6 +31,15 @@ export function periodLabel(year: number, no: number): string {
   return `${year}-${String(no).padStart(2, "0")}`;
 }
 
+/** A file size such as "512 B", "1.5 KB" or "2.3 MB" (powers of 1024). */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
+
 export function shortHash(hash: string): string {
   return hash.slice(0, 12);
 }

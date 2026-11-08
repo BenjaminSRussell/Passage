@@ -355,3 +355,17 @@ ledger's `reporting_hwm` row before its journal lines. Audit entries without a
 ledger (definitions, hierarchies, schedules) stay tenant-level. Report
 definitions, hierarchies and schedules are tenant-level configuration and are
 not entity-scoped.
+
+## Slice 16: scheduled statements and the report library
+
+`finreport fire-schedules TENANT_ID...` (the chart's `statementSchedules`
+CronJob, every five minutes, in process as
+`system:finreport-statement-schedules`, no route and no authz seed) runs the
+distribution schedules that came due: per schedule and ledger it runs the
+definition for the month before the cron time, renders CSV, HTML and XLSX,
+stores the files in `report_library_entry` (migration 0018, SHA-256 and
+retention date) and writes `distribution.sent.v1` per file; a firing that fails
+twice is recorded in `report_schedule_firing` and writes `statement.failed.v1`.
+`GET /v1/reporting/library` lists the stored files, `.../library/{id}/content`
+serves exactly the stored bytes, `GET /v1/reporting/schedule-firings` is the
+firing history. Details and what is left: NOT-IMPLEMENTED.md, "Slice 16".

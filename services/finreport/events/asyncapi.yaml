@@ -10,6 +10,8 @@ channels:
     messages:
       statementGenerated:
         $ref: '#/components/messages/StatementGenerated'
+      statementFailed:
+        $ref: '#/components/messages/StatementFailed'
   definitionPublished:
     address: passage.reporting.definition
     messages:
@@ -30,7 +32,26 @@ channels:
     messages:
       lagExceeded:
         $ref: '#/components/messages/LagExceeded'
+  distributionSent:
+    address: passage.reporting.distribution
+    messages:
+      distributionSent:
+        $ref: '#/components/messages/DistributionSent'
 operations:
+  publishStatementFailed:
+    action: send
+    channel:
+      $ref: '#/channels/statementGenerated'
+    summary: A scheduled firing ended without a statement (FR-15.8); one event per failed firing, written to the outbox in the transaction that records the firing
+    messages:
+      - $ref: '#/channels/statementGenerated/messages/statementFailed'
+  publishDistributionSent:
+    action: send
+    channel:
+      $ref: '#/channels/distributionSent'
+    summary: A rendered output of a scheduled run was stored in the report library and handed to distribution (FR-15.8); one event per output, written to the outbox in the transaction that records the firing
+    messages:
+      - $ref: '#/channels/distributionSent/messages/distributionSent'
   publishBalanceVerified:
     action: send
     channel:
@@ -160,3 +181,45 @@ components:
           lag_seconds: {type: integer, description: 'Age in seconds of the oldest journal entry waiting for an earlier one (a lower bound: entries the consumer has not received do not count)'}
           hwm_ledger: {type: integer, description: Highest posting sequence the reporting service has seen for the ledger}
           hwm_reporting: {type: integer, description: Highest posting sequence the read model has applied}
+    StatementFailed:
+      name: dev.passage.reporting.statement.failed.v1
+      title: Statement failed
+      summary: A scheduled firing could not produce its statement after its retry; ops and the schedule owner are notified.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [schedule_code, definition_code, ledger_id, period, fire_time, stage, code, error, attempts]
+        properties:
+          schedule_code: {type: string}
+          definition_code: {type: string}
+          ledger_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity that owns the ledger's reporting data (also the legalentityid extension); absent when the ledger is unknown}
+          period: {type: string, example: '2026-03', description: Fiscal period the firing was for}
+          fire_time: {type: string, format: date-time, description: The cron time that fired}
+          run_id: {type: string, format: uuid, description: The run, when it was created before the failure}
+          stage: {type: string, enum: [period, run, render, store], description: Where the firing stopped}
+          code: {type: string, description: Problem code of the last attempt, for example REPORT-0004 for a stale read model}
+          error: {type: string}
+          attempts: {type: integer, description: Attempts made, at most 2}
+    DistributionSent:
+      name: dev.passage.reporting.distribution.sent.v1
+      title: Distribution sent
+      summary: A rendered output of a scheduled run is in the report library and was handed to distribution; the notification service sends the email. Recipients are hashed.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [schedule_code, run_id, library_id, ledger_id, definition_code, period, format, size, sha256, delivery, recipient_count, recipients_sha256]
+        properties:
+          schedule_code: {type: string, description: The notification service resolves the recipients from the schedule}
+          run_id: {type: string, format: uuid}
+          library_id: {type: string, format: uuid, description: Report library entry holding the file}
+          ledger_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity that owns the ledger's reporting data (also the legalentityid extension); absent for a legacy ledger}
+          definition_code: {type: string}
+          period: {type: string, example: '2026-03'}
+          format: {type: string, enum: [csv, html, xlsx]}
+          size: {type: integer, format: int64, description: File size in bytes}
+          sha256: {type: string, description: SHA-256 hex of the file}
+          delivery: {type: string, enum: [attachment, link], description: attachment when the file fits the schedule's attachment limit, else the email carries a library link}
+          recipient_count: {type: integer}
+          recipients_sha256: {type: string, description: SHA-256 hex over the sorted recipient addresses, joined by a newline}

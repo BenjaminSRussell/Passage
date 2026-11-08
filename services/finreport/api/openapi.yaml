@@ -1290,6 +1290,148 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/schedule-firings:
+    get:
+      operationId: listScheduleFirings
+      summary: Firings of the distribution schedules, newest first (FR-15.8)
+      description: >-
+        One row per firing of a schedule for one ledger, written when the
+        statement-schedules job ends it: completed with the run it made, or
+        failed with the problem code and detail of its last attempt (one retry
+        is made). With latest=true it is the "last run" of the Schedules
+        screen. A firing is recorded once per schedule, ledger and cron time.
+      x-passage-duty: reporting.statement.schedule
+      parameters:
+        - name: schedule
+          in: query
+          required: false
+          description: Only the firings of this schedule code
+          schema: {type: string}
+        - name: latest
+          in: query
+          required: false
+          description: true keeps only the newest firing of each schedule and ledger (the last run of every schedule however many older firings there are)
+          schema: {type: boolean, default: false}
+        - name: limit
+          in: query
+          required: false
+          description: Firings returned, 1 to 200; default 200
+          schema: {type: integer, minimum: 1, maximum: 200}
+      responses:
+        '200':
+          description: The firings, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ScheduleFiring'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/library:
+    get:
+      operationId: listLibrary
+      summary: Report library of stored statement files (FR-15.8)
+      description: >-
+        The output files of scheduled runs (csv, html, xlsx), newest first and
+        keyset paged by (createdAt, id), filtered by definition, entity (ledger),
+        period, schedule and format. Each entry lists the file's SHA-256 and the
+        date until which it is retained. The files are not in the list; download
+        one from its content link. Visibility follows the caller's legal-entity
+        scope.
+      x-passage-duty: reporting.statement.view
+      parameters:
+        - {name: definition, in: query, required: false, description: Definition code, schema: {type: string}}
+        - {name: ledger, in: query, required: false, description: Ledger id, schema: {type: string, format: uuid}}
+        - {name: schedule, in: query, required: false, description: Schedule code that produced the file, schema: {type: string}}
+        - {name: format, in: query, required: false, description: File format, schema: {type: string, enum: [csv, html, xlsx, pdf]}}
+        - {name: period, in: query, required: false, description: 'Fiscal period as YYYY-PP', schema: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$', example: '2026-03'}}
+        - name: cursor
+          in: query
+          required: false
+          description: nextCursor of the previous page
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          description: Entries per page, 1 to 200; default 50
+          schema: {type: integer, minimum: 1, maximum: 200}
+      responses:
+        '200':
+          description: One page of library entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, limit, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/LibraryEntry'}
+                  limit: {type: integer}
+                  nextCursor: {type: [string, 'null']}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/library/{id}:
+    parameters:
+      - $ref: '#/components/parameters/LibraryId'
+    get:
+      operationId: getLibraryEntry
+      summary: One report library entry (FR-15.8)
+      description: The metadata of a stored file, with its SHA-256 and retention date.
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: The library entry
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LibraryEntry'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0043 - no such entry, or it is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/library/{id}/content:
+    parameters:
+      - $ref: '#/components/parameters/LibraryId'
+    get:
+      operationId: getLibraryContent
+      summary: Download a stored statement file (FR-15.8)
+      description: >-
+        Exactly the bytes that were distributed. The SHA-256 of the body is in
+        the ETag and in X-Passage-Content-Sha256, so a download can be checked
+        against the entry.
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: The file
+          headers:
+            Content-Disposition:
+              description: attachment with the stored file name
+              schema: {type: string}
+            ETag:
+              description: The SHA-256 of the body in quotes
+              schema: {type: string}
+            X-Passage-Content-Sha256:
+              description: Hex SHA-256 of the response body
+              schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+          content:
+            text/csv:
+              schema: {type: string}
+            text/html:
+              schema: {type: string}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: {type: string, format: binary}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0043 - no such entry, or it is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
 components:
   securitySchemes:
     bearerAuth:
@@ -1297,6 +1439,12 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    LibraryId:
+      name: id
+      in: path
+      required: true
+      description: Report library entry id
+      schema: {type: string, format: uuid}
     AuditLedger:
       name: ledger
       in: query
@@ -1690,8 +1838,48 @@ components:
           items: {type: string, format: email}
         attachmentLimitMb: {type: integer, minimum: 1, maximum: 25, default: 20, description: larger outputs are sent as a link (FR-15.8)}
         enabled: {type: boolean}
+        fiscalYearStartMonth: {type: integer, minimum: 1, maximum: 12, default: 1, description: 'Month the fiscal year starts. A firing runs for the calendar month before its fire time in the schedule time zone, placed in a calendar of monthly periods 1 to 12 (plus opening period 0) numbered by the calendar year in which the fiscal year ends; the ledger calendar of wave 14 replaces this'}
         updatedBy: {type: string, readOnly: true}
         nextRunAt: {type: string, format: date-time, readOnly: true, description: next firing in the schedule time zone; absent when disabled}
+    ScheduleFiring:
+      type: object
+      required: [id, scheduleCode, ledgerId, fireTime, periodYear, periodNo, status, attempts, startedAt, finishedAt]
+      properties:
+        id: {type: string, format: uuid}
+        scheduleCode: {type: string}
+        ledgerId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid, description: Legal entity that owns the ledger; absent when the ledger is unknown}
+        fireTime: {type: string, format: date-time, description: The cron time that fired}
+        periodYear: {type: integer}
+        periodNo: {type: integer}
+        status: {type: string, enum: [completed, failed]}
+        attempts: {type: integer, minimum: 1, maximum: 2}
+        runId: {type: string, format: uuid, description: The statement run, when one was made}
+        errorCode: {type: string, description: Problem code of the last attempt of a failed firing, for example REPORT-0004 for a stale read model}
+        errorDetail: {type: string}
+        startedAt: {type: string, format: date-time}
+        finishedAt: {type: string, format: date-time}
+    LibraryEntry:
+      type: object
+      required: [id, runId, scheduleCode, definitionCode, definitionVersion, ledgerId, periodYear, periodNo, currencyType, format, fileName, contentType, sizeBytes, sha256, retainUntil, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        runId: {type: string, format: uuid}
+        scheduleCode: {type: string}
+        definitionCode: {type: string}
+        definitionVersion: {type: integer}
+        ledgerId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid, description: Legal entity that owns the ledger; absent for a legacy ledger}
+        periodYear: {type: integer}
+        periodNo: {type: integer}
+        currencyType: {type: string, enum: [txn, acct, rpt]}
+        format: {type: string, enum: [csv, html, xlsx, pdf]}
+        fileName: {type: string}
+        contentType: {type: string}
+        sizeBytes: {type: integer, format: int64}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        retainUntil: {type: string, format: date-time, description: The file is kept at least until then (REPORTING_RETENTION_CLOSED_YEARS)}
+        createdAt: {type: string, format: date-time}
     Cell:
       type: object
       properties:

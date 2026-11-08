@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Schedule } from "./api/client";
 import { blankSchedule, toSchedule, validateSchedule } from "./ScheduleEditorPage";
+import { lastFiringBySchedule } from "./SchedulesPage";
 import { header, json, pageViolations, problem, renderAt, server, useFakeServer } from "./testServer";
 
 useFakeServer();
@@ -21,6 +22,7 @@ const nightly: Schedule = {
   recipients: ["controller@example.com"],
   attachmentLimitMb: 20,
   enabled: true,
+  fiscalYearStartMonth: 1,
   updatedBy: "u1",
   nextRunAt: "2026-04-01T23:00:00Z",
 };
@@ -54,6 +56,74 @@ describe("schedule form rules", () => {
 
   it("refuses a ledger listed twice", () => {
     expect(validateSchedule({ ...blankSchedule(), ledgerIds: `${LEDGER}\n${LEDGER}` }).ledgerIds).toBe("List each ledger once.");
+  });
+});
+
+const firing = {
+  id: "0190f0a0-0000-7000-8000-000000000f01",
+  scheduleCode: "NIGHTLY",
+  ledgerId: LEDGER,
+  fireTime: "2026-04-01T23:00:00Z",
+  periodYear: 2026,
+  periodNo: 3,
+  status: "completed" as const,
+  attempts: 1,
+  runId: "0190f0a0-0000-7000-8000-000000000a01",
+  startedAt: "2026-04-01T23:00:01Z",
+  finishedAt: "2026-04-01T23:00:03Z",
+};
+
+describe("schedule firings", () => {
+  it("takes the newest firing of each schedule from a newest-first list", () => {
+    const older = { ...firing, id: "older", fireTime: "2026-03-01T23:00:00Z" };
+    const other = { ...firing, id: "other", scheduleCode: "OTHER" };
+    const map = lastFiringBySchedule([firing, other, older]);
+    expect(map.get("NIGHTLY")?.id).toBe(firing.id);
+    expect(map.get("OTHER")?.id).toBe("other");
+  });
+
+  it("shows a failure on one ledger even when another ledger of the same firing completed", () => {
+    const failed = { ...firing, id: "failed", ledgerId: "0190f0a0-0000-7000-8000-0000000000b2", status: "failed" as const, errorCode: "REPORT-0004" };
+    const older = { ...firing, id: "older-failed", status: "failed" as const, fireTime: "2026-03-01T23:00:00Z" };
+    expect(lastFiringBySchedule([firing, failed]).get("NIGHTLY")?.id).toBe("failed");
+    expect(lastFiringBySchedule([firing, older]).get("NIGHTLY")?.id).toBe(firing.id);
+  });
+
+  it("rejects a month outside 1 to 12", () => {
+    expect(validateSchedule({ ...blankSchedule(), fiscalYearStartMonth: "13" }).fiscalYearStartMonth).toBe("Choose a month.");
+    expect(toSchedule({ ...blankSchedule(), fiscalYearStartMonth: "4" }).fiscalYearStartMonth).toBe(4);
+  });
+});
+
+describe("SchedulesPage last run", () => {
+  it("shows the last firing of each schedule, done or failed with its problem code", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/reporting/schedules") return json(200, { items: [nightly, { ...nightly, code: "BROKEN" }, { ...nightly, code: "NEW" }] });
+      if (url.pathname === "/api/v1/reporting/schedule-firings") {
+        expect(url.searchParams.get("latest")).toBe("true");
+        return json(200, { items: [firing, { ...firing, id: "f2", scheduleCode: "BROKEN", status: "failed", errorCode: "REPORT-0004", attempts: 2 }] });
+      }
+      return undefined;
+    };
+    const { container } = renderAt("/finreport/schedules");
+    const table = await findTable({ name: "Distribution schedules" });
+    expect(await within(table).findByText("Done")).toBeInTheDocument();
+    expect(within(table).getByText("for 2026-03", { exact: false })).toBeInTheDocument();
+    expect(within(table).getByText("Failed")).toBeInTheDocument();
+    expect(within(table).getByText("REPORT-0004")).toBeInTheDocument();
+    expect(within(table).getByText("Not yet")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("still lists the schedules when the firings cannot be loaded", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/reporting/schedules") return json(200, { items: [nightly] });
+      if (url.pathname === "/api/v1/reporting/schedule-firings") return problem(500, "COM-0500", "down");
+      return undefined;
+    };
+    renderAt("/finreport/schedules");
+    expect(await screen.findByRole("button", { name: "NIGHTLY" })).toBeInTheDocument();
+    expect(await screen.findByText("Unavailable")).toBeInTheDocument();
   });
 });
 
@@ -143,6 +213,7 @@ describe("ScheduleEditorPage", () => {
       recipients: ["controller@example.com"],
       attachmentLimitMb: 20,
       enabled: true,
+      fiscalYearStartMonth: 1,
     });
   });
 

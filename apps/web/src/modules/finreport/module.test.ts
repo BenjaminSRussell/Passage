@@ -9,7 +9,7 @@ describe("finreport module", () => {
     expect(finreport.nav.every((n) => n.to.startsWith("/finreport"))).toBe(true);
   });
 
-  it("has a list, a form and a detail page for statement runs, report definitions, row sets and column sets, reporting trees, derived hierarchies and schedules, the audit trail report and the ledger verification", () => {
+  it("has a list, a form and a detail page for statement runs, report definitions, row sets and column sets, reporting trees, derived hierarchies and schedules, the report library, the audit trail report and the ledger verification", () => {
     expect(finreport.routes.map((r) => r.path)).toEqual([
       "/finreport",
       "/finreport/runs/new",
@@ -32,6 +32,8 @@ describe("finreport module", () => {
       "/finreport/schedules",
       "/finreport/schedules/new",
       "/finreport/schedules/:code",
+      "/finreport/library",
+      "/finreport/library/:id",
       "/finreport/audit-trail",
       "/finreport/verifications",
       "/finreport/verifications/:id",
@@ -47,6 +49,7 @@ describe("finreport module", () => {
       "reporting.definition.maintain",
       "reporting.definition.maintain",
       "reporting.statement.schedule",
+      "reporting.statement.view",
       "reporting.audit.view",
       "reporting.audit.view",
     ]);

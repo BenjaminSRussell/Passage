@@ -81,7 +81,7 @@ func validSchedule() Schedule {
 		Code: "NIGHTLY-PACK", Name: "Nightly statement pack", Definition: "BS-STD",
 		Cron: "0 23 * * *", Timezone: "UTC", LedgerIDs: []string{testLedger}, CurrencyType: "acct",
 		Formats: []string{"pdf", "csv"}, Recipients: []string{"controller@example.com"},
-		AttachmentLimitMB: DefaultAttachMB, Enabled: true,
+		AttachmentLimitMB: DefaultAttachMB, Enabled: true, FiscalYearStartMonth: 1,
 	}
 }
 

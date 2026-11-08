@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/outputs"
 )
 
 // HTML and XLSX are served from the same stored run as CSV, with their own
@@ -79,9 +80,9 @@ func TestRunOutput_ConsolidatedHeaderNamesEveryLedger(t *testing.T) {
 
 // A failing renderer answers REPORT-0016 naming the format and the run.
 func TestRunOutput_RenderFailure(t *testing.T) {
-	saved := outputFormats["html"]
-	defer func() { outputFormats["html"] = saved }()
-	outputFormats["html"] = outputFormat{saved.contentType, func(domain.Definition, []domain.Cell, domain.Stamp) ([]byte, error) {
+	saved := outputs.Formats["html"]
+	defer func() { outputs.Formats["html"] = saved }()
+	outputs.Formats["html"] = outputs.Format{ContentType: saved.ContentType, Render: func(domain.Definition, []domain.Cell, domain.Stamp) ([]byte, error) {
 		return nil, errors.New("template broke")
 	}}
 	w := call(scheduleRouter(outputStore{}), http.MethodGet, "/v1/reporting/runs/"+runUUID+"/outputs/html", "", nil, DutyView)

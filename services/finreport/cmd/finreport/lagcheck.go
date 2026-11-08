@@ -31,7 +31,7 @@ type lagChecker interface {
 // episodes and writes one dev.passage.reporting.lag.exceeded.v1 per episode
 // once the lag has stayed above REPORTING_MAX_LAG_S for REPORTING_LAG_ALERT_S.
 func lagCheck(ctx context.Context, getenv func(string) string, args []string) error {
-	tenants, err := tenantArgs(args)
+	tenants, err := tenantArgs(lagCheckCommand, args)
 	if err != nil {
 		return err
 	}
@@ -51,9 +51,9 @@ func lagCheck(ctx context.Context, getenv func(string) string, args []string) er
 	return checkTenants(ctx, store.New(pool), cfg, tenants)
 }
 
-func tenantArgs(args []string) ([]string, error) {
+func tenantArgs(command string, args []string) ([]string, error) {
 	if len(args) == 0 {
-		return nil, errors.New("usage: finreport lag-check TENANT_ID [TENANT_ID ...]")
+		return nil, fmt.Errorf("usage: finreport %s TENANT_ID [TENANT_ID ...]", command)
 	}
 	out := make([]string, len(args))
 	for i, arg := range args {

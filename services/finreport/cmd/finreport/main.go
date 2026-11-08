@@ -9,6 +9,7 @@
 //	REPORTING_*        tunables, validated at startup (see internal/config)
 //
 // `finreport lag-check TENANT_ID...` runs the lag alert once (the chart's CronJob).
+// `finreport fire-schedules TENANT_ID...` fires the distribution schedules that are due (the chart's CronJob).
 package main
 
 import (
@@ -43,8 +44,10 @@ func main() {
 		err = runWith(ctx, os.Getenv, true)
 	case len(os.Args) > 1 && os.Args[1] == lagCheckCommand:
 		err = lagCheck(ctx, os.Getenv, os.Args[2:])
+	case len(os.Args) > 1 && os.Args[1] == fireSchedulesCommand:
+		err = fireSchedules(ctx, os.Getenv, os.Args[2:])
 	case len(os.Args) > 1:
-		err = fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to run the ledger journal consumer or \"lag-check TENANT_ID...\" to raise lag.exceeded)", os.Args[1])
+		err = fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to run the ledger journal consumer, \"lag-check TENANT_ID...\" to raise lag.exceeded or \"fire-schedules TENANT_ID...\" to fire due distribution schedules)", os.Args[1])
 	default:
 		err = run(ctx, os.Getenv)
 	}

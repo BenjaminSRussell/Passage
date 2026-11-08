@@ -89,6 +89,10 @@ type Store interface {
 	RunTree(ctx context.Context, runID string) (store.RunTreeView, error)
 	AuditTrail(ctx context.Context, f domain.AuditFilter, after *domain.AuditCursor, limit int) (store.AuditPage, error)
 	ExportAuditTrail(ctx context.Context, f domain.AuditFilter) (store.AuditExport, error)
+	ListLibrary(ctx context.Context, q store.LibraryQuery, after *domain.AuditCursor, limit int) (store.LibraryPage, error)
+	GetLibraryEntry(ctx context.Context, id string) (store.LibraryEntry, error)
+	LibraryContent(ctx context.Context, id string) (store.LibraryEntry, []byte, error)
+	ListFirings(ctx context.Context, schedule string, latest bool, limit int) ([]store.Firing, error)
 }
 
 // API holds the handlers.
@@ -159,6 +163,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules", a.listSchedules)
 		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules/{code}", a.getSchedule)
 		r.With(authz.RequireDuty(DutySchedule)).Put("/schedules/{code}", a.putSchedule)
+		r.With(authz.RequireDuty(DutySchedule)).Get("/schedule-firings", a.listFirings)
+		r.With(authz.RequireDuty(DutyView)).Get("/library", a.listLibrary)
+		r.With(authz.RequireDuty(DutyView)).Get("/library/{id}", a.getLibraryEntry)
+		r.With(authz.RequireDuty(DutyView)).Get("/library/{id}/content", a.libraryContent)
 		r.With(authz.RequireDuty(DutyVerify)).Post("/balance-verifications", a.createVerification)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications", a.listVerifications)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications/{id}", a.getVerification)

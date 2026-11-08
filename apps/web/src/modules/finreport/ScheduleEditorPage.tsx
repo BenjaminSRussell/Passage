@@ -15,7 +15,7 @@ import {
   type Schedule,
   type ScheduleInput,
 } from "./api/client";
-import { CURRENCY_TYPE_LABELS, DEFINITION_CODE, parseReferences, UUID } from "./format";
+import { CURRENCY_TYPE_LABELS, DEFINITION_CODE, MONTH_NAMES, parseReferences, UUID } from "./format";
 import styles from "./pages.module.css";
 
 /** Form state: lists stay text while the user types. */
@@ -31,6 +31,7 @@ export interface ScheduleValues {
   recipients: string;
   attachmentLimitMb: string;
   enabled: boolean;
+  fiscalYearStartMonth: string;
 }
 
 export function blankSchedule(): ScheduleValues {
@@ -46,6 +47,7 @@ export function blankSchedule(): ScheduleValues {
     recipients: "",
     attachmentLimitMb: "20",
     enabled: true,
+    fiscalYearStartMonth: "1",
   };
 }
 
@@ -62,6 +64,7 @@ export function toValues(s: Schedule): ScheduleValues {
     recipients: s.recipients.join("\n"),
     attachmentLimitMb: String(s.attachmentLimitMb),
     enabled: s.enabled,
+    fiscalYearStartMonth: String(s.fiscalYearStartMonth ?? 1),
   };
 }
 
@@ -78,6 +81,7 @@ export function toSchedule(v: ScheduleValues): ScheduleInput {
     recipients: parseReferences(v.recipients),
     attachmentLimitMb: Number(v.attachmentLimitMb),
     enabled: v.enabled,
+    fiscalYearStartMonth: Number(v.fiscalYearStartMonth),
   };
 }
 
@@ -101,6 +105,7 @@ export function validateSchedule(v: ScheduleValues): ScheduleErrors {
   if (s.recipients.length === 0 || s.recipients.length > 50) errors.recipients = "List 1 to 50 email addresses.";
   else if (s.recipients.some((r) => !EMAIL.test(r))) errors.recipients = "Each recipient is a plain email address, such as controller@example.com.";
   if (!Number.isInteger(s.attachmentLimitMb) || s.attachmentLimitMb < 1 || s.attachmentLimitMb > 25) errors.attachmentLimitMb = "Enter a whole number from 1 to 25.";
+  if (!Number.isInteger(s.fiscalYearStartMonth) || s.fiscalYearStartMonth < 1 || s.fiscalYearStartMonth > 12) errors.fiscalYearStartMonth = "Choose a month.";
   return errors;
 }
 
@@ -219,7 +224,7 @@ export function ScheduleEditorPage() {
     <div className={styles.stack}>
       <PageHeader
         title={title}
-        description="Runs the latest published version of a definition for each ledger and sends the outputs to the recipients. Times use the schedule's time zone."
+        description="Runs the latest published version of a definition for each ledger on its timetable, stores the CSV, HTML and XLSX files in the report library and hands them to the recipients. Times use the schedule's time zone."
         meta={saved ? saved.enabled ? <Badge tone="success">Enabled</Badge> : <Badge tone="neutral">Paused</Badge> : undefined}
       />
       <form className={styles.stack} onSubmit={submit} noValidate>
@@ -267,6 +272,22 @@ export function ScheduleEditorPage() {
             <FormField id="fr-s-ledgers" label="Ledgers" hint="One ledger id per line. The statement runs once per ledger." error={errors.ledgerIds}>
               {(c) => <Textarea {...c} className={styles.mono} rows={3} value={v.ledgerIds} invalid={Boolean(errors.ledgerIds)} onChange={(e) => change({ ledgerIds: e.target.value })} />}
             </FormField>
+            <FormField
+              id="fr-s-fy"
+              label="Fiscal year starts in"
+              hint="Each firing runs for the month before it fires, so a run on 1 April is March's statement. This month places it in the fiscal year until the ledger calendar is available."
+              error={errors.fiscalYearStartMonth}
+            >
+              {(c) => (
+                <Select {...c} value={v.fiscalYearStartMonth} invalid={Boolean(errors.fiscalYearStartMonth)} onChange={(e) => change({ fiscalYearStartMonth: e.target.value })}>
+                  {MONTH_NAMES.map((name, i) => (
+                    <option key={name} value={String(i + 1)}>
+                      {name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </FormField>
             <span className={styles.check}>
               <Input id="fr-s-enabled" type="checkbox" checked={v.enabled} onChange={(e) => change({ enabled: e.target.checked })} />
               <label htmlFor="fr-s-enabled">Enabled: run on the timetable</label>
@@ -291,6 +312,7 @@ export function ScheduleEditorPage() {
                   </span>
                 ))}
               </div>
+              <p className={styles.note}>CSV, HTML and XLSX are stored in the report library. PDF needs the renderer, which is not deployed yet, so it is skipped; a schedule with only PDF fails.</p>
               {errors.formats ? (
                 <p id="fr-s-formats-error" className={styles.error}>
                   {errors.formats}

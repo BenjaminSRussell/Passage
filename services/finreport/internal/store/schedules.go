@@ -36,7 +36,9 @@ func (s *Postgres) ListSchedules(ctx context.Context) ([]domain.Schedule, error)
 			if err := json.Unmarshal(body, &sc); err != nil {
 				return err
 			}
-			out = append(out, sc)
+			// Normalize fills fields added after the schedule was saved
+			// (fiscalYearStartMonth, slice 16) with their defaults.
+			out = append(out, sc.Normalize())
 		}
 		return rows.Err()
 	})
@@ -57,7 +59,11 @@ func (s *Postgres) GetSchedule(ctx context.Context, code string) (domain.Schedul
 		if err != nil {
 			return err
 		}
-		return json.Unmarshal(body, &sc)
+		if err := json.Unmarshal(body, &sc); err != nil {
+			return err
+		}
+		sc = sc.Normalize()
+		return nil
 	})
 	return sc, rev, err
 }

@@ -11,11 +11,13 @@ var (
 	HierarchyUnassigned = events.Type(Context, "hierarchy", "unassigned", 1)
 	BalanceVerified     = events.Type(Context, "balance", "verified", 1)
 	LagExceeded         = events.Type(Context, "lag", "exceeded", 1)
+	StatementFailed     = events.Type(Context, "statement", "failed", 1)
+	DistributionSent    = events.Type(Context, "distribution", "sent", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded}
+	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded, StatementFailed, DistributionSent}
 }
 
 // HierarchyUnassignedData is the payload of hierarchy.unassigned.v1: a member
@@ -94,4 +96,45 @@ type LagExceededData struct {
 	LagSeconds    int64  `json:"lag_seconds"`
 	HWMLedger     int64  `json:"hwm_ledger"`
 	HWMReporting  int64  `json:"hwm_reporting"`
+}
+
+// StatementFailedData is the payload of statement.failed.v1 (PRD §2.15.5): a
+// scheduled firing could not produce its statement. Stage is where it stopped
+// (run, render or store); Code and Detail are the problem the last attempt
+// ended with. RunID is empty when the run itself failed. legal_entity_id (the
+// ledger's owner, when known) also becomes the event's legalentityid extension.
+type StatementFailedData struct {
+	ScheduleCode   string `json:"schedule_code"`
+	DefinitionCode string `json:"definition_code"`
+	LedgerID       string `json:"ledger_id"`
+	LegalEntityID  string `json:"legal_entity_id,omitempty"`
+	Period         string `json:"period"`
+	FireTime       string `json:"fire_time"`
+	RunID          string `json:"run_id,omitempty"`
+	Stage          string `json:"stage"`
+	Code           string `json:"code"`
+	Error          string `json:"error"`
+	Attempts       int    `json:"attempts"`
+}
+
+// DistributionSentData is one rendered output of a scheduled run handed to the
+// distribution channel (PRD §2.15.5: run_id, recipients hashed, format, size).
+// Delivery is "attachment" when the file fits the schedule's attachment limit
+// and "link" when it is above it (the notification service sends the library
+// link, FR-15.8). The recipients are the schedule's: the notification service
+// resolves them from schedule_code, the event carries only their hash.
+type DistributionSentData struct {
+	ScheduleCode     string `json:"schedule_code"`
+	RunID            string `json:"run_id"`
+	LibraryID        string `json:"library_id"`
+	LedgerID         string `json:"ledger_id"`
+	LegalEntityID    string `json:"legal_entity_id,omitempty"`
+	DefinitionCode   string `json:"definition_code"`
+	Period           string `json:"period"`
+	Format           string `json:"format"`
+	Size             int64  `json:"size"`
+	SHA256           string `json:"sha256"`
+	Delivery         string `json:"delivery"`
+	RecipientCount   int    `json:"recipient_count"`
+	RecipientsSHA256 string `json:"recipients_sha256"`
 }

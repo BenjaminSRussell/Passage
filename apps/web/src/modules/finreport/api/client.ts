@@ -585,6 +585,8 @@ export interface ScheduleInput {
   recipients: string[];
   attachmentLimitMb: number;
   enabled: boolean;
+  /** Month (1 to 12) the fiscal year starts; a firing runs for the calendar month before its fire time. */
+  fiscalYearStartMonth: number;
 }
 
 /** A distribution schedule as the service returns it. */
@@ -611,6 +613,89 @@ export async function saveSchedule(schedule: ScheduleInput, etag: string | null)
   if (etag) headers["If-Match"] = etag;
   const sent = await send<Schedule>(`/schedules/${seg(schedule.code)}`, { method: "PUT", headers, body: JSON.stringify(schedule) });
   return { schedule: sent.body, etag: sent.etag };
+}
+
+/** One firing of a schedule for one ledger (FR-15.8), written when the job ends it. */
+export interface ScheduleFiring {
+  id: string;
+  scheduleCode: string;
+  ledgerId: string;
+  legalEntityId?: string;
+  fireTime: string;
+  periodYear: number;
+  periodNo: number;
+  status: "completed" | "failed";
+  attempts: number;
+  runId?: string;
+  errorCode?: string;
+  errorDetail?: string;
+  startedAt: string;
+  finishedAt: string;
+}
+
+/** Firings, newest first; for one schedule when a code is given. latest keeps the newest firing of each schedule and ledger. */
+export async function listScheduleFirings(opts: { schedule?: string; latest?: boolean } = {}, signal?: AbortSignal): Promise<ScheduleFiring[]> {
+  const params = new URLSearchParams();
+  if (opts.schedule) params.set("schedule", opts.schedule);
+  if (opts.latest) params.set("latest", "true");
+  const query = params.toString();
+  return (await get<{ items: ScheduleFiring[] }>(`/schedule-firings${query ? `?${query}` : ""}`, signal)).items;
+}
+
+/** A stored output file of a scheduled run (FR-15.8). The file itself is served by libraryContentUrl. */
+export interface LibraryEntry {
+  id: string;
+  runId: string;
+  scheduleCode: string;
+  definitionCode: string;
+  definitionVersion: number;
+  ledgerId: string;
+  legalEntityId?: string;
+  periodYear: number;
+  periodNo: number;
+  currencyType: CurrencyType;
+  format: OutputFormat;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  retainUntil: string;
+  createdAt: string;
+}
+
+export interface LibraryPage {
+  items: LibraryEntry[];
+  limit: number;
+  nextCursor: string | null;
+}
+
+/** The library filters; empty fields are left out. period is YYYY-PP. */
+export interface LibraryQuery {
+  definition?: string;
+  ledger?: string;
+  schedule?: string;
+  format?: OutputFormat;
+  period?: string;
+}
+
+/** One page of the report library, newest first. */
+export function listLibrary(q: LibraryQuery, cursor?: string, signal?: AbortSignal): Promise<LibraryPage> {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(q)) {
+    if (typeof value === "string" && value !== "") params.set(name, value);
+  }
+  if (cursor) params.set("cursor", cursor);
+  const query = params.toString();
+  return get<LibraryPage>(`/library${query ? `?${query}` : ""}`, signal);
+}
+
+export function getLibraryEntry(id: string, signal?: AbortSignal): Promise<LibraryEntry> {
+  return get<LibraryEntry>(`/library/${seg(id)}`, signal);
+}
+
+/** Where a stored file is served; the browser downloads it with the session cookie. */
+export function libraryContentUrl(id: string): string {
+  return `${base}/library/${seg(id)}/content`;
 }
 
 // --- designer parts (FR-15.2, FR-15.3) -------------------------------------
