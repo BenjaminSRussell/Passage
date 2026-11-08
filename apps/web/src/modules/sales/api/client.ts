@@ -852,7 +852,7 @@ export interface AgreementRevisionInput {
 /** One entry of an agreement's history: a revision, the close, quantity returned by a cancelled or lowered order, or quantity drawn by a raised one. */
 export interface AgreementVersion {
   version: number;
-  kind: "REVISED" | "CLOSED" | "RETURNED" | "DRAWN";
+  kind: "REVISED" | "CLOSED" | "RETURNED" | "DRAWN" | "REPRICED";
   actor: string;
   reason: string;
   diff: FieldChange[];
@@ -867,6 +867,38 @@ export function reviseAgreement(id: string, etag: string, input: AgreementRevisi
 /** Closes the agreement early at its ETag; it takes no more releases. */
 export function closeAgreement(id: string, etag: string, reason: string): Promise<Versioned<Agreement>> {
   return versioned<Agreement>(`/agreements/${encodeURIComponent(id)}:close`, { method: "POST", body: JSON.stringify({ reason }), headers: { "If-Match": etag } });
+}
+
+export interface RepricedOrder {
+  orderId: string;
+  orderNumber: string;
+  oldPrice: string;
+  newPrice: string;
+  netTotal: string;
+  version: number;
+}
+
+export interface SkippedOrder {
+  orderId: string;
+  orderNumber: string;
+  reason: string;
+}
+
+export interface AgreementRepriceResult {
+  agreement: Agreement;
+  repriced: RepricedOrder[];
+  skipped: SkippedOrder[];
+  /** True when the call stopped at the per-call limit; run it again. */
+  more: boolean;
+}
+
+/** Puts the agreement's price on the release line of its DRAFT and OPEN orders, at the agreement's ETag (BR-27.9). */
+export function repriceAgreementOrders(id: string, etag: string, reason?: string): Promise<Versioned<AgreementRepriceResult>> {
+  return versioned<AgreementRepriceResult>(`/agreements/${encodeURIComponent(id)}:reprice-orders`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+    headers: { "If-Match": etag },
+  });
 }
 
 export async function listAgreementVersions(id: string, signal?: AbortSignal): Promise<AgreementVersion[]> {

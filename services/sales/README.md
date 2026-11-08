@@ -225,7 +225,7 @@ entity needs a literal ACL for the `debezium` Kafka user in `connect.yaml`.
   an order a release created gives the release's quantity back to the
   commitment in the cancellation transaction, once per release
   (`agreement_return`); EXHAUSTED becomes ACTIVE again, CLOSED stays CLOSED.
-  A revised price applies to later releases only.
+  A revised price applies to later releases only; `POST /agreements/{id}:reprice-orders` carries it to the DRAFT and OPEN orders already released.
 - **FR-27.9 change approval** (slice 13): a customer can be switched to
   `approvalRequired` (`customer_change_policy`, per legal entity and customer;
   off when never saved). A PATCH of a CONFIRMED order of such a customer by a

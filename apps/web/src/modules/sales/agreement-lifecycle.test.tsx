@@ -227,6 +227,50 @@ describe("Agreement lifecycle", () => {
     expect(screen.getByText(/customer left/)).toBeInTheDocument();
   });
 
+  it("carries the agreement price to the released orders and shows what was repriced and left", async () => {
+    const result = {
+      agreement: { ...agreement, version: 3 },
+      repriced: [{ orderId: ORDER_ID, orderNumber: "SO-0000041", oldPrice: "12", newPrice: "12.5", netTotal: "7500", version: 2 }],
+      skipped: [{ orderId: "o2", orderNumber: "SO-0000042", reason: "order is CONFIRMED: change its price with a change request" }],
+      more: true,
+    };
+    handler = (url, init) => {
+      if (init.method === "POST") return { status: 200, body: result, etag: '"3"' };
+      if (url.pathname.endsWith("/versions")) return { status: 200, body: { items: [{ version: 3, kind: "REPRICED", actor: "ka", reason: "", changedAt: "2027-03-04T09:00:00Z", diff: [] }] } };
+      return { status: 200, body: agreement, etag: '"2"' };
+    };
+    renderAt(`/sales/agreements/${AGREEMENT_ID}`);
+    await screen.findByRole("heading", { name: "Sales agreement SA-0000007" });
+    fireEvent.click(screen.getByRole("button", { name: "Reprice released orders" }));
+    const repriced = await findTable({ name: "Repriced orders" });
+    expect(within(repriced).getByText("SO-0000041")).toBeInTheDocument();
+    expect(within(repriced).getByText("7500 USD")).toBeInTheDocument();
+    const skipped = await findTable({ name: "Orders left at their price" });
+    expect(within(skipped).getByText(/CONFIRMED/)).toBeInTheDocument();
+    expect(screen.getByText(/Run it again/)).toBeInTheDocument();
+    expect(screen.getByText("Orders repriced")).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url.pathname).toBe(`/api/v1/sales/agreements/${AGREEMENT_ID}:reprice-orders`);
+    expect(post?.headers.get("If-Match")).toBe('"2"');
+    expect(pageViolations(document.body)).toEqual([]);
+  });
+
+  it("says when no order needed repricing and shows the service's refusal", async () => {
+    let refuse = false;
+    handler = (url, init) => {
+      if (init.method === "POST") return refuse ? { status: 422, body: { code: "SLS-0052", detail: "agreement SA-0000007 is closed" } } : { status: 200, body: { agreement, repriced: [], skipped: [], more: false }, etag: '"2"' };
+      if (url.pathname.endsWith("/versions")) return { status: 200, body: { items: [] } };
+      return { status: 200, body: agreement, etag: '"2"' };
+    };
+    renderAt(`/sales/agreements/${AGREEMENT_ID}`);
+    await screen.findByRole("heading", { name: "Sales agreement SA-0000007" });
+    fireEvent.click(screen.getByRole("button", { name: "Reprice released orders" }));
+    expect(await screen.findByText("No released order needed repricing.")).toBeInTheDocument();
+    refuse = true;
+    fireEvent.click(screen.getByRole("button", { name: "Reprice released orders" }));
+    expect(await screen.findByText("The agreement is closed")).toBeInTheDocument();
+  });
+
   it("hides the actions from a caller without sales.agreement.maintain and reports a failed history", async () => {
     handler = (url) => (url.pathname.endsWith("/versions") ? { status: 500, body: { code: "COM-0500", detail: "boom" } } : { status: 200, body: agreement, etag: '"2"' });
     renderAt(`/sales/agreements/${AGREEMENT_ID}`, ["sales.order.read"]);
@@ -234,5 +278,6 @@ describe("Agreement lifecycle", () => {
     expect(await screen.findByText("Could not load the history")).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Revise the agreement" })).not.toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Close the agreement" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reprice released orders" })).not.toBeInTheDocument();
   });
 });

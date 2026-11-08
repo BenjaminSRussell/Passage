@@ -82,6 +82,11 @@ channels:
     messages:
       agreementDrawn:
         $ref: "#/components/messages/AgreementDrawn"
+  agreementRepriced:
+    address: passage.sales.agreement
+    messages:
+      agreementRepriced:
+        $ref: "#/components/messages/AgreementRepriced"
   scheduleReleaseReceived:
     address: passage.sales.schedulerelease
     messages:
@@ -354,6 +359,12 @@ operations:
     summary: The quantity of a released order's line was raised by a change and drew the difference from the agreement, in the change transaction (BR-27.9). Consumers - planning, key account reporting.
     messages:
       - {$ref: "#/channels/agreementDrawn/messages/agreementDrawn"}
+  publishAgreementRepriced:
+    action: send
+    channel: {$ref: "#/channels/agreementRepriced"}
+    summary: A reprice run put the agreement's current price on the release line of its DRAFT and OPEN orders, in the transaction that changed those orders (BR-27.9). Consumers - key account reporting.
+    messages:
+      - {$ref: "#/channels/agreementRepriced/messages/agreementRepriced"}
   publishOrderChanged:
     action: send
     channel: {$ref: "#/channels/orderChanged"}
@@ -622,6 +633,14 @@ components:
     AgreementDrawn:
       name: dev.passage.sales.agreement.drawn.v1
       title: Sales agreement quantity drawn
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AgreementLifecycleData"
+    AgreementRepriced:
+      name: dev.passage.sales.agreement.repriced.v1
+      title: Sales agreement price carried to released orders
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -1244,7 +1263,7 @@ components:
         status: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED]}
         diff:
           type: array
-          description: changed fields (commitmentQty or commitmentAmount, unitPrice, cumTolerance, overdeliveryPct, validFrom, validTo, releasedQty or releasedAmount, status)
+          description: changed fields (commitmentQty or commitmentAmount, unitPrice, cumTolerance, overdeliveryPct, validFrom, validTo, releasedQty or releasedAmount, status; on repriced one "order <number> unitPrice" entry per order)
           items:
             type: object
             required: [line_no, field, old, new]
@@ -1256,6 +1275,16 @@ components:
         reason: {type: string, description: the close reason, or the order cancellation or line change that returned or drew quantity}
         sales_order_id: {type: string, format: uuid, description: returned and drawn only; the order that gave back or drew the quantity}
         returned_qty: {type: string, description: "returned only; given back, in the commitment unit (on AMOUNT, the value of the quantity at the release price)"}
+        repriced_orders:
+          type: array
+          description: repriced only; the released orders whose release line took the agreement price (the diff has one unit price entry per order)
+          items:
+            type: object
+            required: [sales_order_id, old_price, new_price]
+            properties:
+              sales_order_id: {type: string, format: uuid}
+              old_price: {type: string}
+              new_price: {type: string}
         drawn_qty: {type: string, description: "drawn only; drawn by raising the release line, in the commitment unit (on AMOUNT, the value of the raise at the release price)"}
         version: {type: integer, description: the agreement version after the change}
         actor: {type: string}

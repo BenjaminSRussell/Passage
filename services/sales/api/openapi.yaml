@@ -557,6 +557,51 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}:reprice-orders:
+    post:
+      summary: Put the agreement's current price on the release line of its DRAFT and OPEN orders at the agreement's ETag (BR-27.9)
+      description: >-
+        A revised price applies to later releases only; this action carries it to the orders already released.
+        Each DRAFT or OPEN order whose release line (line 1) is open and priced differently takes the agreement price
+        through the same path as PATCH /orders/{id}: line net and total are recomputed with the line's discount, an order
+        version with the field diff is recorded and order.changed.v1 is written. Quantity, discount and the commitment
+        already drawn are not touched; a repriced order is credit-checked when it is confirmed, as after any PATCH of a DRAFT
+        or OPEN order. A CONFIRMED order priced differently is reported as skipped (change its price with a change request);
+        cancelled and settled orders and orders already at the price are left out. Only orders that still need the price
+        are taken, at most 200 per call; `more` says to call again with the new ETag, and repeated calls end.
+        When at least one order was repriced the agreement gets a REPRICED history entry and agreement.repriced.v1 in the
+        same transaction; a call that reprices nothing changes nothing. A closed agreement is refused with SLS-0052.
+      operationId: repriceSalesAgreementOrders
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, maxLength: 500, description: kept in the agreement history}
+      responses:
+        "200":
+          description: what was repriced and what was left alone; the agreement is at its new version when any order was repriced
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgreementRepriceResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0052 the agreement is closed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/agreements/{id}/versions:
     get:
       summary: An agreement's history, newest first, with the field-level diff of each revision, close and returned quantity
@@ -3522,17 +3567,45 @@ components:
         commitmentQty: {$ref: "#/components/schemas/Money", description: the commitment of a QUANTITY agreement; with its over-delivery tolerance it cannot fall below the released quantity; refused on an AMOUNT agreement}
         commitmentAmount: {$ref: "#/components/schemas/Money", description: the commitment of an AMOUNT agreement, at most 4 places; with its over-delivery tolerance it cannot fall below the released amount; refused on a QUANTITY agreement}
         overdeliveryPct: {$ref: "#/components/schemas/Percent"}
-        unitPrice: {$ref: "#/components/schemas/Money", description: applies to later releases only}
+        unitPrice: {$ref: "#/components/schemas/Money", description: applies to later releases; orders already released take it only through :reprice-orders}
         cumTolerance: {$ref: "#/components/schemas/Money"}
         validFrom: {type: string, description: a date such as 2027-03-04, or empty to clear}
         validTo: {type: string, description: a date such as 2027-03-04, or empty to clear}
         reason: {type: string, maxLength: 500}
+    AgreementRepriceResult:
+      type: object
+      required: [agreement, repriced, skipped, more]
+      properties:
+        agreement: {$ref: "#/components/schemas/SalesAgreement"}
+        repriced:
+          type: array
+          items:
+            type: object
+            required: [orderId, orderNumber, oldPrice, newPrice, netTotal, version]
+            properties:
+              orderId: {type: string, format: uuid}
+              orderNumber: {type: string}
+              oldPrice: {$ref: "#/components/schemas/Money"}
+              newPrice: {$ref: "#/components/schemas/Money"}
+              netTotal: {$ref: "#/components/schemas/Money", description: the order total after the change}
+              version: {type: integer, description: the order version the change produced}
+        skipped:
+          type: array
+          description: orders left at their price, with the reason (a CONFIRMED order priced differently, at most 200 listed, or an order whose release line changed while the call ran)
+          items:
+            type: object
+            required: [orderId, orderNumber, reason]
+            properties:
+              orderId: {type: string, format: uuid}
+              orderNumber: {type: string}
+              reason: {type: string}
+        more: {type: boolean, description: true when more than 200 orders needed the price; call again with the new ETag}
     AgreementVersion:
       type: object
       required: [version, kind, actor, reason, diff, changedAt]
       properties:
         version: {type: integer, description: the agreement version the entry produced}
-        kind: {type: string, enum: [REVISED, CLOSED, RETURNED, DRAWN]}
+        kind: {type: string, enum: [REVISED, CLOSED, RETURNED, DRAWN, REPRICED]}
         actor: {type: string}
         reason: {type: string}
         changedAt: {type: string, format: date-time}

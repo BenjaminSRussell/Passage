@@ -340,6 +340,11 @@ func (s *lifecycleStore) CloseAgreement(_ context.Context, id string, version in
 	return store.Agreement{ID: id, Version: version + 1, Status: "CLOSED"}, s.err
 }
 
+func (s *lifecycleStore) RepriceAgreementOrders(_ context.Context, id string, version int, reason, _ string, _ time.Time) (store.RepriceResult, error) {
+	s.reason, s.version = reason, version
+	return store.RepriceResult{Agreement: store.Agreement{ID: id, Version: version + 1}, Repriced: []store.RepricedOrder{}, Skipped: []store.SkippedOrder{}}, s.err
+}
+
 func (s *lifecycleStore) ListAgreementVersions(_ context.Context, _ string) ([]store.AgreementVersion, error) {
 	return []store.AgreementVersion{{Version: 3, Kind: "REVISED"}}, nil
 }
@@ -378,6 +383,32 @@ func TestReviseAgreement(t *testing.T) {
 	s.err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeCommitmentBelow, "below")
 	if rec := serveBody(t, s, http.MethodPatch, path, `{"commitmentQty":"1"}`, p, map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("store refusal: %d", rec.Code)
+	}
+}
+
+// TestRepriceAgreementOrders covers :reprice-orders: If-Match is required, the
+// body is optional, the reason is bounded, the duty is the maintain duty and the
+// response ETag is the new version.
+func TestRepriceAgreementOrders(t *testing.T) {
+	path := agreements + "/" + ids.New() + ":reprice-orders"
+	p := principal(dutyAgreement)
+	s := &lifecycleStore{}
+	if rec := serveBody(t, s, http.MethodPost, path, ``, p, nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match: %d", rec.Code)
+	}
+	if rec := serveBody(t, s, http.MethodPost, path, `{"reason":"`+strings.Repeat("x", 501)+`"}`, p, map[string]string{"If-Match": `"4"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("long reason: %d", rec.Code)
+	}
+	rec := serveBody(t, s, http.MethodPost, path, ``, p, map[string]string{"If-Match": `"4"`})
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"5"` || s.version != 4 || !strings.Contains(rec.Body.String(), `"repriced":[]`) {
+		t.Fatalf("empty body: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = serveBody(t, s, http.MethodPost, path, `{"reason":"price list"}`, p, map[string]string{"If-Match": `"4"`})
+	if rec.Code != http.StatusOK || s.reason != "price list" {
+		t.Fatalf("with reason: %d reason %q", rec.Code, s.reason)
+	}
+	if rec := serveBody(t, s, http.MethodPost, path, ``, principal(dutyRead), map[string]string{"If-Match": `"4"`}); rec.Code != http.StatusForbidden {
+		t.Fatalf("read duty must not reprice: %d", rec.Code)
 	}
 }
 

@@ -147,6 +147,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(agreements+"/{id}", a.getAgreement)
 	r.With(authz.RequireDuty(dutyAgreement)).Patch(agreements+"/{id}", a.reviseAgreement)
 	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}:close", a.closeAgreement)
+	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}:reprice-orders", a.repriceAgreementOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get(agreements+"/{id}/versions", a.listAgreementVersions)
 	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}:release-order", a.releaseOrder)
 	r.With(authz.RequireDuty(dutyAgreement)).Post(agreements+"/{id}/schedule-releases", a.createScheduleRelease)

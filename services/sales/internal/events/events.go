@@ -21,6 +21,7 @@ var (
 	AgreementClosed      = events.Type(Context, "agreement", "closed", 1)
 	AgreementReturned    = events.Type(Context, "agreement", "returned", 1)
 	AgreementDrawn       = events.Type(Context, "agreement", "drawn", 1)
+	AgreementRepriced    = events.Type(Context, "agreement", "repriced", 1)
 	QuotationConverted   = events.Type(Context, "quotation", "converted", 1)
 	QuotationExpired     = events.Type(Context, "quotation", "expired", 1)
 	QuotationChanged     = events.Type(Context, "quotation", "changed", 1)
@@ -64,7 +65,7 @@ var (
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, OrderHoldRejected, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
-		AgreementChanged, AgreementClosed, AgreementReturned, AgreementDrawn,
+		AgreementChanged, AgreementClosed, AgreementReturned, AgreementDrawn, AgreementRepriced,
 		QuotationConverted, QuotationExpired, QuotationChanged, QuotationCancelled, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
@@ -251,8 +252,18 @@ type AgreementLifecycleData struct {
 	SalesOrderID    string        `json:"sales_order_id,omitempty"`
 	ReturnedQty     string        `json:"returned_qty,omitempty"`
 	DrawnQty        string        `json:"drawn_qty,omitempty"`
-	Version         int           `json:"version"`
-	Actor           string        `json:"actor"`
+	// RepricedOrders is set on repriced only: the released orders whose release
+	// line took the agreement price.
+	RepricedOrders []RepricedOrder `json:"repriced_orders,omitempty"`
+	Version        int             `json:"version"`
+	Actor          string          `json:"actor"`
+}
+
+// RepricedOrder is one entry of agreement.repriced.v1's repriced_orders.
+type RepricedOrder struct {
+	SalesOrderID string `json:"sales_order_id"`
+	OldPrice     string `json:"old_price"`
+	NewPrice     string `json:"new_price"`
 }
 
 // FieldChange is one entry of order.changed's diff. line_no is 0 for a header

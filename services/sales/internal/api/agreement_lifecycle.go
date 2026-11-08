@@ -33,6 +33,11 @@ type closeAgreementRequest struct {
 	Reason string `json:"reason"`
 }
 
+// repriceOrdersRequest is the body of POST /v1/sales/agreements/{id}:reprice-orders.
+type repriceOrdersRequest struct {
+	Reason string `json:"reason"`
+}
+
 // buildRevision validates a partial change. Field errors are keyed by JSON path.
 func buildRevision(req reviseAgreementRequest) (store.AgreementRevision, map[string]string) {
 	f := map[string]string{}
@@ -158,6 +163,37 @@ func (a *API) closeAgreement(w http.ResponseWriter, r *http.Request) {
 		}
 		setETag(w, saved.Version)
 		httpx.JSON(w, http.StatusOK, saved)
+	})(w, r)
+}
+
+// repriceAgreementOrders puts the agreement's price on the release line of its
+// DRAFT and OPEN orders at the agreement's ETag (BR-27.9). The body is optional;
+// its reason is kept in the agreement history.
+func (a *API) repriceAgreementOrders(w http.ResponseWriter, r *http.Request) {
+	agreementRoute(func(w http.ResponseWriter, r *http.Request, id string) {
+		version, ok := ifMatch(w, r)
+		if !ok {
+			return
+		}
+		var req repriceOrdersRequest
+		if r.ContentLength != 0 {
+			if err := httpx.Decode(r, &req); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+		}
+		if len(req.Reason) > 500 {
+			validationFailed(w, r, map[string]string{"reason": "must be at most 500 characters"})
+			return
+		}
+		p, _ := tenant.FromContext(r.Context())
+		res, err := a.store.RepriceAgreementOrders(r.Context(), id, version, req.Reason, p.UserID, a.now().UTC().Truncate(time.Microsecond))
+		if err != nil {
+			a.fail(w, r, "reprice agreement orders", err)
+			return
+		}
+		setETag(w, res.Agreement.Version)
+		httpx.JSON(w, http.StatusOK, res)
 	})(w, r)
 }
 

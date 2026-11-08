@@ -6,14 +6,16 @@ import {
   closeAgreement,
   describeProblem,
   listAgreementVersions,
+  repriceAgreementOrders,
   reviseAgreement,
   type Agreement,
+  type AgreementRepriceResult,
   type AgreementRevisionInput,
   type AgreementVersion,
   type Problem,
 } from "./api/client";
 import { diffColumns } from "./ChangeOrderPage";
-import { commitmentText, DECIMAL, formatDateTime, PERCENT, subtractDecimal } from "./format";
+import { commitmentText, DECIMAL, formatDateTime, money, PERCENT, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -87,7 +89,7 @@ export function validateRevision(values: RevisionValues, current: Agreement): { 
   return { errors, input };
 }
 
-const kindLabel: Record<AgreementVersion["kind"], string> = { REVISED: "Revised", CLOSED: "Closed", RETURNED: "Quantity returned", DRAWN: "Quantity drawn" };
+const kindLabel: Record<AgreementVersion["kind"], string> = { REVISED: "Revised", CLOSED: "Closed", RETURNED: "Quantity returned", DRAWN: "Quantity drawn", REPRICED: "Orders repriced" };
 
 const versionColumns: DataTableColumn<AgreementVersion>[] = [
   { key: "version", header: "Version", align: "end" },
@@ -103,6 +105,35 @@ const problemTitle: Record<string, string> = {
   "SLS-0053": "Commitment is below the released quantity",
   "SLS-0008": "Not enough commitment left",
 };
+
+const repricedColumns = (currency: string): DataTableColumn<AgreementRepriceResult["repriced"][number]>[] => [
+  { key: "orderNumber", header: "Order" },
+  { key: "oldPrice", header: "Price before", align: "end", render: (r) => money(r.oldPrice, currency) },
+  { key: "newPrice", header: "Price now", align: "end", render: (r) => money(r.newPrice, currency) },
+  { key: "netTotal", header: "Order total", align: "end", render: (r) => money(r.netTotal, currency) },
+];
+
+const skippedColumns: DataTableColumn<AgreementRepriceResult["skipped"][number]>[] = [
+  { key: "orderNumber", header: "Order" },
+  { key: "reason", header: "Why it was left" },
+];
+
+/** What a reprice run did: the orders it repriced, the ones it left, and whether to run it again. */
+function RepriceOutcome({ result }: { result: AgreementRepriceResult }) {
+  const currency = result.agreement.currency;
+  return (
+    <div className={styles.stack}>
+      <Alert tone={result.repriced.length > 0 ? "success" : "info"} live="status">
+        {result.repriced.length > 0 ? `${result.repriced.length} released order(s) repriced; the agreement is at version ${result.agreement.version}.` : "No released order needed repricing."}
+      </Alert>
+      {result.repriced.length > 0 ? <DataTable label="Repriced orders" columns={repricedColumns(currency)} rows={result.repriced} getRowKey={(r) => r.orderId} /> : null}
+      {result.skipped.length > 0 ? (
+        <DataTable label="Orders left at their price" columns={skippedColumns} rows={result.skipped} getRowKey={(r) => r.orderId} />
+      ) : null}
+      {result.more ? <Alert tone="warning">More released orders are waiting. Run it again to reprice the rest.</Alert> : null}
+    </div>
+  );
+}
 
 interface Props {
   agreement: Agreement;
@@ -124,7 +155,8 @@ export function AgreementLifecycle({ agreement, etag, onChanged }: Props) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [saved, setSaved] = useState("");
-  const [busy, setBusy] = useState<"revise" | "close" | null>(null);
+  const [busy, setBusy] = useState<"revise" | "close" | "reprice" | null>(null);
+  const [repriced, setRepriced] = useState<AgreementRepriceResult | null>(null);
   const [closeReason, setCloseReason] = useState("");
   const [closeError, setCloseError] = useState("");
   const closed = agreement.status === "CLOSED";
@@ -168,6 +200,22 @@ export function AgreementLifecycle({ agreement, etag, onChanged }: Props) {
     try {
       await closeAgreement(agreement.id, etag, closeReason.trim());
       setSaved("Agreement closed.");
+      onChanged();
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reprice() {
+    setFailure(null);
+    setSaved("");
+    setRepriced(null);
+    setBusy("reprice");
+    try {
+      const res = await repriceAgreementOrders(agreement.id, etag);
+      setRepriced(res.value);
       onChanged();
     } catch (error) {
       setFailure(describeProblem(error));
@@ -228,6 +276,19 @@ export function AgreementLifecycle({ agreement, etag, onChanged }: Props) {
                 </Button>
               </div>
             </form>
+          </Card>
+          <Card title="Carry the price to released orders">
+            <div className={styles.stack}>
+              <p>
+                A revised price applies to later releases. This puts the agreed price of {money(agreement.unitPrice, agreement.currency)} on the release line of every released order that is still a draft or open, keeping its quantity and discount. Confirmed orders are listed and left as they are.
+              </p>
+              <div className={styles.formActions}>
+                <Button onClick={reprice} loading={busy === "reprice"} disabled={busy === "revise" || busy === "close"}>
+                  Reprice released orders
+                </Button>
+              </div>
+              {repriced ? <RepriceOutcome result={repriced} /> : null}
+            </div>
           </Card>
           <Card title="Close the agreement">
             <form className={styles.form} onSubmit={close} noValidate aria-label="Close the agreement">

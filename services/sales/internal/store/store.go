@@ -298,6 +298,7 @@ type Store interface {
 	ReleaseAgreement(ctx context.Context, id string, in AgreementRelease, now time.Time) (ReleaseResult, bool, error)
 	ReviseAgreement(ctx context.Context, id string, version int, in AgreementRevision, actor string, now time.Time) (Agreement, error)
 	CloseAgreement(ctx context.Context, id string, version int, reason, actor string, now time.Time) (Agreement, error)
+	RepriceAgreementOrders(ctx context.Context, id string, version int, reason, actor string, now time.Time) (RepriceResult, error)
 	ListAgreementVersions(ctx context.Context, id string) ([]AgreementVersion, error)
 	CreateScheduleRelease(ctx context.Context, in NewScheduleRelease, now time.Time) (ScheduleRelease, bool, error)
 	ListScheduleReleases(ctx context.Context, agreementID string, limit int) ([]ScheduleRelease, error)
