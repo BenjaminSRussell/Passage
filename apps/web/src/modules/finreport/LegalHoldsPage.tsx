@@ -7,10 +7,12 @@ import {
   describeProblem,
   listLegalHolds,
   listLibrarySweeps,
+  listRunSweeps,
   newKey,
   placeLegalHold,
   type LegalHold,
   type LibrarySweep,
+  type RunSweep,
   type Problem,
 } from "./api/client";
 import { formatBytes, UUID } from "./format";
@@ -50,6 +52,15 @@ export const sweepColumns: DataTableColumn<LibrarySweep>[] = [
   { key: "heldCount", header: "Kept by hold", mono: true, align: "end" },
 ];
 
+export const runSweepColumns: DataTableColumn<RunSweep>[] = [
+  { key: "sweptAt", header: "Swept", mono: true, render: (w) => <time dateTime={w.sweptAt}>{w.sweptAt}</time> },
+  { key: "legalEntityId", header: "Legal entity", mono: true },
+  { key: "retentionDays", header: "Retention (days)", mono: true, align: "end" },
+  { key: "deletedRuns", header: "Runs deleted", mono: true, align: "end" },
+  { key: "deletedCells", header: "Cells deleted", mono: true, align: "end" },
+  { key: "heldRuns", header: "Kept by hold", mono: true, align: "end" },
+];
+
 /** Legal holds on the report library (FR-15.8) and the passes of the retention sweep they suspend. */
 export function LegalHoldsPage() {
   const navigate = useNavigate();
@@ -62,6 +73,7 @@ export function LegalHoldsPage() {
   const attempt = useRef<{ signature: string; key: string } | null>(null);
   const holds = useLoad((signal) => listLegalHolds(signal), "holds");
   const sweeps = useLoad((signal) => listLibrarySweeps(signal), "sweeps");
+  const runSweeps = useLoad((signal) => listRunSweeps(signal), "run sweeps");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -143,6 +155,22 @@ export function LegalHoldsPage() {
           empty={{ title: "No library file has passed its retention date", description: "A sweep pass is recorded when it deletes files, or when a legal hold keeps files that are past retention." }}
         />
       )}
+      </Card>
+      <Card title="Ad-hoc run sweeps">
+        {runSweeps.error ? (
+          <Alert tone="danger" title="Could not load the ad-hoc run sweeps" live="alert" action={<Button size="sm" onClick={runSweeps.reload}>Try again</Button>}>
+            {runSweeps.error.message} ({runSweeps.error.code})
+          </Alert>
+        ) : (
+          <DataTable
+            label="Ad-hoc run sweeps"
+            columns={runSweepColumns}
+            rows={runSweeps.data ?? []}
+            getRowKey={(w) => w.id}
+            loading={runSweeps.loading}
+            empty={{ title: "No ad-hoc run has passed its retention", description: "Statement runs that no schedule produced are deleted with their cells after the retention days, unless a legal hold keeps them. A pass is recorded when it deletes runs or a hold keeps them." }}
+          />
+        )}
       </Card>
     </div>
   );

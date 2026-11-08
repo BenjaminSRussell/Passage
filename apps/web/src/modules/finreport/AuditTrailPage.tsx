@@ -40,6 +40,7 @@ export const AUDIT_KIND_LABELS: Record<AuditKind, string> = {
   legal_hold_placed: "Legal hold placed",
   legal_hold_released: "Legal hold released",
   library_swept: "Library swept",
+  runs_swept: "Ad-hoc runs swept",
 };
 
 export interface AuditValues {

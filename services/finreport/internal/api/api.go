@@ -98,6 +98,7 @@ type Store interface {
 	ListHolds(ctx context.Context, activeOnly bool) ([]store.LegalHold, error)
 	GetHold(ctx context.Context, id string) (store.LegalHold, error)
 	ListSweeps(ctx context.Context, limit int) ([]store.Sweep, error)
+	ListRunSweeps(ctx context.Context, limit int) ([]store.RunSweep, error)
 }
 
 // API holds the handlers.
@@ -177,6 +178,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/legal-holds/{id}", a.getHold)
 		r.With(authz.RequireDuty(DutyHold)).Post("/legal-holds/*", a.holdAction)
 		r.With(authz.RequireDuty(DutyView)).Get("/library-sweeps", a.listSweeps)
+		r.With(authz.RequireDuty(DutyView)).Get("/run-sweeps", a.listRunSweeps)
 		r.With(authz.RequireDuty(DutyVerify)).Post("/balance-verifications", a.createVerification)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications", a.listVerifications)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications/{id}", a.getVerification)

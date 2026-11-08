@@ -16,12 +16,13 @@ var (
 	LegalHoldPlaced     = events.Type(Context, "legalhold", "placed", 1)
 	LegalHoldReleased   = events.Type(Context, "legalhold", "released", 1)
 	LibrarySwept        = events.Type(Context, "library", "swept", 1)
+	RunsSwept           = events.Type(Context, "runs", "swept", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded, StatementFailed, DistributionSent,
-		LegalHoldPlaced, LegalHoldReleased, LibrarySwept}
+		LegalHoldPlaced, LegalHoldReleased, LibrarySwept, RunsSwept}
 }
 
 // HierarchyUnassignedData is the payload of hierarchy.unassigned.v1: a member
@@ -168,6 +169,24 @@ type LibrarySweptData struct {
 	DeletedCount  int    `json:"deleted_count"`
 	DeletedBytes  int64  `json:"deleted_bytes"`
 	HeldCount     int    `json:"held_count"`
+	HoldID        string `json:"hold_id,omitempty"`
+	Actor         string `json:"actor"`
+}
+
+// RunsSweptData is the payload of runs.swept.v1: the retention sweep deleted the
+// ad-hoc statement runs of one legal entity that were older than the retention
+// days (REPORTING_RETENTION_ADHOC_DAYS), with their cells. HeldRuns is the
+// number of such runs a legal hold kept (HoldID names it); a pass that deleted
+// and held nothing writes no event. legal_entity_id also becomes the event's
+// legalentityid extension.
+type RunsSweptData struct {
+	SweepID       string `json:"sweep_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Cutoff        string `json:"cutoff"`
+	RetentionDays int    `json:"retention_days"`
+	DeletedRuns   int    `json:"deleted_runs"`
+	DeletedCells  int64  `json:"deleted_cells"`
+	HeldRuns      int    `json:"held_runs"`
 	HoldID        string `json:"hold_id,omitempty"`
 	Actor         string `json:"actor"`
 }

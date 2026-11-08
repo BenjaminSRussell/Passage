@@ -49,6 +49,11 @@ channels:
     messages:
       librarySwept:
         $ref: '#/components/messages/LibrarySwept'
+  runsSwept:
+    address: passage.reporting.runs
+    messages:
+      runsSwept:
+        $ref: '#/components/messages/RunsSwept'
 operations:
   publishStatementFailed:
     action: send
@@ -120,6 +125,13 @@ operations:
     summary: The retention sweep deleted past-retention report library files of a legal entity, or a legal hold kept them (FR-15.8); one event per entity pass that deleted or held anything
     messages:
       - $ref: '#/channels/librarySwept/messages/librarySwept'
+  publishRunsSwept:
+    action: send
+    channel:
+      $ref: '#/channels/runsSwept'
+    summary: The retention sweep deleted ad-hoc statement runs older than the retention days for a legal entity, or a legal hold kept them (FR-15.8); one event per entity pass that deleted or held anything
+    messages:
+      - $ref: '#/channels/runsSwept/messages/runsSwept'
 components:
   messages:
     StatementGenerated:
@@ -298,5 +310,23 @@ components:
           deleted_count: {type: integer}
           deleted_bytes: {type: integer, format: int64}
           held_count: {type: integer, description: Past-retention files a legal hold kept}
+          hold_id: {type: string, format: uuid, description: The active hold that kept them}
+          actor: {type: string, description: The system actor of the sweep}
+    RunsSwept:
+      name: dev.passage.reporting.runs.swept.v1
+      title: Ad-hoc runs swept
+      summary: The retention sweep deleted the ad-hoc statement runs of a legal entity that were older than the retention days, with their cells, or a legal hold kept runs that were past it.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [sweep_id, legal_entity_id, cutoff, retention_days, deleted_runs, deleted_cells, held_runs, actor]
+        properties:
+          sweep_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity swept (also the legalentityid extension)}
+          cutoff: {type: string, format: date-time, description: Ad-hoc runs that started before this time were eligible}
+          retention_days: {type: integer, description: The ad-hoc retention in days the pass applied}
+          deleted_runs: {type: integer}
+          deleted_cells: {type: integer, format: int64}
+          held_runs: {type: integer, description: Past-retention runs a legal hold kept}
           hold_id: {type: string, format: uuid, description: The active hold that kept them}
           actor: {type: string, description: The system actor of the sweep}

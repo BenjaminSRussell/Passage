@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 17
+# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 18
 
 Every deliverable bullet of PSG-15, and every acceptance criterion that slices 1
 to 7 do not fully meet, is listed here. Status is either **later slice of PSG-15**
@@ -33,7 +33,7 @@ platform change outside the wave's owned paths).
 | FR-15.6 queued / running / failed states and 202 + `statusUrl` for long work | Runs are synchronous; `status` is always `completed`. **later slice of PSG-15** | Async execution needs the job runner (platform). |
 | FR-15.7 drill level 1 | Done (`GET .../balances`, exact sum check) | n/a |
 | FR-15.7 drill level 2, source link, trace id | Done over the line read model (slice 5, see deliverable 3): `GET .../lines`, source document link, trace link. The consumer that fills the read model and the dimension-security `filtered_amount` are **later slice of PSG-15**. Runs stored before slice 5 have balance keys without their sign; drill level 2 takes the sign from the row, which is right for every row except a total mixing credit and debit rows (those show as unreconciled, never wrongly reconciled). | See deliverable 3. |
-| FR-15.8 scheduling and distribution | Partial. Slice 3: schedule CRUD and validation. Slice 16: firing, report library with retention date and SHA-256, `distribution.sent.v1` (attachment or link by the schedule's attachment limit), failure events. Slice 17: legal hold per legal entity and the weekly retention sweep (see Slice 17 below). Share links with expiry, the close-checklist trigger, ad-hoc run retention and the email itself are **later slice of PSG-15**; SMTP is a **handoff** to wave 4 (the notification service consumes `distribution.sent.v1`) | See deliverable 4. |
+| FR-15.8 scheduling and distribution | Partial. Slice 3: schedule CRUD and validation. Slice 16: firing, report library with retention date and SHA-256, `distribution.sent.v1` (attachment or link by the schedule's attachment limit), failure events. Slice 17: legal hold per legal entity and the weekly retention sweep (see Slice 17 below). Slice 18: ad-hoc run retention (see Slice 18 below). Share links with expiry, the close-checklist trigger and the email itself are **later slice of PSG-15**; SMTP is a **handoff** to wave 4 (the notification service consumes `distribution.sent.v1`) | See deliverable 4. |
 | FR-15.9 row-level security on dimensions | **later slice of PSG-15**; OPA dimension decision is a **handoff** to wave 2 | `authz.RequireDuty` checks duties only. |
 | FR-15.10 audit trail report and hashed export | Partial (slice 6): report, filters, CSV export with SHA-256, export recorded. Ledger-kind consumers and PDF export are **later slice of PSG-15**; source events are a **handoff** (waves 5, 11-14). | See deliverable 5. |
 | FR-15.11 definition import/export as JSON | Done: `GET .../export`, `POST .../import` (schema v1, REPORT-0011 when the code has a draft or a published version and `overwrite` is not set, REPORT-0012 schema, optional Idempotency-Key stored in `idempotency_keys`). Store test exports, re-imports under a new code and compares cells. | n/a |
@@ -503,10 +503,9 @@ Duty: `reporting.library.hold` (new) enforced in the service on both POSTs; read
 `REPORT-0049` (0049: reason or note empty or over 500 characters) are slice-local codes,
 not yet in the PRD catalog.
 
-Not built in this slice: share links with expiry (an unauthenticated token route needs a
+Not built in this slice (slice 18 built the ad-hoc run retention): share links with expiry (an unauthenticated token route needs a
 gateway decision, **handoff** to wave 2), per-legal-entity `reporting.retention_closed_years`
-and the 90-day retention of ad-hoc runs (`REPORTING_RETENTION_ADHOC_DAYS`; ad-hoc runs are
-not stored as library files and the sweep does not touch `statement_run`), the closed-period
+and the 90-day retention of ad-hoc runs (built in slice 18), the closed-period
 test for `retain_until` (wave 14 calendar), a hold on one file or one definition (the hold
 is per legal entity, as the PRD says), and a `library.swept` consumer.
 
@@ -558,3 +557,69 @@ error alert with "Try again" and the place and release actions answer 403.
 | Role catalog (wave 2) | grant `reporting.library.hold` to the legal or compliance role and the financial controller; keep it apart from `reporting.statement.schedule` if the segregation rules want the schedule owner unable to lift a hold |
 | Deploy (deploy/) | set `librarySweep.enabled` and `librarySweep.tenantIds` per environment; the notification service or ops alerting may subscribe to `legalhold.placed.v1`, `legalhold.released.v1` and `library.swept.v1` (topics `passage.reporting.legalhold` and `passage.reporting.library`) |
 | PRD catalog | add `REPORT-0045` to `REPORT-0049` |
+
+## Slice 18: retention of ad-hoc statement runs (FR-15.8)
+
+`REPORTING_RETENTION_ADHOC_DAYS` (PRD §2.15.13; default 90, 7 to 730) is now used. The weekly
+`finreport sweep-library TENANT_ID...` job (chart `librarySweep`, which now passes the variable
+from `reporting.retentionAdhocDays`) also deletes the ad-hoc runs older than the retention days,
+after the library pass, in the same in-process system actor (no route, no service call, no authz
+seed for the job). An ad-hoc run is a `statement_run` that no schedule firing
+(`report_schedule_firing.run_id`) and no library file (`report_library_entry.run_id`) refers to;
+scheduled runs stay as long as their firing record exists. The cutoff is the earlier of the job
+clock and the database clock, minus the retention in 24-hour days. The run goes with its cells.
+
+Legal hold applies as for the library: per legal entity, in one transaction that first takes the
+same `report_legal_hold_lock` for every entity its candidate runs belong to, in uuid order (the
+order the delete guard uses, so a concurrent hold on a second entity of a consolidated run is
+waited for and seen, and overlapping passes cannot deadlock), a run any of whose entities (`legal_entity_id`, or `legal_entity_ids`
+of a consolidated run) has an active hold is kept and counted (`heldRuns`, `holdId`). A
+consolidated run belongs to the pass of its first entity. A run without a legal entity is never
+deleted. The pass is recorded in `report_run_sweep` (migration 0020, RLS with the legal-entity
+policy, insert-only), writes a `runs_swept` audit entry and
+`dev.passage.reporting.runs.swept.v1` (topic `passage.reporting.runs`); a pass that finds
+nothing writes nothing.
+
+Migration 0020 gives `passage_app` DELETE on `statement_run` only: the cells follow through
+`ON DELETE CASCADE` (run as the table owner), so the role has no DELETE on `statement_cell`. A
+`BEFORE DELETE` trigger on `statement_run` refuses, whoever issues the delete, a run younger
+than 7 days (168 hours, the lowest configurable retention), a scheduled run, a run without a
+legal entity and a run under a legal hold. Because the guard reads `started_at` and the run's
+entities, the role's table-wide UPDATE on `statement_run` (migration 0007) is narrowed to
+`UPDATE (duration_ms)`, the only column the store updates. The foreign key of `statement_cell`
+is re-added `NOT VALID` and then validated, so the change does not hold the stronger lock for
+the scan of a populated table. The retention days themselves are applied by the sweep only.
+
+`GET /v1/reporting/run-sweeps[?limit=]` lists the passes (reads use `reporting.statement.view`).
+Web: an "Ad-hoc run sweeps" table on the Legal holds page, with loading, empty and error states.
+
+Not built in this slice: a retention for scheduled runs whose library files were swept (the run
+and its firing record stay), per-tenant or per-legal-entity `reporting.retention_adhoc_days`
+overrides (the parameter store is a **handoff** to the platform; the process-wide variable is
+used), a hold on one run, and a `runs.swept` consumer. A run's detail page does not yet show
+when the run will expire. Open product question (PRD §2.15 open question 3): 90 days or 1 year
+for ad-hoc runs; the PRD default of 90 days is used.
+
+### Handoffs from slice 18 (authz seed, exact rows)
+
+No new duty. One new route, read with the existing `reporting.statement.view` (not yet in
+`policies/authz/data.json`, so the gateway refuses it until the row exists: the "Ad-hoc run
+sweeps" table then shows its error alert with "Try again"):
+
+```json
+{"resource": "/v1/reporting/run-sweeps", "methods": ["GET"]}
+```
+
+`policies/authz/authz_test.rego` pin (suggested):
+
+```rego
+test_reporting_run_sweeps_route if {
+	allowed("reporting.statement.view", "GET", "/v1/reporting/run-sweeps")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/run-sweeps")
+}
+```
+
+| Owner | Handoff |
+| --- | --- |
+| Deploy (deploy/) | the existing `librarySweep` CronJob now also deletes ad-hoc runs; set `reporting.retentionAdhocDays` per environment (7 to 730). The `passage.reporting.runs` topic carries `runs.swept.v1` |
+| Authz seed (#313) | the route row above |

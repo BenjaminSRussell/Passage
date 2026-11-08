@@ -65,7 +65,8 @@ statementSchedules:
   tenantIds: []
 # Library retention sweep (FR-15.8, PRD job `library-retention-sweep`):
 # `finreport sweep-library` weekly (Sunday 04:00 UTC) for each tenant listed;
-# deletes report library files past their retention date except for legal
+# deletes report library files past their retention date, and ad-hoc statement
+# runs older than reporting.retentionAdhocDays, except for legal
 # entities under legal hold. In-process system actor, so it needs no authz seed
 # and no signing key.
 librarySweep:

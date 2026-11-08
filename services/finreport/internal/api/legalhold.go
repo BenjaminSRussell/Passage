@@ -184,3 +184,26 @@ func (a *API) listSweeps(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
+
+// listRunSweeps lists the passes of the ad-hoc run retention sweep, newest first.
+func (a *API) listRunSweeps(w http.ResponseWriter, r *http.Request) {
+	if !principal(r) {
+		httpx.Fail(w, r, unauthenticated())
+		return
+	}
+	limit := store.MaxSweepPage
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > store.MaxSweepPage {
+			badQuery(w, r, fmt.Sprintf("limit must be 1 to %d", store.MaxSweepPage))
+			return
+		}
+		limit = n
+	}
+	items, err := a.store.ListRunSweeps(r.Context(), limit)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}

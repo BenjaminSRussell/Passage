@@ -1,7 +1,7 @@
 import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { LegalHold, LibraryEntry, LibrarySweep } from "./api/client";
+import type { LegalHold, LibraryEntry, LibrarySweep, RunSweep } from "./api/client";
 import { validateHold } from "./LegalHoldsPage";
 import { header, json, pageViolations, problem, renderAt, server, useFakeServer } from "./testServer";
 
@@ -32,6 +32,18 @@ const sweep: LibrarySweep = {
   actor: "system:finreport-library-sweep",
 };
 
+const runSweep: RunSweep = {
+  id: "0190f0a0-0000-7000-8000-000000000d02",
+  legalEntityId: ENTITY,
+  sweptAt: "2026-11-08T04:00:01Z",
+  cutoff: "2026-08-10T04:00:00Z",
+  retentionDays: 90,
+  deletedRuns: 7,
+  deletedCells: 1234,
+  heldRuns: 2,
+  actor: "system:finreport-library-sweep",
+};
+
 describe("hold rules", () => {
   it("accepts an entity id and a reason", () => {
     expect(validateHold({ legalEntityId: ` ${ENTITY} `, reason: "Audit" })).toEqual({});
@@ -47,6 +59,7 @@ describe("LegalHoldsPage", () => {
     server.handler = (url) => {
       if (url.pathname === "/api/v1/reporting/legal-holds") return json(200, { items: [active, released] });
       if (url.pathname === "/api/v1/reporting/library-sweeps") return json(200, { items: [sweep] });
+      if (url.pathname === "/api/v1/reporting/run-sweeps") return json(200, { items: [runSweep] });
       return undefined;
     };
     const { container } = renderAt("/finreport/legal-holds");
@@ -57,6 +70,10 @@ describe("LegalHoldsPage", () => {
     const sweeps = await findTable({ name: "Retention sweeps" });
     expect(within(sweeps).getByText("12")).toBeInTheDocument();
     expect(within(sweeps).getByText("2.0 KB")).toBeInTheDocument();
+    const runs = await findTable({ name: "Ad-hoc run sweeps" });
+    expect(within(runs).getByText("90")).toBeInTheDocument();
+    expect(within(runs).getByText("7")).toBeInTheDocument();
+    expect(within(runs).getByText("1234")).toBeInTheDocument();
     // Without the hold duty there is no form to put a library on hold.
     expect(screen.queryByRole("form", { name: "Put a library on hold" })).toBeNull();
     expect(pageViolations(container)).toEqual([]);
@@ -66,6 +83,7 @@ describe("LegalHoldsPage", () => {
     server.handler = (url) => {
       if (url.pathname === "/api/v1/reporting/legal-holds") return json(200, { items: [] });
       if (url.pathname === "/api/v1/reporting/library-sweeps") return problem(500, "COM-0500", "sweeps are down");
+      if (url.pathname === "/api/v1/reporting/run-sweeps") return json(200, { items: [] });
       return undefined;
     };
     renderAt("/finreport/legal-holds");
@@ -73,6 +91,19 @@ describe("LegalHoldsPage", () => {
     const alert = await findAlert();
     expect(alert).toHaveTextContent("sweeps are down (COM-0500)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(await screen.findByText("No ad-hoc run has passed its retention")).toBeInTheDocument();
+  });
+
+  it("shows a retry when the ad-hoc run sweeps cannot be loaded", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/reporting/legal-holds") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/reporting/library-sweeps") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/reporting/run-sweeps") return problem(500, "COM-0500", "run sweeps are down");
+      return undefined;
+    };
+    renderAt("/finreport/legal-holds");
+    expect(await findAlert()).toHaveTextContent("run sweeps are down (COM-0500)");
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("places a hold with an idempotency key and opens it", async () => {
@@ -81,6 +112,7 @@ describe("LegalHoldsPage", () => {
       if (url.pathname === "/api/v1/reporting/legal-holds") return json(200, { items: [] });
       if (url.pathname === `/api/v1/reporting/legal-holds/${HOLD_ID}`) return json(200, active, { ETag: '"1"' });
       if (url.pathname === "/api/v1/reporting/library-sweeps") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/reporting/run-sweeps") return json(200, { items: [] });
       return undefined;
     };
     renderAt("/finreport/legal-holds", [DUTY]);
@@ -102,6 +134,7 @@ describe("LegalHoldsPage", () => {
       if (url.pathname === "/api/v1/reporting/legal-holds" && init.method === "POST") return problem(409, "REPORT-0045", "already under legal hold");
       if (url.pathname === "/api/v1/reporting/legal-holds") return json(200, { items: [active] });
       if (url.pathname === "/api/v1/reporting/library-sweeps") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/reporting/run-sweeps") return json(200, { items: [] });
       return undefined;
     };
     renderAt("/finreport/legal-holds", [DUTY]);

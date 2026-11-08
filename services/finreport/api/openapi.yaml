@@ -1624,6 +1624,37 @@ paths:
                     items: {$ref: '#/components/schemas/LibrarySweep'}
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
+  /v1/reporting/run-sweeps:
+    get:
+      operationId: listRunSweeps
+      summary: Passes of the ad-hoc run retention sweep, newest first (FR-15.8)
+      description: >-
+        One row per legal entity pass of the weekly sweep that deleted ad-hoc statement runs older than the
+        retention days (REPORTING_RETENTION_ADHOC_DAYS, default 90), with their cells, or found some kept by a
+        legal hold. An ad-hoc run is one that no schedule firing and no library file refers to; scheduled runs
+        are not deleted by this sweep. Passes that found nothing past retention are not recorded. Visibility
+        follows the caller's legal-entity scope.
+      x-passage-duty: reporting.statement.view
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Passes to return, 1 to 200; default 200
+          schema: {type: integer, minimum: 1, maximum: 200}
+      responses:
+        '200':
+          description: The run sweep passes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/RunSweep'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerAuth:
@@ -2106,6 +2137,20 @@ components:
         heldCount: {type: integer, description: Past-retention files a legal hold kept}
         holdId: {type: string, format: uuid}
         actor: {type: string}
+    RunSweep:
+      type: object
+      required: [id, legalEntityId, sweptAt, cutoff, retentionDays, deletedRuns, deletedCells, heldRuns, actor]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        sweptAt: {type: string, format: date-time}
+        cutoff: {type: string, format: date-time, description: Ad-hoc runs that started before this time were eligible}
+        retentionDays: {type: integer, description: The ad-hoc retention in days the pass applied}
+        deletedRuns: {type: integer}
+        deletedCells: {type: integer, format: int64}
+        heldRuns: {type: integer, description: Past-retention runs a legal hold kept}
+        holdId: {type: string, format: uuid}
+        actor: {type: string}
     Cell:
       type: object
       properties:
@@ -2287,7 +2332,7 @@ components:
         Ledger kinds (PRD AuditTrailEntry) then the reporting service's own kinds.
       enum: [posted, replayed, reversed, batch_submitted, batch_approved, batch_rejected, period_changed, reopen_approved,
         rate_override, tax_fallback, allocation_run, year_end_run, rebuild,
-        statement_run, definition_published, definition_retired, hierarchy_published, schedule_saved, audit_exported, legal_hold_placed, legal_hold_released, library_swept]
+        statement_run, definition_published, definition_retired, hierarchy_published, schedule_saved, audit_exported, legal_hold_placed, legal_hold_released, library_swept, runs_swept]
     AuditEntry:
       type: object
       required: [id, occurredAt, kind, actorId, objectRef, details]

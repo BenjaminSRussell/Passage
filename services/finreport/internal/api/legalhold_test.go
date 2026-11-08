@@ -61,6 +61,11 @@ func (h *holdStore) ListSweeps(_ context.Context, limit int) ([]store.Sweep, err
 	return []store.Sweep{{ID: holdUUID, LegalEntityID: entityUUID, DeletedCount: 3, HeldCount: 1}}, h.err
 }
 
+func (h *holdStore) ListRunSweeps(_ context.Context, limit int) ([]store.RunSweep, error) {
+	h.sweepN = limit
+	return []store.RunSweep{{ID: holdUUID, LegalEntityID: entityUUID, DeletedRuns: 4, DeletedCells: 96, HeldRuns: 2}}, h.err
+}
+
 const holdBody = `{"legalEntityId":"` + entityUUID + `","reason":"Audit"}`
 
 func TestPlaceHold_RequiresTheDutyAndAKeyAndPassesTheRequest(t *testing.T) {
@@ -154,5 +159,15 @@ func TestListHoldsGetHoldAndSweeps(t *testing.T) {
 	}
 	if w := call(r, http.MethodGet, "/v1/reporting/library-sweeps?limit=0", "", nil, DutyView); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad limit: %d", w.Code)
+	}
+	w = call(r, http.MethodGet, "/v1/reporting/run-sweeps?limit=7", "", nil, DutyView)
+	if w.Code != http.StatusOK || st.sweepN != 7 || !strings.Contains(w.Body.String(), `"deletedRuns":4`) || !strings.Contains(w.Body.String(), `"heldRuns":2`) {
+		t.Fatalf("run sweeps: %d %s limit %d", w.Code, w.Body.String(), st.sweepN)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/run-sweeps?limit=0", "", nil, DutyView); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad run sweep limit: %d", w.Code)
+	}
+	if w := call(r, http.MethodGet, "/v1/reporting/run-sweeps", "", nil, DutyHold); w.Code != http.StatusForbidden {
+		t.Fatalf("run sweeps need the view duty: %d", w.Code)
 	}
 }

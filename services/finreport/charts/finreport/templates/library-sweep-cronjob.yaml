@@ -55,6 +55,8 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.databaseSecret }}
                       key: DATABASE_URL
+                - name: REPORTING_RETENTION_ADHOC_DAYS
+                  value: {{ .Values.reporting.retentionAdhocDays | quote }}
               resources:
                 requests: { cpu: 100m, memory: 128Mi }
                 limits: { cpu: 500m, memory: 512Mi }

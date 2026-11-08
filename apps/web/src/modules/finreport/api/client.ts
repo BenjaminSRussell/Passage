@@ -850,6 +850,7 @@ export const AUDIT_KINDS = [
   "legal_hold_placed",
   "legal_hold_released",
   "library_swept",
+  "runs_swept",
 ] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
@@ -953,6 +954,22 @@ export interface LibrarySweep {
   actor: string;
 }
 
+/** One pass of the weekly sweep over the ad-hoc statement runs of one legal entity. */
+export interface RunSweep {
+  id: string;
+  legalEntityId: string;
+  sweptAt: string;
+  cutoff: string;
+  /** The ad-hoc retention in days the pass applied. */
+  retentionDays: number;
+  deletedRuns: number;
+  deletedCells: number;
+  /** Past-retention runs a legal hold kept. */
+  heldRuns: number;
+  holdId?: string;
+  actor: string;
+}
+
 export async function listLegalHolds(signal?: AbortSignal): Promise<LegalHold[]> {
   return (await get<{ items: LegalHold[] }>("/legal-holds", signal)).items;
 }
@@ -974,4 +991,8 @@ export async function releaseLegalHold(id: string, revision: number, note: strin
 
 export async function listLibrarySweeps(signal?: AbortSignal): Promise<LibrarySweep[]> {
   return (await get<{ items: LibrarySweep[] }>("/library-sweeps", signal)).items;
+}
+
+export async function listRunSweeps(signal?: AbortSignal): Promise<RunSweep[]> {
+  return (await get<{ items: RunSweep[] }>("/run-sweeps", signal)).items;
 }
