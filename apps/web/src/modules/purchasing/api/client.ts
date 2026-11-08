@@ -104,7 +104,15 @@ export interface Requisition {
   warnings?: Warning[];
 }
 
-export type RequisitionHistoryAction = "SUBMITTED" | "APPROVED" | "REJECTED" | "REOPENED" | "CANCELLED";
+export type RequisitionHistoryAction =
+  | "SUBMITTED"
+  | "APPROVED"
+  | "REJECTED"
+  | "REOPENED"
+  | "CANCELLED"
+  | "EDITED"
+  | "WITHDRAWN"
+  | "LINE_CANCELLED";
 
 export interface RequisitionHistory {
   id: string;
@@ -113,6 +121,8 @@ export interface RequisitionHistory {
   role?: string;
   actorId?: string;
   comment?: string;
+  /** The line a LINE_CANCELLED row concerns. */
+  lineId?: string;
   fromStatus: string;
   toStatus: string;
   requisitionVersion: number;
@@ -135,7 +145,7 @@ export interface RequisitionApproval {
   submittedAt: string;
 }
 
-export type RequisitionAction = "approve" | "reject" | "reopen" | "cancel";
+export type RequisitionAction = "approve" | "reject" | "reopen" | "cancel" | "withdraw";
 
 export interface RequisitionSummary {
   id: string;
@@ -170,6 +180,14 @@ export interface RequisitionInput {
   operatingUnitId?: string;
   currency: string;
   lines: RequisitionLineInput[];
+}
+
+/** An edit of a DRAFT requisition: lines, when sent, replace all the lines; the legal entity cannot change. */
+export interface RequisitionPatch {
+  /** An empty string clears the operating unit. */
+  operatingUnitId?: string;
+  currency?: string;
+  lines?: RequisitionLineInput[];
 }
 
 export interface PurchaseOrderLine {
@@ -571,7 +589,23 @@ export function submitRequisition(id: string, version: number, idempotencyKey = 
   });
 }
 
-/** Approve, reject (comment required), reopen or cancel a requisition; version is the ETag read when it was loaded. */
+/** Edits a DRAFT requisition (BR-17.1); version is the ETag read when it was loaded. */
+export function updateRequisition(id: string, version: number, patch: RequisitionPatch, idempotencyKey = newIdempotencyKey()) {
+  return send<Requisition>("PATCH", `/requisitions/${encodeURIComponent(id)}`, {
+    body: patch,
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+/** Cancels one OPEN line of an APPROVED requisition while the rest continues (BR-17.1). */
+export function cancelRequisitionLine(id: string, version: number, lineId: string, comment = "", idempotencyKey = newIdempotencyKey()) {
+  return send<Requisition>("POST", `/requisitions/${encodeURIComponent(id)}:cancel-line`, {
+    body: comment ? { lineId, comment } : { lineId },
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+/** Approve, reject (comment required), reopen, cancel or withdraw a requisition; version is the ETag read when it was loaded. */
 export function actOnRequisition(
   id: string,
   action: RequisitionAction,

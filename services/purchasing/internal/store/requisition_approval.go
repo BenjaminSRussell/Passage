@@ -31,6 +31,10 @@ const (
 	HistoryRejected  = "REJECTED"
 	HistoryReopened  = "REOPENED"
 	HistoryCancelled = "CANCELLED"
+	HistoryEdited    = "EDITED"
+	HistoryWithdrawn = "WITHDRAWN"
+	// HistoryLineCancelled records one line cancelled on an APPROVED requisition (BR-17.1); LineID names it.
+	HistoryLineCancelled = "LINE_CANCELLED"
 )
 
 // RequisitionHistory is one row of the requisition's audit trail.
@@ -41,6 +45,7 @@ type RequisitionHistory struct {
 	Role               string    `json:"role,omitempty"`
 	ActorID            string    `json:"actorId,omitempty"`
 	Comment            string    `json:"comment,omitempty"`
+	LineID             string    `json:"lineId,omitempty"`
 	FromStatus         string    `json:"fromStatus"`
 	ToStatus           string    `json:"toStatus"`
 	RequisitionVersion int       `json:"requisitionVersion"`
@@ -61,6 +66,7 @@ type historyRow struct {
 	Role       string
 	ActorID    string
 	Comment    string
+	LineID     string
 	FromStatus string
 	Version    int
 }
@@ -69,23 +75,23 @@ type historyRow struct {
 func addRequisitionHistory(ctx context.Context, tx pgx.Tx, cur Requisition, h historyRow) error {
 	p, _ := tenant.FromContext(ctx)
 	_, err := tx.Exec(ctx, `insert into purchase_requisition_history (tenant_id, id, requisition_id, legal_entity_id, action, step_no, role,
-		actor_id, comment, from_status, to_status, requisition_version) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		actor_id, comment, from_status, to_status, requisition_version, line_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		p.TenantID, ids.New(), cur.ID, cur.LegalEntityID, h.Action, nullableInt(h.StepNo), nullable(h.Role), nullable(h.ActorID), h.Comment,
-		h.FromStatus, cur.Status, h.Version)
+		h.FromStatus, cur.Status, h.Version, nullable(h.LineID))
 	return err
 }
 
 func loadRequisitionHistory(ctx context.Context, tx pgx.Tx, requisitionID string) ([]RequisitionHistory, error) {
 	p, _ := tenant.FromContext(ctx)
 	rows, err := tx.Query(ctx, `select id, action, coalesce(step_no, 0), coalesce(role, ''), coalesce(actor_id::text, ''), comment, from_status,
-		to_status, requisition_version, created_at from purchase_requisition_history
+		to_status, requisition_version, created_at, coalesce(line_id::text, '') from purchase_requisition_history
 		where tenant_id = $1 and requisition_id = $2 order by created_at, id`, p.TenantID, requisitionID)
 	if err != nil {
 		return nil, err
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (RequisitionHistory, error) {
 		var h RequisitionHistory
-		err := row.Scan(&h.ID, &h.Action, &h.StepNo, &h.Role, &h.ActorID, &h.Comment, &h.FromStatus, &h.ToStatus, &h.RequisitionVersion, &h.CreatedAt)
+		err := row.Scan(&h.ID, &h.Action, &h.StepNo, &h.Role, &h.ActorID, &h.Comment, &h.FromStatus, &h.ToStatus, &h.RequisitionVersion, &h.CreatedAt, &h.LineID)
 		return h, err
 	})
 	if out == nil {
@@ -98,7 +104,8 @@ func loadRequisitionHistory(ctx context.Context, tx pgx.Tx, requisitionID string
 // caller's version. Approving moves the requisition one level up its chain, to APPROVED after the last one
 // (requisition.approved.v1); an approver cannot be the requester (PRC-REQ-009) or have approved an earlier level
 // of the same round (PRC-REQ-010); rejecting writes requisition.rejected.v1; reopening returns a REJECTED
-// requisition to DRAFT with its chain cleared; cancelling a DRAFT, REJECTED or APPROVED requisition cancels its
+// requisition to DRAFT with its chain cleared, and withdrawing does the same for an IN_REVIEW one no level has
+// approved yet (requisition.withdrawn.v1); cancelling a DRAFT, REJECTED or APPROVED requisition cancels its
 // OPEN lines and writes requisition.cancelled.v1, and an APPROVED one only while every line is still OPEN and no
 // running RFQ holds one. Every action adds an audit row. A replayed Idempotency-Key returns the requisition as it is.
 func (s *Postgres) ActOnRequisition(ctx context.Context, id string, version int, act RequisitionAct, idem Idem) (Requisition, error) {
@@ -144,6 +151,8 @@ func (s *Postgres) ActOnRequisition(ctx context.Context, id string, version int,
 			}
 		case domain.ReqActionReopen:
 			h.Action = HistoryReopened
+		case domain.ReqActionWithdraw:
+			h.Action = HistoryWithdrawn
 		case domain.ReqActionCancel:
 			h.Action = HistoryCancelled
 			if cancelled, err = cancellableLines(ctx, tx, cur); err != nil {
@@ -151,7 +160,7 @@ func (s *Postgres) ActOnRequisition(ctx context.Context, id string, version int,
 			}
 		}
 		chain := cur.ApproverChain
-		if act.Action == domain.ReqActionReopen {
+		if act.Action == domain.ReqActionReopen || act.Action == domain.ReqActionWithdraw {
 			chain = []string{}
 		}
 		tag, err := tx.Exec(ctx, `update purchase_requisition set status = $3, approved_steps = $4, approver_chain = $5, version = version + 1,
@@ -195,7 +204,7 @@ func approvedThisRound(ctx context.Context, tx pgx.Tx, requisitionID, userID str
 }
 
 // cancellableLines returns the OPEN lines a cancel will cancel. An APPROVED requisition can be cancelled only while
-// every line is OPEN (a line already ordered stays with its PO) and none is held by a running RFQ.
+// every line is OPEN or already cancelled (a line already ordered stays with its PO) and none is held by a running RFQ.
 func cancellableLines(ctx context.Context, tx pgx.Tx, cur Requisition) ([]string, error) {
 	out := []string{}
 	for _, l := range cur.Lines {
@@ -206,11 +215,16 @@ func cancellableLines(ctx context.Context, tx pgx.Tx, cur Requisition) ([]string
 	if cur.Status != RequisitionApproved {
 		return out, nil
 	}
-	if len(out) != len(cur.Lines) {
-		return nil, httpx.NewProblem(http.StatusConflict, CodeRequisitionState, fmt.Sprintf(
-			"requisition %s has lines that are already ordered or cancelled; cancel it only while every line is OPEN", cur.Number))
+	for _, l := range cur.Lines {
+		if l.Status != "OPEN" && l.Status != "CANCELLED" {
+			return nil, httpx.NewProblem(http.StatusConflict, CodeRequisitionState, fmt.Sprintf(
+				"requisition %s has lines that are already ordered; cancel it only while every line is OPEN or already cancelled", cur.Number))
+		}
 	}
 	for _, l := range cur.Lines {
+		if l.Status != "OPEN" {
+			continue
+		}
 		if number, held, err := liveRFQOf(ctx, tx, l.ID); err != nil {
 			return nil, err
 		} else if held {
@@ -231,6 +245,10 @@ func enqueueRequisitionDecision(ctx context.Context, tx pgx.Tx, cur Requisition,
 		return enqueue(ctx, tx, "requisition", cur.ID, purchasingevents.RequisitionRejected, purchasingevents.RequisitionRejectedData{
 			RequisitionID: cur.ID, Number: cur.Number, LegalEntityID: cur.LegalEntityID, RequesterID: cur.RequesterID, Currency: cur.Currency,
 			Total: cur.Total.String(), StepNo: h.StepNo, Role: h.Role, RejectedBy: act.ActorID, Reason: act.Comment, Version: cur.Version})
+	case domain.ReqActionWithdraw:
+		return enqueue(ctx, tx, "requisition", cur.ID, purchasingevents.RequisitionWithdrawn, purchasingevents.RequisitionWithdrawnData{
+			RequisitionID: cur.ID, Number: cur.Number, LegalEntityID: cur.LegalEntityID, RequesterID: cur.RequesterID, Currency: cur.Currency,
+			Total: cur.Total.String(), WithdrawnBy: act.ActorID, Reason: act.Comment, Version: cur.Version})
 	case domain.ReqActionCancel:
 		return enqueue(ctx, tx, "requisition", cur.ID, purchasingevents.RequisitionCancelled, purchasingevents.RequisitionCancelledData{
 			RequisitionID: cur.ID, Number: cur.Number, LegalEntityID: cur.LegalEntityID, RequesterID: cur.RequesterID, Currency: cur.Currency,

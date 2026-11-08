@@ -88,15 +88,17 @@ type API struct {
 	memberships Memberships
 	now         func() time.Time
 
-	requisitionsCreated   atomic.Int64
-	requisitionsSubmitted atomic.Int64
-	requisitionDecisions  atomic.Int64
-	requisitionsCancelled atomic.Int64
-	requisitionLinesSplit atomic.Int64
-	releaseRuns           atomic.Int64
-	ordersCreated         atomic.Int64
-	agreementsCreated     atomic.Int64
-	priceLookups          atomic.Int64
+	requisitionsCreated       atomic.Int64
+	requisitionsSubmitted     atomic.Int64
+	requisitionDecisions      atomic.Int64
+	requisitionsCancelled     atomic.Int64
+	requisitionLinesSplit     atomic.Int64
+	requisitionsEdited        atomic.Int64
+	requisitionLinesCancelled atomic.Int64
+	releaseRuns               atomic.Int64
+	ordersCreated             atomic.Int64
+	agreementsCreated         atomic.Int64
+	priceLookups              atomic.Int64
 
 	purchaseAgreementsCreated atomic.Int64
 
@@ -156,6 +158,7 @@ func (a *API) Register(r chi.Router) {
 		create := r.With(authz.RequireDuty(dutyRequisitionCreate))
 		create.Post("/requisitions", a.createRequisition)
 		create.Get("/requisitions", a.listRequisitions)
+		create.Patch("/requisitions/{id}", a.patchRequisition)
 		// Approvers read the requisition they decide on.
 		r.With(authz.Require(anyDuty{dutyRequisitionCreate, dutyRequisitionApprove}, dutyRequisitionCreate+" or "+dutyRequisitionApprove, "")).
 			Get("/requisitions/{id}", a.getRequisition)
@@ -305,6 +308,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_requisition_decisions_total", "Requisitions approved or rejected by an approver (BR-17.1); idempotent replays are counted.", a.requisitionDecisions.Load()},
 			{"purchasing_requisitions_cancelled_total", "Requisitions cancelled by their requester (BR-17.1); idempotent replays are counted.", a.requisitionsCancelled.Load()},
 			{"purchasing_requisition_lines_split_total", "Requisition lines split into several lines (FR-17.3).", a.requisitionLinesSplit.Load()},
+			{"purchasing_requisitions_edited_total", "DRAFT requisitions edited by their requester (BR-17.1); idempotent replays are counted.", a.requisitionsEdited.Load()},
+			{"purchasing_requisition_lines_cancelled_total", "Single lines of an APPROVED requisition cancelled by the requester (BR-17.1); idempotent replays are counted.", a.requisitionLinesCancelled.Load()},
 			{"purchasing_requisition_release_runs_total", "Requisition release runs answered (PRD 3.17.16); idempotent replays are counted.", a.releaseRuns.Load()},
 			{"purchasing_purchase_orders_created_total", "Purchase orders created.", a.ordersCreated.Load()},
 			{"purchasing_trade_agreements_created_total", "Trade agreement rows created.", a.agreementsCreated.Load()},

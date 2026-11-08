@@ -40,3 +40,48 @@ type RequisitionCancelledData struct {
 	Reason           string   `json:"reason,omitempty"`
 	Version          int      `json:"version"`
 }
+
+// RequisitionWithdrawn is written when the requester takes an IN_REVIEW requisition back to DRAFT before any
+// approval level decided on it (BR-17.1), so approver inboxes and notifications drop it.
+const RequisitionWithdrawn = "dev.passage.procurement.requisition.withdrawn.v1"
+
+// RequisitionLineCancelled is written when one OPEN line of an APPROVED requisition is cancelled while the rest of
+// the requisition continues (BR-17.1). Budget control (wave 38) releases the line's pre-encumbrance.
+const RequisitionLineCancelled = "dev.passage.procurement.requisitionline.cancelled.v1"
+
+// RequisitionWithdrawnData is the data member of requisition.withdrawn.v1.
+type RequisitionWithdrawnData struct {
+	RequisitionID string `json:"requisition_id"`
+	Number        string `json:"number"`
+	LegalEntityID string `json:"legal_entity_id"`
+	RequesterID   string `json:"requester_id"`
+	Currency      string `json:"currency"`
+	Total         string `json:"total"`
+	WithdrawnBy   string `json:"withdrawn_by"`
+	Reason        string `json:"reason,omitempty"`
+	Version       int    `json:"version"`
+}
+
+// RequisitionLineCancelledData is the data member of requisitionline.cancelled.v1. Amount is the line's amount
+// in the requisition's currency, the pre-encumbrance to release; Total is the requisition total after the
+// cancellation (the lines not cancelled) and RequisitionStatus is APPROVED, or CLOSED when every line left is
+// consolidated.
+type RequisitionLineCancelledData struct {
+	RequisitionID string `json:"requisition_id"`
+	Number        string `json:"number"`
+	LegalEntityID string `json:"legal_entity_id"`
+	RequesterID   string `json:"requester_id"`
+	Currency      string `json:"currency"`
+	LineID        string `json:"line_id"`
+	LineNo        int    `json:"line_no"`
+	ProductID     string `json:"product_id,omitempty"`
+	Category      string `json:"category,omitempty"`
+	Qty           string `json:"qty"`
+	Amount        string `json:"amount"`
+	Total         string `json:"total"`
+	// RequisitionStatus is the requisition's status after the cancellation.
+	RequisitionStatus string `json:"requisition_status"`
+	CancelledBy       string `json:"cancelled_by"`
+	Reason            string `json:"reason,omitempty"`
+	Version           int    `json:"version"`
+}

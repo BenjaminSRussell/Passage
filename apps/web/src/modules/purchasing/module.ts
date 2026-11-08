@@ -25,7 +25,7 @@ import { PriceLookupPage } from "./PricingPage";
 import { ReleaseRunCreatePage, ReleaseRunDetailPage, ReleaseRunsPage } from "./ReleasePages";
 import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage, PurchaseOrdersPage } from "./PurchaseOrderPages";
 import { RepricePage, RepriceRunPage } from "./RepricePages";
-import { RequisitionCreatePage, RequisitionDetailPage, RequisitionsPage } from "./RequisitionPages";
+import { RequisitionCreatePage, RequisitionDetailPage, RequisitionEditPage, RequisitionsPage } from "./RequisitionPages";
 import { RFQCreatePage, RFQDetailPage, RFQsPage } from "./RfqPages";
 import {
   SchedulingAgreementCreatePage,
@@ -48,11 +48,12 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions with approval, rejection and cancellation, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
+    "Requisitions with editing, withdrawal, approval, rejection and cancellation (of the whole requisition or one line), consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
     { path: "/purchasing/requisitions/new", element: createElement(RequisitionCreatePage), handle: { title: "New requisition" } },
+    { path: "/purchasing/requisitions/:id/edit", element: createElement(RequisitionEditPage), handle: { title: "Edit requisition" } },
     { path: "/purchasing/requisitions/:id", element: createElement(RequisitionDetailPage), handle: { title: "Requisition" } },
     { path: "/purchasing/approvals", element: createElement(ApprovalInboxPage), handle: { title: "Requisition approvals" } },
     { path: "/purchasing/consolidation", element: createElement(ConsolidationPage) },

@@ -17,6 +17,9 @@ import (
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
 
+// actionCancelLine is the custom method that cancels one line of an APPROVED requisition (BR-17.1).
+const actionCancelLine = "cancel-line"
+
 type requisitionBody struct {
 	LegalEntityID   string                `json:"legalEntityId"`
 	OperatingUnitID string                `json:"operatingUnitId,omitempty"`
@@ -281,7 +284,7 @@ func (a *API) listRequisitions(w http.ResponseWriter, r *http.Request) {
 	writePage(w, page)
 }
 
-// requisitionAction handles POST /requisitions/{id}:submit|approve|reject|reopen|cancel. The chi segment holds
+// requisitionAction handles POST /requisitions/{id}:submit|approve|reject|reopen|cancel|withdraw|cancel-line. The chi segment holds
 // "<id>:<action>"; each action checks its own duty.
 func (a *API) requisitionAction(w http.ResponseWriter, r *http.Request) {
 	p, err := principal(r.Context())
@@ -290,7 +293,7 @@ func (a *API) requisitionAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action, found := strings.Cut(chi.URLParam(r, "id"), ":")
-	if !found || (action != "submit" && !slices.Contains(domain.ReqActions, action)) || !ids.Valid(id) {
+	if !found || (action != "submit" && action != actionCancelLine && !slices.Contains(domain.ReqActions, action)) || !ids.Valid(id) {
 		fail(w, r, httpx.NewProblem(http.StatusNotFound, codeUnknownAction, "unknown requisition action"))
 		return
 	}
@@ -304,6 +307,10 @@ func (a *API) requisitionAction(w http.ResponseWriter, r *http.Request) {
 	userID, err := caller(r.Context())
 	if err != nil {
 		fail(w, r, err)
+		return
+	}
+	if action == actionCancelLine {
+		a.cancelRequisitionLine(w, r, id, userID)
 		return
 	}
 	if action != "submit" {

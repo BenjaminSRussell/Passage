@@ -34,6 +34,10 @@ func TestRequisitionTransition(t *testing.T) {
 		{"cancel an approved one", domain.ReqApproved, domain.ReqActionCancel, 3, 3, domain.ReqCancelled, 3, false},
 		{"cancel one in review", domain.ReqInReview, domain.ReqActionCancel, 0, 1, "", 0, true},
 		{"cancel a cancelled one", domain.ReqCancelled, domain.ReqActionCancel, 0, 0, "", 0, true},
+		{"withdraw before any level approved", domain.ReqInReview, domain.ReqActionWithdraw, 0, 2, domain.ReqDraft, 0, false},
+		{"withdraw after a level approved", domain.ReqInReview, domain.ReqActionWithdraw, 1, 2, "", 0, true},
+		{"withdraw a draft", domain.ReqDraft, domain.ReqActionWithdraw, 0, 0, "", 0, true},
+		{"withdraw an approved one", domain.ReqApproved, domain.ReqActionWithdraw, 1, 1, "", 0, true},
 		{"unknown action", domain.ReqDraft, "close", 0, 0, "", 0, true},
 	}
 	for _, tc := range tests {

@@ -517,7 +517,8 @@ components:
       required: [id, action, fromStatus, toStatus, requisitionVersion, createdAt]
       properties:
         id: { type: string, format: uuid }
-        action: { type: string, enum: [SUBMITTED, APPROVED, REJECTED, REOPENED, CANCELLED] }
+        action: { type: string, enum: [SUBMITTED, APPROVED, REJECTED, REOPENED, CANCELLED, EDITED, WITHDRAWN, LINE_CANCELLED] }
+        lineId: { type: string, format: uuid, description: The line a LINE_CANCELLED row concerns }
         stepNo: { type: integer, description: The approval level that decided (APPROVED and REJECTED) }
         role: { type: string, description: The role of that level }
         actorId: { type: string, format: uuid }
@@ -526,11 +527,31 @@ components:
         toStatus: { type: string }
         requisitionVersion: { type: integer, description: The requisition version after the action }
         createdAt: { type: string, format: date-time }
+    RequisitionPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        operatingUnitId: { type: string, description: "A new operating unit (uuid); an empty string clears it" }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Changes only together with lines }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: Replaces all the lines
+          items: { $ref: '#/components/schemas/RequisitionLineInput' }
+    RequisitionLineCancelInput:
+      type: object
+      required: [lineId]
+      additionalProperties: false
+      properties:
+        lineId: { type: string, format: uuid, description: The OPEN line to cancel }
+        comment: { type: string, maxLength: 1000, description: The reason }
     RequisitionDecisionInput:
       type: object
       additionalProperties: false
       properties:
-        comment: { type: string, maxLength: 1000, description: "The approver's note, the reason to reject (required) or the reason to cancel" }
+        comment: { type: string, maxLength: 1000, description: "The approver's note, the reason to reject (required) or the reason to cancel or withdraw" }
     RequisitionApproval:
       type: object
       properties:
@@ -2125,6 +2146,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Requisition' }
         '404': { description: Not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    patch:
+      operationId: updateRequisition
+      x-passage-duty: procurement.requisition.create
+      summary: Edit a DRAFT requisition - its operating unit, currency or lines (BR-17.1; duty procurement.requisition.create)
+      description: >-
+        Only the requester (PRC-REQ-004), and only while the requisition is DRAFT: a new one, one reopened after a rejection, or one
+        withdrawn from review. When lines are sent they replace all the lines, are numbered from 1 again and are priced as on create
+        (estimate fallbacks and catalog entries included); the total follows. The currency can change only together with lines; the legal
+        entity cannot change. If-Match is the version, which moves on; an EDITED row joins the history. A replayed Idempotency-Key
+        returns the requisition as it is now.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionPatch' }
+      responses:
+        '200':
+          description: Edited; the requisition as it is now
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { description: Missing Idempotency-Key, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003) or not the requester (PRC-REQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition not found (PRC-REQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the requisition is not DRAFT (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Invalid lines, an empty body or a currency change without lines, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/requisitions/{id}:submit:
     post:
       operationId: submitRequisition
@@ -2249,7 +2304,7 @@ paths:
       x-passage-duty: procurement.requisition.create
       summary: Cancel a DRAFT, REJECTED or APPROVED requisition and its OPEN lines (BR-17.1; duty procurement.requisition.create)
       description: >-
-        Only the requester (PRC-REQ-004). An APPROVED requisition can be cancelled only while every line is still OPEN (a line already
+        Only the requester (PRC-REQ-004). An APPROVED requisition can be cancelled only while every line is still OPEN or already cancelled (a line already
         ordered stays with its PO: PRC-REQ-STATE) and no running RFQ holds a line (PRC-REQ-006). The OPEN lines become CANCELLED and
         requisition.cancelled.v1 lists them. The optional comment is the reason.
       parameters:
@@ -2275,6 +2330,77 @@ paths:
         '409': { description: "Version changed (PRC-VERSION-CONFLICT), the requisition is not DRAFT, REJECTED or APPROVED, a line is ordered (PRC-REQ-STATE) or a running RFQ holds a line (PRC-REQ-006)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Comment too long, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Requisition not found (PRC-REQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisitions/{id}:withdraw:
+    post:
+      operationId: withdrawRequisition
+      x-passage-duty: procurement.requisition.create
+      summary: Take an IN_REVIEW requisition back to DRAFT before any level approved it (BR-17.1; duty procurement.requisition.create)
+      description: >-
+        Only the requester (PRC-REQ-004), and only while no approval level has approved (PRC-REQ-STATE afterwards: the approvers then send
+        it back by rejecting). The approver chain and the levels approved are cleared, so the requisition leaves every approval inbox and
+        can be edited and submitted again, which routes it afresh. The optional comment is the reason. requisition.withdrawn.v1 is written
+        in the same transaction.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionDecisionInput' }
+      responses:
+        '200':
+          description: Done; the requisition as it is now
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { description: Missing Idempotency-Key, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003) or not the requester (PRC-REQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition not found (PRC-REQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT), the requisition is not IN_REVIEW or a level has approved (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Comment too long, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisitions/{id}:cancel-line:
+    post:
+      operationId: cancelRequisitionLine
+      x-passage-duty: procurement.requisition.create
+      summary: Cancel one OPEN line of an APPROVED requisition while the rest continues (BR-17.1; duty procurement.requisition.create)
+      description: >-
+        Only the requester (PRC-REQ-004). The line must be OPEN on an APPROVED requisition and not held by a running RFQ (PRC-REQ-006); a
+        line already ordered stays with its PO, and the last line that is not cancelled cannot go this way (cancel the requisition
+        instead: PRC-REQ-STATE). The total drops to the sum of the lines that are not cancelled (the approved amount stays in the history
+        and requisition.approved.v1); the requisition stays APPROVED, or becomes CLOSED when every line left is already consolidated, and
+        its version moves on. A LINE_CANCELLED row joins the history and requisitionline.cancelled.v1 carries the line's amount for
+        budget control to release and the new total. A replayed Idempotency-Key returns the requisition as it is now. The optional comment
+        is the reason.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionLineCancelInput' }
+      responses:
+        '200':
+          description: Done; the requisition as it is now
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { description: Missing Idempotency-Key, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003) or not the requester (PRC-REQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition (PRC-REQ-NOT-FOUND) or line (PRC-REQ-LINE-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT), the requisition is not APPROVED, the line is not OPEN or is the last one left (PRC-REQ-STATE) or a running RFQ holds it (PRC-REQ-006), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: lineId missing or invalid, or comment too long, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/requisition-approvals:
     get:

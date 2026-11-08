@@ -23,6 +23,14 @@ channels:
         $ref: '#/components/messages/RequisitionRejected'
       requisitionCancelled:
         $ref: '#/components/messages/RequisitionCancelled'
+      requisitionWithdrawn:
+        $ref: '#/components/messages/RequisitionWithdrawn'
+  requisitionline:
+    address: passage.procurement.requisitionline
+    description: Changes to single requisition lines; the Kafka key is the requisition id.
+    messages:
+      requisitionLineCancelled:
+        $ref: '#/components/messages/RequisitionLineCancelled'
   agreement:
     address: passage.procurement.agreement
     description: Purchase agreement release alerts; the Kafka key is the agreement id.
@@ -264,6 +272,18 @@ operations:
       $ref: '#/channels/requisition'
     messages:
       - $ref: '#/channels/requisition/messages/requisitionCancelled'
+  publishRequisitionWithdrawn:
+    action: send
+    channel:
+      $ref: '#/channels/requisition'
+    messages:
+      - $ref: '#/channels/requisition/messages/requisitionWithdrawn'
+  publishRequisitionLineCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/requisitionline'
+    messages:
+      - $ref: '#/channels/requisitionline/messages/requisitionLineCancelled'
   publishAgreementThreshold:
     action: send
     channel:
@@ -799,6 +819,34 @@ components:
               type: { type: string, const: dev.passage.procurement.requisition.cancelled.v1 }
               subject: { type: string, format: uuid, description: requisition id }
               data: { $ref: '#/components/schemas/RequisitionCancelledData' }
+    RequisitionWithdrawn:
+      name: RequisitionWithdrawn
+      title: requisition.withdrawn.v1
+      x-passage-type: dev.passage.procurement.requisition.withdrawn.v1
+      summary: The requester took an IN_REVIEW requisition back to DRAFT before any approval level had approved it (BR-17.1); the approver chain is cleared and the requisition leaves every approval inbox. No budget pre-encumbrance exists yet, so there is nothing to release.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.requisition.withdrawn.v1 }
+              subject: { type: string, format: uuid, description: requisition id }
+              data: { $ref: '#/components/schemas/RequisitionWithdrawnData' }
+    RequisitionLineCancelled:
+      name: RequisitionLineCancelled
+      title: requisitionline.cancelled.v1
+      x-passage-type: dev.passage.procurement.requisitionline.cancelled.v1
+      summary: The requester cancelled one OPEN line of an APPROVED requisition while the rest continues (BR-17.1). Budget control (FR-38.5) releases the line's amount from the requisition's pre-encumbrance; total is the requisition total after the cancellation (the lines not cancelled), and requisition_status is APPROVED, or CLOSED when every line left is already consolidated.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.requisitionline.cancelled.v1 }
+              subject: { type: string, format: uuid, description: requisition id }
+              data: { $ref: '#/components/schemas/RequisitionLineCancelledData' }
     AgreementThreshold:
       name: AgreementThreshold
       title: agreement.threshold.v1
@@ -1373,6 +1421,41 @@ components:
         cancelled_line_ids:
           type: array
           items: { type: string, format: uuid }
+        cancelled_by: { type: string, format: uuid }
+        reason: { type: string }
+        version: { type: integer, description: the requisition version after the cancellation }
+    RequisitionWithdrawnData:
+      type: object
+      required: [requisition_id, number, legal_entity_id, requester_id, currency, total, withdrawn_by, version]
+      additionalProperties: false
+      properties:
+        requisition_id: { type: string, format: uuid }
+        number: { type: string }
+        legal_entity_id: { type: string, format: uuid }
+        requester_id: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        total: { type: string, description: decimal string in the requisition currency }
+        withdrawn_by: { type: string, format: uuid }
+        reason: { type: string }
+        version: { type: integer, description: the requisition version after the withdrawal }
+    RequisitionLineCancelledData:
+      type: object
+      required: [requisition_id, number, legal_entity_id, requester_id, currency, line_id, line_no, qty, amount, total, requisition_status, cancelled_by, version]
+      additionalProperties: false
+      properties:
+        requisition_id: { type: string, format: uuid }
+        number: { type: string }
+        legal_entity_id: { type: string, format: uuid }
+        requester_id: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        line_id: { type: string, format: uuid }
+        line_no: { type: integer }
+        product_id: { type: string, format: uuid }
+        category: { type: string }
+        qty: { type: string, description: decimal string }
+        amount: { type: string, description: decimal string in the requisition currency; the pre-encumbrance to release }
+        total: { type: string, description: decimal string; the requisition total after the cancellation, the sum of the lines not cancelled }
+        requisition_status: { type: string, enum: [APPROVED, CLOSED], description: the requisition status after the cancellation }
         cancelled_by: { type: string, format: uuid }
         reason: { type: string }
         version: { type: integer, description: the requisition version after the cancellation }

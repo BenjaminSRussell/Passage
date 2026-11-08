@@ -18,12 +18,14 @@ import {
 } from "../../shell/ui";
 import {
   actOnRequisition,
+  cancelRequisitionLine,
   createRequisition,
   describeProblem,
   getRequisition,
   listRequisitions,
   newIdempotencyKey,
   submitRequisition,
+  updateRequisition,
   type Requisition,
   type RequisitionAction,
   type RequisitionHistory,
@@ -151,6 +153,7 @@ interface LineDraft {
   preferredVendorId: string;
   /** The warehouse the line is wanted in; orders are split by it. */
   warehouseId: string;
+  siteId: string;
   /** Set when the line was picked from a catalog; the service fills the item from the entry. */
   catalogEntryId: string;
 }
@@ -167,7 +170,26 @@ function emptyLine(): LineDraft {
     requestedDate: todayIso(),
     preferredVendorId: "",
     warehouseId: "",
+    siteId: "",
     catalogEntryId: "",
+  };
+}
+
+/** A saved line as an editable draft; catalog lines keep their entry and the item and price the service took from it. */
+function draftOf(l: RequisitionLine): LineDraft {
+  return {
+    key: l.id || newIdempotencyKey(),
+    productId: l.productId ?? "",
+    description: l.description ?? "",
+    category: l.category ?? "",
+    qty: l.qty,
+    unit: l.unit,
+    estimatedUnitPrice: l.estimatedUnitPrice,
+    requestedDate: l.requestedDate,
+    preferredVendorId: l.preferredVendorId ?? "",
+    warehouseId: l.warehouseId ?? "",
+    siteId: l.siteId ?? "",
+    catalogEntryId: l.catalogEntryId ?? "",
   };
 }
 
@@ -197,6 +219,7 @@ export function validateRequisition(legalEntityId: string, currency: string, lin
     const f = (name: string) => `lines[${i}].${name}`;
     if (!decimalPattern.test(l.qty) || Number(l.qty) <= 0) errors[f("qty")] = "Enter a positive quantity.";
     if (!datePattern.test(l.requestedDate)) errors[f("requestedDate")] = "Enter a date.";
+    if (l.siteId !== "" && !uuidPattern.test(l.siteId.trim())) errors[f("siteId")] = "Site id must be a UUID.";
     if (l.catalogEntryId !== "") return;
     if (l.productId !== "" && !uuidPattern.test(l.productId)) errors[f("productId")] = "Product id must be a UUID.";
     if (l.productId === "" && (l.description.trim() === "" || l.category.trim() === "")) {
@@ -218,7 +241,7 @@ function toInput(legalEntityId: string, currency: string, lines: LineDraft[], op
     currency,
     lines: lines.map((l) =>
       l.catalogEntryId !== ""
-        ? { catalogEntryId: l.catalogEntryId, qty: l.qty.trim(), unit: l.unit.trim(), requestedDate: l.requestedDate, warehouseId: opt(l.warehouseId) }
+        ? { catalogEntryId: l.catalogEntryId, qty: l.qty.trim(), unit: l.unit.trim(), requestedDate: l.requestedDate, warehouseId: opt(l.warehouseId), siteId: opt(l.siteId) }
         : {
       productId: opt(l.productId),
       description: opt(l.description),
@@ -229,6 +252,7 @@ function toInput(legalEntityId: string, currency: string, lines: LineDraft[], op
       requestedDate: l.requestedDate,
       preferredVendorId: opt(l.preferredVendorId),
       warehouseId: opt(l.warehouseId),
+      siteId: opt(l.siteId),
     },
     ),
   };
@@ -241,11 +265,56 @@ function isBlankLine(l: LineDraft): boolean {
 
 /** New requisition: header plus any number of lines; saves a DRAFT and opens it. */
 export function RequisitionCreatePage() {
+  return <RequisitionForm />;
+}
+
+/** Edit a DRAFT requisition (a new one, or one reopened or withdrawn): the lines are saved as a set (BR-17.1). */
+export function RequisitionEditPage() {
+  const { id = "" } = useParams();
+  const resource = useResource((signal) => getRequisition(id, signal), [id]);
+  if (resource.error) {
+    return (
+      <div className={styles.stack}>
+        <PageHeader title="Edit requisition" />
+        <LoadError what="the requisition" error={resource.error} onRetry={resource.reload} />
+      </div>
+    );
+  }
+  const req = resource.data?.body;
+  if (!req) {
+    return (
+      <div className={styles.stack} aria-busy="true">
+        <PageHeader title="Edit requisition" />
+        <p className={styles.muted} role="status">
+          Loading requisition…
+        </p>
+      </div>
+    );
+  }
+  if (req.status !== "DRAFT") {
+    return (
+      <div className={styles.stack}>
+        <PageHeader title={`Edit requisition ${req.number}`} meta={<StatusBadge status={req.status} />} />
+        <Alert tone="warning" live="status">
+          Only a draft can be edited. Withdraw it from review, or reopen it after a rejection, first.
+        </Alert>
+        <div className={styles.actions}>
+          <Link className={buttonClassName("secondary")} to={`/purchasing/requisitions/${req.id}`}>
+            Back to the requisition
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  return <RequisitionForm existing={req} />;
+}
+
+function RequisitionForm({ existing }: { existing?: Requisition }) {
   const navigate = useNavigate();
-  const [legalEntityId, setLegalEntityId] = useState("");
-  const [operatingUnitId, setOperatingUnitId] = useState("");
-  const [currency, setCurrency] = useState("USD");
-  const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
+  const [legalEntityId, setLegalEntityId] = useState(existing?.legalEntityId ?? "");
+  const [operatingUnitId, setOperatingUnitId] = useState(existing?.operatingUnitId ?? "");
+  const [currency, setCurrency] = useState(existing?.currency ?? "USD");
+  const [lines, setLines] = useState<LineDraft[]>(() => (existing ? existing.lines.map(draftOf) : [emptyLine()]));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
@@ -262,6 +331,17 @@ export function RequisitionCreatePage() {
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
+      if (existing) {
+        const input = toInput(legalEntityId.trim(), currency, lines, operatingUnitId.trim());
+        const { body } = await updateRequisition(
+          existing.id,
+          existing.version,
+          { operatingUnitId: operatingUnitId.trim(), currency: input.currency, lines: input.lines },
+          key,
+        );
+        navigate(`/purchasing/requisitions/${body.id}`, { state: { warnings: body.warnings ?? [] } });
+        return;
+      }
       const { body } = await createRequisition(toInput(legalEntityId.trim(), currency, lines, operatingUnitId.trim()), key);
       navigate(`/purchasing/requisitions/${body.id}`, { state: { warnings: body.warnings ?? [] } });
     } catch (error) {
@@ -277,7 +357,14 @@ export function RequisitionCreatePage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New requisition" description="Leave the estimate blank to take the preferred vendor's trade agreement price, or the price of the product's last approved order." />
+      <PageHeader
+        title={existing ? `Edit requisition ${existing.number}` : "New requisition"}
+        description={
+          existing
+            ? "Saving replaces the lines and prices them again; leave an estimate blank to take the preferred vendor's trade agreement price."
+            : "Leave the estimate blank to take the preferred vendor's trade agreement price, or the price of the product's last approved order."
+        }
+      />
       <CatalogPicker
         legalEntityId={legalEntityId.trim()}
         operatingUnitId={operatingUnitId.trim()}
@@ -290,7 +377,7 @@ export function RequisitionCreatePage() {
         <Card title="Requisition">
           <div className={styles.grid}>
             <FormField id="req-legal-entity" label="Legal entity id" error={field("legalEntityId")}>
-              {(control) => <Input {...control} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
+              {(control) => <Input {...control} value={legalEntityId} readOnly={existing !== undefined} onChange={(e) => setLegalEntityId(e.target.value)} />}
             </FormField>
             <FormField id="req-operating-unit" label="Operating unit id" optional hint="Decides which catalogs you can pick from" error={field("operatingUnitId")}>
               {(control) => <Input {...control} value={operatingUnitId} onChange={(e) => setOperatingUnitId(e.target.value)} />}
@@ -340,6 +427,9 @@ export function RequisitionCreatePage() {
                       <FormField id={id("warehouse")} label="Deliver to warehouse id" optional error={err("warehouseId")}>
                         {(c) => <Input {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
                       </FormField>
+                      <FormField id={id("site")} label="Site id" optional error={err("siteId")}>
+                        {(c) => <Input {...c} value={line.siteId} onChange={(e) => update(i, { siteId: e.target.value })} />}
+                      </FormField>
                     </div>
                   </>
                 ) : null}
@@ -374,6 +464,9 @@ export function RequisitionCreatePage() {
                   <FormField id={id("warehouse")} label="Deliver to warehouse id" optional error={err("warehouseId")}>
                     {(c) => <Input {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
                   </FormField>
+                  <FormField id={id("site")} label="Site id" optional error={err("siteId")}>
+                    {(c) => <Input {...c} value={line.siteId} onChange={(e) => update(i, { siteId: e.target.value })} />}
+                  </FormField>
                 </div>
                 )}
               </fieldset>
@@ -385,9 +478,9 @@ export function RequisitionCreatePage() {
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
-            Save requisition
+            {existing ? "Save changes" : "Save requisition"}
           </Button>
-          <Link className={buttonClassName("ghost")} to="/purchasing/requisitions">
+          <Link className={buttonClassName("ghost")} to={existing ? `/purchasing/requisitions/${existing.id}` : "/purchasing/requisitions"}>
             Cancel
           </Link>
         </div>
@@ -396,7 +489,11 @@ export function RequisitionCreatePage() {
   );
 }
 
-const lineColumns = (currency: string, all: RequisitionLine[]): DataTableColumn<RequisitionLine>[] => [
+const lineColumns = (
+  currency: string,
+  all: RequisitionLine[],
+  onCancelLine?: (line: RequisitionLine) => void,
+): DataTableColumn<RequisitionLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
   {
     key: "item",
@@ -431,6 +528,20 @@ const lineColumns = (currency: string, all: RequisitionLine[]): DataTableColumn<
         "—"
       ),
   },
+  ...(onCancelLine
+    ? [
+        {
+          key: "actions",
+          header: "Actions",
+          render: (l: RequisitionLine) =>
+            l.status === "OPEN" ? (
+              <Button size="sm" variant="ghost" onClick={() => onCancelLine(l)}>
+                Cancel line {l.lineNo}
+              </Button>
+            ) : null,
+        } satisfies DataTableColumn<RequisitionLine>,
+      ]
+    : []),
 ];
 
 const actionLabels: Record<RequisitionHistory["action"], string> = {
@@ -439,14 +550,25 @@ const actionLabels: Record<RequisitionHistory["action"], string> = {
   REJECTED: "Rejected",
   REOPENED: "Reopened as a draft",
   CANCELLED: "Cancelled",
+  EDITED: "Edited",
+  WITHDRAWN: "Withdrawn from review",
+  LINE_CANCELLED: "Line cancelled",
 };
 
-const historyColumns: DataTableColumn<RequisitionHistory>[] = [
+const historyColumns = (lines: RequisitionLine[]): DataTableColumn<RequisitionHistory>[] => [
   { key: "createdAt", header: "When", mono: true, render: (h) => h.createdAt.slice(0, 16).replace("T", " ") },
   { key: "action", header: "Action", render: (h) => actionLabels[h.action] ?? h.action },
   { key: "stepNo", header: "Level", render: (h) => (h.stepNo ? `${h.stepNo}. ${roleLabels[h.role ?? ""] ?? h.role ?? ""}` : "—") },
   { key: "actorId", header: "By", render: (h) => <ShortId id={h.actorId} /> },
-  { key: "comment", header: "Comment", render: (h) => h.comment || "—" },
+  {
+    key: "comment",
+    header: "Comment",
+    render: (h) => {
+      const line = h.lineId ? lines.find((l) => l.id === h.lineId) : undefined;
+      const text = [line ? `Line ${line.lineNo}` : "", h.comment ?? ""].filter(Boolean).join(": ");
+      return text || "—";
+    },
+  },
 ];
 
 const doneMessages: Record<RequisitionAction, string> = {
@@ -454,6 +576,7 @@ const doneMessages: Record<RequisitionAction, string> = {
   reject: "Sent back to the requester.",
   reopen: "Reopened as a draft; submit it again when it is ready.",
   cancel: "Requisition cancelled.",
+  withdraw: "Withdrawn from review; edit it and submit it again.",
 };
 
 /** Requisition detail: header, approval progress, decisions, lines, history, and the actions each status allows. */
@@ -470,6 +593,7 @@ export function RequisitionDetailPage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState<RequisitionAction | "submit" | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelLine, setCancelLine] = useState<RequisitionLine | null>(null);
   const keys = useRef<Record<string, string>>({});
   const req = updated ?? submitted ?? resource.data?.body ?? null;
 
@@ -520,6 +644,28 @@ export function RequisitionDetailPage() {
     }
   }
 
+  async function cancelOneLine(line: RequisitionLine) {
+    if (!req) return;
+    setBusy("cancel");
+    setFailure(null);
+    setNotice(null);
+    try {
+      const { body } = await cancelRequisitionLine(req.id, req.version, line.id, "", keyFor(`cancel-line-${line.id}`, req.version));
+      setUpdated(body);
+      setSubmitted(null);
+      setNotice(
+        body.status === "CLOSED"
+          ? `Line ${line.lineNo} cancelled; every other line is already ordered, so the requisition is closed.`
+          : `Line ${line.lineNo} cancelled; the rest of the requisition continues.`,
+      );
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(null);
+      setCancelLine(null);
+    }
+  }
+
   if (resource.error) {
     return (
       <div className={styles.stack}>
@@ -558,6 +704,9 @@ export function RequisitionDetailPage() {
   const steps = req.approvedSteps ?? 0;
   const history = req.history ?? [];
   const stale = failure?.code === "PRC-VERSION-CONFLICT" || failure?.code === "PRC-REQ-STATE";
+  const liveLines = req.lines.filter((l) => l.status !== "CANCELLED").length;
+  const canCancelLine = req.status === "APPROVED" && liveLines > 1;
+  const canWithdraw = req.status === "IN_REVIEW" && steps === 0;
   const canCancel = req.status === "DRAFT" || req.status === "REJECTED" || req.status === "APPROVED";
   return (
     <div className={styles.stack}>
@@ -566,6 +715,16 @@ export function RequisitionDetailPage() {
         meta={<StatusBadge status={req.status} />}
         actions={
           <>
+            {req.status === "DRAFT" ? (
+              <Link className={buttonClassName("secondary")} to={`/purchasing/requisitions/${req.id}/edit`}>
+                Edit
+              </Link>
+            ) : null}
+            {canWithdraw ? (
+              <Button variant="secondary" loading={busy === "withdraw"} onClick={() => void act("withdraw")}>
+                Withdraw
+              </Button>
+            ) : null}
             {req.status === "DRAFT" ? (
               <Button variant="primary" loading={busy === "submit"} onClick={() => void submit()}>
                 Submit for approval
@@ -693,9 +852,23 @@ export function RequisitionDetailPage() {
           </div>
         </Card>
       ) : null}
-      <DataTable label="Requisition lines" columns={lineColumns(req.currency, req.lines)} rows={req.lines} getRowKey={(l) => l.id || String(l.lineNo)} />
+      <DataTable
+        label="Requisition lines"
+        columns={lineColumns(req.currency, req.lines, canCancelLine ? setCancelLine : undefined)}
+        rows={req.lines} getRowKey={(l) => l.id || String(l.lineNo)}
+      />
       {history.length > 0 ? (
-        <DataTable label="Requisition history" columns={historyColumns} rows={history} getRowKey={(h) => h.id} />
+        <DataTable label="Requisition history" columns={historyColumns(req.lines)} rows={history} getRowKey={(h) => h.id} />
+      ) : null}
+      {cancelLine ? (
+        <ConfirmDialog
+          title={`Cancel line ${cancelLine.lineNo} of ${req.number}?`}
+          description="The rest of the requisition continues. Budget control releases the amount of this line. This cannot be undone."
+          confirmLabel={`Cancel line ${cancelLine.lineNo}`}
+          cancelLabel="Keep it"
+          onCancel={() => setCancelLine(null)}
+          onConfirm={() => void cancelOneLine(cancelLine)}
+        />
       ) : null}
       {confirmCancel ? (
         <ConfirmDialog

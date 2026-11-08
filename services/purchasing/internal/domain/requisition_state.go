@@ -20,16 +20,18 @@ const (
 	ReqActionReject  = "reject"
 	ReqActionReopen  = "reopen"
 	ReqActionCancel  = "cancel"
+	// ReqActionWithdraw takes an IN_REVIEW requisition back to DRAFT before any level has decided on it.
+	ReqActionWithdraw = "withdraw"
 )
 
 // ReqActions lists the actions in the order the spec names them.
-var ReqActions = []string{ReqActionApprove, ReqActionReject, ReqActionReopen, ReqActionCancel}
+var ReqActions = []string{ReqActionApprove, ReqActionReject, ReqActionReopen, ReqActionCancel, ReqActionWithdraw}
 
 // ErrRequisitionState is wrapped by every refusal of RequisitionTransition so the store can turn it into 409.
 var ErrRequisitionState = errors.New("requisition state")
 
 // RequisitionTransition applies BR-17.1 after submit: IN_REVIEW → APPROVED when the last chain level approves
-// (otherwise it stays IN_REVIEW one level further on); IN_REVIEW → REJECTED; REJECTED → DRAFT (the requester
+// (otherwise it stays IN_REVIEW one level further on); IN_REVIEW → REJECTED; IN_REVIEW → DRAFT by withdrawal while no level has approved; REJECTED → DRAFT (the requester
 // revises and submits again, which routes the chain afresh); DRAFT, REJECTED or APPROVED → CANCELLED. It returns
 // the next status and the number of levels approved afterwards. Whether an APPROVED requisition may be cancelled
 // (no line ordered or held by an RFQ) depends on its lines and is the store's check.
@@ -57,6 +59,14 @@ func RequisitionTransition(status, action string, approvedSteps, chainLen int) (
 	case ReqActionReopen:
 		if status != ReqRejected {
 			return refuse("REJECTED")
+		}
+		return ReqDraft, 0, nil
+	case ReqActionWithdraw:
+		if status != ReqInReview {
+			return refuse("IN_REVIEW")
+		}
+		if approvedSteps != 0 {
+			return "", 0, fmt.Errorf("%w: level %d has already approved; only the approvers can send it back now", ErrRequisitionState, approvedSteps)
 		}
 		return ReqDraft, 0, nil
 	case ReqActionCancel:

@@ -23,6 +23,8 @@ const (
 	RequisitionApproved  = "APPROVED"
 	RequisitionRejected  = "REJECTED"
 	RequisitionCancelled = "CANCELLED"
+	// RequisitionClosed is an APPROVED requisition with no OPEN line left: every line consolidated or cancelled.
+	RequisitionClosed = "CLOSED"
 )
 
 // Requisition is a purchase requisition (FR-17.1) with its lines.

@@ -58,6 +58,7 @@ type fakeStore struct {
 	lastConsolidated   []string
 	lastSplit          splitCall
 	approval           approvalFake
+	editing            editFake
 	release            releaseLog
 	lastIdem           store.Idem
 
