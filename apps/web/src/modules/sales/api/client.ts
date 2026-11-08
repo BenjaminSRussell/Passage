@@ -1423,6 +1423,79 @@ export function replaceDeliveryTerms(id: string, etag: string, input: Pick<Deliv
   return versioned<DeliveryTerms>(`/delivery-terms/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input), headers: { "If-Match": etag } });
 }
 
+export const PARTIAL_DELIVERY_POLICIES = ["ALLOWED", "COMPLETE_ONLY", "ONE_SHIPMENT"] as const;
+export type PartialDelivery = (typeof PARTIAL_DELIVERY_POLICIES)[number];
+
+/** How far a shipment of a product may differ from the order for a customer, and whether it may ship in parts (BR-27.9, BR-28.7). Percentages are decimal strings. */
+export interface DeliveryToleranceFigures {
+  overdeliveryPct: string;
+  underdeliveryPct: string;
+  partialDelivery: PartialDelivery;
+}
+
+export interface DeliveryToleranceInput extends DeliveryToleranceFigures {
+  legalEntityId: string;
+  productId: string;
+  /** Absent: the rule is for every customer of the legal entity. */
+  customerId?: string;
+}
+
+export interface DeliveryTolerance extends DeliveryToleranceInput {
+  id: string;
+  version: number;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeliveryToleranceFilter {
+  legalEntityId?: string;
+  productId?: string;
+  customerId?: string;
+}
+
+export async function listDeliveryTolerances(filter: DeliveryToleranceFilter = {}, signal?: AbortSignal): Promise<DeliveryTolerance[]> {
+  const body = await json<{ items?: DeliveryTolerance[] }>(
+    `/delivery-tolerances${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, customerId: filter.customerId, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getDeliveryTolerance(id: string, signal?: AbortSignal): Promise<Versioned<DeliveryTolerance>> {
+  return versioned<DeliveryTolerance>(`/delivery-tolerances/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createDeliveryTolerance(input: DeliveryToleranceInput, key: string = newKey()): Promise<Versioned<DeliveryTolerance>> {
+  return versioned<DeliveryTolerance>("/delivery-tolerances", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Replaces the figures of a rule at the given ETag. */
+export function replaceDeliveryTolerance(id: string, etag: string, input: DeliveryToleranceFigures): Promise<Versioned<DeliveryTolerance>> {
+  return versioned<DeliveryTolerance>(`/delivery-tolerances/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+export async function deleteDeliveryTolerance(id: string): Promise<void> {
+  await send(`/delivery-tolerances/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** The tolerance that governs a product for a customer, with the quantity range of an ordered quantity (BR-28.7). */
+export interface ResolvedDeliveryTolerance extends DeliveryToleranceFigures {
+  source: "CUSTOMER" | "ALL_CUSTOMERS" | "DEFAULT";
+  toleranceId?: string;
+  orderedQty?: string;
+  minQty?: string;
+  maxQty?: string;
+}
+
+export function resolveDeliveryTolerance(
+  input: { legalEntityId: string; productId: string; customerId: string; orderedQty?: string },
+  signal?: AbortSignal,
+): Promise<ResolvedDeliveryTolerance> {
+  return json<ResolvedDeliveryTolerance>(`/delivery-tolerances:resolve${query(input)}`, {}, signal);
+}
+
 export const SCHEDULE_STATUSES = ["CONFIRMED", "BACKORDER", "UNPROMISED"] as const;
 export type ScheduleStatus = (typeof SCHEDULE_STATUSES)[number];
 

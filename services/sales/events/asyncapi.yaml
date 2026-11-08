@@ -177,6 +177,21 @@ channels:
     messages:
       deliveryTermsChanged:
         $ref: "#/components/messages/DeliveryTermsChanged"
+  deliveryToleranceCreated:
+    address: passage.sales.deliverytolerance
+    messages:
+      deliveryToleranceCreated:
+        $ref: "#/components/messages/DeliveryToleranceCreated"
+  deliveryToleranceChanged:
+    address: passage.sales.deliverytolerance
+    messages:
+      deliveryToleranceChanged:
+        $ref: "#/components/messages/DeliveryToleranceChanged"
+  deliveryToleranceRemoved:
+    address: passage.sales.deliverytolerance
+    messages:
+      deliveryToleranceRemoved:
+        $ref: "#/components/messages/DeliveryToleranceRemoved"
   orderProgressRecorded:
     address: passage.sales.orderprogress
     messages:
@@ -435,6 +450,24 @@ operations:
     summary: A customer's transport days or receiving weekdays changed (FR-27.3, BR-27.2); they date orders confirmed afterwards, while confirmed orders keep the terms they were confirmed with. Consumers - fulfillment, customer portal, analytics.
     messages:
       - {$ref: "#/channels/deliveryTermsChanged/messages/deliveryTermsChanged"}
+  publishDeliveryToleranceCreated:
+    action: send
+    channel: {$ref: "#/channels/deliveryToleranceCreated"}
+    summary: A product's over-delivery and under-delivery tolerance and partial delivery policy were set for a customer or for every customer (BR-27.9, BR-28.7). Consumers - fulfillment, customer portal, analytics.
+    messages:
+      - {$ref: "#/channels/deliveryToleranceCreated/messages/deliveryToleranceCreated"}
+  publishDeliveryToleranceChanged:
+    action: send
+    channel: {$ref: "#/channels/deliveryToleranceChanged"}
+    summary: A delivery tolerance rule changed (BR-27.9, BR-28.7); the resolve call answers with the new figures from now on. Consumers - fulfillment, customer portal, analytics.
+    messages:
+      - {$ref: "#/channels/deliveryToleranceChanged/messages/deliveryToleranceChanged"}
+  publishDeliveryToleranceRemoved:
+    action: send
+    channel: {$ref: "#/channels/deliveryToleranceRemoved"}
+    summary: A delivery tolerance rule was removed; the product and customer fall back to the all-customers rule or the default (exact quantities, partial delivery allowed). Consumers - fulfillment, customer portal, analytics.
+    messages:
+      - {$ref: "#/channels/deliveryToleranceRemoved/messages/deliveryToleranceRemoved"}
   publishOrderProgressRecorded:
     action: send
     channel: {$ref: "#/channels/orderProgressRecorded"}
@@ -782,6 +815,30 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/DeliveryTermsData"
+    DeliveryToleranceCreated:
+      name: dev.passage.sales.deliverytolerance.created.v1
+      title: Delivery tolerance created
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/DeliveryToleranceData"
+    DeliveryToleranceChanged:
+      name: dev.passage.sales.deliverytolerance.changed.v1
+      title: Delivery tolerance changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/DeliveryToleranceData"
+    DeliveryToleranceRemoved:
+      name: dev.passage.sales.deliverytolerance.removed.v1
+      title: Delivery tolerance removed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/DeliveryToleranceData"
     OrderProgressRecorded:
       name: dev.passage.sales.orderprogress.recorded.v1
       title: Order delivery or invoice recorded
@@ -1043,6 +1100,22 @@ components:
         previous_receiving_days: {type: array, items: {type: integer}, description: absent on created}
         actor: {type: string}
         version: {type: integer, description: terms version after the change}
+    DeliveryToleranceData:
+      type: object
+      required: [tolerance_id, legal_entity_id, product_id, overdelivery_pct, underdelivery_pct, partial_delivery, actor, version]
+      properties:
+        tolerance_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid, description: absent when the rule applies to every customer of the legal entity}
+        overdelivery_pct: {type: string, description: percent of the ordered quantity a shipment may exceed it, as a decimal string}
+        underdelivery_pct: {type: string, description: percent of the ordered quantity a shipment may fall short of it and still complete the line}
+        partial_delivery: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT]}
+        previous_overdelivery_pct: {type: string, description: absent on created and removed}
+        previous_underdelivery_pct: {type: string, description: absent on created and removed}
+        previous_partial_delivery: {type: string, description: absent on created and removed}
+        actor: {type: string}
+        version: {type: integer, description: rule version after the change; the last version on removed}
     AllocationQuotaData:
       type: object
       required: [quota_id, product_id, period_start, period_end, quota_qty, consumed_qty, actor, version]

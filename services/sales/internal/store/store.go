@@ -330,6 +330,12 @@ type Store interface {
 	ListAllocationQuotas(ctx context.Context, f AllocationFilter) ([]AllocationQuota, error)
 	GetAllocationQuota(ctx context.Context, id string) (AllocationQuota, error)
 	ChangeAllocationQuota(ctx context.Context, id string, version int, qty decimal.Decimal, actor string, now time.Time) (AllocationQuota, error)
+	CreateDeliveryTolerance(ctx context.Context, in NewDeliveryTolerance) (DeliveryTolerance, bool, error)
+	ListDeliveryTolerances(ctx context.Context, f DeliveryToleranceFilter) ([]DeliveryTolerance, error)
+	GetDeliveryTolerance(ctx context.Context, id string) (DeliveryTolerance, error)
+	ReplaceDeliveryTolerance(ctx context.Context, id string, version int, t domain.DeliveryTolerance, actor string, now time.Time) (DeliveryTolerance, error)
+	DeleteDeliveryTolerance(ctx context.Context, id, actor string) error
+	ResolveDeliveryTolerance(ctx context.Context, legalEntityID, productID, customerID string) (ResolvedTolerance, error)
 	CreateDeliveryTerms(ctx context.Context, in NewDeliveryTerms) (DeliveryTerms, bool, error)
 	ListDeliveryTerms(ctx context.Context, f DeliveryTermsFilter) ([]DeliveryTerms, error)
 	GetDeliveryTerms(ctx context.Context, id string) (DeliveryTerms, error)

@@ -166,6 +166,9 @@ entity needs a literal ACL for the `debezium` Kafka user in `connect.yaml`.
 | POST | `/v1/sales/product-proposals:respond` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key`; records an accept or decline of one proposal |
 | GET / POST | `/v1/sales/alternative-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, repeated `orderedProductId`, `limit`) by ordered product and priority; create a rule (ordered product, alternative, optional customer, `priority` 1 to 99, optional `validFrom` / `validTo`; one per ordered product, customer or all customers, and alternative, else `SLS-0055`) |
 | DELETE | `/v1/sales/alternative-item-rules/{id}` | `sales.listing.maintain` | Remove a rule (`SLS-0113` when absent) |
+| GET / POST | `/v1/sales/delivery-tolerances` | `sales.order.read` / `sales.parameter.maintain` | List rules (`legalEntityId`, `productId`, `customerId`, `limit`; the all-customers rule first); create a rule for a product and a customer or, without `customerId`, every customer: `overdeliveryPct`, `underdeliveryPct` (0 to 100, 2 places, default 0) and `partialDelivery` (`ALLOWED`, `COMPLETE_ONLY`, `ONE_SHIPMENT`; default `ALLOWED`); `Idempotency-Key`, a second rule for the same product and customer is `SLS-0126`; `deliverytolerance.created` |
+| GET / PUT / DELETE | `/v1/sales/delivery-tolerances/{id}` | `sales.order.read` / `sales.parameter.maintain` | One rule (ETag = version); PUT replaces the figures under `If-Match` (`deliverytolerance.changed`, unchanged figures keep the version); DELETE removes the rule (`deliverytolerance.removed`, `SLS-0127` when absent) |
+| GET | `/v1/sales/delivery-tolerances:resolve` | `sales.order.read` | `legalEntityId`, `productId`, `customerId` required, optional `orderedQty`: the governing figures (the customer's own rule before the all-customers rule before the default of 0, 0, `ALLOWED`) with `source` and, with `orderedQty`, `minQty` and `maxQty` a shipment may carry. Meant for the shipping check (BR-28.7); fulfillment does not call it yet and checks its own `/v1/fulfillment/delivery-tolerances` |
 | GET | `/v1/sales/intake-errors`, `/v1/sales/intake-errors/{id}` | `sales.order.read` | Channel orders refused at intake (`legalEntityId`, `channel`, `status`, `errorCode`, `limit`), most recently seen first; a retry of the same payload raises `attempts` and reopens a resolved row. The payload is not kept, only its hash |
 | POST | `/v1/sales/intake-errors/{id}:resolve` | `sales.order.write` | Close an OPEN intake error with a `note` (`If-Match`; `SLS-0116` when already resolved) |
 | POST | `/v1/sales/alternative-items:evaluate` | `sales.order.read` | Stateless: when the ordered product cannot ship the whole quantity by the requested date, the applicable alternatives that can, each with its available quantity and promise, from ATP buckets in the request |
@@ -393,6 +396,8 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0123` | 422 | Return quantity exceeds what the invoice still allows |
 | `SLS-0124` | 503 / 422 | A peer (billing, fulfillment, inventory, receivables) is unavailable or refused; the return order keeps its state |
 | `SLS-0125` | 404 | Return order not found |
+| `SLS-0126` | 409 | The product already has a delivery tolerance for this customer (or for every customer) in the legal entity |
+| `SLS-0127` | 404 | Delivery tolerance not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

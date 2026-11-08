@@ -2418,6 +2418,145 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/delivery-tolerances:
+    get:
+      summary: List delivery tolerance rules by product and customer, the all-customers rule first (BR-27.9, BR-28.7)
+      operationId: listDeliveryTolerances
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: rules in the caller's legal-entity scope
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/DeliveryTolerance"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: Set the over-delivery and under-delivery tolerance and the partial delivery policy of a product for one customer or for every customer (BR-27.9, BR-28.7, FR-27.6)
+      operationId: createDeliveryTolerance
+      x-passage-duty: sales.parameter.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DeliveryToleranceRequest"}
+      responses:
+        "201":
+          description: the stored rule; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryTolerance"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored rule
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryTolerance"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0126 the product already has a rule for this customer (or for every customer) in the legal entity; change it with PUT
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: idempotency_key_reuse the Idempotency-Key was used with a different body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/delivery-tolerances:resolve:
+    get:
+      summary: The tolerance that governs a product for a customer, the customer's own rule before the all-customers rule before the default, with the least and most a shipment may carry when orderedQty is given (for the shipping check of BR-28.7; fulfillment does not call it yet)
+      operationId: resolveDeliveryTolerance
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: legalEntityId, in: query, description: "the legal entity; absent, the caller's own", schema: {type: string, format: uuid}}
+        - {name: productId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, required: true, schema: {type: string, format: uuid}}
+        - name: orderedQty
+          in: query
+          description: ordered quantity (above 0, at most 6 places); adds minQty and maxQty to the answer
+          schema: {$ref: "#/components/schemas/WeightQuantity"}
+      responses:
+        "200":
+          description: the governing tolerance; source DEFAULT means no rule exists (exact quantities, partial delivery allowed)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ResolvedDeliveryTolerance"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/delivery-tolerances/{id}:
+    get:
+      summary: One delivery tolerance rule
+      operationId: getDeliveryTolerance
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the rule; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryTolerance"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    put:
+      summary: Replace the tolerances and the partial delivery policy of a rule under If-Match; the resolve call answers with them from now on
+      operationId: replaceDeliveryTolerance
+      x-passage-duty: sales.parameter.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DeliveryToleranceReplaceRequest"}
+      responses:
+        "200":
+          description: the rule after the change; unchanged figures keep their version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeliveryTolerance"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412":
+          description: SLS-0006 the If-Match version is stale
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+    delete:
+      summary: Remove a rule; the product and customer fall back to the all-customers rule or the default
+      operationId: deleteDeliveryTolerance
+      x-passage-duty: sales.parameter.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: removed}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
   /v1/sales/product-proposal-rules:
     get:
       summary: Product proposal rules in the caller's scope with their recorded accept and decline counts (FR-27.21)
@@ -3306,6 +3445,50 @@ components:
         updatedBy: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    DeliveryToleranceRequest:
+      type: object
+      required: [legalEntityId, productId]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid, description: absent means every customer of the legal entity}
+        overdeliveryPct: {allOf: [{$ref: "#/components/schemas/Percent"}], description: most a shipment may exceed the ordered quantity, in percent of it; 0 when absent}
+        underdeliveryPct: {allOf: [{$ref: "#/components/schemas/Percent"}], description: most a shipment may fall short of the ordered quantity and still complete the line, in percent of it; 0 when absent}
+        partialDelivery: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT], description: ALLOWED when absent}
+    DeliveryToleranceReplaceRequest:
+      type: object
+      properties:
+        overdeliveryPct: {$ref: "#/components/schemas/Percent"}
+        underdeliveryPct: {$ref: "#/components/schemas/Percent"}
+        partialDelivery: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT]}
+      description: every figure is replaced; an absent percentage is 0 and an absent policy ALLOWED
+    DeliveryTolerance:
+      type: object
+      required: [id, legalEntityId, productId, overdeliveryPct, underdeliveryPct, partialDelivery, version, updatedBy, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid, description: absent for the rule of every customer}
+        overdeliveryPct: {$ref: "#/components/schemas/Percent"}
+        underdeliveryPct: {$ref: "#/components/schemas/Percent"}
+        partialDelivery: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT]}
+        version: {type: integer}
+        updatedBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ResolvedDeliveryTolerance:
+      type: object
+      required: [source, overdeliveryPct, underdeliveryPct, partialDelivery]
+      properties:
+        source: {type: string, enum: [CUSTOMER, ALL_CUSTOMERS, DEFAULT]}
+        toleranceId: {type: string, format: uuid, description: the rule that won; absent for the default}
+        overdeliveryPct: {$ref: "#/components/schemas/Percent"}
+        underdeliveryPct: {$ref: "#/components/schemas/Percent"}
+        partialDelivery: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT]}
+        orderedQty: {$ref: "#/components/schemas/WeightQuantity"}
+        minQty: {type: string, description: least a shipment may carry and still complete the line (ordered less the under-delivery tolerance, rounded up to 6 places); only with orderedQty}
+        maxQty: {type: string, description: most a shipment may carry (ordered plus the over-delivery tolerance, cut to 6 places); only with orderedQty}
     Problem:
       type: object
       required: [type, title, status]

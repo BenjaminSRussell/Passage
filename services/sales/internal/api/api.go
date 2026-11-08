@@ -199,6 +199,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(deliveryTerms, a.listDeliveryTerms)
 	r.With(authz.RequireDuty(dutyRead)).Get(deliveryTerms+"/{id}", a.getDeliveryTerms)
 	r.With(authz.RequireDuty(dutyParameter)).Put(deliveryTerms+"/{id}", a.replaceDeliveryTerms)
+	a.registerDeliveryTolerances(r)
 	a.registerReturnOrders(r)
 }
 

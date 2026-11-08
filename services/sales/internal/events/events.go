@@ -50,6 +50,10 @@ var (
 	DeliveryTermsCreated = events.Type(Context, "deliveryterms", "created", 1)
 	DeliveryTermsChanged = events.Type(Context, "deliveryterms", "changed", 1)
 
+	DeliveryToleranceCreated = events.Type(Context, "deliverytolerance", "created", 1)
+	DeliveryToleranceChanged = events.Type(Context, "deliverytolerance", "changed", 1)
+	DeliveryToleranceRemoved = events.Type(Context, "deliverytolerance", "removed", 1)
+
 	OrderProgressRecorded = events.Type(Context, "orderprogress", "recorded", 1)
 
 	OrderRemainderCancelled = events.Type(Context, "order", "remaindercancelled", 1)
@@ -69,7 +73,7 @@ func All() []string {
 		QuotationConverted, QuotationExpired, QuotationChanged, QuotationCancelled, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
-		DeliveryTermsCreated, DeliveryTermsChanged, OrderProgressRecorded, OrderRemainderCancelled, OrderClosed,
+		DeliveryTermsCreated, DeliveryTermsChanged, DeliveryToleranceCreated, DeliveryToleranceChanged, DeliveryToleranceRemoved, OrderProgressRecorded, OrderRemainderCancelled, OrderClosed,
 		ReturnOrderAuthorized, ReturnOrderReceived, ReturnOrderInspected, ReturnOrderDispositioned, ReturnOrderCredited}
 }
 
@@ -575,6 +579,27 @@ type DeliveryTermsData struct {
 	PreviousReceivingDays []int  `json:"previous_receiving_days,omitempty"`
 	Actor                 string `json:"actor"`
 	Version               int    `json:"version"`
+}
+
+// DeliveryToleranceData is the data member of deliverytolerance.created.v1,
+// deliverytolerance.changed.v1 and deliverytolerance.removed.v1: the
+// over-delivery and under-delivery tolerance (percent of the ordered quantity)
+// and the partial delivery policy of a product for one customer, or for every
+// customer when customer_id is absent (BR-27.9, BR-28.7). previous_* are empty
+// on created; on removed the figures are those the rule had.
+type DeliveryToleranceData struct {
+	ToleranceID              string  `json:"tolerance_id"`
+	LegalEntityID            string  `json:"legal_entity_id"`
+	ProductID                string  `json:"product_id"`
+	CustomerID               *string `json:"customer_id,omitempty"`
+	OverdeliveryPct          string  `json:"overdelivery_pct"`
+	UnderdeliveryPct         string  `json:"underdelivery_pct"`
+	PartialDelivery          string  `json:"partial_delivery"`
+	PreviousOverdeliveryPct  string  `json:"previous_overdelivery_pct,omitempty"`
+	PreviousUnderdeliveryPct string  `json:"previous_underdelivery_pct,omitempty"`
+	PreviousPartialDelivery  string  `json:"previous_partial_delivery,omitempty"`
+	Actor                    string  `json:"actor"`
+	Version                  int     `json:"version"`
 }
 
 // ProgressLine is one line touched by an order progress record.

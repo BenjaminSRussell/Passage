@@ -14,6 +14,7 @@ import { ChangePolicyPage } from "./ChangePolicyPage";
 import { ChangeRequestDetailPage } from "./ChangeRequestDetailPage";
 import { ChangeRequestsPage } from "./ChangeRequestsPage";
 import { DeliveryTermsDetailPage, DeliveryTermsListPage, NewDeliveryTermsPage } from "./DeliveryTermsPage";
+import { DeliveryToleranceDetailPage, DeliveryTolerancesListPage, NewDeliveryTolerancePage } from "./DeliveryTolerancesPage";
 import { CreditExposurePage } from "./CreditExposurePage";
 import { CreditProfilePage, NewCreditProfilePage } from "./CreditProfileFormPage";
 import { CreditProfilesPage } from "./CreditProfilesPage";
@@ -42,7 +43,7 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles and rank customers by credit limit used, the per legal entity sales parameters, product listings, customer delivery terms, supplementary items, product proposals, allocation quotas and sales agreements, record deliveries and invoices against orders, close invoiced orders, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
+    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles and rank customers by credit limit used, the per legal entity sales parameters, product listings, customer delivery terms, delivery tolerances and partial delivery policies, supplementary items, product proposals, allocation quotas and sales agreements, record deliveries and invoices against orders, close invoiced orders, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/workspace", element: createElement(SalesWorkspacePage), handle: { title: "Sales workspace", duty: "sales.order.read" } },
@@ -94,6 +95,9 @@ const sales: PassageModule = {
     { path: "/sales/delivery-terms", element: createElement(DeliveryTermsListPage), handle: { title: "Delivery terms", duty: "sales.order.read" } },
     { path: "/sales/delivery-terms/new", element: createElement(NewDeliveryTermsPage), handle: { title: "New delivery terms" } },
     { path: "/sales/delivery-terms/:id", element: createElement(DeliveryTermsDetailPage), handle: { title: "Delivery terms" } },
+    { path: "/sales/delivery-tolerances", element: createElement(DeliveryTolerancesListPage), handle: { title: "Delivery tolerances", duty: "sales.order.read" } },
+    { path: "/sales/delivery-tolerances/new", element: createElement(NewDeliveryTolerancePage), handle: { title: "New delivery tolerance" } },
+    { path: "/sales/delivery-tolerances/:id", element: createElement(DeliveryToleranceDetailPage), handle: { title: "Delivery tolerance" } },
     { path: "/sales/product-proposals/new", element: createElement(NewProposalRulePage), handle: { title: "New product proposal rule" } },
   ],
   nav: [
@@ -119,6 +123,7 @@ const sales: PassageModule = {
     { label: "Alternative items", to: "/sales/alternative-items", duty: "sales.order.read" },
     { label: "Allocation quotas", to: "/sales/allocation-quotas", duty: "sales.order.read" },
     { label: "Delivery terms", to: "/sales/delivery-terms", duty: "sales.order.read" },
+    { label: "Delivery tolerances", to: "/sales/delivery-tolerances", duty: "sales.order.read" },
     { label: "Intake errors", to: "/sales/intake-errors", duty: "sales.order.read" },
     { label: "Sales parameters", to: "/sales/parameters", duty: "sales.order.read" },
   ],
