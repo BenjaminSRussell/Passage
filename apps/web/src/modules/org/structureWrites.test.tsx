@@ -65,7 +65,14 @@ describe("operating units page", () => {
     expect(within(table).getByText("Assembly")).toBeInTheDocument();
     expect(within(table).getByText("cost center")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add operating unit" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Import from CSV" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Deactivate/ })).toBeNull();
+  });
+
+  it("links to the CSV import for a caller who can write", async () => {
+    serve({ ...entities, "GET /operating-units": () => json({ items: [unit] }) });
+    renderPage("/org/operating-units", OperatingUnitsPage, ["org.read", "org.operating-unit.write"]);
+    expect(await screen.findByRole("link", { name: "Import from CSV" })).toHaveAttribute("href", "/org/operating-units/import");
   });
 
   it("shows the empty and error states", async () => {

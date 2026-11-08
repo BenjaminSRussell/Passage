@@ -58,6 +58,7 @@ type Store interface {
 	ListLegalEntityNames(ctx context.Context, id string) ([]LegalEntityName, error)
 	ListLegalEntities(ctx context.Context, f LegalEntityFilter, afterCode string, limit int) (LegalEntityPage, error)
 	CreateOperatingUnit(ctx context.Context, in OperatingUnit, idempotencyKey string) (OperatingUnit, error)
+	ImportOperatingUnits(ctx context.Context, rows []OperatingUnitImportRow, dryRun bool) ([]OperatingUnitImportResult, error)
 	GetOperatingUnit(ctx context.Context, id string) (OperatingUnit, error)
 	ListOperatingUnits(ctx context.Context, f OperatingUnitFilter, after OperatingUnitKey, limit int) (OperatingUnitPage, error)
 	UpdateOperatingUnit(ctx context.Context, id string, version int, in OperatingUnitPatch) (OperatingUnit, error)

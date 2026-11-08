@@ -126,6 +126,28 @@ paths:
           description: ORG-HIER-TYPE-NOT-FOUND when hierarchyTypeId names no hierarchy type of the tenant.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/operating-units:import:
+    post:
+      operationId: importOperatingUnits
+      summary: Bulk-import operating units
+      description: Creates the operating units of the rows that the tenant does not have yet, matched by type and code. Every row is validated and checked against the tenant's units and legal entities first (default legal entity by code, which must be active and visible to the caller); if any row fails, nothing is written and the report lists each failure by line. Otherwise all new units are created in one transaction, each raising its own operatingunit.created event through the outbox. A row that matches an existing unit (same name and default legal entity) is unchanged, so importing the same file again creates nothing; a row that differs from an existing unit fails, since an import never updates. At most 1000 rows per request.
+      x-passage-duty: org.operating-unit.write
+      parameters:
+        - { name: dryRun, in: query, schema: { type: boolean, default: false }, description: When true nothing is written and the report shows what a real import would create. }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ImportOperatingUnits' } } }
+      responses:
+        '200':
+          description: The import report with one entry per row. applied is true only when the units were written (not a dry run and no failed row). 400 COM-0001 for a malformed body, an empty rows list or a bad dryRun. 403 AUTH-0003 without org.operating-unit.write.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OperatingUnitImportReport' } } }
+        '409':
+          description: ORG-OU-CODE-DUPLICATE when another request created one of the file's units between the check and the write; nothing was written and running the file again reports that unit as unchanged or failed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ORG-OU-IMPORT-TOO-LARGE when the file has more than 1000 rows.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/operating-units/{id}:
     get:
       operationId: getOperatingUnit
@@ -1520,6 +1542,35 @@ components:
       additionalProperties: false
       required: [version]
       properties: { version: { type: integer, minimum: 1 }, name: { type: string, minLength: 1, maxLength: 120 }, status: { type: string, enum: [active, inactive] }, defaultLegalEntityId: { type: string, description: A UUID, or an empty string to clear }, managerPartyId: { type: string, description: A UUID for a cost_center, or an empty string to clear } }
+    ImportOperatingUnits:
+      type: object
+      additionalProperties: false
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [type, code, name]
+            properties: { type: { type: string, enum: [department, cost_center, business_unit, value_stream] }, code: { type: string, description: Upper-cased; 2 to 20 characters of A-Z, 0-9, _ or - }, name: { type: string, minLength: 1, maxLength: 120 }, legalEntity: { type: string, description: Code of the default legal entity; empty for none } }
+    OperatingUnitImportReport:
+      type: object
+      required: [dryRun, applied, created, unchanged, failed, rows]
+      properties:
+        dryRun: { type: boolean }
+        applied: { type: boolean, description: True when the units were written. }
+        created: { type: integer, description: Units created, or that a dry run or a failed file would create. }
+        unchanged: { type: integer, description: Rows that match an existing unit. }
+        failed: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [line, type, code, status]
+            properties: { line: { type: integer, minimum: 1, description: 1-based position of the row in the request }, type: { type: string }, code: { type: string }, status: { type: string, enum: [created, unchanged, failed] }, id: { type: string, format: uuid, description: Present for a created row once applied, and for an unchanged row }, errors: { type: object, additionalProperties: { type: string }, description: Field to problem, for a failed row } }
     OperatingUnitList:
       type: object
       required: [items]

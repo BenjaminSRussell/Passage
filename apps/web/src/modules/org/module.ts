@@ -5,6 +5,7 @@ import { ReferenceDataPage } from "./ReferenceDataPage";
 import { FiscalCalendarsPage } from "./FiscalCalendarsPage";
 import { LegalEntitiesPage } from "./LegalEntityAdmin";
 import { ModelPackagePage } from "./ModelPackagePage";
+import { OperatingUnitImportPage } from "./OperatingUnitImportPage";
 import { OrgHome, OrgLayout } from "./pages";
 import { LocationsPage, OperatingUnitsPage, SitesPage, WarehousesPage } from "./StructurePages";
 import { TeamsPage } from "./TeamsPage";
@@ -20,6 +21,7 @@ const org: PassageModule = {
         { path: "/org", element: createElement(OrgHome) },
         { path: "/org/legal-entities", element: createElement(LegalEntitiesPage) },
         { path: "/org/operating-units", element: createElement(OperatingUnitsPage) },
+        { path: "/org/operating-units/import", element: createElement(OperatingUnitImportPage) },
         { path: "/org/sites", element: createElement(SitesPage) },
         { path: "/org/warehouses", element: createElement(WarehousesPage) },
         { path: "/org/locations", element: createElement(LocationsPage) },

@@ -1,4 +1,4 @@
-# Not implemented in PSG-6 slice 46
+# Not implemented in PSG-6 slice 47
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -40,7 +40,10 @@
 | Ledger posting check for ORG-CAL-LOCKED (BR-6.7) | handoff | the ledger (wave 11) must expose whether a fiscal year has postings; api.noPostings reports none until then, so force regeneration is always allowed |
 | BR-6.11 ORG-LE-DEFAULT-IN-USE (refuse deactivation while users default to the entity) | handoff | users' default legal entity is held by the identity/shell waves (2, 5), outside wave 6 ownership; org needs a read API or event for it |
 | Operating-unit numbers from the wave-5 sequence (org.ou.number_sequence OU-{#####}) | later slice of PSG-6 | sequences are scoped per legal entity, `services/numbering` has no tenant-level sequence and org has no numbering client, so it needs a wave-5 contract first |
-| Operating-unit CSV bulk import | later slice of PSG-6 | import belongs to the web module slice |
+| Operating-unit CSV bulk import | built (PSG-647 slice 47) | `POST /v1/org/operating-units:import` (`?dryRun=true`) takes up to 1000 parsed rows (type, code, name, optional default legal entity by code), checks all of them (rules of the create route, active legal entity visible to the caller, a code repeated in the file, an existing unit with another name or legal entity) and writes all or nothing in one transaction with one `operatingunit.created` event per new unit; a row equal to an existing unit is `unchanged`, so a second run writes nothing and the route needs no Idempotency-Key; a unit created by a concurrent request between the check and the write returns 409 `ORG-OU-CODE-DUPLICATE` and writes nothing. The web page `/org/operating-units/import` reads the CSV (header row, quoted fields, BOM) and shows the check and import report by row |
+| Operating-unit import: updates, manager party, per-row partial success | not built | an import never updates an existing unit (a differing row fails, as the package import only reports differences); `managerPartyId` waits for the party lookup (wave 7); a file with any failed row writes nothing, so there is no partial-success mode |
+| ORG-OU-IMPORT-TOO-LARGE | not in catalog | new code returned by `POST /v1/org/operating-units:import` for more than 1000 rows; the §1.6.18 catalog does not list it |
+| Authz seed for PSG-647 (#313) | handoff | the import route uses the existing duty `org.operating-unit.write` (route and page action) and `org.read` (nav), but `policies/authz/data.json` has no route row for it: `*` and the literal `/v1/org/operating-units` never cross `:`, so the gateway denies the call until the main session adds to duty `org.operating-unit.write` the permission `{ "resource": "/v1/org/operating-units:import", "methods": ["POST"] }` |
 | ORG-SITE-DEFAULT-WAREHOUSE-INVALID, ORG-WH-IS-DEFAULT | not in catalog | new codes returned by the default-warehouse routes (site PATCH `defaultWarehouseId` and warehouse PATCH of a site's default); the §1.6.18 catalog lists neither |
 | Fiscal period UUID for services/close `fiscalPeriodId` | not built | org periods are keyed by (calendar_id, fiscal_year, period_no); resolution returns that key; whether close keys periods by it or org adds a surrogate id is decided with wave 14 |
 | address_id in site.created, warehouse.created and location.created events | not built | an address needs its owner's id, so the pointer is set by PATCH after create and announced in the *.updated event's changed_fields; inline address on create is not built |

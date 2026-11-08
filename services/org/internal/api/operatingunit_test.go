@@ -193,3 +193,91 @@ func TestOperatingUnits_MetricsCountCreatesAndVersionBumps(t *testing.T) {
 		}
 	}
 }
+
+func postImport(t *testing.T, f *fakeStore, query, body, duties string) (int, map[string]any) {
+	t.Helper()
+	rec := do(routerAt(f), http.MethodPost, operatingUnits+":import"+query, body, duties, true)
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec.Code, out
+}
+
+func TestImportOperatingUnits(t *testing.T) {
+	good := `{"rows":[{"type":"department","code":"d200","name":" Assembly "},{"type":"cost_center","code":"CC9","name":"Plant","legalEntity":"usmf"},{"type":"department","code":"D1","name":"Two"}]}`
+	t.Run("applies the file and counts unchanged rows", func(t *testing.T) {
+		f := seededUnits()
+		code, out := postImport(t, f, "", good, unitDuties)
+		if code != http.StatusOK || out["applied"] != true || out["created"] != 2.0 || out["unchanged"] != 1.0 || out["failed"] != 0.0 {
+			t.Fatalf("code %d body %v", code, out)
+		}
+		if len(f.ous) != 4 || f.ous[2].Code != "D200" || f.ous[2].Name != "Assembly" {
+			t.Fatalf("units %+v", f.ous)
+		}
+	})
+	t.Run("a second run writes nothing", func(t *testing.T) {
+		f := seededUnits()
+		postImport(t, f, "", good, unitDuties)
+		_, out := postImport(t, f, "", good, unitDuties)
+		if out["created"] != 0.0 || out["unchanged"] != 3.0 || len(f.ous) != 4 {
+			t.Fatalf("body %v units %d", out, len(f.ous))
+		}
+	})
+	t.Run("dry run reports without writing", func(t *testing.T) {
+		f := seededUnits()
+		_, out := postImport(t, f, "?dryRun=true", good, unitDuties)
+		if out["dryRun"] != true || out["applied"] != false || out["created"] != 2.0 || len(f.ous) != 2 {
+			t.Fatalf("body %v units %d", out, len(f.ous))
+		}
+	})
+	t.Run("one bad row stops the whole file", func(t *testing.T) {
+		f := seededUnits()
+		body := `{"rows":[{"type":"department","code":"D300","name":"Ok"},{"type":"region","code":"x","name":""},{"type":"department","code":"D1","name":"Renamed"},{"type":"department","code":"D300","name":"Again"},{"type":"department","code":"D400","name":"Ok","legalEntity":"nope"}]}`
+		code, out := postImport(t, f, "", body, unitDuties)
+		if code != http.StatusOK || out["applied"] != false || out["failed"] != 4.0 || len(f.ous) != 2 {
+			t.Fatalf("code %d body %v units %d", code, out, len(f.ous))
+		}
+		rows := out["rows"].([]any)
+		first := rows[0].(map[string]any)
+		if first["line"] != 1.0 || first["status"] != "created" || first["id"] != nil {
+			t.Fatalf("row 1 = %v", first)
+		}
+		for i, field := range []string{"type", "code", "code", "legalEntity"} {
+			errs := rows[i+1].(map[string]any)["errors"].(map[string]any)
+			if _, ok := errs[field]; !ok {
+				t.Fatalf("row %d errors %v lack %s", i+2, errs, field)
+			}
+		}
+	})
+	t.Run("rejects bad requests", func(t *testing.T) {
+		for name, c := range map[string]struct {
+			query, body, duties string
+			status              int
+			want                string
+		}{
+			"empty":          {"", `{"rows":[]}`, unitDuties, http.StatusBadRequest, `"rows"`},
+			"bad dryRun":     {"?dryRun=maybe", good, unitDuties, http.StatusBadRequest, `"dryRun"`},
+			"unknown field":  {"", `{"rows":[],"x":1}`, unitDuties, http.StatusBadRequest, "COM-0001"},
+			"too many":       {"", `{"rows":[` + strings.Repeat(`{"type":"department","code":"D1","name":"x"},`, 1000) + `{}]}`, unitDuties, http.StatusUnprocessableEntity, "ORG-OU-IMPORT-TOO-LARGE"},
+			"read-only duty": {"", good, "org.read", http.StatusForbidden, "AUTH-0003"},
+		} {
+			rec := do(routerAt(seededUnits()), http.MethodPost, operatingUnits+":import"+c.query, c.body, c.duties, true)
+			if rec.Code != c.status || !strings.Contains(rec.Body.String(), c.want) {
+				t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+			}
+		}
+	})
+	t.Run("a unit created concurrently is a conflict", func(t *testing.T) {
+		f := seededUnits()
+		f.err = httpx.NewProblem(http.StatusConflict, "ORG-OU-CODE-DUPLICATE", "created by another request")
+		if code, out := postImport(t, f, "", good, unitDuties); code != http.StatusConflict || out["code"] != "ORG-OU-CODE-DUPLICATE" {
+			t.Fatalf("code %d body %v", code, out)
+		}
+	})
+	t.Run("store failure is reported", func(t *testing.T) {
+		f := seededUnits()
+		f.err = errors.New("boom")
+		if code, _ := postImport(t, f, "", good, unitDuties); code != http.StatusInternalServerError {
+			t.Fatalf("code %d", code)
+		}
+	})
+}

@@ -36,6 +36,7 @@ type fakeStore struct {
 	ouFilter            store.OperatingUnitFilter
 	compareArgs         [2]int
 	ouCalls             int
+	importCalls         int
 	sites               []store.Site
 	siteCalls           int
 	replayCreates       bool
@@ -416,6 +417,49 @@ func (f *fakeStore) CreateOperatingUnit(_ context.Context, in store.OperatingUni
 	in.ID, in.Status, in.Version = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.ous)+1), "active", 1
 	f.ous = append(f.ous, in)
 	return in, nil
+}
+
+// ImportOperatingUnits mirrors the store: duplicates in the file and differing existing units
+// fail, an identical existing unit is unchanged, and nothing is added after a failure or on a dry run.
+func (f *fakeStore) ImportOperatingUnits(_ context.Context, rows []store.OperatingUnitImportRow, dryRun bool) ([]store.OperatingUnitImportResult, error) {
+	f.importCalls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []store.OperatingUnitImportResult
+	var add []store.OperatingUnit
+	failed, seen := false, map[string]bool{}
+	for _, row := range rows {
+		res := store.OperatingUnitImportResult{Line: row.Line, Type: row.Type, Code: row.Code, Status: store.ImportCreated, Errors: map[string]string{}}
+		key := row.Type + "/" + row.Code
+		if seen[key] {
+			res.Errors["code"] = "repeats the type and code of an earlier row"
+		}
+		seen[key] = true
+		if row.LegalEntityCode == "NOPE" {
+			res.Errors["legalEntity"] = "is not an active legal entity visible to the caller"
+		}
+		for _, u := range f.ous {
+			if u.Type == row.Type && u.Code == row.Code && len(res.Errors) == 0 {
+				if u.Name == row.Name {
+					res.Status, res.ID = store.ImportUnchanged, u.ID
+				} else {
+					res.Errors["code"] = "exists with a different name or default legal entity; an import never updates"
+				}
+			}
+		}
+		if len(res.Errors) > 0 {
+			res.Status, failed = store.ImportFailed, true
+		} else if res.Status == store.ImportCreated {
+			res.ID = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.ous)+len(add)+1)
+			add = append(add, store.OperatingUnit{ID: res.ID, Type: row.Type, Code: row.Code, Name: row.Name, Status: "active", Version: 1})
+		}
+		out = append(out, res)
+	}
+	if !dryRun && !failed {
+		f.ous = append(f.ous, add...)
+	}
+	return out, nil
 }
 
 func (f *fakeStore) lookupOperatingUnit(id string) (*store.OperatingUnit, error) {

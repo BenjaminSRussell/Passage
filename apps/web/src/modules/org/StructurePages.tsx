@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -331,52 +332,57 @@ export function OperatingUnitsPage() {
       ]}
       toolbar={({ reload }) =>
         canWriteOperatingUnit ? (
-          <CreateForm<OperatingUnitValues, "type" | "code" | "name">
-            title="Add operating unit"
-            subject="operating unit"
-            initial={{ type: "", code: "", name: "", defaultLegalEntityId: "" }}
-            validate={validateOperatingUnit}
-            send={(values) =>
-              createOperatingUnit({
-                type: values.type as OperatingUnitType,
-                code: values.code.toUpperCase(),
-                name: values.name.trim(),
-                defaultLegalEntityId: values.defaultLegalEntityId === "" ? undefined : values.defaultLegalEntityId,
-              })
-            }
-            duplicate={duplicateOf("ORG-OU-CODE-DUPLICATE", "An operating unit of this type already has this code.")}
-            onCreated={reload}
-            fields={({ errors, text }) => (
-              <>
-                <FormField id="ou-type" label="Type" error={errors.type}>
-                  {(control) => (
-                    <Select {...control} {...text("type")}>
-                      <option value="">Select a type</option>
-                      {operatingUnitTypes.map((type) => (
-                        <option key={type} value={type}>
-                          {label(type)}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </FormField>
-                <FormField id="ou-code" label="Code" error={errors.code}>
-                  {(control) => <Input {...control} {...text("code")} maxLength={20} />}
-                </FormField>
-                <FormField id="ou-name" label="Name" error={errors.name}>
-                  {(control) => <Input {...control} {...text("name")} maxLength={120} />}
-                </FormField>
-                <FormField id="ou-legal-entity" label="Default legal entity" optional>
-                  {(control) => (
-                    <Select {...control} {...text("defaultLegalEntityId")}>
-                      <option value="">None</option>
-                      <EntityOptions />
-                    </Select>
-                  )}
-                </FormField>
-              </>
-            )}
-          />
+          <>
+            <p>
+              <Link to="/org/operating-units/import">Import from CSV</Link>
+            </p>
+            <CreateForm<OperatingUnitValues, "type" | "code" | "name">
+              title="Add operating unit"
+              subject="operating unit"
+              initial={{ type: "", code: "", name: "", defaultLegalEntityId: "" }}
+              validate={validateOperatingUnit}
+              send={(values) =>
+                createOperatingUnit({
+                  type: values.type as OperatingUnitType,
+                  code: values.code.toUpperCase(),
+                  name: values.name.trim(),
+                  defaultLegalEntityId: values.defaultLegalEntityId === "" ? undefined : values.defaultLegalEntityId,
+                })
+              }
+              duplicate={duplicateOf("ORG-OU-CODE-DUPLICATE", "An operating unit of this type already has this code.")}
+              onCreated={reload}
+              fields={({ errors, text }) => (
+                <>
+                  <FormField id="ou-type" label="Type" error={errors.type}>
+                    {(control) => (
+                      <Select {...control} {...text("type")}>
+                        <option value="">Select a type</option>
+                        {operatingUnitTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {label(type)}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </FormField>
+                  <FormField id="ou-code" label="Code" error={errors.code}>
+                    {(control) => <Input {...control} {...text("code")} maxLength={20} />}
+                  </FormField>
+                  <FormField id="ou-name" label="Name" error={errors.name}>
+                    {(control) => <Input {...control} {...text("name")} maxLength={120} />}
+                  </FormField>
+                  <FormField id="ou-legal-entity" label="Default legal entity" optional>
+                    {(control) => (
+                      <Select {...control} {...text("defaultLegalEntityId")}>
+                        <option value="">None</option>
+                        <EntityOptions />
+                      </Select>
+                    )}
+                  </FormField>
+                </>
+              )}
+            />
+          </>
         ) : null
       }
     />

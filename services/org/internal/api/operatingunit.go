@@ -51,6 +51,7 @@ type operatingUnitList struct {
 
 func (a *API) registerOperatingUnits(r chi.Router) {
 	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(operatingUnits, a.createOperatingUnit)
+	r.With(authz.RequireDuty(dutyOperatingUnit)).Post(operatingUnitsImport, a.importOperatingUnits)
 	r.With(authz.RequireDuty(dutyRead)).Get(operatingUnits, a.listOperatingUnits)
 	r.With(authz.RequireDuty(dutyRead)).Get(operatingUnits+"/{id}", operatingUnitRoute(a.getOperatingUnit))
 	r.With(authz.RequireDuty(dutyOperatingUnit)).Patch(operatingUnits+"/{id}", operatingUnitRoute(a.updateOperatingUnit))
