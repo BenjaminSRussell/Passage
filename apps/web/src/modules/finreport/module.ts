@@ -5,6 +5,8 @@ import { DefinitionEditorPage } from "./DefinitionEditorPage";
 import { DefinitionsPage } from "./DefinitionsPage";
 import { HierarchiesPage } from "./HierarchiesPage";
 import { HierarchyEditorPage } from "./HierarchyEditorPage";
+import { LegalHoldPage } from "./LegalHoldPage";
+import { LegalHoldsPage } from "./LegalHoldsPage";
 import { LibraryEntryPage } from "./LibraryEntryPage";
 import { LibraryPage } from "./LibraryPage";
 import { ColumnSetEditorPage, RowSetEditorPage, TreeEditorPage } from "./PartEditorPages";
@@ -20,7 +22,7 @@ import { VerificationsPage } from "./VerificationsPage";
 const finreport: PassageModule = {
   id: "finreport",
   title: "Financial statements",
-  description: "Report definitions, statement runs over the journal with drill-down to the balances and journal lines behind every amount, downloads, row sets and column sets with comparative templates, reporting trees with per-unit roll-up runs, distribution schedules with their firings and the report library of stored statement files, the audit trail and the check of the read model against the ledger.",
+  description: "Report definitions, statement runs over the journal with drill-down to the balances and journal lines behind every amount, downloads, row sets and column sets with comparative templates, reporting trees with per-unit roll-up runs, distribution schedules with their firings and the report library of stored statement files with its retention sweep and legal holds, the audit trail and the check of the read model against the ledger.",
   routes: [
     { path: "/finreport", element: createElement(RunsPage), handle: { title: "Financial statements" } },
     { path: "/finreport/runs/new", element: createElement(NewRunPage), handle: { title: "Run a statement" } },
@@ -45,6 +47,8 @@ const finreport: PassageModule = {
     { path: "/finreport/schedules/:code", element: createElement(ScheduleEditorPage), handle: { title: "Distribution schedule" } },
     { path: "/finreport/library", element: createElement(LibraryPage), handle: { title: "Report library" } },
     { path: "/finreport/library/:id", element: createElement(LibraryEntryPage), handle: { title: "Library file" } },
+    { path: "/finreport/legal-holds", element: createElement(LegalHoldsPage), handle: { title: "Legal holds" } },
+    { path: "/finreport/legal-holds/:id", element: createElement(LegalHoldPage), handle: { title: "Legal hold" } },
     { path: "/finreport/audit-trail", element: createElement(AuditTrailPage), handle: { title: "Audit trail" } },
     { path: "/finreport/verifications", element: createElement(VerificationsPage), handle: { title: "Ledger verification" } },
     { path: "/finreport/verifications/:id", element: createElement(VerificationPage), handle: { title: "Ledger check" } },
@@ -58,6 +62,7 @@ const finreport: PassageModule = {
     { label: "Derived hierarchies", to: "/finreport/hierarchies", duty: "reporting.definition.maintain" },
     { label: "Distribution schedules", to: "/finreport/schedules", duty: "reporting.statement.schedule" },
     { label: "Report library", to: "/finreport/library", duty: "reporting.statement.view" },
+    { label: "Legal holds", to: "/finreport/legal-holds", duty: "reporting.statement.view" },
     { label: "Audit trail", to: "/finreport/audit-trail", duty: "reporting.audit.view" },
     { label: "Ledger verification", to: "/finreport/verifications", duty: "reporting.audit.view" },
   ],

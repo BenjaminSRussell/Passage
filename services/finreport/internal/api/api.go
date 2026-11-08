@@ -93,6 +93,11 @@ type Store interface {
 	GetLibraryEntry(ctx context.Context, id string) (store.LibraryEntry, error)
 	LibraryContent(ctx context.Context, id string) (store.LibraryEntry, []byte, error)
 	ListFirings(ctx context.Context, schedule string, latest bool, limit int) ([]store.Firing, error)
+	PlaceHold(ctx context.Context, spec store.HoldSpec) (store.LegalHold, error)
+	ReleaseHold(ctx context.Context, id string, ifMatch *int, note, actor string) (store.LegalHold, error)
+	ListHolds(ctx context.Context, activeOnly bool) ([]store.LegalHold, error)
+	GetHold(ctx context.Context, id string) (store.LegalHold, error)
+	ListSweeps(ctx context.Context, limit int) ([]store.Sweep, error)
 }
 
 // API holds the handlers.
@@ -167,6 +172,11 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/library", a.listLibrary)
 		r.With(authz.RequireDuty(DutyView)).Get("/library/{id}", a.getLibraryEntry)
 		r.With(authz.RequireDuty(DutyView)).Get("/library/{id}/content", a.libraryContent)
+		r.With(authz.RequireDuty(DutyView)).Get("/legal-holds", a.listHolds)
+		r.With(authz.RequireDuty(DutyHold)).Post("/legal-holds", a.placeHold)
+		r.With(authz.RequireDuty(DutyView)).Get("/legal-holds/{id}", a.getHold)
+		r.With(authz.RequireDuty(DutyHold)).Post("/legal-holds/*", a.holdAction)
+		r.With(authz.RequireDuty(DutyView)).Get("/library-sweeps", a.listSweeps)
 		r.With(authz.RequireDuty(DutyVerify)).Post("/balance-verifications", a.createVerification)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications", a.listVerifications)
 		r.With(authz.RequireDuty(DutyAudit)).Get("/balance-verifications/{id}", a.getVerification)

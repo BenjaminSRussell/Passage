@@ -48,7 +48,7 @@ export function LibraryEntryPage() {
     ["Size", formatBytes(e.sizeBytes)],
     ["SHA-256", e.sha256],
     ["Generated", e.createdAt],
-    ["Kept until", e.retainUntil],
+    ["Kept until", e.onHold ? `${e.retainUntil} (kept past this date: legal hold)` : e.retainUntil],
   ];
   return (
     <div className={styles.stack}>

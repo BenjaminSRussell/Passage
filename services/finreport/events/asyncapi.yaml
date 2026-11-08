@@ -37,6 +37,18 @@ channels:
     messages:
       distributionSent:
         $ref: '#/components/messages/DistributionSent'
+  legalHold:
+    address: passage.reporting.legalhold
+    messages:
+      legalHoldPlaced:
+        $ref: '#/components/messages/LegalHoldPlaced'
+      legalHoldReleased:
+        $ref: '#/components/messages/LegalHoldReleased'
+  librarySwept:
+    address: passage.reporting.library
+    messages:
+      librarySwept:
+        $ref: '#/components/messages/LibrarySwept'
 operations:
   publishStatementFailed:
     action: send
@@ -87,6 +99,27 @@ operations:
     summary: A definition version was published (BR-15.8)
     messages:
       - $ref: '#/channels/definitionPublished/messages/definitionPublished'
+  publishLegalHoldPlaced:
+    action: send
+    channel:
+      $ref: '#/channels/legalHold'
+    summary: The report library of a legal entity was put under legal hold (FR-15.8); written to the outbox in the transaction that stores the hold
+    messages:
+      - $ref: '#/channels/legalHold/messages/legalHoldPlaced'
+  publishLegalHoldReleased:
+    action: send
+    channel:
+      $ref: '#/channels/legalHold'
+    summary: A legal hold on the report library of a legal entity was released (FR-15.8); written to the outbox in the transaction that releases it
+    messages:
+      - $ref: '#/channels/legalHold/messages/legalHoldReleased'
+  publishLibrarySwept:
+    action: send
+    channel:
+      $ref: '#/channels/librarySwept'
+    summary: The retention sweep deleted past-retention report library files of a legal entity, or a legal hold kept them (FR-15.8); one event per entity pass that deleted or held anything
+    messages:
+      - $ref: '#/channels/librarySwept/messages/librarySwept'
 components:
   messages:
     StatementGenerated:
@@ -223,3 +256,47 @@ components:
           delivery: {type: string, enum: [attachment, link], description: attachment when the file fits the schedule's attachment limit, else the email carries a library link}
           recipient_count: {type: integer}
           recipients_sha256: {type: string, description: SHA-256 hex over the sorted recipient addresses, joined by a newline}
+    LegalHoldPlaced:
+      name: dev.passage.reporting.legalhold.placed.v1
+      title: Legal hold placed
+      summary: The report library of a legal entity is under legal hold; the retention sweep deletes none of its files until the hold is released.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [hold_id, legal_entity_id, reason, actor]
+        properties:
+          hold_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity whose library is held (also the legalentityid extension)}
+          reason: {type: string}
+          actor: {type: string, description: User who placed the hold}
+    LegalHoldReleased:
+      name: dev.passage.reporting.legalhold.released.v1
+      title: Legal hold released
+      summary: A legal hold on the report library of a legal entity was released; the retention sweep deletes its past-retention files again.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [hold_id, legal_entity_id, reason, actor]
+        properties:
+          hold_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity whose library was held (also the legalentityid extension)}
+          reason: {type: string, description: The reason the hold was placed with}
+          actor: {type: string, description: User who released the hold}
+          note: {type: string, description: Release note}
+    LibrarySwept:
+      name: dev.passage.reporting.library.swept.v1
+      title: Library swept
+      summary: The retention sweep deleted the report library files of a legal entity that were past their retention date, or a legal hold kept files that were past it.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [sweep_id, legal_entity_id, cutoff, deleted_count, deleted_bytes, held_count, actor]
+        properties:
+          sweep_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid, description: Legal entity swept (also the legalentityid extension)}
+          cutoff: {type: string, format: date-time, description: Files with a retention date at or before this time were eligible}
+          deleted_count: {type: integer}
+          deleted_bytes: {type: integer, format: int64}
+          held_count: {type: integer, description: Past-retention files a legal hold kept}
+          hold_id: {type: string, format: uuid, description: The active hold that kept them}
+          actor: {type: string, description: The system actor of the sweep}

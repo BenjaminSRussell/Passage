@@ -45,6 +45,9 @@ func TestGrants_AppRoleLocksDraftsButCannotWriteReadModelOrRewriteAppendOnly(t *
 		`delete from report_row_set`,
 		`delete from report_column_set`,
 		`delete from report_tree`,
+		`update report_library_sweep set cutoff = cutoff`,
+		`delete from report_library_sweep`,
+		`delete from report_legal_hold`,
 		`update outbox set type = type`,
 		`select count(*) from outbox`,
 	} {

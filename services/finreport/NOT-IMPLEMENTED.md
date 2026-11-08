@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 16
+# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 17
 
 Every deliverable bullet of PSG-15, and every acceptance criterion that slices 1
 to 7 do not fully meet, is listed here. Status is either **later slice of PSG-15**
@@ -12,7 +12,7 @@ platform change outside the wave's owned paths).
 | 1 | Report designer: row/column/tree over account structures and dimensions | Rows (header, account_range, dimension_filter, total, calculation), columns (P, P-n, YTD, PY, PYTD, Q, FY, CALC), validation via `:validate`, JSON import/export, definition list. Web designer form (`apps/web/src/modules/finreport`): rows and columns with add, remove and move up/down, validate, save draft with If-Match, publish, export, JSON import. Slice 12: row sets and column sets (`GET/PUT /row-sets[/{code}]`, `/column-sets[/{code}]`, table `report_row_set` and `report_column_set`, migration 0014: stored with the definition rules applied to the part on its own, If-Match on replace, `updatedBy`), four shipped comparative templates (`GET /column-set-templates`, see FR-15.3), `POST /definitions:compose` (a draft body from a row set and a column set or template; stores nothing). Web: row set and column set list and form pages, the templates with a Copy link, and a "Start from saved parts" card in the designer that copies a row set's rows or a column set's or template's columns into the definition (copied, not linked). | Slice 13: reporting trees (`GET /trees`, `GET/PUT /trees/{code}`, table `report_tree`, migration 0015: units over the values of one dimension attribute with parents for roll-up, If-Match on replace) and a Reporting trees list and form in the web module. Partial. Split-pane layout, live preview, drag reorder, multi-select indent and "insert total of selection" are **later slice of PSG-15**. | Slice 1 is the evaluation core, the API and a form-based designer; the tree model and the richer editor follow. |
 | 2 | Standard statements: TB, BS, P&L, CF indirect, comparative, consolidated-by-entity | Slice 2: `TB-STD` (opening, closing, movement per account class), `BS-STD` (current, prior year, variance, check row), `PL-STD` and `PL-FUNC` (period, YTD, prior year) ship in `domain/standard.go`; `GET /standard-definitions` lists them and `POST /standard-definitions:install` publishes version 1 of each code the tenant does not use, in one transaction. Web: install card on the definitions list. Slice 3: `CF-STD` (indirect: net income, non-cash adjustments, working capital, investing, financing, change in cash, check row; period and YTD), and every `cash_flow` run is reconciled per column (`domain.CheckCashFlow`, REPORT-0008 / REPORT-0009 fail the run). | Partial. `TB-DIM` and per-account rows are **later slice of PSG-15**; the entity-column (consolidated-by-entity) run mode ships in slice 15 (section below); comparative column templates ship since slice 12 (see FR-15.3). CF-STD has no "not classified" row: an account range cannot express "every balance-sheet account outside the tagged ranges", so the run-level REPORT-0009 check (naming the accounts) stands in for it until hierarchies can be row sets. | The standard rows group accounts by the first digit of the account number (1 assets, 2 liabilities, 3 equity, 4 revenue, 5-6 expenses). That is an assumption standing in for `MainAccountCategory` (**handoff** to wave 11); a tenant with another chart edits the installed drafts. |
 | 3 | Drill-down: statement, balance, journal lines, source document, trace id | Drill level 1 (balance keys of a cell, sum checked, REPORT-0099 on mismatch; computed cells answer `computed: true`). Slice 5: drill level 2 over the `reporting_journal_line` read model (migration 0005): lines of a cell or of one balance key at the run's HWM, closing entries excluded per statement kind, keyset pages in BR-15.4 order (default `REPORTING_PAGE_SIZE`, max 1,000), `sumOfLines`, `cumulativeSum` and the reconciliation of all lines against the keys on every page (`reconciled`, `difference`, `unreconciledKeys`; a gap is reported, never hidden), debit and credit, `sourceUri` (Passage route or http(s) URL, validated on write and again in the browser) and `traceUrl` from `REPORTING_TRACE_URL`. Web: journal lines panel from the drill panel, per balance or for the whole cell, with load more, breadcrumb, source and trace links. | Partial. Feeding `reporting_journal_line` from `journal.posted` / `journal.reversed` (the ledger consumer, FR-15.1) is **later slice of PSG-15**; the events are a **handoff** to wave 11. `filtered_amount` and the REPORT-0007 warning need dimension security (FR-15.9, **later slice of PSG-15**; OPA decision **handoff** to wave 2): no line is filtered today, so the response has no `filteredAmount`. Statement keyboard navigation (arrow keys, Enter to drill) is **later slice of PSG-15**. Setting `REPORTING_TRACE_URL` to the Tempo (Grafana) address of each environment is a **handoff** to deploy/. | The line feed and dimension security are not built; the trace viewer address is per environment. |
-| 4 | Scheduled distribution (PDF/XLSX/email), row-level security on dimensions | Slice 3: schedules (`GET /schedules`, `GET/PUT /schedules/{code}`, table `report_schedule` with RLS): published definition, cron in an IANA zone, ledgers, currency type, formats, recipients, attachment limit, enabled, If-Match on replace, `nextRunAt`. CSV output of a run (`GET /runs/{id}/outputs/csv`) with the "as of" header and footer. Web: schedule list and form, Download CSV on the statement page. Slice 4: HTML and XLSX outputs (`GET /runs/{id}/outputs/html` and `/xlsx`) built from the same layout as CSV, REPORT-0016 on a renderer error; Download HTML and XLSX on the statement page. Slice 16: the `finreport fire-schedules TENANT_ID...` job (chart CronJob `statementSchedules`, every five minutes) fires the schedules that came due (section "Slice 16" below): one firing per schedule x ledger x cron time, a run of the definition for the month before the cron time, CSV/HTML/XLSX rendered and stored in the report library (`report_library_entry`, SHA-256, retention date), `distribution.sent.v1` per file in the outbox, retry once, `statement.failed.v1` on a second failure; `GET /library[/{id}[/content]]`, `GET /schedule-firings`; web Report library list and file pages, "Last run" on the Schedules page. | Partial. The PDF renderer, `outputs[]` on runs and on `statement.generated`, legal hold and the retention sweep, share links with expiry, REPORT-0017, the close-checklist trigger, per-recipient rendering, and consolidated or tree/hierarchy schedules are **later slice of PSG-15**. The period a firing runs for is the calendar month before the cron time, placed in a fiscal year by the schedule's `fiscalYearStartMonth`; the ledger's own calendar and "last closed period" (**handoff** to wave 14) replace that. **Handoff** for SMTP (wave 4), the Chromium renderer sidecar (deploy/ + platform), the job runner (platform) and OPA dimension-value decisions (wave 2 `authz` Policy). | Requires the email transport (the notification service sends the email from `distribution.sent.v1`), the calendar API and the OPA decision for dimension values. |
+| 4 | Scheduled distribution (PDF/XLSX/email), row-level security on dimensions | Slice 3: schedules (`GET /schedules`, `GET/PUT /schedules/{code}`, table `report_schedule` with RLS): published definition, cron in an IANA zone, ledgers, currency type, formats, recipients, attachment limit, enabled, If-Match on replace, `nextRunAt`. CSV output of a run (`GET /runs/{id}/outputs/csv`) with the "as of" header and footer. Web: schedule list and form, Download CSV on the statement page. Slice 4: HTML and XLSX outputs (`GET /runs/{id}/outputs/html` and `/xlsx`) built from the same layout as CSV, REPORT-0016 on a renderer error; Download HTML and XLSX on the statement page. Slice 16: the `finreport fire-schedules TENANT_ID...` job (chart CronJob `statementSchedules`, every five minutes) fires the schedules that came due (section "Slice 16" below): one firing per schedule x ledger x cron time, a run of the definition for the month before the cron time, CSV/HTML/XLSX rendered and stored in the report library (`report_library_entry`, SHA-256, retention date), `distribution.sent.v1` per file in the outbox, retry once, `statement.failed.v1` on a second failure; `GET /library[/{id}[/content]]`, `GET /schedule-firings`; web Report library list and file pages, "Last run" on the Schedules page. | Partial. Slice 17 built legal hold and the retention sweep (see below). The PDF renderer, `outputs[]` on runs and on `statement.generated`, share links with expiry, REPORT-0017, the close-checklist trigger, per-recipient rendering, and consolidated or tree/hierarchy schedules are **later slice of PSG-15**. The period a firing runs for is the calendar month before the cron time, placed in a fiscal year by the schedule's `fiscalYearStartMonth`; the ledger's own calendar and "last closed period" (**handoff** to wave 14) replace that. **Handoff** for SMTP (wave 4), the Chromium renderer sidecar (deploy/ + platform), the job runner (platform) and OPA dimension-value decisions (wave 2 `authz` Policy). | Requires the email transport (the notification service sends the email from `distribution.sent.v1`), the calendar API and the OPA decision for dimension values. |
 | 5 | Audit trail report: who posted, approvals, reversals, period overrides | Slice 6: `audit_trail_entry` (migration 0006, RLS) with every PRD kind (posted, replayed, reversed, batch submitted/approved/rejected, period changed, reopen approved, rate override, tax fallback, allocation, year-end and rebuild runs) plus this service's own (`statement_run`, `definition_published`, `definition_retired`, `hierarchy_published`, `schedule_saved`, `audit_exported`), the latter written in the same transaction as the change. `PutAuditEntries` ingests ledger kinds, one entry per source event id. `GET /audit-trail` (ledger, period, kind, actor, from/to; narrowed range enforced; keyset pages; `traceUrl`) and `GET /audit-trail:export` (CSV, SHA-256 header, export recorded in the trail with its digest, REPORT-0030 over 50,000 entries). Web: audit trail page with filter, entry details, load more and export showing the digest. | Partial. The consumers that turn `ledger.journal.posted` / `reversed`, batch approval, period status and reopen approval, rate override, tax fallback, allocation, year-end and rebuild events into entries are **later slice of PSG-15**; the events are a **handoff** to waves 11, 12, 13 and 14, and the CDC audit store to wave 5. PDF export (renderer sidecar, **handoff** to deploy/), keeping export files 10 years in the report library, actor display names (identity, **handoff** to wave 2) and masking names on data-subject requests are **later slice of PSG-15**. | The ledger-side events and the audit store are owned by other waves. |
 | 6 | Derived financial hierarchies (main account categories, dimension values) | Slice 2: `report_hierarchy` table (RLS), domain rules (ranges, values, prefix wildcards, attribute tests; depth 12, 20,000 nodes, cycles), list, revision-checked drafts, publish with REPORT-0013 (strict) and REPORT-0014 (overlap), materialized membership per version, `hierarchy.unassigned.v1` per unassigned member of a non-strict publish, owner recorded. Web: hierarchy list and editor with publish and membership view. Slice 7: a run can take its rows from a published main account or dimension value hierarchy (`hierarchy` in `POST /runs`, see FR-15.4): one row per node with members in the ledger, parents total their children, an Unassigned row last (REPORT-0034 warning, footnoted on the statement page), a Total row, the hierarchy version recorded on the run, `GET /runs/{id}/definition` serving the expanded rows. Web: "Rows from hierarchy" on the run form, hierarchy label on the statement page. | Partial. Effective-date resolution of the hierarchy version at run time (BR-15.13: the version effective on the run period's end date; a run takes the version asked for, else the latest published, because the run's calendar periods carry no dates until the ledger calendar of wave 14 exists, **handoff**), expanding a leaf into its accounts on demand on the statement page, main account category hierarchies as run rows (need the category master data of wave 11, **handoff**), `follow_master_data`, retiring a hierarchy and a member-level membership table (membership is one JSON document per version) are **later slice of PSG-15**. The members to classify are passed in the publish request: the account master, `MainAccountCategory` / `MainAccount.category_id` and dimension values are a **handoff** to wave 11 and wave 6. Re-evaluation on `ledger.account.changed` and dimension events within 60 s (`hierarchy-membership-refresh`) and the owner notification are **later slice of PSG-15** after those events exist. | Master data is owned by waves 6 and 11. |
 | 7 | P&L by function of expense (PL-FUNC) | Slice 2: `PL-FUNC` ships with revenue, cost of sales, distribution, administrative, other operating and financial rows filtered on `FUNC_AREA`, and a check row of expense lines without `FUNC_AREA`. `domain.PLFuncCheck` returns REPORT-0015. | Partial. Slice 3 stores REPORT-0015 in the run's `checks[]` as a warning (the run completes) and the statement page shows it. Expense lines whose `FUNC_AREA` is a value other than COS, DIST, ADMIN, OTHER or FIN fall out of the functional rows without showing in the check row (**later slice of PSG-15**, needs a "not in" filter). **Handoff** to wave 11 for the `FUNC_AREA` dimension (FR-11.22). | Depends on the dimension. |
@@ -33,7 +33,7 @@ platform change outside the wave's owned paths).
 | FR-15.6 queued / running / failed states and 202 + `statusUrl` for long work | Runs are synchronous; `status` is always `completed`. **later slice of PSG-15** | Async execution needs the job runner (platform). |
 | FR-15.7 drill level 1 | Done (`GET .../balances`, exact sum check) | n/a |
 | FR-15.7 drill level 2, source link, trace id | Done over the line read model (slice 5, see deliverable 3): `GET .../lines`, source document link, trace link. The consumer that fills the read model and the dimension-security `filtered_amount` are **later slice of PSG-15**. Runs stored before slice 5 have balance keys without their sign; drill level 2 takes the sign from the row, which is right for every row except a total mixing credit and debit rows (those show as unreconciled, never wrongly reconciled). | See deliverable 3. |
-| FR-15.8 scheduling and distribution | Partial. Slice 3: schedule CRUD and validation. Slice 16: firing, report library with retention date and SHA-256, `distribution.sent.v1` (attachment or link by the schedule's attachment limit), failure events. Share links with expiry, legal hold, the retention sweep, the close-checklist trigger and the email itself are **later slice of PSG-15**; SMTP is a **handoff** to wave 4 (the notification service consumes `distribution.sent.v1`) | See deliverable 4. |
+| FR-15.8 scheduling and distribution | Partial. Slice 3: schedule CRUD and validation. Slice 16: firing, report library with retention date and SHA-256, `distribution.sent.v1` (attachment or link by the schedule's attachment limit), failure events. Slice 17: legal hold per legal entity and the weekly retention sweep (see Slice 17 below). Share links with expiry, the close-checklist trigger, ad-hoc run retention and the email itself are **later slice of PSG-15**; SMTP is a **handoff** to wave 4 (the notification service consumes `distribution.sent.v1`) | See deliverable 4. |
 | FR-15.9 row-level security on dimensions | **later slice of PSG-15**; OPA dimension decision is a **handoff** to wave 2 | `authz.RequireDuty` checks duties only. |
 | FR-15.10 audit trail report and hashed export | Partial (slice 6): report, filters, CSV export with SHA-256, export recorded. Ledger-kind consumers and PDF export are **later slice of PSG-15**; source events are a **handoff** (waves 5, 11-14). | See deliverable 5. |
 | FR-15.11 definition import/export as JSON | Done: `GET .../export`, `POST .../import` (schema v1, REPORT-0011 when the code has a draft or a published version and `overwrite` is not set, REPORT-0012 schema, optional Idempotency-Key stored in `idempotency_keys`). Store test exports, re-imports under a new code and compares cells. | n/a |
@@ -51,7 +51,7 @@ platform change outside the wave's owned paths).
 | Events: `statement.failed`, `distribution.sent`, `lag.exceeded` | `lag.exceeded.v1` built in slice 11: `finreport lag-check TENANT_ID...` (chart `lagCheck` CronJob, every minute; `store.CheckLag`, serialised per tenant by an advisory lock) opens an episode per ledger in `reporting_lag_alert` (migration 0013) when its lag first exceeds the gate, writes one event to the outbox once the lag has stayed above for `REPORTING_LAG_ALERT_S` (default 60; a ledger first seen already that far past the gate alerts at once), and closes the episode on recovery; payload `ledger_id`, `legal_entity_id` (also the `legalentityid` extension), `lag_seconds`, `hwm_ledger` (highest sequence seen, applied or waiting), `hwm_reporting`. `statement.failed.v1` and `distribution.sent.v1` are built in slice 16 for scheduled firings (section "Slice 16"); an ad-hoc `POST /runs` that fails still writes no `statement.failed`. A cash flow run refused with REPORT-0008 / REPORT-0009 answers 422 and writes no `statement.failed`: runs are synchronous and nothing is stored. | The producers of `statement.failed` (async runs) and `distribution.sent` (distribution) are not built yet. A CronJob runs at most once a minute, so an alert can come up to a minute after the window ends. The alert rule "lag > 60 s (P2)" on the event is deploy/'s (**handoff**). |
 | `statement.generated.v1`, `definition.published.v1`, `hierarchy.unassigned.v1` | Done: written to the outbox in the same transaction. `hierarchy.unassigned.v1` is raised at publish of a non-strict hierarchy; raising it when a new account or dimension value arrives needs the master-data events (see deliverable 6). | n/a |
 | Retire event | Retire writes no event; PRD §2.15.5 names none. From slice 6 a retire writes a `definition_retired` audit entry in the same transaction. | n/a |
-| Jobs: `reporting-balance-consumer` (built: slice 8 handler, slice 9 `consume` command; waits on the authz seed), `reporting-balance-verify` (the check exists as `POST /balance-verifications` since slice 10; the nightly runner does not), `library-retention-sweep`, `audit-completeness-check`, `hierarchy-membership-refresh` | **later slice of PSG-15**. `statement-schedules` is built in slice 16 as `finreport fire-schedules` (it needs no platform job runner: it is a chart CronJob like `lag-check`). The others, and the ones that depend on the consumer, are later. | Depend on the consumer and the platform job runner. |
+| Jobs: `reporting-balance-consumer` (built: slice 8 handler, slice 9 `consume` command; waits on the authz seed), `reporting-balance-verify` (the check exists as `POST /balance-verifications` since slice 10; the nightly runner does not), `audit-completeness-check`, `hierarchy-membership-refresh` (and `library-retention-sweep`, built in slice 17) | **later slice of PSG-15**. `statement-schedules` is built in slice 16 as `finreport fire-schedules` and `library-retention-sweep` in slice 17 as `finreport sweep-library` (neither needs a platform job runner: they are chart CronJobs like `lag-check`). The others, and the ones that depend on the consumer, are later. | Depend on the consumer and the platform job runner. |
 | Schedules: delete, owner and "last run" | No delete (PRD §2.15.5 lists GET and PUT only; `enabled: false` pauses). `updatedBy` records the last editor; "last run" is on the Schedules screen from slice 16 (`GET /schedule-firings`). | n/a |
 | `POST` publish, validate, retire, install and hierarchy publish: `Idempotency-Key` | Not taken. Validate is stateless. Publish (definitions and hierarchies) is safe to repeat: a second call finds no draft and answers 404, so it never creates a second version. Retire succeeds again on a retired code. Install skips codes already in use. Import and run creation persist the key (`idempotency_keys` table and `statement_run.idempotency_key`). | PRD §2.15.5 asks for a key on import and runs only. |
 | Tree endpoints (`/trees[/{id}]`) | Built in slice 13 as `GET /trees` (maintainers and statement runners; the list carries every tree's units, which is what the run form needs, like `GET /hierarchies`), `GET /trees/{code}` and `PUT /trees/{code}` (maintainers; If-Match, 428 or 412 as for the other parts); slice 14 adds the revision routes above. Hierarchy-backed units are **later slice of PSG-15**. | The definition list (`GET /definitions`), retire (slice 2) and run list (`GET /runs`, newest first, no cursor) are built. |
@@ -426,8 +426,8 @@ column on the Schedules page, "Fiscal year starts in" on the schedule form.
 Not built in this slice: PDF (renderer sidecar, **handoff** to deploy/), the email
 (**handoff** to wave 4: the notification service consumes `distribution.sent.v1`,
 looks the recipients up by `schedule_code` and sends the file or, when `delivery` is
-`link`, a link to `GET /library/{id}/content`), share links with expiry, legal hold
-and the retention sweep (`retain_until` is stored, nothing deletes; it is always the
+`link`, a link to `GET /library/{id}/content`), share links with expiry (slice 17
+built legal hold and the retention sweep; `retain_until` is always the
 closed-period retention, `REPORTING_RETENTION_CLOSED_YEARS` service-wide, because whether the
 firing's period is closed and the per-legal-entity `reporting.retention_closed_years` need
 the wave 14 calendar and the settings service), recipient-specific
@@ -463,3 +463,98 @@ Deploy handoffs (deploy/, not this wave's paths): set `statementSchedules.enable
 `passage.reporting.distribution` (the `statement.failed.v1` event rides on the existing
 `passage.reporting.statement` topic); the notification service (wave 4) subscribes to
 `distribution.sent.v1` and `statement.failed.v1`.
+
+## Slice 17: report library retention and legal hold (FR-15.8)
+
+`finreport sweep-library TENANT_ID...` (chart CronJob `librarySweep`, off by default,
+weekly Sunday 04:00 UTC, in-process system actor `system:finreport-library-sweep` with the
+all-scope duty like `lag-check` and `fire-schedules`: no route, no service call, no authz
+seed) is the PRD job `library-retention-sweep`. Per tenant and legal entity, in one
+transaction, it deletes the `report_library_entry` files whose `retain_until` has passed,
+records the pass in `report_library_sweep` (files and bytes deleted, files kept) and writes
+a `library_swept` audit entry and `dev.passage.reporting.library.swept.v1`. A pass that
+finds nothing past retention writes nothing. Files without a legal entity are never
+deleted (no hold could cover them). Migration 0019 gives `passage_app` DELETE on the
+library table for this, and a `BEFORE DELETE` trigger refuses any delete of a file before
+its `retain_until`, without a legal entity, or while its legal entity is under an active
+hold, whoever issues it, so the rule does not rest on the sweep code alone. Placing a hold
+and deleting an entity's files take the same per-entity advisory lock
+(`report_legal_hold_lock`), so a hold committed while a sweep is running is seen by the
+delete and keeps the files. The application role still has no UPDATE or TRUNCATE on the
+library, and only the release columns of a hold are updatable. The sweep cutoff is the
+earlier of the job clock and the database clock.
+
+Legal hold (PRD §2.15.15: "legal hold suspends `library-retention-sweep` per entity"):
+`report_legal_hold` (migration 0019, RLS with the legal-entity policy). One hold can be in
+force per legal entity (409 `REPORT-0045`); while it is, the sweep deletes none of the
+entity's files and records how many it kept (`heldCount`, `holdId`). `POST /legal-holds`
+(`Idempotency-Key`, body `legalEntityId` and `reason`; the entity must be in the caller's
+scope, 403 `REPORT-0048`), `POST /legal-holds/{id}:release` (`If-Match` the revision: 428,
+412 `conflict_version`; 409 `REPORT-0046` when released already; optional `note`),
+`GET /legal-holds[?active=true]`, `GET /legal-holds/{id}` and `GET /library-sweeps`. Place and
+release write `legal_hold_placed` and `legal_hold_released` audit entries and
+`legalhold.placed.v1` and `legalhold.released.v1` in the same transaction. Library entries
+carry `onHold`. Migration 0019 also widens the audit kind check. Web: Legal holds list with
+the place form (shown to holders of the new duty), the hold page with the release form, the
+retention sweep table, and the library file page says when a file is kept past its date.
+
+Duty: `reporting.library.hold` (new) enforced in the service on both POSTs; reads use
+`reporting.statement.view` (the web nav item is gated on it). `REPORT-0045` to
+`REPORT-0049` (0049: reason or note empty or over 500 characters) are slice-local codes,
+not yet in the PRD catalog.
+
+Not built in this slice: share links with expiry (an unauthenticated token route needs a
+gateway decision, **handoff** to wave 2), per-legal-entity `reporting.retention_closed_years`
+and the 90-day retention of ad-hoc runs (`REPORTING_RETENTION_ADHOC_DAYS`; ad-hoc runs are
+not stored as library files and the sweep does not touch `statement_run`), the closed-period
+test for `retain_until` (wave 14 calendar), a hold on one file or one definition (the hold
+is per legal entity, as the PRD says), and a `library.swept` consumer.
+
+### Handoffs from slice 17 (authz seed, exact rows)
+
+New duty `reporting.library.hold` ("Hold the report library"), enforced in the service on
+`POST /v1/reporting/legal-holds` and `POST /v1/reporting/legal-holds/*:release`. Not yet in
+`policies/authz/data.json`; `TestEveryServiceDutyIsSeeded` in identity fails until the row
+exists. `*` crosses neither `/` nor `:` (the policy globs on both), so each route needs its
+own row and the release row must carry the `:release` suffix, as `definitions/*:publish` does.
+
+`duties` (new):
+
+```json
+"reporting.library.hold": {"permissions": [
+  {"resource": "/v1/reporting/legal-holds", "methods": ["POST"]},
+  {"resource": "/v1/reporting/legal-holds/*:release", "methods": ["POST"]}
+]},
+```
+
+`reporting.statement.view` (add):
+
+```json
+{"resource": "/v1/reporting/legal-holds", "methods": ["GET"]},
+{"resource": "/v1/reporting/legal-holds/*", "methods": ["GET"]},
+{"resource": "/v1/reporting/library-sweeps", "methods": ["GET"]}
+```
+
+`policies/authz/authz_test.rego` pin (suggested):
+
+```rego
+test_reporting_legal_hold_routes if {
+	allowed("reporting.library.hold", "POST", "/v1/reporting/legal-holds")
+	allowed("reporting.library.hold", "POST", "/v1/reporting/legal-holds/h1:release")
+	not allowed("reporting.library.hold", "GET", "/v1/reporting/legal-holds")
+	not allowed("reporting.library.hold", "POST", "/v1/reporting/legal-holds/h1")
+	allowed("reporting.statement.view", "GET", "/v1/reporting/legal-holds/h1")
+	allowed("reporting.statement.view", "GET", "/v1/reporting/library-sweeps")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/legal-holds")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/legal-holds/h1:release")
+}
+```
+
+Until these rows are seeded the gateway refuses the calls: the Legal holds page shows its
+error alert with "Try again" and the place and release actions answer 403.
+
+| Owner | Handoff |
+| --- | --- |
+| Role catalog (wave 2) | grant `reporting.library.hold` to the legal or compliance role and the financial controller; keep it apart from `reporting.statement.schedule` if the segregation rules want the schedule owner unable to lift a hold |
+| Deploy (deploy/) | set `librarySweep.enabled` and `librarySweep.tenantIds` per environment; the notification service or ops alerting may subscribe to `legalhold.placed.v1`, `legalhold.released.v1` and `library.swept.v1` (topics `passage.reporting.legalhold` and `passage.reporting.library`) |
+| PRD catalog | add `REPORT-0045` to `REPORT-0049` |

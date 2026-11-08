@@ -29,6 +29,7 @@ const csv: LibraryEntry = {
   sha256: SHA,
   retainUntil: "2033-04-01T02:00:00Z",
   createdAt: "2026-04-01T02:00:04Z",
+  onHold: false,
 };
 const xlsx: LibraryEntry = { ...csv, id: "0190f0a0-0000-7000-8000-000000000b02", format: "xlsx", fileName: "BS-STD-0190f0a0-2026-03.xlsx", sizeBytes: 5 * 1024 * 1024 };
 

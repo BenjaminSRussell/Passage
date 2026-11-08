@@ -63,6 +63,10 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 			registered[method+" "+strings.TrimSuffix(route, "*")+"{code}:publish"] = true
 			return nil
 		}
+		if strings.HasSuffix(route, "/legal-holds/*") {
+			registered[method+" "+strings.TrimSuffix(route, "*")+"{id}:release"] = true
+			return nil
+		}
 		registered[method+" "+route] = true
 		return nil
 	})

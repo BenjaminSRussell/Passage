@@ -369,3 +369,12 @@ twice is recorded in `report_schedule_firing` and writes `statement.failed.v1`.
 `GET /v1/reporting/library` lists the stored files, `.../library/{id}/content`
 serves exactly the stored bytes, `GET /v1/reporting/schedule-firings` is the
 firing history. Details and what is left: NOT-IMPLEMENTED.md, "Slice 16".
+
+## Slice 17: library retention and legal hold
+
+`finreport sweep-library TENANT_ID...` (chart `librarySweep` CronJob, weekly, in process as
+`system:finreport-library-sweep`) deletes report library files past their retention date per
+legal entity, except for entities under a legal hold (`report_legal_hold`, migration 0019;
+`POST /v1/reporting/legal-holds`, `.../legal-holds/{id}:release`, `GET /library-sweeps`).
+A delete trigger on `report_library_entry` refuses removing a retained or held file. Details
+and what is left: NOT-IMPLEMENTED.md, "Slice 17".

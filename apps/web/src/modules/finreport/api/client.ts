@@ -661,6 +661,8 @@ export interface LibraryEntry {
   sha256: string;
   retainUntil: string;
   createdAt: string;
+  /** The entry's legal entity is under legal hold: the retention sweep keeps the file past retainUntil. */
+  onHold: boolean;
 }
 
 export interface LibraryPage {
@@ -845,6 +847,9 @@ export const AUDIT_KINDS = [
   "hierarchy_published",
   "schedule_saved",
   "audit_exported",
+  "legal_hold_placed",
+  "legal_hold_released",
+  "library_swept",
 ] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
@@ -917,4 +922,56 @@ export async function exportAuditTrail(q: AuditQuery): Promise<AuditExport> {
     fileName: `audit-trail-${id || "export"}.csv`,
     csv: await res.text(),
   };
+}
+
+/** A hold on the report library of one legal entity (FR-15.8): while it is active the retention sweep deletes none of its files. */
+export interface LegalHold {
+  id: string;
+  legalEntityId: string;
+  reason: string;
+  placedBy: string;
+  placedAt: string;
+  active: boolean;
+  releasedBy?: string;
+  releasedAt?: string;
+  releaseNote?: string;
+  /** Echoed in If-Match to release the hold. */
+  revision: number;
+}
+
+/** One pass of the weekly retention sweep over one legal entity. */
+export interface LibrarySweep {
+  id: string;
+  legalEntityId: string;
+  sweptAt: string;
+  cutoff: string;
+  deletedCount: number;
+  deletedBytes: number;
+  /** Past-retention files a legal hold kept. */
+  heldCount: number;
+  holdId?: string;
+  actor: string;
+}
+
+export async function listLegalHolds(signal?: AbortSignal): Promise<LegalHold[]> {
+  return (await get<{ items: LegalHold[] }>("/legal-holds", signal)).items;
+}
+
+export function getLegalHold(id: string, signal?: AbortSignal): Promise<LegalHold> {
+  return get<LegalHold>(`/legal-holds/${seg(id)}`, signal);
+}
+
+/** Puts a legal entity's library under hold. A retry with the same key returns the stored hold. 409 REPORT-0045 when one is active. */
+export async function placeLegalHold(legalEntityId: string, reason: string, key: string): Promise<LegalHold> {
+  return (await send<LegalHold>("/legal-holds", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ legalEntityId, reason }) })).body;
+}
+
+/** Releases a hold; revision is the one read (a stale one answers 412 conflict_version). */
+export async function releaseLegalHold(id: string, revision: number, note: string): Promise<LegalHold> {
+  const headers = { "If-Match": `"${revision}"` };
+  return (await send<LegalHold>(`/legal-holds/${seg(id)}:release`, { method: "POST", headers, body: JSON.stringify(note === "" ? {} : { note }) })).body;
+}
+
+export async function listLibrarySweeps(signal?: AbortSignal): Promise<LibrarySweep[]> {
+  return (await get<{ items: LibrarySweep[] }>("/library-sweeps", signal)).items;
 }

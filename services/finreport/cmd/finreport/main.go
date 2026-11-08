@@ -10,6 +10,7 @@
 //
 // `finreport lag-check TENANT_ID...` runs the lag alert once (the chart's CronJob).
 // `finreport fire-schedules TENANT_ID...` fires the distribution schedules that are due (the chart's CronJob).
+// `finreport sweep-library TENANT_ID...` deletes report library files past retention unless a legal hold keeps them (the chart's CronJob).
 package main
 
 import (
@@ -46,8 +47,10 @@ func main() {
 		err = lagCheck(ctx, os.Getenv, os.Args[2:])
 	case len(os.Args) > 1 && os.Args[1] == fireSchedulesCommand:
 		err = fireSchedules(ctx, os.Getenv, os.Args[2:])
+	case len(os.Args) > 1 && os.Args[1] == sweepLibraryCommand:
+		err = sweepLibrary(ctx, os.Getenv, os.Args[2:])
 	case len(os.Args) > 1:
-		err = fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to run the ledger journal consumer, \"lag-check TENANT_ID...\" to raise lag.exceeded or \"fire-schedules TENANT_ID...\" to fire due distribution schedules)", os.Args[1])
+		err = fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to run the ledger journal consumer, \"lag-check TENANT_ID...\" to raise lag.exceeded, \"fire-schedules TENANT_ID...\" to fire due distribution schedules or \"sweep-library TENANT_ID...\" to delete report library files past retention)", os.Args[1])
 	default:
 		err = run(ctx, os.Getenv)
 	}

@@ -309,8 +309,9 @@ func TestLibrary_ScopedByLegalEntityAndTenant(t *testing.T) {
 	}
 }
 
-// The application role can read and add library files, never change or remove
-// them (the migration grants SELECT and INSERT only).
+// The application role can read and add library files and never change them
+// (SELECT and INSERT, and DELETE for the retention sweep, which the delete guard
+// of migration 0019 limits to files past retention and not under legal hold).
 func TestLibrary_AppRoleCannotRewriteStoredFiles(t *testing.T) {
 	f := firingSetup(t)
 	res := f.result(t, apr1, FiringOutput{Format: "csv", FileName: "a.csv", ContentType: "text/csv", Content: []byte("x")})
@@ -319,7 +320,8 @@ func TestLibrary_AppRoleCannotRewriteStoredFiles(t *testing.T) {
 	}
 	for _, q := range []string{
 		`update report_library_entry set content = 'y'`,
-		`delete from report_library_entry`,
+		`update report_library_entry set retain_until = now() - interval '1 day'`,
+		`truncate report_library_entry`,
 		`update report_schedule_firing set status = 'failed'`,
 		`delete from report_schedule_firing`,
 	} {
@@ -330,5 +332,12 @@ func TestLibrary_AppRoleCannotRewriteStoredFiles(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "permission denied") {
 			t.Errorf("%s as passage_app = %v, want permission denied", q, err)
 		}
+	}
+	err := dbx.WithTenantTx(f.ctx, f.st.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(f.ctx, `delete from report_library_entry`)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "retained until") {
+		t.Errorf("delete of a retained file as passage_app = %v, want the retention refusal", err)
 	}
 }

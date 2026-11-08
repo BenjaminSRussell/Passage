@@ -1432,6 +1432,198 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/legal-holds:
+    get:
+      operationId: listLegalHolds
+      summary: Legal holds on the report library, newest first (FR-15.8)
+      description: >-
+        The holds placed on the report library of a legal entity, in force or released, newest first, for the
+        legal entities in the caller's scope. While a hold is in force the retention sweep deletes none of
+        the entity's files.
+      x-passage-duty: reporting.statement.view
+      parameters:
+        - {name: active, in: query, required: false, description: 'true keeps the holds still in force', schema: {type: boolean}}
+      responses:
+        '200':
+          description: The legal holds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/LegalHold'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: placeLegalHold
+      summary: Put the report library of a legal entity under legal hold (FR-15.8)
+      description: >-
+        Suspends the retention sweep for the legal entity: no file of its report library is deleted, past its
+        retention date or not, until the hold is released. One hold can be in force per entity (409
+        REPORT-0045). The hold, an audit trail entry and legalhold.placed.v1 are written in one transaction.
+        A repeated request with the same Idempotency-Key returns the stored hold.
+      x-passage-duty: reporting.library.hold
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, reason]
+              additionalProperties: false
+              properties:
+                legalEntityId: {type: string, format: uuid, description: Legal entity whose library is held; must be in the caller's scope}
+                reason: {type: string, minLength: 1, maxLength: 500, description: Why the hold is placed (matter, case or audit reference)}
+      responses:
+        '201':
+          description: The hold was placed
+          headers:
+            Location:
+              schema: {type: string}
+            ETag:
+              description: Revision of the hold; send it in If-Match to release it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegalHold'}
+        '200':
+          description: Replay - the hold stored for this Idempotency-Key and the same request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegalHold'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403':
+          description: AUTH-0003 (missing reporting.library.hold) or REPORT-0048 (the legal entity is outside the caller's scope)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: REPORT-0045 - the legal entity is already under legal hold, or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422':
+          description: Invalid body, REPORT-0049 (reason empty or longer than 500 characters) or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/legal-holds/{id}:
+    parameters:
+      - $ref: '#/components/parameters/LegalHoldId'
+    get:
+      operationId: getLegalHold
+      summary: One legal hold (FR-15.8)
+      description: A hold on the report library of a legal entity, with its revision in the ETag.
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: The legal hold
+          headers:
+            ETag:
+              description: Revision of the hold
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegalHold'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0047 - no such hold, or it is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/legal-holds/{id}:release:
+    parameters:
+      - $ref: '#/components/parameters/LegalHoldId'
+    post:
+      operationId: releaseLegalHold
+      summary: Release a legal hold (FR-15.8)
+      description: >-
+        Ends the hold; the retention sweep deletes the entity's past-retention files again at its next pass.
+        If-Match carries the revision read (428 when missing, 412 conflict_version when stale). The release,
+        an audit trail entry and legalhold.released.v1 are written in one transaction.
+      x-passage-duty: reporting.library.hold
+      parameters:
+        - {name: If-Match, in: header, required: true, description: Revision of the hold as read (the ETag), schema: {type: string}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note: {type: string, maxLength: 500, description: Release note}
+      responses:
+        '200':
+          description: The released hold
+          headers:
+            ETag:
+              description: New revision of the hold
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegalHold'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: REPORT-0047 - no such hold, or it is outside the caller's legal-entity scope
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: REPORT-0046 - the hold was released already
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '412':
+          description: conflict_version - the hold changed since it was read
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422':
+          description: REPORT-0049 - the note is longer than 500 characters
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '428':
+          description: precondition_required - If-Match is missing
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /v1/reporting/library-sweeps:
+    get:
+      operationId: listLibrarySweeps
+      summary: Passes of the library retention sweep, newest first (FR-15.8)
+      description: >-
+        One row per legal entity pass of the weekly sweep that deleted files past their retention date or
+        found some kept by a legal hold: how many files and bytes were deleted, how many a hold kept. Passes
+        that found nothing past retention are not recorded. Visibility follows the caller's legal-entity scope.
+      x-passage-duty: reporting.statement.view
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Passes to return, 1 to 200; default 200
+          schema: {type: integer, minimum: 1, maximum: 200}
+      responses:
+        '200':
+          description: The sweep passes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/LibrarySweep'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerAuth:
@@ -1439,6 +1631,12 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    LegalHoldId:
+      name: id
+      in: path
+      required: true
+      description: Legal hold id
+      schema: {type: string, format: uuid}
     LibraryId:
       name: id
       in: path
@@ -1880,6 +2078,34 @@ components:
         sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         retainUntil: {type: string, format: date-time, description: The file is kept at least until then (REPORTING_RETENTION_CLOSED_YEARS)}
         createdAt: {type: string, format: date-time}
+        onHold: {type: boolean, description: The entry's legal entity is under legal hold, so the file is kept past retainUntil}
+    LegalHold:
+      type: object
+      required: [id, legalEntityId, reason, placedBy, placedAt, active, revision]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        reason: {type: string}
+        placedBy: {type: string}
+        placedAt: {type: string, format: date-time}
+        active: {type: boolean, description: true while the hold is in force}
+        releasedBy: {type: string}
+        releasedAt: {type: string, format: date-time}
+        releaseNote: {type: string}
+        revision: {type: integer, description: Echoed in If-Match to release}
+    LibrarySweep:
+      type: object
+      required: [id, legalEntityId, sweptAt, cutoff, deletedCount, deletedBytes, heldCount, actor]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        sweptAt: {type: string, format: date-time}
+        cutoff: {type: string, format: date-time, description: Files retained until this time or earlier were eligible}
+        deletedCount: {type: integer}
+        deletedBytes: {type: integer, format: int64}
+        heldCount: {type: integer, description: Past-retention files a legal hold kept}
+        holdId: {type: string, format: uuid}
+        actor: {type: string}
     Cell:
       type: object
       properties:
@@ -2061,7 +2287,7 @@ components:
         Ledger kinds (PRD AuditTrailEntry) then the reporting service's own kinds.
       enum: [posted, replayed, reversed, batch_submitted, batch_approved, batch_rejected, period_changed, reopen_approved,
         rate_override, tax_fallback, allocation_run, year_end_run, rebuild,
-        statement_run, definition_published, definition_retired, hierarchy_published, schedule_saved, audit_exported]
+        statement_run, definition_published, definition_retired, hierarchy_published, schedule_saved, audit_exported, legal_hold_placed, legal_hold_released, library_swept]
     AuditEntry:
       type: object
       required: [id, occurredAt, kind, actorId, objectRef, details]

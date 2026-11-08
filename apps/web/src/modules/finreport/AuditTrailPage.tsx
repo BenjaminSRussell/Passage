@@ -37,6 +37,9 @@ export const AUDIT_KIND_LABELS: Record<AuditKind, string> = {
   hierarchy_published: "Hierarchy published",
   schedule_saved: "Schedule saved",
   audit_exported: "Audit trail exported",
+  legal_hold_placed: "Legal hold placed",
+  legal_hold_released: "Legal hold released",
+  library_swept: "Library swept",
 };
 
 export interface AuditValues {

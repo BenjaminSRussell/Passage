@@ -42,6 +42,9 @@ type LibraryEntry struct {
 	SHA256            string    `json:"sha256"`
 	RetainUntil       time.Time `json:"retainUntil"`
 	CreatedAt         time.Time `json:"createdAt"`
+	// OnHold is true while the entry's legal entity is under legal hold, so the
+	// retention sweep keeps the file past its retention date (FR-15.8).
+	OnHold bool `json:"onHold"`
 }
 
 // LibraryQuery narrows the library list. Empty and zero fields do not filter.
@@ -62,13 +65,14 @@ type LibraryPage struct {
 
 const libraryColumns = `id::text, run_id::text, schedule_code, definition_code, definition_version, ledger_id::text,
 	coalesce(legal_entity_id::text, ''), period_year, period_no, currency_type, format, file_name, content_type, size_bytes, sha256,
-	retain_until, created_at`
+	retain_until, created_at,
+	exists(select 1 from report_legal_hold h where h.legal_entity_id = report_library_entry.legal_entity_id and h.released_at is null)`
 
 func scanLibrary(row pgx.Row) (LibraryEntry, error) {
 	var e LibraryEntry
 	err := row.Scan(&e.ID, &e.RunID, &e.ScheduleCode, &e.DefinitionCode, &e.DefinitionVersion, &e.LedgerID, &e.LegalEntityID,
 		&e.PeriodYear, &e.PeriodNo, &e.CurrencyType, &e.Format, &e.FileName, &e.ContentType, &e.SizeBytes, &e.SHA256,
-		&e.RetainUntil, &e.CreatedAt)
+		&e.RetainUntil, &e.CreatedAt, &e.OnHold)
 	return e, err
 }
 
@@ -140,7 +144,7 @@ func (s *Postgres) libraryEntry(ctx context.Context, id string, withContent bool
 			row := tx.QueryRow(ctx, `select `+libraryColumns+`, content from report_library_entry where id=$1::uuid`, id)
 			err = row.Scan(&sc.ID, &sc.RunID, &sc.ScheduleCode, &sc.DefinitionCode, &sc.DefinitionVersion, &sc.LedgerID, &sc.LegalEntityID,
 				&sc.PeriodYear, &sc.PeriodNo, &sc.CurrencyType, &sc.Format, &sc.FileName, &sc.ContentType, &sc.SizeBytes, &sc.SHA256,
-				&sc.RetainUntil, &sc.CreatedAt, &content)
+				&sc.RetainUntil, &sc.CreatedAt, &sc.OnHold, &content)
 			e = sc
 		} else {
 			e, err = scanLibrary(tx.QueryRow(ctx, `select `+libraryColumns+` from report_library_entry where id=$1::uuid`, id))

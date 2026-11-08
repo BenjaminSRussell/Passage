@@ -13,11 +13,15 @@ var (
 	LagExceeded         = events.Type(Context, "lag", "exceeded", 1)
 	StatementFailed     = events.Type(Context, "statement", "failed", 1)
 	DistributionSent    = events.Type(Context, "distribution", "sent", 1)
+	LegalHoldPlaced     = events.Type(Context, "legalhold", "placed", 1)
+	LegalHoldReleased   = events.Type(Context, "legalhold", "released", 1)
+	LibrarySwept        = events.Type(Context, "library", "swept", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded, StatementFailed, DistributionSent}
+	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned, BalanceVerified, LagExceeded, StatementFailed, DistributionSent,
+		LegalHoldPlaced, LegalHoldReleased, LibrarySwept}
 }
 
 // HierarchyUnassignedData is the payload of hierarchy.unassigned.v1: a member
@@ -137,4 +141,33 @@ type DistributionSentData struct {
 	Delivery         string `json:"delivery"`
 	RecipientCount   int    `json:"recipient_count"`
 	RecipientsSHA256 string `json:"recipients_sha256"`
+}
+
+// LegalHoldData is the payload of legalhold.placed.v1 and legalhold.released.v1
+// (FR-15.8, PRD §2.15.15): the report library of a legal entity was put under
+// legal hold, or released from it. While the hold is active the retention sweep
+// deletes none of the entity's files. legal_entity_id also becomes the event's
+// legalentityid extension. Note is the release note (released events only).
+type LegalHoldData struct {
+	HoldID        string `json:"hold_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Reason        string `json:"reason"`
+	Actor         string `json:"actor"`
+	Note          string `json:"note,omitempty"`
+}
+
+// LibrarySweptData is the payload of library.swept.v1: the retention sweep
+// deleted the report library files of one legal entity that were past their
+// retention date. HeldCount is the number of past-retention files a legal hold
+// kept (HoldID names it); a pass that deleted and held nothing writes no event.
+// legal_entity_id also becomes the event's legalentityid extension.
+type LibrarySweptData struct {
+	SweepID       string `json:"sweep_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Cutoff        string `json:"cutoff"`
+	DeletedCount  int    `json:"deleted_count"`
+	DeletedBytes  int64  `json:"deleted_bytes"`
+	HeldCount     int    `json:"held_count"`
+	HoldID        string `json:"hold_id,omitempty"`
+	Actor         string `json:"actor"`
 }
