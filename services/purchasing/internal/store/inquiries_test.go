@@ -422,3 +422,89 @@ func TestInquiries_BackorderedLines(t *testing.T) {
 		t.Fatalf("other legal entity sees %d rows (%v)", len(got.Items), err)
 	}
 }
+
+// Expiring agreements: EFFECTIVE and ON_HOLD agreements ending inside the window, lapsed ones
+// (still open past their end date) first, DRAFT, CLOSED and open-ended agreements left out, value
+// lines summed and quantity lines only counted, paged by (end date, id).
+func TestInquiries_ExpiringAgreements(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(199)
+	vendor, product := ids.New(), ids.New()
+	asOf := day(t, "2027-03-01").Time
+
+	mk := func(end string, status string, v string) store.AgreementDetail {
+		a := blanket(t, v, product)
+		if end == "" {
+			a.ValidTo = nil
+		} else {
+			d := day(t, end)
+			a.ValidTo = &d
+		}
+		a.Status = status
+		got, err := s.CreateAgreement(ctx, a, store.Idem{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	lapsed := mk("2027-02-20", domain.AgreementEffective, vendor)
+	soon := mk("2027-03-15", domain.AgreementOnHold, vendor)
+	mk("2027-03-31", domain.AgreementEffective, vendor)    // on the last day of the 30-day window
+	mk("2027-04-01", domain.AgreementEffective, vendor)    // one day beyond it
+	mk("2027-03-10", domain.AgreementDraft, vendor)        // not in force
+	mk("", domain.AgreementEffective, vendor)              // never expires
+	mk("2027-03-05", domain.AgreementEffective, ids.New()) // another vendor
+	execTenant(t, ctx, pool, `update purchase_agreement_line set released_amount = 125.5 where agreement_id = $1 and commitment_type = 'TOTAL_VALUE'`, soon.Agreement.ID)
+
+	page, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf, VendorID: vendor}, "", 0)
+	if err != nil || len(page.Items) != 3 {
+		t.Fatalf("expiring = %+v, %v", page.Items, err)
+	}
+	if first := page.Items[0]; first.ID != lapsed.Agreement.ID || !first.Lapsed || first.DaysLeft != -9 {
+		t.Fatalf("first = %+v", first)
+	}
+	if second := page.Items[1]; second.ID != soon.Agreement.ID || second.Lapsed || second.DaysLeft != 14 || second.Status != "ON_HOLD" ||
+		second.LineCount != 2 || second.QtyLines != 1 || second.CommittedAmount.String() != "500" || second.ReleasedAmount.String() != "125.5" {
+		t.Fatalf("second = %+v", second)
+	}
+	if page.Items[2].DaysLeft != 30 {
+		t.Fatalf("window edge = %+v", page.Items[2])
+	}
+
+	// A shorter window, a zero window (ending today or lapsed), paging, filters, a bad cursor and a bad window.
+	fourteen, zero, tooLong := 14, 0, 400
+	short, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf, VendorID: vendor, WithinDays: &fourteen}, "", 0)
+	if err != nil || len(short.Items) != 2 {
+		t.Fatalf("14 days = %+v, %v", short.Items, err)
+	}
+	if today, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf, VendorID: vendor, WithinDays: &zero}, "", 0); err != nil ||
+		len(today.Items) != 1 || today.Items[0].ID != lapsed.Agreement.ID {
+		t.Fatalf("0 days = %+v, %v", today.Items, err)
+	}
+	one, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf, VendorID: vendor}, "", 1)
+	if err != nil || len(one.Items) != 1 || one.Next == "" {
+		t.Fatalf("page 1 = %+v, %v", one, err)
+	}
+	rest, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf, VendorID: vendor}, one.Next, 0)
+	if err != nil || len(rest.Items) != 2 || rest.Items[0].ID != soon.Agreement.ID {
+		t.Fatalf("rest = %+v, %v", rest.Items, err)
+	}
+	if all, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf}, "", 0); err != nil || len(all.Items) != 4 {
+		t.Fatalf("all vendors = %d, %v", len(all.Items), err)
+	}
+	if _, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf}, "junk", 1); err == nil {
+		t.Fatal("a cursor this list did not return was accepted")
+	}
+	if _, err := s.ListExpiringAgreements(ctx, store.InquiryFilter{AsOf: asOf, WithinDays: &tooLong}, "", 0); err == nil {
+		t.Fatal("a window over a year was accepted")
+	}
+	if other, err := s.ListExpiringAgreements(principalContext(198), store.InquiryFilter{AsOf: asOf}, "", 0); err != nil || len(other.Items) != 0 {
+		t.Fatalf("other tenant = %+v, %v", other.Items, err)
+	}
+	// Row-level security: a caller scoped to another legal entity of the same tenant sees none of them.
+	otherLE := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(199), LegalEntityID: ids.New(), UserID: ids.New()})
+	if other, err := s.ListExpiringAgreements(otherLE, store.InquiryFilter{AsOf: asOf}, "", 0); err != nil || len(other.Items) != 0 {
+		t.Fatalf("other legal entity = %+v, %v", other.Items, err)
+	}
+}

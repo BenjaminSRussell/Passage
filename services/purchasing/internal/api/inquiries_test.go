@@ -43,6 +43,21 @@ func TestInquiries_Read(t *testing.T) {
 		!strings.Contains(rec.Body.String(), `"receivedQty":"4"`) || !strings.Contains(rec.Body.String(), `"openValue":"60"`) {
 		t.Fatalf("backordered: %d %s", rec.Code, rec.Body)
 	}
+	h.fake.expiring = []store.ExpiringAgreement{{ID: ids.New(), Number: "PA-00000001", VendorID: vendor, Currency: "USD", Status: "EFFECTIVE",
+		ValidTo: mustDay(t, "2027-01-20"), DaysLeft: 13, CommittedAmount: decimal.NewFromInt(1000), ReleasedAmount: decimal.NewFromInt(250)}}
+	rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/expiring-agreements?vendorId=" + vendor + "&withinDays=45&asOf=2027-01-07&cursor=2027-01-01|x&limit=3", duties: []string{dutyPurchaseOrderInquire}})
+	if rec.Code != http.StatusOK || h.fake.lastInquiry.VendorID != vendor || h.fake.lastInquiry.WithinDays == nil || *h.fake.lastInquiry.WithinDays != 45 || h.fake.lastLimit != 3 || h.fake.lastAfter != "2027-01-01|x" ||
+		!strings.Contains(rec.Body.String(), `"daysLeft":13`) || !strings.Contains(rec.Body.String(), `"releasedAmount":"250"`) {
+		t.Fatalf("expiring: %d %s", rec.Code, rec.Body)
+	}
+	// No withinDays leaves the default to the store; withinDays=0 is a real window, not the default.
+	if rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/expiring-agreements", duties: []string{dutyPurchaseOrderInquire}}); rec.Code != http.StatusOK || h.fake.lastInquiry.WithinDays != nil {
+		t.Fatalf("expiring, no window: %d %v", rec.Code, h.fake.lastInquiry.WithinDays)
+	}
+	if rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/expiring-agreements?withinDays=0", duties: []string{dutyPurchaseOrderInquire}}); rec.Code != http.StatusOK ||
+		h.fake.lastInquiry.WithinDays == nil || *h.fake.lastInquiry.WithinDays != 0 {
+		t.Fatalf("expiring, zero window: %d %v", rec.Code, h.fake.lastInquiry.WithinDays)
+	}
 	rec = h.do(call{method: "GET", path: "/v1/procurement/inquiries/price-history?productId=" + product + "&from=2027-01-01&to=2027-02-01", duties: []string{dutyPurchaseOrderInquire}})
 	if rec.Code != http.StatusOK || h.fake.lastInquiry.From == nil || h.fake.lastInquiry.To == nil || !strings.Contains(rec.Body.String(), `"unitPrice":"9.5"`) {
 		t.Fatalf("price history: %d %s", rec.Code, rec.Body)
@@ -54,6 +69,7 @@ func TestInquiries_Rejects(t *testing.T) {
 	product := ids.New()
 	for _, q := range []string{
 		"open-orders-by-vendor?vendorId=nope", "open-orders-by-vendor?asOf=yesterday", "overdue-lines?limit=0", "backordered-lines?vendorId=nope", "backordered-lines?asOf=x", "backordered-lines?limit=0",
+		"expiring-agreements?withinDays=-1", "expiring-agreements?withinDays=367", "expiring-agreements?withinDays=x", "expiring-agreements?vendorId=nope", "expiring-agreements?limit=0",
 		"price-history", "price-history?productId=" + product + "&from=2027-02-01&to=2027-01-01", "price-history?productId=" + product + "&from=x",
 	} {
 		if rec := h.do(call{method: "GET", path: "/v1/procurement/inquiries/" + q, duties: []string{dutyPurchaseOrderInquire}}); problemCode(t, rec) != codeInvalid {

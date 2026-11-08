@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
@@ -98,6 +99,34 @@ func (a *API) listBackorderedLines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := a.store.ListBackorderedLines(r.Context(), f, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writePage(w, page)
+}
+
+// listExpiringAgreements is GET /inquiries/expiring-agreements (PRD 3.17.14, FR-17.14): agreements
+// ending within withinDays (default 30, at most 366) of asOf, lapsed ones included.
+func (a *API) listExpiringAgreements(w http.ResponseWriter, r *http.Request) {
+	limit, err := listLimit(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	f, ok := a.inquiryFilter(w, r)
+	if !ok {
+		return
+	}
+	if v := r.URL.Query().Get("withinDays"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > store.MaxExpiryWindowDays {
+			fail(w, r, invalid("withinDays", "must be a whole number of days from 0 to "+strconv.Itoa(store.MaxExpiryWindowDays)))
+			return
+		}
+		f.WithinDays = &n
+	}
+	page, err := a.store.ListExpiringAgreements(r.Context(), f, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		fail(w, r, err)
 		return

@@ -720,6 +720,8 @@ export interface PriceHistoryEntry {
 }
 
 export interface InquiryFilters {
+  /** Expiring agreements: look-ahead in days from `asOf` (default 30). */
+  withinDays?: string;
   vendorId?: string;
   productId?: string;
   asOf?: string;
@@ -737,6 +739,28 @@ export function listOverdueLines(filters: InquiryFilters = {}, options: ListOpti
 
 export function listBackorderedLines(filters: InquiryFilters = {}, options: ListOptions = {}) {
   return list<BackorderedLine>("/inquiries/backordered-lines", { ...filters }, options);
+}
+
+/** An agreement ending within the window, or past its end while still in force (`lapsed`). */
+export interface ExpiringAgreement {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  vendorId: string;
+  currency: string;
+  status: "EFFECTIVE" | "ON_HOLD";
+  validTo: string;
+  daysLeft: number;
+  lapsed: boolean;
+  lineCount: number;
+  /** Quantity lines, not included in the amounts. */
+  qtyLines: number;
+  committedAmount: string;
+  releasedAmount: string;
+}
+
+export function listExpiringAgreements(filters: InquiryFilters = {}, options: ListOptions = {}) {
+  return list<ExpiringAgreement>("/inquiries/expiring-agreements", { ...filters }, options);
 }
 
 export function listPriceHistory(filters: InquiryFilters = {}, options: ListOptions = {}) {

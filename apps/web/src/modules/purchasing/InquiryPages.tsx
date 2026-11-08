@@ -3,10 +3,12 @@ import { Link, NavLink } from "react-router-dom";
 import { Button, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import {
   listBackorderedLines,
+  listExpiringAgreements,
   listOpenOrdersByVendor,
   listOverdueLines,
   listPriceHistory,
   type BackorderedLine,
+  type ExpiringAgreement,
   type InquiryFilters,
   type OverdueLine,
   type PriceHistoryEntry,
@@ -15,13 +17,13 @@ import {
 import { LoadError, ShortId, datePattern, useResource, uuidPattern } from "./parts";
 import styles from "./pages.module.css";
 
-type Field = "vendorId" | "productId" | "asOf" | "from" | "to";
+type Field = "vendorId" | "productId" | "asOf" | "from" | "to" | "withinDays";
 type Draft = Record<Field, string>;
 type Errors = Partial<Record<Field, string>>;
 
-const emptyDraft: Draft = { vendorId: "", productId: "", asOf: "", from: "", to: "" };
+const emptyDraft: Draft = { vendorId: "", productId: "", asOf: "", from: "", to: "", withinDays: "" };
 
-const labels: Record<Field, string> = { vendorId: "Vendor id", productId: "Product id", asOf: "As of", from: "Ordered from", to: "Ordered to" };
+const labels: Record<Field, string> = { vendorId: "Vendor id", productId: "Product id", asOf: "As of", from: "Ordered from", to: "Ordered to", withinDays: "Days ahead" };
 
 /** Checks the filters before the round trip. productId is required where `needsProduct` is set. */
 export function validateInquiry(d: Draft, needsProduct = false): Errors {
@@ -33,13 +35,17 @@ export function validateInquiry(d: Draft, needsProduct = false): Errors {
   for (const key of ["asOf", "from", "to"] as const) {
     if (d[key] !== "" && !datePattern.test(d[key])) errors[key] = "Enter a date.";
   }
+  const days = d.withinDays.trim();
+  if (days !== "" && !(/^\d{1,3}$/.test(days) && Number(days) <= 366)) {
+    errors.withinDays = "Days ahead must be a whole number from 0 to 366.";
+  }
   if (!errors.from && !errors.to && d.from !== "" && d.to !== "" && d.to < d.from) errors.to = "The end date is before the start date.";
   return errors;
 }
 
 const toFilters = (d: Draft): InquiryFilters => {
   const opt = (v: string) => (v.trim() === "" ? undefined : v.trim());
-  return { vendorId: opt(d.vendorId), productId: opt(d.productId), asOf: opt(d.asOf), from: opt(d.from), to: opt(d.to) };
+  return { vendorId: opt(d.vendorId), productId: opt(d.productId), asOf: opt(d.asOf), from: opt(d.from), to: opt(d.to), withinDays: opt(d.withinDays) };
 };
 
 /** The inquiry sub-navigation; NavLink marks the open inquiry with aria-current="page". */
@@ -54,6 +60,9 @@ function InquiryNav() {
       </NavLink>
       <NavLink className={styles.link} to="/purchasing/inquiries/backordered">
         Backordered lines
+      </NavLink>
+      <NavLink className={styles.link} to="/purchasing/inquiries/expiring-agreements">
+        Expiring agreements
       </NavLink>
       <NavLink className={styles.link} to="/purchasing/inquiries/price-history">
         Price history
@@ -119,6 +128,7 @@ function InquiryFrame<T>(p: FrameProps<T>) {
                 <Input
                   {...c}
                   type={f === "asOf" || f === "from" || f === "to" ? "date" : "text"}
+                  inputMode={f === "withinDays" ? "numeric" : undefined}
                   value={draft[f]}
                   onChange={(e) => setDraft((d) => ({ ...d, [f]: e.target.value }))}
                 />
@@ -248,6 +258,41 @@ export function BackorderedLinesPage() {
       empty={{ title: "Nothing backordered", description: "No open line has been received in part." }}
       load={(f, cursor, signal) => listBackorderedLines(f, { cursor, signal })}
       what="backordered lines"
+    />
+  );
+}
+
+/** Purchase agreements ending soon or already lapsed (PRD 3.17.14, FR-17.14), soonest first. */
+export function ExpiringAgreementsPage() {
+  const columns: DataTableColumn<ExpiringAgreement>[] = [
+    {
+      key: "number",
+      header: "Agreement",
+      render: (a) => (
+        <Link className={styles.link} to={`/purchasing/agreements/${a.id}`}>
+          {a.number}
+        </Link>
+      ),
+    },
+    { key: "vendorId", header: "Vendor", render: (a) => <ShortId id={a.vendorId} /> },
+    { key: "status", header: "Status" },
+    { key: "validTo", header: "Ends", mono: true },
+    { key: "daysLeft", header: "Days left", align: "end", render: (a) => (a.lapsed ? `Lapsed ${-a.daysLeft} ${a.daysLeft === -1 ? "day" : "days"} ago` : a.daysLeft) },
+    { key: "committedAmount", header: "Committed", align: "end", render: (a) => money(a.committedAmount, a.currency) },
+    { key: "releasedAmount", header: "Released", align: "end", render: (a) => money(a.releasedAmount, a.currency) },
+    { key: "qtyLines", header: "Quantity lines", align: "end" },
+  ];
+  return (
+    <InquiryFrame<ExpiringAgreement>
+      title="Expiring agreements"
+      description="Effective and on-hold purchase agreements that end within the look-ahead (30 days unless you change it), soonest first. An agreement past its end date that is still in force is shown as lapsed. Committed and released amounts add up the value lines; quantity lines are only counted."
+      fields={["vendorId", "asOf", "withinDays"]}
+      tableLabel="Expiring purchase agreements"
+      columns={columns}
+      rowKey={(a) => a.id}
+      empty={{ title: "No agreement is about to end", description: "Agreements with an end date inside the look-ahead appear here." }}
+      load={(f, cursor, signal) => listExpiringAgreements(f, { cursor, signal })}
+      what="expiring agreements"
     />
   );
 }

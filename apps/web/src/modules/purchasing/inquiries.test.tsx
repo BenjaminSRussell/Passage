@@ -70,6 +70,48 @@ describe("purchasing inquiries", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
+  it("lists expiring agreements with lapsed ones marked, filters by days ahead, and shows empty and error states", async () => {
+    const AGREEMENT = "66666666-6666-4666-8666-666666666666";
+    const row = {
+      id: AGREEMENT,
+      number: "PA-00000004",
+      legalEntityId: "11111111-1111-4111-8111-111111111111",
+      vendorId: VENDOR,
+      currency: "USD",
+      status: "EFFECTIVE",
+      validTo: "2027-02-20",
+      daysLeft: -9,
+      lapsed: true,
+      lineCount: 2,
+      qtyLines: 1,
+      committedAmount: "500",
+      releasedAmount: "125.5",
+    };
+    const fetchMock = stubFetch(() => json({ items: [row, { ...row, id: PO_ID, number: "PA-00000005", daysLeft: 14, lapsed: false, status: "ON_HOLD" }] }));
+    renderAt("/purchasing/inquiries/expiring-agreements");
+    const table = await findTable({ name: "Expiring purchase agreements" });
+    expect(await within(table).findByRole("link", { name: "PA-00000004" })).toHaveAttribute("href", `/purchasing/agreements/${AGREEMENT}`);
+    expect(within(table).getByText("Lapsed 9 days ago")).toBeInTheDocument();
+    expect(within(table).getByText("14")).toBeInTheDocument();
+    expect(within(table).getAllByText("125.5 USD")).toHaveLength(2);
+    const inquiryNav = screen.getByRole("navigation", { name: "Inquiries" });
+    expect(within(inquiryNav).getByRole("link", { name: "Expiring agreements" })).toHaveAttribute("aria-current", "page");
+    fireEvent.change(screen.getByLabelText(/Days ahead/), { target: { value: "400" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(await screen.findByText("Days ahead must be a whole number from 0 to 366.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Days ahead/), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/inquiries/expiring-agreements?withinDays=90"));
+    vi.unstubAllGlobals();
+    stubFetch(() => json({ items: [] }));
+    renderAt("/purchasing/inquiries/expiring-agreements");
+    expect(await screen.findByRole("heading", { name: "No agreement is about to end" })).toBeInTheDocument();
+    vi.unstubAllGlobals();
+    stubFetch(() => problem(500, "PRC-INTERNAL", "boom"));
+    renderAt("/purchasing/inquiries/expiring-agreements");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
   it("lists open orders by vendor and filters by vendor and as-of date", async () => {
     const fetchMock = stubFetch(() => json({ items: [vendorRow] }));
     const { container } = renderAt("/purchasing/inquiries");
@@ -176,7 +218,7 @@ describe("purchasing inquiries", () => {
   });
 
   it("validates ids, dates and the range", () => {
-    const base = { vendorId: "", productId: "", asOf: "", from: "", to: "" };
+    const base = { vendorId: "", productId: "", asOf: "", from: "", to: "", withinDays: "" };
     expect(validateInquiry({ ...base, vendorId: VENDOR, from: "2027-01-01", to: "2027-02-01" })).toEqual({});
     expect(validateInquiry({ ...base, vendorId: "x", productId: "y" })).toEqual({
       vendorId: "Vendor id must be a UUID.",
@@ -184,5 +226,8 @@ describe("purchasing inquiries", () => {
     });
     expect(validateInquiry(base, true).productId).toBe("Product id is required.");
     expect(validateInquiry({ ...base, from: "2027-02-01", to: "2027-01-01" }).to).toBe("The end date is before the start date.");
+    expect(validateInquiry({ ...base, withinDays: "0" })).toEqual({});
+    expect(validateInquiry({ ...base, withinDays: " 366 " })).toEqual({});
+    for (const bad of ["367", "-1", "1.5", "x"]) expect(validateInquiry({ ...base, withinDays: bad }).withinDays).toBe("Days ahead must be a whole number from 0 to 366.");
   });
 });

@@ -108,6 +108,9 @@ type InquiryFilter struct {
 	ProductID     string
 	AsOf          time.Time
 	From, To      *domain.Day
+	// WithinDays is the look-ahead of the expiring agreements inquiry; nil means the default (30).
+	// Zero is a real window: agreements ending on the as-of date, and lapsed ones.
+	WithinDays *int
 }
 
 // ListOpenOrdersByVendor pages vendor and currency groups ordered by vendor then currency; the
@@ -324,4 +327,94 @@ func (s *Postgres) ListPriceHistory(ctx context.Context, f InquiryFilter, after 
 		pg.Next = fmt.Sprintf("%s|%s|%d", last.at.UTC().Format(time.RFC3339Nano), last.PurchaseOrderID, last.LineNo)
 	}
 	return pg, nil
+}
+
+// ExpiringAgreement is a purchase agreement that ends within the look-ahead window, or that has
+// ended while still EFFECTIVE or ON_HOLD (Lapsed). Committed and released amounts add up the lines
+// measured in value (VALUE, CATEGORY_VALUE, TOTAL_VALUE) in the agreement currency; QUANTITY lines
+// are counted in QtyLines and not summed, since a quantity is not an amount.
+type ExpiringAgreement struct {
+	ID              string          `json:"id"`
+	Number          string          `json:"number"`
+	LegalEntityID   string          `json:"legalEntityId"`
+	VendorID        string          `json:"vendorId"`
+	Currency        string          `json:"currency"`
+	Status          string          `json:"status"`
+	ValidTo         domain.Day      `json:"validTo"`
+	DaysLeft        int             `json:"daysLeft"`
+	Lapsed          bool            `json:"lapsed"`
+	LineCount       int             `json:"lineCount"`
+	QtyLines        int             `json:"qtyLines"`
+	CommittedAmount decimal.Decimal `json:"committedAmount"`
+	ReleasedAmount  decimal.Decimal `json:"releasedAmount"`
+}
+
+// DefaultExpiryWindowDays and MaxExpiryWindowDays bound the expiring agreements look-ahead.
+const (
+	DefaultExpiryWindowDays = 30
+	MaxExpiryWindowDays     = 366
+)
+
+// ListExpiringAgreements pages EFFECTIVE and ON_HOLD agreements whose valid_to is on or before
+// f.AsOf plus the window (f.WithinDays, default 30), soonest first, lapsed ones (valid_to before
+// the as-of date) among them; the cursor is "<valid to>|<agreement id>". An agreement with no end
+// date never expires and is not listed.
+func (s *Postgres) ListExpiringAgreements(ctx context.Context, f InquiryFilter, after string, limit int) (Page[ExpiringAgreement], error) {
+	p, _ := tenant.FromContext(ctx)
+	limit = clampLimit(limit)
+	window := DefaultExpiryWindowDays
+	if f.WithinDays != nil {
+		window = *f.WithinDays
+	}
+	if window < 0 || window > MaxExpiryWindowDays {
+		return Page[ExpiringAgreement]{}, &domain.Error{Code: domain.CodeValidation, Detail: "withinDays must be between 0 and " + strconv.Itoa(MaxExpiryWindowDays)}
+	}
+	var curDate *time.Time
+	var curID *string
+	if after != "" {
+		parts := strings.Split(after, "|")
+		d, derr := domain.ParseDay(parts[0])
+		if len(parts) != 2 || derr != nil || !ids.Valid(parts[1]) {
+			return Page[ExpiringAgreement]{}, &domain.Error{Code: domain.CodeValidation, Detail: "cursor is not one this list returned"}
+		}
+		curDate, curID = &d.Time, &parts[1]
+	}
+	var items []ExpiringAgreement
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select a.id, a.number, a.legal_entity_id, a.vendor_id, a.currency, a.status, a.valid_to,
+			a.valid_to - $2::date, count(l.id), count(l.id) filter (where l.commitment_type = 'QUANTITY'),
+			coalesce(sum(l.committed_amount) filter (where l.commitment_type <> 'QUANTITY'), 0),
+			coalesce(sum(l.released_amount) filter (where l.commitment_type <> 'QUANTITY'), 0)
+			from purchase_agreement a
+			left join purchase_agreement_line l on l.tenant_id = a.tenant_id and l.agreement_id = a.id
+			where a.tenant_id = $1 and a.status in ('EFFECTIVE', 'ON_HOLD') and a.valid_to is not null
+			and a.valid_to <= $2::date + $3::int
+			and ($4::uuid is null or a.legal_entity_id = $4::uuid)
+			and ($5::uuid is null or a.vendor_id = $5::uuid)
+			and ($6::date is null or (a.valid_to, a.id) > ($6::date, $7::uuid))
+			group by a.tenant_id, a.id
+			order by a.valid_to, a.id limit $8`,
+			p.TenantID, f.AsOf, window, nullable(f.LegalEntityID), nullable(f.VendorID), curDate, curID, limit+1)
+		if err != nil {
+			return err
+		}
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (ExpiringAgreement, error) {
+			var a ExpiringAgreement
+			var to time.Time
+			err := row.Scan(&a.ID, &a.Number, &a.LegalEntityID, &a.VendorID, &a.Currency, &a.Status, &to, &a.DaysLeft,
+				&a.LineCount, &a.QtyLines, &a.CommittedAmount, &a.ReleasedAmount)
+			a.ValidTo, a.Lapsed = day(to), a.DaysLeft < 0
+			minor := money.MinorUnits(a.Currency)
+			a.CommittedAmount, a.ReleasedAmount = a.CommittedAmount.RoundBank(minor), a.ReleasedAmount.RoundBank(minor)
+			return a, err
+		})
+		return err
+	})
+	if err != nil {
+		return Page[ExpiringAgreement]{}, err
+	}
+	if items == nil {
+		items = []ExpiringAgreement{}
+	}
+	return pageOf(items, limit, func(a ExpiringAgreement) string { return a.ValidTo.String() + "|" + a.ID }), nil
 }

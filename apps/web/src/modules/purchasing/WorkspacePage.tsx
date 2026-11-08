@@ -5,6 +5,7 @@ import {
   listPurchaseAgreements,
   listPurchaseOrders,
   listRequisitions,
+  listExpiringAgreements,
   listRFQs,
   listTradeAgreements,
   type Page,
@@ -70,6 +71,7 @@ export function WorkspacePage() {
         listPurchaseOrders({ approvalStatus: "IN_REVIEW" }, { limit: COUNT_LIMIT, signal }),
         listPurchaseOrders({ approvalStatus: "APPROVED" }, { limit: COUNT_LIMIT, signal }),
         listRFQs({ statuses: ["SENT", "REPLIES_OPEN"] }, { limit: COUNT_LIMIT, signal }),
+        listExpiringAgreements({}, { limit: COUNT_LIMIT, signal }),
       ]),
     [],
   );
@@ -93,6 +95,7 @@ export function WorkspacePage() {
           <StatTile label="Purchase orders in review" value={countLabel(counts.data[6])} />
           <StatTile label="Purchase orders to confirm" value={countLabel(counts.data[7])} />
           <StatTile label="Effective purchase agreements" value={countLabel(counts.data[5])} />
+          <StatTile label="Agreements ending in 30 days or lapsed" value={countLabel(counts.data[9])} />
           <StatTile label="Active price rows" value={countLabel(counts.data[3])} />
         </StatGroup>
       ) : null}
