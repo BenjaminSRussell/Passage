@@ -162,6 +162,10 @@ export interface LegalEntitySetting {
   ssccExtensionDigit: number | null;
   /** Slips posted from now on tell billing to charge their packaging fee lines (BR-28.12). */
   packagingFeeBillable: boolean;
+  /** Slips posted from now on raise the customers' returnable balances (BR-28.13); true when none is saved. */
+  rtpTrackingEnabled: boolean;
+  /** Days after which an outstanding returnable balance is chargeable (FR-28.16), 30 to 365; 90 when none is saved. */
+  rtpChargeDays: number;
   /** 0 when no setting is saved (flags false, prefix and digit null). */
   version: number;
   updatedAt: string | null;
@@ -376,6 +380,8 @@ export interface BackorderFilter {
 export interface AgedReturnableBalance extends ReturnableBalance {
   oldestOutstandingDate: string | null;
   daysOutstanding: number;
+  /** The threshold applied: the chargeDays asked for, else rtp_charge_days of the legal entity of the oldest overdue held shipment, else of the oldest held one. */
+  chargeDays: number;
   chargeDue: boolean;
 }
 
@@ -785,7 +791,7 @@ export function getLegalEntitySetting(legalEntityId: string, signal?: AbortSigna
 export function saveLegalEntitySetting(
   legalEntityId: string,
   version: number,
-  input: { cogsAtShipment: boolean; asnEnabled: boolean; gs1CompanyPrefix: string | null; ssccExtensionDigit: number | null; packagingFeeBillable: boolean },
+  input: { cogsAtShipment: boolean; asnEnabled: boolean; gs1CompanyPrefix: string | null; ssccExtensionDigit: number | null; packagingFeeBillable: boolean; rtpTrackingEnabled: boolean; rtpChargeDays: number },
   key: string,
 ): Promise<LegalEntitySetting> {
   const headers = { "Idempotency-Key": key, "If-Match": `"${version}"` };

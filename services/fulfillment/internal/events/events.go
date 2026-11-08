@@ -169,6 +169,10 @@ type LegalEntitySettingChangedData struct {
 	PreviousSSCCExtensionDigit   *int `json:"previous_sscc_extension_digit,omitempty"`
 	PackagingFeeBillable         bool `json:"packaging_fee_billable"`
 	PreviousPackagingFeeBillable bool `json:"previous_packaging_fee_billable"`
+	RTPTrackingEnabled           bool `json:"rtp_tracking_enabled"`
+	PreviousRTPTrackingEnabled   bool `json:"previous_rtp_tracking_enabled"`
+	RTPChargeDays                int  `json:"rtp_charge_days"`
+	PreviousRTPChargeDays        int  `json:"previous_rtp_charge_days"`
 	Version                      int  `json:"version"`
 }
 

@@ -23,13 +23,18 @@ const columns: DataTableColumn<LegalEntitySetting>[] = [
     render: (row) => `${row.gs1CompanyPrefix ?? "Process default"} (${row.ssccExtensionDigit ?? "default"})`,
   },
   { key: "packagingFeeBillable", header: "Packaging fee", render: (row) => <Badge tone={row.packagingFeeBillable ? "info" : "neutral"}>{row.packagingFeeBillable ? "Billed to the customer" : "Statistical only"}</Badge> },
+  {
+    key: "rtpTrackingEnabled",
+    header: "Returnable packaging",
+    render: (row) => <Badge tone={row.rtpTrackingEnabled ? "info" : "neutral"}>{row.rtpTrackingEnabled ? `Tracked, charge after ${row.rtpChargeDays} days` : "Not tracked"}</Badge>,
+  },
   { key: "updatedAt", header: "Changed", render: (row) => (row.updatedAt ? formatDateTime(row.updatedAt) : dash) },
 ];
 
 /**
  * Posting settings per legal entity (section 5.28.13): the COGS posting policy every packing slip follows, the
- * ASN default of a post, the GS1 company prefix and extension digit of the entity's SSCCs and whether its packaging
- * fees are billed. Changing the COGS policy needs the ledger setup duty; the service enforces it.
+ * ASN default of a post, the GS1 company prefix and extension digit of the entity's SSCCs, whether its packaging
+ * fees are billed and how its returnable packaging is tracked (on or off, and the charge days). Changing the COGS policy needs the ledger setup duty; the service enforces it.
  */
 export function LegalEntitySettingsPage() {
   const canChangeCogs = holdsDuty(usePrincipalDuties(), DUTY_COGS_POLICY);
@@ -40,6 +45,9 @@ export function LegalEntitySettingsPage() {
   const [gs1Prefix, setGs1Prefix] = useState("");
   const [extension, setExtension] = useState("");
   const [billable, setBillable] = useState(false);
+  const [rtpTracking, setRtpTracking] = useState(true);
+  const [rtpDays, setRtpDays] = useState("90");
+  const [rtpDaysError, setRtpDaysError] = useState<string | undefined>();
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | undefined>();
   const [prefixError, setPrefixError] = useState<string | undefined>();
@@ -56,6 +64,9 @@ export function LegalEntitySettingsPage() {
     setGs1Prefix(row.gs1CompanyPrefix ?? "");
     setExtension(row.ssccExtensionDigit === null ? "" : String(row.ssccExtensionDigit));
     setBillable(row.packagingFeeBillable);
+    setRtpTracking(row.rtpTrackingEnabled);
+    setRtpDays(String(row.rtpChargeDays));
+    setRtpDaysError(undefined);
     setVersion(row.version);
     setError(undefined);
     setNotice(null);
@@ -75,12 +86,15 @@ export function LegalEntitySettingsPage() {
     const digitBad = digit !== "" && !/^[0-9]$/.test(digit);
     setPrefixError(prefixBad ? "Enter 6 to 12 digits, or leave it empty for the process default." : undefined);
     setDigitError(digitBad ? "Enter a single digit from 0 to 9, or leave it empty." : undefined);
-    if (bad || prefixBad || digitBad) return;
+    const days = rtpDays.trim();
+    const daysBad = !/^\d{2,3}$/.test(days) || Number(days) < 30 || Number(days) > 365;
+    setRtpDaysError(daysBad ? "Enter a whole number of days from 30 to 365." : undefined);
+    if (bad || prefixBad || digitBad || daysBad) return;
     setBusy(true);
     try {
       const known = state.data?.find((l) => l.legalEntityId === legalEntityId.trim());
       const saved = await saveLegalEntitySetting(legalEntityId.trim(), known ? known.version : version,
-        { cogsAtShipment, asnEnabled, gs1CompanyPrefix: prefix === "" ? null : prefix, ssccExtensionDigit: digit === "" ? null : Number(digit), packagingFeeBillable: billable },
+        { cogsAtShipment, asnEnabled, gs1CompanyPrefix: prefix === "" ? null : prefix, ssccExtensionDigit: digit === "" ? null : Number(digit), packagingFeeBillable: billable, rtpTrackingEnabled: rtpTracking, rtpChargeDays: Number(days) },
         key.current(),
       );
       key.renew();
@@ -108,7 +122,7 @@ export function LegalEntitySettingsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Posting settings"
-        description="Per legal entity: the cost of goods sold policy every packing slip follows (at shipment, or delivered not invoiced until the invoice), whether a post sends the advance ship notice, the GS1 company prefix its containers' SSCCs are issued under, and whether billing charges its packaging fees. A poster cannot change the policy; the ASN is a default the poster can turn off."
+        description="Per legal entity: the cost of goods sold policy every packing slip follows (at shipment, or delivered not invoiced until the invoice), whether a post sends the advance ship notice, the GS1 company prefix its containers' SSCCs are issued under, whether billing charges its packaging fees, and how its returnable packaging is tracked and when a held balance becomes chargeable. A poster cannot change the policy; the ASN is a default the poster can turn off."
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the posting settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
@@ -152,6 +166,12 @@ export function LegalEntitySettingsPage() {
           </FormField>
           <FormField id="le-fee" label="Bill the packaging fee" hint="Packing slips posted from now on tell billing to charge their packaging fee lines. Off keeps the fee statistical.">
             {(control) => <Input {...control} type="checkbox" checked={billable} onChange={(event) => { setBillable(event.target.checked); key.renew(); }} />}
+          </FormField>
+          <FormField id="le-rtp" label="Track returnable packaging" hint="On: a packing slip adds its returnable pallets and crates to the customer's balance. Off: slips posted from now on add nothing; a slip already posted still cancels the way it posted.">
+            {(control) => <Input {...control} type="checkbox" checked={rtpTracking} onChange={(event) => { setRtpTracking(event.target.checked); key.renew(); }} />}
+          </FormField>
+          <FormField id="le-rtp-days" label="Returnable charge after days" error={rtpDaysError} hint="30 to 365. A balance held longer than this is due to be charged (rtp_charge_days).">
+            {(control) => <Input {...control} value={rtpDays} invalid={Boolean(rtpDaysError)} inputMode="numeric" onChange={(event) => { setRtpDays(event.target.value); key.renew(); }} />}
           </FormField>
           <ProblemAlert title="Could not save the settings" problem={failure} />
           <div className={styles.formActions}>

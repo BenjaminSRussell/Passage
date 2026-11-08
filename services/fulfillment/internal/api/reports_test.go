@@ -165,6 +165,7 @@ type agingBody struct {
 		Balance           string  `json:"balance"`
 		OldestOutstanding *string `json:"oldestOutstandingDate"`
 		DaysOutstanding   int     `json:"daysOutstanding"`
+		ChargeDays        int     `json:"chargeDays"`
 		ChargeDue         bool    `json:"chargeDue"`
 	} `json:"items"`
 }
@@ -215,6 +216,35 @@ func TestReturnableAging_AgesFirstInFirstOutAndFlagsCharges(t *testing.T) {
 	}
 	if out.Count != 1 || len(out.Items) != 1 || out.Items[0].ContainerType != "PALLET" {
 		t.Fatalf("chargeDue=true = %+v, want only the PALLET balance", out)
+	}
+}
+
+// Without chargeDays each balance takes the rtp_charge_days of its own legal
+// entity; an explicit chargeDays replaces them all.
+func TestReturnableAging_ChargeDaysPerLegalEntity(t *testing.T) {
+	c1, c2 := ids.New(), ids.New()
+	short, long := shipped("2026-09-01", 4), shipped("2026-09-01", 4)
+	short.ChargeDays, long.ChargeDays = 30, 365
+	fs := &fakeStore{reports: reportCalls{aging: []store.ReturnableAgingRow{
+		{ReturnableBalance: store.ReturnableBalance{CustomerID: c1, ContainerType: "PALLET", Balance: decimal.NewFromInt(4)}, Shipped: []domain.RTPShipped{short}},
+		{ReturnableBalance: store.ReturnableBalance{CustomerID: c2, ContainerType: "PALLET", Balance: decimal.NewFromInt(4)}, Shipped: []domain.RTPShipped{long}},
+	}}}
+	h := agingServer(t, fs, time.Date(2026, 10, 21, 15, 0, 0, 0, time.UTC))
+	var out agingBody
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/aging", "", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("%d %s %v", rec.Code, rec.Body.String(), err)
+	}
+	by := map[string]int{}
+	for i, it := range out.Items {
+		by[it.CustomerID] = i
+	}
+	if a, b := out.Items[by[c1]], out.Items[by[c2]]; a.ChargeDays != 30 || !a.ChargeDue || b.ChargeDays != 365 || b.ChargeDue || out.ChargeDueCount != 1 {
+		t.Fatalf("per entity: %+v / %+v (due %d)", a, b, out.ChargeDueCount)
+	}
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/aging?chargeDays=40", "", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.ChargeDays != 40 || out.ChargeDueCount != 2 || out.Items[0].ChargeDays != 40 {
+		t.Fatalf("explicit chargeDays: %s %v", rec.Body.String(), err)
 	}
 }
 

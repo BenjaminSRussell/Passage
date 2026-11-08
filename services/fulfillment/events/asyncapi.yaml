@@ -681,6 +681,10 @@ components:
           previous_sscc_extension_digit: { type: integer, minimum: 0, maximum: 9, description: "The extension digit replaced; absent when there was none." }
           packaging_fee_billable: { type: boolean }
           previous_packaging_fee_billable: { type: boolean }
+          rtp_tracking_enabled: { type: boolean, description: "Packing slips of the legal entity raise the customers' returnable packaging balances (BR-28.13)." }
+          previous_rtp_tracking_enabled: { type: boolean }
+          rtp_charge_days: { type: integer, minimum: 30, maximum: 365, description: "Days after which an outstanding returnable balance of the legal entity is chargeable (FR-28.16)." }
+          previous_rtp_charge_days: { type: integer, minimum: 30, maximum: 365 }
           version: { type: integer, minimum: 1 }
     DropShipCreated:
       name: dev.passage.fulfillment.dropship.created.v1

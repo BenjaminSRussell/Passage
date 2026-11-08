@@ -17,8 +17,8 @@ const calls = (method: string, suffix: string) => server.calls.filter((c) => c.m
 const header = (call: { init: RequestInit }, name: string) => new Headers(call.init.headers).get(name);
 
 const rows: LegalEntitySetting[] = [
-  { legalEntityId: LE1, cogsAtShipment: false, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, version: 0, updatedAt: null },
-  { legalEntityId: LE2, cogsAtShipment: true, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, version: 2, updatedAt: "2026-10-27T08:00:00Z" },
+  { legalEntityId: LE1, cogsAtShipment: false, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, rtpTrackingEnabled: true, rtpChargeDays: 90, version: 0, updatedAt: null },
+  { legalEntityId: LE2, cogsAtShipment: true, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, rtpTrackingEnabled: true, rtpChargeDays: 90, version: 2, updatedAt: "2026-10-27T08:00:00Z" },
 ];
 
 describe("posting settings page", () => {
@@ -48,14 +48,14 @@ describe("posting settings page", () => {
     const put = calls("PUT", LE2)[0];
     expect(header(put, "If-Match")).toBe('"2"');
     expect(idempotencyKey(put)).toBeTruthy();
-    expect(put.body).toEqual({ cogsAtShipment: true, asnEnabled: true, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false });
+    expect(put.body).toEqual({ cogsAtShipment: true, asnEnabled: true, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, rtpTrackingEnabled: true, rtpChargeDays: 90 });
     const after = await findTable({ name: "Posting settings" });
     await waitFor(() => expect(within(after).getByText("Sent with each post")).toBeInTheDocument());
   });
 
   it("saves the GS1 prefix, extension digit and billable packaging fee, and checks them before calling", async () => {
     server.handler = (url, init) => {
-      if (init.method === "PUT") return json(200, { ...rows[0], gs1CompanyPrefix: "9876543", ssccExtensionDigit: 5, packagingFeeBillable: true, version: 1 });
+      if (init.method === "PUT") return json(200, { ...rows[0], gs1CompanyPrefix: "9876543", ssccExtensionDigit: 5, packagingFeeBillable: true, rtpTrackingEnabled: true, rtpChargeDays: 90, version: 1 });
       if (url.pathname === LIST) return json(200, { items: rows });
       return undefined;
     };
@@ -74,7 +74,28 @@ describe("posting settings page", () => {
     fireEvent.click(screen.getByLabelText("Bill the packaging fee"));
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     expect(await screen.findByText(/Saved\./)).toBeInTheDocument();
-    expect(calls("PUT", LE1)[0].body).toEqual({ cogsAtShipment: false, asnEnabled: false, gs1CompanyPrefix: "9876543", ssccExtensionDigit: 5, packagingFeeBillable: true });
+    expect(calls("PUT", LE1)[0].body).toEqual({ cogsAtShipment: false, asnEnabled: false, gs1CompanyPrefix: "9876543", ssccExtensionDigit: 5, packagingFeeBillable: true, rtpTrackingEnabled: true, rtpChargeDays: 90 });
+  });
+
+  it("saves the returnable packaging tracking and charge days, and checks the days before calling", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "PUT") return json(200, { ...rows[0], rtpTrackingEnabled: false, rtpChargeDays: 45, version: 1 });
+      if (url.pathname === LIST) return json(200, { items: rows });
+      return undefined;
+    };
+    renderAt("/fulfillment/legal-entity-settings");
+    const table = await findTable({ name: "Posting settings" });
+    expect(within(table).getAllByText("Tracked, charge after 90 days").length).toBe(2);
+    fireEvent.click(within(table).getByRole("button", { name: LE1 }));
+    fireEvent.change(screen.getByLabelText("Returnable charge after days"), { target: { value: "29" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText("Enter a whole number of days from 30 to 365.")).toBeInTheDocument();
+    expect(calls("PUT", LE1)).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Returnable charge after days"), { target: { value: "45" } });
+    fireEvent.click(screen.getByLabelText("Track returnable packaging"));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText(/Saved\./)).toBeInTheDocument();
+    expect(calls("PUT", LE1)[0].body).toEqual({ cogsAtShipment: false, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, rtpTrackingEnabled: false, rtpChargeDays: 45 });
   });
 
   it("checks the legal entity id and shows a stale version and a scope refusal", async () => {
@@ -120,7 +141,7 @@ describe("posting settings page", () => {
     fireEvent.click(cogs);
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     expect(await screen.findByText(/Saved\./)).toBeInTheDocument();
-    expect(calls("PUT", LE1)[0].body).toEqual({ cogsAtShipment: true, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false });
+    expect(calls("PUT", LE1)[0].body).toEqual({ cogsAtShipment: true, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, rtpTrackingEnabled: true, rtpChargeDays: 90 });
     expect(header(calls("PUT", LE1)[0], "If-Match")).toBe('"0"');
 
     refuse = true;
@@ -176,7 +197,7 @@ describe("post form presets from the legal entity setting", () => {
   }
 
   it("shows the COGS policy without sending it, presets the ASN and sends the poster's ASN choice", async () => {
-    serve({ legalEntityId: LE2, cogsAtShipment: true, asnEnabled: true, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, version: 1, updatedAt: null });
+    serve({ legalEntityId: LE2, cogsAtShipment: true, asnEnabled: true, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, rtpTrackingEnabled: true, rtpChargeDays: 90, version: 1, updatedAt: null });
     renderAt(`/fulfillment/shipments/${SH}`);
     expect(await screen.findByText(/posts at shipment \(Dr 5000\), the legal entity's policy/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Post cost of goods sold at shipment")).not.toBeInTheDocument();

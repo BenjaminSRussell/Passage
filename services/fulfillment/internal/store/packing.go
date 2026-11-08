@@ -887,12 +887,15 @@ func (s *Postgres) ReturnableAging(ctx context.Context, customerID string) ([]Re
 		if err := rows.Err(); err != nil || len(out) == 0 {
 			return err
 		}
-		shipped, err := tx.Query(ctx, `select sh.customer_id::text, c.container_type, ps.posting_date, count(*)
+		// Only slips that raised the balance (rtp_tracked) age it; each carries
+		// the rtp_charge_days of its legal entity (90 when none is saved).
+		shipped, err := tx.Query(ctx, `select sh.customer_id::text, c.container_type, ps.posting_date, coalesce(les.rtp_charge_days, 90), count(*)
 			from container c
 			join packing_slip ps on ps.tenant_id = c.tenant_id and ps.id = c.packing_slip_id
 			join shipment sh on sh.tenant_id = c.tenant_id and sh.id = c.shipment_id
-			where c.returnable and c.packing_slip_id is not null and sh.customer_id = any($1::uuid[])
-			group by sh.customer_id, c.container_type, ps.posting_date`, customers)
+			left join legal_entity_setting les on les.tenant_id = sh.tenant_id and les.legal_entity_id = sh.legal_entity_id
+			where c.returnable and c.packing_slip_id is not null and ps.rtp_tracked and sh.customer_id = any($1::uuid[])
+			group by sh.customer_id, c.container_type, ps.posting_date, coalesce(les.rtp_charge_days, 90)`, customers)
 		if err != nil {
 			return err
 		}
@@ -901,11 +904,12 @@ func (s *Postgres) ReturnableAging(ctx context.Context, customerID string) ([]Re
 			var customer, containerType string
 			var day time.Time
 			var n int64
-			if err := shipped.Scan(&customer, &containerType, &day, &n); err != nil {
+			var chargeDays int
+			if err := shipped.Scan(&customer, &containerType, &day, &chargeDays, &n); err != nil {
 				return err
 			}
 			if i, ok := index[customer+"/"+containerType]; ok {
-				out[i].Shipped = append(out[i].Shipped, domain.RTPShipped{Date: day, Qty: decimal.NewFromInt(n)})
+				out[i].Shipped = append(out[i].Shipped, domain.RTPShipped{Date: day, Qty: decimal.NewFromInt(n), ChargeDays: chargeDays})
 			}
 		}
 		return shipped.Err()

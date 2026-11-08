@@ -271,7 +271,7 @@ describe("shipment detail", () => {
     server.handler = (url, init) => {
       if (init.method === "POST" && url.pathname.endsWith(":post-packing-slip")) return json(201, slip);
       if (url.pathname === `/api/v1/fulfillment/packing-slips/${SLIP}`) return json(200, slip);
-      if (url.pathname.includes("/legal-entity-settings/")) return json(200, { legalEntityId: ID, cogsAtShipment: false, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, version: 0, updatedAt: null });
+      if (url.pathname.includes("/legal-entity-settings/")) return json(200, { legalEntityId: ID, cogsAtShipment: false, asnEnabled: false, gs1CompanyPrefix: null, ssccExtensionDigit: null, packagingFeeBillable: false, rtpTrackingEnabled: true, rtpChargeDays: 90, version: 0, updatedAt: null });
       return base(url, init);
     };
     renderAt(`/fulfillment/shipments/${SH}`);

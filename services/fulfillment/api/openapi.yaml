@@ -242,6 +242,8 @@ components:
         gs1CompanyPrefix: { type: [string, "null"], pattern: '^[0-9]{6,12}$', description: "The legal entity's GS1 company prefix (BR-28.5); its containers' SSCCs are issued under it. Null takes the process default." }
         ssccExtensionDigit: { type: [integer, "null"], minimum: 0, maximum: 9, description: "The SSCC extension digit; null takes the process default." }
         packagingFeeBillable: { type: boolean, description: "Packing slips posted from now on tell billing to charge their packaging fee lines (BR-28.12)." }
+        rtpTrackingEnabled: { type: boolean, description: "Packing slips posted from now on raise the customers' returnable packaging balances (BR-28.13). True when none is saved, which is what every slip did before the setting; the PRD default is false." }
+        rtpChargeDays: { type: integer, minimum: 30, maximum: 365, description: "Days after which an outstanding returnable balance of this legal entity is chargeable (FR-28.16); 90 when none is saved." }
         version: { type: integer, minimum: 0, description: "0 when no setting is saved (flags false, GS1 prefix and extension digit null)." }
         updatedAt: { type: [string, "null"], format: date-time }
     DropShip:
@@ -365,6 +367,7 @@ components:
         totalCost: { $ref: "#/components/schemas/Decimal" }
         reversalOfId: { type: [string, "null"], format: uuid, description: "Set on a reversing slip; names the slip it cancels." }
         packagingFeeBillable: { type: boolean, description: "The legal entity's packaging_fee_billable when the slip posted (BR-28.12); a reversing slip repeats the original's." }
+        rtpTracked: { type: boolean, description: "The legal entity's rtp_tracking_enabled when the slip posted: false means it raised no returnable balance and cancelling it lowers none; a reversing slip repeats the original's." }
         lines:
           type: array
           description: On a reversing slip quantities and costs are negative.
@@ -1391,13 +1394,19 @@ paths:
       description: >-
         Every balance above zero, aged first in, first out as of today (UTC): returns are taken against the
         oldest shipments, so oldestOutstandingDate is the posting date of the oldest packing slip whose
-        containers the customer still holds. chargeDue is set once daysOutstanding exceeds chargeDays
-        (rtp_charge_days, default 90); wave 30 charges those. count and chargeDueCount cover every matching
-        balance; items holds at most limit of them, oldest first.
+        containers the customer still holds. Each held shipment is judged against the rtp_charge_days of
+        its own legal entity (90 when none is saved): chargeDue is set once any of them is older than its
+        entity's days, so a long setting of one entity never hides another entity's overdue containers;
+        wave 30 charges those. The chargeDays query replaces every entity's value. Slips of an entity with
+        rtp_tracking_enabled false never raised the balance and do not age it; turning tracking off leaves
+        the balances its earlier slips raised in place, still aging. The balance is per customer and
+        container type for the whole tenant; a caller scoped to some legal entities ages it only from the
+        slips of those entities. count and chargeDueCount cover every matching balance; items holds at
+        most limit of them, oldest first.
       x-passage-duty: fulfillment.warehouse.view
       parameters:
         - { name: customerId, in: query, schema: { type: string, format: uuid } }
-        - { name: chargeDays, in: query, schema: { type: integer, minimum: 30, maximum: 365, default: 90 } }
+        - { name: chargeDays, in: query, description: "Replaces the rtp_charge_days of every legal entity; left out, each balance uses its entity's value.", schema: { type: integer, minimum: 30, maximum: 365 } }
         - { name: chargeDue, in: query, description: "true lists only balances whose charge is due.", schema: { type: boolean, default: false } }
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -1410,7 +1419,7 @@ paths:
                 required: [asOf, chargeDays, count, chargeDueCount, items]
                 properties:
                   asOf: { type: string, format: date }
-                  chargeDays: { type: integer }
+                  chargeDays: { type: integer, description: "The chargeDays asked for, else the default 90; the threshold applied to each balance is its own chargeDays." }
                   count: { type: integer }
                   chargeDueCount: { type: integer }
                   items:
@@ -1419,10 +1428,11 @@ paths:
                       allOf:
                         - { $ref: "#/components/schemas/ReturnableBalance" }
                         - type: object
-                          required: [oldestOutstandingDate, daysOutstanding, chargeDue]
+                          required: [oldestOutstandingDate, daysOutstanding, chargeDays, chargeDue]
                           properties:
                             oldestOutstandingDate: { type: [string, "null"], format: date, description: "Null when no shipped container of the balance is visible." }
                             daysOutstanding: { type: integer }
+                            chargeDays: { type: integer, minimum: 30, maximum: 365, description: "The threshold applied: the chargeDays query, else rtp_charge_days of the legal entity of the oldest overdue held shipment, else of the oldest held one." }
                             chargeDue: { type: boolean }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -1971,8 +1981,11 @@ paths:
         either to the process default. A prefix that nests with the process prefix or
         another legal entity's (one is the start of the other) is refused (422 FUL-0050):
         the two would issue the same SSCCs. packagingFeeBillable is stored on each slip
-        posted afterwards for billing (BR-28.12). The three are optional: left out, the
-        saved value stays. If-Match carries the version
+        posted afterwards for billing (BR-28.12). rtpTrackingEnabled false stops the slips
+        posted afterwards from raising the customers' returnable balances (each slip
+        remembers, so cancelling one mirrors its post); rtpChargeDays (30 to 365) is the
+        age after which a balance of the entity is chargeable in the aging report. The
+        last four are optional: left out, the saved value stays. If-Match carries the version
         read, 0 when none is saved. A legal entity outside the caller's legal-entity
         scope is refused (FUL-0058). Publishes legalentitysetting.changed.
       x-passage-duty: fulfillment.warehouse.release
@@ -1994,13 +2007,15 @@ paths:
                 gs1CompanyPrefix: { type: [string, "null"], pattern: '^[0-9]{6,12}$', description: "Left out keeps the saved prefix; null takes the process default." }
                 ssccExtensionDigit: { type: [integer, "null"], minimum: 0, maximum: 9, description: "Left out keeps the saved digit; null takes the process default." }
                 packagingFeeBillable: { type: boolean, description: "Left out keeps the saved value (false when none is saved)." }
+                rtpTrackingEnabled: { type: boolean, description: "Left out keeps the saved value (true when none is saved)." }
+                rtpChargeDays: { type: integer, minimum: 30, maximum: 365, description: "Left out keeps the saved value (90 when none is saved)." }
       responses:
         "200":
           description: The saved setting; ETag carries the new version
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LegalEntitySetting" }
-        "400": { description: "FUL-0050 validation (If-Match, cogsAtShipment, asnEnabled, gs1CompanyPrefix, ssccExtensionDigit), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "400": { description: "FUL-0050 validation (If-Match, cogsAtShipment, asnEnabled, gs1CompanyPrefix, ssccExtensionDigit, rtpTrackingEnabled, rtpChargeDays), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { description: "AUTH-0003 fulfillment.warehouse.release missing, or cogsAtShipment changed without ledger.setup.write", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0058 the legal entity is outside your scope, FUL-0050 the gs1CompanyPrefix nests with one in use, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }

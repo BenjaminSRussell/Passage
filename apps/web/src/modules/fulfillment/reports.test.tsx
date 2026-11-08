@@ -164,6 +164,7 @@ function aged(containerType: string, patch: Partial<AgedReturnableBalance> = {})
     lastReturnedAt: "2026-10-15T09:30:00Z",
     oldestOutstandingDate: "2026-07-13",
     daysOutstanding: 100,
+    chargeDays: 90,
     chargeDue: true,
     ...patch,
   };
@@ -182,13 +183,13 @@ describe("Returnable packaging aging", () => {
     const table = await findTable({ name: "Returnable packaging aging" });
     const pallet = (await within(table).findByText("PALLET")).closest("tr") as HTMLElement;
     const cells = Array.from(pallet.querySelectorAll("td, th")).map((cell) => cell.textContent);
-    expect(cells).toEqual(["0195f0a0", "PALLET", "6", "2026-07-13", "100", "Charge due", "2026-10-11 08:00 UTC", "2026-10-15 09:30 UTC"]);
+    expect(cells).toEqual(["0195f0a0", "PALLET", "6", "2026-07-13", "100", "90", "Charge due", "2026-10-11 08:00 UTC", "2026-10-15 09:30 UTC"]);
     expect(within(within(table).getByText("CRATE").closest("tr") as HTMLElement).getByText("Not due")).toBeInTheDocument();
     const tiles = screen.getByRole("list", { name: "Returnable packaging aging totals" });
     expect(within(tiles).getByText("Outstanding balances", { exact: false }).closest("li")?.textContent).toContain("2");
-    expect(within(tiles).getByText("Charge due", { exact: false }).closest("li")?.textContent).toContain("Out more than 90 days");
+    expect(within(tiles).getByText("Charge due", { exact: false }).closest("li")?.textContent).toContain("Out longer than the legal entity's charge days");
     const params = last(AGING);
-    expect(params.get("chargeDays")).toBe("90");
+    expect(params.has("chargeDays")).toBe(false);
     expect(params.get("limit")).toBe(String(AGING_LIMIT));
     expect(params.has("chargeDue")).toBe(false);
     expect(pageViolations(container)).toEqual([]);
@@ -211,7 +212,7 @@ describe("Returnable packaging aging", () => {
     expect(params.get("chargeDue")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
-    await waitFor(() => expect(last(AGING).get("chargeDays")).toBe("90"));
+    await waitFor(() => expect(last(AGING).has("chargeDays")).toBe(false));
     expect(last(AGING).has("customerId")).toBe(false);
   });
 
@@ -226,7 +227,7 @@ describe("Returnable packaging aging", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
 
     expect(await screen.findByText("Enter the customer id (a UUID), or leave it empty.")).toBeInTheDocument();
-    expect(screen.getByText("Enter a whole number of days from 30 to 365.")).toBeInTheDocument();
+    expect(screen.getByText("Enter a whole number of days from 30 to 365, or leave it empty.")).toBeInTheDocument();
     expect(calls(AGING)).toHaveLength(before);
   });
 

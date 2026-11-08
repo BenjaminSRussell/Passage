@@ -8,7 +8,6 @@ import { useLoad } from "./useLoad";
 
 /** Most balances one view shows; the counts above the table cover all of them. */
 export const AGING_LIMIT = 500;
-const DEFAULT_CHARGE_DAYS = 90;
 
 const columns: DataTableColumn<AgedReturnableBalance>[] = [
   { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
@@ -16,6 +15,7 @@ const columns: DataTableColumn<AgedReturnableBalance>[] = [
   { key: "balance", header: "Held by customer", align: "end" },
   { key: "oldestOutstandingDate", header: "Oldest held since", render: (row) => formatDate(row.oldestOutstandingDate) },
   { key: "daysOutstanding", header: "Days outstanding", align: "end", render: (row) => String(row.daysOutstanding) },
+  { key: "chargeDays", header: "Charge after (days)", align: "end", render: (row) => String(row.chargeDays) },
   {
     key: "chargeDue",
     header: "Charge",
@@ -31,20 +31,21 @@ interface Filter {
   show: "all" | "due";
 }
 
-const blank: Filter = { customerId: "", chargeDays: String(DEFAULT_CHARGE_DAYS), show: "all" };
+const blank: Filter = { customerId: "", chargeDays: "", show: "all" };
 
 function validate(values: Filter): Record<string, string> {
   const found: Record<string, string> = {};
   if (values.customerId !== "" && !UUID.test(values.customerId)) found.customerId = "Enter the customer id (a UUID), or leave it empty.";
   const days = Number(values.chargeDays);
-  if (!/^\d{2,3}$/.test(values.chargeDays) || days < 30 || days > 365) found.chargeDays = "Enter a whole number of days from 30 to 365.";
+  if (values.chargeDays !== "" && (!/^\d{2,3}$/.test(values.chargeDays) || days < 30 || days > 365)) found.chargeDays = "Enter a whole number of days from 30 to 365, or leave it empty.";
   return found;
 }
 
 /**
  * Returnable packaging aging (FR-28.16, section 5.28.14): what each customer
  * still holds, aged first in, first out from the packing slips that shipped
- * it, and flagged once it has been out longer than the charge days.
+ * it, and flagged once it has been out longer than the charge days of its
+ * legal entity (rtp_charge_days), unless a number of days is entered here.
  */
 export function ReturnableAgingPage() {
   const [values, setValues] = useState<Filter>(blank);
@@ -53,7 +54,7 @@ export function ReturnableAgingPage() {
   const state = useLoad(
     (signal) =>
       returnableAging(
-        { customerId: filter.customerId || undefined, chargeDays: Number(filter.chargeDays), chargeDue: filter.show === "due", limit: AGING_LIMIT },
+        { customerId: filter.customerId || undefined, chargeDays: filter.chargeDays === "" ? undefined : Number(filter.chargeDays), chargeDue: filter.show === "due", limit: AGING_LIMIT },
         signal,
       ),
     `${filter.customerId}/${filter.chargeDays}/${filter.show}`,
@@ -82,7 +83,7 @@ export function ReturnableAgingPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Returnable packaging aging"
-        description="Pallets and crates customers still hold, aged from the oldest packing slip not yet returned (first in, first out). A balance out longer than the charge days is due to be charged."
+        description="Pallets and crates customers still hold, aged from the oldest packing slip not yet returned (first in, first out). A balance is due to be charged once containers of a packing slip have been out longer than the charge days of that slip's legal entity."
         actions={
           <Link className={buttonClassName("secondary")} to="/fulfillment/returnable-packaging">
             Balances and return receipts
@@ -94,7 +95,7 @@ export function ReturnableAgingPage() {
           <FormField id="aging-customer" label="Customer id" error={errors.customerId} optional>
             {(control) => <Input {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => setValues({ ...values, customerId: event.target.value })} />}
           </FormField>
-          <FormField id="aging-days" label="Charge after days" hint="rtp_charge_days, 30 to 365." error={errors.chargeDays}>
+          <FormField id="aging-days" label="Charge after days" hint="30 to 365. Empty uses each legal entity's rtp_charge_days (90 when none is saved)." error={errors.chargeDays} optional>
             {(control) => (
               <Input {...control} value={values.chargeDays} inputMode="numeric" invalid={Boolean(errors.chargeDays)} onChange={(event) => setValues({ ...values, chargeDays: event.target.value })} />
             )}
@@ -128,7 +129,7 @@ export function ReturnableAgingPage() {
           {data ? (
             <StatGroup label="Returnable packaging aging totals">
               <StatTile label="Outstanding balances" value={data.count} hint={`As of ${data.asOf}`} />
-              <StatTile label="Charge due" value={data.chargeDueCount} tone="danger" hint={`Out more than ${data.chargeDays} days`} />
+              <StatTile label="Charge due" value={data.chargeDueCount} tone="danger" hint={filter.chargeDays === "" ? "Out longer than the legal entity's charge days" : `Out more than ${data.chargeDays} days`} />
             </StatGroup>
           ) : null}
           <DataTable

@@ -18,7 +18,7 @@ func day(s string) time.Time {
 
 func TestAgeReturnables_FirstInFirstOut(t *testing.T) {
 	asOf := day("2026-10-21")
-	jul, sep, oct := RTPShipped{day("2026-07-13"), d("10")}, RTPShipped{day("2026-09-21"), d("5")}, RTPShipped{day("2026-10-11"), d("4")}
+	jul, sep, oct := RTPShipped{Date: day("2026-07-13"), Qty: d("10")}, RTPShipped{Date: day("2026-09-21"), Qty: d("5")}, RTPShipped{Date: day("2026-10-11"), Qty: d("4")}
 	tests := []struct {
 		name       string
 		balance    string
@@ -36,7 +36,7 @@ func TestAgeReturnables_FirstInFirstOut(t *testing.T) {
 		{"history shorter than the balance uses the oldest shipment", "50", []RTPShipped{oct, sep}, 30, "2026-09-21", 30, false},
 		{"zero balance has no age", "0", []RTPShipped{jul}, 30, "", 0, false},
 		{"no shipment known has no age", "3", nil, 30, "", 0, false},
-		{"time of day is ignored", "1", []RTPShipped{{day("2026-10-20").Add(23 * time.Hour), d("1")}}, 30, "2026-10-20", 1, false},
+		{"time of day is ignored", "1", []RTPShipped{{Date: day("2026-10-20").Add(23 * time.Hour), Qty: d("1")}}, 30, "2026-10-20", 1, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,5 +104,37 @@ func TestBackorder(t *testing.T) {
 		if !rem.Equal(d(tc.remainder)) || open != tc.open {
 			t.Errorf("Backorder(%s, %s, %s) = %s, %v; want %s, %v", tc.status, tc.planned, tc.picked, rem, open, tc.remainder, tc.open)
 		}
+	}
+}
+
+// Each held shipment is judged against its own legal entity's threshold: a
+// long threshold of the oldest shipment's entity never hides the overdue
+// containers of a newer shipment of a short-threshold entity.
+func TestAgeReturnables_EachShipmentJudgedByItsOwnChargeDays(t *testing.T) {
+	asOf := day("2026-10-21")
+	slow := RTPShipped{Date: day("2026-06-01"), Qty: d("5"), ChargeDays: 365}  // 142 days old, threshold 365
+	fast := RTPShipped{Date: day("2026-09-01"), Qty: d("5"), ChargeDays: 30}   // 50 days old, threshold 30
+	recent := RTPShipped{Date: day("2026-10-01"), Qty: d("5"), ChargeDays: 30} // 20 days old, threshold 30
+	tests := []struct {
+		name     string
+		balance  string
+		shipped  []RTPShipped
+		wantDays int
+		wantAge  int
+		wantDue  bool
+	}{
+		{"only the overdue short-threshold shipment held", "5", []RTPShipped{slow, fast}, 30, 50, true},
+		{"older long-threshold shipment held too: the newer one is still overdue", "8", []RTPShipped{slow, fast}, 30, 142, true},
+		{"nothing overdue reports the oldest held shipment's threshold", "8", []RTPShipped{slow, recent}, 365, 142, false},
+		{"not yet overdue short-threshold shipment", "5", []RTPShipped{slow, recent}, 30, 20, false},
+		{"no entity setting takes the given threshold", "5", []RTPShipped{{Date: day("2026-06-01"), Qty: d("5")}}, 90, 142, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AgeReturnables(d(tc.balance), tc.shipped, asOf, 90)
+			if got.ChargeDays != tc.wantDays || got.DaysOutstanding != tc.wantAge || got.ChargeDue != tc.wantDue {
+				t.Fatalf("got %+v, want threshold %d, age %d, due %v", got, tc.wantDays, tc.wantAge, tc.wantDue)
+			}
+		})
 	}
 }

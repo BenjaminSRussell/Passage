@@ -112,7 +112,12 @@ type agingItem struct {
 	store.ReturnableBalance
 	OldestOutstanding *string `json:"oldestOutstandingDate"`
 	DaysOutstanding   int     `json:"daysOutstanding"`
-	ChargeDue         bool    `json:"chargeDue"`
+	// ChargeDays is the threshold applied to this balance: the explicit
+	// chargeDays query, else the rtp_charge_days of the legal entity of its
+	// oldest overdue held shipment, else of its oldest held one (the default
+	// when none is known).
+	ChargeDays int  `json:"chargeDays"`
+	ChargeDue  bool `json:"chargeDue"`
 }
 
 // returnableAging answers GET /v1/fulfillment/returnable-packaging/aging
@@ -128,13 +133,14 @@ func (a *API) returnableAging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chargeDays := domain.DefaultRTPChargeDays
+	override := false
 	if v := q.Get("chargeDays"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < domain.MinRTPChargeDays || n > domain.MaxRTPChargeDays {
 			fail(w, r, "chargeDays", "must be an integer from 30 to 365")
 			return
 		}
-		chargeDays = n
+		chargeDays, override = n, true
 	}
 	dueOnly := false
 	switch q.Get("chargeDue") {
@@ -158,11 +164,22 @@ func (a *API) returnableAging(w http.ResponseWriter, r *http.Request) {
 	all := make([]agingItem, 0, len(rows))
 	out := agingResponse{AsOf: asOf.Format(dateLayout), ChargeDays: chargeDays, Items: []agingItem{}}
 	for _, row := range rows {
-		age := domain.AgeReturnables(row.Balance, row.Shipped, asOf, chargeDays)
+		shipped := row.Shipped
+		if override { // an explicit chargeDays replaces every legal entity's setting
+			shipped = make([]domain.RTPShipped, len(row.Shipped))
+			for i, s := range row.Shipped {
+				s.ChargeDays = 0
+				shipped[i] = s
+			}
+		}
+		age := domain.AgeReturnables(row.Balance, shipped, asOf, chargeDays)
 		if dueOnly && !age.ChargeDue {
 			continue
 		}
-		item := agingItem{ReturnableBalance: row.ReturnableBalance, DaysOutstanding: age.DaysOutstanding, ChargeDue: age.ChargeDue}
+		if age.ChargeDays == 0 {
+			age.ChargeDays = chargeDays
+		}
+		item := agingItem{ReturnableBalance: row.ReturnableBalance, DaysOutstanding: age.DaysOutstanding, ChargeDays: age.ChargeDays, ChargeDue: age.ChargeDue}
 		if age.OldestOutstanding != nil {
 			day := age.OldestOutstanding.Format(dateLayout)
 			item.OldestOutstanding = &day

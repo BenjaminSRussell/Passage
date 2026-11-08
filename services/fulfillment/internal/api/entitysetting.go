@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	passagetenant "github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 )
 
@@ -36,6 +37,9 @@ type legalEntitySettingRequest struct {
 	GS1CompanyPrefix     optional[string] `json:"gs1CompanyPrefix"`
 	SSCCExtensionDigit   optional[int]    `json:"ssccExtensionDigit"`
 	PackagingFeeBillable optional[bool]   `json:"packagingFeeBillable"`
+	// RTPTrackingEnabled and RTPChargeDays (30 to 365) are optional the same way.
+	RTPTrackingEnabled optional[bool] `json:"rtpTrackingEnabled"`
+	RTPChargeDays      optional[int]  `json:"rtpChargeDays"`
 }
 
 // optional records whether a JSON member was present at all; null is present
@@ -139,10 +143,20 @@ func (a *API) saveLegalEntitySetting(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "packagingFeeBillable", "must be true or false (leave it out to keep the saved value)")
 		return
 	}
+	if req.RTPTrackingEnabled.Null {
+		fail(w, r, "rtpTrackingEnabled", "must be true or false (leave it out to keep the saved value)")
+		return
+	}
+	if d := req.RTPChargeDays; d.Set && (d.Null || d.Value < domain.MinRTPChargeDays || d.Value > domain.MaxRTPChargeDays) {
+		fail(w, r, "rtpChargeDays", "must be a whole number of days from 30 to 365 (leave it out to keep the saved value)")
+		return
+	}
 	p, _ := passagetenant.FromContext(r.Context())
 	in := store.LegalEntitySettingInput{CogsAtShipment: *req.CogsAtShipment, AsnEnabled: *req.AsnEnabled,
 		GS1CompanyPrefix: req.GS1CompanyPrefix.nullable(), SSCCExtensionDigit: req.SSCCExtensionDigit.nullable(),
-		PackagingFeeBillable: store.Change[bool]{Set: req.PackagingFeeBillable.Set, Value: req.PackagingFeeBillable.Value}, CanChangeCogs: p.HasDuty(store.DutyCogsPolicy)}
+		PackagingFeeBillable: store.Change[bool]{Set: req.PackagingFeeBillable.Set, Value: req.PackagingFeeBillable.Value},
+		RTPTrackingEnabled:   store.Change[bool]{Set: req.RTPTrackingEnabled.Set, Value: req.RTPTrackingEnabled.Value},
+		RTPChargeDays:        store.Change[int]{Set: req.RTPChargeDays.Set, Value: req.RTPChargeDays.Value}, CanChangeCogs: p.HasDuty(store.DutyCogsPolicy)}
 	s, err := a.store.SaveLegalEntitySetting(r.Context(), id, version, in, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)

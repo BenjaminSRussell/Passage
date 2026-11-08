@@ -104,6 +104,9 @@ const (
 type RTPShipped struct {
 	Date time.Time
 	Qty  decimal.Decimal
+	// ChargeDays is the rtp_charge_days of the legal entity the slip posted
+	// under; 0 takes the chargeDays AgeReturnables is given.
+	ChargeDays int
 }
 
 // RTPAging is the age of an outstanding returnable balance (FR-28.16).
@@ -112,14 +115,22 @@ type RTPAging struct {
 	// customer still holds containers of; nil when no shipment is known.
 	OldestOutstanding *time.Time
 	DaysOutstanding   int
-	ChargeDue         bool
+	// ChargeDays is the threshold applied: that of the oldest overdue held
+	// shipment's legal entity, else that of the oldest held one (the one given
+	// when the shipment carries none).
+	ChargeDays int
+	ChargeDue  bool
 }
 
 // AgeReturnables ages a balance first in, first out: returns are taken against
 // the oldest shipments, so the containers a customer still holds are those of
 // its newest shipments that add up to the balance. The age is the days from
-// the oldest of those to asOf, and the balance is chargeable once that age
-// exceeds chargeDays (section 5.28.16: "balances outstanding > rtp_charge_days").
+// the oldest of those to asOf. Each held shipment is judged against its own
+// threshold (its legal entity's ChargeDays, else chargeDays): the balance is
+// chargeable once any of them is older than its threshold (section 5.28.16:
+// "balances outstanding > rtp_charge_days"), so a long threshold of one entity
+// never hides the overdue containers of another. ChargeDays reports the
+// threshold of the oldest overdue shipment, else that of the oldest held one.
 // When the shipments add up to less than the balance, the oldest shipment
 // given is used. A balance of zero or less, or no shipment, has no age.
 func AgeReturnables(balance decimal.Decimal, shipped []RTPShipped, asOf time.Time, chargeDays int) RTPAging {
@@ -129,6 +140,7 @@ func AgeReturnables(balance decimal.Decimal, shipped []RTPShipped, asOf time.Tim
 	newest := append([]RTPShipped(nil), shipped...)
 	sort.SliceStable(newest, func(i, j int) bool { return newest[i].Date.After(newest[j].Date) })
 	var oldest time.Time
+	days, dueDays := chargeDays, 0
 	left := balance
 	for _, s := range newest {
 		if !left.IsPositive() {
@@ -138,11 +150,20 @@ func AgeReturnables(balance decimal.Decimal, shipped []RTPShipped, asOf time.Tim
 			continue
 		}
 		oldest = dateOnly(s.Date)
+		days = chargeDays
+		if s.ChargeDays > 0 {
+			days = s.ChargeDays
+		}
+		if DaysOutstanding(oldest, asOf) > days {
+			dueDays = days
+		}
 		left = left.Sub(s.Qty)
 	}
 	if oldest.IsZero() {
 		return RTPAging{}
 	}
-	days := DaysOutstanding(oldest, asOf)
-	return RTPAging{OldestOutstanding: &oldest, DaysOutstanding: days, ChargeDue: days > chargeDays}
+	if dueDays > 0 {
+		days = dueDays
+	}
+	return RTPAging{OldestOutstanding: &oldest, DaysOutstanding: DaysOutstanding(oldest, asOf), ChargeDays: days, ChargeDue: dueDays > 0}
 }

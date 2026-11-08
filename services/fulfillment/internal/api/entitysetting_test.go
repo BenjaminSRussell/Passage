@@ -113,6 +113,29 @@ func TestLegalEntitySetting_GS1PrefixAndExtensionAreValidated(t *testing.T) {
 	}
 }
 
+func TestLegalEntitySetting_RTPFieldsAreValidated(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	path := "/v1/fulfillment/legal-entity-settings/" + ids.New()
+	hdr := map[string]string{"If-Match": `"2"`, "Idempotency-Key": "r-1"}
+	for _, extra := range []string{`,"rtpChargeDays":29`, `,"rtpChargeDays":366`, `,"rtpChargeDays":null`, `,"rtpChargeDays":"90"`, `,"rtpTrackingEnabled":null`, `,"rtpTrackingEnabled":"yes"`} {
+		if rec := do(t, h, http.MethodPut, path, `{"cogsAtShipment":false,"asnEnabled":false`+extra+`}`, hdr); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %s", extra, rec.Code, rec.Body.String())
+		}
+	}
+	ok := `{"cogsAtShipment":false,"asnEnabled":false,"rtpTrackingEnabled":false,"rtpChargeDays":30}`
+	if rec := do(t, h, http.MethodPut, path, ok, hdr); rec.Code != http.StatusOK {
+		t.Fatalf("valid: %d %s", rec.Code, rec.Body.String())
+	}
+	if e, d := savedEntitySetting.RTPTrackingEnabled, savedEntitySetting.RTPChargeDays; !e.Set || e.Value || !d.Set || d.Value != 30 {
+		t.Fatalf("valid: %+v", savedEntitySetting)
+	}
+	hdr["Idempotency-Key"] = "r-2"
+	if rec := do(t, h, http.MethodPut, path, `{"cogsAtShipment":false,"asnEnabled":false}`, hdr); rec.Code != http.StatusOK ||
+		savedEntitySetting.RTPTrackingEnabled.Set || savedEntitySetting.RTPChargeDays.Set {
+		t.Fatalf("left out: %d %+v", rec.Code, savedEntitySetting)
+	}
+}
+
 // A post that names a flag passes it as given; one that omits it leaves the
 // choice to the legal entity setting.
 func TestPostPackingSlip_OmittedFlagsTakeTheSetting(t *testing.T) {

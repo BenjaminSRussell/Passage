@@ -209,6 +209,10 @@ type PackingSlip struct {
 	// PackagingFeeBillable is the legal entity's packaging_fee_billable when the
 	// slip posted (BR-28.12); a reversing slip repeats the original's.
 	PackagingFeeBillable bool `json:"packagingFeeBillable"`
+	// RTPTracked says the slip raised the customer's returnable balances
+	// (the legal entity's rtp_tracking_enabled when it posted); a cancel
+	// lowers them only then.
+	RTPTracked bool `json:"rtpTracked"`
 	// RemainderAction is the warehouse's short pick action when posting this
 	// slip closed (CANCEL_REMAINDER) or moved (BACKORDER) the shipment's open
 	// remainder, and BackorderShipmentID the new shipment; both only on the
@@ -1226,7 +1230,7 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			var postLines []domain.PostingLine
 			slip := PackingSlip{ID: ids.New(), ShipmentID: sh.ID, OrderID: sh.OrderID,
 				Status: "POSTED", PostingDate: in.PostingDate, Currency: in.Currency, Lines: []PackingSlipLine{}, PackagingFees: []PackagingFeeLine{},
-				PackagingFeeBillable: le.PackagingFeeBillable}
+				PackagingFeeBillable: le.PackagingFeeBillable, RTPTracked: le.RTPTrackingEnabled}
 			for _, l := range sh.Lines {
 				q := l.Packed.Sub(l.Shipped)
 				if !q.IsPositive() {
@@ -1281,12 +1285,16 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			}
 			// Returnable containers leaving with this slip raise the customer's
 			// balance (BR-28.13); counted before the containers become SHIPPED.
-			returnables, err := countReturnables(ctx, tx, sh.ID, "CLOSED")
-			if err != nil {
-				return PackingSlip{}, err
-			}
-			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, 1, slip.ID); err != nil {
-				return PackingSlip{}, err
+			// An entity that does not track returnables (rtp_tracking_enabled
+			// false) raises nothing and the event lists no movement.
+			returnables := []returnableCount{}
+			if slip.RTPTracked {
+				if returnables, err = countReturnables(ctx, tx, sh.ID, "CLOSED"); err != nil {
+					return PackingSlip{}, err
+				}
+				if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, 1, slip.ID); err != nil {
+					return PackingSlip{}, err
+				}
 			}
 			for _, pl := range slip.Lines {
 				if _, err := tx.Exec(ctx, `update shipment_line set qty_shipped = qty_shipped + $3 where tenant_id = $1 and id = $2`,
@@ -1382,7 +1390,7 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 				return PackingSlip{}, mapDomain(err)
 			}
 			rev := PackingSlip{ID: ids.New(), ShipmentID: orig.ShipmentID, OrderID: orig.OrderID, Status: "POSTED",
-				PostingDate: dateOnly(time.Now()), Currency: orig.Currency, TotalCost: orig.TotalCost.Neg(), ReversalOfID: &orig.ID, PackagingFeeBillable: orig.PackagingFeeBillable,
+				PostingDate: dateOnly(time.Now()), Currency: orig.Currency, TotalCost: orig.TotalCost.Neg(), ReversalOfID: &orig.ID, PackagingFeeBillable: orig.PackagingFeeBillable, RTPTracked: orig.RTPTracked,
 				Journal: toEntries(domain.Reverse(toJournal(orig.Journal))), Lines: []PackingSlipLine{}, PackagingFees: []PackagingFeeLine{}}
 			seq, err := nextNumber(ctx, tx, p.TenantID, "PS:"+sh.LegalEntityID)
 			if err != nil {
@@ -1410,12 +1418,15 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 			}
 			// The returnable containers come back from the customer's balance; a
 			// customer who already returned them blocks the cancel (FUL-0015).
-			returnables, err := countSlipReturnables(ctx, tx, orig.ID)
-			if err != nil {
-				return PackingSlip{}, err
-			}
-			if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, -1, orig.ID); err != nil {
-				return PackingSlip{}, err
+			// A slip that raised nothing lowers nothing, whatever the setting is now.
+			returnables := []returnableCount{}
+			if orig.RTPTracked {
+				if returnables, err = countSlipReturnables(ctx, tx, orig.ID); err != nil {
+					return PackingSlip{}, err
+				}
+				if err := moveBalances(ctx, tx, p.TenantID, sh.CustomerID, returnables, -1, orig.ID); err != nil {
+					return PackingSlip{}, err
+				}
 			}
 			if _, err := tx.Exec(ctx, `update packing_slip set status = 'CANCELLED' where tenant_id = $1 and id = $2`, p.TenantID, orig.ID); err != nil {
 				return PackingSlip{}, err
@@ -1484,9 +1495,9 @@ func insertSlip(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, 
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `insert into packing_slip (tenant_id, id, legal_entity_id, shipment_id, order_id, packing_slip_number, status, posting_date, currency, total_cost, journal, reversal_of_id, packaging_fee_billable)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, tenantID, slip.ID, legalEntityID, slip.ShipmentID, slip.OrderID, slip.Number,
-		slip.Status, slip.PostingDate, slip.Currency, slip.TotalCost, journal, slip.ReversalOfID, slip.PackagingFeeBillable); err != nil {
+	if _, err := tx.Exec(ctx, `insert into packing_slip (tenant_id, id, legal_entity_id, shipment_id, order_id, packing_slip_number, status, posting_date, currency, total_cost, journal, reversal_of_id, packaging_fee_billable, rtp_tracked)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`, tenantID, slip.ID, legalEntityID, slip.ShipmentID, slip.OrderID, slip.Number,
+		slip.Status, slip.PostingDate, slip.Currency, slip.TotalCost, journal, slip.ReversalOfID, slip.PackagingFeeBillable, slip.RTPTracked); err != nil {
 		return err
 	}
 	for _, l := range slip.Lines {
@@ -1502,8 +1513,8 @@ func loadSlip(ctx context.Context, tx pgx.Tx, id string) (PackingSlip, error) {
 	var slip PackingSlip
 	var journal []byte
 	var total string
-	err := tx.QueryRow(ctx, `select id, packing_slip_number, shipment_id, order_id, status, posting_date, currency, total_cost::text, journal, reversal_of_id, packaging_fee_billable
-		from packing_slip where id = $1`, id).Scan(&slip.ID, &slip.Number, &slip.ShipmentID, &slip.OrderID, &slip.Status, &slip.PostingDate, &slip.Currency, &total, &journal, &slip.ReversalOfID, &slip.PackagingFeeBillable)
+	err := tx.QueryRow(ctx, `select id, packing_slip_number, shipment_id, order_id, status, posting_date, currency, total_cost::text, journal, reversal_of_id, packaging_fee_billable, rtp_tracked
+		from packing_slip where id = $1`, id).Scan(&slip.ID, &slip.Number, &slip.ShipmentID, &slip.OrderID, &slip.Status, &slip.PostingDate, &slip.Currency, &total, &journal, &slip.ReversalOfID, &slip.PackagingFeeBillable, &slip.RTPTracked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return slip, httpx.NewProblem(http.StatusNotFound, CodeSlipNotFound, "packing slip not found")
 	}
