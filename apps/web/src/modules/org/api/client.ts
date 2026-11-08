@@ -128,7 +128,7 @@ export async function orgFetch<T>(path: string, init: RequestInit, scope: Scope)
   if (!res.ok) {
     throw await toError(res);
   }
-  return (await res.json()) as T;
+  return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
 
 function clampPageSize(value: unknown): number {

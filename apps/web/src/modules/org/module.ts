@@ -4,6 +4,7 @@ import { HierarchyDesignerPage } from "./HierarchyDesignerPage";
 import { ReferenceDataPage } from "./ReferenceDataPage";
 import { FiscalCalendarsPage } from "./FiscalCalendarsPage";
 import { LegalEntitiesPage } from "./LegalEntityAdmin";
+import { NameTranslationsPage } from "./NameTranslationsPage";
 import { ModelPackagePage } from "./ModelPackagePage";
 import { OperatingUnitImportPage } from "./OperatingUnitImportPage";
 import { OrgHome, OrgLayout } from "./pages";
@@ -29,6 +30,7 @@ const org: PassageModule = {
         { path: "/org/teams", element: createElement(TeamsPage) },
         { path: "/org/reference-data", element: createElement(ReferenceDataPage) },
         { path: "/org/hierarchy", element: createElement(HierarchyDesignerPage) },
+        { path: "/org/names", element: createElement(NameTranslationsPage) },
         { path: "/org/package", element: createElement(ModelPackagePage) },
       ],
     },
@@ -44,6 +46,7 @@ const org: PassageModule = {
     { label: "Teams", to: "/org/teams", duty: "org.read" },
     { label: "Reference data", to: "/org/reference-data", duty: "org.read" },
     { label: "Hierarchies", to: "/org/hierarchy", duty: "org.read" },
+    { label: "Name translations", to: "/org/names", duty: "org.read" },
     { label: "Model package", to: "/org/package", duty: "org.read" },
   ],
 };

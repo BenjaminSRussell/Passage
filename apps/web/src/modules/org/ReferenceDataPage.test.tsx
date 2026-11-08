@@ -74,6 +74,7 @@ describe("tabs", () => {
       "Languages",
       "Units",
       "Conversions",
+      "Rounding",
     ]);
     expect(callsTo(fetchMock, "GET", "/countries")).toHaveLength(1);
     expect(callsTo(fetchMock, "GET", "/currencies")).toHaveLength(0);
@@ -91,7 +92,7 @@ describe("tabs", () => {
     await user.keyboard("{ArrowRight}");
     expect(screen.getByRole("tab", { name: "Currencies" })).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{End}");
-    expect(screen.getByRole("tab", { name: "Conversions" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Rounding" })).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{ArrowRight}");
     expect(screen.getByRole("tab", { name: "Countries" })).toHaveAttribute("aria-selected", "true");
   });

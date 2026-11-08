@@ -15,6 +15,7 @@ import {
 } from "./api/reference";
 import styles from "./pages.module.css";
 import { FilterSelect, StatusTable, statusOptions, useRows, type StatusFilterValue } from "./referenceParts";
+import { RoundingTab } from "./RoundingTab";
 import { ConversionsTab, UnitsTab } from "./UomTabs";
 
 interface ReferenceListTabProps<T extends { code: string; status: ReferenceStatus }> {
@@ -99,6 +100,7 @@ const tabs: { id: string; label: string; render(): ReactNode }[] = [
   },
   { id: "units", label: "Units", render: () => <UnitsTab /> },
   { id: "conversions", label: "Conversions", render: () => <ConversionsTab /> },
+  { id: "rounding", label: "Rounding", render: () => <RoundingTab /> },
 ];
 
 export function ReferenceDataPage() {
@@ -122,7 +124,7 @@ export function ReferenceDataPage() {
 
   return (
     <>
-      <PageHeader title="Reference data" description="Countries, currencies, regions, languages and units of measure for this tenant." />
+      <PageHeader title="Reference data" description="Countries, currencies, regions, languages, units of measure and currency rounding rules for this tenant." />
       <div role="tablist" aria-label="Reference data" className={styles.tablist} onKeyDown={move}>
         {tabs.map((tab, index) => (
           <button
