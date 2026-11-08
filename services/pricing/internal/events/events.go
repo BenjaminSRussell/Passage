@@ -274,6 +274,7 @@ type FreeGoodsRuleData struct {
 	LegalEntityID string `json:"legal_entity_id"`
 	CustomerKind  string `json:"customer_kind"`
 	CustomerKey   string `json:"customer_key"`
+	ProductKind   string `json:"product_kind"`
 	ProductID     string `json:"product_id"`
 	Unit          string `json:"unit"`
 	Kind          string `json:"kind"`

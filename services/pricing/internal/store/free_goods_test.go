@@ -14,7 +14,7 @@ import (
 )
 
 func testFreeGoods(from, to string) domain.FreeGoodsDef {
-	return domain.FreeGoodsDef{LegalEntityID: legalEntity, CustomerKind: domain.CustomerKindAll, ProductID: "P1", Unit: "EA",
+	return domain.FreeGoodsDef{LegalEntityID: legalEntity, CustomerKind: domain.CustomerKindAll, ProductKind: domain.ProductKindProduct, ProductID: "P1", Unit: "EA",
 		Kind: domain.FreeGoodsInclusive, Calc: domain.CalcWholeUnits, Every: decimal.NewFromInt(10), Free: decimal.NewFromInt(1),
 		MinQty: decimal.Zero, ValidFrom: day(from), ValidTo: day(to)}
 }
@@ -249,4 +249,46 @@ func problemFields(err error) map[string]string {
 		return p.Errors
 	}
 	return nil
+}
+
+// A rule keyed on a product group: it is stored with its kind, found by the group key, does not
+// clash with a product rule of the same key, and its overlap guard is its own.
+func TestPostgres_FreeGoodsProductGroupRule(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	grp := testFreeGoods("2026-01-01", "2026-06-30")
+	grp.ProductKind, grp.ProductID = domain.ProductKindGroup, "PG1"
+	r, err := s.CreateFreeGoodsRule(ctx, grp, "fgg-1")
+	if err != nil || r.ProductKind != domain.ProductKindGroup || r.ProductID != "PG1" {
+		t.Fatalf("create group rule = %+v err %v", r, err)
+	}
+	if _, err := s.CreateFreeGoodsRule(ctx, grp, ""); problemCode(err) != domain.CodeOverlap {
+		t.Fatalf("overlapping group rule = %v; want PRC-0002", err)
+	}
+	asProduct := testFreeGoods("2026-01-01", "2026-06-30")
+	asProduct.ProductID = "PG1"
+	if _, err := s.CreateFreeGoodsRule(ctx, asProduct, ""); err != nil {
+		t.Fatalf("a product rule keyed like the group must not clash: %v", err)
+	}
+	live, err := s.ActiveFreeGoodsRules(ctx, legalEntity, []string{"P1", "PG1"}, day("2026-03-01"))
+	if err != nil || len(live) != 2 {
+		t.Fatalf("live by product and group keys = %+v err %v; want both rules", live, err)
+	}
+	got, err := s.GetFreeGoodsRule(ctx, r.ID)
+	if err != nil || got.ProductKind != domain.ProductKindGroup {
+		t.Fatalf("get = %+v err %v", got, err)
+	}
+	// A group rule that has not started can be revised; the revision keeps its product kind.
+	future := testFreeGoods("2999-01-01", "2999-12-31")
+	future.ProductKind, future.ProductID = domain.ProductKindGroup, "PG2"
+	f, err := s.CreateFreeGoodsRule(ctx, future, "")
+	if err != nil {
+		t.Fatalf("create future group rule: %v", err)
+	}
+	rev, err := s.ReviseFreeGoodsRule(ctx, domain.FreeGoodsRevision{ID: f.ID, Version: 1, Calc: domain.CalcWholeUnits, Every: decimal.NewFromInt(20),
+		Free: decimal.NewFromInt(1), MinQty: decimal.Zero, ValidFrom: day("2999-01-01"), ValidTo: day("2999-12-31")}, "")
+	if err != nil || rev.ProductKind != domain.ProductKindGroup || rev.Version != 2 {
+		t.Fatalf("revise keeps the product kind: %+v err %v", rev, err)
+	}
 }

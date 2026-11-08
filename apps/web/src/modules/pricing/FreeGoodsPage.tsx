@@ -1,14 +1,14 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listFreeGoodsRules, type FreeGoodsRule } from "./api/client";
-import { describeOffer, describeWho, FREE_GOODS_STATES, freeGoodsState } from "./freeGoodsFormat";
+import { describeOffer, describeProduct, describeWho, FREE_GOODS_STATES, freeGoodsState } from "./freeGoodsFormat";
 import { today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 function columns(day: string): DataTableColumn<FreeGoodsRule>[] {
   return [
-    { key: "productId", header: "Product", mono: true },
+    { key: "productId", header: "Product", mono: true, render: describeProduct },
     { key: "customerKey", header: "Customers", render: describeWho },
     { key: "freeQuantity", header: "Offer", render: describeOffer },
     { key: "validFrom", header: "Valid from", mono: true },
@@ -34,7 +34,7 @@ export function FreeGoodsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Free goods"
-        description="A rule gives free units for every quantity ordered of a product. Pricing proposes them as zero-priced lines that sales adds to the order."
+        description="A rule gives free units for every quantity ordered of a product or of every product in a product group. Pricing proposes them as zero-priced lines that sales adds to the order."
         actions={
           <Link className={buttonClassName("primary")} to="/pricing/free-goods/new">
             New free goods rule

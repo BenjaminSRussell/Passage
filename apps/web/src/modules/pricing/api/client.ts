@@ -1110,12 +1110,17 @@ export type FreeGoodsKind = (typeof FREE_GOODS_KINDS)[number];
 export const FREE_GOODS_CALC_RULES = ["PROPORTIONAL", "UNIT_REFERENCE", "WHOLE_UNITS"] as const;
 export type FreeGoodsCalcRule = (typeof FREE_GOODS_CALC_RULES)[number];
 export type FreeGoodsCustomerKind = "customer" | "customer_group" | "all";
+/** What productId names: a product, or a product group (every product of the group earns the rule). */
+export type FreeGoodsProductKind = "product" | "product_group";
 
 export interface FreeGoodsRuleInput {
   legalEntityId: string;
   customerKind: FreeGoodsCustomerKind;
   /** Customer or customer group id; empty when customerKind is all. */
   customerKey: string;
+  /** Left out, product. */
+  productKind?: FreeGoodsProductKind;
+  /** The product id, or the product group id when productKind is product_group. */
   productId: string;
   unit: string;
   kind: FreeGoodsKind;

@@ -8,7 +8,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/agreements` | Trade agreements grid with status, type, customer, product, as-of and ends-between filters, and Export CSV of every match | `GET /condition-records`, `GET /condition-records:export` |
 | `/pricing/agreements/new` | Create a DRAFT agreement, optionally in a campaign; `?copy=<id>` starts from an existing one, `?campaign=<id>` fills the campaign | `POST /condition-records` |
 | `/pricing/agreements/:id` | Detail with its campaign, activate (overlap 409 shown) and withdraw | `GET`, `:activate`, `:withdraw` |
-| `/pricing/free-goods` | Free goods rules (FR-26.22) with status | `GET /free-goods-rules` |
+| `/pricing/free-goods` | Free goods rules (FR-26.22) for a product or a product group, with status | `GET /free-goods-rules` |
 | `/pricing/free-goods/new` | Create a rule: customers, product, unit, inclusive or exclusive, calculation ("Legal entity default" sends none, so the entity's `freeGoodsCalcRule` applies), quantities, validity (overlap 409 shown) | `POST /free-goods-rules` |
 | `/pricing/free-goods/:id` | Rule detail, Edit rule (calculation, quantities, minimum, validity at the version read; once the rule has started its offer and first day are read-only and its last day moves only within yesterday and later) and withdraw | `GET /free-goods-rules/{id}`, `:revise`, `:withdraw` |
 | `/pricing/commodity/bases` | Commodity cost basis types (FR-26.21) | `GET /commodity/bases` |

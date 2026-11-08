@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { FreeGoodsCalcRule, FreeGoodsCustomerKind, FreeGoodsKind, FreeGoodsRule } from "./api/client";
+import type { FreeGoodsCalcRule, FreeGoodsCustomerKind, FreeGoodsKind, FreeGoodsProductKind, FreeGoodsRule } from "./api/client";
 
 export const KIND_LABELS: Record<FreeGoodsKind, string> = {
   INCLUSIVE: "Inclusive (free units come out of the order)",
@@ -17,6 +17,16 @@ export const CUSTOMER_KIND_LABELS: Record<FreeGoodsCustomerKind, string> = {
   customer_group: "A customer group",
   customer: "One customer",
 };
+
+export const PRODUCT_KIND_LABELS: Record<FreeGoodsProductKind, string> = {
+  product: "One product",
+  product_group: "A product group",
+};
+
+/** What the rule's product key is, in words: the product itself, or "Group PG1". */
+export function describeProduct(r: Pick<FreeGoodsRule, "productKind" | "productId">): string {
+  return r.productKind === "product_group" ? `Group ${r.productId}` : r.productId;
+}
 
 export type FreeGoodsState = "withdrawn" | "scheduled" | "live" | "ended";
 

@@ -35,17 +35,20 @@ type FreeGoodsDef struct {
 	LegalEntityID string
 	CustomerKind  CustomerKind
 	CustomerKey   string
-	ProductID     string
-	Unit          string
-	Kind          string
-	Calc          string
-	Every         decimal.Decimal
-	Free          decimal.Decimal
-	MinQty        decimal.Decimal
-	ValidFrom     time.Time
-	ValidTo       time.Time
-	Withdrawn     bool
-	Version       int
+	// ProductKind says what ProductID names: a product, or a product group (every product of
+	// the group earns the rule's free goods).
+	ProductKind ProductKind
+	ProductID   string
+	Unit        string
+	Kind        string
+	Calc        string
+	Every       decimal.Decimal
+	Free        decimal.Decimal
+	MinQty      decimal.Decimal
+	ValidFrom   time.Time
+	ValidTo     time.Time
+	Withdrawn   bool
+	Version     int
 }
 
 // ValidateFreeGoods returns field errors for a rule definition; an empty map means valid.
@@ -62,6 +65,9 @@ func ValidateFreeGoods(r FreeGoodsDef) map[string]string {
 		}
 	default:
 		f["customerKind"] = "must be customer, customer_group or all"
+	}
+	if r.ProductKind != ProductKindProduct && r.ProductKind != ProductKindGroup {
+		f["productKind"] = "must be product or product_group"
 	}
 	if r.ProductID == "" || len(r.ProductID) > 64 {
 		f["productId"] = "is required, at most 64 characters"
@@ -163,7 +169,7 @@ func FreeGoodsPastChanges(cur, next FreeGoodsDef, today time.Time) map[string]st
 
 // FreeGoodsKey is the identity two live rules must not share on overlapping dates.
 func FreeGoodsKey(r FreeGoodsDef) string {
-	return r.LegalEntityID + "|" + string(r.CustomerKind) + "|" + r.CustomerKey + "|" + r.ProductID + "|" + r.Unit
+	return r.LegalEntityID + "|" + string(r.CustomerKind) + "|" + r.CustomerKey + "|" + string(r.ProductKind) + "|" + r.ProductID + "|" + r.Unit
 }
 
 // FreeGoodsOverlap returns the first live rule with the same key whose validity overlaps r.
@@ -196,20 +202,32 @@ type FreeGoodsProposal struct {
 	Warning         string          `json:"warning,omitempty"`
 }
 
-func freeGoodsRank(r FreeGoodsDef, h Header) int {
+// freeGoodsRank orders the rules that match a line by the access sequence of BR-26.1: customer
+// and product, customer and group, customer group and product, customer group and group, all
+// customers and product, all customers and group. Zero means the rule does not match.
+func freeGoodsRank(r FreeGoodsDef, h Header, l Line) int {
+	product := 0
+	switch {
+	case r.ProductKind == ProductKindGroup && l.ProductGroupID != "" && r.ProductID == l.ProductGroupID:
+	case r.ProductKind != ProductKindGroup && r.ProductID == l.ProductID:
+		product = 1
+	default:
+		return 0
+	}
 	switch {
 	case r.CustomerKind == CustomerKindCustomer && r.CustomerKey == h.CustomerID:
-		return 3
+		return 5 + product
 	case r.CustomerKind == CustomerKindGroup && h.CustomerGroupID != "" && r.CustomerKey == h.CustomerGroupID:
-		return 2
+		return 3 + product
 	case r.CustomerKind == CustomerKindAll:
-		return 1
+		return 1 + product
 	}
 	return 0
 }
 
-// ProposeFreeGoods picks, per line, the most specific live rule (customer, then customer
-// group, then all; ties go to the later start, then the id) and returns the lines that earn
+// ProposeFreeGoods picks, per line, the most specific live rule (the access sequence of
+// freeGoodsRank: customer, then customer group, then all, and within each a product before its
+// product group; ties go to the later start, then the id) and returns the lines that earn
 // free units, in line order. It is pure: the caller supplies the rules loaded for the
 // header's legal entity and pricing date. A line whose net in lineNet is zero (already
 // priced at nothing) carries the PRC-0014 warning.
@@ -218,8 +236,8 @@ func ProposeFreeGoods(h Header, lines []Line, rules []FreeGoodsDef, lineNet map[
 	for _, l := range lines {
 		var cands []FreeGoodsDef
 		for _, r := range rules {
-			if r.Withdrawn || r.ProductID != l.ProductID || r.Unit != l.Unit ||
-				h.PricingDate.Before(r.ValidFrom) || h.PricingDate.After(r.ValidTo) || freeGoodsRank(r, h) == 0 {
+			if r.Withdrawn || r.Unit != l.Unit || h.PricingDate.Before(r.ValidFrom) || h.PricingDate.After(r.ValidTo) ||
+				freeGoodsRank(r, h, l) == 0 {
 				continue
 			}
 			cands = append(cands, r)
@@ -228,7 +246,7 @@ func ProposeFreeGoods(h Header, lines []Line, rules []FreeGoodsDef, lineNet map[
 			continue
 		}
 		sort.SliceStable(cands, func(i, j int) bool {
-			ri, rj := freeGoodsRank(cands[i], h), freeGoodsRank(cands[j], h)
+			ri, rj := freeGoodsRank(cands[i], h, l), freeGoodsRank(cands[j], h, l)
 			if ri != rj {
 				return ri > rj
 			}

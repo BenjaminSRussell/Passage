@@ -300,3 +300,44 @@ func TestFreeGoods_CalcRuleDefaultFollowsTheParameter(t *testing.T) {
 		t.Fatalf("missing calc rule = %d %v", status, out)
 	}
 }
+
+// A rule for a product group proposes free goods for every product of the group (FR-26.22),
+// a product rule outranks it, and productKind is validated and defaults to product.
+func TestFreeGoods_ProductGroupRule(t *testing.T) {
+	h := router(newFake())
+	activeP1Record(t, h, "9.00", "")
+	body := `{"legalEntityId":"` + legalEntity + `","customerKind":"all","productKind":"product_group","productId":"PG1","unit":"EA",` +
+		`"kind":"EXCLUSIVE","calcRule":"WHOLE_UNITS","everyQuantity":"10","freeQuantity":"1","validFrom":"2026-01-01","validTo":"2026-12-31"}`
+	code, rule := call(t, h, http.MethodPost, "/v1/pricing/free-goods-rules", campaignDuties, body, "Idempotency-Key", "fgg-1")
+	if code != http.StatusCreated || rule["productKind"] != "product_group" || rule["productId"] != "PG1" {
+		t.Fatalf("create group rule = %d %v", code, rule)
+	}
+	grouped := `{"legalEntityId":"` + legalEntity + `","customerId":"C1","currency":"USD","pricingDate":"2026-06-01",
+	"lines":[{"productId":"P1","productGroupId":"PG1","unit":"EA","quantity":"25"}]}`
+	code, out := call(t, h, http.MethodPost, "/v1/pricing/resolve", allDuties, grouped)
+	props, _ := out["freeGoods"].([]any)
+	if code != http.StatusOK || len(props) != 1 || props[0].(map[string]any)["ruleId"] != rule["id"] || props[0].(map[string]any)["freeQuantity"] != "2" {
+		t.Fatalf("group rule proposal = %d %v; want 2 free by %v", code, out["freeGoods"], rule["id"])
+	}
+	if got := freeProposals(t, h, "25"); len(got) != 0 {
+		t.Fatalf("a line without a product group got %v", got)
+	}
+	// A product rule for the same line outranks the group rule.
+	product := createFreeGoods(t, h, "EXCLUSIVE", "WHOLE_UNITS", "fgp-1")
+	_, out = call(t, h, http.MethodPost, "/v1/pricing/resolve", allDuties, grouped)
+	if p := out["freeGoods"].([]any)[0].(map[string]any); p["ruleId"] != product["id"] {
+		t.Fatalf("proposal = %v; want the product rule %v", p, product["id"])
+	}
+	if product["productKind"] != "product" {
+		t.Fatalf("omitted productKind = %v; want product", product["productKind"])
+	}
+	// The same group key cannot be created twice for overlapping dates.
+	if code, out := call(t, h, http.MethodPost, "/v1/pricing/free-goods-rules", campaignDuties, body); code != http.StatusConflict || out["code"] != "PRC-0002" {
+		t.Fatalf("overlapping group rule = %d %v; want 409 PRC-0002", code, out)
+	}
+	bad := strings.Replace(body, `"product_group"`, `"variant"`, 1)
+	code, out = call(t, h, http.MethodPost, "/v1/pricing/free-goods-rules", campaignDuties, bad)
+	if errs, _ := out["errors"].(map[string]any); code != http.StatusUnprocessableEntity || errs["productKind"] == nil {
+		t.Fatalf("variant product kind = %d %v; want 422 on productKind", code, out)
+	}
+}

@@ -859,12 +859,13 @@ components:
       description: >
         A free goods rule (FR-26.22) after create, revise or withdraw. Sales (w27) proposes supplementary
         free goods lines from the live rules (FR-27.14) and drops its snapshot on any of them.
-      required: [rule_id, legal_entity_id, customer_kind, customer_key, product_id, unit, kind, calc_rule, every_quantity, free_quantity, min_quantity, valid_from, valid_to, withdrawn, version]
+      required: [rule_id, legal_entity_id, customer_kind, customer_key, product_kind, product_id, unit, kind, calc_rule, every_quantity, free_quantity, min_quantity, valid_from, valid_to, withdrawn, version]
       properties:
         rule_id: {type: string, format: uuid}
         legal_entity_id: {type: string, format: uuid}
         customer_kind: {type: string, enum: [customer, customer_group, all]}
         customer_key: {type: string}
+        product_kind: {type: string, enum: [product, product_group], description: "What product_id names: a product, or a product group."}
         product_id: {type: string}
         unit: {type: string}
         kind: {type: string, enum: [INCLUSIVE, EXCLUSIVE]}

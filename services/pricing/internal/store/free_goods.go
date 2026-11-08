@@ -20,17 +20,18 @@ import (
 	pevents "github.com/BenjaminSRussell/passage/services/pricing/internal/events"
 )
 
-const freeGoodsColumns = `id::text, legal_entity_id::text, customer_kind, customer_key, product_id, unit, kind, calc_rule,
+const freeGoodsColumns = `id::text, legal_entity_id::text, customer_kind, customer_key, product_kind, product_id, unit, kind, calc_rule,
 	every_quantity::text, free_quantity::text, min_quantity::text, valid_from, valid_to, withdrawn, version`
 
 func scanFreeGoods(row pgx.Row) (domain.FreeGoodsDef, error) {
 	var r domain.FreeGoodsDef
-	var ck, every, free, min string
-	if err := row.Scan(&r.ID, &r.LegalEntityID, &ck, &r.CustomerKey, &r.ProductID, &r.Unit, &r.Kind, &r.Calc,
+	var ck, pk, every, free, min string
+	if err := row.Scan(&r.ID, &r.LegalEntityID, &ck, &r.CustomerKey, &pk, &r.ProductID, &r.Unit, &r.Kind, &r.Calc,
 		&every, &free, &min, &r.ValidFrom, &r.ValidTo, &r.Withdrawn, &r.Version); err != nil {
 		return domain.FreeGoodsDef{}, err
 	}
 	r.CustomerKind = domain.CustomerKind(ck)
+	r.ProductKind = domain.ProductKind(pk)
 	r.Every = decimal.RequireFromString(every)
 	r.Free = decimal.RequireFromString(free)
 	r.MinQty = decimal.RequireFromString(min)
@@ -43,13 +44,13 @@ func freeGoodsNotFound(id string) error {
 
 func sameFreeGoods(a, b domain.FreeGoodsDef) bool {
 	return a.LegalEntityID == b.LegalEntityID && a.CustomerKind == b.CustomerKind && a.CustomerKey == b.CustomerKey &&
-		a.ProductID == b.ProductID && a.Unit == b.Unit && a.Kind == b.Kind && a.Calc == b.Calc && a.Every.Equal(b.Every) &&
+		a.ProductKind == b.ProductKind && a.ProductID == b.ProductID && a.Unit == b.Unit && a.Kind == b.Kind && a.Calc == b.Calc && a.Every.Equal(b.Every) &&
 		a.Free.Equal(b.Free) && a.MinQty.Equal(b.MinQty) && dayStr(a.ValidFrom) == dayStr(b.ValidFrom) && dayStr(a.ValidTo) == dayStr(b.ValidTo)
 }
 
 func freeGoodsEventData(r domain.FreeGoodsDef) pevents.FreeGoodsRuleData {
 	return pevents.FreeGoodsRuleData{RuleID: r.ID, LegalEntityID: r.LegalEntityID, CustomerKind: string(r.CustomerKind),
-		CustomerKey: r.CustomerKey, ProductID: r.ProductID, Unit: r.Unit, Kind: r.Kind, CalcRule: r.Calc,
+		CustomerKey: r.CustomerKey, ProductKind: string(r.ProductKind), ProductID: r.ProductID, Unit: r.Unit, Kind: r.Kind, CalcRule: r.Calc,
 		EveryQuantity: r.Every.String(), FreeQuantity: r.Free.String(), MinQuantity: r.MinQty.String(),
 		ValidFrom: dayStr(r.ValidFrom), ValidTo: dayStr(r.ValidTo), Withdrawn: r.Withdrawn, Version: r.Version}
 }
@@ -86,8 +87,8 @@ func (s *Postgres) CreateFreeGoodsRule(ctx context.Context, in domain.FreeGoodsD
 			}
 		}
 		rows, err := tx.Query(ctx, `select `+freeGoodsColumns+` from free_goods_rule
-			where legal_entity_id = $1 and customer_kind = $2 and customer_key = $3 and product_id = $4 and unit = $5 and not withdrawn`,
-			in.LegalEntityID, string(in.CustomerKind), in.CustomerKey, in.ProductID, in.Unit)
+			where legal_entity_id = $1 and customer_kind = $2 and customer_key = $3 and product_kind = $4 and product_id = $5 and unit = $6 and not withdrawn`,
+			in.LegalEntityID, string(in.CustomerKind), in.CustomerKey, string(in.ProductKind), in.ProductID, in.Unit)
 		if err != nil {
 			return err
 		}
@@ -108,10 +109,10 @@ func (s *Postgres) CreateFreeGoodsRule(ctx context.Context, in domain.FreeGoodsD
 			return httpx.NewProblem(http.StatusConflict, domain.CodeOverlap, fmt.Sprintf("overlapping free goods rule %s for the same customer, product and unit", c.ID))
 		}
 		created, err := scanFreeGoods(tx.QueryRow(ctx, `insert into free_goods_rule (tenant_id, id, legal_entity_id, customer_kind, customer_key,
-			product_id, unit, kind, calc_rule, every_quantity, free_quantity, min_quantity, valid_from, valid_to, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11::numeric, $12::numeric, $13, $14, $15)
+			product_kind, product_id, unit, kind, calc_rule, every_quantity, free_quantity, min_quantity, valid_from, valid_to, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::numeric, $12::numeric, $13::numeric, $14, $15, $16)
 			returning `+freeGoodsColumns,
-			p.TenantID, ids.New(), in.LegalEntityID, string(in.CustomerKind), in.CustomerKey, in.ProductID, in.Unit, in.Kind, in.Calc,
+			p.TenantID, ids.New(), in.LegalEntityID, string(in.CustomerKind), in.CustomerKey, string(in.ProductKind), in.ProductID, in.Unit, in.Kind, in.Calc,
 			in.Every.String(), in.Free.String(), in.MinQty.String(), dayStr(in.ValidFrom), dayStr(in.ValidTo), key))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "free_goods_rule_tenant_id_idempotency_key_key" {
@@ -168,15 +169,16 @@ func (s *Postgres) ListFreeGoodsRules(ctx context.Context, legalEntityID, produc
 	return out, err
 }
 
-// ActiveFreeGoodsRules returns the live rules of one legal entity for the named products
-// that cover asOf, for the resolve proposal. Withdrawn rules and rules outside their
+// ActiveFreeGoodsRules returns the live rules of one legal entity keyed on one of the named
+// keys (the products and the product groups of the document lines; the proposal tells the two
+// kinds apart) that cover asOf, for the resolve proposal. Withdrawn rules and rules outside their
 // validity are not returned.
-func (s *Postgres) ActiveFreeGoodsRules(ctx context.Context, legalEntityID string, productIDs []string, asOf time.Time) ([]domain.FreeGoodsDef, error) {
+func (s *Postgres) ActiveFreeGoodsRules(ctx context.Context, legalEntityID string, keys []string, asOf time.Time) ([]domain.FreeGoodsDef, error) {
 	out := []domain.FreeGoodsDef{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+freeGoodsColumns+` from free_goods_rule
 			where legal_entity_id = $1::uuid and product_id = any($2::text[]) and not withdrawn
-			and valid_from <= $3::date and valid_to >= $3::date`, legalEntityID, productIDs, dayStr(asOf))
+			and valid_from <= $3::date and valid_to >= $3::date`, legalEntityID, keys, dayStr(asOf))
 		if err != nil {
 			return err
 		}
@@ -284,8 +286,8 @@ func (s *Postgres) ReviseFreeGoodsRule(ctx context.Context, rev domain.FreeGoods
 			return err
 		}
 		rows, err := tx.Query(ctx, `select `+freeGoodsColumns+` from free_goods_rule
-			where legal_entity_id = $1 and customer_kind = $2 and customer_key = $3 and product_id = $4 and unit = $5 and not withdrawn and id <> $6`,
-			cur.LegalEntityID, string(cur.CustomerKind), cur.CustomerKey, cur.ProductID, cur.Unit, cur.ID)
+			where legal_entity_id = $1 and customer_kind = $2 and customer_key = $3 and product_kind = $4 and product_id = $5 and unit = $6 and not withdrawn and id <> $7`,
+			cur.LegalEntityID, string(cur.CustomerKind), cur.CustomerKey, string(cur.ProductKind), cur.ProductID, cur.Unit, cur.ID)
 		if err != nil {
 			return err
 		}

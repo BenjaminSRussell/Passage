@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
 import { describeProblem, getFreeGoodsRule, newKey, PricingApiError, withdrawFreeGoodsRule, type FreeGoodsRule, type Problem } from "./api/client";
-import { CALC_LABELS, describeOffer, describeWho, FREE_GOODS_STATES, freeGoodsState, KIND_LABELS } from "./freeGoodsFormat";
+import { CALC_LABELS, describeOffer, describeProduct, describeWho, FREE_GOODS_STATES, freeGoodsState, KIND_LABELS } from "./freeGoodsFormat";
 import { FreeGoodsEditCard } from "./FreeGoodsEditCard";
 import { today } from "./format";
 import styles from "./pages.module.css";
@@ -69,7 +69,7 @@ export function FreeGoodsDetailPage() {
   return (
     <div className={styles.stack}>
       <PageHeader
-        title={`${rule.productId}: ${describeOffer(rule)}`}
+        title={`${describeProduct(rule)}: ${describeOffer(rule)}`}
         description={`${rule.validFrom} to ${rule.validTo} · version ${rule.version}`}
         meta={<Badge tone={status.tone}>{status.label}</Badge>}
         actions={
@@ -89,7 +89,7 @@ export function FreeGoodsDetailPage() {
       <Card title="Rule">
         <dl className={styles.details}>
           <Detail term="Customers">{describeWho(rule)}</Detail>
-          <Detail term="Product" mono>
+          <Detail term={rule.productKind === "product_group" ? "Product group" : "Product"} mono>
             {rule.productId}
           </Detail>
           <Detail term="Unit" mono>

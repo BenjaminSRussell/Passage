@@ -18,7 +18,7 @@ func fgDay(s string) time.Time {
 }
 
 func fgRule(id string, kind domain.CustomerKind, key, freeKind, calc string) domain.FreeGoodsDef {
-	return domain.FreeGoodsDef{ID: id, LegalEntityID: "le", CustomerKind: kind, CustomerKey: key, ProductID: "P1", Unit: "EA",
+	return domain.FreeGoodsDef{ID: id, LegalEntityID: "le", CustomerKind: kind, CustomerKey: key, ProductKind: domain.ProductKindProduct, ProductID: "P1", Unit: "EA",
 		Kind: freeKind, Calc: calc, Every: d("10"), Free: d("1"), ValidFrom: fgDay("2026-01-01"), ValidTo: fgDay("2026-12-31"), Version: 1}
 }
 
@@ -201,5 +201,72 @@ func TestFreeGoodsPastChanges(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func fgGroupRule(id string, kind domain.CustomerKind, key, group string) domain.FreeGoodsDef {
+	r := fgRule(id, kind, key, domain.FreeGoodsExclusive, domain.CalcWholeUnits)
+	r.ProductKind, r.ProductID = domain.ProductKindGroup, group
+	return r
+}
+
+func fgGroupLines(qty string) []domain.Line {
+	return []domain.Line{{No: 1, ProductID: "P1", ProductGroupID: "PG1", Unit: "EA", Quantity: d(qty)}}
+}
+
+func TestProposeFreeGoods_ProductGroupRule(t *testing.T) {
+	rules := []domain.FreeGoodsDef{fgGroupRule("grp", domain.CustomerKindAll, "", "PG1")}
+	got := domain.ProposeFreeGoods(fgHeader(), fgGroupLines("30"), rules, nil)
+	if len(got) != 1 || got[0].RuleID != "grp" || !got[0].FreeQuantity.Equal(d("3")) || got[0].ProductID != "P1" {
+		t.Fatalf("group rule on a line of the group: %+v; want 3 free of P1 by grp", got)
+	}
+	if got := domain.ProposeFreeGoods(fgHeader(), fgLines("30"), rules, nil); len(got) != 0 {
+		t.Errorf("a line without a product group matched a group rule: %+v", got)
+	}
+	other := fgGroupLines("30")
+	other[0].ProductGroupID = "PG2"
+	if got := domain.ProposeFreeGoods(fgHeader(), other, rules, nil); len(got) != 0 {
+		t.Errorf("a line of another group matched: %+v", got)
+	}
+	// A group rule keyed like a product id must not match the product.
+	clash := []domain.FreeGoodsDef{fgGroupRule("grp", domain.CustomerKindAll, "", "P1")}
+	if got := domain.ProposeFreeGoods(fgHeader(), fgGroupLines("30"), clash, nil); len(got) != 0 {
+		t.Errorf("group rule keyed P1 matched product P1: %+v", got)
+	}
+}
+
+func TestProposeFreeGoods_AccessSequenceOrder(t *testing.T) {
+	product := func(id string, kind domain.CustomerKind, key string) domain.FreeGoodsDef {
+		return fgRule(id, kind, key, domain.FreeGoodsExclusive, domain.CalcWholeUnits)
+	}
+	cases := []struct {
+		name  string
+		rules []domain.FreeGoodsDef
+		want  string
+	}{
+		{"product beats its group for one customer scope", []domain.FreeGoodsDef{
+			fgGroupRule("grp", domain.CustomerKindAll, "", "PG1"), product("prd", domain.CustomerKindAll, "")}, "prd"},
+		{"customer and group beats customer group and product", []domain.FreeGoodsDef{
+			product("grpcust", domain.CustomerKindGroup, "G1"), fgGroupRule("custgrp", domain.CustomerKindCustomer, "C1", "PG1")}, "custgrp"},
+		{"customer group and group beats all customers and product", []domain.FreeGoodsDef{
+			product("allprd", domain.CustomerKindAll, ""), fgGroupRule("grpgrp", domain.CustomerKindGroup, "G1", "PG1")}, "grpgrp"},
+	}
+	for _, c := range cases {
+		got := domain.ProposeFreeGoods(fgHeader(), fgGroupLines("30"), c.rules, nil)
+		if len(got) != 1 || got[0].RuleID != c.want {
+			t.Errorf("%s: %+v; want rule %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestValidateFreeGoods_ProductKindAndKey(t *testing.T) {
+	r := fgRule("a", domain.CustomerKindAll, "", domain.FreeGoodsInclusive, domain.CalcWholeUnits)
+	r.ProductKind = "variant"
+	if f := domain.ValidateFreeGoods(r); f["productKind"] == "" {
+		t.Errorf("variant product kind accepted: %v", f)
+	}
+	grp := fgGroupRule("b", domain.CustomerKindAll, "", "P1")
+	if domain.FreeGoodsKey(grp) == domain.FreeGoodsKey(fgRule("a", domain.CustomerKindAll, "", domain.FreeGoodsInclusive, domain.CalcWholeUnits)) {
+		t.Error("a product rule and a group rule with the same key share an identity")
 	}
 }

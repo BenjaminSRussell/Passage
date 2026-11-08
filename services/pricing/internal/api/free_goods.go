@@ -38,6 +38,7 @@ type freeGoodsRequest struct {
 	LegalEntityID string `json:"legalEntityId"`
 	CustomerKind  string `json:"customerKind"`
 	CustomerKey   string `json:"customerKey"`
+	ProductKind   string `json:"productKind"`
 	ProductID     string `json:"productId"`
 	Unit          string `json:"unit"`
 	Kind          string `json:"kind"`
@@ -54,6 +55,7 @@ type freeGoodsView struct {
 	LegalEntityID string `json:"legalEntityId"`
 	CustomerKind  string `json:"customerKind"`
 	CustomerKey   string `json:"customerKey"`
+	ProductKind   string `json:"productKind"`
 	ProductID     string `json:"productId"`
 	Unit          string `json:"unit"`
 	Kind          string `json:"kind"`
@@ -69,7 +71,7 @@ type freeGoodsView struct {
 
 func freeGoodsResponse(r domain.FreeGoodsDef) freeGoodsView {
 	return freeGoodsView{ID: r.ID, LegalEntityID: r.LegalEntityID, CustomerKind: string(r.CustomerKind), CustomerKey: r.CustomerKey,
-		ProductID: r.ProductID, Unit: r.Unit, Kind: r.Kind, CalcRule: r.Calc, EveryQuantity: r.Every.String(),
+		ProductKind: string(r.ProductKind), ProductID: r.ProductID, Unit: r.Unit, Kind: r.Kind, CalcRule: r.Calc, EveryQuantity: r.Every.String(),
 		FreeQuantity: r.Free.String(), MinQuantity: r.MinQty.String(), ValidFrom: r.ValidFrom.Format(dateLayout),
 		ValidTo: r.ValidTo.Format(dateLayout), Withdrawn: r.Withdrawn, Version: r.Version}
 }
@@ -132,8 +134,11 @@ func (a *API) createFreeGoods(w http.ResponseWriter, r *http.Request) {
 		}
 		req.CalcRule = params.FreeGoodsCalcRule
 	}
+	if req.ProductKind == "" {
+		req.ProductKind = string(domain.ProductKindProduct)
+	}
 	def := domain.FreeGoodsDef{LegalEntityID: req.LegalEntityID, CustomerKind: domain.CustomerKind(req.CustomerKind), CustomerKey: req.CustomerKey,
-		ProductID: req.ProductID, Unit: req.Unit, Kind: req.Kind, Calc: req.CalcRule, Every: every, Free: free, MinQty: min,
+		ProductKind: domain.ProductKind(req.ProductKind), ProductID: req.ProductID, Unit: req.Unit, Kind: req.Kind, Calc: req.CalcRule, Every: every, Free: free, MinQty: min,
 		ValidFrom: from, ValidTo: to}
 	for k, v := range domain.ValidateFreeGoods(def) {
 		if _, set := fields[k]; !set {
@@ -273,16 +278,18 @@ func (a *API) reviseFreeGoods(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, freeGoodsResponse(rule))
 }
 
-// freeGoodsRules loads the live free goods rules of the legal entity for the products on
-// the document at its pricing date (FR-26.22).
+// freeGoodsRules loads the live free goods rules of the legal entity for the products and
+// product groups on the document at its pricing date (FR-26.22).
 func (a *API) freeGoodsRules(r *http.Request, legalEntityID string, header domain.Header, lines []domain.Line) ([]domain.FreeGoodsDef, error) {
 	seen := map[string]bool{}
-	var products []string
+	var keys []string
 	for _, l := range lines {
-		if !seen[l.ProductID] {
-			seen[l.ProductID] = true
-			products = append(products, l.ProductID)
+		for _, k := range []string{l.ProductID, l.ProductGroupID} {
+			if k != "" && !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
 		}
 	}
-	return a.store.ActiveFreeGoodsRules(r.Context(), legalEntityID, products, header.PricingDate)
+	return a.store.ActiveFreeGoodsRules(r.Context(), legalEntityID, keys, header.PricingDate)
 }

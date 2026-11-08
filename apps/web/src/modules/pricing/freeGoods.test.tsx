@@ -2,7 +2,7 @@ import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { FreeGoodsRule, ResolveResponse } from "./api/client";
-import { describeOffer, describeWho, freeGoodsState } from "./freeGoodsFormat";
+import { describeOffer, describeProduct, describeWho, freeGoodsState } from "./freeGoodsFormat";
 import { addDays, today } from "./format";
 import { validateRevision } from "./FreeGoodsEditCard";
 import { emptyFreeGoods, toFreeGoodsInput, validateFreeGoods } from "./NewFreeGoodsPage";
@@ -130,6 +130,7 @@ describe("New free goods rule", () => {
       legalEntityId: LE,
       customerKind: "all",
       customerKey: "",
+      productKind: "product",
       productId: "BOLT",
       unit: "EA",
       kind: "INCLUSIVE",
@@ -322,5 +323,49 @@ describe("Simulation with free goods", () => {
     const table = await findTable({ name: "Free goods proposals" });
     expect(table).toHaveTextContent("23 EA");
     expect(table).toHaveTextContent("2 EA");
+  });
+});
+
+describe("Free goods for a product group", () => {
+  const group: FreeGoodsRule = { ...rule, productKind: "product_group", productId: "FASTENERS" };
+
+  it("names the group in the list and on the detail page", async () => {
+    server.handler = (url) => {
+      if (url.pathname.endsWith("/free-goods-rules")) return json(200, { items: [group] });
+      if (url.pathname.endsWith(`/free-goods-rules/${FG}`)) return json(200, group);
+      return undefined;
+    };
+    expect(describeProduct(group)).toBe("Group FASTENERS");
+    expect(describeProduct(rule)).toBe("BOLT");
+    const { unmount } = renderAt("/pricing/free-goods");
+    expect(await screen.findByText("Group FASTENERS")).toBeInTheDocument();
+    unmount();
+    renderAt(`/pricing/free-goods/${FG}`);
+    expect(await screen.findByRole("heading", { name: "Group FASTENERS: 1 free within every 10 EA" })).toBeInTheDocument();
+    expect(screen.getByText("Product group")).toBeInTheDocument();
+  });
+
+  it("creates a product group rule", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith("/free-goods-rules")) return json(201, group);
+      if (url.pathname.endsWith(`/free-goods-rules/${FG}`)) return json(200, group);
+      return undefined;
+    };
+    renderAt("/pricing/free-goods/new");
+    fill("Legal entity id", LE);
+    fireEvent.change(screen.getByLabelText("Applies to"), { target: { value: "product_group" } });
+    fill("Product group", "FASTENERS");
+    fill("For every quantity ordered", "10");
+    fill("Free quantity", "1");
+    fill("Valid from", "2026-01-01");
+    fill("Valid to", "2026-12-31");
+    fireEvent.click(screen.getByRole("button", { name: "Save rule" }));
+    expect(await screen.findByRole("heading", { name: "Group FASTENERS: 1 free within every 10 EA" })).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "POST")!.body).toMatchObject({ productKind: "product_group", productId: "FASTENERS" });
+  });
+
+  it("asks for the group when the group is empty", () => {
+    const v = { ...emptyFreeGoods, legalEntityId: LE, productKind: "product_group" as const, everyQuantity: "10", freeQuantity: "1", validFrom: "2026-01-01", validTo: "2026-12-31" };
+    expect(validateFreeGoods(v).productId).toBe("Enter the product group (up to 64 characters).");
   });
 });

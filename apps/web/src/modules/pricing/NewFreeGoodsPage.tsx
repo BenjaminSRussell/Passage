@@ -10,10 +10,11 @@ import {
   type FreeGoodsCalcRule,
   type FreeGoodsCustomerKind,
   type FreeGoodsKind,
+  type FreeGoodsProductKind,
   type FreeGoodsRuleInput,
   type Problem,
 } from "./api/client";
-import { CALC_LABELS, CUSTOMER_KIND_LABELS, KIND_LABELS } from "./freeGoodsFormat";
+import { CALC_LABELS, CUSTOMER_KIND_LABELS, KIND_LABELS, PRODUCT_KIND_LABELS } from "./freeGoodsFormat";
 import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 
@@ -23,6 +24,7 @@ export const emptyFreeGoods: FreeGoodsRuleInput = {
   legalEntityId: "",
   customerKind: "all",
   customerKey: "",
+  productKind: "product",
   productId: "",
   unit: "EA",
   kind: "INCLUSIVE",
@@ -42,7 +44,7 @@ export function validateFreeGoods(v: FreeGoodsRuleInput): Errors {
   } else if (v.customerKey.trim() === "" || v.customerKey.trim().length > 64) {
     errors.customerKey = "Enter the customer or group (up to 64 characters).";
   }
-  if (v.productId.trim() === "" || v.productId.trim().length > 64) errors.productId = "Enter the product (up to 64 characters).";
+  if (v.productId.trim() === "" || v.productId.trim().length > 64) errors.productId = `Enter the ${v.productKind === "product_group" ? "product group" : "product"} (up to 64 characters).`;
   if (v.unit.trim() === "" || v.unit.trim().length > 16) errors.unit = "Enter the unit (up to 16 characters).";
   const every = Number(v.everyQuantity);
   const free = Number(v.freeQuantity);
@@ -61,6 +63,7 @@ export function toFreeGoodsInput(v: FreeGoodsRuleInput): FreeGoodsRuleInput {
     legalEntityId: v.legalEntityId.trim(),
     customerKind: v.customerKind,
     customerKey: v.customerKind === "all" ? "" : v.customerKey.trim(),
+    productKind: v.productKind ?? "product",
     productId: v.productId.trim(),
     unit: v.unit.trim(),
     kind: v.kind,
@@ -135,7 +138,7 @@ export function NewFreeGoodsPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New free goods rule" description="Give free units for every quantity ordered of one product and unit." />
+      <PageHeader title="New free goods rule" description="Give free units for every quantity ordered of a product or product group and unit." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("fg-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
@@ -151,7 +154,21 @@ export function NewFreeGoodsPage() {
             )}
           </FormField>
           {values.customerKind === "all" ? null : text("fg-customer-key", "customerKey", values.customerKind === "customer" ? "Customer" : "Customer group", { mono: true })}
-          {text("fg-product", "productId", "Product", { mono: true })}
+          <FormField id="fg-product-kind" label="Applies to">
+            {(c) => (
+              <Select {...c} value={values.productKind ?? "product"} onChange={(e) => update({ productKind: e.target.value as FreeGoodsProductKind })}>
+                {(Object.keys(PRODUCT_KIND_LABELS) as FreeGoodsProductKind[]).map((k) => (
+                  <option key={k} value={k}>
+                    {PRODUCT_KIND_LABELS[k]}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {text("fg-product", "productId", values.productKind === "product_group" ? "Product group" : "Product", {
+            mono: true,
+            hint: values.productKind === "product_group" ? "Every product of this group earns the free goods; a rule on the product itself outranks it." : undefined,
+          })}
           {text("fg-unit", "unit", "Unit", { mono: true, hint: "The rule applies to lines ordered in this unit." })}
           <FormField id="fg-kind" label="Variant" hint={values.kind === "INCLUSIVE" ? "1 free within every 10 ordered: the free units are part of the order." : "1 extra per 10 ordered: the free units are added to the order."}>
             {(c) => (

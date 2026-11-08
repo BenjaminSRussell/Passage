@@ -2426,7 +2426,7 @@ paths:
       x-passage-duty: pricing.view
       parameters:
         - {name: legalEntityId, in: query, required: false, description: "Only rules of this legal entity.", schema: {type: string, format: uuid}}
-        - {name: productId, in: query, required: false, description: "Only rules for this product.", schema: {type: string}}
+        - {name: productId, in: query, required: false, description: "Only rules keyed on this product id or product group id.", schema: {type: string}}
       responses:
         "200":
           description: Free goods rules (at most 100).
@@ -3311,7 +3311,7 @@ components:
       required: [productId, unit, quantity]
       properties:
         productId: {type: string, description: "Product id (w8); matched exactly against record product keys."}
-        productGroupId: {type: string, description: "Product pricing group of the line, if any."}
+        productGroupId: {type: string, description: "Product pricing group of the line, if any. Pricing does not look it up: records and free goods rules keyed on a product group match a line only when the caller sends its group here."}
         variant: {type: string}
         unit: {type: string, description: "Must be a unit known to the pricing condition records (w6 conversion is later)."}
         quantity: {type: string, description: "Decimal string greater than 0."}
@@ -3638,7 +3638,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/FreeGoodsRuleInput"
         - type: object
-          required: [id, withdrawn, version]
+          required: [id, productKind, withdrawn, version]
           properties:
             id: {type: string, format: uuid}
             withdrawn: {type: boolean, description: "A withdrawn rule takes no part in resolve."}
@@ -3650,7 +3650,8 @@ components:
         legalEntityId: {type: string, format: uuid}
         customerKind: {type: string, enum: [customer, customer_group, all]}
         customerKey: {type: string, maxLength: 64, description: "Customer or customer group id; empty when customerKind is all."}
-        productId: {type: string, maxLength: 64}
+        productKind: {type: string, enum: [product, product_group], default: product, description: "What productId names. A product_group rule gives free goods on every line whose productGroupId is productId; for one line a rule on the product outranks one on its group, the order of the price access sequence (customer before customer group before all customers, then product before group). Left out, product."}
+        productId: {type: string, maxLength: 64, description: "The product id, or the product group id when productKind is product_group."}
         unit: {type: string, maxLength: 16, description: "The rule applies to lines ordered in this unit."}
         kind: {type: string, enum: [INCLUSIVE, EXCLUSIVE], description: "INCLUSIVE gives the free units out of the ordered quantity (1 free within every 10); EXCLUSIVE adds them on top (1 extra per 10)."}
         calcRule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS], description: "Left out, the legal entity's freeGoodsCalcRule parameter applies (WHOLE_UNITS when none is stored). PROPORTIONAL gives fractional free units (6 decimals); UNIT_REFERENCE rounds the proportional quantity down to whole units; WHOLE_UNITS counts only whole multiples of everyQuantity."}
