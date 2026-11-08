@@ -1528,6 +1528,13 @@ test_carrier_gateway_duties_are_service_only_and_open_only_their_routes if {
 }
 
 # Wave 23 slice 36: cleanout counters and their manual reset.
+test_scheduling_campaign_place_unplace if {
+	allowed("scheduling.schedule.write", "POST", "/v1/scheduling/campaigns/c-1:place")
+	allowed("scheduling.schedule.write", "POST", "/v1/scheduling/campaigns/c-1:unplace")
+	not allowed("scheduling.read", "POST", "/v1/scheduling/campaigns/c-1:place")
+	not allowed("scheduling.campaign.write", "POST", "/v1/scheduling/campaigns/c-1:unplace")
+}
+
 test_scheduling_cleanout_counters if {
 	allowed("scheduling.read", "GET", "/v1/scheduling/cleanout-counters")
 	allowed("scheduling.read", "GET", "/v1/scheduling/resources/r-1/cleanout-counter")

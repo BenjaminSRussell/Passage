@@ -3117,7 +3117,9 @@
       {"resource": "/v1/scheduling/order-pegs/*", "methods": ["DELETE"]},
       {"resource": "/v1/scheduling/order-imports/*:reimport", "methods": ["POST"]},
       {"resource": "/v1/scheduling/operations/*", "methods": ["PATCH", "DELETE"]},
-      {"resource": "/v1/scheduling/orders/*:unschedule", "methods": ["POST"]}
+      {"resource": "/v1/scheduling/orders/*:unschedule", "methods": ["POST"]},
+      {"resource": "/v1/scheduling/campaigns/*:place", "methods": ["POST"]},
+      {"resource": "/v1/scheduling/campaigns/*:unplace", "methods": ["POST"]}
     ]},
     "scheduling.setup.write": {"permissions": [
       {"resource": "/v1/scheduling/cleanout-rules", "methods": ["POST"]},
