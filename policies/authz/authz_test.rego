@@ -1535,6 +1535,19 @@ test_scheduling_cleanout_counters if {
 	not allowed("scheduling.read", "POST", "/v1/scheduling/resources/r-1/cleanout-counter:reset")
 }
 
+# Wave 17 slice 29: requisition approval, rejection, reopen and cancel.
+test_procurement_requisition_approval if {
+	allowed("procurement.requisition.approve", "GET", "/v1/procurement/requisitions/r-1")
+	allowed("procurement.requisition.approve", "POST", "/v1/procurement/requisitions/r-1:approve")
+	allowed("procurement.requisition.approve", "POST", "/v1/procurement/requisitions/r-1:reject")
+	allowed("procurement.requisition.approve", "GET", "/v1/procurement/requisition-approvals")
+	allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r-1:reopen")
+	allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r-1:cancel")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/requisition-approvals")
+	not allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r-1:approve")
+	not allowed("procurement.requisition.approve", "POST", "/v1/procurement/requisitions/r-1:cancel")
+}
+
 # Wave 23 slice 33: network feasibility inquiry.
 test_scheduling_network_feasibility_read if {
 	allowed("scheduling.read", "GET", "/v1/scheduling/network-feasibility")
