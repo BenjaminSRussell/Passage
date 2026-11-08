@@ -1599,3 +1599,9 @@ test_reporting_legal_holds if {
 	not allowed("reporting.statement.view", "POST", "/v1/reporting/legal-holds/h-1:release")
 	not allowed("reporting.library.hold", "GET", "/v1/reporting/legal-holds")
 }
+
+# Wave 27 slice 37: credit exposure report.
+test_sales_credit_exposure if {
+	allowed("sales.order.read", "GET", "/v1/sales/credit-exposure")
+	not allowed("sales.order.read", "POST", "/v1/sales/credit-exposure")
+}

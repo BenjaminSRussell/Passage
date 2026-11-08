@@ -2986,7 +2986,8 @@
       {"resource": "/v1/sales/delivery-terms/*", "methods": ["GET"]},
       {"resource": "/v1/sales/order-progress", "methods": ["GET"]},
       {"resource": "/v1/sales/return-orders", "methods": ["GET"]},
-      {"resource": "/v1/sales/return-orders/*", "methods": ["GET"]}
+      {"resource": "/v1/sales/return-orders/*", "methods": ["GET"]},
+      {"resource": "/v1/sales/credit-exposure", "methods": ["GET"]}
     ]},
     "sales.order.write": {"permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
