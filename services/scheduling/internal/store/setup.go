@@ -126,6 +126,7 @@ type SetupStore interface {
 	CreateCapacityBlock(ctx context.Context, in CapacityBlock, idem Idem) (CapacityBlock, bool, error)
 	ListCapacityBlocks(ctx context.Context, resourceID string) ([]CapacityBlock, error)
 	BlockUtilization(ctx context.Context, resourceID string, from, to time.Time) ([]BlockWindow, error)
+	BlockReport(ctx context.Context, resourceID string, from, to time.Time) (BlockReport, error)
 }
 
 // requireResources refuses ids that are not resources of the tenant.

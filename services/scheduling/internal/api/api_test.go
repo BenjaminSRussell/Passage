@@ -63,6 +63,7 @@ type fakeStore struct {
 
 	// slice 5
 	lastUseID              string
+	lastReportID           string
 	lastUseFrom, lastUseTo time.Time
 
 	// slice 6

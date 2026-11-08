@@ -1032,6 +1032,33 @@ AsyncAPI specs pass the doc gates with no FAIL lines.
 | Default date range and an index for the scan | accepted | With no `from`/`to` the inquiry reads the messages and warnings of every run of the tenant (twice: totals and page). `from`/`to` use the existing `schedule_run_created` index; the page leaves both open by default. |
 | Date range on the time the run was made | decision for Ben | PRD 4.23.14 says only "date range"; the slice filters on when the run was made, not on the dates of the jobs the finding is about (an unplaced operation has no job date). |
 
+## Slice 34: block utilization report across resources (PRD 4.23.14)
+
+Slice 34 builds the cross-resource Block utilization report. `GET /v1/scheduling/block-utilization`
+(duty `scheduling.read`) takes `from` and `to` (RFC 3339, `to` after `from`, at most 62 days) and an
+optional `resourceId` (unknown resource: 404 SCHED-0102). For every resource with an active capacity
+block, or the one named, it adds up the windows of each block in the range exactly as the per-resource
+inquiry counts them (open calendar minutes held after higher-priority blocks, BR-23.15; finite booked
+minutes of jobs matching the block condition; the rest unused) and returns one row per block with the
+window count, the three minute totals and `utilizationPct` (matched over held, whole percent rounded
+half up, null when the block holds no minute in the range), plus the same totals for the whole report.
+Rows are sorted by resource code, then priority (highest first), then block code. At most 200 resources
+are read in code order and `truncated` says more have blocks. The resources are read in one transaction.
+No migration and no event: the report only reads `scheduling_resource`, `scheduling_capacity_block`,
+`scheduled_job` and `scheduling_operation`. The Block utilization page (range and resource filters,
+totals, per-block table with links to the resource and block, loading, empty and error states, range
+checks before asking the service) is in the scheduling web module. The scheduling OpenAPI and AsyncAPI
+specs pass the doc gates with no FAIL lines.
+
+| Item | Status | Reason |
+|---|---|---|
+| `policies/authz/data.json`: resource row `/v1/scheduling/block-utilization` (GET) under `scheduling.read` | handoff - main session (authz seed) | Existing duty; only the route row is new. Until it is seeded the route and the page answer 403 for roles that rely on the resource rows. |
+| Utilization by period (week or day buckets) inside the range and by resource group | later slice of PSG-23 | The report gives one total per block for the whole range; groups come from wave 9. |
+| Paging beyond 200 resources | accepted | The page tells the planner to pick a resource. The report reuses the per-resource read, about four queries per resource (resource, overrides, blocks, booked jobs), so a full report is up to some 800 small queries in one transaction; the 62-day cap keeps each one small. |
+| Days on the page are UTC days | accepted | The page sends UTC midnights for the first day and the day after the last, like the capacity load page; a resource in another time zone gets its windows cut at UTC midnight. The API takes any RFC 3339 instants. |
+| Blocks with no window in the range | decision for Ben | A block whose windows all fall outside the range has no row (the report lists what the range holds); a block whose windows are fully taken by higher-priority blocks or closed calendar time has a row with 0 held minutes and no share. |
+| Jobs of infinite runs and secondary bookings in the matched minutes | accepted | Same rule as the per-resource inquiry: infinite runs reserve no capacity, and secondary bookings are not counted. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -1098,7 +1125,7 @@ AsyncAPI specs pass the doc gates with no FAIL lines.
 | Sites: `siteId` on resources, runs and the Gantt query | handoff — wave 9 (sites on resources) | Slice 1 schedules every resource of the tenant as one plant. |
 | Late orders inquiry (4.23.14) | built (slice 17) | `GET /late-orders` and the Late orders page: late and unplaced orders with due, planned end, lateness. Item and quantity per order are not shown. |
 | Order header data on bars and late orders (item, quantity) | handoff — wave 21 | Bars and late orders carry the order id, operation counts and dates only. |
-| Block utilization inquiry (4.23.14) | built (slice 5) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen. A cross-resource report screen with period totals is not built; the inquiry is per resource. |
+| Block utilization inquiry (4.23.14) | built (slice 5) per resource; cross-resource report built (slice 34) | `GET /resources/{id}/block-utilization` per resource and range, shown on the resource detail screen; `GET /block-utilization` and the Block utilization page total each block across resources (see the slice 34 section). |
 | Resource utilization and changeover time of a run (4.23.14) | built (slice 17) | `GET /runs/{id}/kpis` and the Plan measures card on the run detail; they describe the jobs the run still holds. |
 | Run comparison (4.23.14) | built (slice 29) | `GET /runs/{id}/compare`, per-run snapshots in `schedule_run_job`; see the slice 29 section. |
 | Network feasibility report (4.23.14) | built (slice 33) | `GET /network-feasibility` and the Network feasibility page; see the slice 33 section. |

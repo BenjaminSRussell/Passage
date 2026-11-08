@@ -1420,3 +1420,44 @@ export interface LoadRefresh {
 export function refreshCapacityLoad(): Promise<LoadRefresh> {
   return post<LoadRefresh>("/capacity-load:refresh", {});
 }
+
+/** Period total of one capacity block on one resource (PRD 4.23.14 Block utilization). */
+export interface BlockUsage {
+  resourceId: string;
+  resourceCode: string;
+  resourceName: string;
+  blockId: string;
+  code: string;
+  priority: number;
+  windows: number;
+  blockMinutes: number;
+  matchedMinutes: number;
+  unusedMinutes: number;
+  /** Matched over held minutes in whole percent; null when the block holds no minute in the range. */
+  utilizationPct: number | null;
+}
+
+export interface BlockReport {
+  items: BlockUsage[];
+  /** More than 200 resources have active blocks; only the first 200 by code were read. */
+  truncated: boolean;
+  blockMinutes: number;
+  matchedMinutes: number;
+  unusedMinutes: number;
+  utilizationPct: number | null;
+}
+
+export async function fetchBlockReport(filter: { from: string; to: string; resourceId?: string }, signal?: AbortSignal): Promise<BlockReport> {
+  const body = await send<Partial<BlockReport>>(`/block-utilization${query(filter)}`, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new SchedulingApiError(0, "COM-0001", "The response has no items");
+  }
+  return {
+    items: body.items,
+    truncated: body.truncated === true,
+    blockMinutes: body.blockMinutes ?? 0,
+    matchedMinutes: body.matchedMinutes ?? 0,
+    unusedMinutes: body.unusedMinutes ?? 0,
+    utilizationPct: body.utilizationPct ?? null,
+  };
+}

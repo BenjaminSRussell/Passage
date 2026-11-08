@@ -252,6 +252,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-blocks/{id}", a.getCapacityBlock)
 	r.With(authz.RequireDuty(dutyCapacity)).Patch("/v1/scheduling/capacity-blocks/{id}", a.updateCapacityBlock)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/block-utilization", a.blockUtilization)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/block-utilization", a.blockReport)
 	r.With(authz.RequireDuty(dutyCampaign)).Post("/v1/scheduling/campaigns", a.createCampaign)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaigns", a.listCampaigns)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/campaigns/{id}", a.getCampaign)

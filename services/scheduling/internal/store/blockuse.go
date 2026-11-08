@@ -38,66 +38,74 @@ type BlockWindow struct {
 func (s *Postgres) BlockUtilization(ctx context.Context, resourceID string, from, to time.Time) ([]BlockWindow, error) {
 	var out []BlockWindow
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		r, err := scanResource(tx.QueryRow(ctx, `select `+resourceCols+` from scheduling_resource where id = $1`, resourceID), nil)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return httpx.NewProblem(http.StatusNotFound, CodeResourceNotFound, "resource not found")
-		}
-		if err != nil {
-			return err
-		}
-		loc, err := time.LoadLocation(r.TimeZone)
-		if err != nil {
-			return err
-		}
-		// Lay calendars and windows out from the day before to the day after
-		// so windows crossing the range edges in the site's time zone are whole.
-		start := from.Add(-24 * time.Hour)
-		days := int(to.Sub(from)/(24*time.Hour)) + 3
-		ovm, err := loadOverrides(ctx, tx, resourceID)
-		if err != nil {
-			return err
-		}
-		open := domain.OpenWithOverrides(loc, r.Shifts, ovm[resourceID], start, days)
-
-		rows, err := tx.Query(ctx, `select `+blockCols+` from scheduling_capacity_block where active and resource_id = $1 order by priority desc, code`, resourceID)
-		if err != nil {
-			return err
-		}
-		stored := map[string]CapacityBlock{}
-		var blocks []domain.CapacityBlock
-		for rows.Next() {
-			b, err := scanBlock(rows)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			stored[b.ID] = b
-			db, err := b.expand(loc, start, days)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			blocks = append(blocks, db)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-
-		jobs, err := bookedWithAttributes(ctx, tx, resourceID, from, to)
-		if err != nil {
-			return err
-		}
-		windows := domain.BlockUtilization(open, blocks, jobs, from, to)
-		out = make([]BlockWindow, 0, len(windows))
-		for _, w := range windows {
-			b := stored[w.BlockID]
-			out = append(out, BlockWindow{BlockID: b.ID, Code: b.Code, Priority: b.Priority, Condition: b.Condition,
-				Start: w.Window.Start, End: w.Window.End, BlockMinutes: w.BlockMinutes, MatchedMinutes: w.MatchedMinutes, UnusedMinutes: w.UnusedMinutes})
-		}
-		return nil
+		var err error
+		out, err = blockUtilizationTx(ctx, tx, resourceID, from, to)
+		return err
 	})
 	return out, err
+}
+
+// blockUtilizationTx is BlockUtilization inside a tenant transaction, so the
+// cross-resource report reads every resource in one snapshot.
+func blockUtilizationTx(ctx context.Context, tx pgx.Tx, resourceID string, from, to time.Time) ([]BlockWindow, error) {
+	r, err := scanResource(tx.QueryRow(ctx, `select `+resourceCols+` from scheduling_resource where id = $1`, resourceID), nil)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NewProblem(http.StatusNotFound, CodeResourceNotFound, "resource not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	loc, err := time.LoadLocation(r.TimeZone)
+	if err != nil {
+		return nil, err
+	}
+	// Lay calendars and windows out from the day before to the day after
+	// so windows crossing the range edges in the site's time zone are whole.
+	start := from.Add(-24 * time.Hour)
+	days := int(to.Sub(from)/(24*time.Hour)) + 3
+	ovm, err := loadOverrides(ctx, tx, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	open := domain.OpenWithOverrides(loc, r.Shifts, ovm[resourceID], start, days)
+
+	rows, err := tx.Query(ctx, `select `+blockCols+` from scheduling_capacity_block where active and resource_id = $1 order by priority desc, code`, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	stored := map[string]CapacityBlock{}
+	var blocks []domain.CapacityBlock
+	for rows.Next() {
+		b, err := scanBlock(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		stored[b.ID] = b
+		db, err := b.expand(loc, start, days)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		blocks = append(blocks, db)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	jobs, err := bookedWithAttributes(ctx, tx, resourceID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	windows := domain.BlockUtilization(open, blocks, jobs, from, to)
+	out := make([]BlockWindow, 0, len(windows))
+	for _, w := range windows {
+		b := stored[w.BlockID]
+		out = append(out, BlockWindow{BlockID: b.ID, Code: b.Code, Priority: b.Priority, Condition: b.Condition,
+			Start: w.Window.Start, End: w.Window.End, BlockMinutes: w.BlockMinutes, MatchedMinutes: w.MatchedMinutes, UnusedMinutes: w.UnusedMinutes})
+	}
+	return out, nil
 }
 
 // bookedWithAttributes reads the finite segments on a resource that overlap
