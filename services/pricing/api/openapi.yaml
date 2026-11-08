@@ -2430,7 +2430,7 @@ paths:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         "200":
-          description: Index quotes (at most 100).
+          description: Index quotes (at most 100), each with the agreements it affects.
           content:
             application/json:
               schema: 
@@ -2439,7 +2439,20 @@ paths:
                 properties:
                   items:
                     type: array
-                    items: {$ref: "#/components/schemas/CommodityIndexValue"}
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/CommodityIndexValue"
+                        - type: object
+                          required: [affectedAgreements]
+                          properties:
+                            affectedAgreements:
+                              type: integer
+                              minimum: 0
+                              description: >
+                                ACTIVE price records valid on the quote's day that sit on the key (customer scope,
+                                product, unit, currency; quantity break 0, no variant, no campaign) of a live
+                                calculation on this cost basis, which is what a run priced from the quote reads.
+                                It counts the records in scope; the calculation preview says which would change.
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}

@@ -1180,6 +1180,8 @@ export interface CommodityIndexValue extends CommodityIndexValueInput {
   basisId: string;
   /** 1 for the first quote of a day; a correction is the next revision. */
   revision: number;
+  /** Quotes inquiry only: ACTIVE price records the basis's live calculations would reprice from this quote. */
+  affectedAgreements?: number;
 }
 
 export const MARGIN_KINDS = ["PERCENT", "AMOUNT"] as const;

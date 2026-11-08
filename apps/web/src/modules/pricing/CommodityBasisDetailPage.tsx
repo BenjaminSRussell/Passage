@@ -28,6 +28,7 @@ const columns: DataTableColumn<CommodityIndexValue>[] = [
   { key: "revision", header: "Revision", mono: true },
   { key: "value", header: "Index value", mono: true },
   { key: "source", header: "Source" },
+  { key: "affectedAgreements", header: "Agreements affected", mono: true, align: "end", render: (q) => q.affectedAgreements ?? "" },
 ];
 
 /** One cost basis type with its index quotes and the form that records the next one (FR-26.21). */

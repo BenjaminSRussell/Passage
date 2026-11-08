@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -185,5 +186,78 @@ func TestPostgres_RebateStatementAfterRetroRecompute(t *testing.T) {
 	}
 	if st := domain.BuildRebateStatement(got, "2026-03", in); !st.Reconciled || !st.Target.Equal(decimal.NewFromInt(1000)) {
 		t.Fatalf("statement = target %s reconciled %v; want 1000 and reconciled", st.Target, st.Reconciled)
+	}
+}
+
+// The period state, the totals and the lines of a rebate statement come from one snapshot: an
+// accrual committed while the statement is being read is in all of them or in none, so the
+// footer agrees with the lines. The test holds an exclusive lock on the accrual table so a
+// reader that reads the period first and the rows later (separate statements) is stopped
+// between them, changes the period and its rows in one committed transaction, and releases.
+func TestPostgres_RebateStatementIsOneSnapshot(t *testing.T) {
+	admin, pool := adminAndAppPools(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	a, err := s.CreateAgreement(ctx, agreement(tier("0", "1"), tier("5000", "2.5")), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, value := range []string{"3000", "1000"} {
+		if _, _, err := s.AccrueInvoiceLine(ctx, invoice(a.ID, "C"+string(rune('1'+i)), "2026-03-1"+string(rune('0'+i)), value)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `lock table rebate_accrual in access exclusive mode`); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		in  domain.StatementInput
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, in, err := s.RebateStatementInput(ctx, a.ID, "2026-03")
+		done <- result{in, err}
+	}()
+	// Wait until the reader is stuck behind the lock, then post 10 more in the period and its row.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var waiting int
+		if err := admin.QueryRow(ctx, `select count(*)::int from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()
+			and query like '%rebate_accrual%' and pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the statement read never waited on the lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := tx.Exec(ctx, `update rebate_accrual set accrued_amount = accrued_amount + 10 where agreement_id = $1 and invoice_line_id = 'C1'`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `update rebate_period set accrued_total = accrued_total + 10 where agreement_id = $1 and period_key = '2026-03'`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	var lines decimal.Decimal
+	for _, l := range r.in.Lines {
+		lines = lines.Add(l.Accrued)
+	}
+	if !r.in.Period.Accrued.Equal(r.in.RowsAccrued) || !lines.Equal(r.in.RowsAccrued) {
+		t.Fatalf("period %s, row total %s, lines %s; want one snapshot, all three equal", r.in.Period.Accrued, r.in.RowsAccrued, lines)
 	}
 }

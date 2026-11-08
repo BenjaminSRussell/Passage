@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -15,6 +16,26 @@ import (
 // MaxStatementLines is how many accrual rows a rebate statement lists. The totals are exact
 // whatever the count: they come from the period row and an aggregate, not from the listed rows.
 const MaxStatementLines = 5000
+
+// rebateStatementQuery returns the period state and the exact totals (one row of each, uncorrelated
+// so Postgres evaluates them once) joined to the accrual rows in invoice order, up to the limit.
+// Totals run over every row, whatever the list limit. A retroactive delta row (retroactive, id
+// retro:<run>:<period>) stores the period's cumulative basis, so only the other rows count to the basis.
+const rebateStatementQuery = `with p as (
+	select basis_value::text as bv, basis_qty::text as bq, accrued_total::text as acc from rebate_period
+	where agreement_id = $1 and period_key = $2),
+agg as (
+	select coalesce(sum(accrued_amount) filter (where status = $3), 0)::text as settled, count(*)::int as n,
+		coalesce(sum(accrued_amount), 0)::text as rows_acc,
+		coalesce(sum(basis_value) filter (where not (retroactive and invoice_line_id like 'retro:%')), 0)::text as rows_value,
+		coalesce(sum(basis_qty) filter (where not (retroactive and invoice_line_id like 'retro:%')), 0)::text as rows_qty
+	from rebate_accrual where agreement_id = $1 and period_key = $2)
+select p.bv, p.bq, p.acc, agg.settled, agg.n, agg.rows_acc, agg.rows_value, agg.rows_qty,
+	l.id::text, l.invoice_line_id, l.invoice_date, l.basis_value::text, l.basis_qty::text, l.accrued_amount::text, l.currency::text, l.status, l.retroactive
+from p cross join agg
+left join (select * from rebate_accrual where agreement_id = $1 and period_key = $2
+	order by invoice_date, retroactive, created_at, id limit $4) l on true
+order by l.invoice_date, l.retroactive, l.created_at, l.id`
 
 // RebateStatementInput reads what the rebate agreement statement (PRD §5.26.15) needs for
 // one agreement and one period key, in one transaction so the header, totals and lines agree:
@@ -35,43 +56,39 @@ func (s *Postgres) RebateStatementInput(ctx context.Context, agreementID, period
 		if e := domain.ValidStatementPeriod(a, periodKey); e != nil {
 			return problemOf(e)
 		}
-		var bv, bq, acc string
-		err = tx.QueryRow(ctx, `select basis_value::text, basis_qty::text, accrued_total::text from rebate_period
-			where agreement_id = $1 and period_key = $2`, a.ID, periodKey).Scan(&bv, &bq, &acc)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			in = domain.StatementInput{Lines: []domain.StatementLine{}}
-			return nil
-		case err != nil:
-			return err
-		}
-		in.Period = domain.PeriodState{Value: decimal.RequireFromString(bv), Qty: decimal.RequireFromString(bq), Accrued: decimal.RequireFromString(acc)}
-		// Totals over every row, whatever the list limit. A retroactive delta row (retroactive, id
-		// retro:<run>:<period>) stores the period's cumulative basis, so only the other rows count to the basis.
-		var settled, rowsAcc, rowsValue, rowsQty string
-		if err := tx.QueryRow(ctx, `select coalesce(sum(accrued_amount) filter (where status = $3), 0)::text, count(*)::int,
-			coalesce(sum(accrued_amount), 0)::text,
-			coalesce(sum(basis_value) filter (where not (retroactive and invoice_line_id like 'retro:%')), 0)::text,
-			coalesce(sum(basis_qty) filter (where not (retroactive and invoice_line_id like 'retro:%')), 0)::text
-			from rebate_accrual where agreement_id = $1 and period_key = $2`, a.ID, periodKey, domain.StatusSettled).
-			Scan(&settled, &in.LineCount, &rowsAcc, &rowsValue, &rowsQty); err != nil {
-			return err
-		}
-		in.Settled = decimal.RequireFromString(settled)
-		in.RowsAccrued, in.RowsBasisValue, in.RowsBasisQty = decimal.RequireFromString(rowsAcc), decimal.RequireFromString(rowsValue), decimal.RequireFromString(rowsQty)
-		rows, err := tx.Query(ctx, accrualColumns+` where agreement_id = $1 and period_key = $2
-			order by invoice_date, retroactive, created_at, id limit $3`, a.ID, periodKey, MaxStatementLines)
+		in = domain.StatementInput{Lines: []domain.StatementLine{}}
+		// Period state, totals and lines come from ONE statement, so they share one snapshot: under
+		// READ COMMITTED (the tenant transaction's level) separate reads could straddle an accrual
+		// posted in between and the footer would disagree with the lines. No period row means no
+		// result row, which is the empty input.
+		rows, err := tx.Query(ctx, rebateStatementQuery, a.ID, periodKey, domain.StatusSettled, MaxStatementLines)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
-		in.Lines = []domain.StatementLine{}
+		first := true
 		for rows.Next() {
-			l, err := scanAccrual(rows)
-			if err != nil {
-				return fmt.Errorf("scan accrual: %w", err)
+			var bv, bq, acc, settled, rowsAcc, rowsValue, rowsQty string
+			var id, lineID, cur, status, lbv, lbq, lacc *string
+			var date *time.Time
+			var retro *bool
+			if err := rows.Scan(&bv, &bq, &acc, &settled, &in.LineCount, &rowsAcc, &rowsValue, &rowsQty,
+				&id, &lineID, &date, &lbv, &lbq, &lacc, &cur, &status, &retro); err != nil {
+				return fmt.Errorf("scan rebate statement: %w", err)
 			}
-			in.Lines = append(in.Lines, StatementLineOf(l))
+			if first {
+				first = false
+				in.Period = domain.PeriodState{Value: decimal.RequireFromString(bv), Qty: decimal.RequireFromString(bq), Accrued: decimal.RequireFromString(acc)}
+				in.Settled = decimal.RequireFromString(settled)
+				in.RowsAccrued, in.RowsBasisValue, in.RowsBasisQty = decimal.RequireFromString(rowsAcc), decimal.RequireFromString(rowsValue), decimal.RequireFromString(rowsQty)
+			}
+			if id == nil {
+				continue
+			}
+			in.Lines = append(in.Lines, StatementLineOf(Accrual{ID: *id, AgreementID: a.ID, PeriodKey: periodKey,
+				InvoiceLineID: *lineID, InvoiceDate: *date, BasisValue: decimal.RequireFromString(*lbv),
+				BasisQty: decimal.RequireFromString(*lbq), Accrued: decimal.RequireFromString(*lacc), Currency: *cur,
+				Status: *status, Retroactive: *retro}))
 		}
 		return rows.Err()
 	})

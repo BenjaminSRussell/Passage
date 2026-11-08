@@ -89,8 +89,9 @@ func TestPostgres_CommodityRunBuildsReviewableJournal(t *testing.T) {
 	if _, err := s.RecordIndexValue(ctx, index("00000000-0000-0000-0000-00000000dead", "2026-06-08", "1"), ""); problemCode(err) != domain.CodeBasisNotFound {
 		t.Fatalf("quote on unknown basis = %v", err)
 	}
-	if vals, err := s.ListIndexValues(ctx, basis.ID, 0); err != nil || len(vals) != 2 || vals[0].Revision != 2 {
-		t.Fatalf("index values = %+v err %v; want revision 2 first", vals, err)
+	if vals, err := s.ListIndexValues(ctx, basis.ID, 0); err != nil || len(vals) != 2 || vals[0].Revision != 2 ||
+		vals[0].AffectedAgreements != 1 || vals[1].AffectedAgreements != 1 {
+		t.Fatalf("index values = %+v err %v; want revision 2 first, each affecting the one agreement on the calculation's key", vals, err)
 	}
 
 	_, plan, err := s.PreviewCommodityRun(ctx, calc.ID, day("2026-06-10"))
@@ -148,6 +149,10 @@ func TestPostgres_CommodityRunBuildsReviewableJournal(t *testing.T) {
 	}
 	if _, err := s.RunCommodityCalc(ctx, calc.ID, day("2026-06-10"), ""); problemCode(err) != store.CodeStateInvalid {
 		t.Fatalf("run of a withdrawn calculation = %v; want PRC-0031", err)
+	}
+	// With its only calculation withdrawn, no quote prices any agreement.
+	if vals, err := s.ListIndexValues(ctx, basis.ID, 0); err != nil || len(vals) != 2 || vals[0].AffectedAgreements != 0 || vals[1].AffectedAgreements != 0 {
+		t.Fatalf("quotes after the withdraw = %+v err %v; want no affected agreements", vals, err)
 	}
 
 	counts := map[string]int{}
@@ -279,5 +284,60 @@ func TestPostgres_CommodityRunIsReproducibleAndSegregated(t *testing.T) {
 	}
 	if got, err := s.GetRecord(runner, created.ID); err != nil || !got.Amount.Equal(decimal.RequireFromString("12.012")) {
 		t.Fatalf("record after post = %+v err %v", got, err)
+	}
+}
+
+// The Commodity prices inquiry counts, per quote, the ACTIVE PRICE records valid on the quote's
+// day on the key of a live calculation of the basis: a record on a key of two calculations
+// counts once, a draft, another product's record and another legal entity's record never
+// count, and a caller scoped to another legal entity cannot read the basis at all.
+func TestPostgres_CommodityQuotesCountAffectedAgreements(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	basis, err := s.CreateCommodityBasis(ctx, commodityBasis("CU-LME"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	onP3 := commodityCalc(basis.ID)
+	onP3.ProductID = "P3"
+	for _, c := range []domain.CommodityCalc{commodityCalc(basis.ID), commodityCalc(basis.ID), onP3} {
+		if _, err := s.CreateCommodityCalc(ctx, c, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record := func(product, from, to, le string, activate bool) {
+		t.Helper()
+		e := entry(from, to)
+		e.CustomerKind, e.CustomerKey, e.ProductKey, e.LegalEntityID = domain.CustomerKindAll, "", product, le
+		created, err := s.CreateRecord(ctx, e, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if activate {
+			if _, err := s.ActivateRecord(ctx, created.ID, 1, ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	record("P1", "2026-01-01", "2026-06-14", legalEntity, true)      // counts on 06-08
+	record("P1", "2026-06-15", "2026-12-31", legalEntity, true)      // counts on 06-20
+	record("P3", "2026-06-10", "2026-12-31", legalEntity, true)      // counts on 06-20
+	record("P1", "2026-01-01", "2026-12-31", legalEntity, false)     // draft
+	record("P2", "2026-01-01", "2026-12-31", legalEntity, true)      // no calculation on P2
+	record("P1", "2026-01-01", "2026-12-31", otherLegalEntity, true) // another entity
+	for _, d := range []string{"2026-06-08", "2026-06-20"} {
+		if _, err := s.RecordIndexValue(ctx, index(basis.ID, d, "9000"), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, scoped := range []context.Context{ctx, principal(1, legalEntity)} {
+		vals, err := s.ListIndexValues(scoped, basis.ID, 0)
+		if err != nil || len(vals) != 2 || vals[0].AffectedAgreements != 2 || vals[1].AffectedAgreements != 1 {
+			t.Fatalf("quotes = %+v err %v; want 2 on 2026-06-20 and 1 on 2026-06-08", vals, err)
+		}
+	}
+	if _, err := s.ListIndexValues(principal(1, otherLegalEntity), basis.ID, 0); problemCode(err) != domain.CodeBasisNotFound {
+		t.Fatalf("quotes for a caller of another entity = %v; want PRC-0050", err)
 	}
 }

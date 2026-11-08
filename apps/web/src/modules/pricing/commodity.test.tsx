@@ -15,7 +15,7 @@ const CALC = "0190f0a0-0000-7000-8000-0000000000c1";
 const JOURNAL = "0190f0a0-0000-7000-8000-0000000000d1";
 
 const basis: CommodityBasis = { id: BASIS, version: 1, legalEntityId: LE, code: "CU-LME", name: "LME copper cash", currency: "USD", unit: "MT" };
-const quote: CommodityIndexValue = { basisId: BASIS, asOf: "2026-06-08", revision: 2, value: "9100", source: "LME" };
+const quote: CommodityIndexValue = { basisId: BASIS, asOf: "2026-06-08", revision: 2, value: "9100", source: "LME", affectedAgreements: 3 };
 const calc: CommodityCalculation = {
   id: CALC,
   version: 1,
@@ -97,6 +97,8 @@ describe("Commodity cost basis types", () => {
     const quotes = await findTable({ name: "Index quotes" });
     await waitFor(() => expect(within(quotes).getAllByRole("row")).toHaveLength(3));
     expect(within(quotes).getAllByRole("row")[1]).toHaveTextContent("9100");
+    expect(within(quotes).getAllByRole("columnheader", { name: "Agreements affected" })).toHaveLength(1);
+    expect(within(quotes).getAllByRole("row")[1]).toHaveTextContent("3");
   });
 
   it("shows the empty state and the error state with a retry", async () => {

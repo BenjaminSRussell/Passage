@@ -82,6 +82,8 @@ type indexView struct {
 	Revision int    `json:"revision"`
 	Value    string `json:"value"`
 	Source   string `json:"source"`
+	// AffectedAgreements is only in the quotes inquiry.
+	AffectedAgreements *int `json:"affectedAgreements,omitempty"`
 }
 
 func indexResponse(v domain.IndexValue) indexView {
@@ -318,7 +320,10 @@ func (a *API) listIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]indexView, 0, len(rows))
 	for _, v := range rows {
-		items = append(items, indexResponse(v))
+		view := indexResponse(v)
+		n := v.AffectedAgreements
+		view.AffectedAgreements = &n
+		items = append(items, view)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }

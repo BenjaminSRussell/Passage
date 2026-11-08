@@ -73,6 +73,9 @@ type IndexValue struct {
 	Revision int
 	Value    decimal.Decimal
 	Source   string
+	// AffectedAgreements is set by the quotes inquiry only: how many ACTIVE price records the
+	// basis's live calculations would reprice from this quote (see store.ListIndexValues).
+	AffectedAgreements int
 }
 
 // CommodityCalc turns the latest index of a basis into the price of one product for one

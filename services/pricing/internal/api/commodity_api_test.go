@@ -32,6 +32,24 @@ func newCalc(t *testing.T, h http.Handler, basis, factor, kind, margin string) m
 	return out
 }
 
+// The quotes inquiry carries the affected-agreements count of every quote; a quote just
+// recorded (the create response) does not.
+func TestCommodity_QuotesInquiryCarriesAffectedAgreements(t *testing.T) {
+	h := router(newFake())
+	basis := newBasis(t, h, "CU-LME")
+	if created := recordIndex(t, h, basis, "2026-06-08", "9000"); created["affectedAgreements"] != nil {
+		t.Fatalf("create response = %v; want no affectedAgreements", created)
+	}
+	status, list := call(t, h, http.MethodGet, basesURL+"/"+basis+"/index-values", "pricing.view", "")
+	items, _ := list["items"].([]any)
+	if status != http.StatusOK || len(items) != 1 {
+		t.Fatalf("quotes = %d %v", status, list)
+	}
+	if n, ok := items[0].(map[string]any)["affectedAgreements"].(float64); !ok || n != 0 {
+		t.Fatalf("quote = %v; want affectedAgreements 0 present", items[0])
+	}
+}
+
 func recordIndex(t *testing.T, h http.Handler, basis, day, value string) map[string]any {
 	t.Helper()
 	status, out := call(t, h, http.MethodPost, basesURL+"/"+basis+"/index-values", allDuties, fmt.Sprintf(`{"asOf":"%s","value":"%s","source":"LME"}`, day, value))

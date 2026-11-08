@@ -215,7 +215,7 @@ func (s *Postgres) RecordIndexValue(ctx context.Context, in domain.IndexValue, i
 }
 
 // ListIndexValues returns every quote of a basis, newest day first and highest revision
-// first within a day (the Commodity prices inquiry).
+// first within a day (the Commodity prices inquiry), each with the number of agreements it affects.
 func (s *Postgres) ListIndexValues(ctx context.Context, basisID string, limit int) ([]domain.IndexValue, error) {
 	if limit <= 0 || limit > MaxListLimit {
 		limit = MaxListLimit
@@ -229,17 +229,36 @@ func (s *Postgres) ListIndexValues(ctx context.Context, basisID string, limit in
 		if !exists {
 			return basisNotFound(basisID)
 		}
-		rows, err := tx.Query(ctx, `select `+indexColumns+` from commodity_index_value where basis_id = $1
-			order by as_of desc, revision desc limit $2`, basisID, limit)
+		// Affected agreements: the ACTIVE PRICE records, valid on the quote's day, that sit on the key
+		// (customer scope, product, unit, currency; quantity break 0, no variant, no campaign) of a
+		// live calculation on this basis, which is what a run priced from the quote reads. It counts
+		// the records in scope, not those whose amount would differ: the preview says that.
+		// The records on the live keys are read ONCE (materialized) and each quote counts the ones
+		// valid on its day; a correlated join per quote re-read the entity's price records 100 times
+		// a page (5.4 s against 24 ms on 200,000 records). Days are dates, so no time zone applies.
+		rows, err := tx.Query(ctx, `with q as (
+				select basis_id, as_of, revision, value, source from commodity_index_value where basis_id = $1
+				order by as_of desc, revision desc limit $2),
+			r as materialized (
+				select distinct r.id, r.valid_from, r.valid_to from commodity_calculation c join condition_record r
+					on r.legal_entity_id = c.legal_entity_id and r.customer_kind = c.customer_kind and r.customer_key = c.customer_key
+					and r.product_key = c.product_id and r.unit = c.unit and r.currency = c.currency
+				where c.basis_id = $1 and not c.withdrawn and r.status = 'ACTIVE' and r.condition_type = 'PRICE'
+					and r.product_kind = 'product' and r.from_quantity = 0 and r.variant = '' and r.campaign_id is null)
+			select q.basis_id::text, q.as_of, q.revision, q.value::text, q.source,
+				(select count(*)::int from r where r.valid_from <= q.as_of and r.valid_to >= q.as_of)
+			from q order by q.as_of desc, q.revision desc`, basisID, limit)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			v, err := scanIndex(rows)
-			if err != nil {
+			var v domain.IndexValue
+			var val string
+			if err := rows.Scan(&v.BasisID, &v.AsOf, &v.Revision, &val, &v.Source, &v.AffectedAgreements); err != nil {
 				return err
 			}
+			v.Value = decimal.RequireFromString(val)
 			out = append(out, v)
 		}
 		return rows.Err()
