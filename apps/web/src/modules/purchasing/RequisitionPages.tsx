@@ -1,20 +1,23 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   DataTable,
   EmptyState,
   FormField,
   Input,
   PageHeader,
   Select,
+  Textarea,
   buttonClassName,
   type DataTableColumn,
 } from "../../shell/ui";
 import {
+  actOnRequisition,
   createRequisition,
   describeProblem,
   getRequisition,
@@ -22,6 +25,8 @@ import {
   newIdempotencyKey,
   submitRequisition,
   type Requisition,
+  type RequisitionAction,
+  type RequisitionHistory,
   type CatalogHit,
   type RequisitionInput,
   type RequisitionLine,
@@ -29,6 +34,7 @@ import {
   type RequisitionSummary,
   type Warning,
 } from "./api/client";
+import { approverRoleLabels } from "./ApprovalPages";
 import { CatalogPicker } from "./CatalogPages";
 import {
   Details,
@@ -49,7 +55,7 @@ import styles from "./pages.module.css";
 
 const STATUSES: RequisitionStatus[] = ["DRAFT", "IN_REVIEW", "APPROVED", "REJECTED", "CLOSED", "CANCELLED"];
 
-const roleLabels: Record<string, string> = { MANAGER: "Manager", CATEGORY_OWNER: "Category owner", CFO: "CFO" };
+const roleLabels = approverRoleLabels;
 
 const listColumns: DataTableColumn<RequisitionSummary>[] = [
   { key: "number", header: "Number", mono: true },
@@ -427,29 +433,90 @@ const lineColumns = (currency: string, all: RequisitionLine[]): DataTableColumn<
   },
 ];
 
-/** Requisition detail: header, approval chain, lines, and Submit for a DRAFT. */
+const actionLabels: Record<RequisitionHistory["action"], string> = {
+  SUBMITTED: "Submitted",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  REOPENED: "Reopened as a draft",
+  CANCELLED: "Cancelled",
+};
+
+const historyColumns: DataTableColumn<RequisitionHistory>[] = [
+  { key: "createdAt", header: "When", mono: true, render: (h) => h.createdAt.slice(0, 16).replace("T", " ") },
+  { key: "action", header: "Action", render: (h) => actionLabels[h.action] ?? h.action },
+  { key: "stepNo", header: "Level", render: (h) => (h.stepNo ? `${h.stepNo}. ${roleLabels[h.role ?? ""] ?? h.role ?? ""}` : "—") },
+  { key: "actorId", header: "By", render: (h) => <ShortId id={h.actorId} /> },
+  { key: "comment", header: "Comment", render: (h) => h.comment || "—" },
+];
+
+const doneMessages: Record<RequisitionAction, string> = {
+  approve: "Approved.",
+  reject: "Sent back to the requester.",
+  reopen: "Reopened as a draft; submit it again when it is ready.",
+  cancel: "Requisition cancelled.",
+};
+
+/** Requisition detail: header, approval progress, decisions, lines, history, and the actions each status allows. */
 export function RequisitionDetailPage() {
   const { id = "" } = useParams();
   // Warnings (PRC-REQ-003) come back only on create; the create page hands them over in router state.
   const initialWarnings = (useLocation().state as { warnings?: Warning[] } | null)?.warnings ?? [];
   const resource = useResource((signal) => getRequisition(id, signal), [id]);
+  const [updated, setUpdated] = useState<Requisition | null>(null);
   const [submitted, setSubmitted] = useState<Requisition | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [comment, setComment] = useState("");
+  const [commentError, setCommentError] = useState<string | undefined>();
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [busy, setBusy] = useState(false);
-  const req = submitted ?? resource.data?.body ?? null;
-  const submitKey = useMemo(() => newIdempotencyKey(), [req?.version]);
+  const [busy, setBusy] = useState<RequisitionAction | "submit" | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const keys = useRef<Record<string, string>>({});
+  const req = updated ?? submitted ?? resource.data?.body ?? null;
+
+  /** One Idempotency-Key per action and version, so a retry of the same click replays instead of repeating. */
+  function keyFor(action: string, version: number) {
+    const k = `${action}:${version}`;
+    keys.current[k] ??= newIdempotencyKey();
+    return keys.current[k];
+  }
 
   async function submit() {
     if (!req) return;
-    setBusy(true);
+    setBusy("submit");
     setFailure(null);
+    setNotice(null);
     try {
-      const { body } = await submitRequisition(req.id, req.version, submitKey);
+      const { body } = await submitRequisition(req.id, req.version, keyFor("submit", req.version));
       setSubmitted(body);
+      setUpdated(null);
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  }
+
+  async function act(action: RequisitionAction) {
+    if (!req) return;
+    const text = comment.trim();
+    if (action === "reject" && !text) {
+      setCommentError("Say why you are sending it back.");
+      return;
+    }
+    setCommentError(undefined);
+    setBusy(action);
+    setFailure(null);
+    setNotice(null);
+    try {
+      const { body } = await actOnRequisition(req.id, action, req.version, text, keyFor(action, req.version));
+      setUpdated(body);
+      setSubmitted(null);
+      setComment("");
+      setNotice(action === "approve" && body.status === "APPROVED" ? "Approved: the last level has approved." : doneMessages[action]);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -488,20 +555,55 @@ export function RequisitionDetailPage() {
   }
 
   const chain = req.approverChain ?? [];
+  const steps = req.approvedSteps ?? 0;
+  const history = req.history ?? [];
+  const stale = failure?.code === "PRC-VERSION-CONFLICT" || failure?.code === "PRC-REQ-STATE";
+  const canCancel = req.status === "DRAFT" || req.status === "REJECTED" || req.status === "APPROVED";
   return (
     <div className={styles.stack}>
       <PageHeader
         title={`Requisition ${req.number}`}
         meta={<StatusBadge status={req.status} />}
         actions={
-          req.status === "DRAFT" ? (
-            <Button variant="primary" loading={busy} onClick={() => void submit()}>
-              Submit for approval
+          <>
+            {req.status === "DRAFT" ? (
+              <Button variant="primary" loading={busy === "submit"} onClick={() => void submit()}>
+                Submit for approval
+              </Button>
+            ) : null}
+            {req.status === "REJECTED" ? (
+              <Button variant="primary" loading={busy === "reopen"} onClick={() => void act("reopen")}>
+                Reopen as a draft
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button variant="secondary" loading={busy === "cancel"} onClick={() => setConfirmCancel(true)}>
+                Cancel requisition
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+      <Alert
+        tone="danger"
+        live="alert"
+        action={
+          stale ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setUpdated(null);
+                setSubmitted(null);
+                setFailure(null);
+                resource.reload();
+              }}
+            >
+              Reload requisition
             </Button>
           ) : undefined
         }
-      />
-      <Alert tone="danger" live="alert">
+      >
         {failure ? `${failure.message} (${failure.code})` : null}
       </Alert>
       <Alert tone="success" live="status">
@@ -509,7 +611,7 @@ export function RequisitionDetailPage() {
           ? submitted.status === "APPROVED"
             ? "Submitted and approved: the amount is in the auto-approval band."
             : `Submitted for approval to ${chain.map((r) => roleLabels[r] ?? r).join(", then ")}.`
-          : null}
+          : notice}
       </Alert>
       {submitted?.warnings && submitted.warnings.length > 0 ? (
         <Alert tone="warning" title="Check the vendors against their categories">
@@ -549,20 +651,69 @@ export function RequisitionDetailPage() {
         {req.status === "DRAFT" ? (
           <p className={styles.muted}>The approver chain is set when you submit, from the amount band and line categories.</p>
         ) : chain.length === 0 ? (
-          <p className={styles.muted}>Approved automatically: the total is within the auto-approval band.</p>
+          <p className={styles.muted}>
+            {req.status === "APPROVED" ? "Approved automatically: the total is within the auto-approval band." : "No approval levels."}
+          </p>
         ) : (
-          <ol className={styles.chain} aria-label="Approver chain">
-            {chain.map((role, i) => (
-              <li key={role}>
-                <Badge tone="info">
-                  {i + 1}. {roleLabels[role] ?? role}
-                </Badge>
-              </li>
-            ))}
-          </ol>
+          <>
+            <ol className={styles.chain} aria-label="Approver chain">
+              {chain.map((role, i) => (
+                <li key={`${role}-${i}`}>
+                  <Badge tone={i < steps ? "success" : req.status === "IN_REVIEW" && i === steps ? "warning" : "info"}>
+                    {i + 1}. {roleLabels[role] ?? role}
+                    {i < steps ? " (approved)" : ""}
+                  </Badge>
+                </li>
+              ))}
+            </ol>
+            {req.status === "IN_REVIEW" && req.nextApprover ? (
+              <p className={styles.muted}>Waiting for {(roleLabels[req.nextApprover] ?? req.nextApprover).toLowerCase()}.</p>
+            ) : null}
+          </>
         )}
       </Card>
+      {req.status === "IN_REVIEW" ? (
+        <Card title="Decision">
+          <FormField
+            id="requisition-decision-comment"
+            label="Comment"
+            optional
+            hint="Required to send it back; kept in the history."
+            error={commentError}
+          >
+            {(c) => <Textarea {...c} rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />}
+          </FormField>
+          <div className={styles.actions}>
+            <Button variant="primary" loading={busy === "approve"} onClick={() => void act("approve")}>
+              Approve
+            </Button>
+            <Button variant="secondary" loading={busy === "reject"} onClick={() => void act("reject")}>
+              Send back
+            </Button>
+          </div>
+        </Card>
+      ) : null}
       <DataTable label="Requisition lines" columns={lineColumns(req.currency, req.lines)} rows={req.lines} getRowKey={(l) => l.id || String(l.lineNo)} />
+      {history.length > 0 ? (
+        <DataTable label="Requisition history" columns={historyColumns} rows={history} getRowKey={(h) => h.id} />
+      ) : null}
+      {confirmCancel ? (
+        <ConfirmDialog
+          title={`Cancel requisition ${req.number}?`}
+          description={
+            req.status === "APPROVED"
+              ? "Its lines leave the consolidation queue and nothing can be ordered from it. This cannot be undone."
+              : "It cannot be submitted again. This cannot be undone."
+          }
+          confirmLabel="Cancel requisition"
+          cancelLabel="Keep it"
+          onCancel={() => setConfirmCancel(false)}
+          onConfirm={() => {
+            setConfirmCancel(false);
+            void act("cancel");
+          }}
+        />
+      ) : null}
     </div>
   );
 }

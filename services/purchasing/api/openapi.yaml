@@ -476,12 +476,18 @@ components:
         total: { $ref: '#/components/schemas/Money' }
         approverChain:
           type: array
-          items: { type: string, enum: [MANAGER, CATEGORY_OWNER, CFO] }
+          items: { type: string, enum: [MANAGER, CATEGORY_OWNER, CFO, NEXT_APPROVER] }
+        approvedSteps: { type: integer, description: Levels of approverChain that have approved in this round }
+        nextApprover: { type: string, description: The role that decides next while the requisition is IN_REVIEW, enum: [MANAGER, CATEGORY_OWNER, CFO, NEXT_APPROVER] }
         policyVersion: { type: string }
         version: { type: integer }
         lines:
           type: array
           items: { $ref: '#/components/schemas/RequisitionLine' }
+        history:
+          type: array
+          description: The audit trail, oldest first - submitted, each level's decision, reopened, cancelled
+          items: { $ref: '#/components/schemas/RequisitionHistory' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         warnings:
@@ -506,6 +512,46 @@ components:
         lineCount: { type: integer }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
+    RequisitionHistory:
+      type: object
+      required: [id, action, fromStatus, toStatus, requisitionVersion, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, enum: [SUBMITTED, APPROVED, REJECTED, REOPENED, CANCELLED] }
+        stepNo: { type: integer, description: The approval level that decided (APPROVED and REJECTED) }
+        role: { type: string, description: The role of that level }
+        actorId: { type: string, format: uuid }
+        comment: { type: string }
+        fromStatus: { type: string }
+        toStatus: { type: string }
+        requisitionVersion: { type: integer, description: The requisition version after the action }
+        createdAt: { type: string, format: date-time }
+    RequisitionDecisionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: { type: string, maxLength: 1000, description: "The approver's note, the reason to reject (required) or the reason to cancel" }
+    RequisitionApproval:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        requesterId: { type: string, format: uuid }
+        currency: { type: string }
+        total: { $ref: '#/components/schemas/Money' }
+        lineCount: { type: integer }
+        approvedSteps: { type: integer }
+        chainLength: { type: integer }
+        nextApprover: { type: string, enum: [MANAGER, CATEGORY_OWNER, CFO, NEXT_APPROVER] }
+        version: { type: integer, description: Use as If-Match }
+        submittedAt: { type: string, format: date-time, description: When the requisition last changed (submitted or approved a level) }
+    RequisitionApprovalPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RequisitionApproval' } }
+        nextCursor: { type: string, format: uuid }
     RequisitionPage:
       type: object
       required: [items]
@@ -2068,7 +2114,7 @@ paths:
     get:
       operationId: getRequisition
       x-passage-duty: procurement.requisition.create
-      summary: Read a requisition (ETag = version; duty procurement.requisition.create)
+      summary: Read a requisition (ETag = version; duty procurement.requisition.create or procurement.requisition.approve)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
         '200':
@@ -2103,6 +2149,155 @@ paths:
         '409': { description: Version changed (PRC-VERSION-CONFLICT) or not DRAFT, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: A line's preferred vendor is not assigned to its restricted category and the legal entity's category access mode is HARD (PRC-CAT-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisitions/{id}:approve:
+    post:
+      operationId: approveRequisition
+      x-passage-duty: procurement.requisition.approve
+      summary: Approve the requisition's current level; APPROVED after the last level (BR-17.1; duty procurement.requisition.approve)
+      description: >-
+        Moves an IN_REVIEW requisition one level up its approverChain and, after the last level, to APPROVED with requisition.approved.v1.
+        The approver must be inside the requisition's legal entity scope, must not be the requester (PRC-REQ-009) or have approved an earlier
+        level of the same round (PRC-REQ-010), and needs a REQUISITION approval limit in the requisition currency that covers the total
+        (PRC-SL-001, PRC-SL-002; BR-17.15, fails closed). The CATEGORY_OWNER level needs a manager of one of the requisition's categories
+        once any are assigned (PRC-REQ-011). If-Match is the requisition version, which moves on with every level; a replayed
+        Idempotency-Key returns the requisition as it is now. The optional comment is kept in the history.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionDecisionInput' }
+      responses:
+        '200':
+          description: Done; the requisition as it is now
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { description: Missing Idempotency-Key, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: "Missing duty or legal entity outside the caller's scope (AUTH-0003), the requester (PRC-REQ-009), an approver of an earlier level (PRC-REQ-010), an approval limit that does not cover the total (PRC-SL-001, PRC-SL-002) or not a category manager (PRC-REQ-011)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the requisition is not IN_REVIEW (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Comment too long, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition not found (PRC-REQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisitions/{id}:reject:
+    post:
+      operationId: rejectRequisition
+      x-passage-duty: procurement.requisition.approve
+      summary: Send an IN_REVIEW requisition back with a reason; REJECTED (BR-17.1; duty procurement.requisition.approve)
+      description: >-
+        Moves an IN_REVIEW requisition to REJECTED and writes requisition.rejected.v1 with the level that rejected and the reason.
+        The requester can reopen it to DRAFT, change nothing yet (editing is not built) and submit again, or cancel it. The approver must be
+        inside the legal entity scope and must not be the requester (PRC-REQ-009); a rejection is not held to the approval limit.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionDecisionInput' }
+      responses:
+        '200':
+          description: Done; the requisition as it is now
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { description: Missing Idempotency-Key, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003) or the requester (PRC-REQ-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the requisition is not IN_REVIEW (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Comment missing or too long, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition not found (PRC-REQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisitions/{id}:reopen:
+    post:
+      operationId: reopenRequisition
+      x-passage-duty: procurement.requisition.create
+      summary: Return a REJECTED requisition to DRAFT so it can be submitted again (BR-17.1; duty procurement.requisition.create)
+      description: >-
+        Only the requester (PRC-REQ-004). The approver chain and the levels approved are cleared; submitting routes it afresh.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '200':
+          description: Done; the requisition as it is now
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { description: Missing Idempotency-Key, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003) or not the requester (PRC-REQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the requisition is not REJECTED (PRC-REQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition not found (PRC-REQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisitions/{id}:cancel:
+    post:
+      operationId: cancelRequisition
+      x-passage-duty: procurement.requisition.create
+      summary: Cancel a DRAFT, REJECTED or APPROVED requisition and its OPEN lines (BR-17.1; duty procurement.requisition.create)
+      description: >-
+        Only the requester (PRC-REQ-004). An APPROVED requisition can be cancelled only while every line is still OPEN (a line already
+        ordered stays with its PO: PRC-REQ-STATE) and no running RFQ holds a line (PRC-REQ-006). The OPEN lines become CANCELLED and
+        requisition.cancelled.v1 lists them. The optional comment is the reason.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequisitionDecisionInput' }
+      responses:
+        '200':
+          description: Done; the requisition as it is now
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Requisition' }
+        '400': { description: Missing Idempotency-Key, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003) or not the requester (PRC-REQ-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: "Version changed (PRC-VERSION-CONFLICT), the requisition is not DRAFT, REJECTED or APPROVED, a line is ordered (PRC-REQ-STATE) or a running RFQ holds a line (PRC-REQ-006)", content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Comment too long, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Requisition not found (PRC-REQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/requisition-approvals:
+    get:
+      operationId: listRequisitionApprovals
+      x-passage-duty: procurement.requisition.approve
+      summary: The approver's inbox - IN_REVIEW requisitions with the role that decides next (BR-17.1; duty procurement.requisition.approve or procurement.purchase-order.inquire)
+      description: >-
+        Newest first. The caller's own requisitions are left out because they cannot decide on them. The role is the next
+        level of the requisition's approverChain; it is a role, not a person, until the wave 4 workflow resolves approvers.
+      parameters:
+        - { name: legalEntityId, in: query, required: false, description: Only requisitions of this legal entity (must be inside the caller's scope), schema: { type: string, format: uuid } }
+        - { name: role, in: query, required: false, description: Only requisitions whose next level is this role, schema: { type: string, enum: [MANAGER, CATEGORY_OWNER, CFO, NEXT_APPROVER] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequisitionApprovalPage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/procurement/requisition-lines:
     get:
       operationId: listOpenRequisitionLines

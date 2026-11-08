@@ -52,6 +52,8 @@ type Store interface {
 	GetRequisition(ctx context.Context, id string) (Requisition, error)
 	ListRequisitions(ctx context.Context, f RequisitionFilter, after string, limit int) (Page[RequisitionSummary], error)
 	SubmitRequisition(ctx context.Context, id string, version int, chain []string, policyVersion string, idem Idem) (Requisition, error)
+	ActOnRequisition(ctx context.Context, id string, version int, act RequisitionAct, idem Idem) (Requisition, error)
+	ListRequisitionApprovals(ctx context.Context, f ApprovalQueueFilter, after string, limit int) (Page[RequisitionApprovalItem], error)
 	CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, idem Idem) (PurchaseOrder, error)
 	GetPurchaseOrder(ctx context.Context, id string) (PurchaseOrder, error)
 	ListPurchaseOrders(ctx context.Context, f PurchaseOrderFilter, after string, limit int) (Page[PurchaseOrderSummary], error)

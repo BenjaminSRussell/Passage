@@ -10,8 +10,8 @@ const Context = "procurement"
 const (
 	// RequisitionSubmitted is written when a DRAFT requisition is submitted.
 	RequisitionSubmitted = "dev.passage.procurement.requisition.submitted.v1"
-	// RequisitionApproved is written when a requisition reaches APPROVED; in
-	// this slice that happens on submit when the policy chain is empty.
+	// RequisitionApproved is written when a requisition reaches APPROVED: on submit
+	// when the policy chain is empty, or when the last level approves.
 	RequisitionApproved = "dev.passage.procurement.requisition.approved.v1"
 	// AgreementThreshold is written when a release takes a purchase agreement
 	// line to the threshold (90 % by default) or overruns a SOFT limit

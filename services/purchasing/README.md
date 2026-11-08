@@ -76,8 +76,13 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 |---|---|---|
 | POST `/requisitions` | procurement.requisition.create | Idempotency-Key required; max 500 lines; blank estimates default from the preferred vendor's trade agreement, else 0 with warning PRC-REQ-003 |
 | GET `/requisitions` | procurement.requisition.create | Newest first; `status`, `mine=true`, `limit` (≤ 200), `cursor` |
-| GET `/requisitions/{id}` | procurement.requisition.create | ETag = version |
+| GET `/requisitions/{id}` | procurement.requisition.create or procurement.requisition.approve | ETag = version; legal entity scope applies (row-level security); `approvedSteps`, `nextApprover`, `history` |
 | POST `/requisitions/{id}:submit` | procurement.requisition.create | Idempotency-Key and If-Match (version) required; requester only; routes approvers |
+| POST `/requisitions/{id}:approve` | procurement.requisition.approve | Idempotency-Key and If-Match required; optional `{"comment"}`; approves the current level of the chain, APPROVED after the last (`requisition.approved.v1`); not the requester (PRC-REQ-009), not twice in one round (PRC-REQ-010), held to the approver's REQUISITION approval limit (BR-17.15, PRC-SL-001/002) and, at the CATEGORY_OWNER level, to the category managers once assigned (PRC-REQ-011) |
+| POST `/requisitions/{id}:reject` | procurement.requisition.approve | As `:approve` with a required `{"comment"}`; IN_REVIEW to REJECTED; `requisition.rejected.v1`; not held to the approval limit |
+| POST `/requisitions/{id}:reopen` | procurement.requisition.create | Requester only; REJECTED back to DRAFT with the chain cleared |
+| POST `/requisitions/{id}:cancel` | procurement.requisition.create | Requester only; DRAFT, REJECTED or APPROVED (every line still OPEN and no running RFQ, else PRC-REQ-STATE / PRC-REQ-006) to CANCELLED, OPEN lines CANCELLED; `requisition.cancelled.v1` |
+| GET `/requisition-approvals` | procurement.requisition.approve or procurement.purchase-order.inquire | The approver's inbox: IN_REVIEW requisitions with the role that decides next; `role` and `legalEntityId` filters; the caller's own requisitions are left out |
 | POST `/purchase-orders` | procurement.purchase-order.maintain | Idempotency-Key required; missing unit prices come from trade agreements |
 | GET `/purchase-orders` | procurement.purchase-order.inquire | Newest first; `approvalStatus`, `vendorId`, `limit`, `cursor` |
 | GET `/purchase-orders/{id}` | procurement.purchase-order.inquire, or the service-only `procurement.purchase-order.lookup` (receiving's signed token, #305) | ETag = row version |
@@ -524,7 +529,10 @@ store codes are returned as the `code` field.
 | AUTH-0003 | 403 | Caller lacks the route's duty, or the legal entity is outside the caller's scope |
 | PRC-REQ-002 | 422 | Requisition has more than 500 lines |
 | PRC-REQ-003 | warning | Returned in `warnings` on create: no price found, estimate set to 0 |
-| PRC-REQ-004 | 403 | Only the requester can submit the requisition |
+| PRC-REQ-004 | 403 | Only the requester can submit, reopen or cancel the requisition |
+| PRC-REQ-009 | 403 | The requester cannot approve or reject their own requisition |
+| PRC-REQ-010 | 403 | The approver already approved an earlier level of this round |
+| PRC-REQ-011 | 403 | The CATEGORY_OWNER level needs a manager of one of the requisition's categories |
 | PRC-REQ-NOT-FOUND | 404 | Requisition not found |
 | PRC-REQ-STATE | 409 | Requisition is not in a state that allows the action |
 | PRC-PO-NOT-FOUND | 404 | Purchase order not found |

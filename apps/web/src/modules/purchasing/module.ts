@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { PurchaseAgreementCreatePage, PurchaseAgreementDetailPage, PurchaseAgreementsPage } from "./AgreementPages";
+import { ApprovalInboxPage } from "./ApprovalPages";
 import { CatalogImportCreatePage, CatalogImportDetailPage, CatalogImportsPage } from "./CatalogImportPages";
 import { CatalogCreatePage, CatalogDetailPage, CatalogsPage } from "./CatalogPages";
 import { AutoChargeCreatePage, AutoChargeDetailPage, AutoChargesPage, ChargeCodeCreatePage, ChargeCodeDetailPage, ChargeCodesPage } from "./ChargePages";
@@ -47,12 +48,13 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
+    "Requisitions with approval, rejection and cancellation, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
     { path: "/purchasing/requisitions/new", element: createElement(RequisitionCreatePage), handle: { title: "New requisition" } },
     { path: "/purchasing/requisitions/:id", element: createElement(RequisitionDetailPage), handle: { title: "Requisition" } },
+    { path: "/purchasing/approvals", element: createElement(ApprovalInboxPage), handle: { title: "Requisition approvals" } },
     { path: "/purchasing/consolidation", element: createElement(ConsolidationPage) },
     { path: "/purchasing/releases", element: createElement(ReleaseRunsPage) },
     { path: "/purchasing/releases/new", element: createElement(ReleaseRunCreatePage), handle: { title: "Start a release run" } },
@@ -140,6 +142,7 @@ const purchasing: PassageModule = {
   nav: [
     { label: "Overview", to: "/purchasing", duty: "procurement.purchase-order.inquire" },
     { label: "Requisitions", to: "/purchasing/requisitions", duty: "procurement.requisition.create" },
+    { label: "Requisition approvals", to: "/purchasing/approvals", duty: "procurement.purchase-order.inquire" },
     { label: "Consolidation", to: "/purchasing/consolidation", duty: "procurement.purchase-order.maintain" },
     { label: "Release runs", to: "/purchasing/releases", duty: "procurement.purchase-order.inquire" },
     { label: "Requests for quotation", to: "/purchasing/rfqs", duty: "procurement.rfq.maintain" },

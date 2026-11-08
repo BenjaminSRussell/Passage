@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -260,17 +261,33 @@ func (a *API) listRequisitions(w http.ResponseWriter, r *http.Request) {
 	writePage(w, page)
 }
 
-// requisitionAction handles POST /requisitions/{id}:submit. The chi segment
-// holds "<id>:<action>"; only submit is defined in this slice.
+// requisitionAction handles POST /requisitions/{id}:submit|approve|reject|reopen|cancel. The chi segment holds
+// "<id>:<action>"; each action checks its own duty.
 func (a *API) requisitionAction(w http.ResponseWriter, r *http.Request) {
-	userID, err := caller(r.Context())
+	p, err := principal(r.Context())
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
 	id, action, found := strings.Cut(chi.URLParam(r, "id"), ":")
-	if !found || action != "submit" || !ids.Valid(id) {
+	if !found || (action != "submit" && !slices.Contains(domain.ReqActions, action)) || !ids.Valid(id) {
 		fail(w, r, httpx.NewProblem(http.StatusNotFound, codeUnknownAction, "unknown requisition action"))
+		return
+	}
+	if approving := action == domain.ReqActionApprove || action == domain.ReqActionReject; approving && !p.HasDuty(dutyRequisitionApprove) {
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, codeScope, "missing duty "+dutyRequisitionApprove))
+		return
+	} else if !approving && !p.HasDuty(dutyRequisitionCreate) {
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, codeScope, "missing duty "+dutyRequisitionCreate))
+		return
+	}
+	userID, err := caller(r.Context())
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	if action != "submit" {
+		a.decideRequisition(w, r, id, action, userID)
 		return
 	}
 	key, err := idempotencyKey(r)

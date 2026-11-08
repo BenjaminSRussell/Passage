@@ -90,13 +90,52 @@ export interface Requisition {
   currency: string;
   total: string;
   approverChain: string[];
+  /** Levels of approverChain that have approved in this round. */
+  approvedSteps?: number;
+  /** The role that decides next while the requisition is IN_REVIEW. */
+  nextApprover?: string;
   policyVersion?: string;
   version: number;
   lines: RequisitionLine[];
+  /** The audit trail, oldest first. */
+  history?: RequisitionHistory[];
   createdAt: string;
   updatedAt: string;
   warnings?: Warning[];
 }
+
+export type RequisitionHistoryAction = "SUBMITTED" | "APPROVED" | "REJECTED" | "REOPENED" | "CANCELLED";
+
+export interface RequisitionHistory {
+  id: string;
+  action: RequisitionHistoryAction;
+  stepNo?: number;
+  role?: string;
+  actorId?: string;
+  comment?: string;
+  fromStatus: string;
+  toStatus: string;
+  requisitionVersion: number;
+  createdAt: string;
+}
+
+/** A requisition waiting for an approval level, as the approver's inbox lists it. */
+export interface RequisitionApproval {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  requesterId: string;
+  currency: string;
+  total: string;
+  lineCount: number;
+  approvedSteps: number;
+  chainLength: number;
+  nextApprover: string;
+  version: number;
+  submittedAt: string;
+}
+
+export type RequisitionAction = "approve" | "reject" | "reopen" | "cancel";
 
 export interface RequisitionSummary {
   id: string;
@@ -530,6 +569,28 @@ export function submitRequisition(id: string, version: number, idempotencyKey = 
   return send<Requisition>("POST", `/requisitions/${encodeURIComponent(id)}:submit`, {
     headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
   });
+}
+
+/** Approve, reject (comment required), reopen or cancel a requisition; version is the ETag read when it was loaded. */
+export function actOnRequisition(
+  id: string,
+  action: RequisitionAction,
+  version: number,
+  comment = "",
+  idempotencyKey = newIdempotencyKey(),
+) {
+  return send<Requisition>("POST", `/requisitions/${encodeURIComponent(id)}:${action}`, {
+    body: comment ? { comment } : undefined,
+    headers: { "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+  });
+}
+
+export function listRequisitionApprovals(filters: { role?: string; legalEntityId?: string } = {}, options: ListOptions = {}) {
+  return list<RequisitionApproval>(
+    "/requisition-approvals",
+    { role: filters.role || undefined, legalEntityId: filters.legalEntityId || undefined },
+    options,
+  );
 }
 
 export function listPurchaseOrders(filters: { approvalStatus?: ApprovalStatus | ""; vendorId?: string } = {}, options: ListOptions = {}) {

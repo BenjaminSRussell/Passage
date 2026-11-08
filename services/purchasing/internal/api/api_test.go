@@ -54,6 +54,7 @@ type fakeStore struct {
 	sourcingCalls      []store.SourcingFilter
 	lastConsolidated   []string
 	lastSplit          splitCall
+	approval           approvalFake
 	release            releaseLog
 	lastIdem           store.Idem
 
@@ -503,7 +504,7 @@ func TestSubmitRequisition_RoutesRequiresIfMatchAndRequester(t *testing.T) {
 		problemCode(t, rec) != codeNotRequester {
 		t.Fatalf("other user: %d %s", rec.Code, rec.Body)
 	}
-	if rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions/" + id + ":approve", user: userA, duties: duties,
+	if rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions/" + id + ":close", user: userA, duties: duties,
 		headers: map[string]string{"Idempotency-Key": "s1", "If-Match": `"3"`}}); rec.Code != http.StatusNotFound || problemCode(t, rec) != codeUnknownAction {
 		t.Fatalf("unknown action: %d %s", rec.Code, rec.Body)
 	}

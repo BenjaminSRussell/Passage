@@ -89,6 +89,8 @@ type API struct {
 
 	requisitionsCreated   atomic.Int64
 	requisitionsSubmitted atomic.Int64
+	requisitionDecisions  atomic.Int64
+	requisitionsCancelled atomic.Int64
 	requisitionLinesSplit atomic.Int64
 	releaseRuns           atomic.Int64
 	ordersCreated         atomic.Int64
@@ -153,9 +155,12 @@ func (a *API) Register(r chi.Router) {
 		create := r.With(authz.RequireDuty(dutyRequisitionCreate))
 		create.Post("/requisitions", a.createRequisition)
 		create.Get("/requisitions", a.listRequisitions)
-		create.Get("/requisitions/{id}", a.getRequisition)
-		// Custom methods (":submit") arrive as one path segment; see requisitionAction.
-		create.Post("/requisitions/{id}", a.requisitionAction)
+		// Approvers read the requisition they decide on.
+		r.With(authz.Require(anyDuty{dutyRequisitionCreate, dutyRequisitionApprove}, dutyRequisitionCreate+" or "+dutyRequisitionApprove, "")).
+			Get("/requisitions/{id}", a.getRequisition)
+		// Custom methods (":submit", ":approve", ...) arrive as one path segment; requisitionAction checks the duty of each.
+		r.Post("/requisitions/{id}", a.requisitionAction)
+		a.registerRequisitionApprovalRoutes(r)
 		maintain := r.With(authz.RequireDuty(dutyPurchaseOrderMaintain))
 		maintain.Post("/purchase-orders", a.createOrder)
 		// The consolidation queue and :consolidate (FR-17.3).
@@ -296,6 +301,8 @@ func (a *API) Metrics() http.Handler {
 		}{
 			{"purchasing_requisitions_created_total", "Requisitions created; idempotent replays are counted.", a.requisitionsCreated.Load()},
 			{"purchasing_requisitions_submitted_total", "Requisitions submitted for approval.", a.requisitionsSubmitted.Load()},
+			{"purchasing_requisition_decisions_total", "Requisitions approved or rejected by an approver (BR-17.1); idempotent replays are counted.", a.requisitionDecisions.Load()},
+			{"purchasing_requisitions_cancelled_total", "Requisitions cancelled by their requester (BR-17.1); idempotent replays are counted.", a.requisitionsCancelled.Load()},
 			{"purchasing_requisition_lines_split_total", "Requisition lines split into several lines (FR-17.3).", a.requisitionLinesSplit.Load()},
 			{"purchasing_requisition_release_runs_total", "Requisition release runs answered (PRD 3.17.16); idempotent replays are counted.", a.releaseRuns.Load()},
 			{"purchasing_purchase_orders_created_total", "Purchase orders created.", a.ordersCreated.Load()},

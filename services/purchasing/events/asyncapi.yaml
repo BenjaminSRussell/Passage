@@ -19,6 +19,10 @@ channels:
         $ref: '#/components/messages/RequisitionApproved'
       requisitionSplit:
         $ref: '#/components/messages/RequisitionSplit'
+      requisitionRejected:
+        $ref: '#/components/messages/RequisitionRejected'
+      requisitionCancelled:
+        $ref: '#/components/messages/RequisitionCancelled'
   agreement:
     address: passage.procurement.agreement
     description: Purchase agreement release alerts; the Kafka key is the agreement id.
@@ -248,6 +252,18 @@ operations:
       $ref: '#/channels/requisition'
     messages:
       - $ref: '#/channels/requisition/messages/requisitionSplit'
+  publishRequisitionRejected:
+    action: send
+    channel:
+      $ref: '#/channels/requisition'
+    messages:
+      - $ref: '#/channels/requisition/messages/requisitionRejected'
+  publishRequisitionCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/requisition'
+    messages:
+      - $ref: '#/channels/requisition/messages/requisitionCancelled'
   publishAgreementThreshold:
     action: send
     channel:
@@ -732,7 +748,7 @@ components:
       name: RequisitionApproved
       title: requisition.approved.v1
       x-passage-type: dev.passage.procurement.requisition.approved.v1
-      summary: A requisition reached APPROVED. In this slice that is the auto-approval band on submit (written right after requisition.submitted in the same transaction).
+      summary: A requisition reached APPROVED - the auto-approval band on submit (written right after requisition.submitted in the same transaction) or the last approval level deciding (BR-17.1).
       contentType: application/cloudevents+json
       payload:
         allOf:
@@ -755,6 +771,34 @@ components:
               type: { type: string, const: dev.passage.procurement.requisition.split.v1 }
               subject: { type: string, format: uuid, description: requisition id }
               data: { $ref: '#/components/schemas/RequisitionSplitData' }
+    RequisitionRejected:
+      name: RequisitionRejected
+      title: requisition.rejected.v1
+      x-passage-type: dev.passage.procurement.requisition.rejected.v1
+      summary: An approver sent an IN_REVIEW requisition back with a reason (BR-17.1). The requester can reopen it to DRAFT or cancel it.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.requisition.rejected.v1 }
+              subject: { type: string, format: uuid, description: requisition id }
+              data: { $ref: '#/components/schemas/RequisitionRejectedData' }
+    RequisitionCancelled:
+      name: RequisitionCancelled
+      title: requisition.cancelled.v1
+      x-passage-type: dev.passage.procurement.requisition.cancelled.v1
+      summary: The requester cancelled a DRAFT, REJECTED or APPROVED requisition before anything was ordered from it (BR-17.1); its OPEN lines are CANCELLED. Only an APPROVED requisition carries a budget pre-encumbrance (FR-38.5 creates it on approval), so budget control releases one only when previous_status is APPROVED.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.requisition.cancelled.v1 }
+              subject: { type: string, format: uuid, description: requisition id }
+              data: { $ref: '#/components/schemas/RequisitionCancelledData' }
     AgreementThreshold:
       name: AgreementThreshold
       title: agreement.threshold.v1
@@ -1298,6 +1342,40 @@ components:
         valid_to: { type: string, format: date }
         version: { type: integer, minimum: 1 }
         changed_by: { type: string, format: uuid }
+    RequisitionRejectedData:
+      type: object
+      required: [requisition_id, number, legal_entity_id, requester_id, currency, total, step_no, role, rejected_by, reason, version]
+      additionalProperties: false
+      properties:
+        requisition_id: { type: string, format: uuid }
+        number: { type: string }
+        legal_entity_id: { type: string, format: uuid }
+        requester_id: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        total: { type: string, description: decimal string in the requisition currency }
+        step_no: { type: integer, description: the approval level that rejected }
+        role: { type: string, description: the role of that level }
+        rejected_by: { type: string, format: uuid }
+        reason: { type: string }
+        version: { type: integer, description: the requisition version after the rejection }
+    RequisitionCancelledData:
+      type: object
+      required: [requisition_id, number, legal_entity_id, requester_id, currency, total, previous_status, cancelled_line_ids, cancelled_by, version]
+      additionalProperties: false
+      properties:
+        requisition_id: { type: string, format: uuid }
+        number: { type: string }
+        legal_entity_id: { type: string, format: uuid }
+        requester_id: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        total: { type: string, description: decimal string in the requisition currency }
+        previous_status: { type: string, enum: [DRAFT, REJECTED, APPROVED] }
+        cancelled_line_ids:
+          type: array
+          items: { type: string, format: uuid }
+        cancelled_by: { type: string, format: uuid }
+        reason: { type: string }
+        version: { type: integer, description: the requisition version after the cancellation }
     RequisitionSplitLine:
       type: object
       required: [line_no, line_id, qty, amount]

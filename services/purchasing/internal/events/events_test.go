@@ -14,6 +14,8 @@ var allTypes = map[string]string{
 	events.RequisitionSubmitted:        "requisition",
 	events.RequisitionApproved:         "requisition",
 	events.RequisitionSplit:            "requisition",
+	events.RequisitionRejected:         "requisition",
+	events.RequisitionCancelled:        "requisition",
 	events.RequisitionReleaseCompleted: "requisitionrelease",
 	events.AgreementThreshold:          "agreement",
 	events.POConfirmed:                 "po",
@@ -88,6 +90,8 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 	for _, v := range []any{
 		events.POConfirmedData{SiteID: "s", WarehouseID: "w", Lines: []events.POLineData{{ProductID: "p", Description: "d", Schedule: []events.POScheduleRow{{ConfirmedDate: "2027-01-01"}}}}},
 		events.RequisitionSplitData{SplitBy: "u", NewLines: []events.RequisitionSplitLine{{}}},
+		events.RequisitionRejectedData{},
+		events.RequisitionCancelledData{Reason: "r", CancelledLineIDs: []string{"l"}},
 		events.RequisitionReleaseData{RequestedBy: "u", PurchaseOrders: []events.ReleasedOrder{{}}, Skipped: []events.ReleaseSkippedLine{{}}},
 		events.POVersionCreatedData{Patch: []any{}},
 		events.POCancelledData{Lines: []events.POCancelledLine{{ProductID: "p"}}},

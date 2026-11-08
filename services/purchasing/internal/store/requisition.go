@@ -18,27 +18,35 @@ import (
 
 // Requisition statuses (FR-17.1).
 const (
-	RequisitionDraft    = "DRAFT"
-	RequisitionInReview = "IN_REVIEW"
-	RequisitionApproved = "APPROVED"
+	RequisitionDraft     = "DRAFT"
+	RequisitionInReview  = "IN_REVIEW"
+	RequisitionApproved  = "APPROVED"
+	RequisitionRejected  = "REJECTED"
+	RequisitionCancelled = "CANCELLED"
 )
 
 // Requisition is a purchase requisition (FR-17.1) with its lines.
 type Requisition struct {
-	ID              string            `json:"id"`
-	Number          string            `json:"number"`
-	LegalEntityID   string            `json:"legalEntityId"`
-	OperatingUnitID string            `json:"operatingUnitId,omitempty"`
-	RequesterID     string            `json:"requesterId"`
-	Status          string            `json:"status"`
-	Currency        string            `json:"currency"`
-	Total           decimal.Decimal   `json:"total"`
-	ApproverChain   []string          `json:"approverChain"`
-	PolicyVersion   string            `json:"policyVersion,omitempty"`
-	Version         int               `json:"version"`
-	Lines           []RequisitionLine `json:"lines"`
-	CreatedAt       time.Time         `json:"createdAt"`
-	UpdatedAt       time.Time         `json:"updatedAt"`
+	ID              string          `json:"id"`
+	Number          string          `json:"number"`
+	LegalEntityID   string          `json:"legalEntityId"`
+	OperatingUnitID string          `json:"operatingUnitId,omitempty"`
+	RequesterID     string          `json:"requesterId"`
+	Status          string          `json:"status"`
+	Currency        string          `json:"currency"`
+	Total           decimal.Decimal `json:"total"`
+	ApproverChain   []string        `json:"approverChain"`
+	// ApprovedSteps is how many levels of ApproverChain have approved in this round; NextApprover is the role
+	// that decides next while the requisition is IN_REVIEW (BR-17.1).
+	ApprovedSteps int               `json:"approvedSteps"`
+	NextApprover  string            `json:"nextApprover,omitempty"`
+	PolicyVersion string            `json:"policyVersion,omitempty"`
+	Version       int               `json:"version"`
+	Lines         []RequisitionLine `json:"lines"`
+	// History is the requisition's audit trail, oldest first.
+	History   []RequisitionHistory `json:"history"`
+	CreatedAt time.Time            `json:"createdAt"`
+	UpdatedAt time.Time            `json:"updatedAt"`
 	// Warnings are computed on create (PRC-REQ-003) and not stored.
 	Warnings []Warning `json:"warnings,omitempty"`
 }
@@ -220,13 +228,17 @@ func (s *Postgres) SubmitRequisition(ctx context.Context, id string, version int
 			cur.Status = RequisitionApproved
 		}
 		tag, err := tx.Exec(ctx, `update purchase_requisition set status = $3, approver_chain = $4, policy_version = $5,
-			version = version + 1, updated_at = now() where tenant_id = $1 and id = $2 and version = $6`,
+			approved_steps = 0, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2 and version = $6`,
 			p.TenantID, id, cur.Status, cur.ApproverChain, cur.PolicyVersion, version)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() != 1 {
 			return httpx.NewProblem(http.StatusConflict, CodeVersionConflict, "requisition changed since it was read; reload and retry")
+		}
+		if err := addRequisitionHistory(ctx, tx, cur, historyRow{Action: HistorySubmitted, FromStatus: RequisitionDraft,
+			ActorID: cur.RequesterID, Version: version + 1}); err != nil {
+			return err
 		}
 		data := requisitionData(cur)
 		if err := enqueue(ctx, tx, "requisition", id, purchasingevents.RequisitionSubmitted, data); err != nil {
@@ -258,12 +270,15 @@ func loadRequisition(ctx context.Context, tx pgx.Tx, id string) (Requisition, er
 	p, _ := tenant.FromContext(ctx)
 	var r Requisition
 	err := tx.QueryRow(ctx, `select id, legal_entity_id, coalesce(operating_unit_id::text, ''), number, requester_id, status, currency,
-		total, approver_chain, coalesce(policy_version, ''), version, created_at, updated_at
+		total, approver_chain, coalesce(policy_version, ''), approved_steps, version, created_at, updated_at
 		from purchase_requisition where tenant_id = $1 and id = $2`, p.TenantID, id).
 		Scan(&r.ID, &r.LegalEntityID, &r.OperatingUnitID, &r.Number, &r.RequesterID, &r.Status, &r.Currency, &r.Total, &r.ApproverChain,
-			&r.PolicyVersion, &r.Version, &r.CreatedAt, &r.UpdatedAt)
+			&r.PolicyVersion, &r.ApprovedSteps, &r.Version, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return Requisition{}, notFound(err, CodeRequisitionNotFound, "requisition not found")
+	}
+	if r.Status == RequisitionInReview {
+		r.NextApprover = domain.NextApprover(r.ApproverChain, r.ApprovedSteps)
 	}
 	rows, err := tx.Query(ctx, `select id, line_no, coalesce(product_id::text, ''), description, category, qty, unit,
 		estimated_unit_price, amount, requested_date, coalesce(site_id::text, ''), coalesce(preferred_vendor_id::text, ''), status,
@@ -285,5 +300,10 @@ func loadRequisition(ctx context.Context, tx pgx.Tx, id string) (Requisition, er
 		l.RequestedDate = day(requested)
 		r.Lines = append(r.Lines, l)
 	}
-	return r, rows.Err()
+	if err := rows.Err(); err != nil {
+		return Requisition{}, err
+	}
+	rows.Close()
+	r.History, err = loadRequisitionHistory(ctx, tx, id)
+	return r, err
 }
