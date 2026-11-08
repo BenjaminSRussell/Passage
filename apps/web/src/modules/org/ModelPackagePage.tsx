@@ -30,6 +30,10 @@ const kindLabels: Record<string, string> = {
   fiscalYears: "Fiscal years",
   teamTypes: "Team types",
   teams: "Teams",
+  units: "Units of measure",
+  conversions: "Unit conversions",
+  currencyRoundingRules: "Currency rounding rules",
+  nameTranslations: "Name translations",
 };
 
 const columns: DataTableColumn<KindRow>[] = [

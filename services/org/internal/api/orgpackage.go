@@ -50,6 +50,11 @@ type OrgPackage struct {
 	FiscalCalendars []packageFiscalCalendar `json:"fiscalCalendars"`
 	TeamTypes       []packageTeamType       `json:"teamTypes"`
 	Teams           []packageTeam           `json:"teams"`
+	// The four kinds below are optional: a package written before they existed has none.
+	Units                 []packageUnit        `json:"units"`
+	Conversions           []packageConversion  `json:"conversions"`
+	CurrencyRoundingRules []packageRounding    `json:"currencyRoundingRules"`
+	NameTranslations      []packageTranslation `json:"nameTranslations"`
 	// ExportedAt is written by export and ignored by import, so an exported file imports as is.
 	ExportedAt string `json:"exportedAt,omitempty"`
 }
@@ -233,8 +238,10 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 	}
 	entityCodes := map[string]string{}
 	nodeRefs := map[string]packageNodeRef{}
+	refs := map[string]string{} // ownerType/id -> natural key, for translations and rounding rules
 	for _, e := range entities.Items {
 		entityCodes[e.ID] = e.Code
+		refs[ownerLegalEntity+"/"+e.ID] = e.Code
 		nodeRefs[e.ID] = packageNodeRef{Kind: nodeKindLegalEntity, Code: e.Code}
 		pkg.LegalEntities = append(pkg.LegalEntities, packageLegalEntity{Code: e.Code, Name: e.Name, Country: e.Country, Currency: e.Currency,
 			TimeZone: e.TimeZone, DefaultLanguage: e.DefaultLanguage, RegistrationNumber: e.RegistrationNumber})
@@ -249,6 +256,7 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 	unitRefs := map[string]packageUnitRef{}
 	for _, u := range units.Items {
 		unitRefs[u.ID] = packageUnitRef{Type: u.Type, Code: u.Code}
+		refs[ownerOperatingUnit+"/"+u.ID] = u.Type + "/" + u.Code
 		nodeRefs[u.ID] = packageNodeRef{Kind: nodeKindOperatingUnit, Type: u.Type, Code: u.Code}
 		out := packageOperatingUnit{Type: u.Type, Code: u.Code, Name: u.Name}
 		if u.DefaultLegalEntityID != nil {
@@ -256,7 +264,7 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 		}
 		pkg.OperatingUnits = append(pkg.OperatingUnits, out)
 	}
-	if err := exportSites(ctx, st, entityCodes, &pkg); err != nil {
+	if err := exportSites(ctx, st, entityCodes, refs, &pkg); err != nil {
 		return pkg, err
 	}
 	types, err := st.ListHierarchyTypes(ctx, store.HierarchyTypeFilter{}, "", packageRowCap)
@@ -276,10 +284,13 @@ func exportOrgPackage(ctx context.Context, st store.Store) (OrgPackage, error) {
 	if err := exportFiscalCalendars(ctx, st, &pkg); err != nil {
 		return pkg, err
 	}
-	return pkg, exportTeams(ctx, st, unitRefs, &pkg)
+	if err := exportTeams(ctx, st, unitRefs, &pkg); err != nil {
+		return pkg, err
+	}
+	return pkg, exportReferenceData(ctx, st, entityCodes, refs, &pkg)
 }
 
-func exportSites(ctx context.Context, st store.Store, entityCodes map[string]string, pkg *OrgPackage) error {
+func exportSites(ctx context.Context, st store.Store, entityCodes, refs map[string]string, pkg *OrgPackage) error {
 	ids := make([]string, 0, len(entityCodes))
 	for id := range entityCodes {
 		ids = append(ids, id)
@@ -306,6 +317,12 @@ func exportSites(ctx context.Context, st store.Store, entityCodes map[string]str
 			return tooLarge("warehouses")
 		case locations.Next != nil:
 			return tooLarge("locations")
+		}
+		for _, s := range sites.Items {
+			refs[ownerSite+"/"+s.ID] = entityCodes[entityID] + "/" + s.Code
+		}
+		for _, w := range warehouses.Items {
+			refs[ownerWarehouse+"/"+w.ID] = entityCodes[entityID] + "/" + w.Code
 		}
 		appendSites(entityCodes[entityID], sites.Items, warehouses.Items, locations.Items, pkg)
 	}
@@ -452,6 +469,7 @@ func validatePackage(pkg OrgPackage, p packageProblems, limits domain.TreeLimits
 	for i, t := range pkg.Teams {
 		validatePackageTeam(fmt.Sprintf("teams[%d]", i), t, p, dup)
 	}
+	validatePackageReferenceData(pkg, p, dup)
 }
 
 func validatePackageSite(path string, s packageSite, p packageProblems, dup func(path, kind, key string)) {

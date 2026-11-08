@@ -365,3 +365,19 @@ func TestCurrencyRounding_NoClaimAndDutyWithoutTenantAdminCannotWriteLegalEntity
 	}
 	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "0.01", domain.HalfEven, store.RoundingSourceDefault)
 }
+
+// An empty currency lists every rule of the tenant, the read the organization package export makes.
+func TestCurrencyRounding_ListWithoutCurrencyListsEveryRule(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("EL"))
+	mustPut(t, s, ctx, rule(t, "USD", "cash", "0.05", "half_up", nil))
+	mustPut(t, s, ctx, rule(t, "CHF", "cash", "0.05", "half_up", nil))
+	mustPut(t, s, ctx, rule(t, "CHF", "price", "0.1", "up", &a.ID))
+	rules, err := s.ListCurrencyRoundings(ctx, "")
+	if err != nil || len(rules) != 3 || rules[0].CurrencyCode != "CHF" || rules[2].CurrencyCode != "USD" {
+		t.Fatalf("rules = %+v %v", rules, err)
+	}
+	if one, err := s.ListCurrencyRoundings(ctx, "CHF"); err != nil || len(one) != 2 {
+		t.Fatalf("CHF rules = %+v %v", one, err)
+	}
+}

@@ -141,15 +141,19 @@ func problemFromDomain(err error) *httpx.Problem {
 	return httpx.NewProblem(http.StatusInternalServerError, "COM-0500", "internal error")
 }
 
+// ListCurrencyRoundings lists the rules of one currency; an empty currency lists every rule of
+// the tenant (the organization package export).
 func (s *Postgres) ListCurrencyRoundings(ctx context.Context, currency string) ([]CurrencyRounding, error) {
 	p, _ := tenant.FromContext(ctx)
 	rules := []CurrencyRounding{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := requireCurrency(ctx, tx, p.TenantID, currency); err != nil {
-			return err
+		if currency != "" {
+			if _, err := requireCurrency(ctx, tx, p.TenantID, currency); err != nil {
+				return err
+			}
 		}
-		rows, err := tx.Query(ctx, `select `+roundingColumns+` from currency_rounding where tenant_id = $1 and currency_code = $2
-			order by purpose, legal_entity_id is not null, legal_entity_id`, p.TenantID, currency)
+		rows, err := tx.Query(ctx, `select `+roundingColumns+` from currency_rounding where tenant_id = $1 and ($2::text = '' or currency_code = $2)
+			order by currency_code, purpose, legal_entity_id is not null, legal_entity_id`, p.TenantID, currency)
 		if err != nil {
 			return err
 		}

@@ -110,15 +110,21 @@ func (s *Postgres) PutNameTranslation(ctx context.Context, ownerType, ownerID, l
 	return out, created, nil
 }
 
+// ListNameTranslations lists the translations of one owner; an empty ownerType lists every
+// translation of the tenant (the organization package export).
 func (s *Postgres) ListNameTranslations(ctx context.Context, ownerType, ownerID string) ([]NameTranslation, error) {
 	p, _ := tenant.FromContext(ctx)
 	items := []NameTranslation{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := resolveTranslationOwner(ctx, tx, p.TenantID, ownerType, ownerID); err != nil {
-			return err
+		query, args := `select `+translationColumns+` from org_unit_translation where tenant_id = $1 order by owner_type, owner_id, language`, []any{p.TenantID}
+		if ownerType != "" {
+			if _, err := resolveTranslationOwner(ctx, tx, p.TenantID, ownerType, ownerID); err != nil {
+				return err
+			}
+			query = `select ` + translationColumns + ` from org_unit_translation where tenant_id = $1 and owner_type = $2 and owner_id = $3 order by language`
+			args = []any{p.TenantID, ownerType, ownerID}
 		}
-		rows, err := tx.Query(ctx, `select `+translationColumns+` from org_unit_translation
-			where tenant_id = $1 and owner_type = $2 and owner_id = $3 order by language`, p.TenantID, ownerType, ownerID)
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}

@@ -104,6 +104,32 @@ describe("model package page", () => {
     expect(screen.getByText(/REPORTING\/2026-01-01: nodes/)).toBeInTheDocument();
   });
 
+  it("labels units, conversions, rounding rules and name translations and their differing fields", async () => {
+    serve({
+      "POST /import?dryRun=true": () =>
+        json({
+          ...report,
+          kinds: {
+            units: { created: 2, unchanged: 0 },
+            conversions: { created: 1, unchanged: 0 },
+            currencyRoundingRules: { created: 2, unchanged: 1 },
+            nameTranslations: { created: 3, unchanged: 0 },
+          },
+          differences: [
+            { kind: "currencyRoundingRules", code: "USD/general", field: "unit" },
+            { kind: "nameTranslations", code: "operating_unit/department/FIN/de", field: "name" },
+          ],
+        }),
+    });
+    const { user } = renderPage();
+    await paste(user, packageText);
+    await user.click(screen.getByRole("button", { name: "Check package" }));
+    const table = await screen.findByRole("table", { name: "Records by kind" });
+    for (const label of ["Units of measure", "Unit conversions", "Currency rounding rules", "Name translations"]) expect(within(table).getByText(label)).toBeInTheDocument();
+    expect(screen.getByText(/Currency rounding rules USD\/general: unit/)).toBeInTheDocument();
+    expect(screen.getByText(/Name translations operating_unit\/department\/FIN\/de: name/)).toBeInTheDocument();
+  });
+
   it("imports for real without the dry-run flag", async () => {
     const fetchMock = serve({ "POST /import": () => json({ ...report, dryRun: false }) });
     const { user } = renderPage();

@@ -139,6 +139,17 @@ func TestListCurrencyRoundingRules(t *testing.T) {
 	}
 }
 
+// An empty currency segment names no currency: it must not reach the store, where an empty
+// currency lists every rule of the tenant (the package export's read).
+func TestListCurrencyRoundingRules_EmptyCurrencyIsNotFound(t *testing.T) {
+	f := &fakeStore{roundings: []store.CurrencyRounding{{CurrencyCode: "CHF", Purpose: "cash"}}}
+	r, _ := newRouter(f)
+	rec := do(r, http.MethodGet, "/v1/org/currencies//rounding-rules", "", "org.read", true)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), store.CodeReferenceNotFound) {
+		t.Fatalf("empty currency: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestRoundCurrency_RefusesInvalidInput(t *testing.T) {
 	tests := []struct {
 		name, query, field string

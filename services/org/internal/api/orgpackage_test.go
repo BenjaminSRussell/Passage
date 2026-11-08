@@ -29,6 +29,10 @@ type memOrg struct {
 	teamTypes  []store.TeamType
 	teams      []store.Team
 	cals       []store.FiscalCalendar
+	refUnits   []store.Unit
+	refConvs   []store.Conversion
+	rules      []store.CurrencyRounding
+	names      []store.NameTranslation
 	custom     map[string][]store.FiscalPeriod // calendar id/year -> operating periods
 	versions   []memVersion
 	publishes  []publishCall
@@ -42,12 +46,18 @@ type memOrg struct {
 	failWarehouse bool
 }
 
+var minorUnits = 2
+
 func (m *memOrg) ListReference(_ context.Context, kind store.ReferenceKind, _ store.ReferenceFilter) ([]store.ReferenceItem, error) {
 	codes := map[store.ReferenceKind][]string{store.KindCountry: {"US", "DE"}, store.KindCurrency: {"USD", "EUR"}, store.KindLanguage: {"en", "de"}}[kind]
 	items := []store.ReferenceItem{}
 	for _, code := range codes {
 		if !m.inactive[code] {
-			items = append(items, store.ReferenceItem{Code: code, Status: "active"})
+			item := store.ReferenceItem{Code: code, Status: "active"}
+			if kind == store.KindCurrency {
+				item.MinorUnits = &minorUnits
+			}
+			items = append(items, item)
 		}
 	}
 	return items, nil

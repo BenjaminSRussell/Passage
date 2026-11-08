@@ -50,6 +50,13 @@ type importer struct {
 	teams    map[string]record // code
 	siteCode map[string]string // site id -> code, for messages
 	cals     map[string]store.FiscalCalendar
+	// refUnits, refConvs, roundings, trans and currencies hold the tenant's units, conversions,
+	// rounding rules (key currency/purpose/legal entity id), name translations and currencies.
+	refUnits   map[string]store.Unit
+	refConvs   map[string]store.Conversion
+	roundings  map[string]store.CurrencyRounding
+	trans      map[string]store.NameTranslation
+	currencies map[string]store.ReferenceItem
 	// today is the UTC date as YYYY-MM-DD; a hierarchy version dated before it is backdated.
 	today    string
 	versions map[string]versionState // hierarchy type code
@@ -99,7 +106,7 @@ func importOrgPackage(ctx context.Context, st store.Store, pkg OrgPackage, dryRu
 	if len(problems) > 0 {
 		return im.report, invalidPackage(problems)
 	}
-	steps := []func(OrgPackage) error{im.legalEntities, im.operatingUnits, im.sitesAndStock, im.hierarchyTypes, im.hierarchyVersions, im.fiscalCalendars, im.teamTypes, im.teamsOf}
+	steps := []func(OrgPackage) error{im.legalEntities, im.operatingUnits, im.sitesAndStock, im.hierarchyTypes, im.hierarchyVersions, im.fiscalCalendars, im.teamTypes, im.teamsOf, im.unitsOf, im.conversionsOf, im.roundingOf, im.translationsOf}
 	for _, step := range steps {
 		if err := step(pkg); err != nil {
 			return im.report, err
@@ -122,7 +129,8 @@ func packageWithinCap(pkg OrgPackage) error {
 		kind string
 		n    int
 	}{{"legal entities", len(pkg.LegalEntities)}, {"operating units", len(pkg.OperatingUnits)}, {"sites", len(pkg.Sites)}, {"warehouses", warehouses},
-		{"locations", locations}, {"hierarchy types", len(pkg.HierarchyTypes)}, {"fiscal calendars", len(pkg.FiscalCalendars)}, {"team types", len(pkg.TeamTypes)}, {"teams", len(pkg.Teams)}} {
+		{"locations", locations}, {"hierarchy types", len(pkg.HierarchyTypes)}, {"fiscal calendars", len(pkg.FiscalCalendars)}, {"team types", len(pkg.TeamTypes)}, {"teams", len(pkg.Teams)},
+		{"units", len(pkg.Units)}, {"conversions", len(pkg.Conversions)}, {"rounding rules", len(pkg.CurrencyRoundingRules)}, {"name translations", len(pkg.NameTranslations)}} {
 		if c.n > packageRowCap {
 			return tooLarge(c.kind)
 		}
@@ -281,7 +289,10 @@ func (im *importer) resolve(pkg OrgPackage, p packageProblems) error {
 	}
 	im.resolveTeams(pkg, p)
 	im.resolveCalendars(pkg, p)
-	return im.resolveVersions(pkg, p)
+	if err := im.resolveVersions(pkg, p); err != nil {
+		return err
+	}
+	return im.resolveReferenceKinds(pkg, p)
 }
 
 // resolveReferenceData checks that each legal entity the import creates names a country,

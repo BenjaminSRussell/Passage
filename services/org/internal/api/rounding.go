@@ -146,7 +146,14 @@ func (a *API) listCurrencyRoundings(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	rules, err := a.store.ListCurrencyRoundings(r.Context(), chi.URLParam(r, "code"))
+	code := chi.URLParam(r, "code")
+	if code == "" {
+		// The store lists every currency's rules for an empty code (the package export); over
+		// HTTP an empty path segment names no currency.
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeReferenceNotFound, "no currency with code "))
+		return
+	}
+	rules, err := a.store.ListCurrencyRoundings(r.Context(), code)
 	if err != nil {
 		slog.Error("list currency rounding rules failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

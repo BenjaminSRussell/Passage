@@ -257,3 +257,20 @@ func TestNameTranslation_MigrationReappliesCleanly(t *testing.T) {
 		t.Fatalf("re-applying 0025: %v", err)
 	}
 }
+
+// An empty owner type lists every translation of the tenant, the read the organization package
+// export makes; a named owner still lists only its own.
+func TestNameTranslation_ListWithoutOwnerListsEveryTranslation(t *testing.T) {
+	w := newTranslationWorld(t)
+	w.put(t, "operating_unit", w.ou.ID, "de", "Abteilung")
+	w.put(t, "warehouse", w.wh1.ID, "fr", "Entrepot")
+	w.put(t, "warehouse", w.wh1.ID, "de", "Lager")
+	all, err := w.s.ListNameTranslations(w.ctx, "", "")
+	if err != nil || len(all) != 3 || all[0].OwnerType != "operating_unit" || all[2].Language != "fr" {
+		t.Fatalf("all = %+v %v", all, err)
+	}
+	one, err := w.s.ListNameTranslations(w.ctx, "warehouse", w.wh1.ID)
+	if err != nil || len(one) != 2 || one[0].Language != "de" {
+		t.Fatalf("warehouse = %+v %v", one, err)
+	}
+}

@@ -1344,7 +1344,7 @@ paths:
     post:
       operationId: exportOrgPackage
       summary: Export the organization model as a package
-      description: Reads every legal entity, operating unit, site with its warehouses and locations, hierarchy type, team type and team of the caller's tenant into one versioned JSON package whose records name each other by code. A POST because the export is an administrative action; it changes nothing. Each hierarchy type carries its published and superseded versions (a draft is not exported) and the package carries the fiscal calendars with their generated years. Addresses, translations, calendar assignments and team members are not part of the package.
+      description: Reads every legal entity, operating unit, site with its warehouses and locations, hierarchy type, team type, team, tenant unit of measure and conversion, currency rounding rule and name translation of the caller's tenant into one versioned JSON package whose records name each other by code. A POST because the export is an administrative action; it changes nothing. Each hierarchy type carries its published and superseded versions (a draft is not exported) and the package carries the fiscal calendars with their generated years. Addresses, calendar assignments and team members are not part of the package.
       x-passage-duty: org.package.manage
       responses:
         '200':
@@ -1355,7 +1355,7 @@ paths:
     post:
       operationId: importOrgPackage
       summary: Import an organization model package
-      description: Creates the records of the package that the tenant does not have yet, matched by natural code (legal entity code; operating unit type and code; legal entity and site, warehouse or location code; hierarchy type, team type and team code; hierarchy version by type code and effectiveFrom; fiscal calendar by code; fiscal year by calendar code and year). Existing records are never updated or deleted; their differing names are listed. Before the first write the package is validated, every code reference resolved and every rule the creates apply checked against the tenant's rows (active parent records, active country, currency and language, the legal entity and team limits, warehouse codes unique per legal entity), so a package that fails any of them imports nothing. A hierarchy version is created as a draft of its type, given its nodes and published with its effectiveFrom, oldest first, each published before the next is drafted, so each must be later than the latest version the type already has and the tree must fit the configured depth and node limits. A date before today is a backdate (the org.hierarchy.backdate duty and a type with backdateAllowed) only when the type already holds a version that no package import made; loading a history into an empty type, or finishing one an earlier import started, changes no as-of answer anyone else wrote, and the publish keeps the reason 'Imported from an organization package'. A type with an open draft takes no new version, except the draft an earlier run of the same import left open (its key is orgpkg:hier-draft:<type>/<effectiveFrom>), which the import fills and publishes. New versions of a security-purpose type are not imported (publishing needs a second person) and each is listed under skipped. A fiscal year is generated for its calendar from the calendar's settings (a custom calendar from the listed periods). Each record is then created in its own transaction and raises its own event through the outbox. A change someone else commits after that check can still fail a create; the records created before it stay, and importing the package again creates only what is missing. A second import of the same package reports no creates. The exportedAt field of an exported file is accepted and ignored.
+      description: Creates the records of the package that the tenant does not have yet, matched by natural code (legal entity code; operating unit type and code; legal entity and site, warehouse or location code; hierarchy type, team type and team code; hierarchy version by type code and effectiveFrom; fiscal calendar by code; fiscal year by calendar code and year; unit by code; conversion by its two unit codes in either direction; rounding rule by currency, purpose and legal entity; name translation by owner and language). Existing records are never updated or deleted; their differing names (and, for units, conversions, rounding rules and translations, the differing fields) are listed. Before the first write the package is validated, every code reference resolved and every rule the creates apply checked against the tenant's rows (active parent records, active country, currency and language, the legal entity and team limits, warehouse codes unique per legal entity, units of a conversion known, active and of one class, rounding units valid for the currency, translation owners and languages known), so a package that fails any of them imports nothing. A hierarchy version is created as a draft of its type, given its nodes and published with its effectiveFrom, oldest first, each published before the next is drafted, so each must be later than the latest version the type already has and the tree must fit the configured depth and node limits. A date before today is a backdate (the org.hierarchy.backdate duty and a type with backdateAllowed) only when the type already holds a version that no package import made; loading a history into an empty type, or finishing one an earlier import started, changes no as-of answer anyone else wrote, and the publish keeps the reason 'Imported from an organization package'. A type with an open draft takes no new version, except the draft an earlier run of the same import left open (its key is orgpkg:hier-draft:<type>/<effectiveFrom>), which the import fills and publishes. New versions of a security-purpose type are not imported (publishing needs a second person) and each is listed under skipped. A fiscal year is generated for its calendar from the calendar's settings (a custom calendar from the listed periods). Each record is then created in its own transaction and raises its own event through the outbox where its kind has one (units, conversions and name translations have no event). Rounding rules and name translations are written with the same upsert as their PUT routes, so one someone else sets after that check is overwritten with the package's value. A change someone else commits after that check can still fail a create; the records created before it stay, and importing the package again creates only what is missing. A second import of the same package reports no creates. The exportedAt field of an exported file is accepted and ignored.
       x-passage-duty: org.package.manage
       parameters:
         - { name: dryRun, in: query, schema: { type: boolean, default: false }, description: When true nothing is written and the report shows what a real import would create. }
@@ -2102,6 +2102,51 @@ components:
                   code: { type: string }
               effectiveFrom: { type: string, format: date }
               effectiveTo: { type: string, format: date }
+        units:
+          type: array
+          description: Tenant units of measure (the system units are not exported). Optional.
+          items:
+            type: object
+            required: [code, name, class, decimalPrecision]
+            properties:
+              code: { type: string, description: 1 to 10 characters of A-Z, a-z, 0-9, / or %. }
+              name: { type: string, maxLength: 120 }
+              class: { type: string, enum: [quantity, each, mass, length, volume, area, time, temperature, energy, pressure, power, speed] }
+              decimalPrecision: { type: integer, minimum: 0, maximum: 6 }
+        conversions:
+          type: array
+          description: Tenant conversions between two units of one class, in the package or already in the tenant (system conversions are not exported). Optional; a pair already converted in either direction is unchanged.
+          items:
+            type: object
+            required: [fromCode, toCode, factor]
+            properties:
+              fromCode: { type: string }
+              toCode: { type: string }
+              factor: { type: string, description: Decimal greater than 0, at most 16 integer digits and 12 decimals. }
+              offset: { type: string, description: Decimal, empty or absent for zero. }
+        currencyRoundingRules:
+          type: array
+          description: Currency rounding rules (FR-6.16). Optional.
+          items:
+            type: object
+            required: [currency, purpose, unit, method]
+            properties:
+              currency: { type: string, description: ISO 4217 code of a currency active in the tenant. }
+              purpose: { type: string, enum: [general, price, purchase, sales, tax, cash] }
+              legalEntity: { type: string, description: Code of a legal entity in the package or the tenant; absent for the tenant-wide rule. }
+              unit: { type: string, description: Rounding unit, a power of ten no finer than the currency minor unit or 5 or 25 times one. }
+              method: { type: string, enum: [half_even, half_up, down, up] }
+        nameTranslations:
+          type: array
+          description: Names of legal entities, operating units, sites and warehouses in other languages (FR-6.17). Optional.
+          items:
+            type: object
+            required: [ownerType, owner, language, name]
+            properties:
+              ownerType: { type: string, enum: [legal_entity, operating_unit, site, warehouse] }
+              owner: { type: string, description: The owner's natural key, the code of a legal entity, type/code of an operating unit, LEGAL-ENTITY/CODE of a site or warehouse. It must be in the package or the tenant. }
+              language: { type: string, description: A language tag such as fr or fr-CA whose language is active in the tenant. }
+              name: { type: string, minLength: 1, maxLength: 120 }
         exportedAt: { type: string, format: date-time, description: Written by export; ignored by import. }
     OrgPackageNodeRef:
       type: object
@@ -2133,7 +2178,7 @@ components:
         unchanged: { type: integer, description: Records that already existed. }
         kinds:
           type: object
-          description: Counts per kind (legalEntities, operatingUnits, sites, warehouses, locations, hierarchyTypes, hierarchyVersions, fiscalCalendars, fiscalYears, teamTypes, teams).
+          description: Counts per kind (legalEntities, operatingUnits, sites, warehouses, locations, hierarchyTypes, hierarchyVersions, fiscalCalendars, fiscalYears, teamTypes, teams, units, conversions, currencyRoundingRules, nameTranslations).
           additionalProperties: { $ref: '#/components/schemas/OrgImportCounts' }
         differences:
           type: array
