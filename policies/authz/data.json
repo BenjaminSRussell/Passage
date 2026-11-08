@@ -3000,7 +3000,10 @@
       {"resource": "/v1/sales/order-progress", "methods": ["GET"]},
       {"resource": "/v1/sales/return-orders", "methods": ["GET"]},
       {"resource": "/v1/sales/return-orders/*", "methods": ["GET"]},
-      {"resource": "/v1/sales/credit-exposure", "methods": ["GET"]}
+      {"resource": "/v1/sales/credit-exposure", "methods": ["GET"]},
+      {"resource": "/v1/sales/delivery-tolerances", "methods": ["GET"]},
+      {"resource": "/v1/sales/delivery-tolerances/*", "methods": ["GET"]},
+      {"resource": "/v1/sales/delivery-tolerances:resolve", "methods": ["GET"]}
     ]},
     "sales.order.write": {"permissions": [
       {"resource": "/v1/sales/orders", "methods": ["POST"]},
@@ -3025,7 +3028,9 @@
     "sales.parameter.maintain": {"permissions": [
       {"resource": "/v1/sales/parameters", "methods": ["PUT"]},
       {"resource": "/v1/sales/delivery-terms", "methods": ["POST"]},
-      {"resource": "/v1/sales/delivery-terms/*", "methods": ["PUT"]}
+      {"resource": "/v1/sales/delivery-terms/*", "methods": ["PUT"]},
+      {"resource": "/v1/sales/delivery-tolerances", "methods": ["POST"]},
+      {"resource": "/v1/sales/delivery-tolerances/*", "methods": ["PUT", "DELETE"]}
     ]},
     "sales.quotation.maintain": {"permissions": [
       {"resource": "/v1/sales/quotations", "methods": ["POST"]},

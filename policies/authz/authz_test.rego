@@ -1561,6 +1561,17 @@ test_pricing_free_goods_revise if {
 }
 
 # Wave 27 slice 34: sales reads the customer's group from party on order, quotation and release entry.
+test_sales_delivery_tolerances if {
+	allowed("sales.parameter.maintain", "POST", "/v1/sales/delivery-tolerances")
+	allowed("sales.parameter.maintain", "PUT", "/v1/sales/delivery-tolerances/t-1")
+	allowed("sales.parameter.maintain", "DELETE", "/v1/sales/delivery-tolerances/t-1")
+	allowed("sales.order.read", "GET", "/v1/sales/delivery-tolerances")
+	allowed("sales.order.read", "GET", "/v1/sales/delivery-tolerances/t-1")
+	allowed("sales.order.read", "GET", "/v1/sales/delivery-tolerances:resolve")
+	not allowed("sales.order.read", "POST", "/v1/sales/delivery-tolerances")
+	not allowed("sales.order.read", "PUT", "/v1/sales/delivery-tolerances/t-1")
+}
+
 test_sales_reads_party_customer if {
 	data.service_grants.sales.party == ["party.read"]
 	allowed("party.read", "GET", "/v1/party/customers/c-1")
