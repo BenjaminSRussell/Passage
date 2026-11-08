@@ -2913,7 +2913,8 @@
       {"resource": "/v1/sales/agreements/*:release-order", "methods": ["POST"]},
       {"resource": "/v1/sales/schedule-releases:check", "methods": ["POST"]},
       {"resource": "/v1/sales/agreements/*", "methods": ["PATCH"]},
-      {"resource": "/v1/sales/agreements/*:close", "methods": ["POST"]}
+      {"resource": "/v1/sales/agreements/*:close", "methods": ["POST"]},
+      {"resource": "/v1/sales/agreements/*:reprice-orders", "methods": ["POST"]}
     ]},
     "sales.allocation.maintain": {"permissions": [
       {"resource": "/v1/sales/allocation-quotas", "methods": ["POST"]},

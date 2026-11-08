@@ -1615,6 +1615,12 @@ test_reporting_library_and_firings if {
 	not allowed("reporting.statement.view", "POST", "/v1/reporting/library")
 }
 
+# Wave 27 slice 38: carry a revised agreement price to released orders.
+test_sales_agreement_reprice_orders if {
+	allowed("sales.agreement.maintain", "POST", "/v1/sales/agreements/a-1:reprice-orders")
+	not allowed("sales.order.read", "POST", "/v1/sales/agreements/a-1:reprice-orders")
+}
+
 # Wave 23 slice 34: block utilization report across resources.
 test_scheduling_block_utilization_report if {
 	allowed("scheduling.read", "GET", "/v1/scheduling/block-utilization")
