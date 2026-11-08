@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -192,6 +193,13 @@ type Bar struct {
 	// SecondaryResourceIDs are the resources booked with the job's primary for
 	// the same segments (BR-23.4).
 	SecondaryResourceIDs []string `json:"secondaryResourceIds"`
+	// Secondary is true for the bar of a secondary booking (BR-23.4): the job
+	// holds ResourceID as a secondary resource for these segments and
+	// PrimaryResourceID is the resource it runs on. Such a bar is read-only
+	// on the Gantt (the job moves through its primary bar); it carries no
+	// changeover, no secondary list and no block breach.
+	Secondary         bool    `json:"secondary"`
+	PrimaryResourceID *string `json:"primaryResourceId"`
 }
 
 type RunRequest struct {
@@ -852,6 +860,26 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		if len(bars) > MaxBars {
+			return nil
+		}
+		secondary, err := secondaryBars(ctx, tx, from, to, resourceIDs, MaxBars+1-len(bars))
+		if err != nil {
+			return err
+		}
+		if len(secondary) > 0 {
+			bars = append(bars, secondary...)
+			sort.SliceStable(bars, func(i, j int) bool {
+				a, b := bars[i], bars[j]
+				if !a.Start.Equal(b.Start) {
+					return a.Start.Before(b.Start)
+				}
+				if a.ResourceID != b.ResourceID {
+					return a.ResourceID < b.ResourceID
+				}
+				return a.Segment < b.Segment
+			})
+		}
 		if len(bars) == 0 || len(bars) > MaxBars {
 			return nil
 		}
@@ -864,6 +892,40 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeWindowTooLarge, "the window holds more than 5000 bars; narrow the window or the resources")
 	}
 	return bars, nil
+}
+
+// secondaryBars reads the secondary bookings overlapping [from, to) on the
+// given resources (all when none) as read-only bars on the secondary
+// resource's row (BR-23.4). They take the job's late minutes and firmed flag
+// from its primary segment with the same number.
+// At most limit bars are read: the caller only needs to know the window is
+// over MaxBars in total.
+func secondaryBars(ctx context.Context, tx pgx.Tx, from, to time.Time, resourceIDs []string, limit int) ([]Bar, error) {
+	rows, err := tx.Query(ctx, `select s.job_id::text, p.order_id::text, p.oper_number, s.resource_id::text, p.resource_id::text, s.segment_no,
+			s.start_at, s.end_at, p.late_minutes, p.firmed, o.setup_group, s.finite
+		from scheduled_job_secondary s
+		join scheduled_job p on p.tenant_id = s.tenant_id and p.job_id = s.job_id and p.segment_no = s.segment_no
+		join scheduling_operation o on o.tenant_id = s.tenant_id and o.id = s.job_id
+		where s.end_at > $1 and s.start_at < $2 and ($3::boolean or s.resource_id = any($4::uuid[]))
+		order by s.start_at, s.resource_id, s.segment_no limit $5`,
+		from, to, len(resourceIDs) == 0, resourceIDs, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Bar
+	for rows.Next() {
+		b := Bar{Secondary: true, SecondaryResourceIDs: []string{}}
+		var primary string
+		if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &primary, &b.Segment, &b.Start, &b.End,
+			&b.LateMinutes, &b.Firmed, &b.SetupGroup, &b.finite); err != nil {
+			return nil, err
+		}
+		b.PrimaryResourceID = &primary
+		b.OrderRef, b.OperationRef = b.OrderID, domain.OperationRef(b.OperNumber)
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
 // flagOutsideCapacity marks the bars that are no longer inside their
@@ -922,7 +984,7 @@ func flagBlockBreach(ctx context.Context, tx pgx.Tx, bars []Bar, resources []dom
 	placeable := map[string][]domain.Interval{}
 	for i := range bars {
 		b := &bars[i]
-		if b.OutsideCapacity || !b.finite || len(blocks[b.ResourceID]) == 0 {
+		if b.Secondary || b.OutsideCapacity || !b.finite || len(blocks[b.ResourceID]) == 0 {
 			continue
 		}
 		if _, ok := expanded[b.ResourceID]; !ok {

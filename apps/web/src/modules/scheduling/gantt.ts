@@ -62,10 +62,11 @@ export function groupByResource(bars: GanttBar[], resourceIds: string[]): Map<st
   return out;
 }
 
-/** One row per job: the first segment's start and the last segment's end. */
+/** One row per job: the first segment's start and the last segment's end. Secondary bookings are not jobs of their own. */
 export function jobsOf(bars: GanttBar[]): GanttBar[] {
   const byJob = new Map<string, GanttBar>();
   for (const bar of bars) {
+    if (bar.secondary) continue;
     const seen = byJob.get(bar.jobId);
     if (!seen) {
       byJob.set(bar.jobId, { ...bar });

@@ -212,6 +212,14 @@ export interface GanttBar {
    * stays where it is until the next run or move. Absent on older servers.
    */
   blockBreach?: boolean;
+  /**
+   * True for the bar of a secondary booking (BR-23.4): the job holds
+   * resourceId as a secondary resource for this segment and runs on
+   * primaryResourceId. Read-only; the job moves through its primary bar.
+   * Absent on older servers.
+   */
+  secondary?: boolean;
+  primaryResourceId?: string | null;
 }
 
 export interface MoveRequest {

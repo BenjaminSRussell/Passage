@@ -142,6 +142,18 @@
   stroke-linecap: round;
 }
 
+/* BR-23.4: a secondary booking is a lighter bar in the order's colour that cannot be dragged; clicking it selects the job. */
+.secondaryBar {
+  cursor: pointer;
+  fill-opacity: 0.35;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.secondaryBar:hover {
+  fill-opacity: 0.5;
+}
+
 /* The changeover at the start of a job (FR-23.15): a hatch over the bar. */
 .changeover {
   fill: var(--color-text);

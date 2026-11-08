@@ -126,6 +126,31 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
               {rowBars.map((bar) => {
                 const pos = barPosition(bar, from, to);
                 if (!pos) return null;
+                if (bar.secondary) {
+                  const primary = bar.primaryResourceId ? (resources.find((r) => r.id === bar.primaryResourceId)?.code ?? shortId(bar.primaryResourceId)) : "";
+                  return (
+                    <rect
+                      key={`${bar.jobId}-${bar.segment}-secondary`}
+                      data-secondary-job={bar.jobId}
+                      x={pos.x * VIEW_WIDTH}
+                      y={BAR_INSET}
+                      width={Math.max(pos.width * VIEW_WIDTH, 1)}
+                      height={ROW_HEIGHT - 2 * BAR_INSET}
+                      rx={3}
+                      className={cx(
+                        styles.secondaryBar,
+                        styles[`tone${orderTone(bar.orderId)}`],
+                        bar.outsideCapacity && styles.violation,
+                        selectedJobId === bar.jobId && styles.selected,
+                      )}
+                      onClick={() => onSelect?.(bar)}
+                    >
+                      <title>
+                        {`Held as secondary for order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}${primary ? ` running on ${primary}` : ""}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${bar.firmed ? ", firmed" : ""}${bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : ""}`}
+                      </title>
+                    </rect>
+                  );
+                }
                 const violation = violations[bar.jobId];
                 // AC-23.7: a booked job a later downtime overlaps is outlined like a violation.
                 const outside = bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : "";

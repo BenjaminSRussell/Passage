@@ -80,7 +80,9 @@ func barsOf(t *testing.T, ctx context.Context, s *store.Postgres) map[string]sto
 	}
 	out := map[string]store.Bar{}
 	for _, b := range bars {
-		out[b.JobID] = b
+		if !b.Secondary {
+			out[b.JobID] = b
+		}
 	}
 	return out
 }

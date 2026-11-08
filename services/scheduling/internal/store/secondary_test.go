@@ -134,3 +134,63 @@ func TestSecondaryResources_DowntimeOnASecondaryListsTheJob(t *testing.T) {
 		t.Fatalf("bar = %+v, want outsideCapacity after a downtime on its secondary", after)
 	}
 }
+
+func TestSecondaryResources_AppearAsReadOnlyBarsOnTheSecondaryRow(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := tenantCtx(1)
+	m, tool := mustResource(t, ctx, s, "M1", true), mustResource(t, ctx, s, "TOOL", true)
+	a := secOperation(t, ctx, s, 10, 120, m.ID, tool.ID)
+	if _, _, err := s.RunSchedule(ctx, siteRun(at(0, 6, 0)), store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	from, to := monday.AddDate(0, 0, -1), monday.AddDate(0, 0, 30)
+	bars, err := s.Gantt(ctx, from, to, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var primary, secondary []store.Bar
+	for _, b := range bars {
+		if b.Secondary {
+			secondary = append(secondary, b)
+		} else {
+			primary = append(primary, b)
+		}
+	}
+	if len(primary) != 1 || len(secondary) != 1 {
+		t.Fatalf("bars = %d primary, %d secondary, want 1 and 1", len(primary), len(secondary))
+	}
+	p, sec := primary[0], secondary[0]
+	if sec.JobID != a.ID || sec.ResourceID != tool.ID || sec.PrimaryResourceID == nil || *sec.PrimaryResourceID != m.ID {
+		t.Fatalf("secondary bar = %+v", sec)
+	}
+	if !sec.Start.Equal(p.Start) || !sec.End.Equal(p.End) || sec.Segment != p.Segment || sec.OperNumber != 10 {
+		t.Fatalf("secondary bar %v-%v does not mirror the primary %v-%v", sec.Start, sec.End, p.Start, p.End)
+	}
+	if len(sec.SecondaryResourceIDs) != 0 || sec.ChangeoverMinutes != 0 || sec.BlockBreach {
+		t.Fatalf("secondary bar carries primary-only data: %+v", sec)
+	}
+
+	// The row filter selects the secondary resource's own bars.
+	only, err := s.Gantt(ctx, from, to, []string{tool.ID})
+	if err != nil || len(only) != 1 || !only[0].Secondary {
+		t.Fatalf("TOOL row = %+v err=%v, want its one secondary bar", only, err)
+	}
+	onlyPrimary, err := s.Gantt(ctx, from, to, []string{m.ID})
+	if err != nil || len(onlyPrimary) != 1 || onlyPrimary[0].Secondary {
+		t.Fatalf("M1 row = %+v err=%v, want its one primary bar", onlyPrimary, err)
+	}
+
+	// A downtime on the secondary flags its own bar as outside capacity.
+	if _, _, err := s.CreateCapacityOverride(ctx, store.CapacityOverride{ResourceID: tool.ID, Kind: domain.OverrideDowntime, StartAt: p.Start, EndAt: p.End, Reason: "repair"}, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.Gantt(ctx, from, to, []string{tool.ID})
+	if err != nil || len(after) != 1 || !after[0].OutsideCapacity {
+		t.Fatalf("TOOL row after downtime = %+v err=%v, want outsideCapacity", after, err)
+	}
+
+	// Another tenant sees none of it (RLS).
+	if other, err := s.Gantt(tenantCtx(2), from, to, nil); err != nil || len(other) != 0 {
+		t.Fatalf("other tenant bars = %+v err=%v", other, err)
+	}
+}

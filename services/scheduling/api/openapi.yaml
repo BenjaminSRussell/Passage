@@ -505,6 +505,11 @@ paths:
     get:
       operationId: listGantt
       summary: Scheduled segments for a Gantt window (at most 5,000 bars)
+      description: >
+        Returns the primary segments in the window and, as bars with secondary
+        true, the secondary bookings (BR-23.4) on the secondary resource's row.
+        resourceIds filters both by the resource the bar sits on. The 5,000-bar
+        limit counts both kinds.
       x-passage-duty: scheduling.read
       parameters:
         - name: from
@@ -2277,12 +2282,14 @@ components:
             - { type: 'null' }
         changeoverCurrency: { type: [string, 'null'], pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the setup matrix currency); null with it.' }
         cleaningSetId: { type: [string, 'null'], description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning); null when none.' }
-        outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7). Also true when a secondary resource booked with the job is closed for the segment.' }
+        outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7). Also true when a secondary resource booked with the job is closed for the segment. On a secondary bar, only that secondary resource''s capacity is judged.' }
         blockBreach: { type: boolean, description: 'True when the segment lies in open capacity but in time the resource''s active capacity blocks do not leave a job with the operation''s attributes (BR-23.15), for example after a block was added or its condition changed. The job stays where it is until the next run or move. Never true together with outsideCapacity, nor for infinite-run jobs.' }
         secondaryResourceIds:
           type: array
           items: { type: string, format: uuid }
-          description: Resources booked for the same segments as the primary resource (BR-23.4); empty when the operation needs none.
+          description: Resources booked for the same segments as the primary resource (BR-23.4); empty when the operation needs none. Always empty on a secondary bar.
+        secondary: { type: boolean, description: 'True for the bar of a secondary booking (BR-23.4): the job holds resourceId as a secondary resource for these segments, mirroring its primary segment. Such a bar is read-only (move the job through its primary bar), carries no changeover and no blockBreach, and takes lateMinutes and firmed from the primary segment.' }
+        primaryResourceId: { type: [string, 'null'], format: uuid, description: 'The resource the job runs on when secondary is true; null on a primary bar.' }
     MoveRequest:
       type: object
       required: [start]

@@ -1059,6 +1059,24 @@ specs pass the doc gates with no FAIL lines.
 | Blocks with no window in the range | decision for Ben | A block whose windows all fall outside the range has no row (the report lists what the range holds); a block whose windows are fully taken by higher-priority blocks or closed calendar time has a row with 0 held minutes and no share. |
 | Jobs of infinite runs and secondary bookings in the matched minutes | accepted | Same rule as the per-resource inquiry: infinite runs reserve no capacity, and secondary bookings are not counted. |
 
+## Slice 35: secondary bookings as bars on the secondary resource's Gantt row (BR-23.4)
+
+Built: `GET /gantt` also returns the secondary bookings of the window as bars
+with `secondary: true` and `primaryResourceId`, on the secondary resource's row
+(`resourceIds` filters by the resource a bar sits on; the 5,000-bar limit counts
+both kinds). A secondary bar mirrors the primary segment with the same number
+and takes `lateMinutes` and `firmed` from it; it has no changeover, no
+`secondaryResourceIds` and no `blockBreach`, and `outsideCapacity` is judged
+against the secondary resource's own calendar and downtimes. The workspace draws
+it as a lighter bar that cannot be dragged (a click selects the job, which moves
+through its primary bar); it is not a row of the jobs table. No migration, no
+new endpoint, no new duty.
+
+| Item | Status | Reason |
+|---|---|---|
+| Secondary bookings counted in the block-utilization inquiry and report | later slice of PSG-23 | Blocks match the operation's attributes on the resource a job runs on; whether a secondary booking should use up a block of the secondary resource is a rule the PRD does not state. |
+| Dragging a secondary bar to move the job | accepted | The job has one start; moving it from its secondary row would need a rule for which resource the new start applies to. Use the primary bar or the Move form. |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -1068,7 +1086,7 @@ specs pass the doc gates with no FAIL lines.
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) | partial (slices 27 and 28) | Queue before and queue after are built (slice 27); setup that must not split is built (BR-23.3). Overlap quantity (BR-23.5) is built (slice 28); transit time apart from the network edge's transfer minutes is not modelled; queue times from the production route are a handoff to wave 21. |
 | 1 | Operations mode in daily buckets (FR-23.2) | built (slices 31 and 32) | `mode: operations` on `POST /runs` and `POST /orders/{id}:schedule` (or `defaultMode`): an operation that follows another starts at the next local midnight of its resource; a move keeps the mode of the run that placed the job; see Slices 31 and 32. The CP-SAT campaign path ignores mode. |
 | 1 | Duration from route times and efficiency (BR-23.1) | built (slices 18 and 21) | Minutes come from the planned hours of wave 21's process and setup jobs (already route time times quantity); the scheduling resource's `efficiencyPct` stretches or shrinks them when the job is placed (slice 21). Efficiency from wave 9 resources and per-day overrides remain a handoff (row below). |
-| 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Not yet: secondary bookings as their own bars on the secondary resource's Gantt row (they show on the primary bar, in the jobs table and in the load), in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
+| 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | built (slice 12) | `Operation.Secondaries`, `domain/secondary.go`, `scheduled_job_secondary`. A primary job and a secondary booking on the same resource are kept apart by the scheduler (it sees both as busy time), not by a database constraint, because the two live in different tables. Secondary resources are an explicit list per operation; choosing them by capability or resource group is wave 9. Secondary bookings are their own read-only bars on the secondary resource's Gantt row since slice 35. Not yet: secondary bookings in the block-utilization inquiry and in the setup changeover sequencing of the secondary resource; secondaries only for setup or only for process (a secondary is held for the whole job, changeover included); and `ScheduledJob.secondary_resource_ids` on the stored job row (the list lives on the operation and the booking rows). The CP-SAT model does not book secondaries yet. |
 | 1 | Resource selection by resource group and capability with level and expiry (FR-23.2, FR-23.12, SCHED-0004 for capabilities) | handoff — wave 9 (resources, groups, capabilities) | Candidates are explicit resource ids in priority order. Slice 1 keeps its own `scheduling_resource` table with a weekly calendar; wave 9 resources, calendars, efficiency % and capacity-per-day overrides replace it. |
 | 1 | Setup optimization inside schedule runs: the changeover from the matrix (or the route setup, SCHED-0012) laid in front of each job on a resource | built | `domain/constraints.go`; the changeover is part of the job's span and stored as `scheduled_job.changeover_minutes` on its first segment. The run places orders in priority order and prices each changeover from the job before it; it does not reorder jobs to cut changeovers outside a campaign. |
 | 1 | Changeover kept in one piece: BR-23.3 says setup is never split across closed time and moves to the next open interval when it does not fit | built | `fillSlot` in `domain/constraints.go`; an exact move start that would split it is SCHED-0002. Route setup without a matrix is not laid as a separate block (see the job scheduling row above). |
