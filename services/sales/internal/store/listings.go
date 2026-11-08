@@ -122,11 +122,23 @@ func checkListings(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder)
 			Reason: in.ListingOverrideReason, Actor: in.Actor})
 	}
 	if len(denied) > 0 {
+		hint := "; a user with sales.order.approve may accept it with listingOverrideReason"
+		if !in.CanOverrideListing && strings.TrimSpace(in.ListingOverrideReason) != "" {
+			// The reason was given but the caller cannot override: say so
+			// rather than leave the reason looking ignored.
+			hint = "; listingOverrideReason was given, but accepting a denied line needs sales.order.approve, which the caller does not hold"
+		}
 		return nil, problem(http.StatusUnprocessableEntity, CodeProductNotListed,
-			"PRODUCT_NOT_LISTED: the product is not listed for this customer on "+strings.Join(denied, ", ")+
-				"; a user with sales.order.approve may accept it with listingOverrideReason")
+			"PRODUCT_NOT_LISTED: the product is not listed for this customer on "+strings.Join(denied, ", ")+hint)
 	}
 	return overrides, nil
+}
+
+// listingCheckInput shapes a quotation's lines as the order the listing check
+// reads: the same rule applies at quotation entry as at order entry.
+func listingCheckInput(legalEntityID, customerID string, group *string, lines []Line, day time.Time, actor string, canOverride bool, reason string) NewOrder {
+	return NewOrder{LegalEntityID: legalEntityID, CustomerID: customerID, CustomerGroup: group, Lines: lines, OrderDate: day,
+		Actor: actor, CanOverrideListing: canOverride, ListingOverrideReason: reason}
 }
 
 // CreateListing stores one listing entry.

@@ -2,11 +2,14 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/domain"
 	salesevents "github.com/BenjaminSRussell/passage/services/sales/internal/events"
@@ -219,6 +222,123 @@ func TestPostgres_QuotationConversionChecksListings(t *testing.T) {
 	if len(res.Order.Lines) != 3 || len(res.Order.ListingOverrides) != 1 || res.Order.ListingOverrides[0].LineNo != 2 ||
 		res.Order.ListingOverrides[0].Actor != "sales-manager" {
 		t.Fatalf("override: %+v", res.Order)
+	}
+}
+
+// TestPostgres_QuotationEntryChecksListings: the listing rule of order intake
+// applies when a quotation is entered and when a DRAFT's lines are replaced
+// (FR-27.15, BR-27.13). A GROUP entry applies through the quotation's customer
+// group; an approver's override is logged on the quotation; and a conversion
+// copies the group onto the order, where the same rule runs again.
+func TestPostgres_QuotationEntryChecksListings(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	le, customer := ids.New(), ids.New()
+	group := "EU-RETAIL"
+	in := threeLineQuotation(le, customer, "quote-entry-listing")
+	in.CustomerGroup = &group
+	if _, err := s.CreateListing(ctx, ProductListing{LegalEntityID: le, ScopeType: domain.ScopeGroup, ScopeKey: group,
+		ProductID: in.Lines[1].ProductID, ListingType: domain.ListingDeny, CreatedBy: "listing-admin"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateQuotation(ctx, in); problemCode(t, err) != CodeProductNotListed {
+		t.Fatalf("a group-denied line must refuse the quotation: %v", err)
+	}
+	if n := countWhere(t, pool, `select count(*) from sales_quotation where idempotency_key = $1`, in.IdempotencyKey); n != 0 {
+		t.Fatalf("a refused quotation stored %d rows", n)
+	}
+	// A reason without sales.order.approve is refused, not taken as an
+	// override, and the refusal says the duty is missing.
+	noDuty := in
+	noDuty.ListingOverrideReason, noDuty.Actor = "rep thinks it is fine", "rep"
+	_, _, err := s.CreateQuotation(ctx, noDuty)
+	var refusal *httpx.Problem
+	if !errors.As(err, &refusal) || refusal.Code != CodeProductNotListed || !strings.Contains(refusal.Detail, "does not hold") {
+		t.Fatalf("a reason without the approve duty must be refused with the missing duty named: %v", err)
+	}
+	if n := countWhere(t, pool, `select count(*) from sales_quotation where idempotency_key = $1`, in.IdempotencyKey); n != 0 {
+		t.Fatalf("a refused override stored %d rows", n)
+	}
+	// Without the group the entry is checked at customer level only and passes.
+	plain := in
+	plain.CustomerGroup, plain.IdempotencyKey = nil, "quote-entry-nogroup"
+	if _, _, err := s.CreateQuotation(ctx, plain); err != nil {
+		t.Fatalf("no group, no group entry: %v", err)
+	}
+	in.CanOverrideListing, in.ListingOverrideReason, in.Actor = true, "customer accepted the substitute", "sales-manager"
+	q, _, err := s.CreateQuotation(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.CustomerGroup == nil || *q.CustomerGroup != group || len(q.ListingOverrides) != 1 || q.ListingOverrides[0].LineNo != 2 ||
+		q.ListingOverrides[0].Actor != "sales-manager" || q.ListingOverrides[0].Reason != "customer accepted the substitute" {
+		t.Fatalf("group and override must be stored: %+v", q)
+	}
+	// Replacing the lines re-checks them, and the override log follows the new line set.
+	now := time.Date(2027, 3, 2, 9, 0, 0, 0, time.UTC)
+	site, wh := ids.New(), ids.New()
+	denied := ids.New()
+	if _, err := s.CreateListing(ctx, ProductListing{LegalEntityID: le, ScopeType: domain.ScopeGroup, ScopeKey: group,
+		ProductID: denied, ListingType: domain.ListingDeny, CreatedBy: "listing-admin"}); err != nil {
+		t.Fatal(err)
+	}
+	lines := []Line{{LineNo: 1, ProductID: denied, Quantity: d(1), Unit: "EA", SiteID: site, WarehouseID: wh, UnitPrice: d(5), DiscPct: d(0),
+		LineNet: d(5), RequestedShipDate: "2027-03-20"}}
+	if _, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: q.Version, Lines: lines, Actor: "rep"}, now); problemCode(t, err) != CodeProductNotListed {
+		t.Fatalf("a replaced denied line must be refused: %v", err)
+	}
+	kept, err := s.GetQuotation(ctx, q.ID)
+	if err != nil || kept.Version != q.Version || len(kept.Lines) != 3 || len(kept.ListingOverrides) != 1 {
+		t.Fatalf("a refused change must change nothing: %v %+v", err, kept)
+	}
+	changed, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: q.Version, Lines: lines, Actor: "sales-manager", CanOverrideListing: true,
+		ListingOverrideReason: "one-off"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed.ListingOverrides) != 1 || changed.ListingOverrides[0].ProductID != denied || changed.ListingOverrides[0].Reason != "one-off" {
+		t.Fatalf("the log follows the replaced lines: %+v", changed.ListingOverrides)
+	}
+	// A change that keeps the lines leaves the log alone.
+	prob := 40
+	same, err := s.ChangeQuotation(ctx, q.ID, QuotationChange{Version: changed.Version, ProbabilityPct: &prob, Actor: "rep"}, now)
+	if err != nil || len(same.ListingOverrides) != 1 {
+		t.Fatalf("probability change: %v %+v", err, same.ListingOverrides)
+	}
+	// Conversion carries the group onto the order.
+	other := threeLineQuotation(le, customer, "quote-entry-convert")
+	other.CustomerGroup = &group
+	oq, _, err := s.CreateQuotation(ctx, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := s.SendQuotation(ctx, oq.ID, oq.Version, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.ConvertQuotation(ctx, oq.ID, ConvertRequest{Version: sent.Version, Actor: "rep"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Order.CustomerGroup == nil || *res.Order.CustomerGroup != group {
+		t.Fatalf("the converted order must carry the customer group: %+v", res.Order.CustomerGroup)
+	}
+	// The group applies at conversion: an entry added after quotation entry denies it.
+	third := threeLineQuotation(le, customer, "quote-entry-late")
+	third.CustomerGroup = &group
+	tq, _, err := s.CreateQuotation(ctx, third)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsent, err := s.SendQuotation(ctx, tq.ID, tq.Version, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateListing(ctx, ProductListing{LegalEntityID: le, ScopeType: domain.ScopeGroup, ScopeKey: group,
+		ProductID: third.Lines[2].ProductID, ListingType: domain.ListingDeny, CreatedBy: "listing-admin"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConvertQuotation(ctx, tq.ID, ConvertRequest{Version: tsent.Version, Actor: "rep"}, now); problemCode(t, err) != CodeProductNotListed {
+		t.Fatalf("the group must apply at conversion: %v", err)
 	}
 }
 

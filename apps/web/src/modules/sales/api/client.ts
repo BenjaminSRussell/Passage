@@ -820,6 +820,10 @@ export interface Quotation {
   lostReason?: string;
   /** Why a CANCELLED quotation was cancelled. */
   cancelReason?: string;
+  /** The customer group the listing check used; a converted order carries it. */
+  customerGroup?: string;
+  /** Denied lines accepted at entry with sales.order.approve, and why. */
+  listingOverrides?: ListingOverride[];
   version: number;
   createdBy: string;
   createdAt: string;
@@ -837,6 +841,10 @@ export interface NewQuotation {
   currency: string;
   validUntil?: string;
   probabilityPct?: number;
+  /** Applies GROUP listing entries; the order a conversion creates carries it. */
+  customerGroup?: string;
+  /** Needs sales.order.approve; accepts lines the product listing denies. */
+  listingOverrideReason?: string;
   lines: NewOrderLine[];
 }
 
@@ -845,6 +853,8 @@ export interface ChangeQuotationInput {
   validUntil?: string;
   probabilityPct?: number;
   lines?: NewOrderLine[];
+  /** Needs sales.order.approve; accepts replacement lines the product listing denies. */
+  listingOverrideReason?: string;
 }
 
 export interface QuotationFilter {

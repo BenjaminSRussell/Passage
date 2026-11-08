@@ -114,6 +114,8 @@ const quoteValues = (): QuotationValues => ({
   currency: "USD",
   validUntil: "",
   probabilityPct: "",
+  customerGroup: "",
+  listingOverrideReason: "",
   lines: [{ ...emptyLine("2027-03-04"), productId: PRODUCT, siteId: SITE, warehouseId: WAREHOUSE, unitPrice: "19.99", quantity: "3" }],
 });
 
@@ -141,6 +143,17 @@ describe("validateQuotation", () => {
     const { input } = validateQuotation({ ...quoteValues(), validUntil: "2027-04-15", probabilityPct: "0" }, "2027-03-01");
     expect(input?.validUntil).toBe("2027-04-15");
     expect(input?.probabilityPct).toBe(0);
+  });
+
+  it("sends the customer group and listing override reason when given, and bounds them like the service", () => {
+    const { input } = validateQuotation({ ...quoteValues(), customerGroup: " EU-RETAIL ", listingOverrideReason: " customer accepted " }, "2027-03-01");
+    expect(input?.customerGroup).toBe("EU-RETAIL");
+    expect(input?.listingOverrideReason).toBe("customer accepted");
+    const plain = validateQuotation(quoteValues(), "2027-03-01").input;
+    expect(plain).not.toHaveProperty("customerGroup");
+    expect(plain).not.toHaveProperty("listingOverrideReason");
+    const { errors } = validateQuotation({ ...quoteValues(), customerGroup: "g".repeat(81), listingOverrideReason: "r".repeat(501) }, "2027-03-01");
+    expect(Object.keys(errors).sort()).toEqual(["customerGroup", "listingOverrideReason"]);
   });
 });
 
@@ -198,6 +211,22 @@ describe("New sales quotation", () => {
     expect(post?.body).toMatchObject({ legalEntityId: LE, customerId: CUSTOMER, probabilityPct: 70, lines: [{ productId: PRODUCT, unitPrice: "19.99" }] });
   });
 
+  it("posts the customer group and shows a listing refusal from the service against the form", async () => {
+    handler = (_url, init) =>
+      init.method === "POST" ? { status: 422, body: { code: "SLS-0011", detail: "PRODUCT_NOT_LISTED: line 1" } } : { status: 200, body: {} };
+    renderAt("/sales/quotations/new");
+    fill("Legal entity", LE);
+    fill("Customer", CUSTOMER);
+    fill("Customer group", "EU-RETAIL");
+    fill("Product", PRODUCT);
+    fill("Unit price", "19.99");
+    fill("Site", SITE);
+    fill("Warehouse", WAREHOUSE);
+    fireEvent.click(screen.getByRole("button", { name: "Save draft quotation" }));
+    expect(await screen.findByText(/SLS-0011/)).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ customerGroup: "EU-RETAIL" });
+  });
+
   it("shows field errors without calling the service", async () => {
     handler = () => ({ status: 200, body: {} });
     renderAt("/sales/quotations/new");
@@ -250,6 +279,20 @@ describe("Sales quotation detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Convert selected lines" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(2));
     expect(calls.filter((c) => c.method === "POST")[1].body).toEqual({ lineNos: [], listingOverrideReason: "customer accepted the substitute" });
+  });
+
+  it("shows the customer group and the listing overrides accepted at entry", async () => {
+    handler = () => ({
+      status: 200,
+      body: quotation({
+        customerGroup: "EU-RETAIL",
+        listingOverrides: [{ lineNo: 2, productId: PRODUCT, decision: "DENY group", reason: "customer accepted the substitute", actor: "approver" }],
+      }),
+      etag: '"2"',
+    });
+    renderAt(`/sales/quotations/${QUOTE_ID}`);
+    expect(await screen.findByText("EU-RETAIL")).toBeInTheDocument();
+    expect(screen.getByText(/Line 2: customer accepted the substitute \(approver\)/)).toBeInTheDocument();
   });
 
   it("sends a draft, and marks it lost only with a reason", async () => {

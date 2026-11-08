@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -47,6 +48,13 @@ type NewQuotation struct {
 	RequestHash    string
 	Actor          string
 	Lines          []Line
+	// CustomerGroup stands in for the w7 customer group (GROUP listing
+	// entries); the order a conversion creates carries it.
+	CustomerGroup *string
+	// CanOverrideListing and ListingOverrideReason accept a line the product
+	// listing denies at entry (FR-27.15), like an order.
+	CanOverrideListing    bool
+	ListingOverrideReason string
 }
 
 // QuotationLine is one quotation line. LineStatus is OPEN or CONVERTED; a
@@ -70,10 +78,13 @@ type Quotation struct {
 	NetTotal         decimal.Decimal `json:"netTotal"`
 	LostReason       *string         `json:"lostReason,omitempty"`
 	CancelReason     *string         `json:"cancelReason,omitempty"`
-	Version          int             `json:"version"`
-	CreatedBy        string          `json:"createdBy"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	CustomerGroup    *string         `json:"customerGroup,omitempty"`
+	// ListingOverrides logs the denied lines accepted at entry.
+	ListingOverrides []ListingOverride `json:"listingOverrides"`
+	Version          int               `json:"version"`
+	CreatedBy        string            `json:"createdBy"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	UpdatedAt        time.Time         `json:"updatedAt"`
 	// Lines is filled on a single read and empty in the list.
 	Lines []QuotationLine `json:"lines"`
 	// OpenLines and LineCount summarise the lines in the list and on a read.
@@ -157,6 +168,15 @@ func (s *Postgres) CreateQuotation(ctx context.Context, in NewQuotation) (Quotat
 				in.ProbabilityPct = &params.QuotationProbabilityDefault
 			}
 		}
+		overrides, err := checkListings(ctx, tx, p.TenantID, listingCheckInput(in.LegalEntityID, in.CustomerID, in.CustomerGroup, in.Lines,
+			in.IssuedAt, in.Actor, in.CanOverrideListing, in.ListingOverrideReason))
+		if err != nil {
+			return err
+		}
+		overrideJSON, err := json.Marshal(overrides)
+		if err != nil {
+			return err
+		}
 		seq, err := nextSequence(ctx, tx, p.TenantID, in.LegalEntityID, quotationSequence)
 		if err != nil {
 			return err
@@ -167,10 +187,11 @@ func (s *Postgres) CreateQuotation(ctx context.Context, in NewQuotation) (Quotat
 			nets = append(nets, l.LineNet)
 		}
 		if _, err := tx.Exec(ctx, `insert into sales_quotation (tenant_id, id, legal_entity_id, quotation_number, customer_id, invoice_account_id,
-				currency, status, probability_pct, valid_until, net_total, idempotency_key, request_hash, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13)`,
+				currency, status, probability_pct, valid_until, net_total, idempotency_key, request_hash, created_by, customer_group, listing_overrides)
+			values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13, $14, $15::jsonb)`,
 			p.TenantID, id, in.LegalEntityID, domain.FormatQuotationNumber(seq), in.CustomerID, in.InvoiceAccountID, in.Currency,
-			*in.ProbabilityPct, in.ValidUntil.Format(dayLayout), domain.SumNets(nets).String(), in.IdempotencyKey, in.RequestHash, in.Actor); err != nil {
+			*in.ProbabilityPct, in.ValidUntil.Format(dayLayout), domain.SumNets(nets).String(), in.IdempotencyKey, in.RequestHash, in.Actor,
+			in.CustomerGroup, string(overrideJSON)); err != nil {
 			return err
 		}
 		if err := insertQuotationLines(ctx, tx, p.TenantID, id, in.Lines); err != nil {
@@ -192,16 +213,20 @@ func (s *Postgres) CreateQuotation(ctx context.Context, in NewQuotation) (Quotat
 
 const quotationColumns = `q.id::text, q.legal_entity_id::text, q.quotation_number, q.customer_id::text, q.invoice_account_id::text,
 	q.currency::text, q.status, q.probability_pct, q.valid_until::text, q.net_total::text, q.lost_reason, q.cancel_reason, q.version, q.created_by,
-	q.created_at, q.updated_at,
+	q.created_at, q.updated_at, q.customer_group, q.listing_overrides::text,
 	(select count(*) from sales_quotation_line l where l.tenant_id = q.tenant_id and l.quotation_id = q.id),
 	(select count(*) from sales_quotation_line l where l.tenant_id = q.tenant_id and l.quotation_id = q.id and l.line_status = 'OPEN')`
 
 func scanQuotation(row pgx.Row) (Quotation, error) {
 	var q Quotation
-	var net string
+	var net, overrides string
 	if err := row.Scan(&q.ID, &q.LegalEntityID, &q.QuotationNumber, &q.CustomerID, &q.InvoiceAccountID, &q.Currency, &q.Status,
 		&q.ProbabilityPct, &q.ValidUntil, &net, &q.LostReason, &q.CancelReason, &q.Version, &q.CreatedBy, &q.CreatedAt, &q.UpdatedAt,
-		&q.LineCount, &q.OpenLines); err != nil {
+		&q.CustomerGroup, &overrides, &q.LineCount, &q.OpenLines); err != nil {
+		return Quotation{}, err
+	}
+	q.ListingOverrides = []ListingOverride{}
+	if err := json.Unmarshal([]byte(overrides), &q.ListingOverrides); err != nil {
 		return Quotation{}, err
 	}
 	q.NetTotal = decimal.RequireFromString(net)
@@ -386,7 +411,7 @@ func orderFromQuotation(q Quotation, selected []int, in ConvertRequest, now time
 	if err != nil {
 		return NewOrder{}, err
 	}
-	order := NewOrder{LegalEntityID: q.LegalEntityID, CustomerID: q.CustomerID, InvoiceAccountID: q.InvoiceAccountID,
+	order := NewOrder{LegalEntityID: q.LegalEntityID, CustomerID: q.CustomerID, InvoiceAccountID: q.InvoiceAccountID, CustomerGroup: q.CustomerGroup,
 		OrderType: "ORDER", Currency: q.Currency, Channel: quoteChannel, RequestHash: hash, OrderDate: now, Actor: in.Actor,
 		CanOverrideListing: in.CanOverrideListing, ListingOverrideReason: in.ListingOverrideReason}
 	for i, n := range selected {
@@ -446,6 +471,10 @@ type QuotationChange struct {
 	ProbabilityPct *int
 	Lines          []Line
 	Actor          string
+	// CanOverrideListing and ListingOverrideReason accept a replaced line the
+	// product listing denies, as at creation.
+	CanOverrideListing    bool
+	ListingOverrideReason string
 }
 
 // CancelQuotation moves a DRAFT or SENT quotation to CANCELLED with a reason
@@ -513,7 +542,22 @@ func (s *Postgres) ChangeQuotation(ctx context.Context, id string, in QuotationC
 			changed = append(changed, "probability_pct")
 		}
 		net, lineCount := q.NetTotal, len(q.Lines)
+		var overrideJSON *string
 		if in.Lines != nil {
+			// The whole replacement line set is checked against the listings
+			// on the day of the change, for the quotation's customer group, and
+			// its overrides replace the stored log.
+			overrides, err := checkListings(ctx, tx, p.TenantID, listingCheckInput(q.LegalEntityID, q.CustomerID, q.CustomerGroup, in.Lines,
+				now, in.Actor, in.CanOverrideListing, in.ListingOverrideReason))
+			if err != nil {
+				return err
+			}
+			raw, err := json.Marshal(overrides)
+			if err != nil {
+				return err
+			}
+			s := string(raw)
+			overrideJSON = &s
 			nets := make([]decimal.Decimal, 0, len(in.Lines))
 			for _, l := range in.Lines {
 				nets = append(nets, l.LineNet)
@@ -532,8 +576,9 @@ func (s *Postgres) ChangeQuotation(ctx context.Context, id string, in QuotationC
 			changed = append(changed, "lines")
 		}
 		if _, err := tx.Exec(ctx, `update sales_quotation set valid_until = $3::date, probability_pct = $4, net_total = $5::numeric,
-				version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
-			p.TenantID, id, validUntil.Format(dayLayout), probability, net.String()); err != nil {
+				listing_overrides = coalesce($6::jsonb, listing_overrides), version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2`,
+			p.TenantID, id, validUntil.Format(dayLayout), probability, net.String(), overrideJSON); err != nil {
 			return err
 		}
 		if err := enqueue(ctx, tx, "quotation", id, salesevents.QuotationChanged, p.TenantID, salesevents.QuotationChangedData{

@@ -15,6 +15,8 @@ export interface ChangeValues {
   validUntil: string;
   probabilityPct: string;
   lines: LineValues[];
+  /** Sent with replaced lines only; needs sales.order.approve. */
+  listingOverrideReason?: string;
 }
 
 /** The form's starting values: the quotation as stored. */
@@ -51,7 +53,12 @@ export function validateChange(values: ChangeValues, q: Quotation, on: string = 
   else if (Number(probability) !== q.probabilityPct) input.probabilityPct = Number(probability);
   if (q.status === "DRAFT") {
     const lines = validateLines(values.lines, errors);
-    if (!sameLines(changeValuesOf(q).lines, values.lines)) input.lines = lines;
+    if (!sameLines(changeValuesOf(q).lines, values.lines)) {
+      input.lines = lines;
+      const override = (values.listingOverrideReason ?? "").trim();
+      if (override.length > 500) errors.listingOverrideReason = "Use at most 500 characters.";
+      else if (override) input.listingOverrideReason = override;
+    }
   }
   if (Object.keys(errors).length > 0) return { errors };
   if (Object.keys(input).length === 0) return { errors: { body: "Nothing differs from the stored quotation." } };
@@ -88,6 +95,7 @@ export function rebaseChange(values: ChangeValues, before: Quotation, after: Quo
     validUntil: values.validUntil === was.validUntil ? now.validUntil : values.validUntil,
     probabilityPct: values.probabilityPct.trim() === was.probabilityPct ? now.probabilityPct : values.probabilityPct,
     lines: sameLines(values.lines, was.lines) ? now.lines : values.lines,
+    listingOverrideReason: values.listingOverrideReason,
   };
 }
 
@@ -170,7 +178,12 @@ export function QuotationMaintenance({ quotation, etag, onDone, onConflict }: Pr
             {(control) => <Input {...control} inputMode="numeric" value={values.probabilityPct} onChange={(e) => setValues({ ...values, probabilityPct: e.target.value })} invalid={Boolean(errors.probabilityPct)} />}
           </FormField>
           {draft ? (
-            <LinesEditor lines={values.lines} errors={errors} newLineDate={today()} onChange={(lines) => setValues({ ...values, lines })} legend="Quotation line" idPrefix="change-line" />
+            <>
+              <LinesEditor lines={values.lines} errors={errors} newLineDate={today()} onChange={(lines) => setValues({ ...values, lines })} legend="Quotation line" idPrefix="change-line" />
+              <FormField id="change-listingOverrideReason" label="Listing override reason" hint="Needs the sales.order.approve duty. Accepts replaced lines the product listing denies and logs the reason." error={errors.listingOverrideReason} optional>
+                {(control) => <Input {...control} value={values.listingOverrideReason ?? ""} onChange={(e) => setValues({ ...values, listingOverrideReason: e.target.value })} invalid={Boolean(errors.listingOverrideReason)} />}
+              </FormField>
+            </>
           ) : (
             <p className={`${styles.note} ${styles.formActions}`}>A sent quotation keeps its lines and prices, which are what the customer holds. Cancel it to quote again.</p>
           )}

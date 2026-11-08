@@ -110,6 +110,18 @@ describe("validateChange", () => {
     expect(validateChange(sentValues, sent, "2027-03-01").errors.body).toBeDefined();
   });
 
+  it("sends the listing override reason only with replaced lines", () => {
+    const draft = quotation();
+    const values = changeValuesOf(draft);
+    values.lines[1] = { ...values.lines[1], unitPrice: "9.50" };
+    values.listingOverrideReason = " accepted ";
+    expect(validateChange(values, draft, "2027-03-01").input?.listingOverrideReason).toBe("accepted");
+    const lineless = { ...changeValuesOf(draft), probabilityPct: "10", listingOverrideReason: "accepted" };
+    expect(validateChange(lineless, draft, "2027-03-01").input).not.toHaveProperty("listingOverrideReason");
+    values.listingOverrideReason = "r".repeat(501);
+    expect(validateChange(values, draft, "2027-03-01").errors.listingOverrideReason).toBeDefined();
+  });
+
   it("rebases on a re-read quotation: edited fields stay, untouched ones take the stored value", () => {
     const before = quotation();
     const after = quotation({ validUntil: "2099-06-30", probabilityPct: 70, lines: [line(1)], version: 2 });

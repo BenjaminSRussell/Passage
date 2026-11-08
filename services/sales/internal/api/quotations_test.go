@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +123,23 @@ func TestBuildQuotation_RejectsBadFields(t *testing.T) {
 		{"no legal entity", func(r *createQuotationRequest) { r.LegalEntityID = "" }, "legalEntityId"},
 		{"no lines", func(r *createQuotationRequest) { r.Lines = nil }, "lines"},
 		{"bad line price", func(r *createQuotationRequest) { r.Lines[0].UnitPrice = "ten" }, "lines[0].unitPrice"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := quoteRequest(1)
+			tc.edit(&req)
+			if _, fields := buildQuotation(req, today); fields[tc.field] == "" {
+				t.Fatalf("want an error on %s, got %v", tc.field, fields)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		edit  func(*createQuotationRequest)
+		field string
+	}{
+		{"empty customer group", func(r *createQuotationRequest) { r.CustomerGroup = strPtr("") }, "customerGroup"},
+		{"long customer group", func(r *createQuotationRequest) { r.CustomerGroup = strPtr(strings.Repeat("g", maxScopeKey+1)) }, "customerGroup"},
+		{"long override reason", func(r *createQuotationRequest) { r.ListingOverrideReason = strings.Repeat("r", maxOverrideReason+1) }, "listingOverrideReason"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := quoteRequest(1)
@@ -330,5 +348,30 @@ func TestSupplementaryHandlers(t *testing.T) {
 	id := ids.New()
 	if rec := serve(t, s, http.MethodDelete, suppRules+"/"+id, principal(dutyListing), nil); rec.Code != http.StatusNoContent || s.deleted != id {
 		t.Fatalf("delete: %d", rec.Code)
+	}
+}
+
+// TestCreateQuotation_PassesGroupAndOverrideDuty: the customer group and the
+// override reason reach the store, and only a caller with sales.order.approve
+// can override the listing at quotation entry (FR-27.15).
+func TestCreateQuotation_PassesGroupAndOverrideDuty(t *testing.T) {
+	req := quoteRequest(1)
+	req.LegalEntityID = testLE
+	req.CustomerGroup = strPtr("EU-RETAIL")
+	req.ListingOverrideReason = "customer accepted"
+	raw, _ := json.Marshal(req)
+	s := &slice4Store{}
+	if rec := serveBody(t, s, http.MethodPost, quotations, string(raw), principal(dutyQuotation), map[string]string{idempotencyKey: "q1"}); rec.Code != http.StatusCreated {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if s.quotation.CustomerGroup == nil || *s.quotation.CustomerGroup != "EU-RETAIL" || s.quotation.ListingOverrideReason != "customer accepted" || s.quotation.CanOverrideListing {
+		t.Fatalf("without the approve duty the override must not be allowed: %+v", s.quotation)
+	}
+	s = &slice4Store{}
+	if rec := serveBody(t, s, http.MethodPost, quotations, string(raw), principal(dutyQuotation, dutyOrderApprove), map[string]string{idempotencyKey: "q2"}); rec.Code != http.StatusCreated {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if !s.quotation.CanOverrideListing {
+		t.Fatalf("sales.order.approve must allow the override: %+v", s.quotation)
 	}
 }

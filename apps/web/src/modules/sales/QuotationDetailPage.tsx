@@ -164,10 +164,14 @@ export function QuotationDetailPage() {
     ["Net total", money(quotation.netTotal, quotation.currency)],
     ["Valid until", quotation.validUntil],
     ["Win probability", `${quotation.probabilityPct}%`],
+    ...(quotation.customerGroup ? ([["Customer group", quotation.customerGroup]] as [string, ReactNode][]) : []),
     ["Open lines", `${quotation.openLines} of ${quotation.lineCount}`],
     ["Created", `${formatDateTime(quotation.createdAt)} by ${quotation.createdBy}`],
     ...(quotation.lostReason ? ([["Lost because", quotation.lostReason]] as [string, ReactNode][]) : []),
     ...(quotation.cancelReason ? ([["Cancelled because", quotation.cancelReason]] as [string, ReactNode][]) : []),
+    ...(quotation.listingOverrides && quotation.listingOverrides.length > 0
+      ? ([["Listing overrides", quotation.listingOverrides.map((o) => `Line ${o.lineNo}: ${o.reason} (${o.actor})`).join("; ")]] as [string, ReactNode][])
+      : []),
   ];
   const mono = new Set(["Customer", "Invoice account", "Legal entity"]);
 

@@ -30,6 +30,12 @@ type createQuotationRequest struct {
 	ValidUntil       *string            `json:"validUntil,omitempty"`
 	ProbabilityPct   *int               `json:"probabilityPct,omitempty"`
 	Lines            []orderLineRequest `json:"lines"`
+	// CustomerGroup stands in for the w7 customer group so GROUP listing
+	// entries apply; the order a conversion creates carries it.
+	CustomerGroup *string `json:"customerGroup,omitempty"`
+	// ListingOverrideReason, with duty sales.order.approve, accepts a line the
+	// product listing denies (FR-27.15).
+	ListingOverrideReason string `json:"listingOverrideReason,omitempty"`
 }
 
 // convertQuotationRequest selects the lines to convert; an empty or absent
@@ -82,6 +88,12 @@ func buildQuotation(req createQuotationRequest, today time.Time) (store.NewQuota
 			validUntil = day
 		}
 	}
+	if req.CustomerGroup != nil && (*req.CustomerGroup == "" || len(*req.CustomerGroup) > maxScopeKey) {
+		f["customerGroup"] = fmt.Sprintf("must be 1 to %d characters", maxScopeKey)
+	}
+	if len(req.ListingOverrideReason) > maxOverrideReason {
+		f["listingOverrideReason"] = fmt.Sprintf("must be at most %d characters", maxOverrideReason)
+	}
 	probability := req.ProbabilityPct // nil: the legal entity's quotation_probability_default applies
 	if probability != nil {
 		if err := domain.ValidateProbability(*probability); err != nil {
@@ -89,7 +101,8 @@ func buildQuotation(req createQuotationRequest, today time.Time) (store.NewQuota
 		}
 	}
 	in := store.NewQuotation{LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice,
-		Currency: req.Currency, ValidUntil: validUntil, IssuedAt: today, ProbabilityPct: probability}
+		Currency: req.Currency, ValidUntil: validUntil, IssuedAt: today, ProbabilityPct: probability, CustomerGroup: req.CustomerGroup,
+		ListingOverrideReason: req.ListingOverrideReason}
 	for i, l := range req.Lines {
 		path := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		if l.DeliveryDateControl != nil {
@@ -139,6 +152,7 @@ func (a *API) createQuotation(w http.ResponseWriter, r *http.Request) {
 	}
 	p, _ := tenant.FromContext(r.Context())
 	in.IdempotencyKey, in.RequestHash, in.Actor = key, hash, p.UserID
+	in.CanOverrideListing = p.HasDuty(dutyOrderApprove)
 	saved, created, err := a.store.CreateQuotation(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, "create quotation", err)
@@ -311,6 +325,9 @@ type changeQuotationRequest struct {
 	ValidUntil     *string             `json:"validUntil,omitempty"`
 	ProbabilityPct *int                `json:"probabilityPct,omitempty"`
 	Lines          *[]orderLineRequest `json:"lines,omitempty"`
+	// ListingOverrideReason, with duty sales.order.approve, accepts a replaced
+	// line the product listing denies.
+	ListingOverrideReason string `json:"listingOverrideReason,omitempty"`
 }
 
 // cancelQuotationRequest records why a quotation was cancelled.
@@ -322,7 +339,10 @@ type cancelQuotationRequest struct {
 // JSON path, as for creation.
 func buildQuotationChange(req changeQuotationRequest, version int, today time.Time) (store.QuotationChange, map[string]string) {
 	f := map[string]string{}
-	in := store.QuotationChange{Version: version, ProbabilityPct: req.ProbabilityPct}
+	in := store.QuotationChange{Version: version, ProbabilityPct: req.ProbabilityPct, ListingOverrideReason: req.ListingOverrideReason}
+	if len(req.ListingOverrideReason) > maxOverrideReason {
+		f["listingOverrideReason"] = fmt.Sprintf("must be at most %d characters", maxOverrideReason)
+	}
 	if req.ValidUntil == nil && req.ProbabilityPct == nil && req.Lines == nil {
 		f["body"] = "must change validUntil, probabilityPct or lines"
 	}
@@ -383,6 +403,7 @@ func (a *API) changeQuotation(w http.ResponseWriter, r *http.Request) {
 		}
 		p, _ := tenant.FromContext(r.Context())
 		in.Actor = p.UserID
+		in.CanOverrideListing = p.HasDuty(dutyOrderApprove)
 		q, err := a.store.ChangeQuotation(r.Context(), id, in, a.now())
 		if err != nil {
 			a.fail(w, r, "change quotation", err)

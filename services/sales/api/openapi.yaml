@@ -1741,7 +1741,7 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
         "422":
-          description: idempotency_key_reuse - the key was used with a different body
+          description: idempotency_key_reuse - the key was used with a different body; SLS-0011 PRODUCT_NOT_LISTED - a line's product is not listed for the customer or group on the issue date (a caller with sales.order.approve may accept it with listingOverrideReason)
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -1790,7 +1790,7 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0030 the status does not allow it (not DRAFT or SENT, or lines on a SENT quotation); SLS-0031 the validity has passed
+          description: SLS-0030 the status does not allow it (not DRAFT or SENT, or lines on a SENT quotation); SLS-0031 the validity has passed; SLS-0011 a replacement line's product is not listed for the customer or the quotation's group
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -4026,6 +4026,8 @@ components:
           minItems: 1
           maxItems: 2000
           items: {$ref: "#/components/schemas/OrderLineRequest"}
+        customerGroup: {type: string, minLength: 1, maxLength: 80, description: "stands in for the w7 customer group so GROUP listing entries apply at entry; the order a conversion creates carries it"}
+        listingOverrideReason: {type: string, maxLength: 500, description: With duty sales.order.approve, accepts lines the product listing denies and logs the reason on the quotation (FR-27.15).}
     ChangeQuotationRequest:
       type: object
       minProperties: 1
@@ -4038,6 +4040,7 @@ components:
           maxItems: 2000
           description: replaces the whole line set (DRAFT only)
           items: {$ref: "#/components/schemas/OrderLineRequest"}
+        listingOverrideReason: {type: string, maxLength: 500, description: "With duty sales.order.approve, accepts replacement lines the product listing denies; the log on the quotation is replaced with the lines."}
     QuotationLine:
       allOf:
         - $ref: "#/components/schemas/OrderLine"
@@ -4047,7 +4050,7 @@ components:
             convertedOrderId: {type: string, format: uuid, description: the order a CONVERTED line became}
     Quotation:
       type: object
-      required: [id, legalEntityId, quotationNumber, customerId, invoiceAccountId, currency, status, validUntil, probabilityPct, netTotal, version, lines, lineCount, openLines]
+      required: [id, legalEntityId, quotationNumber, customerId, invoiceAccountId, currency, status, validUntil, probabilityPct, netTotal, version, lines, lineCount, openLines, listingOverrides]
       properties:
         id: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
@@ -4061,6 +4064,18 @@ components:
         netTotal: {$ref: "#/components/schemas/Money"}
         lostReason: {type: string}
         cancelReason: {type: string, description: the reason a CANCELLED quotation was cancelled}
+        customerGroup: {type: string, description: the customer group the listing check used and a converted order carries}
+        listingOverrides:
+          type: array
+          description: denied lines accepted at entry with sales.order.approve, and why
+          items:
+            type: object
+            properties:
+              lineNo: {type: integer}
+              productId: {type: string, format: uuid}
+              decision: {type: string}
+              reason: {type: string}
+              actor: {type: string}
         version: {type: integer, minimum: 1}
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
