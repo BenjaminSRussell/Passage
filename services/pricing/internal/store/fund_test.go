@@ -167,7 +167,7 @@ func TestPostgres_PromotionPlan(t *testing.T) {
 	if _, err := s.CreatePromotion(ctx, plan, ""); problemCode(err) != domain.CodeFundClosed {
 		t.Fatalf("promotion on a closed fund = %v; want PRC-0011", err)
 	}
-	list, err := s.ListPromotions(ctx, legalEntity, 0)
+	list, err := s.ListPromotions(ctx, legalEntity, "", 0)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list = %d err %v; want 1", len(list), err)
 	}
@@ -179,4 +179,80 @@ func problemStatus(err error) int {
 		return p.Status
 	}
 	return 0
+}
+
+// TestPostgres_PromotionPlanCampaignLink covers FR-26.10 and FR-26.20: a plan may belong to a
+// campaign of its legal entity and currency whose validity holds the window; a killed or
+// unknown campaign is refused; the list filters by campaign; the link survives a replay.
+func TestPostgres_PromotionPlanCampaignLink(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	camp := testCampaign("")
+	camp.ValidFrom, camp.ValidTo = day("2027-03-01"), day("2027-03-31")
+	c, err := s.CreateCampaign(ctx, camp, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	weekly := make([]decimal.Decimal, domain.BaselineWeeks)
+	for i := range weekly {
+		weekly[i] = decimal.NewFromInt(10)
+	}
+	plan := domain.PromotionPlan{LegalEntityID: legalEntity, Name: "Spring push", CampaignID: c.ID, ProductID: "P-1", Currency: "USD",
+		Start: day("2027-03-01"), End: day("2027-03-28"), BaselineWeekly: weekly, LiftPct: decimal.NewFromInt(25), PlannedSpend: decimal.NewFromInt(500)}
+
+	p, err := s.CreatePromotion(ctx, plan, "promo-c1")
+	if err != nil || p.CampaignID != c.ID {
+		t.Fatalf("linked plan = %+v err %v", p, err)
+	}
+	if again, err := s.CreatePromotion(ctx, plan, "promo-c1"); err != nil || again.ID != p.ID || again.CampaignID != c.ID {
+		t.Fatalf("replay = %+v err %v", again, err)
+	}
+	other := plan
+	other.CampaignID = ""
+	if _, err := s.CreatePromotion(ctx, other, "promo-c1"); problemCode(err) != store.CodeIdempotencyUse {
+		t.Fatalf("replay without the campaign = %v; want idempotency reuse", err)
+	}
+	if _, err := s.CreatePromotion(ctx, other, ""); err != nil {
+		t.Fatal(err)
+	}
+	for name, mod := range map[string]func(*domain.PromotionPlan){
+		"currency":  func(q *domain.PromotionPlan) { q.Currency = "EUR" },
+		"endDate":   func(q *domain.PromotionPlan) { q.End = day("2027-04-02") },
+		"startDate": func(q *domain.PromotionPlan) { q.Start = day("2027-02-20") },
+	} {
+		bad := plan
+		mod(&bad)
+		if _, err := s.CreatePromotion(ctx, bad, ""); problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Fatalf("%s outside the campaign = %v; want 422", name, err)
+		}
+	}
+	missing := plan
+	missing.CampaignID = "00000000-0000-0000-0000-00000000dead"
+	if _, err := s.CreatePromotion(ctx, missing, ""); problemCode(err) != domain.CodeCampaignNotFound {
+		t.Fatalf("unknown campaign = %v; want PRC-0041", err)
+	}
+	if _, err := s.CreatePromotion(principal(2, ""), plan, ""); problemCode(err) != domain.CodeCampaignNotFound {
+		t.Fatalf("another tenant's campaign = %v; want PRC-0041", err)
+	}
+	// A caller scoped to another legal entity cannot see the campaign, so cannot link to it.
+	const otherLE = "00000000-0000-0000-0001-0000000000ee"
+	scoped := plan
+	scoped.LegalEntityID = otherLE
+	if _, err := s.CreatePromotion(principal(1, otherLE), scoped, ""); problemCode(err) != domain.CodeCampaignNotFound {
+		t.Fatalf("campaign outside the caller's legal entity scope = %v; want PRC-0041", err)
+	}
+	list, err := s.ListPromotions(ctx, legalEntity, c.ID, 0)
+	if err != nil || len(list) != 1 || list[0].ID != p.ID {
+		t.Fatalf("list by campaign = %d err %v; want the one linked plan", len(list), err)
+	}
+	if all, err := s.ListPromotions(ctx, legalEntity, "", 0); err != nil || len(all) != 2 {
+		t.Fatalf("list = %d err %v; want 2", len(all), err)
+	}
+	if _, err := s.SetCampaignKilled(ctx, c.ID, c.Version, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePromotion(ctx, plan, ""); problemCode(err) != domain.CodePromoCampaignKilled {
+		t.Fatalf("killed campaign = %v; want PRC-0069", err)
+	}
 }

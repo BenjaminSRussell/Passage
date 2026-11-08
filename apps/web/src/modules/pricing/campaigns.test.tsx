@@ -1,7 +1,7 @@
 import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { Campaign, ConditionRecord } from "./api/client";
+import type { Campaign, ConditionRecord, Promotion } from "./api/client";
 import { campaignState, describeTarget } from "./campaignFormat";
 import { addDays, today } from "./format";
 import { emptyCampaign, toCampaignInput, validateCampaign } from "./NewCampaignPage";
@@ -168,12 +168,32 @@ describe("New campaign", () => {
   });
 });
 
+const campaignPlan: Promotion = {
+  id: "0190f0a0-0000-7000-8000-000000000a01",
+  legalEntityId: LE,
+  name: "Spring feature",
+  eventCategory: "FEATURE",
+  eventType: "TPR",
+  customerScope: "",
+  campaignId: CMP,
+  productId: "BOLT",
+  currency: "USD",
+  startDate: "2026-03-02",
+  endDate: "2026-03-29",
+  baselineWeeklyUnits: Array.from({ length: 13 }, () => "10"),
+  baseline: "10",
+  liftPct: "25",
+  plannedSpend: "500",
+  forecastUnits: "50",
+};
+
 describe("Campaign detail", () => {
   it("shows the campaign's agreements and kills it at its version", async () => {
     server.handler = (url, init) => {
       if (init.method === "POST" && url.pathname.endsWith(`/campaigns/${CMP}:kill`)) return json(200, { ...campaign, killed: true, version: 2 });
       if (url.pathname.endsWith(`/campaigns/${CMP}`)) return json(200, campaign);
       if (url.pathname.endsWith("/condition-records")) return json(200, { items: [promoRecord] });
+      if (url.pathname.endsWith("/promotions")) return json(200, { items: [campaignPlan] });
       return undefined;
     };
     const { container } = renderAt(`/pricing/campaigns/${CMP}`);
@@ -183,12 +203,20 @@ describe("Campaign detail", () => {
     expect(table).toHaveTextContent("8.5 USD");
     expect(server.calls.find((c) => c.url.pathname.endsWith("/condition-records"))!.url.searchParams.get("campaignId")).toBe(CMP);
     expect(screen.getByRole("link", { name: "Add agreement" })).toHaveAttribute("href", `/pricing/agreements/new?campaign=${CMP}`);
+    const plans = await screen.findByRole("table", { name: "Campaign promotions" });
+    expect(plans).toHaveTextContent("Spring feature");
+    expect(plans).toHaveTextContent("500 USD");
+    expect(plans).toHaveTextContent("Awaiting actuals");
+    expect(server.calls.find((c) => c.url.pathname.endsWith("/promotions"))!.url.searchParams.get("campaignId")).toBe(CMP);
+    expect(screen.getByRole("link", { name: "Plan promotion" })).toHaveAttribute("href", `/pricing/promotions/new?campaign=${CMP}&legalEntity=${LE}&currency=USD`);
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Kill campaign" }));
     expect(await screen.findByRole("button", { name: "Restore campaign" })).toBeInTheDocument();
     expect(screen.getAllByRole("status").some((s) => /leave the next price resolution/.test(s.textContent ?? ""))).toBe(true);
     expect(screen.getByText("Killed")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Plan promotion" })).not.toBeInTheDocument();
+    expect(screen.getByText("A killed campaign takes no new promotions. Restore it first.")).toBeInTheDocument();
     const kill = server.calls.find((c) => c.method === "POST")!;
     expect(kill.body).toEqual({ version: 1 });
     expect(idempotencyKey(kill)).toBeTruthy();
@@ -199,12 +227,33 @@ describe("Campaign detail", () => {
       if (init.method === "POST") return json(412, { code: "conflict_version", detail: "campaign version does not match" });
       if (url.pathname.endsWith(`/campaigns/${CMP}`)) return json(200, { ...campaign, killed: true, version: 4 });
       if (url.pathname.endsWith("/condition-records")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/promotions")) return json(200, { items: [] });
       return undefined;
     };
     renderAt(`/pricing/campaigns/${CMP}`);
     fireEvent.click(await screen.findByRole("button", { name: "Restore campaign" }));
     expect(await findAlert()).toHaveTextContent("campaign version does not match (conflict_version)");
     expect(server.calls.find((c) => c.method === "POST")!.body).toEqual({ version: 4 });
+  });
+
+  it("shows the empty and error states of the campaign's promotions", async () => {
+    server.handler = (url) => {
+      if (url.pathname.endsWith(`/campaigns/${CMP}`)) return json(200, campaign);
+      if (url.pathname.endsWith("/condition-records")) return json(200, { items: [] });
+      if (url.pathname.endsWith("/promotions")) return json(200, { items: [] });
+      return undefined;
+    };
+    const first = renderAt(`/pricing/campaigns/${CMP}`);
+    expect(await screen.findByText("No promotions yet")).toBeInTheDocument();
+    first.unmount();
+    server.handler = (url) => {
+      if (url.pathname.endsWith(`/campaigns/${CMP}`)) return json(200, campaign);
+      if (url.pathname.endsWith("/condition-records")) return json(200, { items: [] });
+      return json(500, { code: "COM-0500", detail: "database unavailable" });
+    };
+    renderAt(`/pricing/campaigns/${CMP}`);
+    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("shows the error state when the campaign is unknown", async () => {

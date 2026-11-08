@@ -2328,6 +2328,7 @@ paths:
       x-passage-duty: pricing.view or pricing.fund.maintain
       parameters:
         - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: campaignId, in: query, required: false, schema: {type: string, format: uuid}, description: "Only plans linked to this campaign."}
       responses:
         "200":
           description: Promotion plans by id (at most 100).
@@ -2347,7 +2348,9 @@ paths:
       operationId: createPromotion
       summary: >
         Plan a promotion with a 13-week baseline, forecast lift and planned spend (FR-26.20). A fund,
-        when named, must be open (409 PRC-0011) and in the same legal entity and currency (422).
+        when named, must be open (409 PRC-0011) and in the same legal entity and currency (422). A
+        campaign, when named (FR-26.10), must exist (404 PRC-0041), be in the same legal entity and
+        currency with the promotion window inside its validity (422), and not be killed (409 PRC-0069).
       x-passage-duty: pricing.fund.maintain
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -3207,6 +3210,7 @@ components:
         eventType: {type: string, maxLength: 64, description: "Merchandising event type."}
         customerScope: {type: string, maxLength: 64, description: "Customer or customer group; empty means all."}
         fundId: {type: string, format: uuid}
+        campaignId: {type: string, format: uuid, description: "Campaign the promotion belongs to; same legal entity and currency, window inside its validity."}
         productId: {type: string, maxLength: 64}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         startDate: {type: string, format: date}
@@ -3230,6 +3234,7 @@ components:
         eventType: {type: string}
         customerScope: {type: string}
         fundId: {type: string, format: uuid}
+        campaignId: {type: string, format: uuid, description: "Present when the promotion belongs to a campaign."}
         productId: {type: string}
         currency: {type: string}
         startDate: {type: string, format: date}

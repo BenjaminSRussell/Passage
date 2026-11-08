@@ -958,6 +958,8 @@ export interface PromotionInput {
   eventType: string;
   customerScope: string;
   fundId?: string;
+  /** The campaign the promotion belongs to (FR-26.10): same legal entity and currency, window inside its validity. */
+  campaignId?: string;
   productId: string;
   currency: string;
   startDate: string;
@@ -974,9 +976,10 @@ export interface PromotionActuals {
   spend: string;
 }
 
-export interface Promotion extends Omit<PromotionInput, "fundId"> {
+export interface Promotion extends Omit<PromotionInput, "fundId" | "campaignId"> {
   id: string;
   fundId?: string;
+  campaignId?: string;
   baseline: string;
   forecastUnits: string;
   actuals?: PromotionActuals;
@@ -1025,15 +1028,16 @@ export async function getFundUsage(id: string, signal?: AbortSignal): Promise<Fu
   return body as FundUsage;
 }
 
-export function listPromotions(legalEntityId = "", signal?: AbortSignal): Promise<Promotion[]> {
-  return items<Promotion>(`/promotions${query({ legalEntityId })}`, signal);
+/** GET /promotions - optionally only the plans of one campaign. */
+export function listPromotions(legalEntityId = "", signal?: AbortSignal, campaignId = ""): Promise<Promotion[]> {
+  return items<Promotion>(`/promotions${query({ legalEntityId, campaignId })}`, signal);
 }
 
 export function getPromotion(id: string, signal?: AbortSignal): Promise<Promotion> {
   return send<Promotion>(`/promotions/${encodeURIComponent(id)}`, {}, signal);
 }
 
-/** POST /promotions - the fund, when named, must be open and in the same legal entity and currency. */
+/** POST /promotions - the fund, when named, must be open and in the same legal entity and currency; the campaign, when named, must be live-able (not killed), in the same entity and currency, and span the window. */
 export function createPromotion(body: PromotionInput, key: string = newKey()): Promise<Promotion> {
   return post<Promotion>("/promotions", body, key);
 }

@@ -31,6 +31,7 @@ const plan: Promotion = {
   plannedSpend: "500",
   forecastUnits: "50",
 };
+const CMP = "0190f0a0-0000-7000-8000-000000000b01";
 
 function fill(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -53,6 +54,16 @@ describe("Promotions", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "Spring push" }));
     expect(await screen.findByRole("heading", { name: "Spring push" })).toBeInTheDocument();
+  });
+
+  it("shows the campaign of a plan as a link", async () => {
+    server.handler = (url) => {
+      if (url.pathname.endsWith("/promotions")) return json(200, { items: [{ ...plan, campaignId: CMP }] });
+      return undefined;
+    };
+    renderAt("/pricing/promotions");
+    const table = await findTable({ name: "Promotions" });
+    await waitFor(() => expect(within(table).getByRole("link", { name: CMP })).toHaveAttribute("href", `/pricing/campaigns/${CMP}`));
   });
 
   it("shows the empty state and the error state", async () => {
@@ -115,6 +126,49 @@ describe("New promotion", () => {
     });
   });
 
+  it("prefills the campaign from the link and sends it", async () => {
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith("/promotions")) return json(201, { ...plan, campaignId: CMP });
+      if (url.pathname.endsWith(`/promotions/${PROMO}`)) return json(200, { ...plan, campaignId: CMP });
+      return undefined;
+    };
+    renderAt(`/pricing/promotions/new?campaign=${CMP}&legalEntity=${LE}&currency=EUR`);
+    expect(screen.getByLabelText(/^Campaign id/)).toHaveValue(CMP);
+    expect(screen.getByLabelText("Legal entity id")).toHaveValue(LE);
+    expect(screen.getByLabelText("Currency")).toHaveValue("EUR");
+    fill("Promotion name", "Spring push");
+    fill("Product id", "P-1");
+    fill("First day", "2027-03-01");
+    fill("Last day", "2027-03-28");
+    fill("Baseline weekly units", WEEKS.join("\n"));
+    fireEvent.click(screen.getByRole("button", { name: "Save promotion" }));
+    expect(await screen.findByRole("heading", { name: "Spring push" })).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "POST")?.body).toMatchObject({ campaignId: CMP, legalEntityId: LE, currency: "EUR", productId: "P-1" });
+    expect(screen.getByRole("link", { name: "Campaign" })).toHaveAttribute("href", `/pricing/campaigns/${CMP}`);
+  });
+
+  it("refuses a malformed campaign id before calling the service", async () => {
+    renderAt("/pricing/promotions/new?campaign=not-a-uuid");
+    fireEvent.click(screen.getByRole("button", { name: "Save promotion" }));
+    expect(await screen.findByText("Enter the campaign id (a UUID) or leave it empty.")).toBeInTheDocument();
+    expect(server.calls).toHaveLength(0);
+  });
+
+  it("explains a killed campaign", async () => {
+    server.handler = () => json(409, { code: "PRC-0069", detail: "campaign Spring is killed" });
+    renderAt(`/pricing/promotions/new?campaign=${CMP}`);
+    fill("Legal entity id", LE);
+    fill("Promotion name", "x");
+    fill("Product id", "P-1");
+    fill("First day", "2027-03-01");
+    fill("Last day", "2027-03-01");
+    fill("Baseline weekly units", WEEKS.join(","));
+    fireEvent.click(screen.getByRole("button", { name: "Save promotion" }));
+    const alert = await findAlert();
+    expect(alert).toHaveTextContent("The campaign is killed");
+    expect(alert).toHaveTextContent("(PRC-0069)");
+  });
+
   it("explains a closed fund", async () => {
     server.handler = () => json(409, { code: "PRC-0011", detail: "fund Spring TPM is closed" });
     renderAt("/pricing/promotions/new");
@@ -175,6 +229,10 @@ describe("promotion form rules", () => {
     expect(validatePromotion({ ...ok, liftPct: "-101" }).liftPct).toBeDefined();
     expect(validatePromotion({ ...ok, liftPct: "-20" })).toEqual({});
     expect(validatePromotion({ ...ok, fundId: "not-a-uuid" }).fundId).toBeDefined();
+    expect(validatePromotion({ ...ok, campaignId: "not-a-uuid" }).campaignId).toBeDefined();
+    expect(validatePromotion({ ...ok, campaignId: CMP })).toEqual({});
+    expect(toPromotionInput({ ...ok, campaignId: ` ${CMP} ` }).campaignId).toBe(CMP);
+    expect(toPromotionInput(ok).campaignId).toBeUndefined();
     expect(toPromotionInput(ok).fundId).toBeUndefined();
     expect(baselineWeeks("1,2;3\n4  5")).toEqual(["1", "2", "3", "4", "5"]);
     expect(validateActuals({ units: "1", weeks: "261", spend: "" }).weeks).toBeDefined();

@@ -53,7 +53,7 @@ function campaignServer(handler?: (url: URL, init: RequestInit) => ReturnType<ty
     const custom = handler?.(url, init);
     if (custom) return custom;
     if (url.pathname.endsWith(`/campaigns/${CMP}`)) return json(200, campaign);
-    if (url.pathname.endsWith("/condition-records")) return json(200, { items: [] });
+    if (url.pathname.endsWith("/condition-records") || url.pathname.endsWith("/promotions")) return json(200, { items: [] });
     return undefined;
   };
 }

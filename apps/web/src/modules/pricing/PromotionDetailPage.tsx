@@ -114,6 +114,11 @@ export function PromotionDetailPage() {
                 Fund
               </Link>
             ) : null}
+            {plan.campaignId ? (
+              <Link className={buttonClassName("secondary")} to={`/pricing/campaigns/${plan.campaignId}`}>
+                Campaign
+              </Link>
+            ) : null}
             <Link className={buttonClassName("ghost")} to="/pricing/promotions">
               All promotions
             </Link>
@@ -144,6 +149,9 @@ export function PromotionDetailPage() {
           <Detail term="Planned spend" mono>{`${plan.plannedSpend} ${plan.currency}`}</Detail>
           <Detail term="Fund" mono>
             {plan.fundId || "None"}
+          </Detail>
+          <Detail term="Campaign" mono>
+            {plan.campaignId || "None"}
           </Detail>
           <Detail term="Legal entity" mono>
             {plan.legalEntityId}

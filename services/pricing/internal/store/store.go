@@ -132,7 +132,7 @@ type Store interface {
 	FundUsage(ctx context.Context, id string) (domain.Fund, []FundUsageLine, error)
 	CreatePromotion(ctx context.Context, p domain.PromotionPlan, idempotencyKey string) (domain.PromotionPlan, error)
 	GetPromotion(ctx context.Context, id string) (domain.PromotionPlan, error)
-	ListPromotions(ctx context.Context, legalEntityID string, limit int) ([]domain.PromotionPlan, error)
+	ListPromotions(ctx context.Context, legalEntityID, campaignID string, limit int) ([]domain.PromotionPlan, error)
 	RecordPromotionActuals(ctx context.Context, id string, a domain.PromotionActuals) (domain.PromotionPlan, error)
 	CreateCampaign(ctx context.Context, c domain.Campaign, idempotencyKey string) (domain.Campaign, error)
 	GetCampaign(ctx context.Context, id string) (domain.Campaign, error)

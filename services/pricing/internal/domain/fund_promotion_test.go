@@ -257,3 +257,29 @@ func TestCheckPromotionFund(t *testing.T) {
 		t.Fatalf("closed fund: want PRC-0011, got %v", err)
 	}
 }
+
+func TestCheckPromotionCampaign(t *testing.T) {
+	day := func(s string) time.Time { v, _ := time.Parse("2006-01-02", s); return v }
+	camp := Campaign{LegalEntityID: "le-1", Name: "Spring", Currency: "USD", ValidFrom: day("2027-03-01"), ValidTo: day("2027-03-31")}
+	plan := PromotionPlan{LegalEntityID: "le-1", Currency: "USD", Start: day("2027-03-01"), End: day("2027-03-31")}
+	if fields, err := CheckPromotionCampaign(camp, plan); len(fields) != 0 || err != nil {
+		t.Fatalf("window equal to the campaign: %v %v", fields, err)
+	}
+	for field, mod := range map[string]func(*PromotionPlan){
+		"campaignId": func(p *PromotionPlan) { p.LegalEntityID = "le-2" },
+		"currency":   func(p *PromotionPlan) { p.Currency = "EUR" },
+		"startDate":  func(p *PromotionPlan) { p.Start = day("2027-02-28") },
+		"endDate":    func(p *PromotionPlan) { p.End = day("2027-04-01") },
+	} {
+		p := plan
+		mod(&p)
+		if fields, _ := CheckPromotionCampaign(camp, p); fields[field] == "" {
+			t.Fatalf("%s must be a field error: %v", field, fields)
+		}
+	}
+	camp.Killed = true
+	var re *RuleError
+	if _, err := CheckPromotionCampaign(camp, plan); !errors.As(err, &re) || re.Code != CodePromoCampaignKilled || re.Status != 409 {
+		t.Fatalf("killed campaign: want 409 PRC-0069, got %v", err)
+	}
+}

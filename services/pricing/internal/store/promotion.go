@@ -16,7 +16,7 @@ import (
 )
 
 const promoColumns = `id::text, legal_entity_id::text, name, event_category, event_type, customer_scope,
-	coalesce(fund_id::text, ''), product_id, currency::text,
+	coalesce(fund_id::text, ''), coalesce(campaign_id::text, ''), product_id, currency::text,
 	start_date, end_date, baseline_weekly_units::text[], lift_pct::text, planned_spend::text,
 	actual_units::text, actual_weeks, actual_spend::text`
 
@@ -26,7 +26,7 @@ func scanPromo(row pgx.Row) (domain.PromotionPlan, error) {
 	var lift, spend string
 	var actUnits, actSpend *string
 	var actWeeks *int32
-	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.Name, &p.EventCategory, &p.EventType, &p.CustomerScope, &p.FundID, &p.ProductID, &p.Currency, &p.Start, &p.End,
+	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.Name, &p.EventCategory, &p.EventType, &p.CustomerScope, &p.FundID, &p.CampaignID, &p.ProductID, &p.Currency, &p.Start, &p.End,
 		&baseline, &lift, &spend, &actUnits, &actWeeks, &actSpend); err != nil {
 		return domain.PromotionPlan{}, err
 	}
@@ -52,7 +52,7 @@ func promoNotFound(id string) error {
 // samePromo reports whether a replayed create carries the same economic content.
 func samePromo(a, b domain.PromotionPlan) bool {
 	if a.LegalEntityID != b.LegalEntityID || a.Name != b.Name || a.EventCategory != b.EventCategory || a.EventType != b.EventType ||
-		a.CustomerScope != b.CustomerScope || a.FundID != b.FundID || a.ProductID != b.ProductID ||
+		a.CustomerScope != b.CustomerScope || a.FundID != b.FundID || a.CampaignID != b.CampaignID || a.ProductID != b.ProductID ||
 		a.Currency != b.Currency || dayStr(a.Start) != dayStr(b.Start) || dayStr(a.End) != dayStr(b.End) ||
 		!a.LiftPct.Equal(b.LiftPct) || !a.PlannedSpend.Equal(b.PlannedSpend) || len(a.BaselineWeekly) != len(b.BaselineWeekly) {
 		return false
@@ -70,12 +70,15 @@ func samePromo(a, b domain.PromotionPlan) bool {
 // close cannot slip between the check and the insert.
 func (s *Postgres) CreatePromotion(ctx context.Context, p domain.PromotionPlan, idempotencyKey string) (domain.PromotionPlan, error) {
 	tp, _ := tenant.FromContext(ctx)
-	var key, fund *string
+	var key, fund, campaign *string
 	if idempotencyKey != "" {
 		key = &idempotencyKey
 	}
 	if p.FundID != "" {
 		fund = &p.FundID
+	}
+	if p.CampaignID != "" {
+		campaign = &p.CampaignID
 	}
 	baseline := make([]string, len(p.BaselineWeekly))
 	for i, w := range p.BaselineWeekly {
@@ -114,12 +117,30 @@ func (s *Postgres) CreatePromotion(ctx context.Context, p domain.PromotionPlan, 
 				return RuleProblem(err)
 			}
 		}
+		if campaign != nil {
+			c, err := scanCampaign(tx.QueryRow(ctx, `select `+campaignColumns+` from campaign where id = $1 for share`, *campaign))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return campaignNotFound(*campaign)
+			}
+			if err != nil {
+				return err
+			}
+			fields, err := domain.CheckPromotionCampaign(c, p)
+			if len(fields) > 0 {
+				prob := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "promotion cannot belong to this campaign")
+				prob.Errors = fields
+				return prob
+			}
+			if err != nil {
+				return RuleProblem(err)
+			}
+		}
 		var err error
 		out, err = scanPromo(tx.QueryRow(ctx, `insert into promotion_plan (tenant_id, id, legal_entity_id, name, event_category, event_type,
-			customer_scope, fund_id, product_id, currency, start_date, end_date, baseline_weekly_units, lift_pct, planned_spend, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13::text[]::numeric[], $14::numeric, $15::numeric, $16)
+			customer_scope, fund_id, campaign_id, product_id, currency, start_date, end_date, baseline_weekly_units, lift_pct, planned_spend, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::date, $13::date, $14::text[]::numeric[], $15::numeric, $16::numeric, $17)
 			returning `+promoColumns,
-			tp.TenantID, ids.New(), p.LegalEntityID, p.Name, p.EventCategory, p.EventType, p.CustomerScope, fund, p.ProductID, p.Currency, dayStr(p.Start), dayStr(p.End),
+			tp.TenantID, ids.New(), p.LegalEntityID, p.Name, p.EventCategory, p.EventType, p.CustomerScope, fund, campaign, p.ProductID, p.Currency, dayStr(p.Start), dayStr(p.End),
 			baseline, p.LiftPct.String(), p.PlannedSpend.String(), key))
 		return err
 	})
@@ -139,15 +160,17 @@ func (s *Postgres) GetPromotion(ctx context.Context, id string) (domain.Promotio
 	return p, err
 }
 
-// ListPromotions returns promotion plans ordered by id, optionally for one legal entity.
-func (s *Postgres) ListPromotions(ctx context.Context, legalEntityID string, limit int) ([]domain.PromotionPlan, error) {
+// ListPromotions returns promotion plans ordered by id, optionally for one legal entity and
+// one campaign.
+func (s *Postgres) ListPromotions(ctx context.Context, legalEntityID, campaignID string, limit int) ([]domain.PromotionPlan, error) {
 	if limit <= 0 || limit > MaxListLimit {
 		limit = MaxListLimit
 	}
 	out := []domain.PromotionPlan{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+promoColumns+` from promotion_plan
-			where ($1::text = '' or legal_entity_id::text = $1) order by id limit $2`, legalEntityID, limit)
+			where ($1::text = '' or legal_entity_id::text = $1) and ($2::text = '' or campaign_id = nullif($2::text, '')::uuid)
+			order by id limit $3`, legalEntityID, campaignID, limit)
 		if err != nil {
 			return err
 		}

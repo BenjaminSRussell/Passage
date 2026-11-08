@@ -18,13 +18,15 @@ var ErrNoBaseline = errors.New("promotion baseline must be greater than zero to 
 // weeks, oldest first. EventCategory and EventType classify the merchandising event;
 // CustomerScope names the customer or customer group it targets (empty means all).
 type PromotionPlan struct {
-	ID             string
-	LegalEntityID  string
-	Name           string
-	EventCategory  string
-	EventType      string
-	CustomerScope  string
-	FundID         string
+	ID            string
+	LegalEntityID string
+	Name          string
+	EventCategory string
+	EventType     string
+	CustomerScope string
+	FundID        string
+	// CampaignID links the plan to a campaign of the same legal entity and currency; empty means none.
+	CampaignID     string
 	ProductID      string
 	Currency       string
 	Start          time.Time
@@ -114,4 +116,34 @@ func ValidatePromotion(p PromotionPlan) map[string]string {
 		fields["plannedSpend"] = "must not be negative"
 	}
 	return fields
+}
+
+// CodePromoCampaignKilled: a promotion plan cannot be linked to a campaign that is killed.
+const CodePromoCampaignKilled = "PRC-0069"
+
+// CheckPromotionCampaign reports why a promotion may not belong to campaign c: the campaign
+// must be in the promotion's legal entity and currency and the promotion window must lie
+// inside the campaign's validity (field errors), and the campaign must not be killed
+// (PRC-0069). Later revisions of the campaign are not re-checked against existing plans.
+func CheckPromotionCampaign(c Campaign, p PromotionPlan) (map[string]string, error) {
+	fields := map[string]string{}
+	if c.LegalEntityID != p.LegalEntityID {
+		fields["campaignId"] = "must belong to the promotion's legal entity"
+	} else if c.Currency != p.Currency {
+		fields["currency"] = "must match the campaign currency " + c.Currency
+	} else {
+		if p.Start.Before(c.ValidFrom) {
+			fields["startDate"] = "must not be before the campaign starts on " + c.ValidFrom.Format("2006-01-02")
+		}
+		if p.End.After(c.ValidTo) {
+			fields["endDate"] = "must not be after the campaign ends on " + c.ValidTo.Format("2006-01-02")
+		}
+	}
+	if len(fields) > 0 {
+		return fields, nil
+	}
+	if c.Killed {
+		return nil, &RuleError{Code: CodePromoCampaignKilled, Status: 409, Message: "campaign " + c.Name + " is killed"}
+	}
+	return nil, nil
 }

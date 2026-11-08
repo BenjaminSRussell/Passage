@@ -243,3 +243,50 @@ func TestPromotion_ListAndGet(t *testing.T) {
 		t.Fatalf("missing promotion = %d %v; want 404 PRC-0040", code, got)
 	}
 }
+
+func TestPromotion_CampaignLink(t *testing.T) {
+	h := router(newFake())
+	camp := createCampaign(t, h, "")
+	cid := camp["id"].(string)
+	// The campaign runs 2026-03-01 to 2026-03-31; the helper's plan runs in 2027.
+	linked := func(c, start, end, currency string) string {
+		body := strings.Replace(promoBody(13, "10", "", currency), `"startDate":"2027-03-01","endDate":"2027-03-28"`, `"startDate":"`+start+`","endDate":"`+end+`"`, 1)
+		return strings.Replace(body, `{"legalEntityId"`, `{"campaignId":"`+c+`","legalEntityId"`, 1)
+	}
+	code, out := call(t, h, http.MethodPost, "/v1/pricing/promotions", fundDuties, linked(cid, "2026-03-02", "2026-03-29", "USD"))
+	if code != http.StatusCreated || out["campaignId"] != cid {
+		t.Fatalf("linked plan = %d %v; want 201 with campaignId", code, out)
+	}
+	if code, out := call(t, h, http.MethodPost, "/v1/pricing/promotions", fundDuties, promoBody(13, "10", "", "USD")); code != http.StatusCreated {
+		t.Fatalf("unlinked plan = %d %v", code, out)
+	} else if _, has := out["campaignId"]; has {
+		t.Fatalf("an unlinked plan has no campaignId: %v", out)
+	}
+	code, list := call(t, h, http.MethodGet, "/v1/pricing/promotions?campaignId="+cid, "pricing.view", "")
+	if items, _ := list["items"].([]any); code != http.StatusOK || len(items) != 1 {
+		t.Fatalf("list by campaign = %d %v; want the one linked plan", code, list)
+	}
+	if code, out := call(t, h, http.MethodGet, "/v1/pricing/promotions?campaignId=nope", "pricing.view", ""); code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad campaignId filter = %d %v; want 422", code, out)
+	}
+	for name, body := range map[string]string{
+		"currency":   linked(cid, "2026-03-02", "2026-03-29", "EUR"),
+		"startDate":  linked(cid, "2026-02-27", "2026-03-29", "USD"),
+		"endDate":    linked(cid, "2026-03-02", "2026-04-02", "USD"),
+		"campaignId": linked("not-a-uuid", "2026-03-02", "2026-03-29", "USD"),
+	} {
+		code, out := call(t, h, http.MethodPost, "/v1/pricing/promotions", fundDuties, body)
+		if errs, _ := out["errors"].(map[string]any); code != http.StatusUnprocessableEntity || errs[name] == nil {
+			t.Fatalf("%s = %d %v; want 422 on %s", name, code, out, name)
+		}
+	}
+	if code, out := call(t, h, http.MethodPost, "/v1/pricing/promotions", fundDuties, linked(noCampaign, "2026-03-02", "2026-03-29", "USD")); code != http.StatusNotFound || out["code"] != "PRC-0041" {
+		t.Fatalf("unknown campaign = %d %v; want 404 PRC-0041", code, out)
+	}
+	if code, _ := call(t, h, http.MethodPost, "/v1/pricing/campaigns/"+cid+":kill", campaignDuties, `{"version":1}`); code != http.StatusOK {
+		t.Fatalf("kill = %d", code)
+	}
+	if code, out := call(t, h, http.MethodPost, "/v1/pricing/promotions", fundDuties, linked(cid, "2026-03-02", "2026-03-29", "USD")); code != http.StatusConflict || out["code"] != "PRC-0069" {
+		t.Fatalf("killed campaign = %d %v; want 409 PRC-0069", code, out)
+	}
+}

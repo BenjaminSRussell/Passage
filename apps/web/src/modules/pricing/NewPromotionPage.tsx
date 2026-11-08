@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Textarea } from "../../shell/ui";
 import { createPromotion, describeProblem, newKey, type Problem, type PromotionInput } from "./api/client";
 import { DECIMAL, UUID } from "./format";
@@ -16,6 +16,7 @@ export interface PromotionDraft {
   eventType: string;
   customerScope: string;
   fundId: string;
+  campaignId: string;
   productId: string;
   currency: string;
   startDate: string;
@@ -35,6 +36,7 @@ export const emptyPromotion: PromotionDraft = {
   eventType: "",
   customerScope: "",
   fundId: "",
+  campaignId: "",
   productId: "",
   currency: "USD",
   startDate: "",
@@ -58,6 +60,7 @@ export function validatePromotion(v: PromotionDraft): Errors {
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (v.fundId.trim() !== "" && !UUID.test(v.fundId.trim())) errors.fundId = "Enter the fund id (a UUID) or leave it empty.";
+  if (v.campaignId.trim() !== "" && !UUID.test(v.campaignId.trim())) errors.campaignId = "Enter the campaign id (a UUID) or leave it empty.";
   if (v.productId.trim() === "" || v.productId.trim().length > 64) errors.productId = "Enter the product id (up to 64 characters).";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!DAY.test(v.startDate)) errors.startDate = "Enter the first day of the promotion.";
@@ -91,13 +94,29 @@ export function toPromotionInput(v: PromotionDraft): PromotionInput {
     plannedSpend: v.plannedSpend.trim(),
   };
   if (v.fundId.trim() !== "") input.fundId = v.fundId.trim();
+  if (v.campaignId.trim() !== "") input.campaignId = v.campaignId.trim();
   return input;
+}
+
+/** What a refused plan tells the planner, by service code. */
+function failureTitle(code: string): string {
+  if (code === "PRC-0011") return "The fund is closed";
+  if (code === "PRC-0069") return "The campaign is killed";
+  if (code === "PRC-0041") return "The campaign does not exist";
+  return "Could not save the promotion";
 }
 
 /** Plan a promotion (FR-26.20): merchandising event, product, window, 13-week baseline, lift and spend. */
 export function NewPromotionPage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<PromotionDraft>(emptyPromotion);
+  const [params] = useSearchParams();
+  // A link from a campaign carries its id, legal entity and currency so the plan starts in it.
+  const [values, setValues] = useState<PromotionDraft>(() => ({
+    ...emptyPromotion,
+    campaignId: params.get("campaign") ?? "",
+    legalEntityId: params.get("legalEntity") ?? "",
+    currency: params.get("currency") ?? emptyPromotion.currency,
+  }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -157,6 +176,7 @@ export function NewPromotionPage() {
           {text("pp-type", "eventType", "Event type", { optional: true, hint: "For example TPR (temporary price reduction)." })}
           {text("pp-scope", "customerScope", "Customer or customer group", { optional: true, hint: "Leave empty for all customers.", mono: true })}
           {text("pp-fund", "fundId", "Fund id", { optional: true, hint: "An open fund in the same legal entity and currency.", mono: true })}
+          {text("pp-campaign", "campaignId", "Campaign id", { optional: true, hint: "A campaign that is not killed, in the same legal entity and currency, running over the whole window.", mono: true })}
           {text("pp-product", "productId", "Product id", { mono: true })}
           {text("pp-currency", "currency", "Currency", { mono: true })}
           {text("pp-start", "startDate", "First day", { type: "date" })}
@@ -170,7 +190,7 @@ export function NewPromotionPage() {
           </div>
           {failure ? (
             <div className={styles.formActions}>
-              <Alert tone="danger" title={failure.code === "PRC-0011" ? "The fund is closed" : "Could not save the promotion"} live="alert">
+              <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
                 {failure.message} ({failure.code})
               </Alert>
             </div>

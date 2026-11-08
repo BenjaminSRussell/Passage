@@ -113,7 +113,12 @@ Built in slice 4:
   weekly units before the promotion, forecast lift % and planned spend. The response derives the
   baseline (13-week average), forecast units (baseline × started weeks × (1 + lift %)) and, once
   `:actuals` records the units, weeks and spend in the window, the effectiveness
-  (actual weekly average − baseline) / baseline in percent.
+  (actual weekly average − baseline) / baseline in percent. A plan may name a campaign
+  (FR-26.10, slice 25, migration `0018`): the campaign must exist (404 PRC-0041), be in the plan's
+  legal entity and currency with the plan window inside its validity (422), and not be killed
+  (409 PRC-0069); it is share-locked while the plan is written. `GET /promotions?campaignId=`
+  lists a campaign's plans. A later revise of the campaign is not re-checked against plans
+  already linked, and planned spend is not checked against the campaign budget.
 - Migration `0004_funds_promotions.sql` (trade_fund, trade_fund_usage, promotion_plan; RLS and
   legal-entity scope on each).
 - **Web**: fund list, create and detail (attribute usage, revise budget, close and reopen, usage by
@@ -290,8 +295,8 @@ testdata/               fixtures
 | POST | `/v1/pricing/funds/{id}:close` | pricing.fund.maintain | body `{version}`; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/funds/{id}:reopen` | pricing.fund.maintain | body `{version}`; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/funds/{id}/usage` | pricing.view or pricing.fund.maintain | Fund usage inquiry |
-| GET | `/v1/pricing/promotions?legalEntityId=` | pricing.view or pricing.fund.maintain | |
-| POST | `/v1/pricing/promotions` | pricing.fund.maintain | `Idempotency-Key` honoured; fund must be open and match (PRC-0011, COM-0001) |
+| GET | `/v1/pricing/promotions?legalEntityId=&campaignId=` | pricing.view or pricing.fund.maintain | |
+| POST | `/v1/pricing/promotions` | pricing.fund.maintain | `Idempotency-Key` honoured; fund must be open and match (PRC-0011, COM-0001); campaign must exist, match and not be killed (PRC-0041, COM-0001, PRC-0069) |
 | GET | `/v1/pricing/promotions/{id}` | pricing.view or pricing.fund.maintain | |
 | POST | `/v1/pricing/promotions/{id}:actuals` | pricing.fund.maintain | body `{units, weeks, spend}`; overwrites; stand-in for the nightly actuals job |
 | GET | `/v1/pricing/campaigns?legalEntityId=` | pricing.view | latest start first |
@@ -358,6 +363,7 @@ testdata/               fixtures
 | PRC-0066 | 422 | The period of a settlement export holds no commission |
 | PRC-0067 | 404 | No commission settlement export with the id |
 | PRC-0068 | 500 | The file rebuilt from a settlement export's frozen rows no longer matches its recorded digest (the CSV layout changed), so it is not served |
+| PRC-0069 | 409 | A promotion plan names a killed campaign (restore the campaign first) |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |

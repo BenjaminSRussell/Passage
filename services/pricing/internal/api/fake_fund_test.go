@@ -223,6 +223,21 @@ func (f *fakeStore) CreatePromotion(_ context.Context, p domain.PromotionPlan, k
 			return domain.PromotionPlan{}, store.RuleProblem(err)
 		}
 	}
+	if p.CampaignID != "" {
+		c, ok := f.campaignData().campaigns[p.CampaignID]
+		if !ok {
+			return domain.PromotionPlan{}, httpx.NewProblem(http.StatusNotFound, domain.CodeCampaignNotFound, "no campaign "+p.CampaignID)
+		}
+		fields, err := domain.CheckPromotionCampaign(c, p)
+		if len(fields) > 0 {
+			prob := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, "promotion cannot belong to this campaign")
+			prob.Errors = fields
+			return domain.PromotionPlan{}, prob
+		}
+		if err != nil {
+			return domain.PromotionPlan{}, store.RuleProblem(err)
+		}
+	}
 	p.ID = f.nextID("0010")
 	st.promos[p.ID] = p
 	if key != "" {
@@ -241,12 +256,12 @@ func (f *fakeStore) GetPromotion(_ context.Context, id string) (domain.Promotion
 	return p, nil
 }
 
-func (f *fakeStore) ListPromotions(_ context.Context, le string, _ int) ([]domain.PromotionPlan, error) {
+func (f *fakeStore) ListPromotions(_ context.Context, le, campaign string, _ int) ([]domain.PromotionPlan, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []domain.PromotionPlan{}
 	for _, p := range f.fundData().promos {
-		if le == "" || p.LegalEntityID == le {
+		if (le == "" || p.LegalEntityID == le) && (campaign == "" || p.CampaignID == campaign) {
 			out = append(out, p)
 		}
 	}

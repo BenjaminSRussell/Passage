@@ -112,6 +112,7 @@ type promotionRequest struct {
 	EventType      string   `json:"eventType"`
 	CustomerScope  string   `json:"customerScope"`
 	FundID         string   `json:"fundId"`
+	CampaignID     string   `json:"campaignId"`
 	ProductID      string   `json:"productId"`
 	Currency       string   `json:"currency"`
 	StartDate      string   `json:"startDate"`
@@ -141,6 +142,7 @@ type promotionView struct {
 	EventType           string       `json:"eventType"`
 	CustomerScope       string       `json:"customerScope"`
 	FundID              string       `json:"fundId,omitempty"`
+	CampaignID          string       `json:"campaignId,omitempty"`
 	ProductID           string       `json:"productId"`
 	Currency            string       `json:"currency"`
 	StartDate           string       `json:"startDate"`
@@ -406,6 +408,9 @@ func (a *API) createPromotion(w http.ResponseWriter, r *http.Request) {
 	if req.FundID != "" && !ids.Valid(req.FundID) {
 		fields["fundId"] = "must be a UUID"
 	}
+	if req.CampaignID != "" && !ids.Valid(req.CampaignID) {
+		fields["campaignId"] = "must be a UUID"
+	}
 	start, err1 := time.Parse(dateLayout, req.StartDate)
 	end, err2 := time.Parse(dateLayout, req.EndDate)
 	if err1 != nil {
@@ -432,7 +437,7 @@ func (a *API) createPromotion(w http.ResponseWriter, r *http.Request) {
 		weekly = append(weekly, v)
 	}
 	plan := domain.PromotionPlan{LegalEntityID: req.LegalEntityID, Name: req.Name, EventCategory: req.EventCategory,
-		EventType: req.EventType, CustomerScope: req.CustomerScope, FundID: req.FundID, ProductID: req.ProductID,
+		EventType: req.EventType, CustomerScope: req.CustomerScope, FundID: req.FundID, CampaignID: req.CampaignID, ProductID: req.ProductID,
 		Currency: req.Currency, Start: start, End: end, BaselineWeekly: weekly, LiftPct: lift, PlannedSpend: spend}
 	if len(fields) == 0 {
 		for k, v := range domain.ValidatePromotion(plan) {
@@ -465,7 +470,12 @@ func (a *API) listPromotions(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
 		return
 	}
-	rows, err := a.store.ListPromotions(r.Context(), le, store.MaxListLimit)
+	campaign := r.URL.Query().Get("campaignId")
+	if campaign != "" && !ids.Valid(campaign) {
+		validationFailed(w, r, map[string]string{"campaignId": "must be a UUID"})
+		return
+	}
+	rows, err := a.store.ListPromotions(r.Context(), le, campaign, store.MaxListLimit)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -593,7 +603,7 @@ func promotionResponse(p domain.PromotionPlan) (promotionView, error) {
 	}
 	weeks := domain.PlanWeeks(p.Start, p.End)
 	out := promotionView{ID: p.ID, LegalEntityID: p.LegalEntityID, Name: p.Name, EventCategory: p.EventCategory,
-		EventType: p.EventType, CustomerScope: p.CustomerScope, FundID: p.FundID, ProductID: p.ProductID,
+		EventType: p.EventType, CustomerScope: p.CustomerScope, FundID: p.FundID, CampaignID: p.CampaignID, ProductID: p.ProductID,
 		Currency: p.Currency, StartDate: p.Start.Format(dateLayout), EndDate: p.End.Format(dateLayout),
 		BaselineWeeklyUnits: weekly, Baseline: base.String(), LiftPct: p.LiftPct.String(), PlannedSpend: p.PlannedSpend.String(),
 		ForecastUnits: domain.ForecastUnits(base, p.LiftPct, weeks).String()}
