@@ -2344,7 +2344,8 @@
     "org.legal-entity.write": {"permissions": [
       {"resource": "/v1/org/legal-entities", "methods": ["POST"]},
       {"resource": "/v1/org/legal-entities/*", "methods": ["PATCH"]},
-      {"resource": "/v1/org/legal-entities/*/translations/*", "methods": ["PUT", "DELETE"]}
+      {"resource": "/v1/org/legal-entities/*/translations/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/org/legal-entities/*:copy", "methods": ["POST"]}
     ]},
     "org.operating-unit.write": {"permissions": [
       {"resource": "/v1/org/operating-units", "methods": ["POST"]},

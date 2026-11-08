@@ -1586,6 +1586,12 @@ test_sales_reads_party_customer if {
 }
 
 # Wave 6 slice 47: operating-unit CSV bulk import.
+test_org_legal_entity_copy if {
+	allowed("org.legal-entity.write", "POST", "/v1/org/legal-entities/le-1:copy")
+	not allowed("org.read", "POST", "/v1/org/legal-entities/le-1:copy")
+	not allowed("org.legal-entity.write", "GET", "/v1/org/legal-entities/le-1:copy")
+}
+
 test_org_operating_unit_import if {
 	allowed("org.operating-unit.write", "POST", "/v1/org/operating-units:import")
 	not allowed("org.read", "POST", "/v1/org/operating-units:import")
