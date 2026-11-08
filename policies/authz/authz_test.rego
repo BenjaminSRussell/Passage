@@ -1564,3 +1564,12 @@ test_org_name_translation_writes if {
 	allowed("org.site.write", "DELETE", "/v1/org/warehouses/w-1/translations/fr")
 	not allowed("org.read", "PUT", "/v1/org/sites/s-1/translations/fr")
 }
+
+# Wave 15 slice 16: report library and schedule firings.
+test_reporting_library_and_firings if {
+	allowed("reporting.statement.view", "GET", "/v1/reporting/library")
+	allowed("reporting.statement.view", "GET", "/v1/reporting/library/l-1")
+	allowed("reporting.statement.view", "GET", "/v1/reporting/library/l-1/content")
+	allowed("reporting.statement.schedule", "GET", "/v1/reporting/schedule-firings")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/library")
+}

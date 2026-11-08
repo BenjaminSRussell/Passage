@@ -263,7 +263,10 @@
       {"resource": "/v1/reporting/runs/*/outputs/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/lag", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/definition", "methods": ["GET"]},
-      {"resource": "/v1/reporting/runs/*/tree", "methods": ["GET"]}
+      {"resource": "/v1/reporting/runs/*/tree", "methods": ["GET"]},
+      {"resource": "/v1/reporting/library", "methods": ["GET"]},
+      {"resource": "/v1/reporting/library/*", "methods": ["GET"]},
+      {"resource": "/v1/reporting/library/*/content", "methods": ["GET"]}
     ]},
     "reporting.definition.maintain": {"permissions": [
       {"resource": "/v1/reporting/definitions/*", "methods": ["PUT"]},
@@ -296,7 +299,8 @@
     ]},
     "reporting.statement.schedule": {"permissions": [
       {"resource": "/v1/reporting/schedules", "methods": ["GET"]},
-      {"resource": "/v1/reporting/schedules/*", "methods": ["GET", "PUT"]}
+      {"resource": "/v1/reporting/schedules/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/reporting/schedule-firings", "methods": ["GET"]}
     ]},
     "reporting.audit.view": {"permissions": [
       {"resource": "/v1/reporting/audit-trail", "methods": ["GET"]},
