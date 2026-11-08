@@ -41,9 +41,11 @@ export function validateRelease(values: ReleaseValues): { errors: Errors; input?
 const releaseColumns: DataTableColumn<AgreementRelease>[] = [
   { key: "releasedAt", header: "Released", render: (r) => formatDateTime(r.releasedAt) },
   { key: "quantity", header: "Quantity", align: "end" },
+  { key: "drawnQty", header: "Drawn later", align: "end", render: (r) => r.drawnQty ?? "0" },
+  { key: "returnedQty", header: "Returned", align: "end", render: (r) => r.returnedQty ?? "0" },
   { key: "orderNumber", header: "Order", mono: true, render: (r) => <Link to={`/sales/orders/${r.salesOrderId}`}>{r.orderNumber}</Link> },
   { key: "actor", header: "By" },
-  { key: "returnedAt", header: "Returned", render: (r) => (r.returnedAt ? formatDateTime(r.returnedAt) : "—") },
+  { key: "returnedAt", header: "Last returned", render: (r) => (r.returnedAt ? formatDateTime(r.returnedAt) : "—") },
 ];
 
 /** One agreement with its commitment, release history and the release-order form (FR-27.10). */
@@ -115,6 +117,9 @@ export function AgreementDetailPage() {
     ["Agreed price", `${money(agreement.unitPrice, agreement.currency)} per ${agreement.unit}`],
     ["Committed", `${agreement.commitmentQty} ${agreement.unit}`],
     ["Released", `${agreement.releasedQty} ${agreement.unit}`],
+    ...(agreement.overdeliveryPct && agreement.overdeliveryPct !== "0" && agreement.ceilingQty
+      ? ([["Over-delivery tolerance", `${agreement.overdeliveryPct}% (up to ${agreement.ceilingQty} ${agreement.unit})`]] as [string, ReactNode][])
+      : []),
     ["Remaining", `${agreement.remainingQty} ${agreement.unit}`],
     ["Valid", agreement.validFrom || agreement.validTo ? `${agreement.validFrom ?? "…"} to ${agreement.validTo ?? "…"}` : "Open-ended"],
     ["Created", `${formatDateTime(agreement.createdAt)} by ${agreement.createdBy}`],

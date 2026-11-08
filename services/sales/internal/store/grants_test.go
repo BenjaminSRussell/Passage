@@ -45,6 +45,8 @@ func TestGrants_AppRoleCannotRewriteAppendOnlyTables(t *testing.T) {
 		`update agreement_release set quantity = quantity`,
 		`update agreement_return set quantity = quantity`,
 		`delete from agreement_return`,
+		`update agreement_draw set quantity = quantity`,
+		`delete from agreement_draw`,
 		`update sales_agreement_version set version = version`,
 		`delete from sales_agreement_version`,
 		`delete from sales_order`,

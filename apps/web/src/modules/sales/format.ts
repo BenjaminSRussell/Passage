@@ -5,6 +5,9 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 /** Decimal with up to 6 places, as the service accepts (never parsed to float). */
 export const DECIMAL = /^\d+(\.\d{1,6})?$/;
 
+/** A percent from 0 to 100 with up to 2 places, as the service accepts for overdeliveryPct. */
+export const PERCENT = /^(100(\.0{1,2})?|\d{1,2}(\.\d{1,2})?)$/;
+
 const SCALE = 6;
 
 function toMicros(value: string): bigint {

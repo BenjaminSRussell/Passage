@@ -13,7 +13,7 @@ import {
   type Problem,
 } from "./api/client";
 import { diffColumns } from "./ChangeOrderPage";
-import { DECIMAL, formatDateTime, subtractDecimal } from "./format";
+import { DECIMAL, formatDateTime, PERCENT, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -21,6 +21,11 @@ import { useLoad } from "./useLoad";
 export const DUTY_AGREEMENT_MAINTAIN = "sales.agreement.maintain";
 const REASON_MAX = 500;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** True for an empty tolerance or 0 in any spelling. */
+function isZeroPercent(v: string): boolean {
+  return v === "" || /^0+(\.0+)?$/.test(v);
+}
 
 /** Exact comparison of decimal strings (never parsed to float): -1, 0 or 1. */
 function compare(a: string, b: string): number {
@@ -32,6 +37,7 @@ export interface RevisionValues {
   commitmentQty: string;
   unitPrice: string;
   cumTolerance: string;
+  overdeliveryPct: string;
   validFrom: string;
   validTo: string;
   reason: string;
@@ -43,6 +49,7 @@ export function revisionValues(a: Agreement): RevisionValues {
     commitmentQty: a.commitmentQty,
     unitPrice: a.unitPrice,
     cumTolerance: a.cumTolerance ?? "0",
+    overdeliveryPct: a.overdeliveryPct ?? "0",
     validFrom: a.validFrom ?? "",
     validTo: a.validTo ?? "",
     reason: "",
@@ -58,10 +65,12 @@ export function validateRevision(values: RevisionValues, current: Agreement): { 
   const errors: Record<string, string> = {};
   const input: AgreementRevisionInput = {};
   if (!DECIMAL.test(values.commitmentQty) || /^0+(\.0+)?$/.test(values.commitmentQty)) errors.commitmentQty = "Enter a quantity above 0 with up to 6 decimals.";
-  else if (compare(values.commitmentQty, current.releasedQty) < 0) errors.commitmentQty = `Cannot be below the ${current.releasedQty} already released.`;
+  else if (isZeroPercent(values.overdeliveryPct) && isZeroPercent(current.overdeliveryPct ?? "0") && compare(values.commitmentQty, current.releasedQty) < 0) errors.commitmentQty = `Cannot be below the ${current.releasedQty} already released.`;
   else if (compare(values.commitmentQty, current.commitmentQty) !== 0) input.commitmentQty = values.commitmentQty;
   if (!/^\d+(\.\d{1,4})?$/.test(values.unitPrice)) errors.unitPrice = "Enter a price of at least 0 with up to 4 decimals.";
   else if (compare(values.unitPrice, current.unitPrice) !== 0) input.unitPrice = values.unitPrice;
+  if (!PERCENT.test(values.overdeliveryPct)) errors.overdeliveryPct = "Enter a percent from 0 to 100 with up to 2 decimals.";
+  else if (compare(values.overdeliveryPct, current.overdeliveryPct ?? "0") !== 0) input.overdeliveryPct = values.overdeliveryPct;
   if (!DECIMAL.test(values.cumTolerance)) errors.cumTolerance = "Enter a tolerance of at least 0.";
   else if (compare(values.cumTolerance, current.cumTolerance ?? "0") !== 0) input.cumTolerance = values.cumTolerance;
   for (const name of ["validFrom", "validTo"] as const) {
@@ -75,7 +84,7 @@ export function validateRevision(values: RevisionValues, current: Agreement): { 
   return { errors, input };
 }
 
-const kindLabel: Record<AgreementVersion["kind"], string> = { REVISED: "Revised", CLOSED: "Closed", RETURNED: "Quantity returned" };
+const kindLabel: Record<AgreementVersion["kind"], string> = { REVISED: "Revised", CLOSED: "Closed", RETURNED: "Quantity returned", DRAWN: "Quantity drawn" };
 
 const versionColumns: DataTableColumn<AgreementVersion>[] = [
   { key: "version", header: "Version", align: "end" },
@@ -89,6 +98,7 @@ const problemTitle: Record<string, string> = {
   "SLS-0006": "The agreement was changed by someone else",
   "SLS-0052": "The agreement is closed",
   "SLS-0053": "Commitment is below the released quantity",
+  "SLS-0008": "Not enough commitment left",
 };
 
 interface Props {
@@ -193,7 +203,8 @@ export function AgreementLifecycle({ agreement, etag, onChanged }: Props) {
         <>
           <Card title="Revise the agreement">
             <form className={styles.form} onSubmit={revise} noValidate aria-label="Revise the agreement">
-              {field("commitmentQty", "Committed quantity", { decimal: true, hint: `Not below the ${agreement.releasedQty} ${agreement.unit} already released.` })}
+              {field("commitmentQty", "Committed quantity", { decimal: true, hint: `With the tolerance, not below the ${agreement.releasedQty} ${agreement.unit} already released.` })}
+              {field("overdeliveryPct", "Over-delivery tolerance (%)", { decimal: true, hint: "Releases may go this many percent above the commitment." })}
               {field("unitPrice", "Agreed price", { decimal: true, hint: "Applies to later releases; existing orders keep their price." })}
               {field("cumTolerance", "Cumulative tolerance", { decimal: true })}
               {field("validFrom", "Valid from", { type: "date" })}
@@ -240,7 +251,7 @@ export function AgreementLifecycle({ agreement, etag, onChanged }: Props) {
             {history.error.message} ({history.error.code})
           </Alert>
         ) : !history.loading && versions.length === 0 ? (
-          <EmptyState compact headingLevel={3} title="No changes yet" description="Revisions, the close and quantity returned by cancelled orders are recorded here." />
+          <EmptyState compact headingLevel={3} title="No changes yet" description="Revisions, the close, and quantity returned or drawn by order changes are recorded here." />
         ) : (
           <div className={styles.stack}>
             <DataTable label="Agreement history" columns={versionColumns} rows={versions} getRowKey={(v) => String(v.version)} loading={history.loading && versions.length === 0} />

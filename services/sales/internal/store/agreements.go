@@ -34,9 +34,11 @@ type NewAgreement struct {
 	ValidFrom        *string
 	ValidTo          *string
 	CumTolerance     decimal.Decimal
-	IdempotencyKey   string
-	RequestHash      string
-	Actor            string
+	// OverdeliveryPct is how far above the commitment releases may go (BR-27.9).
+	OverdeliveryPct decimal.Decimal
+	IdempotencyKey  string
+	RequestHash     string
+	Actor           string
 }
 
 // Agreement is a sales agreement with its commitment and released quantity.
@@ -52,10 +54,15 @@ type Agreement struct {
 	Currency         string          `json:"currency"`
 	Commitment       decimal.Decimal `json:"commitmentQty"`
 	Released         decimal.Decimal `json:"releasedQty"`
-	Remaining        decimal.Decimal `json:"remainingQty"`
-	Status           string          `json:"status"`
-	ValidFrom        *string         `json:"validFrom,omitempty"`
-	ValidTo          *string         `json:"validTo,omitempty"`
+	// OverdeliveryPct lets releases go above the commitment by that percent;
+	// CeilingQty is the commitment with it and RemainingQty what can still be
+	// released (the ceiling less the released quantity).
+	OverdeliveryPct decimal.Decimal `json:"overdeliveryPct"`
+	CeilingQty      decimal.Decimal `json:"ceilingQty"`
+	Remaining       decimal.Decimal `json:"remainingQty"`
+	Status          string          `json:"status"`
+	ValidFrom       *string         `json:"validFrom,omitempty"`
+	ValidTo         *string         `json:"validTo,omitempty"`
 	// CumTolerance, CumShipped and CumResetDate are the cumulative quantity
 	// settings of scheduling-agreement releases (BR-27.12): the tolerance a
 	// release's cumulative received quantity may differ from CumShipped, the
@@ -77,14 +84,19 @@ type Agreement struct {
 
 // AgreementReleaseRecord is one stored release and the order it created.
 type AgreementReleaseRecord struct {
-	ID           string          `json:"id"`
-	Quantity     decimal.Decimal `json:"quantity"`
+	ID       string          `json:"id"`
+	Quantity decimal.Decimal `json:"quantity"`
+	// DrawnQty is quantity drawn after the release by raising its order line,
+	// ReturnedQty what went back by lowering or cancelling it; the release is
+	// outstanding for Quantity + DrawnQty - ReturnedQty.
+	DrawnQty     decimal.Decimal `json:"drawnQty"`
+	ReturnedQty  decimal.Decimal `json:"returnedQty"`
 	SalesOrderID string          `json:"salesOrderId"`
 	OrderNumber  string          `json:"orderNumber"`
 	Actor        string          `json:"actor"`
 	ReleasedAt   time.Time       `json:"releasedAt"`
-	// ReturnedAt is set when the order was cancelled and the quantity went back
-	// to the commitment.
+	// ReturnedAt is the time of the last return of quantity to the commitment
+	// (an order cancelled, a line lowered or removed).
 	ReturnedAt *time.Time `json:"returnedAt,omitempty"`
 }
 
@@ -125,13 +137,13 @@ func agreementNotFound() error {
 
 const agreementColumns = `id::text, legal_entity_id::text, agreement_number, customer_id::text, invoice_account_id::text, product_id::text,
 	unit, unit_price::text, currency::text, commitment_qty::text, released_qty::text, status, valid_from::text, valid_to::text, version,
-	created_by, created_at, updated_at, cum_tolerance::text, cum_shipped::text, cum_reset_date::text, close_reason, closed_by, closed_at`
+	created_by, created_at, updated_at, cum_tolerance::text, cum_shipped::text, cum_reset_date::text, close_reason, closed_by, closed_at, overdelivery_pct::text`
 
 func scanAgreement(row pgx.Row) (Agreement, error) {
 	var a Agreement
-	var price, commitment, released, tol, shipped string
+	var price, commitment, released, tol, shipped, pct string
 	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.AgreementNumber, &a.CustomerID, &a.InvoiceAccountID, &a.ProductID, &a.Unit, &price,
-		&a.Currency, &commitment, &released, &a.Status, &a.ValidFrom, &a.ValidTo, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &tol, &shipped, &a.CumResetDate, &a.CloseReason, &a.ClosedBy, &a.ClosedAt); err != nil {
+		&a.Currency, &commitment, &released, &a.Status, &a.ValidFrom, &a.ValidTo, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &tol, &shipped, &a.CumResetDate, &a.CloseReason, &a.ClosedBy, &a.ClosedAt, &pct); err != nil {
 		return Agreement{}, err
 	}
 	a.CumTolerance = decimal.RequireFromString(tol)
@@ -139,7 +151,9 @@ func scanAgreement(row pgx.Row) (Agreement, error) {
 	a.UnitPrice = decimal.RequireFromString(price)
 	a.Commitment = decimal.RequireFromString(commitment)
 	a.Released = decimal.RequireFromString(released)
-	a.Remaining = a.Commitment.Sub(a.Released)
+	a.OverdeliveryPct = decimal.RequireFromString(pct)
+	a.CeilingQty = domain.AgreementCeiling(a.Commitment, a.OverdeliveryPct)
+	a.Remaining = a.CeilingQty.Sub(a.Released)
 	return a, nil
 }
 
@@ -182,10 +196,10 @@ func (s *Postgres) CreateAgreement(ctx context.Context, in NewAgreement) (Agreem
 		}
 		id := ids.New()
 		if _, err := tx.Exec(ctx, `insert into sales_agreement (tenant_id, id, legal_entity_id, agreement_number, customer_id, invoice_account_id,
-				product_id, unit, unit_price, currency, commitment_qty, valid_from, valid_to, idempotency_key, request_hash, created_by, cum_tolerance)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::date, $13::date, $14, $15, $16, $17::numeric)`,
+				product_id, unit, unit_price, currency, commitment_qty, valid_from, valid_to, idempotency_key, request_hash, created_by, cum_tolerance, overdelivery_pct)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::date, $13::date, $14, $15, $16, $17::numeric, $18::numeric)`,
 			p.TenantID, id, in.LegalEntityID, domain.FormatAgreementNumber(seq), in.CustomerID, in.InvoiceAccountID, in.ProductID, in.Unit,
-			in.UnitPrice.String(), in.Currency, in.Commitment.String(), in.ValidFrom, in.ValidTo, in.IdempotencyKey, in.RequestHash, in.Actor, in.CumTolerance.String()); err != nil {
+			in.UnitPrice.String(), in.Currency, in.Commitment.String(), in.ValidFrom, in.ValidTo, in.IdempotencyKey, in.RequestHash, in.Actor, in.CumTolerance.String(), in.OverdeliveryPct.String()); err != nil {
 			return err
 		}
 		created = true
@@ -244,9 +258,11 @@ func (s *Postgres) GetAgreement(ctx context.Context, id string) (Agreement, erro
 }
 
 func loadReleases(ctx context.Context, tx pgx.Tx, tenantID, agreementID string) ([]AgreementReleaseRecord, error) {
-	rows, err := tx.Query(ctx, `select r.id::text, r.quantity::text, r.sales_order_id::text, o.order_number, r.actor, r.released_at, x.returned_at
+	rows, err := tx.Query(ctx, `select r.id::text, r.quantity::text, r.sales_order_id::text, o.order_number, r.actor, r.released_at,
+			(select max(x.returned_at) from agreement_return x where x.tenant_id = r.tenant_id and x.release_id = r.id),
+			(select coalesce(sum(d.quantity), 0)::text from agreement_draw d where d.tenant_id = r.tenant_id and d.release_id = r.id),
+			(select coalesce(sum(x.quantity), 0)::text from agreement_return x where x.tenant_id = r.tenant_id and x.release_id = r.id)
 		from agreement_release r join sales_order o on o.tenant_id = r.tenant_id and o.id = r.sales_order_id
-		left join agreement_return x on x.tenant_id = r.tenant_id and x.release_id = r.id
 		where r.tenant_id = $1 and r.agreement_id = $2 order by r.released_at desc, r.id desc`, tenantID, agreementID)
 	if err != nil {
 		return nil, err
@@ -255,11 +271,13 @@ func loadReleases(ctx context.Context, tx pgx.Tx, tenantID, agreementID string) 
 	out := []AgreementReleaseRecord{}
 	for rows.Next() {
 		var r AgreementReleaseRecord
-		var qty string
-		if err := rows.Scan(&r.ID, &qty, &r.SalesOrderID, &r.OrderNumber, &r.Actor, &r.ReleasedAt, &r.ReturnedAt); err != nil {
+		var qty, drawn, returned string
+		if err := rows.Scan(&r.ID, &qty, &r.SalesOrderID, &r.OrderNumber, &r.Actor, &r.ReleasedAt, &r.ReturnedAt, &drawn, &returned); err != nil {
 			return nil, err
 		}
 		r.Quantity = decimal.RequireFromString(qty)
+		r.DrawnQty = decimal.RequireFromString(drawn)
+		r.ReturnedQty = decimal.RequireFromString(returned)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -313,7 +331,7 @@ func (s *Postgres) ReleaseAgreement(ctx context.Context, id string, in Agreement
 		if !domain.AgreementValidOn(from, to, now.UTC().Truncate(24*time.Hour)) {
 			return problem(http.StatusUnprocessableEntity, CodeAgreementNotValid, "agreement "+a.AgreementNumber+" is not valid on "+now.UTC().Format(dayLayout))
 		}
-		next, status, err := domain.ReleaseAgreement(a.Commitment, a.Released, in.Quantity)
+		next, status, err := domain.ReleaseAgreement(a.Commitment, a.OverdeliveryPct, a.Released, in.Quantity)
 		if errors.Is(err, domain.ErrAgreementExhausted) {
 			return problem(http.StatusUnprocessableEntity, CodeAgreementExhausted,
 				"AGREEMENT_EXHAUSTED: agreement "+a.AgreementNumber+" has "+a.Remaining.String()+" "+a.Unit+" remaining; the release asks for "+in.Quantity.String())
@@ -349,7 +367,7 @@ func (s *Postgres) ReleaseAgreement(ctx context.Context, id string, in Agreement
 		}
 		if err := enqueue(ctx, tx, "agreement", id, salesevents.AgreementReleased, p.TenantID, salesevents.AgreementReleasedData{
 			AgreementID: id, AgreementNumber: a.AgreementNumber, CustomerID: a.CustomerID, ProductID: a.ProductID, SalesOrderID: order.ID,
-			Quantity: in.Quantity.String(), Released: next.String(), Remaining: a.Commitment.Sub(next).String(), Status: status,
+			Quantity: in.Quantity.String(), Released: next.String(), Remaining: a.CeilingQty.Sub(next).String(), Status: status,
 			Version: a.Version + 1, Actor: in.Actor}); err != nil {
 			return err
 		}

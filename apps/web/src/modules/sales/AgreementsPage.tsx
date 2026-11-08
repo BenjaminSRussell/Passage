@@ -13,7 +13,7 @@ import {
   type AgreementStatus,
   type Problem,
 } from "./api/client";
-import { DECIMAL, money, sentence, shortId, UUID } from "./format";
+import { DECIMAL, money, PERCENT, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -32,6 +32,7 @@ export interface AgreementValues {
   validFrom: string;
   validTo: string;
   cumTolerance: string;
+  overdeliveryPct: string;
 }
 
 type Errors = Record<string, string>;
@@ -51,6 +52,7 @@ export function validateAgreement(values: AgreementValues): { errors: Errors; in
   if (values.validFrom && !DATE.test(values.validFrom)) errors.validFrom = "Choose a date.";
   if (values.validTo && !DATE.test(values.validTo)) errors.validTo = "Choose a date.";
   if (values.cumTolerance !== "" && !DECIMAL.test(values.cumTolerance)) errors.cumTolerance = "Enter 0 or more with up to 6 decimals, or leave it empty for 0.";
+  if (values.overdeliveryPct !== "" && !PERCENT.test(values.overdeliveryPct)) errors.overdeliveryPct = "Enter a percent from 0 to 100 with up to 2 decimals, or leave it empty for 0.";
   if (values.validFrom && values.validTo && values.validTo < values.validFrom) errors.validTo = "The end must not be before the start.";
   if (Object.keys(errors).length > 0) return { errors };
   return {
@@ -67,6 +69,7 @@ export function validateAgreement(values: AgreementValues): { errors: Errors; in
       ...(values.validFrom ? { validFrom: values.validFrom } : {}),
       ...(values.validTo ? { validTo: values.validTo } : {}),
       ...(values.cumTolerance !== "" ? { cumTolerance: values.cumTolerance } : {}),
+      ...(values.overdeliveryPct !== "" ? { overdeliveryPct: values.overdeliveryPct } : {}),
     },
   };
 }
@@ -97,7 +100,7 @@ export function AgreementsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Sales agreements"
-        description="Blanket quantity commitments at an agreed price. Each release creates a draft order and draws down the commitment; a release beyond it is refused."
+        description="Blanket quantity commitments at an agreed price. Each release creates a draft order and draws down the commitment; a release beyond it and its over-delivery tolerance is refused."
         actions={
           <Link className={buttonClassName("primary")} to="/sales/agreements/new">
             New agreement
@@ -165,6 +168,7 @@ export function NewAgreementPage() {
     validFrom: "",
     validTo: "",
     cumTolerance: "",
+    overdeliveryPct: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -225,6 +229,7 @@ export function NewAgreementPage() {
           {field("unit", "Unit")}
           {field("unitPrice", "Unit price", undefined, { decimal: true })}
           {field("currency", "Currency")}
+          {field("overdeliveryPct", "Over-delivery tolerance (%)", "Releases may go this many percent above the committed quantity. Default 0.", { decimal: true, optional: true })}
           {field("validFrom", "Valid from", undefined, { type: "date", optional: true })}
           {field("validTo", "Valid to", undefined, { type: "date", optional: true })}
           {field("cumTolerance", "Cumulative tolerance", "How far a scheduling release's cumulative received quantity may differ from shipped before it is held. Default 0.", { decimal: true, optional: true })}

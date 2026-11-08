@@ -77,6 +77,11 @@ channels:
     messages:
       agreementReturned:
         $ref: "#/components/messages/AgreementReturned"
+  agreementDrawn:
+    address: passage.sales.agreement
+    messages:
+      agreementDrawn:
+        $ref: "#/components/messages/AgreementDrawn"
   scheduleReleaseReceived:
     address: passage.sales.schedulerelease
     messages:
@@ -340,9 +345,15 @@ operations:
   publishAgreementReturned:
     action: send
     channel: {$ref: "#/channels/agreementReturned"}
-    summary: A cancelled order gave the quantity of its release back to the agreement commitment, in the cancellation transaction (BR-27.9). Consumers - planning, key account reporting.
+    summary: A cancelled order, or a release line lowered or removed by a change, gave quantity back to the agreement commitment, in the same transaction (BR-27.9). Consumers - planning, key account reporting.
     messages:
       - {$ref: "#/channels/agreementReturned/messages/agreementReturned"}
+  publishAgreementDrawn:
+    action: send
+    channel: {$ref: "#/channels/agreementDrawn"}
+    summary: The quantity of a released order's line was raised by a change and drew the difference from the agreement, in the change transaction (BR-27.9). Consumers - planning, key account reporting.
+    messages:
+      - {$ref: "#/channels/agreementDrawn/messages/agreementDrawn"}
   publishOrderChanged:
     action: send
     channel: {$ref: "#/channels/orderChanged"}
@@ -603,6 +614,14 @@ components:
     AgreementReturned:
       name: dev.passage.sales.agreement.returned.v1
       title: Sales agreement quantity returned
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AgreementLifecycleData"
+    AgreementDrawn:
+      name: dev.passage.sales.agreement.drawn.v1
+      title: Sales agreement quantity drawn
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -1201,13 +1220,13 @@ components:
         sales_order_id: {type: string, format: uuid, description: the DRAFT order the release created}
         quantity: {type: string, description: quantity drawn by this release (decimal string)}
         released_qty: {type: string, description: cumulative released quantity after this release}
-        remaining_qty: {type: string, description: commitment less released quantity}
+        remaining_qty: {type: string, description: commitment with the over-delivery tolerance, less released quantity}
         status: {type: string, enum: [ACTIVE, EXHAUSTED]}
         version: {type: integer, description: the agreement version after the release}
         actor: {type: string}
     AgreementLifecycleData:
       type: object
-      required: [agreement_id, agreement_number, legal_entity_id, customer_id, product_id, commitment_qty, released_qty, remaining_qty, unit_price, status, diff, version, actor]
+      required: [agreement_id, agreement_number, legal_entity_id, customer_id, product_id, commitment_qty, overdelivery_pct, released_qty, remaining_qty, unit_price, status, diff, version, actor]
       properties:
         agreement_id: {type: string, format: uuid}
         agreement_number: {type: string, example: SA-0000001}
@@ -1215,13 +1234,14 @@ components:
         customer_id: {type: string, format: uuid}
         product_id: {type: string, format: uuid}
         commitment_qty: {type: string, description: commitment after the change (decimal string)}
+        overdelivery_pct: {type: string, description: tolerance above the commitment in percent after the change (decimal string)}
         released_qty: {type: string, description: released quantity after the change}
-        remaining_qty: {type: string, description: commitment less released quantity}
+        remaining_qty: {type: string, description: commitment with the over-delivery tolerance, less released quantity}
         unit_price: {type: string, description: agreed price after the change; applies to later releases}
         status: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED]}
         diff:
           type: array
-          description: changed fields (commitmentQty, unitPrice, cumTolerance, validFrom, validTo, releasedQty, status)
+          description: changed fields (commitmentQty, unitPrice, cumTolerance, overdeliveryPct, validFrom, validTo, releasedQty, status)
           items:
             type: object
             required: [line_no, field, old, new]
@@ -1230,9 +1250,10 @@ components:
               field: {type: string}
               old: {type: string}
               new: {type: string}
-        reason: {type: string, description: the close reason or the cancelled order that returned quantity}
-        sales_order_id: {type: string, format: uuid, description: returned only; the cancelled order}
+        reason: {type: string, description: the close reason, or the order cancellation or line change that returned or drew quantity}
+        sales_order_id: {type: string, format: uuid, description: returned and drawn only; the order that gave back or drew the quantity}
         returned_qty: {type: string, description: returned only; quantity given back}
+        drawn_qty: {type: string, description: drawn only; quantity drawn by raising the release line}
         version: {type: integer, description: the agreement version after the change}
         actor: {type: string}
     BackorderRunCommittedData:

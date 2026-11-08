@@ -18,9 +18,11 @@ type reviseAgreementRequest struct {
 	CommitmentQty *string `json:"commitmentQty"`
 	UnitPrice     *string `json:"unitPrice"`
 	CumTolerance  *string `json:"cumTolerance"`
-	ValidFrom     *string `json:"validFrom"`
-	ValidTo       *string `json:"validTo"`
-	Reason        string  `json:"reason"`
+	// OverdeliveryPct changes the tolerance above the commitment (BR-27.9).
+	OverdeliveryPct *string `json:"overdeliveryPct"`
+	ValidFrom       *string `json:"validFrom"`
+	ValidTo         *string `json:"validTo"`
+	Reason          string  `json:"reason"`
 }
 
 // closeAgreementRequest is the body of POST /v1/sales/agreements/{id}:close.
@@ -60,6 +62,16 @@ func buildRevision(req reviseAgreementRequest) (store.AgreementRevision, map[str
 			out.CumTolerance = &tol
 		}
 	}
+	if req.OverdeliveryPct != nil {
+		pct, err := decimal.NewFromString(*req.OverdeliveryPct)
+		if err != nil {
+			f["overdeliveryPct"] = "must be a decimal from 0 to 100 with at most 2 places"
+		} else if err := domain.ValidateOverdelivery(pct); err != nil {
+			f["overdeliveryPct"] = err.Error()
+		} else {
+			out.OverdeliveryPct = &pct
+		}
+	}
 	for name, v := range map[string]*string{"validFrom": req.ValidFrom, "validTo": req.ValidTo} {
 		if v != nil && *v != "" {
 			if _, err := time.Parse(dayLayout, *v); err != nil {
@@ -70,8 +82,8 @@ func buildRevision(req reviseAgreementRequest) (store.AgreementRevision, map[str
 	if len(req.Reason) > 500 {
 		f["reason"] = "must be at most 500 characters"
 	}
-	if req.CommitmentQty == nil && req.UnitPrice == nil && req.CumTolerance == nil && req.ValidFrom == nil && req.ValidTo == nil {
-		f["body"] = "at least one of commitmentQty, unitPrice, cumTolerance, validFrom or validTo is required"
+	if req.CommitmentQty == nil && req.UnitPrice == nil && req.CumTolerance == nil && req.OverdeliveryPct == nil && req.ValidFrom == nil && req.ValidTo == nil {
+		f["body"] = "at least one of commitmentQty, unitPrice, cumTolerance, overdeliveryPct, validFrom or validTo is required"
 	}
 	return out, f
 }

@@ -300,11 +300,15 @@ describe("Sales agreements", () => {
   });
 
   it("validateAgreement and validateRelease mirror the service rules", () => {
-    const base = { legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: "", productId: PRODUCT, unit: "EA", unitPrice: "1", currency: "USD", commitmentQty: "10", validFrom: "", validTo: "", cumTolerance: "" };
+    const base = { legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: "", productId: PRODUCT, unit: "EA", unitPrice: "1", currency: "USD", commitmentQty: "10", validFrom: "", validTo: "", cumTolerance: "", overdeliveryPct: "" };
     expect(validateAgreement(base).input).toBeDefined();
     expect(validateAgreement({ ...base, commitmentQty: "0" }).errors.commitmentQty).toMatch(/above 0/);
     expect(validateAgreement({ ...base, unitPrice: "1.00001" }).errors.unitPrice).toMatch(/4 decimals/);
     expect(validateAgreement({ ...base, invoiceAccountId: "INV" }).errors.invoiceAccountId).toBeDefined();
+    expect(validateAgreement({ ...base, overdeliveryPct: "5.5" }).input?.overdeliveryPct).toBe("5.5");
+    expect(validateAgreement({ ...base, overdeliveryPct: "100" }).input).toBeDefined();
+    expect(validateAgreement({ ...base, overdeliveryPct: "101" }).errors.overdeliveryPct).toMatch(/0 to 100/);
+    expect(validateAgreement({ ...base, overdeliveryPct: "1.005" }).errors.overdeliveryPct).toBeDefined();
     const release = { quantity: "5", siteId: SITE, warehouseId: WAREHOUSE, requestedShipDate: "2027-04-15" };
     expect(validateRelease(release).input).toEqual(release);
     expect(validateRelease({ ...release, quantity: "0.0" }).errors.quantity).toBeDefined();

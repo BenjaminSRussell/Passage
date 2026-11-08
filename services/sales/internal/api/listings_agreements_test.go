@@ -124,6 +124,11 @@ func TestBuildAgreement_Table(t *testing.T) {
 		wantField string
 	}{
 		{name: "valid", mutate: func(*createAgreementRequest) {}},
+		{name: "tolerance", mutate: func(r *createAgreementRequest) { r.OverdeliveryPct = strPtr("5.5") }},
+		{name: "tolerance above 100", mutate: func(r *createAgreementRequest) { r.OverdeliveryPct = strPtr("100.5") }, wantField: "overdeliveryPct"},
+		{name: "negative tolerance", mutate: func(r *createAgreementRequest) { r.OverdeliveryPct = strPtr("-1") }, wantField: "overdeliveryPct"},
+		{name: "tolerance with three places", mutate: func(r *createAgreementRequest) { r.OverdeliveryPct = strPtr("1.005") }, wantField: "overdeliveryPct"},
+		{name: "text tolerance", mutate: func(r *createAgreementRequest) { r.OverdeliveryPct = strPtr("some") }, wantField: "overdeliveryPct"},
 		{name: "zero commitment", mutate: func(r *createAgreementRequest) { r.CommitmentQty = "0" }, wantField: "commitmentQty"},
 		{name: "seven decimals", mutate: func(r *createAgreementRequest) { r.CommitmentQty = "1.0000001" }, wantField: "commitmentQty"},
 		{name: "text commitment", mutate: func(r *createAgreementRequest) { r.CommitmentQty = "lots" }, wantField: "commitmentQty"},
@@ -349,7 +354,7 @@ func TestReviseAgreement(t *testing.T) {
 	if rec := serveBody(t, s, http.MethodPatch, path, `{"commitmentQty":"1500"}`, p, nil); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("no If-Match: %d", rec.Code)
 	}
-	for _, body := range []string{`{}`, `{"commitmentQty":"0"}`, `{"unitPrice":"1.00001"}`, `{"validTo":"soon"}`, `{"cumTolerance":"-1"}`} {
+	for _, body := range []string{`{}`, `{"commitmentQty":"0"}`, `{"unitPrice":"1.00001"}`, `{"validTo":"soon"}`, `{"cumTolerance":"-1"}`, `{"overdeliveryPct":"101"}`, `{"overdeliveryPct":"x"}`} {
 		if rec := serveBody(t, s, http.MethodPatch, path, body, p, map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: status %d", body, rec.Code)
 		}
@@ -358,6 +363,11 @@ func TestReviseAgreement(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"3"` || s.version != 2 {
 		t.Fatalf("status %d etag %s body %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
 	}
+	if rec := serveBody(t, s, http.MethodPatch, path, `{"overdeliveryPct":"7.5"}`, p, map[string]string{"If-Match": `"2"`}); rec.Code != http.StatusOK ||
+		s.revision.OverdeliveryPct == nil || !s.revision.OverdeliveryPct.Equal(decimal.RequireFromString("7.5")) {
+		t.Fatalf("tolerance only: status %d got %+v", rec.Code, s.revision)
+	}
+	rec = serveBody(t, s, http.MethodPatch, path, `{"commitmentQty":"1500","unitPrice":"15","validTo":"","reason":"deal"}`, p, map[string]string{"If-Match": `"2"`})
 	r := s.revision
 	if r.Commitment == nil || !r.Commitment.Equal(decimal.NewFromInt(1500)) || r.UnitPrice == nil || r.ValidTo == nil || *r.ValidTo != "" || r.ValidFrom != nil || r.Reason != "deal" {
 		t.Fatalf("store got %+v", r)

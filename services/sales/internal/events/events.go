@@ -20,6 +20,7 @@ var (
 	AgreementChanged     = events.Type(Context, "agreement", "changed", 1)
 	AgreementClosed      = events.Type(Context, "agreement", "closed", 1)
 	AgreementReturned    = events.Type(Context, "agreement", "returned", 1)
+	AgreementDrawn       = events.Type(Context, "agreement", "drawn", 1)
 	QuotationConverted   = events.Type(Context, "quotation", "converted", 1)
 	QuotationExpired     = events.Type(Context, "quotation", "expired", 1)
 	QuotationChanged     = events.Type(Context, "quotation", "changed", 1)
@@ -63,7 +64,7 @@ var (
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, OrderHoldRejected, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
-		AgreementChanged, AgreementClosed, AgreementReturned,
+		AgreementChanged, AgreementClosed, AgreementReturned, AgreementDrawn,
 		QuotationConverted, QuotationExpired, QuotationChanged, QuotationCancelled, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged, IntakeErrorRecorded, IntakeErrorResolved,
 		OrderChangeRequested, OrderChangeApproved, OrderChangeRejected, OrderChangeWithdrawn, ChangePolicyChanged,
@@ -220,10 +221,12 @@ type AgreementReleasedData struct {
 }
 
 // AgreementLifecycleData is the data member of agreement.changed.v1,
-// .closed.v1 and .returned.v1 (FR-27.10). diff lists the changed fields of a
-// revision (changed) or the released quantity (returned); reason is the close
-// reason or the cancellation that returned quantity; sales_order_id and
-// returned_qty are set on returned only.
+// .closed.v1, .returned.v1 and .drawn.v1 (FR-27.10). diff lists the changed
+// fields of a revision (changed) or the released quantity (returned, drawn);
+// reason is the close reason, the cancellation or line change that returned
+// quantity, or the raise that drew it; sales_order_id and returned_qty are set
+// on returned, sales_order_id and drawn_qty on drawn. remaining_qty is what can
+// still be released: the commitment with overdelivery_pct, less released_qty.
 type AgreementLifecycleData struct {
 	AgreementID     string        `json:"agreement_id"`
 	AgreementNumber string        `json:"agreement_number"`
@@ -231,6 +234,7 @@ type AgreementLifecycleData struct {
 	CustomerID      string        `json:"customer_id"`
 	ProductID       string        `json:"product_id"`
 	Commitment      string        `json:"commitment_qty"`
+	OverdeliveryPct string        `json:"overdelivery_pct"`
 	Released        string        `json:"released_qty"`
 	Remaining       string        `json:"remaining_qty"`
 	UnitPrice       string        `json:"unit_price"`
@@ -239,6 +243,7 @@ type AgreementLifecycleData struct {
 	Reason          string        `json:"reason,omitempty"`
 	SalesOrderID    string        `json:"sales_order_id,omitempty"`
 	ReturnedQty     string        `json:"returned_qty,omitempty"`
+	DrawnQty        string        `json:"drawn_qty,omitempty"`
 	Version         int           `json:"version"`
 	Actor           string        `json:"actor"`
 }

@@ -442,6 +442,9 @@ func applyChangeTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, id 
 		if err := followRemovalsTx(ctx, tx, p.TenantID, o, before, req, actor, next, now); err != nil {
 			return err
 		}
+		if err := followReleaseLineTx(ctx, tx, p.TenantID, o, before, actor, now); err != nil {
+			return err
+		}
 		checked := false
 		if o.Status == domain.OrderConfirmed && o.OrderType != domain.OrderTypeJournal && o.NetTotal.GreaterThan(oldTotal) {
 			if checked, err = checksAtTx(ctx, tx, p.TenantID, o.LegalEntityID, domain.CheckPointConfirm); err != nil {

@@ -160,7 +160,12 @@ paths:
         what it released above it and lifts the ceiling again on a raise;
         removing line 1 of an order
         released from a sales agreement gives the release quantity back to the
-        agreement.
+        agreement, lowering its quantity gives the difference back, and raising it
+        draws the difference from the agreement under its row lock (agreement.returned.v1
+        or agreement.drawn.v1 in the same transaction); a raise beyond the commitment and
+        its over-delivery tolerance is 422 SLS-0008 AGREEMENT_EXHAUSTED, outside the
+        validity period SLS-0029, on a closed agreement SLS-0052, and the whole change is
+        refused.
         On a CONFIRMED order, a line whose quantity or requested date changes,
         or that is cancelled or reopened with its parent, returns its allocation
         quota draw and draws again (BR-27.15); a line moved to a later period
@@ -214,7 +219,7 @@ paths:
               schema: {$ref: "#/components/schemas/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0011 an added line's product is not listed for the customer; SLS-0013 allocation quota cannot cover a changed or added line in any period
+          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0011 an added line's product is not listed for the customer; SLS-0013 allocation quota cannot cover a changed or added line in any period; SLS-0008 raising the release line of an agreement order goes beyond the commitment and its tolerance, SLS-0029 outside the agreement validity, SLS-0052 the agreement is closed
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -477,11 +482,11 @@ paths:
               schema: {$ref: "#/components/schemas/SalesAgreement"}
         "404": {$ref: "#/components/responses/Problem"}
     patch:
-      summary: Revise an agreement's commitment, price, validity or cumulative tolerance at its ETag (FR-27.10)
+      summary: Revise an agreement's commitment, over-delivery tolerance, price, validity or cumulative tolerance at its ETag (FR-27.10)
       description: >-
         Every body field is optional but at least one is required; an empty validFrom or validTo clears that bound.
-        The commitment cannot fall below the quantity already released (SLS-0053); it is EXHAUSTED when the commitment
-        equals the released quantity and ACTIVE otherwise. A new price applies to later releases only, orders already
+        The commitment with its over-delivery tolerance cannot fall below the quantity already released (SLS-0053); it is
+        EXHAUSTED when the released quantity reaches that ceiling and ACTIVE otherwise. A new price applies to later releases only, orders already
         created keep their price. The revision, its field-level diff and agreement.changed.v1 commit together. A request
         that changes nothing returns the agreement without a new version.
       operationId: reviseSalesAgreement
@@ -3230,6 +3235,10 @@ components:
         errors:
           type: object
           additionalProperties: {type: string}
+    Percent:
+      type: string
+      description: Decimal string from 0 to 100 with at most 2 places (never float).
+      pattern: "^[0-9]{1,3}(\\.[0-9]{1,2})?$"
     Money:
       type: string
       description: Decimal string at 6 places (never float).
@@ -3350,9 +3359,10 @@ components:
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
         cumTolerance: {$ref: "#/components/schemas/Money", description: how far a release's cumulative received quantity may differ from the shipped quantity (BR-27.12); default 0}
+        overdeliveryPct: {$ref: "#/components/schemas/Percent", description: releases may draw up to the commitment plus this percent (BR-27.9); default 0}
     SalesAgreement:
       type: object
-      required: [id, legalEntityId, agreementNumber, customerId, invoiceAccountId, productId, unit, unitPrice, currency, commitmentQty, releasedQty, remainingQty, status, version]
+      required: [id, legalEntityId, agreementNumber, customerId, invoiceAccountId, productId, unit, unitPrice, currency, commitmentQty, overdeliveryPct, ceilingQty, releasedQty, remainingQty, status, version]
       properties:
         id: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
@@ -3365,8 +3375,10 @@ components:
         currency: {type: string}
         commitmentQty: {$ref: "#/components/schemas/Money"}
         releasedQty: {$ref: "#/components/schemas/Money"}
-        remainingQty: {$ref: "#/components/schemas/Money"}
-        status: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED]}
+        overdeliveryPct: {$ref: "#/components/schemas/Percent", description: tolerance above the commitment in percent (BR-27.9)}
+        ceilingQty: {$ref: "#/components/schemas/Money", description: the commitment plus the over-delivery tolerance, the most that can be released}
+        remainingQty: {$ref: "#/components/schemas/Money", description: ceilingQty less releasedQty, what can still be released}
+        status: {type: string, enum: [ACTIVE, EXHAUSTED, CLOSED], description: EXHAUSTED once releasedQty reaches ceilingQty}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
         closeReason: {type: string, description: set when the agreement was closed early}
@@ -3445,20 +3457,23 @@ components:
         version: {type: integer, minimum: 1}
     AgreementReleaseRecord:
       type: object
-      required: [id, quantity, salesOrderId, orderNumber, actor, releasedAt]
+      required: [id, quantity, drawnQty, returnedQty, salesOrderId, orderNumber, actor, releasedAt]
       properties:
         id: {type: string, format: uuid}
-        quantity: {$ref: "#/components/schemas/Money"}
+        quantity: {$ref: "#/components/schemas/Money", description: quantity drawn by the release itself}
+        drawnQty: {$ref: "#/components/schemas/Money", description: quantity drawn later by raising the order line}
+        returnedQty: {$ref: "#/components/schemas/Money", description: quantity given back by lowering or removing the line or cancelling the order; the release is outstanding for quantity plus drawnQty less returnedQty}
         salesOrderId: {type: string, format: uuid}
         orderNumber: {type: string}
         actor: {type: string}
         releasedAt: {type: string, format: date-time}
-        returnedAt: {type: string, format: date-time, description: set when the order was cancelled and the quantity went back to the commitment}
+        returnedAt: {type: string, format: date-time, description: time of the last return of quantity to the commitment}
     AgreementRevisionRequest:
       type: object
       minProperties: 1
       properties:
-        commitmentQty: {$ref: "#/components/schemas/Money", description: not below the released quantity}
+        commitmentQty: {$ref: "#/components/schemas/Money", description: the commitment with its over-delivery tolerance cannot fall below the released quantity}
+        overdeliveryPct: {$ref: "#/components/schemas/Percent"}
         unitPrice: {$ref: "#/components/schemas/Money", description: applies to later releases only}
         cumTolerance: {$ref: "#/components/schemas/Money"}
         validFrom: {type: string, description: a date such as 2027-03-04, or empty to clear}
@@ -3469,7 +3484,7 @@ components:
       required: [version, kind, actor, reason, diff, changedAt]
       properties:
         version: {type: integer, description: the agreement version the entry produced}
-        kind: {type: string, enum: [REVISED, CLOSED, RETURNED]}
+        kind: {type: string, enum: [REVISED, CLOSED, RETURNED, DRAWN]}
         actor: {type: string}
         reason: {type: string}
         changedAt: {type: string, format: date-time}

@@ -30,7 +30,7 @@ func TestReleaseAgreement_Table(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			next, status, err := ReleaseAgreement(tc.commitment, tc.released, tc.qty)
+			next, status, err := ReleaseAgreement(tc.commitment, decimal.Zero, tc.released, tc.qty)
 			if tc.wantErr != nil {
 				if err == nil {
 					t.Fatalf("want error, got next=%s status=%q", next, status)
@@ -63,7 +63,7 @@ func TestReleaseAgreement_NeverOverdraws(t *testing.T) {
 		steps := rapid.IntRange(1, 30).Draw(t, "steps")
 		for i := 0; i < steps; i++ {
 			qty := decimal.NewFromInt(rapid.Int64Range(1, 2_000).Draw(t, "qty"))
-			next, status, err := ReleaseAgreement(commitment, released, qty)
+			next, status, err := ReleaseAgreement(commitment, decimal.Zero, released, qty)
 			if err != nil {
 				if !errors.Is(err, ErrAgreementExhausted) {
 					t.Fatalf("unexpected error %v", err)
@@ -180,18 +180,76 @@ func TestReviseAgreement_Table(t *testing.T) {
 
 var errAny = errors.New("any error")
 
+func dpct(s string) decimal.Decimal { return decimal.RequireFromString(s) }
+
+// TestReleaseAgreement_Tolerance covers BR-27.9: a release may draw up to the
+// commitment plus overdelivery_pct, and the agreement is EXHAUSTED at that
+// ceiling, not at the commitment.
+func TestReleaseAgreement_Tolerance(t *testing.T) {
+	next, status, err := ReleaseAgreement(d(1000), dpct("5"), d(900), d(150))
+	if err != nil || !next.Equal(d(1050)) || status != AgreementExhausted {
+		t.Fatalf("draw to the ceiling: %s %s %v", next, status, err)
+	}
+	next, status, err = ReleaseAgreement(d(1000), dpct("5"), d(0), d(1000))
+	if err != nil || !next.Equal(d(1000)) || status != AgreementActive {
+		t.Fatalf("the commitment itself leaves the tolerance open: %s %s %v", next, status, err)
+	}
+	if _, _, err = ReleaseAgreement(d(1000), dpct("5"), d(1000), d(51)); !errors.Is(err, ErrAgreementExhausted) {
+		t.Fatalf("beyond the ceiling must be refused: %v", err)
+	}
+	if got := AgreementCeiling(d(3), dpct("0.5")); !got.Equal(dpct("3.015")) {
+		t.Fatalf("ceiling %s", got)
+	}
+	if got := AgreementCeiling(dpct("0.000001"), dpct("50")); !got.Equal(dpct("0.000001")) {
+		t.Fatalf("ceiling cut to 6 places must not exceed the exact figure: %s", got)
+	}
+	for _, bad := range []string{"-0.01", "100.01", "1.005"} {
+		if ValidateOverdelivery(dpct(bad)) == nil {
+			t.Fatalf("%s must be refused", bad)
+		}
+	}
+	for _, ok := range []string{"0", "5", "12.5", "100"} {
+		if err := ValidateOverdelivery(dpct(ok)); err != nil {
+			t.Fatalf("%s: %v", ok, err)
+		}
+	}
+}
+
+func TestReviseAgreement_Tolerance(t *testing.T) {
+	cur := AgreementState{Commitment: d(1000), Released: d(1040), OverdeliveryPct: dpct("5"), UnitPrice: d(12), Status: AgreementActive}
+	next, diff, err := ReviseAgreement(cur, AgreementRevision{OverdeliveryPct: ptr(dpct("4"))})
+	if err != nil || next.Status != AgreementExhausted || len(diff) != 2 || diff[0].Field != "overdeliveryPct" {
+		t.Fatalf("a tolerance that meets the released quantity exhausts: %+v %v %v", next, diff, err)
+	}
+	if _, _, err = ReviseAgreement(cur, AgreementRevision{OverdeliveryPct: ptr(dpct("3.9"))}); !errors.Is(err, ErrCommitmentBelowReleased) {
+		t.Fatalf("a tolerance below the released quantity must be refused: %v", err)
+	}
+	if _, _, err = ReviseAgreement(cur, AgreementRevision{Commitment: dp(991)}); err != nil {
+		t.Fatalf("the ceiling, not the commitment, bounds the released quantity: %v", err)
+	}
+	if _, _, err = ReviseAgreement(cur, AgreementRevision{OverdeliveryPct: ptr(dpct("101"))}); err == nil {
+		t.Fatal("101 percent must be refused")
+	}
+	back, status, err := ReturnToAgreement(d(1000), dpct("5"), d(1050), d(60), AgreementExhausted)
+	if err != nil || !back.Equal(d(990)) || status != AgreementActive {
+		t.Fatalf("a return reopens an exhausted agreement: %s %s %v", back, status, err)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
 func TestReturnToAgreement(t *testing.T) {
-	next, status, err := ReturnToAgreement(d(1000), d(1000), d(400), AgreementExhausted)
+	next, status, err := ReturnToAgreement(d(1000), d(0), d(1000), d(400), AgreementExhausted)
 	if err != nil || !next.Equal(d(600)) || status != AgreementActive {
 		t.Fatalf("exhausted agreement reopens: %s %s %v", next, status, err)
 	}
-	if _, status, err = ReturnToAgreement(d(1000), d(600), d(100), AgreementClosed); err != nil || status != AgreementClosed {
+	if _, status, err = ReturnToAgreement(d(1000), d(0), d(600), d(100), AgreementClosed); err != nil || status != AgreementClosed {
 		t.Fatalf("closed stays closed: %s %v", status, err)
 	}
-	if _, _, err = ReturnToAgreement(d(1000), d(50), d(100), AgreementActive); err == nil {
+	if _, _, err = ReturnToAgreement(d(1000), d(0), d(50), d(100), AgreementActive); err == nil {
 		t.Fatal("returning more than was released must fail")
 	}
-	if _, _, err = ReturnToAgreement(d(1000), d(50), d(0), AgreementActive); err == nil {
+	if _, _, err = ReturnToAgreement(d(1000), d(0), d(50), d(0), AgreementActive); err == nil {
 		t.Fatal("a zero return must fail")
 	}
 }

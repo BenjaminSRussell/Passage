@@ -101,7 +101,55 @@ describe("validateRevision", () => {
   });
 });
 
+describe("validateRevision with an over-delivery tolerance", () => {
+  const tolerant: Agreement = { ...agreement, releasedQty: "1040", remainingQty: "10", overdeliveryPct: "5", ceilingQty: "1050" };
+  it("sends the changed tolerance and leaves the below-released check to the service", () => {
+    const base = revisionValues(tolerant);
+    expect(base.overdeliveryPct).toBe("5");
+    expect(validateRevision({ ...base, overdeliveryPct: "10" }, tolerant).input).toEqual({ overdeliveryPct: "10" });
+    expect(validateRevision({ ...base, overdeliveryPct: "101" }, tolerant).errors.overdeliveryPct).toMatch(/0 to 100/);
+    expect(validateRevision({ ...base, overdeliveryPct: "" }, tolerant).errors.overdeliveryPct).toBeDefined();
+    // 991 is below the released 1040 but within the ceiling, so only the service can judge it
+    expect(validateRevision({ ...base, commitmentQty: "991" }, tolerant).input).toEqual({ commitmentQty: "991" });
+    expect(validateRevision({ ...revisionValues(agreement), commitmentQty: "599" }, agreement).errors.commitmentQty).toMatch(/below the 600/);
+  });
+});
+
 describe("Agreement lifecycle", () => {
+  it("shows the tolerance, the ceiling, and what each release drew and gave back", async () => {
+    const withDraws: Agreement = {
+      ...agreement,
+      overdeliveryPct: "5",
+      ceilingQty: "1050",
+      remainingQty: "450",
+      releases: [{ id: "r1", quantity: "600", drawnQty: "40", returnedQty: "15", salesOrderId: ORDER_ID, orderNumber: "SO-0000041", actor: "key-account", releasedAt: "2027-03-02T09:00:00Z", returnedAt: "2027-03-04T09:00:00Z" }],
+    };
+    handler = (url) => (url.pathname.endsWith("/versions") ? { status: 200, body: { items: [{ version: 4, kind: "DRAWN", actor: "rep", reason: "quantity of order SO-0000041 raised", changedAt: "2027-03-05T09:00:00Z", diff: [] }] } } : { status: 200, body: withDraws, etag: '"2"' });
+    renderAt(`/sales/agreements/${AGREEMENT_ID}`);
+    await screen.findByRole("heading", { name: "Sales agreement SA-0000007" });
+    expect(screen.getByText("5% (up to 1050 EA)")).toBeInTheDocument();
+    const releases = await findTable({ name: "Releases" });
+    expect(within(releases).getByText("40")).toBeInTheDocument();
+    expect(within(releases).getByText("15")).toBeInTheDocument();
+    expect(await screen.findByText("Quantity drawn")).toBeInTheDocument();
+  });
+
+  it("revises the tolerance", async () => {
+    handler = (url, init) =>
+      init.method === "PATCH"
+        ? { status: 200, body: { ...agreement, overdeliveryPct: "7.5", version: 3 }, etag: '"3"' }
+        : url.pathname.endsWith("/versions")
+          ? { status: 200, body: { items: [] } }
+          : { status: 200, body: agreement, etag: '"2"' };
+    renderAt(`/sales/agreements/${AGREEMENT_ID}`);
+    await screen.findByRole("heading", { name: "Sales agreement SA-0000007" });
+    const form = screen.getByRole("form", { name: "Revise the agreement" });
+    fireEvent.change(within(form).getByLabelText(/Over-delivery tolerance/), { target: { value: "7.5" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save revision" }));
+    expect(await screen.findByText("Agreement revised to version 3.")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ overdeliveryPct: "7.5" });
+  });
+
   it("revises at the ETag, sends the diff only and reloads", async () => {
     let revised = false;
     handler = (url, init) => {

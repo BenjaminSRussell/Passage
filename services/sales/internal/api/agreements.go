@@ -31,6 +31,9 @@ type createAgreementRequest struct {
 	// CumTolerance is how far a scheduling release's cumulative received
 	// quantity may differ from the shipped quantity (BR-27.12); default 0.
 	CumTolerance *string `json:"cumTolerance"`
+	// OverdeliveryPct lets releases draw up to that percent above the
+	// commitment (BR-27.9); default 0, at most 100.
+	OverdeliveryPct *string `json:"overdeliveryPct"`
 }
 
 // releaseOrderRequest is the body of POST /v1/sales/agreements/{id}:release-order:
@@ -83,7 +86,16 @@ func buildAgreement(req createAgreementRequest) (store.NewAgreement, map[string]
 			f["cumTolerance"] = err.Error()
 		}
 	}
-	return store.NewAgreement{CumTolerance: tolerance, LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice, ProductID: req.ProductID,
+	overdelivery := decimal.Zero
+	if req.OverdeliveryPct != nil {
+		var err error
+		if overdelivery, err = decimal.NewFromString(*req.OverdeliveryPct); err != nil {
+			f["overdeliveryPct"] = "must be a decimal from 0 to 100 with at most 2 places"
+		} else if err := domain.ValidateOverdelivery(overdelivery); err != nil {
+			f["overdeliveryPct"] = err.Error()
+		}
+	}
+	return store.NewAgreement{CumTolerance: tolerance, OverdeliveryPct: overdelivery, LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: invoice, ProductID: req.ProductID,
 		Unit: req.Unit, UnitPrice: price, Currency: req.Currency, Commitment: commitment, ValidFrom: req.ValidFrom, ValidTo: req.ValidTo}, f
 }
 

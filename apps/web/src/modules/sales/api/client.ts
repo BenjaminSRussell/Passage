@@ -249,20 +249,26 @@ export interface AgreementInput {
   validTo?: string;
   /** How far a scheduling release's cumulative received quantity may differ from the shipped quantity (default 0). */
   cumTolerance?: Decimal;
+  /** Releases may draw this many percent above the commitment (BR-27.9); default 0. */
+  overdeliveryPct?: Decimal;
 }
 
 export interface AgreementRelease {
   id: string;
   quantity: Decimal;
+  /** Drawn after the release by raising its order line; absent on older responses. */
+  drawnQty?: Decimal;
+  /** Given back by lowering or removing the line or cancelling the order; absent on older responses. */
+  returnedQty?: Decimal;
   salesOrderId: string;
   orderNumber: string;
   actor: string;
   releasedAt: string;
-  /** Set when the order was cancelled and the quantity went back to the commitment. */
+  /** Time of the last return of quantity to the commitment. */
   returnedAt?: string;
 }
 
-export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo" | "cumTolerance">> {
+export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo" | "cumTolerance" | "overdeliveryPct">> {
   id: string;
   agreementNumber: string;
   releasedQty: Decimal;
@@ -272,6 +278,9 @@ export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "
   validTo?: string;
   /** Cumulative settings of scheduling releases (BR-27.12); absent on older responses. */
   cumTolerance?: Decimal;
+  /** Tolerance above the commitment in percent, and the commitment with it; absent on older responses. */
+  overdeliveryPct?: Decimal;
+  ceilingQty?: Decimal;
   cumShipped?: Decimal;
   cumResetDate?: string;
   /** Set when the agreement was closed early. */
@@ -765,15 +774,16 @@ export interface AgreementRevisionInput {
   commitmentQty?: Decimal;
   unitPrice?: Decimal;
   cumTolerance?: Decimal;
+  overdeliveryPct?: Decimal;
   validFrom?: string;
   validTo?: string;
   reason?: string;
 }
 
-/** One entry of an agreement's history: a revision, the close, or quantity returned by a cancelled order. */
+/** One entry of an agreement's history: a revision, the close, quantity returned by a cancelled or lowered order, or quantity drawn by a raised one. */
 export interface AgreementVersion {
   version: number;
-  kind: "REVISED" | "CLOSED" | "RETURNED";
+  kind: "REVISED" | "CLOSED" | "RETURNED" | "DRAWN";
   actor: string;
   reason: string;
   diff: FieldChange[];

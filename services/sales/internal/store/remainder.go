@@ -18,7 +18,8 @@ import (
 // (BR-27.5): an undelivered OPEN or RESERVED line is CANCELLED, a line
 // delivered in part keeps the delivered quantity and is closed at it. The
 // order's total follows, so the credit exposure falls to what was delivered;
-// quota and agreement quantity that the closed quantity held go back; the
+// quota and agreement quantity that the closed quantity held go back (the
+// agreement only for the release line, line 1, of a released order); the
 // remaining schedule lines are cancelled. The order becomes SHIPPED (INVOICED
 // when everything delivered was invoiced). It gets a new version with the
 // field-level diff, and order.remaindercancelled.v1 is queued in the same
@@ -114,7 +115,10 @@ func (s *Postgres) cancelRemainder(ctx context.Context, id string, lineNo, versi
 				return err
 			}
 			diff = append(diff, domain.FieldChange{LineNo: l.LineNo, Field: "lineStatus", Old: l.LineStatus, New: after.Status})
-			if l.SupplementaryOf == nil {
+			// Only the release line (line 1, not a supplementary line) holds
+			// agreement quantity; a line added later by PATCH drew nothing,
+			// so its cut gives nothing back (BR-27.9).
+			if l.LineNo == 1 && l.SupplementaryOf == nil {
 				agreementCut = agreementCut.Add(gave)
 			}
 			kept := after.Quantity
