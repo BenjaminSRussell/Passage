@@ -1448,6 +1448,15 @@ test_finreport_ledger_consumer_reads_only_journal_lines if {
 	allowed("ledger.balance.read", "GET", "/v1/ledger/balances")
 }
 
+test_reporting_library_share_links if {
+	allowed("reporting.library.share", "GET", "/v1/reporting/library/f-1/share-links")
+	allowed("reporting.library.share", "POST", "/v1/reporting/library/f-1/share-links")
+	allowed("reporting.library.share", "POST", "/v1/reporting/share-links/l-1:revoke")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/library/f-1/share-links")
+	not allowed("reporting.statement.view", "POST", "/v1/reporting/share-links/l-1:revoke")
+	not allowed("reporting.library.share", "GET", "/v1/reporting/shared/tok")
+}
+
 test_reporting_balance_verification_routes if {
 	allowed("reporting.balance.verify", "POST", "/v1/reporting/balance-verifications")
 	not allowed("reporting.balance.verify", "GET", "/v1/reporting/balance-verifications")

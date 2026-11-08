@@ -317,6 +317,10 @@
       {"resource": "/v1/reporting/legal-holds", "methods": ["POST"]},
       {"resource": "/v1/reporting/legal-holds/*:release", "methods": ["POST"]}
     ]},
+    "reporting.library.share": {"permissions": [
+      {"resource": "/v1/reporting/library/*/share-links", "methods": ["GET", "POST"]},
+      {"resource": "/v1/reporting/share-links/*:revoke", "methods": ["POST"]}
+    ]},
     "hub.subscription.write": {"permissions": [
       {"resource": "/v1/hub/subscriptions", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*", "methods": ["PATCH", "DELETE"]},
