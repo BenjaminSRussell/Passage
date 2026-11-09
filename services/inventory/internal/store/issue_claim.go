@@ -248,7 +248,6 @@ type issueSettlement struct {
 // and a hold placed meanwhile is checked against the row it holds.
 func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, moved []*row, settle *issueSettlement) error {
 	falls := map[issueScope]map[string]decimal.Decimal{}
-	issued := map[issueScope]map[string]decimal.Decimal{}
 	for _, r := range moved {
 		wh := r.dims[domain.DimWarehouse]
 		if wh == "" || domain.IsRestricted(r.dims[domain.DimStatus]) {
@@ -265,12 +264,6 @@ func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 		falls[sc][""] = falls[sc][""].Add(d)
 		if b := r.dims[domain.DimBatch]; b != "" {
 			falls[sc][b] = falls[sc][b].Add(d)
-		}
-		if settle != nil && d.IsNegative() {
-			if issued[sc] == nil {
-				issued[sc] = map[string]decimal.Decimal{}
-			}
-			issued[sc][r.dims[domain.DimBatch]] = issued[sc][r.dims[domain.DimBatch]].Sub(d)
 		}
 	}
 	scopes := make([]issueScope, 0, len(falls))
@@ -308,8 +301,8 @@ func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 				return err
 			}
 		}
-		for _, b := range slices.Sorted(maps.Keys(issued[sc])) {
-			if err := settleIssue(ctx, tx, tenantID, legalEntityID, sc, b, issued[sc][b], *settle); err != nil {
+		if settle != nil {
+			if err := settleNetFall(ctx, tx, tenantID, legalEntityID, sc, falls[sc], *settle); err != nil {
 				return err
 			}
 		}
@@ -340,63 +333,73 @@ func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 	return nil
 }
 
-// settleIssue books what an issue of qty (from one batch, or none) settles of
-// the claims of a scope, each group capped by what it has outstanding over the
-// warehouse, so stock issued without a claim never absorbs a later claim. The
-// issue settles the group of its own ref, and the picks that carry no ref (no
-// caller sets one on a warehouse pick): both stood in for the units it moved.
-// Ships and consumptions always carry their ref, so a claim of those kinds
-// without one keeps reserving its units until released. An issue that names no
-// ref (a journal) settles on, in the order of the refs, the groups that hold a
-// CONSUME claim, up to qty: consumption reaches inventory as a journal that
-// cannot name the production item.
+// settleNetFall settles the claims an issue can be linked to by what left the
+// scope net: the fall over the warehouse (a transfer or reclassification inside
+// it settles nothing), spread over the batches whose own net fell, the rest
+// batchless.
+func settleNetFall(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, sc issueScope, falls map[string]decimal.Decimal, settle issueSettlement) error {
+	left := decimal.Max(decimal.Zero, falls[""].Neg())
+	for _, b := range slices.Sorted(maps.Keys(falls)) {
+		if b == "" {
+			continue
+		}
+		part := decimal.Min(left, decimal.Max(decimal.Zero, falls[b].Neg()))
+		if !part.IsPositive() {
+			continue
+		}
+		left = left.Sub(part)
+		if err := settleIssue(ctx, tx, tenantID, legalEntityID, sc, b, part, settle); err != nil {
+			return err
+		}
+	}
+	if !left.IsPositive() {
+		return nil
+	}
+	return settleIssue(ctx, tx, tenantID, legalEntityID, sc, "", left, settle)
+}
+
+// settleIssue books what an issue of qty (from one batch, or none) that names
+// a ref settles of the claims of a scope, drawing on qty once: first the claims
+// of its own ref, then the picks that carry no ref (no caller sets one on a
+// warehouse pick), each up to what it still has outstanding over the warehouse.
+// Claims of another ref, ships and consumptions without a ref, and issues that
+// name no ref (journals, registrations) settle nothing: nothing links them to
+// the units that left, so they stay until the movement they stand for names
+// them or they are released.
 func settleIssue(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, sc issueScope, batch string, qty decimal.Decimal, settle issueSettlement) error {
-	groups, err := tx.Query(ctx, `select issue_ref, `+groupOpenSQL("", "")+`::text, bool_or(kind = 'CONSUME'),
-		greatest(0, coalesce(sum(qty) filter (where kind = 'PICK'), 0) - coalesce(sum(qty) filter (where kind = 'ISSUED'), 0))::text from inventory_issue_claim
-		where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and warehouse = $4 group by issue_ref order by issue_ref collate "C"`,
-		tenantID, legalEntityID, sc.product, sc.warehouse)
+	groups, err := tx.Query(ctx, `select issue_ref, `+groupOpenSQL("", "")+`::text,
+		greatest(0, coalesce(sum(qty) filter (where kind = 'PICK'), 0) - coalesce(sum(qty) filter (where kind = 'ISSUED'), 0))::text
+		from inventory_issue_claim where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and warehouse = $4
+		and issue_ref in ('', $5) group by issue_ref`, tenantID, legalEntityID, sc.product, sc.warehouse, settle.ref)
 	if err != nil {
 		return fmt.Errorf("outstanding claims of the scope: %w", err)
 	}
-	type group struct {
-		ref     string
-		open    decimal.Decimal
-		consume bool
-		picks   decimal.Decimal
-	}
-	var open []group
+	open := map[string]decimal.Decimal{}
 	for groups.Next() {
-		var g group
-		var raw, picks string
-		if err := groups.Scan(&g.ref, &raw, &g.consume, &picks); err != nil {
+		var ref, raw, picks string
+		if err := groups.Scan(&ref, &raw, &picks); err != nil {
 			groups.Close()
 			return fmt.Errorf("outstanding claims of the scope: %w", err)
 		}
-		g.open, g.picks = decimal.RequireFromString(raw), decimal.RequireFromString(picks)
-		open = append(open, g)
+		open[ref] = decimal.RequireFromString(raw)
+		if ref == "" {
+			open[ref] = decimal.RequireFromString(picks)
+		}
 	}
 	groups.Close()
 	if err := groups.Err(); err != nil {
 		return fmt.Errorf("outstanding claims of the scope: %w", err)
 	}
 	rest := qty
-	for _, g := range open {
-		var settled decimal.Decimal
-		switch {
-		case g.ref == "":
-			settled = decimal.Min(qty, g.picks)
-		case g.ref == settle.ref:
-			settled = decimal.Min(qty, g.open)
-		case settle.ref == "" && g.consume:
-			settled = decimal.Min(rest, g.open)
-			rest = rest.Sub(settled)
-		}
+	for _, ref := range []string{settle.ref, ""} {
+		settled := decimal.Min(rest, open[ref])
 		if !settled.IsPositive() {
 			continue
 		}
+		rest = rest.Sub(settled)
 		if _, err := tx.Exec(ctx, `insert into inventory_issue_claim (tenant_id, legal_entity_id, idempotency_key, product_id, warehouse, batch, kind, qty, issue_ref)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict do nothing`,
-			tenantID, legalEntityID, issuedKeyPrefix+settle.key+"|"+batch+"|"+g.ref, sc.product, sc.warehouse, batch, domain.IssueBooked, settled.String(), g.ref); err != nil {
+			tenantID, legalEntityID, issuedKeyPrefix+settle.key+"|"+batch+"|"+ref, sc.product, sc.warehouse, batch, domain.IssueBooked, settled.String(), ref); err != nil {
 			return scopeProblem(err)
 		}
 	}

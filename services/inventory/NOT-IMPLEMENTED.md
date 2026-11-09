@@ -195,18 +195,21 @@ batch, so a batch with no hold cannot reach another batch's held stock
 (`TestClaimAll_EachAttemptOwnsItsClaim`, fulfillment `TestPostPackingSlip_FailedDoubleSubmitKeepsTheCommittedClaim`). A claim
 whose withdrawal is lost (crash between claim and commit) stays and only makes later movements stricter. Which claims an issue settles
 (migrations 0040 and 0041 let an `ISSUED` row carry no ref; settlement keys start `issued:`, which `ClaimIssue` refuses in a
-caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): the issue's own ref (the DELIVERED booking), the `PICK`
-claims without a ref (no caller sets `issueRef` on a warehouse pick, so a pick for a sales line is a ref-less claim beside the
-ship under the line's ref, and a delivery of the units would otherwise leave it standing for ever and make free stock negative
-at the next hold, `TestIssueClaim_APickWithoutARefIsSettledByTheDeliveryOfItsUnits`,
-`TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims`), and, for a journal issue that cannot name a ref,
-the groups that hold a `CONSUME` claim up to the quantity issued (production consumption reaches inventory as a journal,
-`TestIssueClaim_AConsumptionClaimIsSettledByTheJournalIssueOfItsUnits`); each is capped by what it still has outstanding. A
-`SHIP` or `CONSUME` claim without a ref is never settled (fulfillment and production always send theirs) and keeps
-reserving its units until released. A pick without a ref counts beside the ship of the same units until the delivery
-settles both, which is stricter (a false refusal only while a hold exists), never a leak. Settling by quantity rather than by
-document means an unrelated journal issue can also settle a consumption claim of another order; the claim is then taken
-again by the movement it stood in for, so this errs towards a later refusal, not a leak. A hold is placed against the row's physical stock and does not
+caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): only an issue that names a ref settles anything, and
+it draws on the quantity it moved once, net of what left the warehouse: first the claims of its own ref (the postings consumer's
+DELIVERED booking, or a `transactions:apply` registration that sends `issueRef`, which is how a production consumption
+settles its `CONSUME` claim, `TestIssueClaim_AConsumptionCarryingItsRefSettlesItsClaim`), then the `PICK` claims that carry no
+ref (no caller sets `issueRef` on a warehouse pick, `TestIssueClaim_APickWithoutARefIsSettledByTheDeliveryOfItsUnits`), each
+up to what it still has outstanding. Journals, status steps and registrations that name no ref settle nothing, so a scrap or
+an adjustment lowers free stock by what it takes and never releases another order's claim
+(`TestIssueClaim_UnlinkedIssuesAndInScopeMovesSettleNothing`, and the property test, which compares free stock with the model's
+own after every journal issue). Known limits: production does not yet book its consumption in inventory at all (no call in
+`services/production` posts one), so its `CONSUME` claims stay outstanding until the consumption is booked with `issueRef` or
+the claim is released (`POST /v1/inventory/issue-claims:release`); a `SHIP` or `CONSUME` claim without a ref is never settled;
+and a pick without a ref followed by the ship of the same units counts twice, because nothing links the pick to the ship: the
+delivery settles the ship's claim and, from what is left of the quantity it moved, the pick, so with both claims the pick
+stays (stricter: a false refusal only while a hold exists, never a leak) until it is released or a later ref-bearing issue
+settles it. A hold is placed against the row's physical stock and does not
 subtract outstanding claims. A hold placed over stock already claimed may therefore cover units that have left. It then
 stops every further claim and every issue that settles nothing until the usage decision, so it is stricter, not a leak. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.

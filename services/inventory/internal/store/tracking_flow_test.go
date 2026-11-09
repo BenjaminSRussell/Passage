@@ -143,12 +143,10 @@ func TestPostingsFlow_BatchesAndSerials(t *testing.T) {
 }
 
 // TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims follows
-// a packing slip post (#496) through inventory: the warehouse pick (no ref) and
-// the slip's ship claim (under the order line) stand in for the 3 serials until
-// sales' DELIVERED report of the slip, the shared fixture, is booked. The
-// booking issues the serials and leaves no claim behind, so what is claimed
-// counts neither before the booking twice nor after it, and a replay of the
-// event changes nothing.
+// a packing slip post (#496) through inventory: the slip's ship claim (under
+// the order line) stands in for the 3 serials until sales' DELIVERED report of
+// the slip, the shared fixture, is booked. The booking issues the serials and
+// settles the claim, and a replay of the event changes nothing.
 func TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims(t *testing.T) {
 	s, _, _ := setup(t)
 	handlers := api.PostingsConsumerHandlers(s, flowUnits{}, domain.NegativePolicy{})
@@ -188,7 +186,6 @@ func TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims(t *tes
 			t.Fatalf("%s claim: %v", kind, err)
 		}
 	}
-	claim("warehouse-pick", "PICK", "")
 	claim("fulfillment-ship", "SHIP", issueclaim.SalesLineRef(l.LineID))
 	room := func() store.IssueRoom {
 		r, err := s.GetIssueRoom(read, fx.LegalEntityID, l.ProductID, l.WarehouseID, "")
@@ -197,8 +194,8 @@ func TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims(t *tes
 		}
 		return r
 	}
-	if r := room(); !r.Physical.Equal(dec("4")) || !r.Outstanding.Equal(dec("6")) {
-		t.Fatalf("before the delivery: %s physical, %s claimed, want 4 and 6", r.Physical, r.Outstanding)
+	if r := room(); !r.Physical.Equal(dec("4")) || !r.Outstanding.Equal(dec("3")) {
+		t.Fatalf("before the delivery: %s physical, %s claimed, want 4 and 3", r.Physical, r.Outstanding)
 	}
 	for i := 0; i < 2; i++ {
 		if err := handle(delivery); err != nil {

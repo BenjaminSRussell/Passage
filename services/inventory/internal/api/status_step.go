@@ -54,6 +54,10 @@ type applyRequest struct {
 	Currency      string            `json:"currency"`
 	CostPrice     string            `json:"costPrice"`
 	CWQty         *int              `json:"cwQty"`
+	// IssueRef names the document line an issue registration is booked for
+	// (platform/issueclaim: SALES_LINE:<id>, PRODUCTION_ORDER:<order>:<item>);
+	// it settles the claims taken for that line and for the picks without a ref.
+	IssueRef string `json:"issueRef"`
 	// Both.
 	ToStatus string `json:"toStatus"`
 	Date     string `json:"date"`
@@ -159,7 +163,7 @@ func (a *API) stepTransaction(w http.ResponseWriter, r *http.Request, req applyR
 	}
 	for name, set := range map[string]bool{"legalEntityId": req.LegalEntityID != "", "productId": req.ProductID != "", "qty": req.Qty != "",
 		"dimensions": req.Dimensions != nil, "currency": req.Currency != "", "costPrice": req.CostPrice != "", "enteredUnit": req.EnteredUnit != "",
-		"cwQty": req.CWQty != nil} {
+		"cwQty": req.CWQty != nil, "issueRef": req.IssueRef != ""} {
 		if set {
 			fields[name] = "applies only when origin registers a new transaction"
 		}
@@ -230,13 +234,16 @@ func (a *API) registerTransaction(w http.ResponseWriter, r *http.Request, req ap
 			cwQty = *req.CWQty
 		}
 	}
+	if len(req.IssueRef) > domain.MaxIssueRef || (req.IssueRef != "" && qty.IsPositive()) {
+		fields["issueRef"] = "must be at most 255 characters and applies only to an issue"
+	}
 	if len(fields) > 0 {
 		return
 	}
 	change, applied, err := a.store.CreateTransaction(r.Context(), store.CreateTransactionInput{LegalEntityID: req.LegalEntityID,
 		SourceType: o.SourceType, SourceID: o.SourceID, Reference: o.Reference, ProductID: req.ProductID, Dims: domain.Dimensions(req.Dimensions),
 		Qty: qty, EnteredQty: entered, EnteredUnit: req.EnteredUnit, Status: domain.Status(req.ToStatus), Currency: req.Currency,
-		CostPrice: cost, CWQty: cwQty, Date: date, IdempotencyKey: key, Negative: a.post.Negative})
+		CostPrice: cost, CWQty: cwQty, Date: date, IdempotencyKey: key, Negative: a.post.Negative, IssueRef: req.IssueRef})
 	writeStatusChange(w, r, a, "register transaction", change, applied, err)
 }
 

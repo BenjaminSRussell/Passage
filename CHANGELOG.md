@@ -313,14 +313,14 @@ release may change public APIs.
   free stock below zero while anything is held, so a hold placed after a pick also stops the ship of the staged units
   until the usage decision. Inventory migrations 0038 and 0039 add `inventory_issue_claim.issue_ref` and the `ISSUED`
   rows (NOT VALID checks, validated apart). Property test: `TestHoldProperty_MixedMovementsNeverReachHeldStock`.
-- Issue claims no longer outlive the movement that issues them (#33). A warehouse pick sets no `issueRef`, so its
-  claim had none; the DELIVERED booking of the slip settled only the ship's ref, the pick claim stayed outstanding for
-  ever, and the next quality hold made free stock negative and refused every journal issue, ship and consume of the
-  product. An inventory issue now also settles the `PICK` claims without a ref, and a journal issue (production
-  consumption) the groups that hold a `CONSUME` claim, each up to what it still has outstanding. Settlement keys start
-  `issued:` and `ClaimIssue` refuses a caller key that does, which would have made a settlement a silent no-op. Inventory
-  migrations 0040 and 0041 let an `ISSUED` row carry no ref. Sales and fulfillment: tests for the slip's
-  `:record-progress` call emitting `orderprogress.recorded` and for inventory booking the slip's delivery.
+- Issue claims are settled by the issue that can be linked to them (#33). A warehouse pick sets no `issueRef`, so
+  its claim had none and the DELIVERED booking of its units left it outstanding. An issue that names a ref (the DELIVERED
+  booking, or a `transactions:apply` registration with the new optional `issueRef`) now settles the claims of that ref and
+  then the ref-less `PICK` claims, drawing on the quantity it moved once and net of what left the warehouse; journals and
+  registrations that name no ref settle nothing, so a scrap cannot release another order's claim. Settlement keys start
+  `issued:` and `ClaimIssue` refuses a caller key that does. Inventory migrations 0040 and 0041 let an `ISSUED` row carry no
+  ref. Production consumption claims stay until the consumption is booked with its ref or released (production books none in
+  inventory yet). Sales and inventory tests follow a posted slip's `:record-progress` call to the event and the booking.
 - edi EDIFACT ORDERS (#35, found by the partner simulator): a charge amount (MOA 23 or 204) written with a decimal
   comma was stored in the canonical order as text such as `12,50`, and one that was not a number passed unchecked; it
   now takes the decimal point (two decimals unless the partner writes more, like the 850's SAC05) and a non-numeric
