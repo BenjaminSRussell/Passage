@@ -103,12 +103,13 @@ func ProductionItemRef(orderID, itemID string) string {
 // ProductionItemRef forms: a ref in any other spelling (upper case, another
 // prefix) would never match the claims taken under the canonical one.
 func CanonicalRef(ref string) bool {
+	canonical := func(id string) bool { c, ok := ids.Canonical(id); return ok && c == id }
 	switch kind, rest, _ := strings.Cut(ref, ":"); kind {
 	case "SALES_LINE":
-		return ids.Valid(rest) && rest == strings.ToLower(rest) && ref == SalesLineRef(rest)
+		return canonical(rest)
 	case "PRODUCTION_ORDER":
 		order, item, ok := strings.Cut(rest, ":")
-		return ok && ids.Valid(order) && ids.Valid(item) && ref == ProductionItemRef(order, item)
+		return ok && canonical(order) && canonical(item)
 	}
 	return false
 }

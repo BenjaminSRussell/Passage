@@ -194,7 +194,7 @@ batch, so a batch with no hold cannot reach another batch's held stock
 (`platform/go/issueclaim`) sends each movement's key with an attempt id, so a failed double submit withdraws only its own claim
 (`TestClaimAll_EachAttemptOwnsItsClaim`, fulfillment `TestPostPackingSlip_FailedDoubleSubmitKeepsTheCommittedClaim`). A claim
 whose withdrawal is lost (crash between claim and commit) stays and only makes later movements stricter. Which claims an issue settles
-(migrations 0040 and 0041 let an `ISSUED` row carry no ref; settlement keys start `issued:`, which `ClaimIssue` refuses in a
+(settlement keys start `issued:`, which `ClaimIssue` refuses in a
 caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): only an issue that names a ref settles anything, and
 it settles only the claims of that ref (the postings consumer's DELIVERED booking of a sales order line, ref `SALES_LINE:<line id>`),
 drawing on the quantity it moved once, net of what left the warehouse, and never more than the ref still has outstanding. Claims

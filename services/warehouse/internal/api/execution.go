@@ -478,7 +478,7 @@ func (a *API) createWork(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.OrderLineID != "" {
 			switch {
-			case in.Direction != domain.DirectionPick || !ids.Valid(in.OrderLineID):
+			case in.Direction != domain.DirectionPick || !issueclaim.CanonicalRef(issueclaim.SalesLineRef(in.OrderLineID)):
 				fields[p+".orderLineId"] = "must be a sales order line id, on a PICK line"
 			case attrs[issueclaim.RefAttribute] != "":
 				fields[p+".orderLineId"] = "and the issueRef attribute name the same thing: give one"

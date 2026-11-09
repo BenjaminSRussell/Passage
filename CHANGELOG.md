@@ -317,8 +317,8 @@ release may change public APIs.
   settles only the claims of that line's ref, once and net of what left the warehouse; claims without a ref and claims of other
   refs are never settled by an issue, so one line's delivery cannot release another line's pick and move held stock. Journals,
   status steps and registrations settle nothing, and `transactions:apply` takes no `issueRef` (refused). Settlement keys start
-  `issued:` and `ClaimIssue` refuses a caller key that does. Inventory migrations 0040 and 0041 let an `ISSUED` row carry no
-  ref. Production consumption claims stay until released (production books none in inventory yet). Sales and inventory tests
+  `issued:` and `ClaimIssue` refuses a caller key that does.
+  Production consumption claims stay until released (production books none in inventory yet). Sales and inventory tests
   follow a posted slip's `:record-progress` call to the event and the booking.
 - Warehouse picks for a sales order line are linked to the line's ship claim (#33). A work line takes the new optional
   `orderLineId` (PICK only; becomes the `issueRef` attribute `SALES_LINE:<id>`, refused together with an explicit `issueRef`;

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -261,5 +262,28 @@ func TestFake_AHoldAfterThePickStopsTheShipOfWhatWasPicked(t *testing.T) {
 	f.Set(product, d(10), d(0))
 	if err := f.Claim(ctx, mk("ship-after", issueclaim.Ship)); err != nil {
 		t.Fatalf("ship after the usage decision: %v", err)
+	}
+}
+
+func TestCanonicalRef(t *testing.T) {
+	id := "0190f0a0-0000-7000-8000-0000000000a1"
+	plain := "0190f0a000007000800000000000" + "00a1"
+	for ref, want := range map[string]bool{
+		"SALES_LINE:" + id:                     true,
+		"PRODUCTION_ORDER:" + id + ":" + id:    true,
+		"SALES_LINE:" + plain:                  false,
+		"SALES_LINE:{" + id + "}":              false,
+		"SALES_LINE:urn:uuid:" + id:            false,
+		"SALES_LINE:" + strings.ToUpper(id):    false,
+		"SALES_LINE:":                          false,
+		"PRODUCTION_ORDER:" + id:               false,
+		"PRODUCTION_ORDER:" + id + ":" + plain: false,
+		"PRODUCTION_ORDER:" + id + ":x":        false,
+		"OTHER:" + id:                          false,
+		"":                                     false,
+	} {
+		if got := issueclaim.CanonicalRef(ref); got != want {
+			t.Errorf("CanonicalRef(%q) = %v, want %v", ref, got, want)
+		}
 	}
 }

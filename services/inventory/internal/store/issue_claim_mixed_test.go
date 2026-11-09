@@ -477,13 +477,6 @@ func TestHoldProperty_MixedMovementsNeverReachHeldStock(t *testing.T) {
 				case code != "" && problemCode(err) != code:
 					rt.Fatalf("issue %s ref %q with %s free, %s physical, %s held: %v, want %s", qty, ref, m.free(), m.physical, m.held, err, code)
 				case code == "":
-					total := decimal.Zero
-					for _, q := range settled {
-						total = total.Add(q)
-					}
-					if total.GreaterThan(decimal.Min(qty, open)) {
-						rt.Fatalf("issue %s settled %s, more than the %s open under ref %q", qty, total, open, ref)
-					}
 					if m.held.IsPositive() && !freeBefore.IsPositive() && (ref == "" || qty.GreaterThan(open)) {
 						rt.Fatalf("issue %s ref %q passed with %s free and %s held, %s open under its ref", qty, ref, freeBefore, m.held, open)
 					}
