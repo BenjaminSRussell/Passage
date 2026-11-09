@@ -125,15 +125,28 @@ func decode[T any](t *testing.T, r stack.Response) T {
 	return out
 }
 
+type flowClients struct {
+	party, purchasing, approving, receiving, clerkReceiving, ledger stack.Client
+	approverID, ledgerID                                            string
+}
+
 func TestVendorPurchaseOrderReceiptInvoiceLedgerFlow(t *testing.T) {
 	s := startStack(t)
-	party := stack.Client{Base: s.URL("party"), Principal: buyer}
-	purchasing := stack.Client{Base: s.URL("purchasing"), Principal: buyer}
-	approving := stack.Client{Base: s.URL("purchasing"), Principal: approver}
-	receiving := stack.Client{Base: s.URL("receiving"), Principal: buyer}
-	clerkReceiving := stack.Client{Base: s.URL("receiving"), Principal: clerk}
-	ledger := stack.Client{Base: s.URL("ledger"), Principal: buyer}
+	runFlow(t, flowClients{
+		party:          stack.Client{Base: s.URL("party"), Principal: buyer},
+		purchasing:     stack.Client{Base: s.URL("purchasing"), Principal: buyer},
+		approving:      stack.Client{Base: s.URL("purchasing"), Principal: approver},
+		receiving:      stack.Client{Base: s.URL("receiving"), Principal: buyer},
+		clerkReceiving: stack.Client{Base: s.URL("receiving"), Principal: clerk},
+		ledger:         stack.Client{Base: s.URL("ledger"), Principal: buyer},
+		approverID:     approver.User,
+		ledgerID:       s.LedgerID,
+	}, s.URL("purchasing"))
+}
 
+func runFlow(t *testing.T, c flowClients, purchasingURL string) {
+	t.Helper()
+	party, purchasing, approving, receiving, clerkReceiving, ledger := c.party, c.purchasing, c.approving, c.receiving, c.clerkReceiving, c.ledger
 	group := must(t, party, http.MethodPost, "/v1/party/vendor-groups", map[string]any{"code": "TRADE", "name": "Trade vendors"}, nil, http.StatusCreated)
 	partyRec := must(t, party, http.MethodPost, "/v1/party/parties", map[string]any{"partyType": "organization", "legalName": "Acme Supplies Ltd"}, nil, http.StatusCreated)
 	if partyRec.String("partyNumber") != "P-000001" {
@@ -147,7 +160,7 @@ func TestVendorPurchaseOrderReceiptInvoiceLedgerFlow(t *testing.T) {
 
 	today := time.Now().UTC().Format("2006-01-02")
 	productID := "7d1c0b9e-3a55-4c1b-9d6e-0a1f6a1d0c11"
-	if err := stack.GrantPurchaseOrderLimit(context.Background(), s.URL("purchasing"), approver.User); err != nil {
+	if err := stack.GrantPurchaseOrderLimit(context.Background(), purchasingURL, c.approverID); err != nil {
 		t.Fatal(err)
 	}
 	po := must(t, purchasing, http.MethodPost, "/v1/procurement/purchase-orders", map[string]any{
@@ -207,7 +220,7 @@ func TestVendorPurchaseOrderReceiptInvoiceLedgerFlow(t *testing.T) {
 		t.Fatalf("invoice entry should clear GR/IR into vendor control for 250.00: %+v", invoiceEntry)
 	}
 
-	tb := decode[trialBalance](t, must(t, ledger, http.MethodGet, "/v1/ledger/balances?ledger="+s.LedgerID, nil, nil, http.StatusOK))
+	tb := decode[trialBalance](t, must(t, ledger, http.MethodGet, "/v1/ledger/balances?ledger="+c.ledgerID, nil, nil, http.StatusOK))
 	if !tb.Balanced || tb.net("1400") != "250.00" || tb.net("2000") != "-250.00" || tb.net("2100") != "0.00" {
 		t.Fatalf("trial balance after the flow: %+v", tb)
 	}

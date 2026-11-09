@@ -23,12 +23,12 @@ test("an admin signs in through Keycloak, sees admin navigation and may call adm
   await signIn(page, "admin", "passage-admin-dev");
   await expect(page.getByRole("link", { name: "Audit" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Users" })).toBeVisible();
-  expect([401, 403]).not.toContain(await apiStatus(page, "/api/v1/numbering/sequences"));
+  expect([401, 403]).not.toContain(await apiStatus(page, "/api/v1/numbering/sequences/PARTY"));
 });
 
 test("a clerk signs in, sees no admin navigation and is refused by the API with 403", async ({ page }) => {
   await signIn(page, "clerk", "passage-clerk-dev");
   await expect(page.getByRole("link", { name: "Audit" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Users" })).toHaveCount(0);
-  expect(await apiStatus(page, "/api/v1/numbering/sequences")).toBe(403);
+  expect(await apiStatus(page, "/api/v1/numbering/sequences/PARTY")).toBe(403);
 });

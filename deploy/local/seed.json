@@ -18,6 +18,7 @@
         "identity.user.maintain",
         "ledger.balance.read",
         "ledger.journal.read",
+        "numbering.read",
         "numbering.sequence.maintain",
         "numbering.write",
         "party.read",
