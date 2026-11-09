@@ -8,6 +8,7 @@ import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { demoNote } from "./metadata";
 import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
+import { WorkContextProvider } from "./lookup/workContext";
 import { devDuties, PrincipalProvider } from "./principal";
 import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
@@ -235,6 +236,7 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
 
   return (
     <PrincipalProvider duties={principalDuties}>
+      <WorkContextProvider>
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
           Skip to content
@@ -256,6 +258,7 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
               menuRef={menuRef}
               drawerOpen={drawerOpen}
               compact={density === "compact"}
+              showContext={principalDuties.includes("org.read")}
               onOpenDrawer={() => setDrawerOpen(true)}
               onApplyView={applySavedView}
               onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
@@ -284,6 +287,7 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
         ) : null}
         {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
       </div>
+      </WorkContextProvider>
     </PrincipalProvider>
   );
 }
