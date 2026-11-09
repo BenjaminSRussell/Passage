@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -300,13 +301,19 @@ func (a *API) saft(w http.ResponseWriter, r *http.Request) {
 		in.Entries = append(in.Entries, saft.Entry{Code: t.Code, Direction: t.Direction, Amount: t.Amount, Count: t.Count})
 	}
 	if ledgerID := q.Get("ledger_id"); ledgerID != "" {
-		if in.Journals, err = a.saftJournals(r.Context(), ledgerID, period); err != nil {
+		extract, err := a.saftExtract(r.Context(), ledgerID, in.Currency, period)
+		if err != nil {
 			a.reject(w, r, err)
 			return
 		}
+		in.Accounts, in.Journals = extract.Accounts, extract.Journals
 	}
 	doc, err := saft.Build(in)
 	if err != nil {
+		var de *saft.DocumentError
+		if errors.As(err, &de) && len(in.Journals) > 0 {
+			err = fmt.Errorf("%w: %w", ledger.ErrBadData, err)
+		}
 		a.reject(w, r, err)
 		return
 	}
@@ -314,29 +321,14 @@ func (a *API) saft(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(doc)
 }
 
-func (a *API) saftJournals(ctx context.Context, ledgerID string, period domain.Period) ([]saft.Journal, error) {
-	reader, ok := a.ledger.(ledgerclient.LineReader)
+func (a *API) saftExtract(ctx context.Context, ledgerID, currency string, period domain.Period) (ledger.Extract, error) {
+	src, ok := a.ledger.(ledgerclient.AuditReader)
 	if !ok {
-		return nil, ledger.ErrNotConfigured
+		return ledger.Extract{}, ledger.ErrNotConfigured
 	}
 	if !ids.Valid(ledgerID) {
-		return nil, invalid("ledger_id", "ledger_id must be a UUID")
+		return ledger.Extract{}, invalid("ledger_id", "ledger_id must be a UUID")
 	}
 	p, _ := tenant.FromContext(ctx)
-	owner, err := a.ledger.LegalEntity(ctx, p.LegalEntityID, ledgerID)
-	if err != nil {
-		if ledgerclient.Rejected(err) {
-			return nil, invalid("ledger_id", "ledger_id is not a ledger of this legal entity")
-		}
-		return nil, fmt.Errorf("%w: ledger lookup: %w", ledger.ErrRead, err)
-	}
-	if owner != p.LegalEntityID {
-		return nil, invalid("ledger_id", "ledger_id is not a ledger of this legal entity")
-	}
-	lines, err := reader.JournalLines(ctx, ledgerclient.LineQuery{LegalEntityID: p.LegalEntityID, LedgerID: ledgerID,
-		DateFrom: period.From.Format(dateLayout), DateTo: period.To.Format(dateLayout)})
-	if err != nil {
-		return nil, fmt.Errorf("%w: journal lines: %w", ledger.ErrRead, err)
-	}
-	return ledger.Journals(lines)
+	return ledger.Audit(ctx, src, p.LegalEntityID, ledgerID, currency, period)
 }

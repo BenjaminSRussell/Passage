@@ -365,6 +365,7 @@ func TestSAFTExportEmitsTheLedgerJournalsOfTheEntityLedger(t *testing.T) {
 	fake.AddLedger(foreignLedger, other)
 	postJournal(t, fake, entity, ledgerID, "d1", "2026-01-10", "100.00")
 	postJournal(t, fake, entity, ledgerID, "d2", "2026-01-20", "40.50")
+	postJournal(t, fake, entity, ledgerID, "prior", "2025-12-20", "5.00")
 	postJournal(t, fake, entity, ledgerID, "outside", "2026-02-03", "9.00")
 	postJournal(t, fake, other, foreignLedger, "foreign", "2026-01-11", "7.00")
 	r, _ := routerWith(&fakeStore{}, nil, fake)
@@ -374,7 +375,7 @@ func TestSAFTExportEmitsTheLedgerJournalsOfTheEntityLedger(t *testing.T) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"<NumberOfEntries>2</NumberOfEntries>", "<TotalDebit>140.5</TotalDebit>", "<TotalCredit>140.5</TotalCredit>", "<JournalID>ar_invoice</JournalID>"} {
+	for _, want := range []string{"<NumberOfEntries>2</NumberOfEntries>", "<TotalDebit>140.5</TotalDebit>", "<TotalCredit>140.5</TotalCredit>", "<JournalID>ar_invoice</JournalID>", "<AccountID>8000</AccountID>", "<OpeningDebitBalance>5</OpeningDebitBalance>", "<ClosingDebitBalance>145.5</ClosingDebitBalance>", "<OpeningCreditBalance>5</OpeningCreditBalance>", "<ClosingCreditBalance>145.5</ClosingCreditBalance>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %s in %s", want, body)
 		}
@@ -399,9 +400,11 @@ func TestSAFTExportEmitsTheLedgerJournalsOfTheEntityLedger(t *testing.T) {
 }
 
 func TestSAFTExportRefusesALedgerOfAnotherEntityAndBadInput(t *testing.T) {
-	entity, other, foreignLedger := ids.New(), ids.New(), ids.New()
+	entity, other, foreignLedger, ledgerID := ids.New(), ids.New(), ids.New(), ids.New()
 	fake := ledgerclient.NewFake()
 	fake.AddLedger(foreignLedger, other)
+	fake.AddLedger(ledgerID, entity)
+	postJournal(t, fake, entity, ledgerID, "d1", "2026-01-10", "100.00")
 	r, _ := routerWith(&fakeStore{}, nil, fake)
 	for name, tc := range map[string]struct {
 		query string
@@ -410,6 +413,8 @@ func TestSAFTExportRefusesALedgerOfAnotherEntityAndBadInput(t *testing.T) {
 		"ledger of another entity": {saftQuery + "&ledger_id=" + foreignLedger, http.StatusBadRequest},
 		"unknown ledger":           {saftQuery + "&ledger_id=" + ids.New(), http.StatusBadRequest},
 		"not a uuid":               {saftQuery + "&ledger_id=nope", http.StatusBadRequest},
+		"partial month":            {strings.Replace(saftQuery, "2026-01-31", "2026-01-30", 1) + "&ledger_id=" + ledgerID, http.StatusBadRequest},
+		"currency differs":         {strings.Replace(saftQuery, "EUR", "USD", 1) + "&ledger_id=" + ledgerID, http.StatusUnprocessableEntity},
 	} {
 		if rec := saftCall(r, entity, tc.query); rec.Code != tc.want {
 			t.Errorf("%s: got %d %s", name, rec.Code, rec.Body.String())
@@ -441,9 +446,14 @@ func TestSAFTExportRefusesAnUnbalancedLedgerAndSurfacesLedgerOutages(t *testing.
 	fake := ledgerclient.NewFake()
 	fake.AddLedger(ledgerID, entity)
 	query := saftQuery + "&ledger_id=" + ledgerID
+	postJournal(t, fake, entity, ledgerID, "d1", "2026-01-10", "10.00")
 	unbalanced, _ := routerWith(&fakeStore{}, nil, brokenLines{fake})
-	if rec := saftCall(unbalanced, entity, query); rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "<AuditFile") {
-		t.Fatalf("exported an unbalanced ledger: %d %s", rec.Code, rec.Body.String())
+	rec := saftCall(unbalanced, entity, query)
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "TAX-0012") || strings.Contains(rec.Body.String(), "<AuditFile") {
+		t.Fatalf("unbalanced ledger: got %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "e1") || strings.Contains(rec.Body.String(), "1200") {
+		t.Fatalf("problem body names ledger values: %s", rec.Body.String())
 	}
 	down, _ := routerWith(&fakeStore{}, nil, failingLines{fake})
 	if rec := saftCall(down, entity, query); rec.Code != http.StatusBadGateway {

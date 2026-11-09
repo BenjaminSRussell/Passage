@@ -84,7 +84,7 @@ var serviceGrants = map[string]map[string][]string{
 		"compliance": {"compliance.legal-hold.check"},
 	},
 	"tax": {
-		"ledger": {"ledger.balance.read", "ledger.entry.lookup", "ledger.ledger.lookup"},
+		"ledger": {"ledger.balance.read", "ledger.entry.lookup", "ledger.ledger.lookup", "ledger.account.lookup"},
 	},
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},

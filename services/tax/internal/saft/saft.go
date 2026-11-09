@@ -13,13 +13,14 @@ import (
 )
 
 const (
-	Namespace     = "urn:OECD:StandardAuditFile-Tax:2.00"
-	FileVersion   = "2.00"
-	softwareName  = "Passage"
-	softwareID    = "passage-tax"
-	softwareBuild = "1"
-	dateLayout    = "2006-01-02"
-	maxNameLength = 200
+	Namespace      = "urn:OECD:StandardAuditFile-Tax:2.00"
+	FileVersion    = "2.00"
+	softwareName   = "Passage"
+	softwareID     = "passage-tax"
+	softwareBuild  = "1"
+	dateLayout     = "2006-01-02"
+	dateTimeLayout = "2006-01-02T15:04:05"
+	maxNameLength  = 200
 )
 
 var (
@@ -42,9 +43,15 @@ type Input struct {
 	Period             domain.Period
 	Created            time.Time
 	Entries            []Entry
+	Accounts           []Account
 	Customers          []Party
 	Suppliers          []Party
 	Journals           []Journal
+}
+
+type Account struct {
+	ID, Description, Type string
+	Opening, Closing      decimal.Decimal
 }
 
 type Party struct{ ID, AccountID, TaxID, Name string }
@@ -96,9 +103,28 @@ type selectionOf struct {
 }
 
 type masterFiles struct {
+	Accounts  *accountList  `xml:"GeneralLedgerAccounts"`
 	Customers *customerList `xml:"Customers"`
 	Suppliers *supplierList `xml:"Suppliers"`
 	TaxTable  taxTable      `xml:"TaxTable"`
+}
+
+type accountList struct {
+	Items []accountXML `xml:"Account"`
+}
+
+type accountXML struct {
+	AccountID          string `xml:"AccountID"`
+	AccountDescription string `xml:"AccountDescription"`
+	AccountType        string `xml:"AccountType"`
+	OpeningDebit       string `xml:"OpeningDebitBalance,omitempty"`
+	OpeningCredit      string `xml:"OpeningCreditBalance,omitempty"`
+	ClosingDebit       string `xml:"ClosingDebitBalance,omitempty"`
+	ClosingCredit      string `xml:"ClosingCreditBalance,omitempty"`
+}
+
+type amountXML struct {
+	Amount string `xml:"Amount"`
 }
 
 type customerList struct {
@@ -140,19 +166,22 @@ type journalXML struct {
 type transactionXML struct {
 	TransactionID   string    `xml:"TransactionID"`
 	Period          int       `xml:"Period"`
+	PeriodYear      int       `xml:"PeriodYear"`
 	TransactionDate string    `xml:"TransactionDate"`
 	Description     string    `xml:"Description"`
+	SystemEntryDate string    `xml:"SystemEntryDate"`
+	GLPostingDate   string    `xml:"GLPostingDate"`
 	Lines           []lineXML `xml:"Line"`
 }
 
 type lineXML struct {
-	RecordID     string `xml:"RecordID"`
-	AccountID    string `xml:"AccountID"`
-	Description  string `xml:"Description"`
-	DebitAmount  string `xml:"DebitAmount,omitempty"`
-	CreditAmount string `xml:"CreditAmount,omitempty"`
-	CustomerID   string `xml:"CustomerID,omitempty"`
-	SupplierID   string `xml:"SupplierID,omitempty"`
+	RecordID     string     `xml:"RecordID"`
+	AccountID    string     `xml:"AccountID"`
+	Description  string     `xml:"Description"`
+	DebitAmount  *amountXML `xml:"DebitAmount"`
+	CreditAmount *amountXML `xml:"CreditAmount"`
+	CustomerID   string     `xml:"CustomerID,omitempty"`
+	SupplierID   string     `xml:"SupplierID,omitempty"`
 }
 
 type taxTable struct {
@@ -183,6 +212,7 @@ func Build(in Input) ([]byte, error) {
 		doc.MasterFiles.TaxTable.Entries = append(doc.MasterFiles.TaxTable.Entries,
 			taxTableEntry{TaxType: e.Direction, TaxCode: e.Code, TaxAmount: e.Amount.String(), NumberOfTransactions: e.Count})
 	}
+	doc.addAccounts(in)
 	doc.addParties(in)
 	doc.addLedger(in)
 	body, err := xml.MarshalIndent(doc, "", "  ")
@@ -194,6 +224,26 @@ func Build(in Input) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func balanceSides(net decimal.Decimal) (debit, credit string) {
+	if net.IsNegative() {
+		return "", net.Neg().String()
+	}
+	return net.String(), ""
+}
+
+func (d *auditFile) addAccounts(in Input) {
+	if len(in.Accounts) == 0 {
+		return
+	}
+	d.MasterFiles.Accounts = &accountList{}
+	for _, a := range in.Accounts {
+		x := accountXML{AccountID: a.ID, AccountDescription: a.Description, AccountType: a.Type}
+		x.OpeningDebit, x.OpeningCredit = balanceSides(a.Opening)
+		x.ClosingDebit, x.ClosingCredit = balanceSides(a.Closing)
+		d.MasterFiles.Accounts.Items = append(d.MasterFiles.Accounts.Items, x)
+	}
 }
 
 func (d *auditFile) addParties(in Input) {
@@ -220,15 +270,16 @@ func (d *auditFile) addLedger(in Input) {
 	for _, j := range in.Journals {
 		jx := journalXML{JournalID: j.ID, Description: j.Description, Type: j.Type}
 		for _, t := range j.Transactions {
-			tx := transactionXML{TransactionID: t.ID, Period: int(t.Date.Month()), TransactionDate: t.Date.Format(dateLayout), Description: t.Description}
+			tx := transactionXML{TransactionID: t.ID, Period: int(t.Date.Month()), PeriodYear: t.Date.Year(), TransactionDate: t.Date.Format(dateLayout),
+				Description: t.Description, SystemEntryDate: t.Date.Format(dateTimeLayout), GLPostingDate: t.Date.Format(dateLayout)}
 			for _, l := range t.Lines {
 				lx := lineXML{RecordID: l.RecordID, AccountID: l.AccountID, Description: l.Description, CustomerID: l.CustomerID, SupplierID: l.SupplierID}
 				if !l.Debit.IsZero() {
-					lx.DebitAmount = l.Debit.String()
+					lx.DebitAmount = &amountXML{Amount: l.Debit.String()}
 					debit = debit.Add(l.Debit)
 				}
 				if !l.Credit.IsZero() {
-					lx.CreditAmount = l.Credit.String()
+					lx.CreditAmount = &amountXML{Amount: l.Credit.String()}
 					credit = credit.Add(l.Credit)
 				}
 				tx.Lines = append(tx.Lines, lx)

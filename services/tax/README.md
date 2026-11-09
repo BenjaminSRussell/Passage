@@ -21,7 +21,7 @@ DATABASE_URL=postgres://... go run ./cmd/tax
 | `MIGRATE_ON_START` | `true` applies `migrations/` at start (the chart sets it from `migrateOnStart`) |
 | `LEDGER_URL` | base URL of the ledger service; unset leaves `POST /v1/tax/settlements:run` answering 503 |
 | `LEDGER_TIMEOUT` | ledger call timeout, default 3s |
-| `PASSAGE_SERVICE_SIGNING_KEY` or `PASSAGE_SERVICE_SIGNING_KEY_FILE`, `PASSAGE_SERVICE_NAME` | the service identity the ledger call is signed with; required when `LEDGER_URL` is set. `service_grants.tax.ledger` in `policies/authz/data.json` (mirrored in `platform/go/tenant`) grants it `ledger.balance.read`, plus `ledger.entry.lookup` and `ledger.ledger.lookup` for the SAF-T export, and nothing else |
+| `PASSAGE_SERVICE_SIGNING_KEY` or `PASSAGE_SERVICE_SIGNING_KEY_FILE`, `PASSAGE_SERVICE_NAME` | the service identity the ledger call is signed with; required when `LEDGER_URL` is set. `service_grants.tax.ledger` in `policies/authz/data.json` (mirrored in `platform/go/tenant`) grants it `ledger.balance.read`, plus `ledger.entry.lookup`, `ledger.ledger.lookup` and `ledger.account.lookup` for the SAF-T export, and nothing else |
 
 ## API
 

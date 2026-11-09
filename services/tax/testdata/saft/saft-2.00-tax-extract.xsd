@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This file is a STRICT SUBSET of the official OECD SAF-T 2.00 schema: every document it accepts must also be accepted by the
+  official schema, and it never loosens an element's shape (order, cardinality, type) to fit the exporter. It models only part of
+  the official content model (see SOURCE.md for what is missing). It is NOT the official schema and MUST be replaced by the
+  official XSD once that is fetched by hand.
+-->
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
            xmlns="urn:OECD:StandardAuditFile-Tax:2.00"
            targetNamespace="urn:OECD:StandardAuditFile-Tax:2.00"
@@ -19,6 +25,14 @@
       <xs:enumeration value="use"/>
     </xs:restriction>
   </xs:simpleType>
+  <xs:complexType name="AmountStructure">
+    <xs:sequence>
+      <xs:element name="Amount" type="xs:decimal"/>
+      <xs:element name="CurrencyCode" type="CurrencyCode" minOccurs="0"/>
+      <xs:element name="CurrencyAmount" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="ExchangeRate" type="xs:decimal" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
   <xs:element name="AuditFile">
     <xs:complexType>
       <xs:sequence>
@@ -54,6 +68,29 @@
         <xs:element name="MasterFiles">
           <xs:complexType>
             <xs:sequence>
+              <xs:element name="GeneralLedgerAccounts" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="Account" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="AccountID" type="Text200"/>
+                          <xs:element name="AccountDescription" type="Text200"/>
+                          <xs:element name="AccountType" type="Text200"/>
+                          <xs:choice>
+                            <xs:element name="OpeningDebitBalance" type="xs:decimal"/>
+                            <xs:element name="OpeningCreditBalance" type="xs:decimal"/>
+                          </xs:choice>
+                          <xs:choice>
+                            <xs:element name="ClosingDebitBalance" type="xs:decimal"/>
+                            <xs:element name="ClosingCreditBalance" type="xs:decimal"/>
+                          </xs:choice>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
               <xs:element name="Customers" minOccurs="0">
                 <xs:complexType>
                   <xs:sequence>
@@ -122,8 +159,11 @@
                         <xs:sequence>
                           <xs:element name="TransactionID" type="Text200"/>
                           <xs:element name="Period"><xs:simpleType><xs:restriction base="xs:integer"><xs:minInclusive value="1"/><xs:maxInclusive value="12"/></xs:restriction></xs:simpleType></xs:element>
+                          <xs:element name="PeriodYear"><xs:simpleType><xs:restriction base="xs:integer"><xs:minInclusive value="1900"/><xs:maxInclusive value="2100"/></xs:restriction></xs:simpleType></xs:element>
                           <xs:element name="TransactionDate" type="xs:date"/>
                           <xs:element name="Description" type="xs:string"/>
+                          <xs:element name="SystemEntryDate" type="xs:dateTime"/>
+                          <xs:element name="GLPostingDate" type="xs:date"/>
                           <xs:element name="Line" minOccurs="2" maxOccurs="unbounded">
                             <xs:complexType>
                               <xs:sequence>
@@ -131,8 +171,8 @@
                                 <xs:element name="AccountID" type="Text200"/>
                                 <xs:element name="Description" type="xs:string"/>
                                 <xs:choice>
-                                  <xs:element name="DebitAmount" type="xs:decimal"/>
-                                  <xs:element name="CreditAmount" type="xs:decimal"/>
+                                  <xs:element name="DebitAmount" type="AmountStructure"/>
+                                  <xs:element name="CreditAmount" type="AmountStructure"/>
                                 </xs:choice>
                                 <xs:element name="CustomerID" type="Text200" minOccurs="0"/>
                                 <xs:element name="SupplierID" type="Text200" minOccurs="0"/>

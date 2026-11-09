@@ -366,14 +366,14 @@ func TestJournalLines_PagesWithTheEntryLookupDutyPinnedToTheEntity(t *testing.T)
 			t.Errorf("unexpected request %s", r.URL)
 		}
 		if r.URL.Query().Get("cursor") == "" {
-			_, _ = w.Write([]byte(`{"items":[{"entryId":"e1","lineNumber":1,"account":"1200","debitCredit":"D","amountAcct":"10.50","postingDate":"2026-01-02"}],"nextCursor":"5.1"}`))
+			_, _ = w.Write([]byte(`{"items":[{"entryId":"e1","lineNumber":1,"account":"1200","debitCredit":"D","amountAcct":"10.50","postingDate":"2026-01-02","text":"line text"}],"nextCursor":"5.1"}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"items":[{"entryId":"e1","lineNumber":2,"account":"8000","debitCredit":"C","amountAcct":"10.50","postingDate":"2026-01-02"}]}`))
 	})
 	verifier = v
 	lines, err := c.JournalLines(principalCtx(), ledgerclient.LineQuery{LegalEntityID: entityID, LedgerID: ledgerID, DateFrom: "2026-01-01", DateTo: "2026-01-31"})
-	if err != nil || len(lines) != 2 || lines[0].Credit || !lines[1].Credit || !lines[1].Amount.Equal(decimal.RequireFromString("10.5")) {
+	if err != nil || len(lines) != 2 || lines[0].Credit || lines[0].Text != "line text" || !lines[1].Credit || !lines[1].Amount.Equal(decimal.RequireFromString("10.5")) {
 		t.Fatalf("lines %+v err %v", lines, err)
 	}
 	if len(duties) != 2 || !slices.Equal(duties[0], []string{ledgerclient.DutyEntryLookup}) || entities[0] != entityID {

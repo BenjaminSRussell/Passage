@@ -16,6 +16,9 @@ release may change public APIs.
 - `GET /v1/tax/saft?ledger_id=` exports the ledger's journals as GeneralLedgerEntries (#13): new
   `ledgerclient.JournalLines`, the `tax` service grant gains `ledger.entry.lookup` and `ledger.ledger.lookup`, and the ledger
   must belong to the caller's legal entity. Customers and Suppliers stay unfilled (no party reference on ledger lines).
+  The extract now carries GeneralLedgerAccounts from the chart, AmountStructure amounts and the OECD Transaction elements,
+  needs a currency equal to the ledger's (422 TAX-0011), maps unusable ledger data to 502 TAX-0012, and the `tax` grant also
+  gains `ledger.account.lookup`.
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

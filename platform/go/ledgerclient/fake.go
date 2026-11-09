@@ -265,7 +265,39 @@ func (f *Fake) JournalLines(_ context.Context, q LineQuery) ([]JournalLine, erro
 		}
 		for i, l := range s.Lines {
 			out = append(out, JournalLine{EntryID: s.ID, Voucher: s.DocumentID, PostingDate: s.PostingDate, LineNumber: i + 1,
-				Account: l.Account, Credit: l.Credit, Amount: l.Amount, SourceType: s.SourceType, Description: l.Text})
+				Account: l.Account, Credit: l.Credit, Amount: l.Amount, SourceType: s.SourceType, Text: l.Text})
+		}
+	}
+	return out, nil
+}
+
+func (f *Fake) Ledger(_ context.Context, _, ledgerID string) (Info, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	le, ok := f.ledgers[ledgerID]
+	if !ok {
+		return Info{}, ErrNotVisible
+	}
+	info := Info{LegalEntityID: le, Currency: "USD", ChartCode: "CHART"}
+	for _, s := range f.entries {
+		if s.LedgerID == ledgerID {
+			info.Currency = s.Currency
+			break
+		}
+	}
+	return info, nil
+}
+
+func (f *Fake) Accounts(_ context.Context, legalEntityID, _ string) (map[string]ChartAccount, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]ChartAccount{}
+	for _, s := range f.entries {
+		if s.LegalEntityID != legalEntityID {
+			continue
+		}
+		for _, l := range s.Lines {
+			out[l.Account] = ChartAccount{Name: "Account " + l.Account, Type: "asset", Postable: true}
 		}
 	}
 	return out, nil

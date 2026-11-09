@@ -15,12 +15,16 @@ import (
 const (
 	DutyEntryLookup = "ledger.entry.lookup"
 
-	linesPath    = "/v1/ledger/journal-lines"
-	linesPerPage = 1000
-	maxLinePages = 1000
+	linesPath       = "/v1/ledger/journal-lines"
+	linesPerPage    = 1000
+	maxLinePages    = 1000
+	MaxJournalLines = 200_000
 )
 
-var ErrTooManyPages = errors.New("ledger journal-lines: the ledger returned too many pages")
+var (
+	ErrTooManyPages = errors.New("ledger: the ledger returned too many pages")
+	ErrTooManyLines = errors.New("ledger journal-lines: the period holds more lines than one export can carry")
+)
 
 type LineQuery struct {
 	LegalEntityID string
@@ -38,10 +42,13 @@ type JournalLine struct {
 	Credit      bool
 	Amount      decimal.Decimal
 	SourceType  string
-	Description string
+	Text        string
 }
 
-type LineReader interface {
+type AuditReader interface {
+	Ledger(ctx context.Context, legalEntityID, ledgerID string) (Info, error)
+	Accounts(ctx context.Context, legalEntityID, chart string) (map[string]ChartAccount, error)
+	Balances(ctx context.Context, q BalanceQuery) (AccountBalances, error)
 	JournalLines(ctx context.Context, q LineQuery) ([]JournalLine, error)
 }
 
@@ -54,7 +61,7 @@ type journalLineBody struct {
 	DebitCredit string `json:"debitCredit"`
 	AmountAcct  string `json:"amountAcct"`
 	SourceType  string `json:"sourceType"`
-	Description string `json:"description"`
+	Text        string `json:"text"`
 }
 
 type linesPage struct {
@@ -83,8 +90,11 @@ func (c *Client) JournalLines(ctx context.Context, q LineQuery) ([]JournalLine, 
 			if err != nil {
 				return nil, fmt.Errorf("ledger journal-lines: line %d of entry %s: %w", l.LineNumber, l.EntryID, err)
 			}
+			if len(out) >= MaxJournalLines {
+				return nil, ErrTooManyLines
+			}
 			out = append(out, JournalLine{EntryID: l.EntryID, Voucher: l.Voucher, PostingDate: l.PostingDate, LineNumber: l.LineNumber,
-				Account: l.Account, Credit: l.DebitCredit == sideCredit, Amount: amount, SourceType: l.SourceType, Description: l.Description})
+				Account: l.Account, Credit: l.DebitCredit == sideCredit, Amount: amount, SourceType: l.SourceType, Text: l.Text})
 		}
 		if page.NextCursor == "" {
 			return out, nil
