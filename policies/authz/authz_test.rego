@@ -1726,3 +1726,46 @@ test_production_order_end_check if {
 	allowed("production.order.read", "GET", "/v1/production/orders/o-1/end-check")
 	not allowed("production.order.read", "POST", "/v1/production/orders/o-1/end-check")
 }
+
+# Issue #495: the dev seed (deploy/local/seed.json) holds an admin and a clerk; admin routes are the admin's alone.
+dev_seed_assignments := {"tenant-1": {
+	"admin": [
+		"audit.read", "numbering.read", "numbering.sequence.maintain", "numbering.write",
+		"identity.user.maintain", "identity.security-role.maintain",
+	],
+	"clerk": ["receiving.receipt.maintain", "ledger.journal.read", "party.read"],
+}}
+
+dev_seed_decision(user, action, resource) := decision if {
+	decision := data.authz.decision with input as {
+		"subject": {"tenant_id": "tenant-1", "user_id": user},
+		"action": action,
+		"resource": resource,
+	}
+		with data.assignments as dev_seed_assignments
+}
+
+test_dev_seed_admin_reaches_admin_routes if {
+	dev_seed_decision("admin", "POST", "/v1/numbering/sequences").allow
+	dev_seed_decision("admin", "GET", "/v1/numbering/sequences/PARTY").allow
+	dev_seed_decision("admin", "POST", "/v1/identity/users").allow
+}
+
+test_dev_seed_clerk_is_denied_admin_routes_with_a_missing_duty if {
+	numbering := dev_seed_decision("clerk", "POST", "/v1/numbering/sequences")
+	not numbering.allow
+	numbering.duty_missing in {"numbering.write", "numbering.sequence.maintain"}
+	users := dev_seed_decision("clerk", "POST", "/v1/identity/users")
+	not users.allow
+	users.duty_missing != ""
+	not dev_seed_decision("clerk", "GET", "/v1/numbering/sequences/PARTY").allow
+}
+
+test_dev_seed_clerk_keeps_its_own_routes if {
+	dev_seed_decision("clerk", "GET", "/v1/ledger/journal-lines").allow
+	dev_seed_decision("clerk", "GET", "/v1/party/parties/p-1").allow
+}
+
+test_dev_seed_unknown_user_is_denied_everything if {
+	not dev_seed_decision("stranger", "GET", "/v1/ledger/journal-lines").allow
+}
