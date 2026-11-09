@@ -145,7 +145,7 @@ func (a *API) listSites(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	q := r.URL.Query()
-	f := store.SiteFilter{LegalEntityID: q.Get("legalEntityId"), Status: q.Get("status")}
+	f := store.SiteFilter{LegalEntityID: q.Get("legalEntityId"), Status: q.Get("status"), Query: q.Get("q")}
 	for _, c := range []struct {
 		field, rule string
 		invalid     bool

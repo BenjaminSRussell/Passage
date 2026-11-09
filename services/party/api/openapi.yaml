@@ -537,6 +537,114 @@ paths:
         '409': { description: 'PTY-CHANGE-DECIDED: decided differently or by someone else; the same decider repeating the same decision gets 200.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PTY-REASON-TOO-LONG: decision reason exceeds 500 Unicode characters.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties:search:
+    get:
+      operationId: searchParties
+      summary: Search parties by name or number
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number; % and _ match themselves. Merged parties are left out. Results are parties (id is the party id), ordered by name and paged by an opaque cursor.
+      x-passage-duty: party.read
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of hits. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, partyId, partyNumber, name]
+                      properties:
+                        id: { type: string, format: uuid }
+                        partyId: { type: string, format: uuid }
+                        partyNumber: { type: string }
+                        name: { type: string }
+                        accountNumber: { type: string }
+                        blocked: { type: string }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/vendors:search:
+    get:
+      operationId: searchVendors
+      summary: Search vendors by name or number
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are vendor roles in the caller's legal entities (id is the vendor role id; partyId the party), ordered by name and paged by an opaque cursor.
+      x-passage-duty: party.read
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of hits. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, partyId, partyNumber, name]
+                      properties:
+                        id: { type: string, format: uuid }
+                        partyId: { type: string, format: uuid }
+                        partyNumber: { type: string }
+                        name: { type: string }
+                        accountNumber: { type: string }
+                        blocked: { type: string }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/customers:search:
+    get:
+      operationId: searchCustomers
+      summary: Search customers by name or number
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are customer roles in the caller's legal entities (id is the customer role id; partyId the party), ordered by name and paged by an opaque cursor.
+      x-passage-duty: party.read
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of hits. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, partyId, partyNumber, name]
+                      properties:
+                        id: { type: string, format: uuid }
+                        partyId: { type: string, format: uuid }
+                        partyNumber: { type: string }
+                        name: { type: string }
+                        accountNumber: { type: string }
+                        blocked: { type: string }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
