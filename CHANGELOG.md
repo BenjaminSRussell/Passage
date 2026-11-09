@@ -10,6 +10,10 @@ release may change public APIs.
 
 ### Added
 
+- Wave 10 proof P4a (#10): the demo manufacturer's seven AX tables now migrate through the real `target.Loader`
+  (signed service tokens over HTTP to the owning services' import routes, read-back reconciliation) with the
+  cross-reference in Postgres, instead of the in-memory `MemLoader`
+  (`TestPostgres_AXDemoExtractMigratesThroughTheRealLoader`). The recorded demo stays a human step.
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
