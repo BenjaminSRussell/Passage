@@ -1129,3 +1129,80 @@ export function getException(id: string, signal?: AbortSignal): Promise<Warehous
 export function resolveException(id: string, version: number, note: string, key: string): Promise<WarehouseException> {
   return command<WarehouseException>(`/exceptions/${encodeURIComponent(id)}:resolve`, { note }, key, version);
 }
+
+export type ManifestStatus = "CLOSED" | "CANCELLED";
+export const MANIFEST_STATUSES: ManifestStatus[] = ["CLOSED", "CANCELLED"];
+
+/** One labelled parcel (a shipment and a carrier tracking number) on a carrier manifest. */
+export interface ManifestParcel {
+  shipmentId: string;
+  shipmentNumber: string;
+  orderId: string;
+  trackingNumber: string;
+  /** False once the manifest is cancelled. */
+  active: boolean;
+}
+
+/** A carrier manifest (FR-28.6): the end-of-day close-out of the parcels one carrier collects from a warehouse. */
+export interface Manifest {
+  id: string;
+  manifestNumber: string;
+  status: ManifestStatus;
+  legalEntityId: string;
+  warehouseId: string;
+  carrier: string;
+  /** YYYY-MM-DD. */
+  pickupDate: string;
+  providerManifestId?: string | null;
+  parcelCount: number;
+  shipmentCount: number;
+  /** Filled by the read and the close; empty in the list. */
+  parcels: ManifestParcel[];
+  version: number;
+  createdAt: string;
+  cancelledAt?: string | null;
+}
+
+/** A labelled parcel on no active manifest; ready when its shipment has shipped. */
+export interface ManifestCandidate {
+  shipmentId: string;
+  shipmentNumber: string;
+  legalEntityId: string;
+  warehouseId: string;
+  orderId: string;
+  shipmentStatus: string;
+  carrier: string;
+  trackingNumber: string;
+  labelledAt: string;
+  ready: boolean;
+}
+
+export interface ManifestInput {
+  warehouseId: string;
+  legalEntityId: string;
+  carrier: string;
+  pickupDate: string;
+  providerManifestId?: string;
+}
+
+export function listManifests(filter: { status?: ManifestStatus | ""; carrier?: string; warehouseId?: string; limit?: number } = {}, signal?: AbortSignal): Promise<Manifest[]> {
+  return items<Manifest>(`/manifests${query({ limit: 200, ...filter })}`, signal);
+}
+
+export function getManifest(id: string, signal?: AbortSignal): Promise<Manifest> {
+  return send<Manifest>(`/manifests/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function listManifestCandidates(signal?: AbortSignal): Promise<ManifestCandidate[]> {
+  return items<ManifestCandidate>(`/manifest-candidates${query({ limit: 500 })}`, signal);
+}
+
+/** Closes a manifest for the ready parcels of the carrier in the warehouse (fulfillment.warehouse.ship). */
+export function closeManifest(input: ManifestInput, key: string): Promise<Manifest> {
+  return command<Manifest>("/manifests", input, key);
+}
+
+/** Withdraws a CLOSED manifest; its parcels become unmanifested again. version is the one read. */
+export function cancelManifest(id: string, version: number, key: string): Promise<Manifest> {
+  return command<Manifest>(`/manifests/${encodeURIComponent(id)}:cancel`, undefined, key, version);
+}

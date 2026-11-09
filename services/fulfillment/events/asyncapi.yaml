@@ -76,6 +76,16 @@ channels:
     messages:
       warehouseOperationRuleChanged:
         $ref: "#/components/messages/WarehouseOperationRuleChanged"
+  manifestClosed:
+    address: passage.fulfillment.manifest
+    messages:
+      manifestClosed:
+        $ref: "#/components/messages/ManifestClosed"
+  manifestCancelled:
+    address: passage.fulfillment.manifest
+    messages:
+      manifestCancelled:
+        $ref: "#/components/messages/ManifestCancelled"
   deliveryToleranceChanged:
     address: passage.fulfillment.deliverytolerance
     messages:
@@ -269,6 +279,16 @@ operations:
     channel: { $ref: "#/channels/warehouseOperationRuleChanged" }
     messages:
       - $ref: "#/channels/warehouseOperationRuleChanged/messages/warehouseOperationRuleChanged"
+  publishManifestClosed:
+    action: send
+    channel: { $ref: "#/channels/manifestClosed" }
+    messages:
+      - $ref: "#/channels/manifestClosed/messages/manifestClosed"
+  publishManifestCancelled:
+    action: send
+    channel: { $ref: "#/channels/manifestCancelled" }
+    messages:
+      - $ref: "#/channels/manifestCancelled/messages/manifestCancelled"
   publishDeliveryToleranceChanged:
     action: send
     channel: { $ref: "#/channels/deliveryToleranceChanged" }
@@ -648,6 +668,22 @@ components:
           previous_wave_max_lines: { type: integer, minimum: 1, maximum: 2000 }
           previous_wave_max_orders: { type: integer, minimum: 1, maximum: 500 }
           version: { type: integer, minimum: 1 }
+    ManifestClosed:
+      name: dev.passage.fulfillment.manifest.closed.v1
+      title: Carrier manifest closed
+      summary: >
+        The end-of-day manifest of a carrier at a warehouse was closed (FR-28.6): the labelled
+        parcels, each a shipment and a tracking number, that the carrier collects on pickup_date.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ManifestPayload"
+    ManifestCancelled:
+      name: dev.passage.fulfillment.manifest.cancelled.v1
+      title: Carrier manifest cancelled
+      summary: A CLOSED carrier manifest was withdrawn; its parcels are unmanifested again and the next manifest takes them. Same payload as manifest.closed with status CANCELLED.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ManifestPayload"
     WarehouseOperationRuleChanged:
       name: dev.passage.fulfillment.warehouseoperationrule.changed.v1
       title: Warehouse operation rule changed
@@ -1011,6 +1047,30 @@ components:
           type: integer
           minimum: 1
           description: The sales order version; an older event never overwrites a newer one.
+    ManifestPayload:
+      type: object
+      required: [manifest_id, manifest_number, status, legal_entity_id, warehouse, carrier, pickup_date, parcel_count, shipment_count, parcels]
+      properties:
+        manifest_id: { type: string, format: uuid }
+        manifest_number: { type: string, description: "MF- number, gap-free per legal entity." }
+        status: { type: string, enum: [CLOSED, CANCELLED] }
+        legal_entity_id: { type: string, format: uuid }
+        warehouse: { type: string, format: uuid }
+        carrier: { type: string }
+        pickup_date: { type: string, format: date }
+        provider_manifest_id: { type: string, description: "The carrier's own manifest reference, when the caller gave one." }
+        parcel_count: { type: integer, minimum: 1 }
+        shipment_count: { type: integer, minimum: 1 }
+        parcels:
+          type: array
+          items:
+            type: object
+            required: [shipment_id, shipment_number, order_id, tracking_number]
+            properties:
+              shipment_id: { type: string, format: uuid }
+              shipment_number: { type: string }
+              order_id: { type: string, format: uuid }
+              tracking_number: { type: string }
     DropShipPayload:
       type: object
       required: [drop_ship_id, drop_ship_number, status, legal_entity_id, order_id, order_line_id, customer_id, product_id, unit, qty, vendor_id, purchase_order_id, purchase_order_line_id, unit_cost, currency, qty_confirmed, qty_closed, journal]

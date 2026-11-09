@@ -347,6 +347,7 @@ type Store interface {
 	WorkbenchStore
 	WavePickStore
 	TrackingStore
+	ManifestStore
 	Ping(ctx context.Context) error
 }
 

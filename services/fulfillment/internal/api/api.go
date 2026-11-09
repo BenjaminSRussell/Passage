@@ -85,6 +85,7 @@ func (a *API) Routes(r chi.Router) {
 	a.routesPacking(r)
 	a.routesWorkbench(r)
 	a.routesCarrier(r)
+	a.routesManifest(r)
 	a.routesReleaseRule(r)
 	a.routesOperationRule(r)
 	a.routesDeliveryTolerance(r)

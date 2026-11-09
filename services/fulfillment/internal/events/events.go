@@ -25,6 +25,8 @@ var (
 	ASNIssued            = events.Type(Context, "asn", "issued", 1)
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
 	PickTracked          = events.Type(Context, "pick", "tracked", 1)
+	ManifestClosed       = events.Type(Context, "manifest", "closed", 1)
+	ManifestCancelled    = events.Type(Context, "manifest", "cancelled", 1)
 
 	WarehouseSettingChanged       = events.Type(Context, "warehousesetting", "changed", 1)
 	LegalEntitySettingChanged     = events.Type(Context, "legalentitysetting", "changed", 1)
@@ -48,7 +50,7 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged, DeliveryToleranceChanged, WarehouseOperationRuleChanged,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, ContainerNested, ContainerUnnested, WaveCreated, WaveAssigned, WaveClosed, ASNIssued, TrackingUpdated, PickTracked, WarehouseSettingChanged, LegalEntitySettingChanged, WarehouseReleaseRuleChanged, DeliveryToleranceChanged, WarehouseOperationRuleChanged, ManifestClosed, ManifestCancelled,
 		DropShipCreated, DropShipConfirmed, DropShipCancelled, DropShipClosed, ExceptionRaised, ExceptionResolved, ReturnableReturned, ReturnableAdjusted,
 	}
 }
@@ -495,4 +497,29 @@ type DropShipData struct {
 	// Reason is set when the drop-ship was closed or cancelled because sales cancelled the
 	// remainder of the order (ReasonOrderRemainderCancelled): sales already knows.
 	Reason string `json:"reason,omitempty"`
+}
+
+// ManifestParcel is one parcel on a carrier manifest.
+type ManifestParcel struct {
+	ShipmentID     string `json:"shipment_id"`
+	ShipmentNumber string `json:"shipment_number"`
+	OrderID        string `json:"order_id"`
+	TrackingNumber string `json:"tracking_number"`
+}
+
+// ManifestData is published when a carrier manifest is closed
+// (manifest.closed) and when it is cancelled (manifest.cancelled, same shape):
+// the parcels handed to the carrier at the warehouse on the pickup date.
+type ManifestData struct {
+	ManifestID         string           `json:"manifest_id"`
+	ManifestNumber     string           `json:"manifest_number"`
+	Status             string           `json:"status"`
+	LegalEntityID      string           `json:"legal_entity_id"`
+	WarehouseID        string           `json:"warehouse"`
+	Carrier            string           `json:"carrier"`
+	PickupDate         string           `json:"pickup_date"`
+	ProviderManifestID string           `json:"provider_manifest_id,omitempty"`
+	ParcelCount        int              `json:"parcel_count"`
+	ShipmentCount      int              `json:"shipment_count"`
+	Parcels            []ManifestParcel `json:"parcels"`
 }

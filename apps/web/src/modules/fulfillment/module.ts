@@ -8,6 +8,8 @@ import { ExceptionDetailPage } from "./ExceptionDetailPage";
 import { ExceptionsPage } from "./ExceptionsPage";
 import { DropShipDetailPage } from "./DropShipDetailPage";
 import { DropShipsPage } from "./DropShipsPage";
+import { ManifestDetailPage } from "./ManifestDetailPage";
+import { ManifestsPage } from "./ManifestsPage";
 import { LegalEntitySettingsPage } from "./LegalEntitySettingsPage";
 import { OperationRulesPage } from "./OperationRulesPage";
 import { PackagingFeesPage } from "./PackagingFeesPage";
@@ -44,6 +46,8 @@ const fulfillment: PassageModule = {
     { path: "/fulfillment/shipments/:id", element: createElement(ShipmentDetailPage), handle: { title: "Shipment" } },
     { path: "/fulfillment/packing-slips", element: createElement(PackingSlipsPage), handle: { title: "Packing slips" } },
     { path: "/fulfillment/packing-slips/:id", element: createElement(PackingSlipDetailPage), handle: { title: "Packing slip" } },
+    { path: "/fulfillment/manifests", element: createElement(ManifestsPage), handle: { title: "Carrier manifests" } },
+    { path: "/fulfillment/manifests/:id", element: createElement(ManifestDetailPage), handle: { title: "Carrier manifest" } },
     { path: "/fulfillment/drop-ships", element: createElement(DropShipsPage), handle: { title: "Drop-ships" } },
     { path: "/fulfillment/drop-ships/:id", element: createElement(DropShipDetailPage), handle: { title: "Drop-ship" } },
     { path: "/fulfillment/exceptions", element: createElement(ExceptionsPage), handle: { title: "Warehouse exceptions" } },
@@ -72,6 +76,7 @@ const fulfillment: PassageModule = {
     { label: "Pick waves", to: "/fulfillment/waves", duty: "fulfillment.warehouse.view" },
     { label: "Shipments", to: "/fulfillment/shipments", duty: "fulfillment.warehouse.view" },
     { label: "Packing slips", to: "/fulfillment/packing-slips", duty: "fulfillment.warehouse.view" },
+    { label: "Carrier manifests", to: "/fulfillment/manifests", duty: "fulfillment.warehouse.view" },
     { label: "Drop-ships", to: "/fulfillment/drop-ships", duty: "fulfillment.warehouse.view" },
     { label: "Exceptions", to: "/fulfillment/exceptions", duty: "fulfillment.warehouse.view" },
     { label: "Delivered not invoiced", to: "/fulfillment/delivered-not-invoiced", duty: "fulfillment.warehouse.view" },

@@ -51,6 +51,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ManifestId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     LegalEntityId:
       name: legalEntityId
       in: path
@@ -263,6 +268,59 @@ components:
         rtpChargeDays: { type: integer, minimum: 30, maximum: 365, description: "Days after which an outstanding returnable balance of this legal entity is chargeable (FR-28.16); 90 when none is saved." }
         version: { type: integer, minimum: 0, description: "0 when no setting is saved (flags false, GS1 prefix and extension digit null)." }
         updatedAt: { type: [string, "null"], format: date-time }
+    ManifestParcel:
+      type: object
+      required: [shipmentId, shipmentNumber, orderId, trackingNumber, active]
+      description: One labelled parcel (a shipment and a carrier tracking number) on a carrier manifest. Active is false once the manifest is cancelled.
+      properties:
+        shipmentId: { type: string, format: uuid }
+        shipmentNumber: { type: string }
+        orderId: { type: string, format: uuid }
+        trackingNumber: { type: string }
+        active: { type: boolean }
+    Manifest:
+      type: object
+      required: [id, manifestNumber, status, legalEntityId, warehouseId, carrier, pickupDate, parcelCount, shipmentCount, parcels, version, createdAt]
+      description: >
+        A carrier manifest (FR-28.6): the end-of-day close-out of the labelled parcels one carrier
+        collects from one warehouse, so the carrier takes exactly what the warehouse hands over.
+        CLOSED until cancelled; cancelling frees its parcels for the next manifest.
+      properties:
+        id: { type: string, format: uuid }
+        manifestNumber: { type: string, description: "MF- number, gap-free per legal entity." }
+        status: { type: string, enum: [CLOSED, CANCELLED] }
+        legalEntityId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        carrier: { type: string, pattern: "^[a-z0-9-]{2,32}$", description: "Carrier code, as on the label's tracking event." }
+        pickupDate: { type: string, format: date }
+        providerManifestId: { type: [string, "null"], description: "The carrier's own manifest reference when the caller has one." }
+        parcelCount: { type: integer, minimum: 1 }
+        shipmentCount: { type: integer, minimum: 1 }
+        parcels:
+          type: array
+          description: "The parcels on the manifest. Returned by the read and the close, empty in the list."
+          items: { $ref: "#/components/schemas/ManifestParcel" }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        cancelledAt: { type: [string, "null"], format: date-time }
+    ManifestCandidate:
+      type: object
+      required: [shipmentId, shipmentNumber, legalEntityId, warehouseId, orderId, shipmentStatus, carrier, trackingNumber, labelledAt, ready]
+      description: >
+        A labelled parcel that is on no active manifest. Ready is true when its shipment has shipped
+        (a packing slip posted), so it goes on the next manifest; a parcel that is not ready waits
+        for its packing slip and is left out.
+      properties:
+        shipmentId: { type: string, format: uuid }
+        shipmentNumber: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        shipmentStatus: { type: string }
+        carrier: { type: string }
+        trackingNumber: { type: string }
+        labelledAt: { type: string, format: date-time }
+        ready: { type: boolean }
     DropShip:
       type: object
       required: [id, dropShipNumber, status, legalEntityId, orderId, orderLineId, customerId, productId, unit, qty, qtyConfirmed, qtyClosed, qtyOpen, vendorId, purchaseOrderId, purchaseOrderLineId, unitCost, currency, journal, version]
@@ -2919,4 +2977,144 @@ paths:
         "404": { description: "FUL-0060 drop-ship not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0001 the drop-ship is not PARTIALLY_CONFIRMED, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/manifest-candidates:
+    get:
+      operationId: listManifestCandidates
+      summary: List the labelled parcels that are on no manifest (FR-28.6)
+      description: >
+        The parcels a carrier pickup is still missing: every label bought in the last 30 days for a
+        shipment (a LABELLED tracking event; the same tracking number reported twice is one parcel)
+        that is on no active manifest, oldest first, scoped by legal entity. A parcel the carrier has
+        already scanned (IN_TRANSIT or DELIVERED) or of a CANCELLED or DELIVERED shipment is left out.
+        Ready parcels (their shipment is SHIPPED or PARTIALLY_SHIPPED) go on the next manifest; the
+        others wait for their packing slip, which is the exception to chase after the warehouse's cutoff.
+      x-passage-duty: fulfillment.warehouse.view
+      parameters:
+        - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: carrier, in: query, schema: { type: string, pattern: "^[a-z0-9-]{2,32}$" } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Unmanifested parcels, oldest label first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ManifestCandidate" } }
+        "400": { description: "FUL-0050 invalid filter", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/manifests:
+    post:
+      operationId: closeManifest
+      summary: Close a carrier manifest for a warehouse (FR-28.6)
+      description: >
+        Hands every ready parcel of the carrier in the warehouse and legal entity to a new CLOSED
+        manifest with a gap-free MF- number: the end-of-day close-out. Parcels whose shipment has
+        not shipped stay unmanifested. A parcel is on one active manifest at a time, and a concurrent
+        close for the same warehouse and carrier waits for this one. FUL-0076 when no parcel is
+        ready. The manifest is a record in this service; no call is made to the carrier, and
+        providerManifestId stores the carrier's own reference when the caller has one. Publishes
+        manifest.closed.
+      x-passage-duty: fulfillment.warehouse.ship
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [warehouseId, legalEntityId, carrier, pickupDate]
+              properties:
+                warehouseId: { type: string, format: uuid }
+                legalEntityId: { type: string, format: uuid }
+                carrier: { type: string, pattern: "^[a-z0-9-]{2,32}$" }
+                pickupDate: { type: string, format: date, description: "Within 7 days of today." }
+                providerManifestId: { type: string, maxLength: 128 }
+      responses:
+        "201":
+          description: The CLOSED manifest with its parcels; ETag carries its version
+          headers:
+            ETag: { schema: { type: string }, description: The manifest version. }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Manifest" }
+        "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { description: "FUL-0079 a parcel went on another manifest at the same time; reload and close again", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0076 no shipped parcel of the carrier is waiting in the warehouse, FUL-0058 legal entity outside your scope, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+    get:
+      operationId: listManifests
+      summary: List carrier manifests
+      description: Manifests, newest pickup date first, filtered by warehouse, carrier, status and pickup date range; scoped by legal entity. Parcels are not listed; read one manifest for them.
+      x-passage-duty: fulfillment.warehouse.view
+      parameters:
+        - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+        - { name: carrier, in: query, schema: { type: string, pattern: "^[a-z0-9-]{2,32}$" } }
+        - { name: status, in: query, schema: { type: string, enum: [CLOSED, CANCELLED] } }
+        - { name: pickupFrom, in: query, schema: { type: string, format: date } }
+        - { name: pickupTo, in: query, schema: { type: string, format: date } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Manifests, newest pickup first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Manifest" } }
+        "400": { description: "FUL-0050 invalid filter", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/manifests/{id}:
+    get:
+      operationId: getManifest
+      summary: Read one carrier manifest
+      description: One manifest with every parcel on it, active or withdrawn by a cancel.
+      x-passage-duty: fulfillment.warehouse.view
+      parameters:
+        - { $ref: "#/components/parameters/ManifestId" }
+      responses:
+        "200":
+          description: The manifest with its parcels; ETag carries its version
+          headers:
+            ETag: { schema: { type: string }, description: The manifest version. }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Manifest" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0077 manifest not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/manifests/{id}:cancel:
+    post:
+      operationId: cancelManifest
+      summary: Cancel a CLOSED carrier manifest (FR-28.6)
+      description: >
+        Withdraws a manifest closed by mistake (wrong day or carrier). Its parcels are unmanifested
+        again, so the next close takes them. Only a CLOSED manifest can be cancelled (FUL-0001), and
+        not once the carrier has collected from it: a parcel on it scanned IN_TRANSIT or DELIVERED, or
+        its shipment DELIVERED (FUL-0078). Publishes manifest.cancelled.
+      x-passage-duty: fulfillment.warehouse.ship
+      parameters:
+        - { $ref: "#/components/parameters/ManifestId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: The CANCELLED manifest; ETag carries the new version
+          headers:
+            ETag: { schema: { type: string }, description: The manifest version. }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Manifest" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0077 manifest not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "conflict_version", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 the manifest is already cancelled, FUL-0078 the carrier has collected a parcel on it, or idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: "precondition_required", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
