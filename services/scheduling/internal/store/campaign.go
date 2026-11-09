@@ -614,12 +614,24 @@ func (s *Postgres) StartCampaign(ctx context.Context, cmd CampaignCommand, idem 
 }
 
 // CompleteCampaign finishes a started campaign (FR-23.14). Its orders stay on
-// it for the record and campaign.completed is published.
+// it for the record and campaign.completed is published. Its cleanout windows
+// that have not begun are released and the resource's materialized load is
+// rewritten; windows moved with a job or an unscheduled order are not followed
+// (NOT-IMPLEMENTED.md: they clear when the campaign is unplaced, re-placed,
+// cancelled or completed).
 func (s *Postgres) CompleteCampaign(ctx context.Context, cmd CampaignCommand, idem Idem) (Campaign, bool, error) {
-	return s.campaignCommand(ctx, cmd, idem, func(tx pgx.Tx, c Campaign) error {
+	return s.campaignCommandTracked(ctx, cmd, idem, func(ctx context.Context, tx pgx.Tx, c Campaign) error {
 		if conflict := domain.CanComplete(c.Status); conflict != nil {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, conflict.Code, conflict.Detail)
 		}
+		// Cleanout windows that have not begun are not going to be run: they
+		// stop closing the resource. Windows already run stay as history, and
+		// one under way stays whole: a cleanout is never split (BR-23.13), so
+		// the resource is not free until the cleaning in progress ends.
+		if _, err := tx.Exec(ctx, `delete from scheduling_campaign_cleanout where campaign_id = $1 and start_at > now()`, c.ID); err != nil {
+			return err
+		}
+		trackResources(ctx, c.ResourceID)
 		var at time.Time
 		var version int
 		if err := tx.QueryRow(ctx, `update scheduling_campaign set status = 'completed', completed_at = now(), version = version + 1

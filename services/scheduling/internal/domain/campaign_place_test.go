@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -104,6 +105,46 @@ func TestPlaceCampaign_HoldsBackAnOrderThatIsNotReady(t *testing.T) {
 		t.Fatalf("second order starts %v before it is ready", out.Placements[1].Start)
 	}
 	var _ time.Time = out.End
+}
+
+func TestPlaceCampaign_ReadyGapDoesNotHideAForeignJob(t *testing.T) {
+	// The first order ends 10:30 and the second is not ready before 14:00; a
+	// foreign job at 11:00-12:00 would sit between them.
+	ops := campaignOps()
+	ops[1].ReadyAt = at(0, 14, 0)
+	booked := []Busy{{ResourceID: "r1", JobID: "x", Start: at(0, 11, 0), End: at(0, 12, 0)}}
+	out, conf := PlaceCampaign(CampaignPlaceInput{ResourceID: "r1", Resources: []Resource{placeResource(t)}, Booked: booked, Start: at(0, 8, 0), HorizonDays: 14, Operations: ops})
+	if conf != nil {
+		t.Fatal(conf)
+	}
+	p := out.Placements
+	if !p[0].Start.Equal(at(0, 12, 0)) {
+		t.Fatalf("first order starts %v, want behind the foreign job at 12:00", p[0].Start)
+	}
+	if !p[1].Start.Equal(p[0].End) {
+		t.Fatalf("orders are not back to back: %v then %v", p[0].End, p[1].Start)
+	}
+}
+
+func TestPlaceCampaign_DenseResourceGivesUpAtTheTryLimit(t *testing.T) {
+	// A round-the-clock resource where every 150 min free stretch (exactly the
+	// first order with its leading setup) is followed by a one-minute foreign
+	// job, and the second order is not ready for 50 days: every try finds a
+	// foreign job in the ready gap, so placement must stop with SCHED-0149.
+	r := res("r1", "R1", true, allDays(0, 24*60))
+	r.Matrix = brMatrix(t)
+	r.CurrentGroup = "A"
+	var booked []Busy
+	for k := 0; k < 600; k++ {
+		s := at(0, 0, 0).Add(time.Duration(k*151+150) * time.Minute)
+		booked = append(booked, Busy{ResourceID: "r1", JobID: fmt.Sprintf("x%d", k), Start: s, End: s.Add(time.Minute)})
+	}
+	ops := campaignOps()
+	ops[1].ReadyAt = at(50, 0, 0)
+	_, conf := PlaceCampaign(CampaignPlaceInput{ResourceID: "r1", Resources: []Resource{r}, Booked: booked, Start: at(0, 0, 0), HorizonDays: 60, Operations: ops})
+	if conf == nil || conf.Code != CodeCampaignWindow {
+		t.Fatalf("conf = %+v, want %s once the tries run out", conf, CodeCampaignWindow)
+	}
 }
 
 // predPlacement is a scheduled job of operation id on resource r0 from start to end.

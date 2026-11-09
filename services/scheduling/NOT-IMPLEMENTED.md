@@ -1247,6 +1247,27 @@ row only, and both could pass).
 | Making If-Match required on moves and firms | later slice of PSG-23 | Kept optional so existing API clients keep working; the web workspace already sends it. |
 | A version on dependents pushed by `propagate` | later slice of PSG-23 | The check covers the moved job's own order; pegged orders are re-planned against current placements under the existing exclusion constraint (their own versions change when they are pushed). |
 
+## Slice 40: Moonaan review fixes for campaign placement and completion (FR-23.14, BR-23.13)
+
+Two findings of the Moonaan review of slices 37 to 39. Placement: when a
+campaign order is not ready until later (its own ready time or the release of
+its scheduled earlier operations), the gap between the previous order (and its
+cleanouts) and that order's start is now checked for other jobs too, so a
+foreign job can no longer sit inside the campaign; the start moves behind it
+and the campaign is laid again (at most 200 times, then SCHED-0149). Work
+ahead of the first order no longer counts as a blocker, so those tries are not
+spent walking past jobs before the campaign begins. Completion: `:complete`
+deletes the campaign's cleanout windows that have not begun and rewrites the
+resource's materialized load in the same transaction; windows already run stay
+as history, and a window under way stays whole (a cleanout is never split,
+BR-23.13, so the resource is not free until the cleaning ends). No migration,
+no new endpoint, no new duty.
+
+| Item | Status | Reason |
+|---|---|---|
+| Cleanout windows following a `:move` of a campaign job or an `orders/{id}:unschedule` of a campaign order | later slice of PSG-23 | The window stays where the placement laid it and keeps closing that time; it clears when the campaign is unplaced, placed again, cancelled or completed. Until then a planner who moves a campaign job or unschedules a campaign order should place the campaign again (or unplace it) to move or free the window. See also the slice 37 row on runs and moves that keep a placed campaign together. |
+| Truncating a window under way when the campaign is completed | accepted (product decision for Ben) | Completion keeps the cleaning in progress until its planned end. If completion should instead mean the line is clean now, the window would be cut at the completion time (needs an UPDATE grant on `scheduling_campaign_cleanout`). |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |

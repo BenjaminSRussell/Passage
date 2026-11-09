@@ -1819,7 +1819,8 @@ paths:
       operationId: completeCampaign
       summary: >
         Complete a started campaign (FR-23.14); its orders stay on it and campaign.completed is
-        published. 422 SCHED-0125 when it has not started, SCHED-0011 when it is already completed or cancelled.
+        published. Its cleanout windows that have not begun are released (windows already run or
+        under way stay). 422 SCHED-0125 when it has not started, SCHED-0011 when it is already completed or cancelled.
       x-passage-duty: scheduling.campaign.write
       parameters:
         - $ref: '#/components/parameters/Id'

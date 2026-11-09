@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/scheduling/internal/domain"
 	schedevents "github.com/BenjaminSRussell/passage/services/scheduling/internal/events"
@@ -245,9 +246,23 @@ func TestCompleteAndCancelCampaign(t *testing.T) {
 	if c, _, err = s.StartCampaign(ctx, cmd(c), store.Idem{}); err != nil {
 		t.Fatal(err)
 	}
+	// One cleanout window already run, one under way and one still ahead.
+	past, running := ids.New(), ids.New()
+	for after, off := range map[string]string{past: "-3 hours", running: "-30 minutes", order.OrderID: "5 days"} {
+		if _, err := admin.Exec(context.Background(), `insert into scheduling_campaign_cleanout (tenant_id, campaign_id, after_order_id, resource_id,
+			start_at, end_at, minutes, setup_group, reason) values ($1, $2, $3, $4, now() + $5::interval, now() + $5::interval + interval '1 hour', 60, 'A', 'batches')`,
+			testkit.TenantID(1), c.ID, after, r.ID, off); err != nil {
+			t.Fatal(err)
+		}
+	}
 	c, _, err = s.CompleteCampaign(ctx, cmd(c), store.Idem{})
 	if err != nil || c.Status != domain.CampaignCompleted || c.CompletedAt == nil || len(c.Orders) != 1 {
 		t.Fatalf("complete: %+v err=%v", c, err)
+	}
+	var kept []string
+	if e := admin.QueryRow(context.Background(), `select coalesce(array_agg(after_order_id::text order by start_at), '{}') from scheduling_campaign_cleanout
+		where campaign_id = $1`, c.ID).Scan(&kept); e != nil || len(kept) != 2 || kept[0] != past || kept[1] != running {
+		t.Fatalf("cleanout windows after complete = %v err=%v, want the run one and the one under way kept, the future one released", kept, e)
 	}
 	if n := outboxCount(t, admin, schedevents.CampaignCompleted); n != 1 {
 		t.Fatalf("campaign.completed events = %d, want 1", n)

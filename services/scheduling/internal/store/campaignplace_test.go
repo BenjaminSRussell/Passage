@@ -94,6 +94,31 @@ func TestPlaceCampaign_JobsBackToBackWithCleanoutWindow(t *testing.T) {
 	}
 }
 
+func TestCompleteCampaign_ReleasesTheCleanoutWindowAhead(t *testing.T) {
+	s, _, admin := setup(t)
+	ctx := tenantCtx(1)
+	c, r, _ := plannedCampaign(t, ctx, s, "MIX-1")
+	placed, _, err := s.PlaceCampaign(ctx, store.CampaignCommand{CampaignID: c.ID, Version: c.Version, HorizonDays: 60}, store.Idem{})
+	if err != nil || len(placed.Placement.Cleanouts) != 1 {
+		t.Fatalf("place: %+v err=%v", placed.Placement, err)
+	}
+	started, _, err := s.StartCampaign(ctx, store.CampaignCommand{CampaignID: c.ID, Version: placed.Version}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMaterialized(t, ctx, s, admin, 1)
+	if _, _, err := s.CompleteCampaign(ctx, store.CampaignCommand{CampaignID: c.ID, Version: started.Version}, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	// The Tuesday cleanout had not begun: the shift is open again, and the
+	// materialized load of the week no longer counts it as closed time.
+	iv, err := s.ResourceCapacity(ctx, r.ID, at(1, 0, 0), at(2, 0, 0))
+	if err != nil || len(iv) != 1 || !iv[0].Start.Equal(at(1, 8, 0)) {
+		t.Fatalf("capacity on the cleanout day after complete = %+v err=%v, want the full shift back", iv, err)
+	}
+	assertMaterialized(t, ctx, s, admin, 1)
+}
+
 func TestPlaceCampaign_ReplacesTheEarlierPlacementAndUnplaceFreesEverything(t *testing.T) {
 	s, _, admin := setup(t)
 	ctx := tenantCtx(1)

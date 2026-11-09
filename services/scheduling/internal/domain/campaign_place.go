@@ -155,8 +155,13 @@ func placeCampaignFrom(in CampaignPlaceInput, start time.Time) (CampaignPlacemen
 	foreign := foreignBusy(in.Booked, in.ResourceID)
 	out := CampaignPlacement{Placements: make([]Placement, 0, len(in.Operations)), Cleanouts: []PlacedCleanout{}}
 	cursor := start
-	for _, op := range in.Operations {
+	for i, op := range in.Operations {
 		op.Candidates = []string{in.ResourceID}
+		// prevEnd is where the previous order (and its cleanouts) ended: the
+		// gap up to this order's start (its changeover included, as pl.Start
+		// is the start of the setup) must hold no other work, even when the
+		// order is not ready until later.
+		prevEnd := cursor
 		if op.ReadyAt.After(cursor) {
 			// An order that is not ready yet holds the campaign back: it
 			// could not be contiguous with the order before it otherwise.
@@ -166,8 +171,12 @@ func placeCampaignFrom(in CampaignPlaceInput, start time.Time) (CampaignPlacemen
 		if stop != nil {
 			return CampaignPlacement{}, nil, nil, &Conflict{Code: CodeOutsideCapacity, Detail: fmt.Sprintf("order %s cannot be placed: %s", op.OrderID, stop.reason), JobID: op.ID}
 		}
-		if b := between(foreign, cursor, pl.Start); b != nil {
-			return CampaignPlacement{}, nil, b, nil
+		// Work ahead of the first order is not inside the campaign; placeOp
+		// already lays that order in the first free stretch.
+		if i > 0 {
+			if b := between(foreign, prevEnd, pl.Start); b != nil {
+				return CampaignPlacement{}, nil, b, nil
+			}
 		}
 		e.book(op, pl)
 		out.Placements = append(out.Placements, pl)
