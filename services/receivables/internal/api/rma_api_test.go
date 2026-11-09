@@ -10,8 +10,10 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
+const rmaInvoiceID = "00000000-0000-0000-0000-0000000000b1"
+
 func rmaBody(le, gross, restocking, net string) string {
-	return `{"rmaId":"` + ids.New() + `","rmaNumber":"RMA-0000001","legalEntityId":"` + le + `","invoiceNumber":"INV-30001","postingDate":"2027-03-01",
+	return `{"rmaId":"` + ids.New() + `","rmaNumber":"RMA-0000001","legalEntityId":"` + le + `","invoiceNumber":"INV-30001","invoiceId":"` + rmaInvoiceID + `","postingDate":"2027-03-01",
 		"gross":"` + gross + `","restocking":"` + restocking + `","net":"` + net + `"}`
 }
 
@@ -39,6 +41,7 @@ func TestPostRMACredit_Validation(t *testing.T) {
 		{"zero net", rmaBody(testLE, "60.00", "60.00", "0"), "ar.rmacredit.post", http.StatusUnprocessableEntity, "amounts"},
 		{"valid", rmaBody(testLE, "400.00", "60.00", "340.00"), "ar.rmacredit.post", http.StatusCreated, ""},
 		{"valid with tax lines", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"57.00"},{"code":"DE7","amount":"7.00"}]`), "ar.rmacredit.post", http.StatusCreated, ""},
+		{"tax lines without the billing invoice id", withTax(strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), rmaInvoiceID, "", 1), `[{"code":"DE19","amount":"57.00"}]`), "ar.rmacredit.post", http.StatusBadRequest, "invoiceId"},
 		{"tax line without amount", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"0"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "taxLines"},
 		{"tax code listed twice", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"1"},{"code":"DE19","amount":"2"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "taxLines"},
 		{"tax line with an unknown field", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"1","rate":"19"}]`), "ar.rmacredit.post", http.StatusBadRequest, ""},

@@ -89,9 +89,9 @@ type ARCreditor interface {
 
 // ARCredit is the credit-note request sales sends receivables (AC-30.5); receivables derives customer, currency and ledger itself.
 type ARCredit struct {
-	RMAID, RMANumber, LegalEntityID, InvoiceNumber, PostingDate, IdempotencyKey string
-	Gross, Restocking, Net                                                      decimal.Decimal
-	TaxLines                                                                    []ARTaxLine
+	RMAID, RMANumber, LegalEntityID, InvoiceNumber, InvoiceID, PostingDate, IdempotencyKey string
+	Gross, Restocking, Net                                                                 decimal.Decimal
+	TaxLines                                                                               []ARTaxLine
 }
 
 type ARTaxLine struct {
@@ -793,7 +793,7 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 		return ReturnOrder{}, err
 	}
 	note, err := s.ar.PostRMACredit(ctx, ARCredit{RMAID: current.ID, RMANumber: current.RMANumber, LegalEntityID: current.LegalEntityID,
-		InvoiceNumber: current.OriginalInvoiceNo, PostingDate: *current.CreditPostingDate, IdempotencyKey: "rma-credit-" + current.ID,
+		InvoiceNumber: current.OriginalInvoiceNo, InvoiceID: current.OriginalInvoiceID, PostingDate: *current.CreditPostingDate, IdempotencyKey: "rma-credit-" + current.ID,
 		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net, TaxLines: taxLines})
 	if err != nil {
 		return ReturnOrder{}, upstreamProblem(ctx, "receivables", err)

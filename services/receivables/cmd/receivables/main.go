@@ -16,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/api"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/billingclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/taxclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/migrations"
@@ -112,6 +113,11 @@ func run() error {
 		taxRecorder = tc
 	}
 	s.WithRMATax(rmaTaxAccounts, taxRecorder)
+	if bc, err := billingclient.FromEnv(os.Getenv); err != nil {
+		return err
+	} else if bc != nil {
+		s.WithBilling(bc)
+	}
 	h := api.New(s)
 	r := httpx.NewRouter()
 	h.Register(r)

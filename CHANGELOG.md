@@ -13,7 +13,7 @@ release may change public APIs.
 - RMA credit notes reverse the original invoice tax (#30): sales derives the reversal per tax code from the stored invoice
   line tax (pro rata, half-even to the cent, net of billing credits and earlier returns; history in `return_order_tax`),
   receivables debits the pinned tax accounts, credits 1200 net plus tax, records negative output transactions with the tax
-  service and bounds the credit with its tax against the invoice; billing exposes `creditedTax` per invoice line. The
+  service and bounds the credit with its tax against the invoice and checks every tax code against the billing invoice (read-only `billing.invoice.read`, `BILLING_URL`): unbilled codes and over-claims are refused; billing exposes `creditedTax` per invoice line. The
   receivables service gains the `tax.transaction.record` grant and `RECEIVABLES_RMA_TAX_ACCOUNTS` / `TAX_URL` settings.
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an

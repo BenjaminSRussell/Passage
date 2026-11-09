@@ -46,9 +46,9 @@ const (
 // customer, currency and ledger are never taken from the caller: they come
 // from the invoice's open item and the legal entity's configured ledger.
 type RMACredit struct {
-	RMAID, RMANumber, LegalEntityID, InvoiceNumber, PostingDate string
-	Gross, Restocking, Net                                      decimal.Decimal
-	TaxLines                                                    []RMATaxLine
+	RMAID, RMANumber, LegalEntityID, InvoiceNumber, InvoiceID, PostingDate string
+	Gross, Restocking, Net                                                 decimal.Decimal
+	TaxLines                                                               []RMATaxLine
 }
 
 type RMATaxLine struct {
@@ -165,6 +165,9 @@ func rmaHash(in RMACredit) string {
 	for _, t := range in.TaxLines {
 		text += fmt.Sprintf("|%s=%s", t.Code, t.Amount)
 	}
+	if len(in.TaxLines) > 0 {
+		text += "|invoice=" + in.InvoiceID
+	}
 	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
 }
@@ -235,6 +238,10 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 	if err != nil {
 		return RMACreditNote{}, err
 	}
+	billed, err := s.billedTax(ctx, in)
+	if err != nil {
+		return RMACreditNote{}, err
+	}
 	tax := taxTotal(in.TaxLines)
 	p, _ := tenant.FromContext(ctx)
 	doc := "CN-" + in.RMANumber
@@ -272,6 +279,9 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRMAInvoice,
 				fmt.Sprintf("the return value %s exceeds what invoice %s still allows (amount %s, already returned by RMAs %s)",
 					value, invoice.DocumentNumber, invoice.Amount, credited))
+		}
+		if err := checkTaxAgainstInvoice(ctx, tx, p.TenantID, invoice.ID, billed, in.TaxLines); err != nil {
+			return err
 		}
 		var taken bool
 		if err := tx.QueryRow(ctx, `select exists (select 1 from open_item where tenant_id = $1 and legal_entity_id = $2 and document_number = $3)`,

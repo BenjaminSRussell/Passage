@@ -19,6 +19,7 @@ type rmaCreditRequest struct {
 	RMANumber     string             `json:"rmaNumber"`
 	LegalEntityID string             `json:"legalEntityId"`
 	InvoiceNumber string             `json:"invoiceNumber"`
+	InvoiceID     string             `json:"invoiceId"`
 	PostingDate   string             `json:"postingDate"`
 	Gross         decimal.Decimal    `json:"gross"`
 	Restocking    decimal.Decimal    `json:"restocking"`
@@ -48,6 +49,9 @@ func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 	if req.InvoiceNumber == "" {
 		fields["invoiceNumber"] = "is required"
 	}
+	if len(req.TaxLines) > 0 && !ids.Valid(req.InvoiceID) {
+		fields["invoiceId"] = "must be the billing invoice's UUID when taxLines are sent"
+	}
 	if _, err := store.ParseDay(req.PostingDate); err != nil {
 		fields["postingDate"] = "must be YYYY-MM-DD"
 	}
@@ -73,7 +77,7 @@ func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.store.PostRMACredit(r.Context(), store.RMACredit{
-		RMAID: req.RMAID, RMANumber: req.RMANumber, LegalEntityID: req.LegalEntityID, InvoiceNumber: req.InvoiceNumber,
+		RMAID: req.RMAID, RMANumber: req.RMANumber, LegalEntityID: req.LegalEntityID, InvoiceNumber: req.InvoiceNumber, InvoiceID: req.InvoiceID,
 		PostingDate: req.PostingDate, Gross: req.Gross, Restocking: req.Restocking, Net: req.Net, TaxLines: req.TaxLines,
 	})
 	if err != nil {

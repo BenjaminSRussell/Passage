@@ -7,6 +7,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/billingclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 	rcvevents "github.com/BenjaminSRussell/passage/services/receivables/internal/events"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/taxclient"
@@ -14,16 +16,26 @@ import (
 
 var taxAccounts = map[string]map[string]string{legalEntity: {"DE19": "2310", "DE7": "2320"}}
 
+const billingInvoiceID = "00000000-0000-0000-0000-0000000000b1"
+
+func billedAs(s *Postgres, remaining map[string]decimal.Decimal) {
+	bill := billingclient.NewFake()
+	bill.Set(billingInvoiceID, billingclient.Basis{Number: "INV-30001", LegalEntityID: legalEntity, Remaining: remaining})
+	s.WithBilling(bill)
+}
+
 func rmaTaxSetup(t *testing.T) (*Postgres, *failingLedger, *taxclient.Fake) {
 	t.Helper()
 	s, gl, _ := rmaSetup(t)
 	tax := taxclient.NewFake()
 	s.WithRMATax(taxAccounts, tax)
+	billedAs(s, map[string]decimal.Decimal{"DE19": amt("500.00"), "DE7": amt("20.00")})
 	return s, gl, tax
 }
 
 func taxedIn(invoice string) RMACredit {
 	in := rmaIn(invoice)
+	in.InvoiceID = billingInvoiceID
 	in.Gross, in.Restocking, in.Net = amt("300.00"), amt("45.00"), amt("255.00")
 	in.TaxLines = []RMATaxLine{{Code: "DE19", Amount: amt("57.00")}, {Code: "DE7", Amount: amt("7.00")}}
 	return in
@@ -156,6 +168,7 @@ func TestPostRMACredit_InvoiceBoundIncludesTheReversedTax(t *testing.T) {
 	ctx := tenantCtx(1)
 	inv := seedInvoice(t, s, ctx)
 	over := rmaIn(inv.DocumentNumber)
+	over.InvoiceID = billingInvoiceID
 	over.Gross, over.Restocking, over.Net = amt("700.00"), amt("0"), amt("700.00")
 	over.TaxLines = []RMATaxLine{{Code: "DE19", Amount: amt("300.01")}}
 	if _, err := s.PostRMACredit(ctx, over); problemCode(err) != CodeRMAInvoice {
@@ -189,5 +202,80 @@ func TestValidateRMATax(t *testing.T) {
 	}
 	if err := ValidateRMATax([]RMATaxLine{{Code: "A", Amount: amt("1")}, {Code: "B", Amount: amt("2")}}); err != nil {
 		t.Fatalf("valid lines: %v", err)
+	}
+}
+
+func taxOnly(invoice, rma, code, amount string) RMACredit {
+	in := rmaIn(invoice)
+	in.RMAID, in.RMANumber, in.InvoiceID = ids.New(), rma, billingInvoiceID
+	in.Gross, in.Restocking, in.Net = amt("100.00"), amt("0"), amt("100.00")
+	in.TaxLines = []RMATaxLine{{Code: code, Amount: amt(amount)}}
+	return in
+}
+
+func TestPostRMACredit_TaxCodeTheInvoiceNeverBilledIsRejected(t *testing.T) {
+	s, gl, tax := rmaTaxSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	s.WithRMATax(map[string]map[string]string{legalEntity: {"DE19": "2310", "DE7": "2320", "FR20": "2330"}}, tax)
+	if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-0000001", "FR20", "1.00")); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("a code the invoice does not carry: %v", err)
+	}
+	if len(gl.Entries()) != 0 || len(tax.Recorded()) != 0 {
+		t.Fatalf("nothing may be posted or recorded: %d journals, %d tax transactions", len(gl.Entries()), len(tax.Recorded()))
+	}
+}
+
+func TestPostRMACredit_OverClaimingOneCodeIsRejectedEvenWhenTheTotalFits(t *testing.T) {
+	s, gl, _ := rmaTaxSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-0000001", "DE7", "20.01")); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("20.01 of 20.00 billed DE7 while 100.00 + 20.01 fits the 1000.00 invoice: %v", err)
+	}
+	if len(gl.Entries()) != 0 {
+		t.Fatalf("a refused credit posts nothing: %d journals", len(gl.Entries()))
+	}
+}
+
+func TestPostRMACredit_SuccessiveCreditsExhaustACodeExactly(t *testing.T) {
+	s, _, tax := rmaTaxSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	for i, amount := range []string{"12.00", "8.00"} {
+		if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-000000"+string(rune('1'+i)), "DE7", amount)); err != nil {
+			t.Fatalf("credit %d of %s: %v", i+1, amount, err)
+		}
+	}
+	if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-0000003", "DE7", "0.01")); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("DE7 is used up after 12.00 + 8.00: %v", err)
+	}
+	if len(tax.Recorded()) != 2 {
+		t.Fatalf("two credits recorded: %d", len(tax.Recorded()))
+	}
+}
+
+func TestPostRMACredit_TaxBasisIsBillingsNotTheCallers(t *testing.T) {
+	s, _, _ := rmaTaxSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := taxOnly(inv.DocumentNumber, "RMA-0000001", "DE7", "1.00")
+	in.InvoiceID = "00000000-0000-0000-0000-0000000000b2"
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("an invoice id billing does not know: %v", err)
+	}
+	other := billingclient.NewFake()
+	other.Set(billingInvoiceID, billingclient.Basis{Number: "INV-99999", LegalEntityID: legalEntity, Remaining: map[string]decimal.Decimal{"DE7": amt("20.00")}})
+	s.WithBilling(other)
+	if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-0000001", "DE7", "1.00")); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("an invoice id of another invoice number: %v", err)
+	}
+	other.Err = http.ErrHandlerTimeout
+	if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-0000001", "DE7", "1.00")); problemCode(err) != CodeRMAUnavailable {
+		t.Fatalf("billing outage: %v", err)
+	}
+	s.billing = nil
+	if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-0000001", "DE7", "1.00")); problemCode(err) != CodeRMAUnavailable {
+		t.Fatalf("billing not configured: %v", err)
 	}
 }

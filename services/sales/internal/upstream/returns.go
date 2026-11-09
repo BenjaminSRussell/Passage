@@ -268,7 +268,7 @@ func (r *Returns) PostRMACredit(ctx context.Context, in store.ARCredit) (store.C
 	for _, t := range in.TaxLines {
 		taxLines = append(taxLines, map[string]string{"code": t.Code, "amount": t.Amount.StringFixed(2)})
 	}
-	body := map[string]any{"rmaId": in.RMAID, "rmaNumber": in.RMANumber, "legalEntityId": in.LegalEntityID, "invoiceNumber": in.InvoiceNumber,
+	body := map[string]any{"rmaId": in.RMAID, "rmaNumber": in.RMANumber, "legalEntityId": in.LegalEntityID, "invoiceNumber": in.InvoiceNumber, "invoiceId": in.InvoiceID,
 		"postingDate": in.PostingDate, "gross": in.Gross.StringFixed(2), "restocking": in.Restocking.StringFixed(2), "net": in.Net.StringFixed(2), "taxLines": taxLines}
 	var out struct {
 		OpenItemID       string `json:"openItemId"`
