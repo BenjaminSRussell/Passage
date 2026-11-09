@@ -1294,7 +1294,10 @@ paths:
         `legalEntityId` (which must own it, MIG-1531), each under a fixed idempotency key. It then
         reads the ledger's period balance of every account the documents or `legacyTrialBalance`
         name and stores the diff against the legacy trial balance (the documents' own when none is
-        given) as a parallel run in REVIEW, idempotent by (period, system). A document the ledger
+        given) as a parallel run in REVIEW, idempotent by (period, system). Each legacy TB tuple
+        carries the number of documents that posted to its account, so the ledger's rounding of
+        every line to the currency's minor unit is EXPECTED under RND-001 up to 0.01 per document
+        (BR-49.7). A document the ledger
         refuses is listed in `rejected` and shows as TB variances; any other ledger failure is 502
         MIG-1533 and the replay can be repeated. Without a configured ledger the answer is 503 MIG-1530.
       x-passage-duty: migration.factory.run
@@ -2504,6 +2507,10 @@ components:
           description: The canonical tuple key, for example entity|account|dimensions|currency|period.
         amount:
           type: string
+        documents:
+          type: integer
+          minimum: 0
+          description: How many legacy documents the tuple sums. RND-001 allows 0.01 per document (BR-49.7), so a tuple of n documents is EXPECTED up to n x 0.01; absent or 0 counts as one document. When both sides give a count the larger one applies.
     ParallelRunRequest:
       type: object
       required: [period, sourceSystem, documentsReplayed, revenue]
@@ -2551,6 +2558,10 @@ components:
         delta:
           type: string
           description: passage - legacy.
+        documents:
+          type: integer
+          minimum: 0
+          description: The document count the per-document rule RND-001 scaled its tolerance by; absent when neither side gave one. A replay counts, per account, the legacy documents that posted to it.
         class:
           type: string
           enum: [EXPECTED, EXPLAINED, UNEXPLAINED]
