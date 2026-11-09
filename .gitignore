@@ -23,3 +23,6 @@ apps/web/playwright-report/
 /services/receiving/receiving
 **/testdata/rapid/**/*.fail
 deploy/.gateway-schemas/
+
+# local dev stack (scripts/dev-up.sh, tools/e2e): binaries, logs, generated realm and OPA data
+.run/
