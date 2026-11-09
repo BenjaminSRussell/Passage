@@ -75,25 +75,26 @@ export function Shell({ modules: allModules, duties, workspaceConfig }: ShellPro
   );
 
   const config = useMemo(() => workspaceConfig ?? loadWorkspaceConfig(), [workspaceConfig]);
-  const navEntries = useMemo(() => new Map(resolveNavEntries(modules).map((e) => [e.to, e])), [modules]);
+  const navEntries = useMemo(() => resolveNavEntries(modules, config.areas), [modules, config]);
+  const navEntryByTo = useMemo(() => new Map(navEntries.map((e) => [e.to, e])), [navEntries]);
   const entries = useMemo<PaletteEntry[]>(
     () => [
       ...shellNav.map((n) => ({ id: `shell:${n.to}`, group: copy.nav.general, label: n.label, to: n.to, icon: n.icon })),
       ...modules.flatMap((m) =>
         m.nav.map((n) => {
-          const entry = navEntries.get(n.to);
+          const entry = navEntryByTo.get(n.to);
           return {
             id: `${m.id}:${n.to}`,
             group: m.title,
             label: entry?.label ?? n.label,
             to: n.to,
             icon: workspaceIcon(m.id),
-            keywords: `${n.label} ${config.areas.find((a) => a.id === entry?.area)?.label ?? ""}`,
+            keywords: `${n.label} ${entry?.areaLabel ?? ""}`,
           };
         }),
       ),
     ],
-    [modules, navEntries, config],
+    [modules, navEntryByTo],
   );
 
   const announce = useCallback((message: string, visual = false) => {
@@ -250,7 +251,7 @@ export function Shell({ modules: allModules, duties, workspaceConfig }: ShellPro
 
   return (
     <PrincipalProvider duties={principalDuties}>
-      <WorkspaceNavProvider modules={modules} config={config}>
+      <WorkspaceNavProvider entries={navEntries} config={config}>
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
           Skip to content
@@ -259,6 +260,7 @@ export function Shell({ modules: allModules, duties, workspaceConfig }: ShellPro
           <Sidebar
             shellNav={shellNav}
             drawerOpen={drawerOpen}
+            announce={announceQuietly}
             searchRef={searchRef}
             onOpenSearch={openSearch}
             onCloseDrawer={closeDrawer}

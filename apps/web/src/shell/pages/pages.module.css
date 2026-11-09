@@ -109,6 +109,7 @@
 }
 
 .moduleHint {
+  margin-inline-start: var(--space-2);
   color: var(--color-text-muted);
   font-size: var(--text-xs-size);
 }

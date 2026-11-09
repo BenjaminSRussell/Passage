@@ -8,6 +8,8 @@ export const copy = {
     switcherLabel: "Workspace",
     chooseSummary: "Choose my workspaces",
     chooseLegend: "Workspaces shown in the switcher",
+    keepOne: "Keep at least one workspace.",
+    currentPage: "Current page",
   },
   allFeatures: {
     pageTitle: "All features",
@@ -17,6 +19,8 @@ export const copy = {
     advanced: "Advanced",
     count: (count: number) => (count === 1 ? "1 feature" : `${count} features`),
     noMatches: (query: string) => `No features match “${query}”.`,
+    emptyTitle: "No features available",
+    emptyDescription: "Features appear here once your account has access to them.",
   },
   buttons: {
     search: "Search",
@@ -38,6 +42,7 @@ export const copy = {
     oneResult: "1 result",
     results: (count: number) => `${count} results`,
     opened: (label: string) => `Opened ${label}`,
+    workspaceSwitched: (label: string) => `Workspace changed to ${label}`,
   },
   offlineBanner: "You're offline. Pages you've opened still work, but searches and saves will fail until you reconnect.",
   palette: {

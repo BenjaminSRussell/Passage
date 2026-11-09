@@ -1,10 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import type { PassageModule } from "../../modules/registry";
 import {
   effectivePrefs,
   groupByArea,
-  loadWorkspaceConfig,
-  resolveNavEntries,
   resolveWorkspaces,
   type AreaGroup,
   type NavEntry,
@@ -19,9 +16,9 @@ function readPrefs(): WorkspacePrefs {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed: unknown = raw === null ? {} : JSON.parse(raw);
-    const { held, active } = (parsed ?? {}) as { held?: unknown; active?: unknown };
+    const { dropped, active } = (parsed ?? {}) as { dropped?: unknown; active?: unknown };
     return {
-      held: Array.isArray(held) ? held.filter((h): h is string => typeof h === "string") : undefined,
+      dropped: Array.isArray(dropped) ? dropped.filter((d): d is string => typeof d === "string") : undefined,
       active: typeof active === "string" ? active : undefined,
     };
   } catch {
@@ -64,17 +61,15 @@ export function useWorkspaceNav(): WorkspaceNavValue {
 }
 
 export interface WorkspaceNavProviderProps {
-  modules: PassageModule[];
-  config?: WorkspaceConfig;
+  entries: NavEntry[];
+  config: WorkspaceConfig;
   children: ReactNode;
 }
 
-export function WorkspaceNavProvider({ modules, config, children }: WorkspaceNavProviderProps) {
-  const resolvedConfig = useMemo(() => config ?? loadWorkspaceConfig(), [config]);
+export function WorkspaceNavProvider({ entries, config, children }: WorkspaceNavProviderProps) {
   const [prefs, setPrefs] = useState<WorkspacePrefs>(readPrefs);
-  const entries = useMemo(() => resolveNavEntries(modules), [modules]);
-  const areaGroups = useMemo(() => groupByArea(entries, resolvedConfig.areas), [entries, resolvedConfig]);
-  const available = useMemo(() => resolveWorkspaces(resolvedConfig, entries), [resolvedConfig, entries]);
+  const areaGroups = useMemo(() => groupByArea(entries, config.areas), [entries, config]);
+  const available = useMemo(() => resolveWorkspaces(config, entries), [config, entries]);
   const { held, active } = useMemo(() => effectivePrefs(prefs, available), [prefs, available]);
 
   const update = useCallback((next: WorkspacePrefs) => {
@@ -82,18 +77,22 @@ export function WorkspaceNavProvider({ modules, config, children }: WorkspaceNav
     writePrefs(next);
   }, []);
 
-  const setActive = useCallback((id: string) => update({ held: prefs.held, active: id }), [prefs.held, update]);
+  const setActive = useCallback((id: string) => update({ dropped: prefs.dropped, active: id }), [prefs.dropped, update]);
 
   const toggleHeld = useCallback(
     (id: string) => {
       const heldIds = held.map((w) => w.id);
-      const nextIds = heldIds.includes(id) ? heldIds.filter((h) => h !== id) : [...heldIds, id];
-      if (nextIds.length === 0) {
-        return;
+      const dropped = prefs.dropped ?? [];
+      if (heldIds.includes(id)) {
+        if (heldIds.length === 1) {
+          return;
+        }
+        update({ dropped: [...dropped, id], active: active?.id === id ? undefined : active?.id });
+      } else {
+        update({ dropped: dropped.filter((d) => d !== id), active: active?.id });
       }
-      update({ held: nextIds, active: active !== undefined && nextIds.includes(active.id) ? active.id : nextIds[0] });
     },
-    [held, active, update],
+    [held, active, prefs.dropped, update],
   );
 
   const value = useMemo(

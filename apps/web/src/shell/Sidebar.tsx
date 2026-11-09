@@ -1,5 +1,5 @@
 import { useRef, type RefObject } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, matchPath, NavLink, useLocation } from "react-router-dom";
 import { copy, shortcutHint } from "./copy";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 import styles from "./Shell.module.css";
@@ -11,14 +11,21 @@ import { WorkspaceSwitcher } from "./workspaces/WorkspaceSwitcher";
 export interface SidebarProps {
   shellNav: ShellNavItem[];
   drawerOpen: boolean;
+  announce(message: string): void;
   searchRef: RefObject<HTMLButtonElement | null>;
   onOpenSearch(): void;
   onCloseDrawer(): void;
 }
 
-export function Sidebar({ shellNav, drawerOpen, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
+export function Sidebar({ shellNav, drawerOpen, announce, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
   const asideRef = useRef<HTMLElement>(null);
-  const { active } = useWorkspaceNav();
+  const { active, entries } = useWorkspaceNav();
+  const { pathname } = useLocation();
+  const covers = (to: string) => matchPath({ path: to, end: false }, pathname) !== null;
+  const outsideWorkspace =
+    shellNav.some((n) => matchPath({ path: n.to, end: true }, pathname) !== null) || active?.entries.some((e) => covers(e.to))
+      ? undefined
+      : entries.filter((e) => covers(e.to)).sort((a, b) => b.to.length - a.to.length)[0];
 
   useFocusTrap(asideRef, drawerOpen);
 
@@ -67,7 +74,7 @@ export function Sidebar({ shellNav, drawerOpen, searchRef, onOpenSearch, onClose
           <kbd aria-hidden="true">{shortcutHint}</kbd>
         </button>
       </div>
-      <WorkspaceSwitcher />
+      <WorkspaceSwitcher announce={announce} />
       <nav aria-label="Workspaces" className={styles.nav}>
         <ul className={styles.list}>
           {shellNav.map((n) => (
@@ -81,9 +88,9 @@ export function Sidebar({ shellNav, drawerOpen, searchRef, onOpenSearch, onClose
         </ul>
         {active ? (
           <div className={styles.group}>
-            <p id="nav-active-workspace" className={styles.groupLabel}>
+            <h2 id="nav-active-workspace" className={styles.groupLabel}>
               {active.label}
-            </p>
+            </h2>
             <ul className={styles.list} aria-labelledby="nav-active-workspace">
               {active.entries.map((n) => (
                 <li key={n.to}>
@@ -92,6 +99,20 @@ export function Sidebar({ shellNav, drawerOpen, searchRef, onOpenSearch, onClose
                   </NavLink>
                 </li>
               ))}
+            </ul>
+          </div>
+        ) : null}
+        {outsideWorkspace ? (
+          <div className={styles.group}>
+            <h2 id="nav-current-page" className={styles.groupLabel}>
+              {copy.workspaces.currentPage}
+            </h2>
+            <ul className={styles.list} aria-labelledby="nav-current-page">
+              <li>
+                <NavLink to={outsideWorkspace.to} className={styles.item} onClick={onCloseDrawer}>
+                  {outsideWorkspace.label}
+                </NavLink>
+              </li>
             </ul>
           </div>
         ) : null}

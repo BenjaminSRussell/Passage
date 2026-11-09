@@ -1,13 +1,13 @@
 import { Link } from "react-router-dom";
 import { copy } from "../copy";
 import { Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
-import { ALL_FEATURES_PATH, TOP_TASK_COUNT } from "../workspaces/model";
+import { ALL_FEATURES_PATH, HOME_WORKSPACE_LIMIT, TOP_TASK_COUNT } from "../workspaces/model";
 import { useWorkspaceNav } from "../workspaces/WorkspaceNav";
 import styles from "./pages.module.css";
 
 export function HomePage() {
   const { held, active } = useWorkspaceNav();
-  const ordered = active ? [active, ...held.filter((w) => w.id !== active.id)] : held;
+  const ordered = (active ? [active, ...held.filter((w) => w.id !== active.id)] : held).slice(0, HOME_WORKSPACE_LIMIT);
   return (
     <>
       <PageHeader title={copy.home.pageTitle} description={copy.home.description} />

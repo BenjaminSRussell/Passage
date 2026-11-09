@@ -39,11 +39,11 @@ const modules: PassageModule[] = [
   },
 ];
 
-function renderShell(path = "/", duties: string[] = []) {
+function renderShell(path = "/", duties: string[] = [], shellModules: PassageModule[] = modules) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route element={<Shell modules={modules} duties={duties} />}>
+        <Route element={<Shell modules={shellModules} duties={duties} />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/features" element={<AllFeaturesPage />} />
           <Route path="*" element={<p>Some page</p>} />
@@ -92,7 +92,39 @@ describe("workspace switcher", () => {
       await user.click(within(group).getByRole("checkbox", { name }));
     }
     expect(screen.getByLabelText("Workspace")).toHaveValue("tenant-admin");
-    expect(within(group).getByRole("checkbox", { name: "Administration" })).toBeDisabled();
+    const last = within(group).getByRole("checkbox", { name: "Administration" });
+    expect(last).toHaveAttribute("aria-disabled", "true");
+    expect(group).toHaveAccessibleDescription("Keep at least one workspace.");
+    await user.click(last);
+    expect(last).toBeChecked();
+    expect(screen.getByLabelText("Workspace")).toHaveValue("tenant-admin");
+  });
+
+  it("still shows a workspace the user never dropped, even if their saved choices predate it", () => {
+    window.localStorage.setItem("passage.workspaces.v1", JSON.stringify({ dropped: ["ap-clerk"] }));
+    renderShell();
+    const names = within(screen.getByLabelText("Workspace")).getAllByRole("option").map((o) => o.textContent);
+    expect(names).toEqual(["Accounts receivable", "Accounting and close", "Administration"]);
+  });
+
+  it("announces a workspace switch politely", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.selectOptions(screen.getByLabelText("Workspace"), "ar-clerk");
+    expect(screen.getByRole("status")).toHaveTextContent("Workspace changed to Accounts receivable");
+  });
+
+  it("names the active workspace with a heading", () => {
+    renderShell();
+    expect(sidebar().getByRole("heading", { level: 2, name: "Accounts payable" })).toBeInTheDocument();
+  });
+
+  it("passes the in-repo accessibility checks with the choose-workspaces panel open", async () => {
+    const user = userEvent.setup();
+    const { container } = renderShell();
+    await user.click(screen.getByText("Choose my workspaces"));
+    expect(screen.getByRole("group", { name: "Workspaces shown in the switcher" })).toBeVisible();
+    expect(pageViolations(container)).toEqual([]);
   });
 
   it("falls back to all workspaces when saved choices are unreadable", () => {
@@ -104,6 +136,25 @@ describe("workspace switcher", () => {
   it("passes the in-repo accessibility checks", () => {
     const { container } = renderShell();
     expect(pageViolations(container)).toEqual([]);
+  });
+});
+
+describe("current page cue", () => {
+  it("shows a page opened outside the active workspace under Current page, and nothing inside it", () => {
+    const outside = renderShell("/admin/sequences");
+    const cue = sidebar().getByRole("list", { name: "Current page" });
+    expect(within(cue).getByRole("link", { name: "Sequences" })).toHaveAttribute("aria-current", "page");
+    outside.unmount();
+    renderShell("/ledger/open-items");
+    expect(sidebar().queryByRole("list", { name: "Current page" })).not.toBeInTheDocument();
+  });
+
+  it("covers detail pages below a nav entry and stays out of the way on shell pages", () => {
+    const detail = renderShell("/admin/sequences/42");
+    expect(within(sidebar().getByRole("list", { name: "Current page" })).getByRole("link", { name: "Sequences" })).toBeInTheDocument();
+    detail.unmount();
+    renderShell("/features");
+    expect(sidebar().queryByRole("list", { name: "Current page" })).not.toBeInTheDocument();
   });
 });
 
@@ -153,6 +204,33 @@ describe("All features", () => {
     expect(screen.getByText(/No features match/)).toBeInTheDocument();
   });
 
+  it("renders no empty list for an area where only Advanced entries match, and names each link with its module", async () => {
+    const user = userEvent.setup();
+    renderShell("/features", ["ledger.journal.read"]);
+    await user.type(screen.getByLabelText("Filter features"), "settings");
+    const finance = within(screen.getByRole("region", { name: "Finance" }));
+    expect(finance.getAllByRole("list")).toHaveLength(1);
+    expect(finance.getByRole("link", { name: "Ledger settings — General ledger" })).toBeInTheDocument();
+  });
+
+  it("matches the business area name and uses its own wording when nothing is available", async () => {
+    const user = userEvent.setup();
+    const first = renderShell("/features", []);
+    await user.type(screen.getByLabelText("Filter features"), "administration");
+    expect(within(screen.getByRole("main")).getByRole("link", { name: /Audit log/ })).toBeInTheDocument();
+    first.unmount();
+    render(
+      <MemoryRouter initialEntries={["/features"]}>
+        <Routes>
+          <Route element={<Shell modules={[]} duties={[]} />}>
+            <Route path="/features" element={<AllFeaturesPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("No features available")).toBeInTheDocument();
+  });
+
   it("is reachable from the sidebar and home", () => {
     renderShell("/", []);
     expect(sidebar().getByRole("link", { name: "All features" })).toHaveAttribute("href", "/features");
@@ -169,6 +247,19 @@ describe("home", () => {
     const headings = cards.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(headings[0]).toBe("Administration");
     expect(cards.getByRole("list", { name: "Administration: Top tasks" })).toBeInTheDocument();
+  });
+
+  it("caps the home cards for users who hold many workspaces", () => {
+    const buyer: PassageModule = {
+      id: "purchasing",
+      title: "Purchasing",
+      routes: [],
+      nav: [{ label: "Purchase orders", to: "/purchasing/purchase-orders" }],
+    };
+    renderShell("/", [], [...modules, buyer]);
+    expect(within(screen.getByLabelText("Workspace")).getAllByRole("option")).toHaveLength(5);
+    const cards = within(screen.getByRole("list", { name: "Workspaces" }));
+    expect(cards.getAllByRole("heading", { level: 3 })).toHaveLength(4);
   });
 
   it("explains an empty state when nothing is available", () => {

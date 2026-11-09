@@ -92,7 +92,7 @@ describe("persona workspaces", () => {
 
   it("shows each persona at most 25 entries by default, with every entry still reachable through All features", () => {
     const visible = visibleModules(modules, allDuties);
-    const entries = resolveNavEntries(visible);
+    const entries = resolveNavEntries(visible, config.areas);
     for (const w of resolveWorkspaces(config, entries)) {
       expect(w.entries.length, w.id).toBeLessThanOrEqual(MAX_DEFAULT_ENTRIES);
       expect(w.entries.length, w.id).toBeGreaterThanOrEqual(TOP_TASK_COUNT);
@@ -103,7 +103,7 @@ describe("persona workspaces", () => {
   });
 
   it("applies duty gating inside every workspace", () => {
-    const withoutDuties = resolveNavEntries(visibleModules(modules, []));
+    const withoutDuties = resolveNavEntries(visibleModules(modules, []), config.areas);
     const ungated = new Set(moduleEntries.filter((e) => e.duty === undefined).map((e) => e.to));
     for (const w of resolveWorkspaces(config, withoutDuties)) {
       expect(w.entries.filter((e) => !ungated.has(e.to)).map((e) => e.to), w.id).toEqual([]);
@@ -113,7 +113,7 @@ describe("persona workspaces", () => {
   });
 
   it("finds each top task by its task label and by its original screen name", () => {
-    const entries = resolveNavEntries(visibleModules(modules, allDuties));
+    const entries = resolveNavEntries(visibleModules(modules, allDuties), config.areas);
     for (const w of resolveWorkspaces(config, entries)) {
       for (const e of w.entries.slice(0, TOP_TASK_COUNT)) {
         expect(matchesQuery(e, e.label), e.to).toBe(true);

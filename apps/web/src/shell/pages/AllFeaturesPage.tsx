@@ -11,9 +11,10 @@ function EntryList({ entries }: { entries: NavEntry[] }) {
     <ul className={styles.links}>
       {entries.map((e) => (
         <li key={e.to}>
-          <Link to={e.to} className={styles.link}>
+          <Link to={e.to} className={styles.link} aria-label={`${e.label} — ${e.moduleTitle}`}>
             <span>
-              {e.label} <span className={styles.moduleHint}>{e.moduleTitle}</span>
+              {e.label}
+              <span className={styles.moduleHint}>{e.moduleTitle}</span>
             </span>
           </Link>
         </li>
@@ -50,14 +51,14 @@ export function AllFeaturesPage() {
       </div>
       <p role="status">{searching && total === 0 ? copy.allFeatures.noMatches(query.trim()) : copy.allFeatures.count(total)}</p>
       {groups.length === 0 && !searching ? (
-        <EmptyState icon="grid" title={copy.home.emptyTitle} description={copy.home.emptyDescription} />
+        <EmptyState icon="grid" title={copy.allFeatures.emptyTitle} description={copy.allFeatures.emptyDescription} />
       ) : null}
       {groups.map((g) => (
         <section key={g.area.id} className={styles.areaSection} aria-labelledby={`area-${g.area.id}`}>
           <h2 id={`area-${g.area.id}`} className={styles.areaTitle}>
             {g.area.label}
           </h2>
-          <EntryList entries={g.main} />
+          {g.main.length > 0 ? <EntryList entries={g.main} /> : null}
           {g.advanced.length > 0 ? (
             <details className={styles.advanced} open={searching}>
               <summary>{`${copy.allFeatures.advanced} (${g.advanced.length})`}</summary>

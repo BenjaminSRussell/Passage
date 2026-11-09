@@ -331,7 +331,7 @@ describe("notes page", () => {
     await user.click(screen.getByRole("button", { name: "Save Note" }));
     expect(within(screen.getByRole("table", { name: "Note list" })).getByRole("button", { name: "Kickoff" })).toBeInTheDocument();
     expect(screen.getAllByRole("status").some((node) => node.textContent === "Note saved")).toBe(true);
-    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+    expect(within(screen.getByRole("main")).getAllByRole("heading", { level: 2 })).toHaveLength(1);
   });
 });
 
@@ -497,7 +497,8 @@ describe("duty gating", () => {
     expect(within(nav).queryByRole("link", { name: "Print and track checks" })).not.toBeInTheDocument();
     const cards = screen.getByRole("list", { name: "Workspaces" });
     expect(within(cards).queryByRole("link", { name: "Post a journal" })).not.toBeInTheDocument();
-    expect(within(cards).getAllByRole("link", { name: "Review open items" }).length).toBeGreaterThan(0);
+    expect(within(cards).queryByRole("link", { name: "Print and track checks" })).not.toBeInTheDocument();
+    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(2);
   });
 
   it("shows gated entries to a principal holding the duty", () => {
