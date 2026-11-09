@@ -216,7 +216,7 @@ export function NewFlowPage() {
             <FormField id="flow-name" label="Name" error={errors.name}>
               {(c) => <Input {...c} value={values.name} maxLength={120} onChange={(e) => update({ name: e.target.value })} invalid={Boolean(errors.name)} />}
             </FormField>
-            <FormField id="flow-stream" label="Value stream id" hint="The wave-6 operating unit of type value stream." error={errors.valueStreamId}>
+            <FormField id="flow-stream" label="Value stream id" hint="An operating unit of type value stream." error={errors.valueStreamId}>
               {(c) => <Input {...c} className={styles.mono} value={values.valueStreamId} onChange={(e) => update({ valueStreamId: e.target.value })} invalid={Boolean(errors.valueStreamId)} />}
             </FormField>
             <FormField id="flow-site" label="Site id" error={errors.siteId}>

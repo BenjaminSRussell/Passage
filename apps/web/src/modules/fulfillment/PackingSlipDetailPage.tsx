@@ -171,8 +171,8 @@ export function PackingSlipDetailPage() {
       <Card title="Packaging fees">
         <p className={styles.note}>
           {slip.packagingFeeBillable
-            ? "Billable (BR-28.12): billing charges these lines to the customer; they are never posted to the journal here."
-            : "Statistical lines (BR-28.12): reported per country and month, never posted to the journal."}
+            ? "Billable lines: billing charges these lines to the customer; they are never posted to the journal here."
+            : "Statistical lines: reported per country and month, never posted to the journal."}
         </p>
         <DataTable
           label="Packaging fees"

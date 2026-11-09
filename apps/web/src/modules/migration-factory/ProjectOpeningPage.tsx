@@ -47,7 +47,7 @@ export function ProjectOpeningPage() {
         description={
           opening
             ? mismatch
-              ? "The opening totals differ from the legacy project ledger. The project can't be invoiced or estimated until they match (BR-49.12)."
+              ? "The opening totals differ from the legacy project ledger. The project can't be invoiced or estimated until they match."
               : "Every category matches the legacy project ledger to 0.00."
             : "Opening balances carried in from the legacy project ledger."
         }

@@ -143,7 +143,7 @@ export function NewOrderPegPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New order peg" description="Pegs are entered here until master planning (wave 22) publishes them." />
+      <PageHeader title="New order peg" description="Enter pegs here until master planning publishes them." />
       <Card>{body}</Card>
     </div>
   );

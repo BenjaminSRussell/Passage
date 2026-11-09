@@ -228,7 +228,7 @@ export function SubcontractOperationsPage({ onOpenOrder }: SubcontractOperations
             </div>
           ) : null}
           <p className={styles.hint}>
-            Purchasing (wave 17) creates the vendor PO line from the request; its number and receipt status will show here once it does.
+            Purchasing creates the vendor purchase order line from the request; its number and receipt status will show here once it does.
           </p>
         </>
       )}

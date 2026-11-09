@@ -156,7 +156,7 @@ export function CentralPaymentsPage() {
           <Card title="Bank return" headingLevel={3}>
             <div className={styles.cardBody}>
               <p className={styles.note}>
-                When the bank returns the payment, both entities reverse their postings in one saga under the same pair id (BR-40.11).
+                When the bank returns the payment, both entities reverse their postings together, under the same pair id.
               </p>
               {reversal.failure ? (
                 <Alert tone="danger" title="The reversal was not derived" live="alert">
@@ -188,7 +188,7 @@ export function CentralPaymentsPage() {
             icon="receipt"
             headingLevel={3}
             title="No payment postings yet"
-            description="The form holds acceptance example AC-40.10. Preview it, or enter your own payment and matrix rows."
+            description="The form is filled in with an example. Preview it, or enter your own payment and matrix rows."
           />
         </Card>
       )}

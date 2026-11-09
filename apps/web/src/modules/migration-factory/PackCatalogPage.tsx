@@ -18,7 +18,7 @@ const startPath: Partial<Record<Pack, string>> = {
 const columns: DataTableColumn<CatalogEntry>[] = [
   { key: "pack", header: "Pack", mono: true },
   { key: "sourceSystems", header: "Legacy systems", render: (row) => row.sourceSystems.map((s) => SOURCE_LABELS[s] ?? s).join(", ") },
-  { key: "controlTotals", header: "Control totals (FR-49.2)" },
+  { key: "controlTotals", header: "Control totals" },
   {
     key: "available",
     header: "This release",

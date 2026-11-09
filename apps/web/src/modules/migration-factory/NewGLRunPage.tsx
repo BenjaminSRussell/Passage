@@ -138,7 +138,7 @@ export function NewGLRunPage() {
           {text(
             "openItemsRunId",
             "Open items run",
-            "An open_items run of this company. Its open items per control account must equal the GL balance of that account (BR-49.2).",
+            "An open_items run of this company. Its open items per control account must equal the GL balance of that account.",
             { spellCheck: false },
             true,
           )}

@@ -217,7 +217,7 @@ export function NewOperationPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New operation" description="Production orders from wave 21 will feed operations automatically; until then add them here." />
+      <PageHeader title="New operation" description="Production orders will feed operations automatically; until then, add them here." />
       <Card>
         {resources.error ? (
           <Alert tone="danger" title="Could not load resources and networks" live="alert" action={<Button size="sm" onClick={resources.reload}>Try again</Button>}>

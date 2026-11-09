@@ -191,7 +191,7 @@ describe("validateOnhandRun", () => {
       cutoff: "The cutoff can't be after the legacy freeze (MIG-1501).",
       items: "List the item master the lines are checked against.",
       glRunId: "Enter the id of a gl_balances run, or leave it blank.",
-      inventoryAccount: "Enter the inventory GL account to compare (BR-49.3).",
+      inventoryAccount: "Enter the inventory GL account to compare.",
       quarantineMaxPct: "Enter a percentage from 0 to 10.",
       lines: 'Line 1: quantity "0" must be a decimal above zero such as 12.5.',
     });

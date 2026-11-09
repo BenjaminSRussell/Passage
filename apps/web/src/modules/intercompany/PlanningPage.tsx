@@ -225,7 +225,7 @@ export function PlanningPage() {
             icon="workflow"
             headingLevel={3}
             title="No run order yet"
-            description="The form holds acceptance example AC-40.16. Sequence it, or enter your own planning group."
+            description="The form is filled in with an example. Sequence it, or enter your own planning group."
           />
         </Card>
       )}

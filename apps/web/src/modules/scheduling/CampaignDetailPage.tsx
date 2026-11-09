@@ -718,7 +718,7 @@ function AllocationCard({ campaign }: { campaign: Campaign }) {
     <Card title="Changeover cost allocation">
       <div className={styles.stack}>
         <p className={styles.note}>
-          Split the actual cost of the leading setup and cleanout orders over the campaign's orders (FR-23.16). Rounding goes to the largest order. Nothing is posted yet.
+          Split the actual cost of the leading setup and cleanout orders over the campaign's orders. Rounding goes to the largest order. Nothing is posted yet.
         </p>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Allocate changeover cost">
           <FormField id="allocation-amount" label="Cost to allocate" error={errors.amount}>

@@ -165,7 +165,7 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
         <div className={styles.form}>
           {whole("quotationExpiryDays", "Quotation expiry, days", "Validity of a quotation created without a valid-until date, 1 to 365.")}
           {whole("quotationProbabilityDefault", "Default win probability, %", "Applies to a quotation created without a probability, 0 to 100.")}
-          {whole("creditReleaseValidityDays", "Credit release validity, days", "How long a released CREDIT hold keeps covering its order, 1 to 30 (BR-27.4).")}
+          {whole("creditReleaseValidityDays", "Credit release validity, days", "How long a released credit hold keeps covering its order, from 1 to 30 days.")}
           {whole("creditHoldSlaBusinessDays", "Credit hold SLA, business days", "The release queue marks a hold waiting past this many Monday-to-Friday days, 1 to 10.")}
           {whole("intakeDedupWindowDays", "Order intake dedup window, days", "A channel order with the same reference inside this window returns the existing order instead of creating another, 1 to 90.")}
           <FormField

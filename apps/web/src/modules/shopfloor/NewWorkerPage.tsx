@@ -103,7 +103,7 @@ export function NewWorkerPage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {field("name", "Name", undefined, false, { maxLength: 120 })}
-          {field("partyId", "Party id", "The employee's party record (wave 7).")}
+          {field("partyId", "Party id", "The employee's party record.")}
           {field("badgeId", "Badge", "Scanned at the kiosk; unique in your tenant.", true, { maxLength: 64 })}
           {field("userId", "Sign-in user", "This user can't approve their own time.", true, { maxLength: 200 })}
           {field("costRate", "Cost rate per hour", "For example 21.50.", false, { inputMode: "decimal" })}

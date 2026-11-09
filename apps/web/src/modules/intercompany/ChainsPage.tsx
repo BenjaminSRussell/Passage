@@ -164,7 +164,7 @@ export function ChainsPage() {
             icon="workflow"
             headingLevel={3}
             title="No chain checked yet"
-            description="The form holds acceptance example AC-40.3. Preview it, or enter your own chain."
+            description="The form is filled in with an example. Preview it, or enter your own chain."
           />
         </Card>
       )}

@@ -33,7 +33,7 @@ export function OrderImportsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Production orders received"
-        description="Each production order that was dated in wave 21 arrives here, and its route operations become operations to schedule. Orders with operations that could not be registered are listed with the reason; run the schedule after an order changes."
+        description="Each dated production order arrives here, and its route operations become operations to schedule. Orders with operations that could not be registered are listed with the reason; run the schedule after an order changes."
         actions={
           <Link className={buttonClassName("secondary")} to="/scheduling/operations">
             Operations

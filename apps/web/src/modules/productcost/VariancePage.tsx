@@ -223,7 +223,7 @@ export function VariancePage() {
               Compute variance
             </Button>
             <Button variant="ghost" onClick={() => setValues(ac395)}>
-              Load AC-39.5 example
+              Load the example
             </Button>
           </div>
         </form>

@@ -255,7 +255,7 @@ export function VersionsPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="version-fallback" label="Fallback principle" hint="Where a missing price comes from (BR-39.4).">
+          <FormField id="version-fallback" label="Fallback principle" hint="Where a missing price comes from.">
             {(control) => (
               <Select
                 {...control}

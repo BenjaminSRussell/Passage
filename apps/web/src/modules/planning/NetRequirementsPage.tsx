@@ -199,7 +199,7 @@ export function NetRequirementsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Net requirements"
-        description={`Gross requirements, receipts and projected available balance per day of one item in the current version of plan ${plan}. A warehouse planned in its own scope is netted apart from the site (FR-22.18).`}
+        description={`Gross requirements, receipts and projected available balance per day of one item in the current version of plan ${plan}. A warehouse planned in its own scope is netted apart from the site.`}
       />
       <SelectionForm key={`${plan}/${item}/${warehouse}`} plan={plan} item={item} warehouse={warehouse} onSelect={select} />
       {item ? (

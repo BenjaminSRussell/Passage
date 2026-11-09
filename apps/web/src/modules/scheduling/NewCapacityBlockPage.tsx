@@ -193,7 +193,7 @@ export function NewCapacityBlockPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New capacity block" description="A job may use a block only when every predicate holds for its attributes; other jobs use unblocked capacity (BR-23.15)." />
+      <PageHeader title="New capacity block" description="A job can use a block only when its attributes meet every condition of the block; other jobs use unblocked capacity." />
       <Card>
         <ResourceGate need="A block reserves time on one resource.">
           {(resources) => (

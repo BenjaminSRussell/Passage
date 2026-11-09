@@ -137,7 +137,7 @@ export function ProfitInInventoryPage() {
             icon="box"
             headingLevel={3}
             title="No unrealized profit yet"
-            description="The form holds acceptance example AC-40.12. Compute it, or enter the layers your entity still holds."
+            description="The form is filled in with an example. Compute it, or enter the layers your entity still holds."
           />
         </Card>
       )}

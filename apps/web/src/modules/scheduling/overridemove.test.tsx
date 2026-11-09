@@ -69,7 +69,7 @@ describe("Gantt block breaches", () => {
     const table = await findTable({ name: "Jobs in window" });
     await waitFor(() => expect(table).toHaveTextContent("Inside a block it does not match"));
     expect(within(table).getAllByRole("row")[1]).not.toHaveTextContent("does not match");
-    expect(container.querySelector(`rect[data-job="${JOB2}"] title`)?.textContent).toContain("inside a capacity block it does not match (BR-23.15)");
+    expect(container.querySelector(`rect[data-job="${JOB2}"] title`)?.textContent).toContain("inside a capacity block it does not match");
     expect(container.querySelector(`rect[data-job="${JOB1}"] title`)?.textContent).not.toContain("capacity block");
     expect(container.querySelector(`rect[data-job="${JOB2}"]`)?.getAttribute("class")).toMatch(/breach/);
     expect(container.querySelector(`rect[data-job="${JOB1}"]`)?.getAttribute("class")).not.toMatch(/breach/);

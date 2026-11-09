@@ -289,7 +289,7 @@ export function CutoverPlanDetailPage() {
         <>
           {plan.abortDue ? (
             <Alert tone="danger" title="Abort deadline passed">
-              Go/no-go items are still open after T+{plan.abortOffsetMin / 60}h. Confirm the rollback below (BR-49.9).
+              Go/no-go items are still open after T+{plan.abortOffsetMin / 60}h. Confirm the rollback below.
             </Alert>
           ) : plan.abortWarning ? (
             <Alert tone="warning" title="Abort deadline approaching">
@@ -390,7 +390,7 @@ export function CutoverPlanDetailPage() {
         <Card title="Rollback plan">
           <div className={styles.stack}>
             <p className={styles.note}>
-              Generated for this cutover (FR-49.9). If go/no-go items are still open at the abort deadline ({formatOffset(plan.abortOffsetMin)}), the
+              Generated for this cutover. If go/no-go items are still open at the abort deadline ({formatOffset(plan.abortOffsetMin)}), the
               cutover manager decides on the rollback and these steps follow.
             </p>
             <DataTable label="Rollback plan" columns={rollbackColumns} rows={plan.rollbackSteps} getRowKey={(row) => String(row.seq)} />

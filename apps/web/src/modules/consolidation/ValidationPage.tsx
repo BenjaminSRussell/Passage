@@ -212,7 +212,7 @@ export function ValidationPage() {
             icon="calendarCheck"
             headingLevel={3}
             title="No validation yet"
-            description="The form holds acceptance example AC-40.15. Validate it, or enter your own units' totals."
+            description="The form is filled in with an example. Validate it, or enter your own units' totals."
           />
         </Card>
       )}

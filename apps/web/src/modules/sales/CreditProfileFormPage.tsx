@@ -217,7 +217,7 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
           {text("customerId", "Customer", { mono: true, readOnly: existing })}
           {text("limit", "Credit limit", { decimal: true })}
           {text("currency", "Currency")}
-          <FormField id="profile-limitType" label="Limit type" hint="What counts as exposure (BR-27.3)." error={errors.limitType}>
+          <FormField id="profile-limitType" label="Limit type" hint="What counts as exposure." error={errors.limitType}>
             {(control) => (
               <Select {...control} value={values.limitType} onChange={(e) => update({ limitType: e.target.value as LimitType })}>
                 {LIMIT_TYPES.map((t) => (

@@ -431,7 +431,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
 
         <Card title="Order">
           <div className={styles.fields}>
-            {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "Released product id (wave 8).", readOnly: !!intake })}
+            {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "The id of the released product.", readOnly: !!intake })}
             {text("po-quantity", "Quantity", values.quantity, (v) => set({ quantity: v }), { inputMode: "decimal", readOnly: !!intake })}
             {text("po-currency", "Currency", values.currency, (v) => set({ currency: v.toUpperCase() }))}
             {text("po-deliveryDate", "Delivery date", values.deliveryDate, (v) => set({ deliveryDate: v }), { optional: true, type: "date", readOnly: !!intake })}

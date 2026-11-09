@@ -293,7 +293,7 @@ export function InvoicingPlanPage() {
     <div className={styles.stack}>
       <PageHeader
         title={title}
-        description="Schedule the invoices of this line. Payables (wave 18) invoices each open row on its due date; the rows always add up to the line amount, and a change to the line amount reshares the open rows."
+        description="Schedule the invoices of this line. Payables invoices each open row on its due date; the rows always add up to the line amount, and a change to the line amount reshares the open rows."
         actions={back}
       />
       <Alert tone="danger" live="alert">

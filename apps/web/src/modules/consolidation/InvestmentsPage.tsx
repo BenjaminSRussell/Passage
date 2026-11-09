@@ -162,7 +162,7 @@ export function InvestmentsPage() {
             icon="percent"
             headingLevel={3}
             title="No equity-method result yet"
-            description="The form holds acceptance example AC-40.14. Apply it, or enter your own associate."
+            description="The form is filled in with an example. Apply it, or enter your own associate."
           />
         </Card>
       )}

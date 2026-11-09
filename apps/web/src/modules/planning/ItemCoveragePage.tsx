@@ -57,10 +57,10 @@ const orderTypeLabel: Record<OrderType, string> = { purchase: "Purchase", produc
 /** Whole-number fields of an item coverage with their label, range and help. */
 const DAY_FIELDS = [
   { key: "safetyMarginReceiptDays", label: "Receipt margin (days)", min: 0, max: 365, hint: "Days added before a receipt is available.", optional: false },
-  { key: "safetyMarginIssueDays", label: "Issue margin (days)", min: 0, max: 365, hint: "Working days each demand is moved earlier (FR-22.5).", optional: false },
-  { key: "safetyMarginReorderDays", label: "Reorder margin (days)", min: 0, max: 365, hint: "Working days added to the lead time of planned orders (FR-22.5).", optional: false },
+  { key: "safetyMarginIssueDays", label: "Issue margin (days)", min: 0, max: 365, hint: "Working days each demand is moved earlier.", optional: false },
+  { key: "safetyMarginReorderDays", label: "Reorder margin (days)", min: 0, max: 365, hint: "Working days added to the lead time of planned orders.", optional: false },
   { key: "leadTimeDays", label: "Lead time override (days)", min: 0, max: 3650, hint: "Blank uses the item's lead time.", optional: true },
-  { key: "requiredShelfLifeDays", label: "Required shelf life (days)", min: 0, max: 3650, hint: "Remaining shelf life a demand needs (FR-22.20).", optional: false },
+  { key: "requiredShelfLifeDays", label: "Required shelf life (days)", min: 0, max: 3650, hint: "Remaining shelf life a demand needs.", optional: false },
 ] as const;
 
 type DayKey = (typeof DAY_FIELDS)[number]["key"];
@@ -453,7 +453,7 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
           </Select>
         )}
       </FormField>
-      <FormField id="ic-strategy" label="Planning strategy" hint="How forecast and sales demand interact (FR-22.19).">
+      <FormField id="ic-strategy" label="Planning strategy" hint="How forecast and sales demand interact.">
         {(a11y) => (
           <Select {...a11y} value={draft.planningStrategy} onChange={(e) => set("planningStrategy", e.target.value as PlanningStrategy)}>
             {(Object.keys(strategyLabel) as PlanningStrategy[]).map((s) => (
@@ -476,7 +476,7 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
         </FormField>
       ))}
       <fieldset className={`${styles.fieldset} ${styles.wide}`}>
-        <legend className={styles.legend}>DDMRP and priority (FR-22.16)</legend>
+        <legend className={styles.legend}>DDMRP and priority</legend>
         <div className={styles.checks}>
           <span className={styles.check}>
             <Input id="ic-decoupling" type="checkbox" checked={draft.decouplingPoint} onChange={(e) => set("decouplingPoint", e.target.checked)} />

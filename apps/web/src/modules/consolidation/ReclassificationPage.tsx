@@ -212,7 +212,7 @@ export function ReclassificationPage() {
             icon="workflow"
             headingLevel={3}
             title="No dry run yet"
-            description="The form holds acceptance example AC-40.13 with an overdrawn group cash balance. Run it, or enter your own rules."
+            description="The form is filled in with an example that has an overdrawn group cash balance. Run it, or enter your own rules."
           />
         </Card>
       )}

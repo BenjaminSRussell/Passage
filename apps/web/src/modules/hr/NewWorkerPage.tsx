@@ -106,7 +106,7 @@ export function NewWorkerPage() {
     <div className={styles.stack}>
       <PageHeader
         title="New worker"
-        description="A worker is one person (wave 7 party). Start an employment from the worker's page once it is created."
+        description="A worker is one person, recorded as a party. Start an employment from the worker's page once it is created."
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>

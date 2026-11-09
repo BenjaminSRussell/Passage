@@ -13,7 +13,7 @@ import { useLoad } from "./useLoad";
 /** What the supervisor does about each kind of case. */
 const ADVICE: Record<string, string> = {
   SLIP_POSTED_BEYOND_KEPT:
-    "The goods have left the warehouse. Take them back through a customer return (wave 30), or raise a new order for the customer, then record what you did.",
+    "The goods have left the warehouse. Take them back through a customer return, or raise a new order for the customer, then record what you did.",
   PACKED_BEYOND_KEPT:
     "Posting this shipment is refused (FUL-0066) until it holds no more than the order line keeps. Unpack the containers on the shipment and put the goods back: unpacking cuts the quantity above what the order line keeps, so the rest can be repacked and posted. Then record what you did.",
   DROPSHIP_CONFIRMED_BEYOND_KEPT:

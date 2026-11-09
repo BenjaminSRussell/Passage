@@ -152,7 +152,7 @@ export function WIPReportPage({ onOpenOrder }: WIPReportPageProps) {
               </Button>
             </div>
           ) : null}
-          <p className={styles.hint}>The general-ledger WIP account side of the reconciliation arrives with the ledger (wave 11).</p>
+          <p className={styles.hint}>The WIP account balance from the general ledger isn't part of this reconciliation yet.</p>
         </>
       )}
     </div>

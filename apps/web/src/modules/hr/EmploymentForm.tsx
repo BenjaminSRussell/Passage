@@ -104,7 +104,7 @@ export function EmploymentForm({ workerId, onCreated, onCancel }: { workerId: st
 
   return (
     <form className={styles.form} onSubmit={submit} noValidate aria-label="Start employment">
-      {input("legalEntityId", "Legal entity id", "The employing legal entity (wave 6).")}
+      {input("legalEntityId", "Legal entity id", "The legal entity that employs the worker.")}
       <FormField id="employment-employmentType" label="Employment type">
         {(control) => (
           <Select {...control} value={values.employmentType} onChange={(event) => update({ employmentType: event.target.value as EmploymentType })}>

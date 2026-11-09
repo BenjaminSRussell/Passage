@@ -312,7 +312,7 @@ export function PackRunDetailPage() {
       {run?.targetLoad ? <TargetLoadPanel initial={run.targetLoad} onChanged={state.reload} /> : null}
       {projects.length > 0 && run ? (
         <Card title="Projects">
-          <p className={styles.note}>Opening lines never post to the GL. A project that does not reconcile can't be invoiced or estimated (BR-49.12).</p>
+          <p className={styles.note}>Opening lines never post to the GL. A project that does not reconcile can't be invoiced or estimated.</p>
           <DataTable
             label="Projects"
             columns={projectColumns}

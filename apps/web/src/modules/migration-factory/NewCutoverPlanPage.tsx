@@ -110,7 +110,7 @@ export function NewCutoverPlanPage() {
           <FormField
             id="plan-rehearsalPlanId"
             label="Rehearsal plan"
-            hint="Optional. The id of an earlier plan: the durations measured on its completed steps become this plan's planned durations (FR-49.6)."
+            hint="Optional. The id of an earlier plan: the durations measured on its completed steps become this plan's planned durations."
             optional
             error={errors.rehearsalPlanId}
           >

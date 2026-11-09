@@ -171,7 +171,7 @@ export function TranslationPage() {
             icon="percent"
             headingLevel={3}
             title="No translation yet"
-            description="The form holds acceptance example AC-40.6. Translate it, or enter your own unit's net assets, net income and rates."
+            description="The form is filled in with an example. Translate it, or enter your own unit's net assets, net income and rates."
           />
         </Card>
       )}

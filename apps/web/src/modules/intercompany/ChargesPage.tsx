@@ -233,7 +233,7 @@ export function ChargesPage() {
             icon="receipt"
             headingLevel={3}
             title="No charge priced yet"
-            description="The form holds acceptance example AC-40.11. Price it, or enter your own charge, transfer prices and matrix row."
+            description="The form is filled in with an example. Price it, or enter your own charge, transfer prices and matrix row."
           />
         </Card>
       )}

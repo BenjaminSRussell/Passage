@@ -269,7 +269,7 @@ export function MaterialRequirementsPage({ onOpenOrder }: MaterialRequirementsPa
               </Button>
             </div>
           ) : null}
-          <p className={styles.hint}>Outstanding is required minus issued (posted picking lists, backflush included, net of reversals). Stock on hand is not compared yet (wave 16).</p>
+          <p className={styles.hint}>Outstanding is required minus issued (posted picking lists, backflush included, net of reversals). Stock on hand isn't compared yet.</p>
         </>
       )}
     </div>

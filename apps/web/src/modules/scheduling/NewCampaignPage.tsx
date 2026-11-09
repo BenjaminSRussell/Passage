@@ -61,7 +61,7 @@ const fieldNames: Record<string, keyof CampaignValues> = {
 };
 
 const ruleHints: Record<SequenceRule, string> = {
-  "nearest-neighbor": "Orders follow the smallest changeover from the previous setup group (BR-23.12).",
+  "nearest-neighbor": "Orders follow the smallest changeover from the previous setup group.",
   manual: "Orders run in the order you add them; changeovers are priced as they fall.",
   "cp-sat": "The optimizer searches for the order with the fewest changeover minutes (up to 50 orders); nearest neighbour is kept when it finds nothing better.",
 };
@@ -126,7 +126,7 @@ export function NewCampaignPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New campaign" description="A campaign runs its orders back to back on one resource with a leading setup and a cleanout at the end (FR-23.14)." />
+      <PageHeader title="New campaign" description="A campaign runs its orders back to back on one resource with a leading setup and a cleanout at the end." />
       <Card>
         <ResourceGate need="A campaign runs on one resource.">
           {(resources) => (
