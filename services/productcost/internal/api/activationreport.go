@@ -8,6 +8,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
@@ -51,6 +52,10 @@ func (a *API) revaluationReport(w http.ResponseWriter, r *http.Request) {
 	act, err := a.store.GetActivation(r.Context(), id)
 	if err != nil {
 		storeFailure(w, r, err)
+		return
+	}
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, act.LegalEntityID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeLegalEntityScope, "legal entity "+act.LegalEntityID+" is outside your scope"))
 		return
 	}
 	positions := make([]inventory.Position, len(act.Lines))

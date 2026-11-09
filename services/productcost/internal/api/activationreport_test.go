@@ -43,7 +43,7 @@ func TestRevaluationReport_TiesLinesToTheJournalAndToTheInventoryOnHand(t *testi
 	f := &fakeStore{report: reportActivation("1000")}
 	oh := onHandOf("1000")
 	h, _ := activationRouter(f, nil, oh)
-	rec := call{http.MethodGet, reportPath(someID), "", view, "", ""}.do(h)
+	rec := call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
@@ -59,14 +59,14 @@ func TestRevaluationReport_TiesLinesToTheJournalAndToTheInventoryOnHand(t *testi
 func TestRevaluationReport_FlagsAQuantityTheInventoryNoLongerHolds(t *testing.T) {
 	f := &fakeStore{report: reportActivation("1000")}
 	h, _ := activationRouter(f, nil, onHandOf("900"))
-	rec := call{http.MethodGet, reportPath(someID), "", view, "", ""}.do(h)
+	rec := call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h)
 	got := decodeReport(t, rec.Body.Bytes())
 	if rec.Code != http.StatusOK || got.TiedToOnHand || got.Lines[0].Tied || got.Lines[0].Difference.String() != "-100" || !got.TiedToJournal {
 		t.Fatalf("%d report %+v", rec.Code, got)
 	}
 	empty := &fakeOnHand{positions: map[inventory.Position]decimal.Decimal{}}
 	h, _ = activationRouter(f, nil, empty)
-	got = decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", ""}.do(h).Body.Bytes())
+	got = decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h).Body.Bytes())
 	if got.TiedToOnHand || got.Lines[0].OnHand.String() != "0" {
 		t.Fatalf("a position inventory has no row for is zero on hand: %+v", got)
 	}
@@ -76,41 +76,57 @@ func TestRevaluationReport_NotTiedToTheJournalWhenTheStoredAmountsDisagree(t *te
 	act := reportActivation("1000")
 	act.JournalLines[1].Amount = decimal.RequireFromString("499.99")
 	h, _ := activationRouter(&fakeStore{report: act}, nil, onHandOf("1000"))
-	got := decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", ""}.do(h).Body.Bytes())
+	got := decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h).Body.Bytes())
 	if got.TiedToJournal || !got.TiedToOnHand {
 		t.Fatalf("%+v", got)
 	}
 	act = reportActivation("1000")
 	act.Total = decimal.RequireFromString("501")
 	h, _ = activationRouter(&fakeStore{report: act}, nil, onHandOf("1000"))
-	if got = decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", ""}.do(h).Body.Bytes()); got.TiedToJournal {
+	if got = decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h).Body.Bytes()); got.TiedToJournal {
 		t.Fatalf("a total that is not the sum of the lines: %+v", got)
+	}
+}
+
+func TestRevaluationReport_RefusesAnActivationOfAnotherLegalEntityWithoutCallingInventory(t *testing.T) {
+	for name, scope := range map[string]string{"other entity": ids.New(), "no entity": ""} {
+		oh := onHandOf("1000")
+		h, _ := activationRouter(&fakeStore{report: reportActivation("1000")}, nil, oh)
+		rec := call{http.MethodGet, reportPath(someID), "", view, "", scope}.do(h)
+		if code, _ := problemCode(t, rec); rec.Code != http.StatusForbidden || code != domain.CodeLegalEntityScope || oh.calls != 0 {
+			t.Errorf("%s: %d %s inventory calls %d", name, rec.Code, rec.Body.String(), oh.calls)
+		}
+	}
+	oh := onHandOf("1000")
+	h, _ := activationRouter(&fakeStore{report: reportActivation("1000")}, nil, oh)
+	if rec := (call{http.MethodGet, reportPath(someID), "", view, "", rollLE}).do(h); rec.Code != http.StatusOK || oh.calls != 1 {
+		t.Errorf("own entity: %d", rec.Code)
 	}
 }
 
 func TestRevaluationReport_RefusesWithoutDutyInventoryOrActivation(t *testing.T) {
 	good := &fakeStore{report: reportActivation("1")}
 	h, _ := activationRouter(good, nil, onHandOf("1"))
-	if rec := (call{http.MethodGet, reportPath(someID), "", calculate, "", ""}).do(h); rec.Code != http.StatusForbidden {
+	if rec := (call{http.MethodGet, reportPath(someID), "", calculate, "", rollLE}).do(h); rec.Code != http.StatusForbidden {
 		t.Errorf("without productcost.view: %d", rec.Code)
 	}
-	if rec := (call{http.MethodGet, reportPath("not-a-uuid"), "", view, "", ""}).do(h); rec.Code != http.StatusNotFound {
+	if rec := (call{http.MethodGet, reportPath("not-a-uuid"), "", view, "", rollLE}).do(h); rec.Code != http.StatusNotFound {
 		t.Errorf("a malformed id: %d", rec.Code)
 	}
 	noInventory, _ := activationRouter(&fakeStore{report: reportActivation("1")}, nil, nil)
-	rec := call{http.MethodGet, reportPath(someID), "", view, "", ""}.do(noInventory)
+	rec := call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(noInventory)
 	if code, _ := problemCode(t, rec); rec.Code != http.StatusServiceUnavailable || code != domain.CodeOnHandUnavailable {
 		t.Errorf("no inventory configured: %d %s", rec.Code, rec.Body.String())
 	}
 	down := &fakeOnHand{err: errors.New("inventory down")}
 	h, _ = activationRouter(&fakeStore{report: reportActivation("1")}, nil, down)
-	rec = call{http.MethodGet, reportPath(someID), "", view, "", ""}.do(h)
+	rec = call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h)
 	if code, _ := problemCode(t, rec); rec.Code != http.StatusBadGateway || code != domain.CodeOnHandUnavailable {
 		t.Errorf("inventory down: %d %s", rec.Code, rec.Body.String())
 	}
 	missing := &fakeStore{err: errors.New("boom")}
 	h, _ = activationRouter(missing, nil, onHandOf("1"))
-	if rec := (call{http.MethodGet, reportPath(ids.New()), "", view, "", ""}).do(h); rec.Code != http.StatusInternalServerError {
+	if rec := (call{http.MethodGet, reportPath(ids.New()), "", view, "", rollLE}).do(h); rec.Code != http.StatusInternalServerError {
 		t.Errorf("store failure: %d", rec.Code)
 	}
 }
