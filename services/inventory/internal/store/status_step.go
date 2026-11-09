@@ -240,11 +240,7 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		if err := saveRow(ctx, tx, tp.TenantID, in.LegalEntityID, r, 1); err != nil {
 			return err
 		}
-		var settle *issueSettlement
-		if in.IssueRef != "" {
-			settle = &issueSettlement{ref: in.IssueRef, key: in.IdempotencyKey}
-		}
-		if err := guardClaimedStock(ctx, tx, tp.TenantID, in.LegalEntityID, []*row{r}, settle); err != nil {
+		if err := guardClaimedStock(ctx, tx, tp.TenantID, in.LegalEntityID, []*row{r}, &issueSettlement{ref: in.IssueRef, key: in.IdempotencyKey}); err != nil {
 			return err
 		}
 		changeID := ids.New()

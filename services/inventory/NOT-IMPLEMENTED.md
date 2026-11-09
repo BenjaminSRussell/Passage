@@ -193,11 +193,20 @@ batch, so a batch with no hold cannot reach another batch's held stock
 (`TestIssueClaim_ABatchWithoutAHoldCannotReachAnotherBatchsHeldStock`); batchless claims count against every batch. The client
 (`platform/go/issueclaim`) sends each movement's key with an attempt id, so a failed double submit withdraws only its own claim
 (`TestClaimAll_EachAttemptOwnsItsClaim`, fulfillment `TestPostPackingSlip_FailedDoubleSubmitKeepsTheCommittedClaim`). A claim
-whose withdrawal is lost (crash between claim and commit) stays and only makes later movements stricter. What the ref
-grouping depends on: a warehouse pick carries a ref only when whoever creates the work sets the line attribute `issueRef`. A
-pick without one, followed by the ship of the same units, still counts twice, which is stricter (a false refusal only while a
-hold exists), never a leak. The claims of production consumption and warehouse picks are never settled: nothing books them as
-inventory issues, so they keep standing in for the issue. A hold is placed against the row's physical stock and does not
+whose withdrawal is lost (crash between claim and commit) stays and only makes later movements stricter. Which claims an issue settles
+(migrations 0040 and 0041 let an `ISSUED` row carry no ref; settlement keys start `issued:`, which `ClaimIssue` refuses in a
+caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): the issue's own ref (the DELIVERED booking), the `PICK`
+claims without a ref (no caller sets `issueRef` on a warehouse pick, so a pick for a sales line is a ref-less claim beside the
+ship under the line's ref, and a delivery of the units would otherwise leave it standing for ever and make free stock negative
+at the next hold, `TestIssueClaim_APickWithoutARefIsSettledByTheDeliveryOfItsUnits`,
+`TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims`), and, for a journal issue that cannot name a ref,
+the groups that hold a `CONSUME` claim up to the quantity issued (production consumption reaches inventory as a journal,
+`TestIssueClaim_AConsumptionClaimIsSettledByTheJournalIssueOfItsUnits`); each is capped by what it still has outstanding. A
+`SHIP` or `CONSUME` claim without a ref is never settled (fulfillment and production always send theirs) and keeps
+reserving its units until released. A pick without a ref counts beside the ship of the same units until the delivery
+settles both, which is stricter (a false refusal only while a hold exists), never a leak. Settling by quantity rather than by
+document means an unrelated journal issue can also settle a consumption claim of another order; the claim is then taken
+again by the movement it stood in for, so this errs towards a later refusal, not a leak. A hold is placed against the row's physical stock and does not
 subtract outstanding claims. A hold placed over stock already claimed may therefore cover units that have left. It then
 stops every further claim and every issue that settles nothing until the usage decision, so it is stricter, not a leak. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -39,15 +40,18 @@ type IssueClaimInput struct {
 // the claims and inventory issues read are those an earlier claim or posting
 // has committed. Claims of every kind stand in, together, for the issues
 // inventory has not booked: claims that share a ref (a pick and the ship of
-// what was picked) count as the largest per-kind total of the ref, less what
-// inventory has booked for the ref since (ISSUED, see guardClaimedStock), and
-// claims with no ref count in full. With any quantity held, what is left free
+// what was picked) count as the largest per-kind total of the ref, and claims
+// with no ref count in full, each less what inventory has booked for them since
+// (ISSUED, see settleIssue). With any quantity held, what is left free
 // after the claim may not be below zero (domain.CheckIssueClaim), so the ship
 // of picked units is refused while a hold placed after the pick covers them.
 // Restricted (BLOCKED, QUARANTINE) rows are not free stock. The rule holds
 // over the whole warehouse and, for a claim that names a batch, within that
 // batch too. A repeated key is a replay.
 func (s *Postgres) ClaimIssue(ctx context.Context, in IssueClaimInput) (replayed bool, err error) {
+	if strings.HasPrefix(in.IdempotencyKey, issuedKeyPrefix) {
+		return false, problem(http.StatusUnprocessableEntity, domain.CodeInvalid, "Idempotency-Key must not start with "+issuedKeyPrefix)
+	}
 	tp, _ := tenant.FromContext(ctx)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := lockKey(ctx, tx, "issue-claim", tp.TenantID, in.IdempotencyKey); err != nil {
@@ -184,14 +188,24 @@ func scopeStock(rows map[string]*row, warehouse, batch string) (physical, held d
 	return physical, held
 }
 
-// refOutstandingSQL is, per ref, the largest per-kind total of its claims
-// less what inventory booked for it, never below zero.
-const refOutstandingSQL = `greatest(0, greatest(sum(qty) filter (where kind = 'PICK'), sum(qty) filter (where kind = 'SHIP'),
-	sum(qty) filter (where kind = 'CONSUME'), 0) - coalesce(sum(qty) filter (where kind = 'ISSUED'), 0))`
+// issuedKeyPrefix starts the key of every settlement row; ClaimIssue refuses a
+// caller key that starts with it, so a claim can never occupy a settlement's key.
+const issuedKeyPrefix = "issued:"
+
+// groupOpenSQL is, per ref group, what its claims stand for less what inventory
+// booked for it, never below zero: the largest per-kind total of a ref, or the
+// full total of the claims without a ref. claimFilter narrows the claims and
+// issuedFilter the settlements (both start with " and ", or are empty).
+func groupOpenSQL(claimFilter, issuedFilter string) string {
+	return `greatest(0, case when issue_ref = '' then coalesce(sum(qty) filter (where kind <> 'ISSUED'` + claimFilter + `), 0)
+		else greatest(sum(qty) filter (where kind = 'PICK'` + claimFilter + `), sum(qty) filter (where kind = 'SHIP'` + claimFilter + `),
+			sum(qty) filter (where kind = 'CONSUME'` + claimFilter + `), 0) end
+		- coalesce(sum(qty) filter (where kind = 'ISSUED'` + issuedFilter + `), 0))`
+}
 
 // outstandingClaims is the claimed quantity of a scope that inventory has not
-// booked as an issue: every claim without a ref, plus per ref the largest
-// per-kind total less what was booked for it. Within a batch, claims of the
+// booked as an issue: the claims without a ref in full, plus per ref the
+// largest per-kind total, each less what was booked for it. Within a batch, claims of the
 // batch and batchless claims count (a batchless claim may have taken any
 // batch), and a ref counts no more than it does over the whole warehouse, so
 // a ref settled by an issue of another batch does not linger in this one.
@@ -201,12 +215,9 @@ func outstandingClaims(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 			select issue_ref, kind, batch, qty, ($5::text = '' or batch = '' or batch = $5::text) as in_batch from inventory_issue_claim
 			where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and warehouse = $4),
 		r as (
-			select `+refOutstandingSQL+` as w,
-				greatest(0, greatest(sum(qty) filter (where kind = 'PICK' and in_batch), sum(qty) filter (where kind = 'SHIP' and in_batch),
-					sum(qty) filter (where kind = 'CONSUME' and in_batch), 0)
-					- coalesce(sum(qty) filter (where kind = 'ISSUED' and ($5::text = '' or batch = $5::text)), 0)) as b
-			from c where issue_ref <> '' group by issue_ref)
-		select ((select coalesce(sum(qty), 0) from c where issue_ref = '' and in_batch) + (select coalesce(sum(least(w, b)), 0) from r))::text`,
+			select `+groupOpenSQL("", "")+` as w, `+groupOpenSQL(" and in_batch", " and ($5::text = '' or batch = $5::text)")+` as b
+			from c group by issue_ref)
+		select coalesce(sum(least(w, b)), 0)::text from r`,
 		tenantID, legalEntityID, sc.product, sc.warehouse, batch).Scan(&out)
 	if err != nil {
 		return decimal.Zero, fmt.Errorf("outstanding issue claims: %w", err)
@@ -216,8 +227,8 @@ func outstandingClaims(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 
 // issueSettlement names the document line an inventory issue is booked for
 // (the postings consumer's DELIVERED booking of a sales order line, ref as
-// platform/issueclaim forms it) and the issue's key: the issue settles the
-// claims of the ref, which stood in for it until it was booked.
+// platform/issueclaim forms it; empty for a journal) and the issue's key: the
+// issue settles the claims that stood in for it until it was booked (settleIssue).
 type issueSettlement struct {
 	ref, key string
 }
@@ -237,8 +248,7 @@ type issueSettlement struct {
 // and a hold placed meanwhile is checked against the row it holds.
 func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, moved []*row, settle *issueSettlement) error {
 	falls := map[issueScope]map[string]decimal.Decimal{}
-	var settleScope issueScope
-	settleBatch := ""
+	issued := map[issueScope]map[string]decimal.Decimal{}
 	for _, r := range moved {
 		wh := r.dims[domain.DimWarehouse]
 		if wh == "" || domain.IsRestricted(r.dims[domain.DimStatus]) {
@@ -257,7 +267,10 @@ func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 			falls[sc][b] = falls[sc][b].Add(d)
 		}
 		if settle != nil && d.IsNegative() {
-			settleScope, settleBatch = sc, r.dims[domain.DimBatch]
+			if issued[sc] == nil {
+				issued[sc] = map[string]decimal.Decimal{}
+			}
+			issued[sc][r.dims[domain.DimBatch]] = issued[sc][r.dims[domain.DimBatch]].Sub(d)
 		}
 	}
 	scopes := make([]issueScope, 0, len(falls))
@@ -295,8 +308,8 @@ func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 				return err
 			}
 		}
-		if settle != nil && sc == settleScope {
-			if err := settleIssue(ctx, tx, tenantID, legalEntityID, sc, settleBatch, falls[sc][""].Neg(), *settle); err != nil {
+		for _, b := range slices.Sorted(maps.Keys(issued[sc])) {
+			if err := settleIssue(ctx, tx, tenantID, legalEntityID, sc, b, issued[sc][b], *settle); err != nil {
 				return err
 			}
 		}
@@ -327,22 +340,65 @@ func guardClaimedStock(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 	return nil
 }
 
-// settleIssue books what an issue of qty settles of its ref: no more than the
-// ref has outstanding over the warehouse, so stock issued without a claim
-// never absorbs a later claim of the same line.
+// settleIssue books what an issue of qty (from one batch, or none) settles of
+// the claims of a scope, each group capped by what it has outstanding over the
+// warehouse, so stock issued without a claim never absorbs a later claim. The
+// issue settles the group of its own ref, and the picks that carry no ref (no
+// caller sets one on a warehouse pick): both stood in for the units it moved.
+// Ships and consumptions always carry their ref, so a claim of those kinds
+// without one keeps reserving its units until released. An issue that names no
+// ref (a journal) settles on, in the order of the refs, the groups that hold a
+// CONSUME claim, up to qty: consumption reaches inventory as a journal that
+// cannot name the production item.
 func settleIssue(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, sc issueScope, batch string, qty decimal.Decimal, settle issueSettlement) error {
-	var open string
-	if err := tx.QueryRow(ctx, `select `+refOutstandingSQL+`::text from inventory_issue_claim
-		where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and warehouse = $4 and issue_ref = $5`,
-		tenantID, legalEntityID, sc.product, sc.warehouse, settle.ref).Scan(&open); err != nil {
-		return fmt.Errorf("outstanding claims of the issue ref: %w", err)
+	groups, err := tx.Query(ctx, `select issue_ref, `+groupOpenSQL("", "")+`::text, bool_or(kind = 'CONSUME'),
+		greatest(0, coalesce(sum(qty) filter (where kind = 'PICK'), 0) - coalesce(sum(qty) filter (where kind = 'ISSUED'), 0))::text from inventory_issue_claim
+		where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and warehouse = $4 group by issue_ref order by issue_ref collate "C"`,
+		tenantID, legalEntityID, sc.product, sc.warehouse)
+	if err != nil {
+		return fmt.Errorf("outstanding claims of the scope: %w", err)
 	}
-	settled := decimal.Min(qty, decimal.RequireFromString(open))
-	if !settled.IsPositive() {
-		return nil
+	type group struct {
+		ref     string
+		open    decimal.Decimal
+		consume bool
+		picks   decimal.Decimal
 	}
-	_, err := tx.Exec(ctx, `insert into inventory_issue_claim (tenant_id, legal_entity_id, idempotency_key, product_id, warehouse, batch, kind, qty, issue_ref)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict do nothing`,
-		tenantID, legalEntityID, "issued:"+settle.key, sc.product, sc.warehouse, batch, domain.IssueBooked, settled.String(), settle.ref)
-	return scopeProblem(err)
+	var open []group
+	for groups.Next() {
+		var g group
+		var raw, picks string
+		if err := groups.Scan(&g.ref, &raw, &g.consume, &picks); err != nil {
+			groups.Close()
+			return fmt.Errorf("outstanding claims of the scope: %w", err)
+		}
+		g.open, g.picks = decimal.RequireFromString(raw), decimal.RequireFromString(picks)
+		open = append(open, g)
+	}
+	groups.Close()
+	if err := groups.Err(); err != nil {
+		return fmt.Errorf("outstanding claims of the scope: %w", err)
+	}
+	rest := qty
+	for _, g := range open {
+		var settled decimal.Decimal
+		switch {
+		case g.ref == "":
+			settled = decimal.Min(qty, g.picks)
+		case g.ref == settle.ref:
+			settled = decimal.Min(qty, g.open)
+		case settle.ref == "" && g.consume:
+			settled = decimal.Min(rest, g.open)
+			rest = rest.Sub(settled)
+		}
+		if !settled.IsPositive() {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `insert into inventory_issue_claim (tenant_id, legal_entity_id, idempotency_key, product_id, warehouse, batch, kind, qty, issue_ref)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict do nothing`,
+			tenantID, legalEntityID, issuedKeyPrefix+settle.key+"|"+batch+"|"+g.ref, sc.product, sc.warehouse, batch, domain.IssueBooked, settled.String(), g.ref); err != nil {
+			return scopeProblem(err)
+		}
+	}
+	return nil
 }

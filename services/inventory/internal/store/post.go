@@ -227,7 +227,7 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	// A count records what is there rather than moving it, so it is not
 	// weighed against the claims (it may find claimed units already gone).
 	if j.Type != domain.JournalCount {
-		if err := guardClaimedStock(ctx, tx, tenantID, j.LegalEntityID, orderedRows(rows, order), nil); err != nil {
+		if err := guardClaimedStock(ctx, tx, tenantID, j.LegalEntityID, orderedRows(rows, order), &issueSettlement{key: "journal:" + j.ID}); err != nil {
 			return err
 		}
 	}
