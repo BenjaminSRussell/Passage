@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -15,6 +18,8 @@ import (
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	ediev "github.com/BenjaminSRussell/passage/services/edi/internal/events"
 )
+
+var ErrNotPostable = errors.New("edi: message is not mapped or parked")
 
 const xrefColumns = `id::text, qualifier, partner_item, product_id::text, site_id::text, warehouse_id::text, version`
 
@@ -120,23 +125,35 @@ func (s *Store) PutSalesDefaults(ctx context.Context, partnerID, legalEntityID s
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `insert into partner_sales_defaults (tenant_id, partner_id, legal_entity_id, invoice_account_id, currency)
-			values ($1, $2, $3, $4, $5) on conflict (tenant_id, partner_id) do update set legal_entity_id = excluded.legal_entity_id,
-			invoice_account_id = excluded.invoice_account_id, currency = excluded.currency,
-			version = partner_sales_defaults.version + 1, updated_at = now()`, tid, partnerID, legalEntityID, d.InvoiceAccountID, d.Currency)
+		unitMap, err := json.Marshal(d.UnitMap)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `insert into partner_sales_defaults (tenant_id, partner_id, legal_entity_id, invoice_account_id, currency, auto_post, unit_map)
+			values ($1, $2, $3, $4, $5, $6, $7) on conflict (tenant_id, partner_id) do update set legal_entity_id = excluded.legal_entity_id,
+			invoice_account_id = excluded.invoice_account_id, currency = excluded.currency, auto_post = excluded.auto_post,
+			unit_map = excluded.unit_map, version = partner_sales_defaults.version + 1, updated_at = now()`,
+			tid, partnerID, legalEntityID, d.InvoiceAccountID, d.Currency, d.AutoPosts(), unitMap)
 		return scopeRefused(err)
 	})
+	auto := d.AutoPosts()
+	d.AutoPost = &auto
+	if d.UnitMap == nil {
+		d.UnitMap = map[string]string{}
+	}
 	return d, err
 }
 
 func (s *Store) GetSalesDefaults(ctx context.Context, partnerID string) (domain.SalesDefaults, error) {
 	var d domain.SalesDefaults
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select invoice_account_id::text, currency from partner_sales_defaults where partner_id = $1`, partnerID).
-			Scan(&d.InvoiceAccountID, &d.Currency)
+		var auto bool
+		err := tx.QueryRow(ctx, `select invoice_account_id::text, currency, auto_post, unit_map from partner_sales_defaults where partner_id = $1`, partnerID).
+			Scan(&d.InvoiceAccountID, &d.Currency, &auto, &d.UnitMap)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
+		d.AutoPost = &auto
 		return err
 	})
 	return d, err
@@ -147,6 +164,7 @@ type PostState struct {
 	MessageRecord
 	ParkCode     string
 	SalesOrderID string
+	SalesRequest json.RawMessage
 }
 
 // Postable reports whether the message may be posted (again): it is mapped, or
@@ -162,8 +180,8 @@ func (s *Store) MessageForPost(ctx context.Context, id string) (PostState, error
 	}
 	st := PostState{MessageRecord: rec}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `select coalesce(park_code, ''), coalesce(sales_order_id::text, '') from message where id = $1`, id).
-			Scan(&st.ParkCode, &st.SalesOrderID)
+		return tx.QueryRow(ctx, `select coalesce(park_code, ''), coalesce(sales_order_id::text, ''), sales_request from message where id = $1`, id).
+			Scan(&st.ParkCode, &st.SalesOrderID, &st.SalesRequest)
 	})
 	return st, err
 }
@@ -192,9 +210,11 @@ func (s *Store) ParkMessage(ctx context.Context, id, code, detail string) error 
 			return err
 		}
 		if prev == text {
-			return nil
+			_, err := tx.Exec(ctx, `update message set sales_request = null, post_attempts = 0, post_retry_at = null where id = $1`, id)
+			return err
 		}
-		if err := tx.QueryRow(ctx, `update message set status = 'FAILED', park_code = $2, error = $3`+postableWhere+` returning transaction_set, st_control`,
+		if err := tx.QueryRow(ctx, `update message set status = 'FAILED', park_code = $2, error = $3, sales_request = null, post_attempts = 0, post_retry_at = null`+
+			postableWhere+` returning transaction_set, st_control`,
 			id, code, text).Scan(&d.TransactionSet, &d.STControl); err != nil {
 			return err
 		}
@@ -204,7 +224,8 @@ func (s *Store) ParkMessage(ctx context.Context, id, code, detail string) error 
 }
 
 // MarkPosted records the sales order a message became and publishes
-// message.posted. A message already POSTED to the same order is left alone.
+// message.posted. A message already POSTED to the same order is left alone;
+// one that is missing, or neither mapped nor parked, is an error.
 func (s *Store) MarkPosted(ctx context.Context, id, salesOrderID string) error {
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tid, err := tenantID(ctx)
@@ -212,10 +233,20 @@ func (s *Store) MarkPosted(ctx context.Context, id, salesOrderID string) error {
 			return err
 		}
 		var d ediev.MessagePostedData
-		err = tx.QueryRow(ctx, `update message set status = 'POSTED', sales_order_id = $2, park_code = null, error = null`+postableWhere+
+		err = tx.QueryRow(ctx, `update message set status = 'POSTED', sales_order_id = $2, park_code = null, error = null, post_attempts = 0, post_retry_at = null`+postableWhere+
 			` returning transaction_set, st_control, interchange_id::text`, id, salesOrderID).Scan(&d.TransactionSet, &d.STControl, &d.InterchangeID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+			var status, posted string
+			err := tx.QueryRow(ctx, `select status, coalesce(sales_order_id::text, '') from message where id = $1`, id).Scan(&status, &posted)
+			switch {
+			case errors.Is(err, pgx.ErrNoRows):
+				return ErrNotFound
+			case err != nil:
+				return err
+			case status == "POSTED" && posted == salesOrderID:
+				return nil
+			}
+			return fmt.Errorf("%w: message %s is %s", ErrNotPostable, id, status)
 		}
 		if err != nil {
 			return err
@@ -230,5 +261,79 @@ func (s *Store) MarkPosted(ctx context.Context, id, salesOrderID string) error {
 			return err
 		}
 		return outbox.Enqueue(ctx, tx, "message", id, evt)
+	})
+}
+
+// PinSalesRequest stores the body about to be sent under the message's
+// Idempotency-Key unless one is already pinned, and returns the pinned body:
+// a retry after a transient failure sends the first attempt's body, whatever
+// was edited since. Parking the message unpins it.
+func (s *Store) PinSalesRequest(ctx context.Context, id string, req domain.SalesOrderRequest) (domain.SalesOrderRequest, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return req, err
+	}
+	var pinned domain.SalesOrderRequest
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var raw []byte
+		err := tx.QueryRow(ctx, `update message set sales_request = coalesce(sales_request, $2::jsonb)`+postableWhere+` returning sales_request`, id, string(body)).Scan(&raw)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotPostable
+		}
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, &pinned)
+	})
+	return pinned, err
+}
+
+// PostDueTenants lists the tenants with a mapped inbound order whose partner
+// auto-posts and whose retry time has come.
+func (s *Store) PostDueTenants(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `select t::text from edi_post_due_tenants() t`)
+	if err != nil {
+		return nil, fmt.Errorf("edi: due post tenants: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+type ClaimedPost struct {
+	ID       string
+	Attempts int
+}
+
+// ClaimPosts leases up to limit mapped inbound orders of the context's tenant
+// whose partner auto-posts: the retry time moves lease ahead and the attempt
+// count goes up, in one statement with skip locked, so concurrent posters never
+// take the same order and a crashed one gives it back when the lease ends.
+func (s *Store) ClaimPosts(ctx context.Context, limit int, lease time.Duration) ([]ClaimedPost, error) {
+	var out []ClaimedPost
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `with claimed as (
+				select m.id as claimed_id from message m
+				join interchange i on i.tenant_id = m.tenant_id and i.id = m.interchange_id and i.direction = 'IN'
+				join partner_sales_defaults d on d.tenant_id = m.tenant_id and d.partner_id = i.partner_id and d.auto_post
+				where m.status = 'MAPPED' and m.transaction_set in ('850', 'ORDERS') and (m.post_retry_at is null or m.post_retry_at <= now())
+				order by m.created_at, m.id limit $1 for update of m skip locked)
+			update message m set post_attempts = m.post_attempts + 1, post_retry_at = now() + make_interval(secs => $2)
+			from claimed where m.id = claimed.claimed_id returning m.id::text, m.post_attempts`, limit, lease.Seconds())
+		if err != nil {
+			return err
+		}
+		out, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (ClaimedPost, error) {
+			var c ClaimedPost
+			return c, r.Scan(&c.ID, &c.Attempts)
+		})
+		return err
+	})
+	return out, err
+}
+
+// DeferPost sets when a mapped order is posted again after a transient failure.
+func (s *Store) DeferPost(ctx context.Context, id string, at time.Time) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update message set post_retry_at = $2 where id = $1 and status = 'MAPPED'`, id, at)
+		return err
 	})
 }

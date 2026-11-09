@@ -10,6 +10,7 @@ const (
 	CodeNoSalesDefaults = "EDI-0020"
 	CodeOrderUnpostable = "EDI-0022"
 	CodeSalesRefused    = "EDI-0023"
+	CodeUnitUnmapped    = "EDI-0024"
 
 	SalesChannel = "EDI"
 )
@@ -42,10 +43,16 @@ func (x ItemXref) Validate() map[string]string {
 	return f
 }
 
+// SalesDefaults are the partner's order defaults. AutoPost (on when absent) lets the background poster post the partner's
+// mapped orders; UnitMap turns the partner's units of measure into the ones sales knows.
 type SalesDefaults struct {
-	InvoiceAccountID string `json:"invoiceAccountId"`
-	Currency         string `json:"currency"`
+	InvoiceAccountID string            `json:"invoiceAccountId"`
+	Currency         string            `json:"currency"`
+	AutoPost         *bool             `json:"autoPost,omitempty"`
+	UnitMap          map[string]string `json:"unitMap"`
 }
+
+func (d SalesDefaults) AutoPosts() bool { return d.AutoPost == nil || *d.AutoPost }
 
 func (d SalesDefaults) Validate() map[string]string {
 	f := map[string]string{}
@@ -54,6 +61,17 @@ func (d SalesDefaults) Validate() map[string]string {
 	}
 	if !currencyRe.MatchString(d.Currency) {
 		f["currency"] = "must be an ISO 4217 code"
+	}
+	if len(d.UnitMap) > 200 {
+		f["unitMap"] = "must hold at most 200 units"
+	}
+	for from, to := range d.UnitMap {
+		if n := len(from); n < 1 || n > 3 || from != strings.TrimSpace(from) {
+			f["unitMap"] = "keys must be 1 to 3 characters (the partner's unit code) without surrounding spaces"
+		}
+		if n := len(to); n < 1 || n > 10 || to != strings.TrimSpace(to) {
+			f["unitMap"] = "values must be 1 to 10 characters (our unit) without surrounding spaces"
+		}
 	}
 	return f
 }
@@ -104,7 +122,7 @@ func ediDate(s string) (string, bool) {
 // BuildSalesOrder maps the canonical order onto the sales intake request. Only
 // an original order (BEG01 00) is posted: a replace or change belongs to sales'
 // change flow. Every line must resolve through xrefs to a product, and the
-// order needs a requested ship or delivery date; anything else is a Park.
+// order needs a requested ship or delivery date; every unit of measure must be in the partner's unit map; anything else is a Park.
 func BuildSalesOrder(partnerID string, o Order, p TradeProfile, d SalesDefaults, xrefs map[ItemRef]ItemXref) (SalesOrderRequest, *Park) {
 	if o.Purpose != "00" {
 		return SalesOrderRequest{}, &Park{CodeOrderUnpostable, "BEG01 purpose " + o.Purpose + " is a change or cancellation; only an original order (00) is posted"}
@@ -124,7 +142,7 @@ func BuildSalesOrder(partnerID string, o Order, p TradeProfile, d SalesDefaults,
 	}
 	req := SalesOrderRequest{LegalEntityID: p.LegalEntityID, CustomerID: p.CustomerID, InvoiceAccountID: d.InvoiceAccountID,
 		Currency: currency, RequestedShipDate: date, Channel: SalesChannel, ExternalRef: SalesExternalRef(partnerID, o.PONumber)}
-	var missing []string
+	var missing, unmapped []string
 	for _, l := range o.Lines {
 		if l.ItemRef == nil {
 			missing = append(missing, "line "+l.LineNo+" (no item reference)")
@@ -135,11 +153,19 @@ func BuildSalesOrder(partnerID string, o Order, p TradeProfile, d SalesDefaults,
 			missing = append(missing, fmt.Sprintf("line %s (%s %s)", l.LineNo, l.ItemRef.Qualifier, l.ItemRef.Value))
 			continue
 		}
-		req.Lines = append(req.Lines, SalesOrderLine{ProductID: x.ProductID, Quantity: l.Quantity, Unit: l.UOM, SiteID: x.SiteID,
+		unit, mapped := d.UnitMap[l.UOM]
+		if !mapped {
+			unmapped = append(unmapped, fmt.Sprintf("line %s (%q)", l.LineNo, l.UOM))
+			continue
+		}
+		req.Lines = append(req.Lines, SalesOrderLine{ProductID: x.ProductID, Quantity: l.Quantity, Unit: unit, SiteID: x.SiteID,
 			WarehouseID: x.WarehouseID, UnitPrice: l.UnitPrice, RequestedShipDate: date})
 	}
 	if len(missing) > 0 {
 		return SalesOrderRequest{}, &Park{CodeNoItemRef, "no item cross-reference for " + strings.Join(missing, ", ")}
+	}
+	if len(unmapped) > 0 {
+		return SalesOrderRequest{}, &Park{CodeUnitUnmapped, "no unit of measure mapping in the partner's sales defaults for " + strings.Join(unmapped, ", ")}
 	}
 	return req, nil
 }

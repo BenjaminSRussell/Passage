@@ -17,6 +17,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	ediev "github.com/BenjaminSRussell/passage/services/edi/internal/events"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/poster"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
@@ -32,9 +33,11 @@ const (
 )
 
 type placedOrder struct {
-	key   string
-	le    string
-	order domain.SalesOrderRequest
+	key    string
+	le     string
+	order  domain.SalesOrderRequest
+	actor  string
+	duties int
 }
 
 // fakeIntake stands in for the sales service: it dedups by externalRef the way
@@ -45,8 +48,9 @@ type fakeIntake struct {
 	err    error
 }
 
-func (f *fakeIntake) PlaceOrder(_ context.Context, le, key string, order domain.SalesOrderRequest) (domain.SalesOrderRef, error) {
-	f.calls = append(f.calls, placedOrder{key: key, le: le, order: order})
+func (f *fakeIntake) PlaceOrder(ctx context.Context, le, key string, order domain.SalesOrderRequest) (domain.SalesOrderRef, error) {
+	p, _ := tenant.FromContext(ctx)
+	f.calls = append(f.calls, placedOrder{key: key, le: le, order: order, actor: p.UserID, duties: len(p.Duties)})
 	if f.err != nil {
 		return domain.SalesOrderRef{}, f.err
 	}
@@ -95,7 +99,7 @@ func (f *postFixture) admin(t *testing.T, method, path, body string) (int, strin
 
 func (f *postFixture) defaults(t *testing.T) {
 	t.Helper()
-	if code, body := f.admin(t, http.MethodPut, "/sales-defaults", `{"invoiceAccountId":"`+spInvoice+`","currency":"EUR"}`); code != http.StatusOK {
+	if code, body := f.admin(t, http.MethodPut, "/sales-defaults", `{"invoiceAccountId":"`+spInvoice+`","currency":"EUR","unitMap":{"EA":"EA","CA":"CS","PCE":"PC"}}`); code != http.StatusOK {
 		t.Fatalf("defaults: %d %s", code, body)
 	}
 }
@@ -195,7 +199,7 @@ func TestPostMessage_850BecomesASalesOrderAndUnmappedItemsAreParkedVisibly(t *te
 	f.xref(t, "BP", "ABC-1", spProductA)
 	f.xref(t, "UP", "012345678905", spProductB)
 	code, body = f.post(t, msg)
-	var posted postResult
+	var posted poster.Result
 	if err := json.Unmarshal([]byte(body), &posted); err != nil || code != http.StatusOK || posted.Status != "POSTED" || posted.SalesOrderID == "" || posted.MessageID != msg {
 		t.Fatalf("post: %d %s", code, body)
 	}
@@ -206,7 +210,7 @@ func TestPostMessage_850BecomesASalesOrderAndUnmappedItemsAreParkedVisibly(t *te
 	if call.key != msg || call.le != srcLE || call.order.Channel != "EDI" || call.order.CustomerID != srcCustomer || call.order.InvoiceAccountID != spInvoice ||
 		call.order.Currency != "USD" || call.order.ExternalRef != f.partner+":PO1234" || call.order.RequestedShipDate != "2026-11-05" ||
 		len(call.order.Lines) != 2 || call.order.Lines[0].ProductID != spProductA || call.order.Lines[1].ProductID != spProductB ||
-		call.order.Lines[0].SiteID != spSite || call.order.Lines[1].Quantity != "4" || call.order.Lines[1].Unit != "CA" {
+		call.order.Lines[0].SiteID != spSite || call.order.Lines[1].Quantity != "4" || call.order.Lines[1].Unit != "CS" {
 		t.Fatalf("sales request: %+v", call)
 	}
 	if status, errText := f.message(t, msg); status != "POSTED" || errText != "" {
@@ -223,7 +227,7 @@ func TestPostMessage_850BecomesASalesOrderAndUnmappedItemsAreParkedVisibly(t *te
 
 	second := f.receive(t, "000000002", "00")
 	code, body = f.post(t, second)
-	var dup postResult
+	var dup poster.Result
 	if err := json.Unmarshal([]byte(body), &dup); err != nil || code != http.StatusOK || dup.SalesOrderID != posted.SalesOrderID || len(f.intake.orders) != 1 {
 		t.Fatalf("the same PO in another interchange is the same sales order: %d %s", code, body)
 	}
@@ -381,13 +385,22 @@ func TestSalesDefaultsAPI_RoundTripValidationAndProfile(t *testing.T) {
 	if code, _ := f.admin(t, http.MethodGet, "/sales-defaults", ""); code != http.StatusNotFound {
 		t.Fatalf("none yet: %d", code)
 	}
+	unknown := "/edi/v1/partners/00000000-0000-0000-0000-0000000000ff"
+	for _, path := range []string{"/sales-defaults", "/item-xrefs"} {
+		if rec := do(t, f.h, http.MethodGet, unknown+path, "", "edi.admin", srcScope); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "partner") {
+			t.Fatalf("an unknown partner is 404 on %s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if code, body := f.admin(t, http.MethodPut, "/sales-defaults", `{"invoiceAccountId":"`+spInvoice+`","currency":"EUR","unitMap":{"EACH":"EA"}}`); code != http.StatusBadRequest || !strings.Contains(body, "unitMap") {
+		t.Fatalf("a unit key over three characters: %d %s", code, body)
+	}
 	if code, body := f.admin(t, http.MethodPut, "/sales-defaults", `{"invoiceAccountId":"x","currency":"usd"}`); code != http.StatusBadRequest || !strings.Contains(body, "currency") {
 		t.Fatalf("validation: %d %s", code, body)
 	}
 	f.defaults(t)
 	f.defaults(t)
 	code, body := f.admin(t, http.MethodGet, "/sales-defaults", "")
-	if code != http.StatusOK || !strings.Contains(body, `"EUR"`) {
+	if code != http.StatusOK || !strings.Contains(body, `"EUR"`) || !strings.Contains(body, `"autoPost":true`) || !strings.Contains(body, `"CA":"CS"`) {
 		t.Fatalf("read: %d %s", code, body)
 	}
 	if rec := do(t, f.h, http.MethodPut, "/edi/v1/partners/"+f.partner+"/sales-defaults", `{"invoiceAccountId":"`+spInvoice+`","currency":"EUR"}`, "edi.admin", map[string]string{tenant.HeaderLegalEntity: spOtherLE}); rec.Code != http.StatusConflict {
@@ -422,7 +435,7 @@ func TestPostMessage_EdifactORDERSBecomesASalesOrderToo(t *testing.T) {
 		t.Fatalf("post: %d %s", code2, body)
 	}
 	order := f.intake.calls[0].order
-	if order.ExternalRef != eu.ID+":PO-EU-881" || order.Currency != "EUR" || order.RequestedShipDate != "2026-11-12" || len(order.Lines) != 2 || order.Lines[0].Unit != "PCE" {
+	if order.ExternalRef != eu.ID+":PO-EU-881" || order.Currency != "EUR" || order.RequestedShipDate != "2026-11-12" || len(order.Lines) != 2 || order.Lines[0].Unit != "PC" {
 		t.Fatalf("sales request: %+v", order)
 	}
 }

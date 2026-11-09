@@ -28,6 +28,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/poster"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -118,6 +119,10 @@ func run() error {
 		p := &delivery.Poller{Store: st, Secrets: tc.secrets, Receive: a.ReceiveFromTransport}
 		go delivery.Run(ctx, "delivery dispatcher", tc.interval, d.RunOnce)
 		go delivery.Run(ctx, "sftp poller", tc.interval, p.RunOnce)
+		if a.Intake != nil {
+			sp := &poster.Poster{Store: st, Intake: a.Intake, PlaceAs: poster.AsServicePrincipal}
+			go delivery.Run(ctx, "sales poster", tc.interval, sp.RunOnce)
+		}
 	}
 	go func() { errCh <- httpx.Serve(ctx, addr, a.Routes()) }()
 	err = <-errCh

@@ -1,8 +1,6 @@
 package api
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -13,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/poster"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 )
@@ -22,11 +21,7 @@ const (
 	CodeNotPostable = "EDI-0021"
 )
 
-// Intake places an order with the sales service (POST /v1/sales/orders under
-// the service-only duty sales.channel.intake).
-type Intake interface {
-	PlaceOrder(ctx context.Context, legalEntityID, key string, order domain.SalesOrderRequest) (domain.SalesOrderRef, error)
-}
+type Intake = poster.Intake
 
 func (a *API) partnerProfile(w http.ResponseWriter, r *http.Request) (string, domain.TradeProfile, bool) {
 	partnerID := chi.URLParam(r, "id")
@@ -50,6 +45,18 @@ func (a *API) partnerProfile(w http.ResponseWriter, r *http.Request) (string, do
 	return partnerID, profile, true
 }
 
+func (a *API) partnerExists(w http.ResponseWriter, r *http.Request, partnerID string) bool {
+	if !validID(partnerID) {
+		httpx.Fail(w, r, notFound("partner"))
+		return false
+	}
+	if _, err := a.store.GetPartner(r.Context(), partnerID); err != nil {
+		httpx.Fail(w, r, storeProblem(err, "partner"))
+		return false
+	}
+	return true
+}
+
 func storeProblem(err error, what string) error {
 	if errors.Is(err, store.ErrNotFound) {
 		return notFound(what)
@@ -59,8 +66,7 @@ func storeProblem(err error, what string) error {
 
 func (a *API) listXrefs(w http.ResponseWriter, r *http.Request) {
 	partnerID := chi.URLParam(r, "id")
-	if !validID(partnerID) {
-		httpx.Fail(w, r, notFound("partner"))
+	if !a.partnerExists(w, r, partnerID) {
 		return
 	}
 	items, err := a.store.ListXrefs(r.Context(), partnerID)
@@ -152,8 +158,7 @@ func (a *API) putSalesDefaults(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) getSalesDefaults(w http.ResponseWriter, r *http.Request) {
 	partnerID := chi.URLParam(r, "id")
-	if !validID(partnerID) {
-		httpx.Fail(w, r, notFound("partner"))
+	if !a.partnerExists(w, r, partnerID) {
 		return
 	}
 	d, err := a.store.GetSalesDefaults(r.Context(), partnerID)
@@ -164,118 +169,38 @@ func (a *API) getSalesDefaults(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, d)
 }
 
-type postResult struct {
-	MessageID    string `json:"messageId"`
-	Status       string `json:"status"`
-	SalesOrderID string `json:"salesOrderId"`
-}
-
-// postMessage turns an inbound 850 (or ORDERS) into a sales order under the
-// service grant edi -> sales for sales.channel.intake, in the legal entity of
-// the partner's trade profile. The sales request is built from the stored
-// canonical order, the partner's item cross-references and defaults; the
-// Idempotency-Key is the message id and the externalRef is the partner's PO
-// number, so posting twice, or the same PO in a second interchange, yields the
-// one sales order. An order that cannot be mapped (a change or cancellation,
-// no ship date, an item with no cross-reference) or that sales refuses is
-// parked: FAILED with its park code, in the message monitor, and posted again
-// by calling this route once the cause is fixed.
+// postMessage posts one inbound 850 or ORDERS to sales (see poster.Post). A
+// parked order answers 422 with its park code; once the cause is fixed the same
+// route posts it again.
 func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !validID(id) {
 		httpx.Fail(w, r, notFound("message"))
 		return
 	}
-	if a.Intake == nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "sales intake is not configured"))
-		return
-	}
 	ctx := r.Context()
-	st, err := a.store.MessageForPost(ctx, id)
-	if err != nil {
-		httpx.Fail(w, r, storeProblem(err, "message"))
-		return
-	}
-	if st.Direction != "IN" || (st.TransactionSet != "850" && st.TransactionSet != "ORDERS") {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNotPostable, "only an inbound 850 or ORDERS is posted to sales"))
-		return
-	}
-	if st.Status == "POSTED" {
-		httpx.JSON(w, http.StatusOK, postResult{MessageID: id, Status: st.Status, SalesOrderID: st.SalesOrderID})
-		return
-	}
-	if !st.Postable() {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNotPostable, "message is "+st.Status+"; only a mapped or parked order is posted (reprocess a failed mapping first)"))
-		return
-	}
-	var order domain.Order
-	if err := json.Unmarshal(st.Canonical, &order); err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	profile, err := a.store.GetTradeProfile(ctx, st.PartnerID)
-	if errors.Is(err, store.ErrNotFound) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNoTradeProfile, "partner has no trade profile; PUT /partners/{id}/trade-profile first"))
-		return
-	}
-	if err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	defaults, err := a.store.GetSalesDefaults(ctx, st.PartnerID)
-	if errors.Is(err, store.ErrNotFound) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodeNoSalesDefaults, "partner has no sales defaults; PUT /partners/{id}/sales-defaults first"))
-		return
-	}
-	if err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	refs := make([]domain.ItemRef, 0, len(order.Lines))
-	for _, l := range order.Lines {
-		if l.ItemRef != nil {
-			refs = append(refs, *l.ItemRef)
-		}
-	}
-	xrefs, err := a.store.LookupXrefs(ctx, st.PartnerID, refs)
-	if err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	req, park := domain.BuildSalesOrder(st.PartnerID, order, profile, defaults, xrefs)
-	if park != nil {
-		a.park(w, r, id, *park)
-		return
-	}
-	ref, err := a.Intake.PlaceOrder(ctx, profile.LegalEntityID, id, req)
-	var refused *sources.RefusedError
+	res, err := (&poster.Poster{Store: a.store, Intake: a.Intake}).Post(ctx, id)
+	var parked *poster.ParkedError
+	var notPostable *poster.NotPostableError
 	switch {
-	case errors.As(err, &refused):
-		a.park(w, r, id, domain.Park{Code: domain.CodeSalesRefused, Detail: "sales " + refused.Code + ": " + refused.Detail})
-		return
+	case err == nil:
+		httpx.JSON(w, http.StatusOK, res)
+	case errors.Is(err, poster.ErrNotConfigured):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "sales intake is not configured"))
+	case errors.As(err, &notPostable):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNotPostable, notPostable.Detail))
+	case errors.Is(err, poster.ErrNoTradeProfile):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNoTradeProfile, "partner has no trade profile; PUT /partners/{id}/trade-profile first"))
+	case errors.Is(err, poster.ErrNoSalesDefaults):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodeNoSalesDefaults, "partner has no sales defaults; PUT /partners/{id}/sales-defaults first"))
+	case errors.As(err, &parked):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, parked.Code, "order parked: "+parked.Detail))
 	case errors.Is(err, sources.ErrForbidden):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, CodeSourceForbidden, "the caller may not place orders for this partner's legal entity"))
-		return
-	case err != nil:
+	case errors.Is(err, store.ErrNotFound):
+		httpx.Fail(w, r, notFound("message"))
+	default:
 		slog.ErrorContext(ctx, "edi post to sales failed", "err", err, "messageId", id, "correlationId", middleware.GetReqID(ctx))
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeSourceDown, "the sales service could not take the order; post again"))
-		return
 	}
-	if err := a.store.MarkPosted(ctx, id, ref.ID); err != nil {
-		slog.ErrorContext(ctx, "edi could not record the posted order", "err", err, "messageId", id, "salesOrderId", ref.ID, "correlationId", middleware.GetReqID(ctx))
-		httpx.Fail(w, r, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, postResult{MessageID: id, Status: "POSTED", SalesOrderID: ref.ID})
-}
-
-func (a *API) park(w http.ResponseWriter, r *http.Request, id string, p domain.Park) {
-	ctx := r.Context()
-	if err := a.store.ParkMessage(ctx, id, p.Code, p.Detail); err != nil {
-		slog.ErrorContext(ctx, "edi could not park the order", "err", err, "messageId", id, "correlationId", middleware.GetReqID(ctx))
-		httpx.Fail(w, r, storeProblem(err, "message"))
-		return
-	}
-	slog.WarnContext(ctx, "edi order parked", "messageId", id, "parkCode", p.Code, "detail", p.Detail, "correlationId", middleware.GetReqID(ctx))
-	httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, p.Code, "order parked: "+p.Detail))
 }

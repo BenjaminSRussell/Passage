@@ -34,6 +34,8 @@ func spXrefs() map[ItemRef]ItemXref {
 	}
 }
 
+var spUnits = map[string]string{"EA": "EACH", "CA": "CASE"}
+
 func spBuild(t *testing.T, tr Transaction, xrefs map[ItemRef]ItemXref) (SalesOrderRequest, *Park) {
 	t.Helper()
 	order, issues := Map850(tr)
@@ -41,7 +43,7 @@ func spBuild(t *testing.T, tr Transaction, xrefs map[ItemRef]ItemXref) (SalesOrd
 		t.Fatalf("fixture must map cleanly: %v", issues)
 	}
 	return BuildSalesOrder(spPartner, order, TradeProfile{LegalEntityID: spLE, CustomerID: spCustomer},
-		SalesDefaults{InvoiceAccountID: spInvoice, Currency: "EUR"}, xrefs)
+		SalesDefaults{InvoiceAccountID: spInvoice, Currency: "EUR", UnitMap: spUnits}, xrefs)
 }
 
 func TestBuildSalesOrder_MapsPOOntoTheEDIChannelOrder(t *testing.T) {
@@ -51,8 +53,8 @@ func TestBuildSalesOrder_MapsPOOntoTheEDIChannelOrder(t *testing.T) {
 	}
 	want := SalesOrderRequest{LegalEntityID: spLE, CustomerID: spCustomer, InvoiceAccountID: spInvoice, Currency: "USD",
 		RequestedShipDate: "2026-11-05", Channel: "EDI", ExternalRef: spPartner + ":PO1234", Lines: []SalesOrderLine{
-			{ProductID: spProductA, Quantity: "10", Unit: "EA", SiteID: spSite, WarehouseID: spWarehouse, UnitPrice: "2.5", RequestedShipDate: "2026-11-05"},
-			{ProductID: spProductB, Quantity: "4", Unit: "CA", SiteID: spSite, WarehouseID: spWarehouse, UnitPrice: "11", RequestedShipDate: "2026-11-05"},
+			{ProductID: spProductA, Quantity: "10", Unit: "EACH", SiteID: spSite, WarehouseID: spWarehouse, UnitPrice: "2.5", RequestedShipDate: "2026-11-05"},
+			{ProductID: spProductB, Quantity: "4", Unit: "CASE", SiteID: spSite, WarehouseID: spWarehouse, UnitPrice: "11", RequestedShipDate: "2026-11-05"},
 		}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("request\n got %+v\nwant %+v", got, want)
@@ -93,6 +95,22 @@ func TestBuildSalesOrder_ParksWhatItCannotMap(t *testing.T) {
 	}
 }
 
+func TestBuildSalesOrder_ParksAUnitOfMeasureTheMapDoesNotKnow(t *testing.T) {
+	order, issues := Map850(po850("00", "SA", Segment{ID: "DTM", Elements: []string{"010", "20261105"}}))
+	if len(issues) != 0 {
+		t.Fatal(issues)
+	}
+	partial := SalesDefaults{InvoiceAccountID: spInvoice, Currency: "EUR", UnitMap: map[string]string{"EA": "EACH"}}
+	req, park := BuildSalesOrder(spPartner, order, TradeProfile{LegalEntityID: spLE, CustomerID: spCustomer}, partial, spXrefs())
+	if park == nil || park.Code != CodeUnitUnmapped || !strings.Contains(park.Detail, `line 2 ("CA")`) || strings.Contains(park.Detail, "line 1") || len(req.Lines) != 0 {
+		t.Fatalf("CA has no mapping: %+v %v", req, park)
+	}
+	none := SalesDefaults{InvoiceAccountID: spInvoice, Currency: "EUR"}
+	if _, park := BuildSalesOrder(spPartner, order, TradeProfile{}, none, spXrefs()); park == nil || park.Code != CodeUnitUnmapped {
+		t.Fatalf("no unit map at all parks: %v", park)
+	}
+}
+
 func TestBuildSalesOrder_ALineWithoutAnItemReferenceIsParked(t *testing.T) {
 	order := Order{Purpose: "00", OrderType: "SA", PONumber: "P1", RequestedShip: "20261105",
 		Lines: []OrderLine{{LineNo: "1", Quantity: "1", UOM: "EA", UnitPrice: "1"}}}
@@ -113,7 +131,15 @@ func TestItemXrefAndSalesDefaults_Validate(t *testing.T) {
 	if f := (SalesDefaults{InvoiceAccountID: "no", Currency: "usd"}).Validate(); len(f) != 2 {
 		t.Fatalf("defaults: %v", f)
 	}
-	if f := (SalesDefaults{InvoiceAccountID: spInvoice, Currency: "USD"}).Validate(); len(f) != 0 {
+	if f := (SalesDefaults{InvoiceAccountID: spInvoice, Currency: "USD", UnitMap: map[string]string{"EA": "EACH"}}).Validate(); len(f) != 0 {
 		t.Fatalf("valid defaults: %v", f)
+	}
+	for name, units := range map[string]map[string]string{"long key": {"EACH": "EA"}, "empty value": {"EA": ""}, "long value": {"EA": "ABCDEFGHIJK"}} {
+		if f := (SalesDefaults{InvoiceAccountID: spInvoice, Currency: "USD", UnitMap: units}).Validate(); f["unitMap"] == "" {
+			t.Fatalf("%s is refused: %v", name, f)
+		}
+	}
+	if (SalesDefaults{}).AutoPosts() != true {
+		t.Fatal("auto-post is on unless turned off")
 	}
 }

@@ -16,6 +16,11 @@ release may change public APIs.
   `sales.channel.intake` (key = message id, externalRef = partner id and PO number), records the sales order on the
   message (POSTED, `message.posted`), and parks what it cannot map or sales refuses (FAILED with a park code in the
   message monitor).
+  The edi background poster posts MAPPED orders of partners that have not turned `autoPost` off, as the new service
+  principal `edi-sales` (only `sales.channel.intake`; `platform/go/tenant` and `policies/authz/data.json`), with back-off;
+  reprocess skips parked orders; units of measure are mapped per partner (`unitMap`, EDI-0024 parks an unmapped one);
+  a retry sends the body pinned at the first attempt; `MarkPosted` errors when no row matches; unknown partner is 404
+  on the xref list and sales defaults (migration 0011).
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

@@ -858,7 +858,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '422':
-          description: EDI-0105, EDI-0022 or EDI-0023 — the order is parked
+          description: EDI-0105, EDI-0022, EDI-0023 or EDI-0024 — the order is parked
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -1570,6 +1570,15 @@ components:
       properties:
         invoiceAccountId: { type: string, format: uuid }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
+        autoPost:
+          type: boolean
+          default: true
+          description: Whether the background poster posts the partner's mapped orders to sales; false leaves them for POST /messages/{id}:post
+        unitMap:
+          type: object
+          description: The partner's unit of measure (1 to 3 characters, e.g. EA, CA, PCE) to ours (1 to 10); a line whose unit has no entry parks the order (EDI-0024)
+          additionalProperties: { type: string, minLength: 1, maxLength: 10 }
+          maxProperties: 200
     TradeProfile:
       type: object
       additionalProperties: false
