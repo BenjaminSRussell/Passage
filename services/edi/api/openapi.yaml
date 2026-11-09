@@ -1576,7 +1576,7 @@ components:
           description: Whether the background poster posts the partner's mapped orders to sales; false leaves them for POST /messages/{id}:post
         unitMap:
           type: object
-          description: The partner's unit of measure (1 to 3 characters, e.g. EA, CA, PCE) to ours (1 to 10); a line whose unit has no entry parks the order (EDI-0024)
+          description: The partner's unit of measure (1 to 3 characters, e.g. EA, CA, PCE) to ours (1 to 10); empty means units pass through; otherwise a line whose unit has no entry parks the order (EDI-0024)
           additionalProperties: { type: string, minLength: 1, maxLength: 10 }
           maxProperties: 200
     TradeProfile:

@@ -106,8 +106,9 @@ func TestBuildSalesOrder_ParksAUnitOfMeasureTheMapDoesNotKnow(t *testing.T) {
 		t.Fatalf("CA has no mapping: %+v %v", req, park)
 	}
 	none := SalesDefaults{InvoiceAccountID: spInvoice, Currency: "EUR"}
-	if _, park := BuildSalesOrder(spPartner, order, TradeProfile{}, none, spXrefs()); park == nil || park.Code != CodeUnitUnmapped {
-		t.Fatalf("no unit map at all parks: %v", park)
+	req, park = BuildSalesOrder(spPartner, order, TradeProfile{}, none, spXrefs())
+	if park != nil || len(req.Lines) != 2 || req.Lines[0].Unit != "EA" || req.Lines[1].Unit != "CA" {
+		t.Fatalf("a partner with no unit map passes units through: %+v %v", req, park)
 	}
 }
 

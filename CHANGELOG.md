@@ -18,7 +18,7 @@ release may change public APIs.
   message monitor).
   The edi background poster posts MAPPED orders of partners that have not turned `autoPost` off, as the new service
   principal `edi-sales` (only `sales.channel.intake`; `platform/go/tenant` and `policies/authz/data.json`), with back-off;
-  reprocess skips parked orders; units of measure are mapped per partner (`unitMap`, EDI-0024 parks an unmapped one);
+  reprocess skips parked orders; units of measure are mapped per partner (`unitMap`; none passes units through, EDI-0024 parks a unit missing from an existing map);
   a retry sends the body pinned at the first attempt; `MarkPosted` errors when no row matches; unknown partner is 404
   on the xref list and sales defaults (migration 0011).
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the

@@ -122,7 +122,7 @@ func ediDate(s string) (string, bool) {
 // BuildSalesOrder maps the canonical order onto the sales intake request. Only
 // an original order (BEG01 00) is posted: a replace or change belongs to sales'
 // change flow. Every line must resolve through xrefs to a product, and the
-// order needs a requested ship or delivery date; every unit of measure must be in the partner's unit map; anything else is a Park.
+// order needs a requested ship or delivery date; when the partner has a unit map every unit of measure must be in it (none: units pass through); anything else is a Park.
 func BuildSalesOrder(partnerID string, o Order, p TradeProfile, d SalesDefaults, xrefs map[ItemRef]ItemXref) (SalesOrderRequest, *Park) {
 	if o.Purpose != "00" {
 		return SalesOrderRequest{}, &Park{CodeOrderUnpostable, "BEG01 purpose " + o.Purpose + " is a change or cancellation; only an original order (00) is posted"}
@@ -153,7 +153,10 @@ func BuildSalesOrder(partnerID string, o Order, p TradeProfile, d SalesDefaults,
 			missing = append(missing, fmt.Sprintf("line %s (%s %s)", l.LineNo, l.ItemRef.Qualifier, l.ItemRef.Value))
 			continue
 		}
-		unit, mapped := d.UnitMap[l.UOM]
+		unit, mapped := l.UOM, true
+		if len(d.UnitMap) > 0 {
+			unit, mapped = d.UnitMap[l.UOM]
+		}
 		if !mapped {
 			unmapped = append(unmapped, fmt.Sprintf("line %s (%q)", l.LineNo, l.UOM))
 			continue
