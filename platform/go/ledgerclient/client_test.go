@@ -353,3 +353,44 @@ func TestEntry_RoundsEachLineBeforeCheckingBalance(t *testing.T) {
 		t.Fatalf("JPY has no minor unit: %+v %v", r, err)
 	}
 }
+
+func TestJournalLines_PagesWithTheEntryLookupDutyPinnedToTheEntity(t *testing.T) {
+	var verifier *tenant.ServiceVerifier
+	var duties [][]string
+	var entities []string
+	c, v := newClientAs(t, "tax", func(w http.ResponseWriter, r *http.Request) {
+		claims, _ := verifier.Verify(r.Header.Get(tenant.HeaderServiceToken))
+		duties = append(duties, claims.Duties)
+		entities = append(entities, claims.Le)
+		if r.URL.Path != "/v1/ledger/journal-lines" || r.URL.Query().Get("ledger") != ledgerID || r.URL.Query().Get("date_from") != "2026-01-01" {
+			t.Errorf("unexpected request %s", r.URL)
+		}
+		if r.URL.Query().Get("cursor") == "" {
+			_, _ = w.Write([]byte(`{"items":[{"entryId":"e1","lineNumber":1,"account":"1200","debitCredit":"D","amountAcct":"10.50","postingDate":"2026-01-02"}],"nextCursor":"5.1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"entryId":"e1","lineNumber":2,"account":"8000","debitCredit":"C","amountAcct":"10.50","postingDate":"2026-01-02"}]}`))
+	})
+	verifier = v
+	lines, err := c.JournalLines(principalCtx(), ledgerclient.LineQuery{LegalEntityID: entityID, LedgerID: ledgerID, DateFrom: "2026-01-01", DateTo: "2026-01-31"})
+	if err != nil || len(lines) != 2 || lines[0].Credit || !lines[1].Credit || !lines[1].Amount.Equal(decimal.RequireFromString("10.5")) {
+		t.Fatalf("lines %+v err %v", lines, err)
+	}
+	if len(duties) != 2 || !slices.Equal(duties[0], []string{ledgerclient.DutyEntryLookup}) || entities[0] != entityID {
+		t.Fatalf("duties %v entities %v", duties, entities)
+	}
+}
+
+func TestJournalLines_RejectsAnUnreadableAmountAndALedgerError(t *testing.T) {
+	bad, _ := newClientAs(t, "tax", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"entryId":"e1","amountAcct":"lots"}]}`))
+	})
+	q := ledgerclient.LineQuery{LegalEntityID: entityID, LedgerID: ledgerID, DateFrom: "2026-01-01", DateTo: "2026-01-31"}
+	if _, err := bad.JournalLines(principalCtx(), q); err == nil {
+		t.Fatal("accepted an unreadable amount")
+	}
+	missing, _ := newClientAs(t, "tax", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) })
+	if _, err := missing.JournalLines(principalCtx(), q); !ledgerclient.Rejected(err) {
+		t.Fatalf("err %v", err)
+	}
+}

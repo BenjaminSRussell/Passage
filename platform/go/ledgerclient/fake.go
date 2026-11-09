@@ -254,3 +254,19 @@ func (f *Fake) Balances(_ context.Context, q BalanceQuery) (AccountBalances, err
 	slices.SortFunc(out.Rows, func(a, b AccountBalance) int { return strings.Compare(a.Account, b.Account) })
 	return out, nil
 }
+
+func (f *Fake) JournalLines(_ context.Context, q LineQuery) ([]JournalLine, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []JournalLine
+	for _, s := range f.entries {
+		if s.LedgerID != q.LedgerID || s.LegalEntityID != q.LegalEntityID || s.PostingDate < q.DateFrom || s.PostingDate > q.DateTo {
+			continue
+		}
+		for i, l := range s.Lines {
+			out = append(out, JournalLine{EntryID: s.ID, Voucher: s.DocumentID, PostingDate: s.PostingDate, LineNumber: i + 1,
+				Account: l.Account, Credit: l.Credit, Amount: l.Amount, SourceType: s.SourceType, Description: l.Text})
+		}
+	}
+	return out, nil
+}

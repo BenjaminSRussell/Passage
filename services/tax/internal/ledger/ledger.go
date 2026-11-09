@@ -15,7 +15,10 @@ import (
 
 const periodLayout = "2006-01"
 
-var ErrRead = errors.New("general ledger read failed")
+var (
+	ErrRead          = errors.New("general ledger read failed")
+	ErrNotConfigured = errors.New("general ledger is not configured")
+)
 
 type GL struct {
 	Client        ledgerclient.Ledger

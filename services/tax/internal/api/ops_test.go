@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/api"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/tax/internal/saft"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/store"
 	"github.com/BenjaminSRussell/passage/services/tax/migrations"
 )
@@ -329,5 +333,120 @@ func TestSettleThroughTheRouterReconcilesToTheLedger(t *testing.T) {
 		t.Fatalf("one cent off the GL: %d %s", rec.Code, rec.Body.String())
 	} else if strings.Contains(rec.Body.String(), "19.0") {
 		t.Fatalf("mismatch response leaks GL amounts: %s", rec.Body.String())
+	}
+}
+
+const saftQuery = "?period_from=2026-01-01&period_to=2026-01-31&company_name=Acme&registration_number=DE1&country=DE&currency=EUR"
+
+func saftCall(r http.Handler, entity, query string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/v1/tax/saft"+query, nil)
+	req.Header.Set(tenant.HeaderTenant, testkit.TenantID(7))
+	req.Header.Set(tenant.HeaderLegalEntity, entity)
+	req.Header.Set(tenant.HeaderDuties, "tax.saft.export")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+func postJournal(t *testing.T, fake *ledgerclient.Fake, entity, ledgerID, doc, date string, amount string) {
+	t.Helper()
+	v := decimal.RequireFromString(amount)
+	e := ledgerclient.Entry{LegalEntityID: entity, LedgerID: ledgerID, DocumentID: doc, PostingDate: date, Currency: "EUR", IdempotencyKey: doc, SourceType: "ar_invoice",
+		Lines: []ledgerclient.Line{{Account: "1200", Amount: v}, {Account: "8000", Credit: true, Amount: v}}}
+	if _, err := fake.Post(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSAFTExportEmitsTheLedgerJournalsOfTheEntityLedger(t *testing.T) {
+	entity, other, ledgerID, foreignLedger := ids.New(), ids.New(), ids.New(), ids.New()
+	fake := ledgerclient.NewFake()
+	fake.AddLedger(ledgerID, entity)
+	fake.AddLedger(foreignLedger, other)
+	postJournal(t, fake, entity, ledgerID, "d1", "2026-01-10", "100.00")
+	postJournal(t, fake, entity, ledgerID, "d2", "2026-01-20", "40.50")
+	postJournal(t, fake, entity, ledgerID, "outside", "2026-02-03", "9.00")
+	postJournal(t, fake, other, foreignLedger, "foreign", "2026-01-11", "7.00")
+	r, _ := routerWith(&fakeStore{}, nil, fake)
+
+	rec := saftCall(r, entity, saftQuery+"&ledger_id="+ledgerID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"<NumberOfEntries>2</NumberOfEntries>", "<TotalDebit>140.5</TotalDebit>", "<TotalCredit>140.5</TotalCredit>", "<JournalID>ar_invoice</JournalID>"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in %s", want, body)
+		}
+	}
+	if strings.Contains(body, "<DebitAmount>9<") || strings.Contains(body, "<DebitAmount>7<") {
+		t.Fatalf("lines outside the period or the entity leaked: %s", body)
+	}
+	if err := saft.CheckDocument([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	xmllint, err := exec.LookPath("xmllint")
+	if err != nil {
+		t.Skip("xmllint is not on PATH")
+	}
+	file := filepath.Join(t.TempDir(), "saft.xml")
+	if err := os.WriteFile(file, rec.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(xmllint, "--noout", "--nonet", "--schema", "../../testdata/saft/saft-2.00-tax-extract.xsd", file).CombinedOutput(); err != nil {
+		t.Fatalf("route output rejected by the schema: %v\n%s", err, out)
+	}
+}
+
+func TestSAFTExportRefusesALedgerOfAnotherEntityAndBadInput(t *testing.T) {
+	entity, other, foreignLedger := ids.New(), ids.New(), ids.New()
+	fake := ledgerclient.NewFake()
+	fake.AddLedger(foreignLedger, other)
+	r, _ := routerWith(&fakeStore{}, nil, fake)
+	for name, tc := range map[string]struct {
+		query string
+		want  int
+	}{
+		"ledger of another entity": {saftQuery + "&ledger_id=" + foreignLedger, http.StatusBadRequest},
+		"unknown ledger":           {saftQuery + "&ledger_id=" + ids.New(), http.StatusBadRequest},
+		"not a uuid":               {saftQuery + "&ledger_id=nope", http.StatusBadRequest},
+	} {
+		if rec := saftCall(r, entity, tc.query); rec.Code != tc.want {
+			t.Errorf("%s: got %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	noLedger, _ := routerWith(&fakeStore{}, nil, nil)
+	if rec := saftCall(noLedger, entity, saftQuery+"&ledger_id="+foreignLedger); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("no ledger configured: got %d", rec.Code)
+	}
+}
+
+type brokenLines struct{ *ledgerclient.Fake }
+
+func (brokenLines) JournalLines(context.Context, ledgerclient.LineQuery) ([]ledgerclient.JournalLine, error) {
+	return []ledgerclient.JournalLine{
+		{EntryID: "e1", PostingDate: "2026-01-10", LineNumber: 1, Account: "1200", Amount: decimal.RequireFromString("10")},
+		{EntryID: "e1", PostingDate: "2026-01-10", LineNumber: 2, Account: "8000", Credit: true, Amount: decimal.RequireFromString("9")},
+	}, nil
+}
+
+type failingLines struct{ *ledgerclient.Fake }
+
+func (failingLines) JournalLines(context.Context, ledgerclient.LineQuery) ([]ledgerclient.JournalLine, error) {
+	return nil, errors.New("ledger down")
+}
+
+func TestSAFTExportRefusesAnUnbalancedLedgerAndSurfacesLedgerOutages(t *testing.T) {
+	entity, ledgerID := ids.New(), ids.New()
+	fake := ledgerclient.NewFake()
+	fake.AddLedger(ledgerID, entity)
+	query := saftQuery + "&ledger_id=" + ledgerID
+	unbalanced, _ := routerWith(&fakeStore{}, nil, brokenLines{fake})
+	if rec := saftCall(unbalanced, entity, query); rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "<AuditFile") {
+		t.Fatalf("exported an unbalanced ledger: %d %s", rec.Code, rec.Body.String())
+	}
+	down, _ := routerWith(&fakeStore{}, nil, failingLines{fake})
+	if rec := saftCall(down, entity, query); rec.Code != http.StatusBadGateway {
+		t.Fatalf("ledger outage: got %d %s", rec.Code, rec.Body.String())
 	}
 }

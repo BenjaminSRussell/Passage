@@ -13,6 +13,9 @@ release may change public APIs.
 - SAF-T structural validation for the tax extract (#13): `saft.Build` accepts Customers, Suppliers and
   GeneralLedgerEntries and checks them in Go (required elements, balanced transactions, control totals, party
   references) because the official OECD XSD cannot be fetched automatically; the test XSD subset covers the sections.
+- `GET /v1/tax/saft?ledger_id=` exports the ledger's journals as GeneralLedgerEntries (#13): new
+  `ledgerclient.JournalLines`, the `tax` service grant gains `ledger.entry.lookup` and `ledger.ledger.lookup`, and the ledger
+  must belong to the caller's legal entity. Customers and Suppliers stay unfilled (no party reference on ledger lines).
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

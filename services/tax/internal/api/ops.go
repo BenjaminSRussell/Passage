@@ -15,6 +15,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/ledger"
@@ -298,6 +299,12 @@ func (a *API) saft(w http.ResponseWriter, r *http.Request) {
 	for _, t := range totals {
 		in.Entries = append(in.Entries, saft.Entry{Code: t.Code, Direction: t.Direction, Amount: t.Amount, Count: t.Count})
 	}
+	if ledgerID := q.Get("ledger_id"); ledgerID != "" {
+		if in.Journals, err = a.saftJournals(r.Context(), ledgerID, period); err != nil {
+			a.reject(w, r, err)
+			return
+		}
+	}
 	doc, err := saft.Build(in)
 	if err != nil {
 		a.reject(w, r, err)
@@ -305,4 +312,31 @@ func (a *API) saft(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	_, _ = w.Write(doc)
+}
+
+func (a *API) saftJournals(ctx context.Context, ledgerID string, period domain.Period) ([]saft.Journal, error) {
+	reader, ok := a.ledger.(ledgerclient.LineReader)
+	if !ok {
+		return nil, ledger.ErrNotConfigured
+	}
+	if !ids.Valid(ledgerID) {
+		return nil, invalid("ledger_id", "ledger_id must be a UUID")
+	}
+	p, _ := tenant.FromContext(ctx)
+	owner, err := a.ledger.LegalEntity(ctx, p.LegalEntityID, ledgerID)
+	if err != nil {
+		if ledgerclient.Rejected(err) {
+			return nil, invalid("ledger_id", "ledger_id is not a ledger of this legal entity")
+		}
+		return nil, fmt.Errorf("%w: ledger lookup: %w", ledger.ErrRead, err)
+	}
+	if owner != p.LegalEntityID {
+		return nil, invalid("ledger_id", "ledger_id is not a ledger of this legal entity")
+	}
+	lines, err := reader.JournalLines(ctx, ledgerclient.LineQuery{LegalEntityID: p.LegalEntityID, LedgerID: ledgerID,
+		DateFrom: period.From.Format(dateLayout), DateTo: period.To.Format(dateLayout)})
+	if err != nil {
+		return nil, fmt.Errorf("%w: journal lines: %w", ledger.ErrRead, err)
+	}
+	return ledger.Journals(lines)
 }
