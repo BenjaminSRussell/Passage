@@ -1685,6 +1685,8 @@
       {"resource": "/v1/service/dispatch/board", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/runs", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/service/dispatch/optimizations", "methods": ["GET"]},
+      {"resource": "/v1/service/dispatch/optimizations/*", "methods": ["GET"]},
       {"resource": "/v1/service/work-orders/*/actions", "methods": ["GET"]}
     ]},
     "fieldservice.work-order.execute": {"permissions": [{"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]}]},
@@ -1693,8 +1695,14 @@
       {"resource": "/v1/service/technicians/*", "methods": ["PUT"]},
       {"resource": "/v1/service/work-orders/*:assign", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*:unassign", "methods": ["POST"]},
-      {"resource": "/v1/service/dispatch/publish", "methods": ["POST"]}
+      {"resource": "/v1/service/dispatch/publish", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations/*:sync", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations/*:accept", "methods": ["POST"]}
     ]},
+    "dispatch.run.create": {"service_only": true, "permissions": [{"resource": "/v1/dispatch/runs", "methods": ["POST"]}]},
+    "dispatch.run.read": {"service_only": true, "permissions": [{"resource": "/v1/dispatch/runs/*", "methods": ["GET"]}]},
     "fieldservice.service-object.maintain": {"permissions": [
       {"resource": "/v1/service/service-objects", "methods": ["POST"]},
       {"resource": "/v1/service/service-objects/*:install", "methods": ["POST"]},
@@ -3486,6 +3494,9 @@
       "fulfillment": ["fulfillment.shipment.read"],
       "billing": ["billing.invoice.read"],
       "sales": ["sales.order.lookup"]
+    },
+    "fieldservice": {
+      "dispatch": ["dispatch.run.create", "dispatch.run.read"]
     }
   },
   "service_principals": {

@@ -715,6 +715,13 @@ test_service_grants_allow_only_their_declared_routes if {
 	data.service_grants.payables.ledger == ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"]
 	data.service_grants.party.numbering == ["numbering.sequence.allocate"]
 	data.service_grants.hr.numbering == ["numbering.sequence.allocate"]
+	data.service_grants.fieldservice.dispatch == ["dispatch.run.create", "dispatch.run.read"]
+	allowed("dispatch.run.create", "POST", "/v1/dispatch/runs")
+	allowed("dispatch.run.read", "GET", "/v1/dispatch/runs/r1")
+	not allowed("dispatch.run.create", "GET", "/v1/dispatch/runs/r1")
+	not allowed("dispatch.run.read", "POST", "/v1/dispatch/runs")
+	allowed("fieldservice.technician.dispatch", "POST", "/v1/service/dispatch/optimizations/o1:accept")
+	not allowed("fieldservice.inquire", "POST", "/v1/service/dispatch/optimizations")
 	data.service_grants.productcost.ledger == ["ledger.entry.post", "ledger.journal.reverse"]
 	data.service_grants.productcost.inventory == ["inventory.read"]
 	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {

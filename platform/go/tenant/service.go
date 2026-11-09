@@ -200,6 +200,9 @@ var serviceGrants = map[string]map[string][]string{
 		"billing":     {"billing.invoice.read"},
 		"sales":       {"sales.order.lookup"},
 	},
+	"fieldservice": {
+		"dispatch": {"dispatch.run.create", "dispatch.run.read"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.
