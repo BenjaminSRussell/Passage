@@ -1157,9 +1157,17 @@ paths:
         made since go-live; lines dated before T-0 are counted as excluded, every line must be for
         an entity of the plan, and each journal (entity, document, currency) must balance. One bad
         posting rejects the request (MIG-0001) and leaves the plan as it was. The accepted lines are
-        stored with the plan and served by GET .../rekeying/{file}. Writes
-        dev.passage.cutover.plan.rolledback.v1 with the line counts. `version` works as on step
-        completion. The body may be up to 16 MiB.
+        stored with the plan and served by GET .../rekeying/{file}. In the same transaction the
+        loaded and reconciled pack runs of the plan's legacy companies and packs move to ROLLED_BACK
+        (BR-49.1; they are no longer loaded into a target or released), and every coexistence flag of
+        the plan's legacy companies that Passage masters goes back to LEGACY (FR-49.7), each writing
+        dev.passage.migration.coexistence.changed.v1. Writes dev.passage.cutover.plan.rolledback.v1
+        with the line counts, the rolled-back run count and the flags handed back, on which the
+        integration hub resumes the coexistence adapters (AC-49.7). With `ledgers` and a configured
+        ledger the executing request then posts the compensating journals as POST
+        .../rollback/compensations does; a failure there leaves the rollback in place and is reported
+        in `rollbackOutcome.compensationProblem`. `version` works as on step completion. The body may
+        be up to 16 MiB.
       x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1180,6 +1188,11 @@ paths:
                 version:
                   type: integer
                   minimum: 1
+                ledgers:
+                  type: array
+                  description: The ledger each entity's compensating journals are posted in, pinned as on POST .../rollback/compensations; used by the executing request. Each legal entity must be in the caller's scope.
+                  items:
+                    $ref: "#/components/schemas/EntityLedger"
       responses:
         "200":
           description: The plan with rolledBack true and the re-keying counts.
@@ -1443,12 +1456,7 @@ paths:
                 ledgers:
                   type: array
                   items:
-                    type: object
-                    required: [entity, legalEntityId, ledgerId]
-                    properties:
-                      entity: {type: string}
-                      legalEntityId: {type: string, format: uuid}
-                      ledgerId: {type: string}
+                    $ref: "#/components/schemas/EntityLedger"
                 retryParked: {type: boolean}
       responses:
         "200":
@@ -3014,6 +3022,30 @@ components:
               type: integer
               minimum: 0
               description: Postings given with the rollback that were dated before T-0 and left out.
+        rollbackOutcome:
+          type: object
+          description: Present once the plan is rolled back. What the rollback did besides the re-keying export.
+          required: [packRunsRolledBack, coexistenceResumed]
+          properties:
+            packRunsRolledBack:
+              type: integer
+              minimum: 0
+              description: Pack runs of the plan's legacy companies and packs moved from LOADED or RECONCILED to ROLLED_BACK (BR-49.1).
+            coexistenceResumed:
+              type: integer
+              minimum: 0
+              description: Coexistence flags handed back to LEGACY (FR-49.7).
+            coexistence:
+              type: array
+              description: The flags handed back; on the executing request's response only.
+              items:
+                type: object
+            compensations:
+              type: object
+              description: The compensating-journal run the executing request made with `ledgers`, shaped as the POST .../rollback/compensations response.
+            compensationProblem:
+              type: string
+              description: Why the executing request posted no compensations although `ledgers` were given (the ledger is not configured, a ledger is foreign or pinned, the ledger failed); the rollback stands and POST .../rollback/compensations takes over.
         steps:
           type: array
           description: Present on generate, get and commands; absent in the list.
@@ -3024,6 +3056,14 @@ components:
           description: The generated rollback plan (FR-49.9), sent with the steps.
           items:
             $ref: "#/components/schemas/RollbackStep"
+    EntityLedger:
+      type: object
+      required: [entity, legalEntityId, ledgerId]
+      additionalProperties: false
+      properties:
+        entity: {type: string}
+        legalEntityId: {type: string, format: uuid}
+        ledgerId: {type: string}
     RekeyPosting:
       type: object
       required: [kind, entity, documentRef, postedAt, account, currency, amount]

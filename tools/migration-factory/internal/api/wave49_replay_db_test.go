@@ -54,7 +54,7 @@ func fxReplayMonth(n int) fxMonth {
 	var m fxMonth
 	revenue := int64(0)
 	amt := func(lo, hi int64) int64 { return (lo + r.Int64N(hi-lo)) * 10_000 } // whole cents in [lo, hi) cents
-	frac := func() int64 { return r.Int64N(10_000) }                            // a sub-cent part, in millionths
+	frac := func() int64 { return r.Int64N(10_000) }                           // a sub-cent part, in millionths
 	for i := 1; i <= n; i++ {
 		day := 2 + (i*27)/(n+1) // March 2 to 28, in posting order
 		type ln struct {
