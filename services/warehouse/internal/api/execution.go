@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/store"
@@ -415,6 +417,10 @@ type workLineInput struct {
 	Volume     decimal.Decimal   `json:"volume"`
 	LPs        int               `json:"lps"`
 	Attributes map[string]string `json:"attributes"`
+	// OrderLineID is the sales order line a PICK serves; it becomes the line's
+	// issueRef attribute, the ref fulfillment's ship claim and the DELIVERED
+	// booking of the line use, so inventory counts the pick and the ship once.
+	OrderLineID string `json:"orderLineId"`
 }
 
 type workRequest struct {
@@ -466,8 +472,23 @@ func (a *API) createWork(w http.ResponseWriter, r *http.Request) {
 		if in.LPs < 0 {
 			fields[p+".lps"] = "must not be negative"
 		}
+		attrs := in.Attributes
+		if in.OrderLineID != "" {
+			switch {
+			case in.Direction != domain.DirectionPick || !ids.Valid(in.OrderLineID):
+				fields[p+".orderLineId"] = "must be a sales order line id, on a PICK line"
+			case attrs[issueclaim.RefAttribute] != "":
+				fields[p+".orderLineId"] = "and the issueRef attribute name the same thing: give one"
+			default:
+				attrs = maps.Clone(attrs)
+				if attrs == nil {
+					attrs = map[string]string{}
+				}
+				attrs[issueclaim.RefAttribute] = issueclaim.SalesLineRef(in.OrderLineID)
+			}
+		}
 		reqs = append(reqs, domain.NewLine{ItemID: item, Direction: in.Direction, Qty: in.Qty,
-			Weight: in.Weight, Volume: in.Volume, LPs: in.LPs, Attributes: in.Attributes})
+			Weight: in.Weight, Volume: in.Volume, LPs: in.LPs, Attributes: attrs})
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

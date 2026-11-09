@@ -799,6 +799,14 @@ components:
             Free-form line attributes. `batch` names the lot a PICK takes; `issueRef` names the document line the
             pick serves (`SALES_LINE:<order line id>` or `PRODUCTION_ORDER:<order id>:<item id>`), so inventory
             counts the pick and the later ship or consumption of the same units once while a quality hold exists.
+        orderLineId:
+          type: string
+          format: uuid
+          description: >-
+            PICK only: the sales order line the pick serves. It sets the `issueRef` attribute to `SALES_LINE:<id>`,
+            the ref of fulfillment's ship claim and of the line's DELIVERED booking, so the delivery settles the pick
+            and the ship together. Not together with `issueRef`. A pick with neither has no ref and is settled only by
+            an issue that names a ref in the same warehouse, or released.
     WorkRequest:
       type: object
       additionalProperties: false

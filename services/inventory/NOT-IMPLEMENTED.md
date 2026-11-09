@@ -197,19 +197,21 @@ whose withdrawal is lost (crash between claim and commit) stays and only makes l
 (migrations 0040 and 0041 let an `ISSUED` row carry no ref; settlement keys start `issued:`, which `ClaimIssue` refuses in a
 caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): only an issue that names a ref settles anything, and
 it draws on the quantity it moved once, net of what left the warehouse: first the claims of its own ref (the postings consumer's
-DELIVERED booking, or a `transactions:apply` registration that sends `issueRef`, which is how a production consumption
-settles its `CONSUME` claim, `TestIssueClaim_AConsumptionCarryingItsRefSettlesItsClaim`), then the `PICK` claims that carry no
-ref (no caller sets `issueRef` on a warehouse pick, `TestIssueClaim_APickWithoutARefIsSettledByTheDeliveryOfItsUnits`), each
-up to what it still has outstanding. Journals, status steps and registrations that name no ref settle nothing, so a scrap or
+DELIVERED booking, or a `transactions:apply` registration that sends `issueRef`, which must be `SALES_LINE:<origin.sourceId>` of
+a SALES_LINE origin and is otherwise refused 422 with nothing settled, `TestApplyRegistrationSettlesOnlyItsOwnSalesLine`), then
+the `PICK` claims that carry no ref, each up to what it still has outstanding. A warehouse pick for an order line carries the
+line's ref (`orderLineId` on the work line), so for one ref the pick and the ship are the same units: outstanding is the larger of
+the two kinds minus what was issued, and a delivery lowers it by at most the delivered quantity across both
+(`TestIssueClaim_APickLinkedToItsLineIsSettledWithTheShipByTheDelivery`, `TestIssueClaim_APartialDeliveryLeavesTheRestOfTheLinesPickAndShipOutstanding`,
+`TestIssueClaim_AnotherLinesDeliveryLeavesThisLinesPickAlone`). A pick with no source document (ad hoc) stays ref-less and is released
+explicitly (`POST /v1/inventory/issue-claims:release`) or settled by a ref-bearing issue after the ref's own claims. Journals,
+status steps and registrations that name no ref settle nothing, so a scrap or
 an adjustment lowers free stock by what it takes and never releases another order's claim
 (`TestIssueClaim_UnlinkedIssuesAndInScopeMovesSettleNothing`, and the property test, which compares free stock with the model's
 own after every journal issue). Known limits: production does not yet book its consumption in inventory at all (no call in
-`services/production` posts one), so its `CONSUME` claims stay outstanding until the consumption is booked with `issueRef` or
-the claim is released (`POST /v1/inventory/issue-claims:release`); a `SHIP` or `CONSUME` claim without a ref is never settled;
-and a pick without a ref followed by the ship of the same units counts twice, because nothing links the pick to the ship: the
-delivery settles the ship's claim and, from what is left of the quantity it moved, the pick, so with both claims the pick
-stays (stricter: a false refusal only while a hold exists, never a leak) until it is released or a later ref-bearing issue
-settles it. A hold is placed against the row's physical stock and does not
+`services/production` posts one), and `transactions:apply` cannot carry a production ref, so its `CONSUME` claims stay
+outstanding until released; a `SHIP` or `CONSUME` claim without a ref is never settled; fulfillment has no code that creates
+warehouse work, so only work created through the warehouse API with `orderLineId` is linked. A hold is placed against the row's physical stock and does not
 subtract outstanding claims. A hold placed over stock already claimed may therefore cover units that have left. It then
 stops every further claim and every issue that settles nothing until the usage decision, so it is stricter, not a leak. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.

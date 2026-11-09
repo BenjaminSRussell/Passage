@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -133,6 +135,35 @@ func TestApplyRegistersAnExternalOrigin(t *testing.T) {
 		in.Dims["site"] != "S1" || !in.Qty.Equal(decimal.NewFromInt(5)) || !in.EnteredQty.Equal(in.Qty) || in.Status != domain.StatusOrdered ||
 		!in.CostPrice.Equal(decimal.RequireFromString("2.5")) || in.Date.Format("2006-01-02") != "2026-10-01" || in.IdempotencyKey != "reg-1" {
 		t.Fatalf("store input %+v", in)
+	}
+}
+
+func TestApplyRegistrationSettlesOnlyItsOwnSalesLine(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	le, product, line, other := ids.New(), ids.New(), ids.New(), ids.New()
+	body := func(sourceType, source, ref string) string {
+		return `{"origin":{"sourceType":"` + sourceType + `","sourceId":"` + source + `"},"legalEntityId":"` + le + `","productId":"` + product + `",
+			"dimensions":{"site":"S1","warehouse":"W1"},"qty":"-2","enteredUnit":"EA","currency":"USD","toStatus":"SOLD","date":"2026-10-01","issueRef":"` + ref + `"}`
+	}
+	for name, b := range map[string]string{
+		"another line":     body("SALES_LINE", line, issueclaim.SalesLineRef(other)),
+		"a production ref": body("SALES_LINE", line, "PRODUCTION_ORDER:"+other+":"+line),
+		"another origin":   body("PROD_LINE", line, issueclaim.SalesLineRef(line)),
+	} {
+		fs.createIn = store.CreateTransactionInput{}
+		rec := do(t, h, http.MethodPost, applyURL, b, []string{applyDuty}, key("mismatch"))
+		if rec.Code != http.StatusUnprocessableEntity || fs.createIn.SourceID != "" {
+			t.Fatalf("%s: status %d body %s store input %+v, want 422 and no store call", name, rec.Code, rec.Body.String(), fs.createIn)
+		}
+	}
+	rec := do(t, h, http.MethodPost, applyURL, body("SALES_LINE", line, strings.ToUpper(issueclaim.SalesLineRef(line))), []string{applyDuty}, key("own"))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a ref that is not the canonical form: status %d", rec.Code)
+	}
+	rec = do(t, h, http.MethodPost, applyURL, body("SALES_LINE", line, issueclaim.SalesLineRef(line)), []string{applyDuty}, key("own"))
+	if rec.Code != http.StatusCreated || fs.createIn.IssueRef != issueclaim.SalesLineRef(line) {
+		t.Fatalf("own line: status %d body %s input %+v", rec.Code, rec.Body.String(), fs.createIn)
 	}
 }
 

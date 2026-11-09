@@ -321,6 +321,12 @@ release may change public APIs.
   `issued:` and `ClaimIssue` refuses a caller key that does. Inventory migrations 0040 and 0041 let an `ISSUED` row carry no
   ref. Production consumption claims stay until the consumption is booked with its ref or released (production books none in
   inventory yet). Sales and inventory tests follow a posted slip's `:record-progress` call to the event and the booking.
+- Warehouse picks for a sales order line are linked to the line's ship claim (#33). A work line takes the new optional
+  `orderLineId` (PICK only; becomes the `issueRef` attribute `SALES_LINE:<id>`, refused together with an explicit
+  `issueRef`), so pick 5, ship 5 and a DELIVERED booking of 5 leave nothing outstanding and the pick and ship of one line
+  count once; a partial delivery of 3 leaves exactly 2. A pick with no source document stays ref-less and is released
+  explicitly or by an issue naming a ref. `transactions:apply` accepts `issueRef` only as `SALES_LINE:<origin.sourceId>`
+  on a SALES_LINE origin; any other ref is refused 422 and settles nothing.
 - edi EDIFACT ORDERS (#35, found by the partner simulator): a charge amount (MOA 23 or 204) written with a decimal
   comma was stored in the canonical order as text such as `12,50`, and one that was not a number passed unchecked; it
   now takes the decimal point (two decimals unless the partner writes more, like the 850's SAC05) and a non-numeric

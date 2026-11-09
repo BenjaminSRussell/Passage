@@ -623,3 +623,69 @@ func TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused(t *testing.T) {
 	}
 	wantRoom(t, roomOf(t, ctx, s, product), "10", "0", "0")
 }
+
+func pickAndShip(t *testing.T, ctx context.Context, s *store.Postgres, product, qty, ref string) {
+	t.Helper()
+	for _, kind := range []string{"PICK", "SHIP"} {
+		if _, err := s.ClaimIssue(ctx, refClaim(ctx, product, kind+ref, kind, qty, ref)); err != nil {
+			t.Fatalf("%s of %s: %v", kind, qty, err)
+		}
+	}
+}
+
+func TestIssueClaim_APickLinkedToItsLineIsSettledWithTheShipByTheDelivery(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "20", "1", dims()))
+	l := issueclaim.SalesLineRef(ids.New())
+	pickAndShip(t, ctx, s, product, "5", l)
+	wantRoom(t, roomOf(t, ctx, s, product), "20", "0", "5")
+	if err := deliver(ctx, s, product, "d1", dec("5"), l); err != nil {
+		t.Fatal(err)
+	}
+	wantRoom(t, roomOf(t, ctx, s, product), "15", "0", "0")
+	if free := roomOf(t, ctx, s, product).Free(); !free.Equal(dec("15")) {
+		t.Fatalf("free %s, want 15", free)
+	}
+	if _, err := s.PlaceHold(ctx, holdInput(ctx, product, "h1", "15", "qo-1", dims())); err != nil {
+		t.Fatalf("hold of the 15 free units: %v", err)
+	}
+	if err := journalMove(ctx, s, product, dec("-1")); problemCode(err) != domain.CodeQualityHold {
+		t.Fatalf("journal issue with everything held: %v, want %s", err, domain.CodeQualityHold)
+	}
+}
+
+func TestIssueClaim_APartialDeliveryLeavesTheRestOfTheLinesPickAndShipOutstanding(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "20", "1", dims()))
+	l := issueclaim.SalesLineRef(ids.New())
+	pickAndShip(t, ctx, s, product, "5", l)
+	if err := deliver(ctx, s, product, "d1", dec("3"), l); err != nil {
+		t.Fatal(err)
+	}
+	wantRoom(t, roomOf(t, ctx, s, product), "17", "0", "2")
+	if err := deliver(ctx, s, product, "d2", dec("2"), l); err != nil {
+		t.Fatal(err)
+	}
+	wantRoom(t, roomOf(t, ctx, s, product), "15", "0", "0")
+}
+
+func TestIssueClaim_AnotherLinesDeliveryLeavesThisLinesPickAlone(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := entityCtx(1, ids.New())
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "20", "1", dims()))
+	l1, l2 := issueclaim.SalesLineRef(ids.New()), issueclaim.SalesLineRef(ids.New())
+	pickAndShip(t, ctx, s, product, "5", l1)
+	if err := deliver(ctx, s, product, "d2", dec("4"), l2); err != nil {
+		t.Fatal(err)
+	}
+	wantRoom(t, roomOf(t, ctx, s, product), "16", "0", "5")
+	if err := deliver(ctx, s, product, "d1", dec("5"), l1); err != nil {
+		t.Fatal(err)
+	}
+	wantRoom(t, roomOf(t, ctx, s, product), "11", "0", "0")
+}

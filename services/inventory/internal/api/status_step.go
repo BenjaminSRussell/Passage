@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -54,9 +55,9 @@ type applyRequest struct {
 	Currency      string            `json:"currency"`
 	CostPrice     string            `json:"costPrice"`
 	CWQty         *int              `json:"cwQty"`
-	// IssueRef names the document line an issue registration is booked for
-	// (platform/issueclaim: SALES_LINE:<id>, PRODUCTION_ORDER:<order>:<item>);
-	// it settles the claims taken for that line and for the picks without a ref.
+	// IssueRef names the sales line an issue registration is booked for; it must
+	// be SALES_LINE:<origin.sourceId> of a SALES_LINE origin, so a caller can
+	// settle only the claims of the line it registers against.
 	IssueRef string `json:"issueRef"`
 	// Both.
 	ToStatus string `json:"toStatus"`
@@ -183,6 +184,10 @@ func (a *API) stepTransaction(w http.ResponseWriter, r *http.Request, req applyR
 		To: domain.Status(req.ToStatus), Date: date, CostAmount: cost, IdempotencyKey: key, Negative: a.post.Negative})
 }
 
+func ownSalesLineRef(o *originRequest, ref string) bool {
+	return o.SourceType == "SALES_LINE" && ref == issueclaim.SalesLineRef(o.SourceID)
+}
+
 // registerTransaction answers the registration form of transactions:apply.
 func (a *API) registerTransaction(w http.ResponseWriter, r *http.Request, req applyRequest, date time.Time, key string, fields map[string]string) {
 	o := req.Origin
@@ -236,6 +241,11 @@ func (a *API) registerTransaction(w http.ResponseWriter, r *http.Request, req ap
 	}
 	if len(req.IssueRef) > domain.MaxIssueRef || (req.IssueRef != "" && qty.IsPositive()) {
 		fields["issueRef"] = "must be at most 255 characters and applies only to an issue"
+	}
+	if len(fields) == 0 && req.IssueRef != "" && !ownSalesLineRef(o, req.IssueRef) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeInvalid,
+			"issueRef must be SALES_LINE:<origin.sourceId> of an origin with sourceType SALES_LINE: a registration settles only its own line's claims"))
+		return
 	}
 	if len(fields) > 0 {
 		return
