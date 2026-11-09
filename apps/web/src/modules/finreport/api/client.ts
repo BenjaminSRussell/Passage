@@ -382,9 +382,28 @@ export async function importDefinition(def: unknown, overwrite: boolean, key: st
   return (await send<Definition>(`/definitions/import${query}`, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(def) })).body;
 }
 
-export async function listRuns(definition: string, signal?: AbortSignal): Promise<RunSummary[]> {
-  const query = definition ? `?definition=${seg(definition)}` : "";
-  return (await get<{ items: RunSummary[] }>(`/runs${query}`, signal)).items;
+/** The run filters; empty fields are left out. period is YYYY-PP. */
+export interface RunQuery {
+  definition?: string;
+  ledger?: string;
+  period?: string;
+}
+
+/** One keyset page of runs, newest first; nextCursor is null on the last page. */
+export interface RunPage {
+  items: RunSummary[];
+  limit: number;
+  nextCursor: string | null;
+}
+
+export function listRuns(q: RunQuery, cursor?: string, signal?: AbortSignal): Promise<RunPage> {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(q)) {
+    if (typeof value === "string" && value !== "") params.set(name, value);
+  }
+  if (cursor) params.set("cursor", cursor);
+  const query = params.toString();
+  return get<RunPage>(`/runs${query ? `?${query}` : ""}`, signal);
 }
 
 export function getRun(id: string, signal?: AbortSignal): Promise<RunSummary> {

@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { getLag, listRuns, type RunSummary } from "./api/client";
-import { periodLabel, shortHash } from "./format";
+import { describeProblem, getLag, listRuns, type Problem, type RunPage, type RunQuery, type RunSummary } from "./api/client";
+import { periodLabel, shortHash, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -16,12 +16,64 @@ const columns: DataTableColumn<RunSummary>[] = [
   { key: "startedAt", header: "Generated", mono: true, render: (r) => <time dateTime={r.startedAt}>{r.startedAt}</time> },
 ];
 
-/** Financial statements: the report library of runs (FR-15.6) and the read-model lag (FR-15.1). */
+const PERIOD = /^\d{4}-\d{2}$/;
+
+/** The filters the service accepts: a UUID ledger and a period as YYYY-PP. An invalid value is not sent. */
+export function runQuery(definition: string, ledger: string, period: string): { query: RunQuery; errors: { ledger?: string; period?: string } } {
+  const query: RunQuery = {};
+  const errors: { ledger?: string; period?: string } = {};
+  if (definition.trim() !== "") query.definition = definition.trim().toUpperCase();
+  if (ledger.trim() !== "") {
+    if (UUID.test(ledger.trim())) query.ledger = ledger.trim();
+    else errors.ledger = "Enter the ledger id (a UUID), or leave it empty for every ledger.";
+  }
+  if (period.trim() !== "") {
+    if (PERIOD.test(period.trim())) query.period = period.trim();
+    else errors.period = "Enter the fiscal year and period number, such as 2026-03.";
+  }
+  return { query, errors };
+}
+
+/** Financial statements: the report library of runs (FR-15.6), keyset paged, and the read-model lag (FR-15.1). */
 export function RunsPage() {
   const navigate = useNavigate();
   const [definition, setDefinition] = useState("");
-  const filter = definition.trim().toUpperCase();
-  const runs = useLoad((signal) => listRuns(filter, signal), filter);
+  const [ledger, setLedger] = useState("");
+  const [period, setPeriod] = useState("");
+  const { query, errors } = runQuery(definition, ledger, period);
+  const key = JSON.stringify(query);
+  const first = useLoad((signal) => listRuns(query, undefined, signal), key);
+  const [more, setMore] = useState<RunPage[]>([]);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [moreError, setMoreError] = useState<Problem | null>(null);
+
+  // The filter a Load more answer belongs to: a page that arrives after the
+  // filter changed is dropped rather than added to the new list.
+  const current = useRef(key);
+  useEffect(() => {
+    current.current = key;
+    setMore([]);
+    setMoreError(null);
+  }, [key]);
+
+  const pages = first.data ? [first.data, ...more] : [];
+  const items = pages.flatMap((p) => p.items);
+  const nextCursor = pages.length > 0 ? pages[pages.length - 1].nextCursor : null;
+
+  const loadMore = async () => {
+    if (!nextCursor) return;
+    const asked = key;
+    setMoreBusy(true);
+    setMoreError(null);
+    try {
+      const page = await listRuns(query, nextCursor);
+      if (current.current === asked) setMore((m) => [...m, page]);
+    } catch (failure) {
+      if (current.current === asked) setMoreError(describeProblem(failure));
+    } finally {
+      setMoreBusy(false);
+    }
+  };
 
   return (
     <div className={styles.stack}>
@@ -34,24 +86,49 @@ export function RunsPage() {
           </Link>
         }
       />
-      <FormField id="fr-runs-definition" label="Definition code" optional>
-        {(c) => <Input {...c} className={styles.mono} value={definition} onChange={(e) => setDefinition(e.target.value)} />}
-      </FormField>
-      {runs.error ? (
-        <Alert tone="danger" title="Could not load the statement runs" live="alert" action={<Button size="sm" onClick={runs.reload}>Try again</Button>}>
-          {runs.error.message} ({runs.error.code})
+      <div className={styles.form}>
+        <FormField id="fr-runs-definition" label="Definition code" optional>
+          {(c) => <Input {...c} className={styles.mono} value={definition} onChange={(e) => setDefinition(e.target.value)} />}
+        </FormField>
+        <FormField id="fr-runs-period" label="Period" hint="Fiscal year and period, such as 2026-03." optional error={errors.period}>
+          {(c) => <Input {...c} className={styles.mono} value={period} invalid={Boolean(errors.period)} onChange={(e) => setPeriod(e.target.value)} />}
+        </FormField>
+        <FormField id="fr-runs-ledger" label="Ledger" hint="Ledger id. Empty means every ledger." optional error={errors.ledger}>
+          {(c) => <Input {...c} className={styles.mono} value={ledger} invalid={Boolean(errors.ledger)} onChange={(e) => setLedger(e.target.value)} />}
+        </FormField>
+      </div>
+      {first.error ? (
+        <Alert tone="danger" title="Could not load the statement runs" live="alert" action={<Button size="sm" onClick={first.reload}>Try again</Button>}>
+          {first.error.message} ({first.error.code})
         </Alert>
       ) : (
         <DataTable
           label="Statement runs"
           columns={columns}
-          rows={runs.data ?? []}
+          rows={items}
           getRowKey={(r) => r.id}
-          loading={runs.loading}
-          empty={{ title: "No statement runs yet", description: "Run a published definition to produce a statement." }}
+          loading={first.loading && !first.data}
+          empty={
+            key === "{}"
+              ? { title: "No statement runs yet", description: "Run a published definition to produce a statement." }
+              : { title: "No runs match these filters", description: "Change or clear the definition, period or ledger." }
+          }
           onRowOpen={(r) => navigate(`/finreport/runs/${r.id}`)}
         />
       )}
+      {nextCursor && !first.error ? (
+        <div className={styles.drillFooter}>
+          <span className={styles.note}>Showing the newest {items.length} runs.</span>
+          <Button onClick={loadMore} loading={moreBusy}>
+            Load more
+          </Button>
+        </div>
+      ) : null}
+      {moreError ? (
+        <Alert tone="danger" live="alert" title="Could not load more runs">
+          {moreError.message} ({moreError.code})
+        </Alert>
+      ) : null}
       <LagPanel />
     </div>
   );

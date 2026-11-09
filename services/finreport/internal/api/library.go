@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -37,16 +38,20 @@ func libraryQuery(q url.Values) (store.LibraryQuery, error) {
 		}
 	}
 	if v := q.Get("period"); v != "" {
-		y, n, ok := strings.Cut(v, "-")
-		year, err1 := strconv.Atoi(y)
-		no, err2 := strconv.Atoi(n)
-		if !ok || err1 != nil || err2 != nil || year < 1 || no < 0 || len(y) != 4 {
+		y, n, _ := strings.Cut(v, "-")
+		year, _ := strconv.Atoi(y)
+		no, _ := strconv.Atoi(n)
+		if !periodQuery.MatchString(v) || year < 1 {
 			return f, fmt.Errorf("period must be YYYY-PP, such as 2026-03")
 		}
 		f.PeriodYear, f.PeriodNo = year, no
 	}
 	return f, nil
 }
+
+// periodQuery is the period filter of the library and run lists, as the
+// OpenAPI pattern states it.
+var periodQuery = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}$`)
 
 var formatNames = map[string]struct{}{"csv": {}, "html": {}, "xlsx": {}}
 

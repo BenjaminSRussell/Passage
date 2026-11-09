@@ -107,6 +107,33 @@ describe("RunsPage", () => {
     renderAt("/finreport");
     fireEvent.change(screen.getByLabelText("Definition code"), { target: { value: "bs-std" } });
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("definition") === "BS-STD")).toBe(true));
+    expect(await screen.findByText("No runs match these filters")).toBeInTheDocument();
+  });
+
+  it("pages by cursor, sends the period and ledger filters and holds back invalid ones", async () => {
+    const older: RunSummary = { ...run, id: "0190f0a0-0000-7000-8000-000000000102", definitionCode: "BS-STD" };
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/reporting/runs") {
+        if (url.searchParams.get("cursor") === "c1") return json(200, { items: [older], limit: 50, nextCursor: null });
+        return json(200, { items: [run], limit: 50, nextCursor: "c1" });
+      }
+      if (url.pathname === "/api/v1/reporting/lag") return json(200, { items: [] });
+      return undefined;
+    };
+    renderAt("/finreport");
+    const table = await findTable({ name: "Statement runs" });
+    expect(await within(table).findByRole("button", { name: "PL-STD v2" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await within(table).findByRole("button", { name: "BS-STD v2" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "PL-STD v2" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/^Period/), { target: { value: "2026-3" } });
+    expect(await screen.findByText("Enter the fiscal year and period number, such as 2026-03.")).toBeInTheDocument();
+    expect(server.calls.some((c) => c.url.searchParams.has("period"))).toBe(false);
+    fireEvent.change(screen.getByLabelText(/^Period/), { target: { value: "2026-03" } });
+    fireEvent.change(screen.getByLabelText(/^Ledger/), { target: { value: LEDGER } });
+    await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("period") === "2026-03" && c.url.searchParams.get("ledger") === LEDGER)).toBe(true));
   });
 
   it("shows empty states when nothing has run yet", async () => {

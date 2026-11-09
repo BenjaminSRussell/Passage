@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -35,6 +37,9 @@ type fakeStore struct {
 	runErr      error
 	listLimit   int
 	listDef     string
+	listQuery   store.RunQuery
+	listAfter   *domain.AuditCursor
+	listNext    *domain.AuditCursor
 	imported    *domain.Definition
 	overwrite   bool
 	importHash  string
@@ -64,9 +69,13 @@ func (f *fakeStore) RunDefinition(_ context.Context, id string) (domain.Definiti
 	return domain.Definition{Code: "TB-STD", Name: "Trial balance by " + id}, nil
 }
 
-func (f *fakeStore) ListRuns(_ context.Context, def string, limit int) ([]store.Run, error) {
-	f.listDef, f.listLimit = def, limit
-	return []store.Run{{ID: runUUID, DefinitionCode: "BS-STD"}}, nil
+func (f *fakeStore) ListRunsPage(_ context.Context, q store.RunQuery, after *domain.AuditCursor, limit int) (store.RunPage, error) {
+	f.listDef, f.listLimit, f.listQuery, f.listAfter = q.Definition, limit, q, after
+	page := store.RunPage{Items: []store.Run{{ID: runUUID, DefinitionCode: "BS-STD"}}}
+	if f.listNext != nil {
+		page.Next = f.listNext
+	}
+	return page, nil
 }
 
 func (f *fakeStore) ListDefinitions(context.Context) ([]store.DefinitionSummary, error) {
@@ -248,12 +257,57 @@ func TestRunReads_RejectNonUUIDWithoutStore(t *testing.T) {
 func TestListRuns(t *testing.T) {
 	f := &fakeStore{}
 	w := call(router(f), http.MethodGet, "/v1/reporting/runs?definition=BS-STD&limit=25", "", nil, DutyView)
-	if w.Code != http.StatusOK || f.listDef != "BS-STD" || f.listLimit != 25 || !strings.Contains(w.Body.String(), runUUID) {
+	if w.Code != http.StatusOK || f.listDef != "BS-STD" || f.listLimit != 25 || !strings.Contains(w.Body.String(), runUUID) || !strings.Contains(w.Body.String(), `"nextCursor":null`) {
 		t.Fatalf("status %d def %q limit %d body %s", w.Code, f.listDef, f.listLimit, w.Body.String())
+	}
+	w = call(router(f), http.MethodGet, "/v1/reporting/runs", "", nil, DutyView)
+	if w.Code != http.StatusOK || f.listLimit != store.RunDefaultPage {
+		t.Fatalf("default limit = %d, want %d", f.listLimit, store.RunDefaultPage)
 	}
 	w = call(router(f), http.MethodGet, "/v1/reporting/runs?limit=999", "", nil, DutyView)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("limit above maximum = %d, want 400", w.Code)
+	}
+}
+
+func TestListRunsFiltersAndCursor(t *testing.T) {
+	ledger := "6f1f1b9a-0000-4000-8000-000000000001"
+	at := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	next := &domain.AuditCursor{OccurredAt: at, ID: runUUID}
+	f := &fakeStore{listNext: next}
+	w := call(router(f), http.MethodGet, "/v1/reporting/runs?ledger="+ledger+"&period=2026-03", "", nil, DutyView)
+	if w.Code != http.StatusOK || f.listQuery.LedgerID != ledger || f.listQuery.PeriodYear != 2026 || f.listQuery.PeriodNo != 3 {
+		t.Fatalf("status %d query %+v body %s", w.Code, f.listQuery, w.Body.String())
+	}
+	var body struct {
+		NextCursor string `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.NextCursor != next.Encode() {
+		t.Fatalf("nextCursor %q (%v), want %q", body.NextCursor, err, next.Encode())
+	}
+	w = call(router(f), http.MethodGet, "/v1/reporting/runs?cursor="+body.NextCursor, "", nil, DutyView)
+	if w.Code != http.StatusOK || f.listAfter == nil || f.listAfter.ID != runUUID || !f.listAfter.OccurredAt.Equal(at) {
+		t.Fatalf("cursor not passed on: %d %+v", w.Code, f.listAfter)
+	}
+	// A tampered cursor (bad base64, no separator, a non-UUID id, a bad time) is
+	// a 400, never a 500, and the store is not reached.
+	tampered := []string{"bad", base64.RawURLEncoding.EncodeToString([]byte("2026-03-01T10:00:00Z")),
+		base64.RawURLEncoding.EncodeToString([]byte("2026-03-01T10:00:00Z|1 or 1=1")),
+		base64.RawURLEncoding.EncodeToString([]byte("yesterday|" + runUUID))}
+	for _, c := range tampered {
+		f := &fakeStore{}
+		if w := call(router(f), http.MethodGet, "/v1/reporting/runs?cursor="+c, "", nil, DutyView); w.Code != http.StatusBadRequest || f.listLimit != 0 {
+			t.Fatalf("cursor %q = %d (store reached: %v), want 400", c, w.Code, f.listLimit != 0)
+		}
+	}
+	for _, q := range []string{"ledger=nope", "period=2026", "period=2026-3", "period=2026-+3", "period=2026-123", "period=0000-01", "limit=0", "limit=x"} {
+		if w := call(router(&fakeStore{}), http.MethodGet, "/v1/reporting/runs?"+q, "", nil, DutyView); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "COM-0002") {
+			t.Fatalf("%s = %d %s, want 400 COM-0002", q, w.Code, w.Body.String())
+		}
+	}
+	// schedule and format filter the stored library files, not runs: they are not read here.
+	if w := call(router(&fakeStore{}), http.MethodGet, "/v1/reporting/runs?format=docx&schedule=X", "", nil, DutyView); w.Code != http.StatusOK {
+		t.Fatalf("library-only parameters = %d, want 200", w.Code)
 	}
 }
 

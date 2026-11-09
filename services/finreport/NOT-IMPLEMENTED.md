@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 20
+# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 21
 
 Every deliverable bullet of PSG-15, and every acceptance criterion that slices 1
 to 7 do not fully meet, is listed here. Status is either **later slice of PSG-15**
@@ -56,7 +56,7 @@ platform change outside the wave's owned paths).
 | `POST` publish, validate, retire, install and hierarchy publish: `Idempotency-Key` | Not taken. Validate is stateless. Publish (definitions and hierarchies) is safe to repeat: a second call finds no draft and answers 404, so it never creates a second version. Retire succeeds again on a retired code. Install skips codes already in use. Import and run creation persist the key (`idempotency_keys` table and `statement_run.idempotency_key`). | PRD §2.15.5 asks for a key on import and runs only. |
 | Tree endpoints (`/trees[/{id}]`) | Built in slice 13 as `GET /trees` (maintainers and statement runners; the list carries every tree's units, which is what the run form needs, like `GET /hierarchies`), `GET /trees/{code}` and `PUT /trees/{code}` (maintainers; If-Match, 428 or 412 as for the other parts); slice 14 adds the revision routes above. Hierarchy-backed units are **later slice of PSG-15**. | The definition list (`GET /definitions`), retire (slice 2) and run list (`GET /runs`, newest first, no cursor) are built. |
 | `GET/PUT /v1/ledger/main-account-categories` | **handoff** to wave 11 | Path and entity belong to the ledger service. |
-| Run list keyset pagination | **later slice of PSG-15** | `GET /runs` returns at most 200 runs, filterable by definition code. The report library (`GET /library`, slice 16) is keyset paged and filters by definition, ledger (entity), period, schedule and format. |
+| Run list keyset pagination | Slice 21: done. `GET /runs` pages by keyset on (startedAt, id), 50 by default and 200 at most, with `cursor`/`nextCursor` and filters `definition`, `ledger` and `period` (YYYY-PP); the web runs page has period and ledger filters and a Load more button. A consolidated run is found by its first ledger. A filter on the other ledgers of a consolidated run, on status and on the requesting user is **later slice of PSG-15**. | Migration 0022 indexes the pages. |
 | Ad-hoc balances query `GET /reporting/balances` | **later slice of PSG-15** | Needs the dimension security filter. |
 | Audit view `AuditTrailEntry` | Table built (slice 6, see deliverable 5), indexed on (tenant, ledger, occurred at, id) and (tenant, occurred at, id). It is a table fed in transaction and by `PutAuditEntries`, not a materialized view over the wave 5 audit store: that store is not available to this service (**handoff** to wave 5). The BR-15.12 `audit-completeness-check` job (events vs rows per day, P1 alert) is **later slice of PSG-15**, after the consumer exists. | Depends on the consumer and the job runner. |
 | Parameters `reporting.*` (tenant, legal-entity and definition scopes) | The process-wide defaults come from `REPORTING_*` (slice 4). Tenant, legal-entity and definition overrides are **later slice of PSG-15**; the parameter store is a **handoff** to the platform (wave 1/2). | Parameter store is part of the platform. |
@@ -762,3 +762,45 @@ and `DIFF` (debit less credit, 0.00 for a balanced ledger). The web column edito
 - Transaction-currency columns (`txn`) decide the side on the net summed across
   currencies, as every `txn` column already sums; a per-currency side needs the currency
   filter of FR-15.3 (not built).
+
+## Slice 21: keyset paging of the statement run list (FR-15.6, FR-15.8)
+
+Built: `GET /v1/reporting/runs` returns `{items, limit, nextCursor}`, newest first,
+keyset paged on `(started_at, id)` so a run stored while a user pages through is
+neither skipped nor repeated (same opaque cursor as the audit trail and the
+report library). New filters `ledger` (UUID) and `period` (`YYYY-PP`) beside
+`definition`; `limit` is 1 to 200 and defaults to 50 (it used to default to
+200 and return no cursor). Bad `ledger`, `period`, `limit` or `cursor` is
+400 COM-0002. Migration `0022_run_list_keyset.sql` replaces the
+`statement_run_started` index with `(tenant_id, started_at desc, id desc)` and
+adds `(tenant_id, definition_code, started_at desc, id desc)`; it creates no
+table, so it needs no grant. OpenAPI documents the parameters, the page and the
+403 response; the OpenAPI and AsyncAPI doc gates have no FAIL lines.
+
+Web (`apps/web/src/modules/finreport`): the runs page filters by definition,
+period and ledger (an invalid period or ledger shows its error and is not
+sent) and loads further pages with Load more; the client `listRuns` now takes a
+query and cursor and returns a page.
+
+Contract change for callers: a client that read `items` of the old list and
+relied on 200 runs without a cursor now receives 50 and must follow
+`nextCursor`. The only caller in the repository is the web module.
+
+Deferred: the filters listed in the "Run list keyset pagination" row; no new
+duty, route, grant or principal, so there is no authz seed for this slice.
+
+Review notes: runs that start at the same instant are ordered by id (descending)
+and a page boundary between them neither skips nor repeats one (`started_at` is
+NOT NULL, so no run lacks a key). A tampered cursor is 400 COM-0002; the cursor
+holds only a time and a run id and positions the page inside the caller's own
+RLS-scoped rows, so it cannot reach another tenant's or entity's runs. The
+period filter (runs and library) accepts exactly `YYYY-PP`, as OpenAPI states;
+`schedule` and `format` are library-only parameters and are not read by
+`GET /runs`. Migration 0022 builds its indexes with plain `CREATE INDEX` inside
+the migration transaction, which blocks writes to `statement_run` while it
+builds; at today's table sizes that is seconds. A tenant with millions of runs
+would need the indexes built `CONCURRENTLY` outside the migrator (a platform
+migrator change, not taken). With a cursor bound, the planner folds
+`$cursor is null or ...` away and the row comparison becomes an index bound on
+`(tenant_id, started_at desc, id desc)` (checked with EXPLAIN), so a deep page
+does not scan the rows before it.

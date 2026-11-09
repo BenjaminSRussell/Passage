@@ -180,6 +180,11 @@ paths:
     get:
       operationId: listRuns
       summary: Report library - newest runs first
+      description: >-
+        The statement runs, newest first and keyset paged by (startedAt, id), so a
+        run stored while a user pages through is neither skipped nor repeated.
+        Filtered by definition code, ledger and period. Visibility follows the
+        caller's legal-entity scope.
       x-passage-duty: reporting.statement.view
       parameters:
         - name: definition
@@ -187,23 +192,34 @@ paths:
           required: false
           description: Only runs of this definition code
           schema: {type: string}
+        - {name: ledger, in: query, required: false, description: Only runs of this ledger (a consolidated run has its first ledger), schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: false, description: 'Only runs of this fiscal period as YYYY-PP', schema: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$', example: '2026-03'}}
+        - name: cursor
+          in: query
+          required: false
+          description: nextCursor of the previous page
+          schema: {type: string}
         - name: limit
           in: query
           required: false
-          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+          description: Runs per page, 1 to 200; default 50
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
       responses:
         '200':
-          description: Runs, newest first
+          description: One page of runs, newest first; nextCursor is null on the last page
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, limit, nextCursor]
                 properties:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/Run'}
+                  limit: {type: integer}
+                  nextCursor: {type: [string, 'null']}
         '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
     post:
       operationId: createRun
       summary: Run a published definition over the reporting read model (FR-15.6)

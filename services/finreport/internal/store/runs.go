@@ -358,19 +358,61 @@ func (s *Postgres) GetRun(ctx context.Context, id string) (Run, error) {
 	return run, err
 }
 
-// MaxRunPage is the largest page ListRuns returns.
-const MaxRunPage = 200
+// MaxRunPage is the largest page ListRunsPage returns; RunDefaultPage is the
+// size of a page when the caller does not ask for one.
+const (
+	MaxRunPage     = 200
+	RunDefaultPage = 50
+)
 
-// ListRuns returns the newest runs first, at most limit (1..MaxRunPage), and
-// only runs of definition when it is not empty (report library, FR-15.8).
+// RunQuery narrows the report library of runs. Empty fields do not filter; a
+// period is both PeriodYear and PeriodNo (PeriodYear 0 means any period).
+type RunQuery struct {
+	Definition string
+	LedgerID   string
+	PeriodYear int
+	PeriodNo   int
+}
+
+// RunPage is one keyset page of runs, newest first.
+type RunPage struct {
+	Items []Run
+	Next  *domain.AuditCursor // started-at and id of the last item, when more follow
+}
+
+// ListRuns returns the first page of the newest runs for one definition code
+// (empty for every definition), at most limit (1..MaxRunPage).
 func (s *Postgres) ListRuns(ctx context.Context, definition string, limit int) ([]Run, error) {
 	if limit < 1 || limit > MaxRunPage {
 		limit = MaxRunPage
 	}
-	out := []Run{}
+	page, err := s.ListRunsPage(ctx, RunQuery{Definition: definition}, nil, limit)
+	return page.Items, err
+}
+
+// ListRunsPage returns the report library of runs (FR-15.6, FR-15.8), newest
+// first, filtered by definition, ledger and period and paged by keyset on
+// (started at, id) so a run stored while a user pages through is never skipped
+// or repeated. limit outside 1..MaxRunPage becomes RunDefaultPage.
+func (s *Postgres) ListRunsPage(ctx context.Context, q RunQuery, after *domain.AuditCursor, limit int) (RunPage, error) {
+	if limit < 1 || limit > MaxRunPage {
+		limit = RunDefaultPage
+	}
+	page := RunPage{Items: []Run{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var cursorAt *time.Time
+		cursorID := ""
+		if after != nil {
+			t := after.OccurredAt
+			cursorAt, cursorID = &t, after.ID
+		}
 		rows, err := tx.Query(ctx, `select `+runColumns+` from statement_run
-			where ($1 = '' or definition_code = $1) order by started_at desc, id limit $2`, definition, limit)
+			where ($1 = '' or definition_code = $1)
+			  and ($2 = '' or ledger_id = $2::uuid)
+			  and ($3 = 0 or (period_year = $3 and period_no = $4))
+			  and ($5::timestamptz is null or (started_at, id) < ($5, nullif($6, '')::uuid))
+			order by started_at desc, id desc limit $7`,
+			q.Definition, q.LedgerID, q.PeriodYear, q.PeriodNo, cursorAt, cursorID, limit+1)
 		if err != nil {
 			return err
 		}
@@ -380,11 +422,19 @@ func (s *Postgres) ListRuns(ctx context.Context, definition string, limit int) (
 			if err != nil {
 				return err
 			}
-			out = append(out, run)
+			page.Items = append(page.Items, run)
 		}
 		return rows.Err()
 	})
-	return out, err
+	if err != nil {
+		return RunPage{Items: []Run{}}, err
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		last := page.Items[limit-1]
+		page.Next = &domain.AuditCursor{OccurredAt: last.StartedAt, ID: last.ID}
+	}
+	return page, nil
 }
 
 // ListCells returns every cell of a run in evaluation order.

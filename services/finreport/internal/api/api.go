@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -57,7 +58,7 @@ type Store interface {
 	ImportDefinition(ctx context.Context, def domain.Definition, overwrite bool, key, requestHash string) (domain.Definition, int, bool, error)
 	Publish(ctx context.Context, code, actor string) (domain.Definition, error)
 	CreateRun(ctx context.Context, spec store.RunSpec) (store.Run, error)
-	ListRuns(ctx context.Context, definition string, limit int) ([]store.Run, error)
+	ListRunsPage(ctx context.Context, q store.RunQuery, after *domain.AuditCursor, limit int) (store.RunPage, error)
 	GetRun(ctx context.Context, id string) (store.Run, error)
 	ListCells(ctx context.Context, runID string) ([]domain.Cell, error)
 	GetCell(ctx context.Context, runID, row, column string) (domain.Cell, error)
@@ -503,28 +504,49 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, status, run)
 }
 
-// listRuns is the report library list: newest runs first, optionally for one
-// definition code, at most limit (default and maximum 200).
+// listRuns is the report library of runs: newest first, filtered by definition
+// code, ledger and period (YYYY-PP) and keyset paged (default 50, maximum 200).
 func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 	if !principal(r) {
 		httpx.Fail(w, r, unauthenticated())
 		return
 	}
-	limit := store.MaxRunPage
-	if v := r.URL.Query().Get("limit"); v != "" {
+	q := r.URL.Query()
+	// Only the filters a run has: schedule and format belong to the stored
+	// library files and are not read here.
+	f, err := libraryQuery(url.Values{"definition": {q.Get("definition")}, "ledger": {q.Get("ledger")}, "period": {q.Get("period")}})
+	if err != nil {
+		badQuery(w, r, err.Error())
+		return
+	}
+	limit := store.RunDefaultPage
+	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > store.MaxRunPage {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0002", fmt.Sprintf("limit must be 1 to %d", store.MaxRunPage)))
+			badQuery(w, r, fmt.Sprintf("limit must be 1 to %d", store.MaxRunPage))
 			return
 		}
 		limit = n
 	}
-	runs, err := a.store.ListRuns(r.Context(), r.URL.Query().Get("definition"), limit)
+	var after *domain.AuditCursor
+	if v := q.Get("cursor"); v != "" {
+		c, err := domain.DecodeAuditCursor(v)
+		if err != nil {
+			badQuery(w, r, "cursor is not one this endpoint returned")
+			return
+		}
+		after = &c
+	}
+	page, err := a.store.ListRunsPage(r.Context(), store.RunQuery{Definition: f.Definition, LedgerID: f.LedgerID, PeriodYear: f.PeriodYear, PeriodNo: f.PeriodNo}, after, limit)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": runs})
+	var next any
+	if page.Next != nil {
+		next = page.Next.Encode()
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": page.Items, "limit": limit, "nextCursor": next})
 }
 
 func validateRun(req runRequest) error {
