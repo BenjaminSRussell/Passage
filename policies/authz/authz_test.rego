@@ -455,6 +455,19 @@ test_administer_exchange_rates_allows_only_provider_import if {
 	not allowed("fx.rate.maintain", "POST", "/v1/fx/providers/ecb:import")
 }
 
+test_procurement_rfq_types_and_amendments if {
+	allowed("procurement.policy.maintain", "POST", "/v1/procurement/rfq-types")
+	allowed("procurement.policy.maintain", "PUT", "/v1/procurement/rfq-types/t-1")
+	allowed("procurement.rfq.maintain", "GET", "/v1/procurement/rfq-types/t-1")
+	allowed("procurement.rfq.award", "GET", "/v1/procurement/rfq-types")
+	allowed("procurement.rfq.maintain", "PUT", "/v1/procurement/rfqs/r-1")
+	allowed("procurement.rfq.maintain", "POST", "/v1/procurement/rfqs/r-1/amendments")
+	allowed("procurement.rfq.maintain", "PUT", "/v1/procurement/rfqs/r-1/amendments/2/acknowledgements/v-1")
+	not allowed("procurement.rfq.maintain", "POST", "/v1/procurement/rfq-types")
+	not allowed("procurement.rfq.award", "PUT", "/v1/procurement/rfqs/r-1")
+	not allowed("procurement.rfq.award", "POST", "/v1/procurement/rfqs/r-1/amendments")
+}
+
 test_payment_file_preview_duty_allows_only_its_route if {
 	allowed("payment-file.preview", "POST", "/v1/payables/payment-files:preview")
 	not allowed("payment-file.preview", "POST", "/v1/payables/payments/status:parse")

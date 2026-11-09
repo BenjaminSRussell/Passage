@@ -604,20 +604,26 @@
     ]},
     "procurement.rfq.maintain": {"permissions": [
       {"resource": "/v1/procurement/rfqs", "methods": ["GET", "POST"]},
-      {"resource": "/v1/procurement/rfqs/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/rfqs/*", "methods": ["GET", "PUT"]},
       {"resource": "/v1/procurement/rfqs/*/compare", "methods": ["GET"]},
       {"resource": "/v1/procurement/rfqs/*:send", "methods": ["POST"]},
       {"resource": "/v1/procurement/rfqs/*:close", "methods": ["POST"]},
       {"resource": "/v1/procurement/rfqs/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/procurement/rfqs/*/replies", "methods": ["POST"]},
-      {"resource": "/v1/procurement/rfqs:from-requisitions", "methods": ["POST"]}
+      {"resource": "/v1/procurement/rfqs:from-requisitions", "methods": ["POST"]},
+      {"resource": "/v1/procurement/rfqs/*/amendments", "methods": ["POST"]},
+      {"resource": "/v1/procurement/rfqs/*/amendments/*/acknowledgements/*", "methods": ["PUT"]},
+      {"resource": "/v1/procurement/rfq-types", "methods": ["GET"]},
+      {"resource": "/v1/procurement/rfq-types/*", "methods": ["GET"]}
     ]},
     "procurement.rfq.award": {"permissions": [
       {"resource": "/v1/procurement/rfqs", "methods": ["GET"]},
       {"resource": "/v1/procurement/rfqs/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/rfqs/*/compare", "methods": ["GET"]},
       {"resource": "/v1/procurement/rfqs/*:award", "methods": ["POST"]},
-      {"resource": "/v1/procurement/rfqs/*/scores/*", "methods": ["PUT"]}
+      {"resource": "/v1/procurement/rfqs/*/scores/*", "methods": ["PUT"]},
+      {"resource": "/v1/procurement/rfq-types", "methods": ["GET"]},
+      {"resource": "/v1/procurement/rfq-types/*", "methods": ["GET"]}
     ]},
     "procurement.catalog.maintain": {"permissions": [
       {"resource": "/v1/procurement/catalogs", "methods": ["GET", "POST"]},
@@ -1490,7 +1496,9 @@
       {"resource": "/v1/procurement/auto-charges", "methods": ["GET", "POST"]},
       {"resource": "/v1/procurement/auto-charges/*", "methods": ["GET", "PUT"]},
       {"resource": "/v1/procurement/model-service-specs", "methods": ["GET", "POST"]},
-      {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET", "PUT"]}
+      {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/procurement/rfq-types", "methods": ["GET", "POST"]},
+      {"resource": "/v1/procurement/rfq-types/*", "methods": ["GET", "PUT"]}
     ]},
     "projects.billing.maintain": {"permissions": [
       {"resource": "/v1/projects/invoice-proposals", "methods": ["POST"]},
