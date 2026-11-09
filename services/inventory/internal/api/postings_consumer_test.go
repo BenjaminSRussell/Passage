@@ -210,7 +210,7 @@ func TestPostingsConsumer_IssuesTheDeliveredWeight(t *testing.T) {
 	in := f.got[0]
 	if in.SourceType != "SALES_LINE" || !in.Qty.Equal(decimal.NewFromInt(-51)) || in.CWQty != 5 || !in.EnteredQty.Equal(decimal.NewFromInt(-5)) || in.EnteredUnit != "CS" ||
 		in.Status != domain.StatusDeducted || in.Currency != "EUR" || !in.CostPrice.Equal(d("2.5")) || !in.Negative.PhysicalAllowed ||
-		in.SourceID != deliverySourceID(postTenant, postOrder, "PS-1", postLine) {
+		in.SourceID != deliverySourceID(postTenant, postOrder, "PS-1", postLine) || in.IssueRef != "SALES_LINE:"+strings.ToLower(postLine) {
 		t.Fatalf("booking %+v", in)
 	}
 	if err := h[OrderProgressRecordedType].Handle(postingsCtx(t), nil, postingEvent(t, OrderProgressRecordedType, SalesSource, fmt.Sprintf(deliveryData, "DELIVERED", "BOX", ""))); err != nil {

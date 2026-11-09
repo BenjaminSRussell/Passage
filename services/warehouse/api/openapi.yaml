@@ -792,7 +792,13 @@ components:
         weight: { $ref: "#/components/schemas/Decimal" }
         volume: { $ref: "#/components/schemas/Decimal" }
         lps: { type: integer, minimum: 0 }
-        attributes: { type: object, additionalProperties: { type: string } }
+        attributes:
+          type: object
+          additionalProperties: { type: string }
+          description: >-
+            Free-form line attributes. `batch` names the lot a PICK takes; `issueRef` names the document line the
+            pick serves (`SALES_LINE:<order line id>` or `PRODUCTION_ORDER:<order id>:<item id>`), so inventory
+            counts the pick and the later ship or consumption of the same units once while a quality hold exists.
     WorkRequest:
       type: object
       additionalProperties: false

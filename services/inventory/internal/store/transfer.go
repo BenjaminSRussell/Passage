@@ -735,6 +735,9 @@ func moveStockBatch(ctx context.Context, tx pgx.Tx, tenantID string, doc documen
 			return err
 		}
 	}
+	if err := guardClaimedStock(ctx, tx, tenantID, doc.legalEntityID, orderedRows(rows, order), nil); err != nil {
+		return err
+	}
 	for _, w := range written {
 		d := doc
 		d.currency = w.r.currency

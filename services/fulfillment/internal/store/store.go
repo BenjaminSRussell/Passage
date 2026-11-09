@@ -388,16 +388,16 @@ func (s *Postgres) claimShipment(ctx context.Context, sh Shipment) (func(), erro
 	if s.claims == nil {
 		return undo, nil
 	}
-	perProduct := map[string]decimal.Decimal{}
+	// One claim per order line (ClaimAll merges the schedule lines of one
+	// line), under the line's ref: a warehouse pick for the line carries the
+	// same ref, so the ship of what was picked is not counted twice, and the
+	// line's DELIVERED booking at inventory settles it.
+	var claims []issueclaim.Claim
 	for _, l := range sh.Lines {
 		if q := l.Packed.Sub(l.Shipped); q.IsPositive() {
-			perProduct[l.ProductID] = perProduct[l.ProductID].Add(q)
+			claims = append(claims, issueclaim.Claim{LegalEntityID: sh.LegalEntityID, ProductID: l.ProductID, Warehouse: sh.WarehouseID, Kind: issueclaim.Ship, Qty: q,
+				Ref: issueclaim.SalesLineRef(l.OrderLineID), Key: fmt.Sprintf("fulfillment-ship:%s:%d:%s:%s", sh.ID, sh.Version, l.ProductID, l.OrderLineID)})
 		}
-	}
-	var claims []issueclaim.Claim
-	for product, q := range perProduct {
-		claims = append(claims, issueclaim.Claim{LegalEntityID: sh.LegalEntityID, ProductID: product, Warehouse: sh.WarehouseID, Kind: issueclaim.Ship, Qty: q,
-			Key: fmt.Sprintf("fulfillment-ship:%s:%d:%s:%s", sh.ID, sh.Version, product, q)})
 	}
 	undo, err := issueclaim.ClaimAll(ctx, s.claims, claims)
 	switch {

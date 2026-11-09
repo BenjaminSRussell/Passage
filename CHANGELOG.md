@@ -230,6 +230,18 @@ release may change public APIs.
 
 ### Fixed
 
+- Quality holds now hold across every movement kind together (#33, Wave 33 AC2). Inventory's issue claims
+  (`POST /v1/inventory/issue-claims`) were tallied per kind, so a consume of 2 and a ship of 2 of the same free 2
+  both passed. Claims of every kind now count together, and the new optional `issueRef` (the document line the units
+  are issued for: `SALES_LINE:<order line id>` or `PRODUCTION_ORDER:<order id>:<item id>`) groups claims that are
+  successive steps of the same units. A pick and the ship of what it picked count once (the largest per-kind total of
+  the ref). Fulfillment's packing-slip post and production consumption send their ref, and a warehouse pick sends the
+  work line's `issueRef` attribute. Inventory's own issues are weighed against the outstanding claims too: journals
+  other than counts, status steps, transfers and blockings. A sales DELIVERED booking settles its order line's
+  claims, so stock issued through inventory and claimed before is no longer counted twice. A claim may not leave
+  free stock below zero while anything is held, so a hold placed after a pick also stops the ship of the staged units
+  until the usage decision. Inventory migrations 0038 and 0039 add `inventory_issue_claim.issue_ref` and the `ISSUED`
+  rows (NOT VALID checks, validated apart). Property test: `TestHoldProperty_MixedMovementsNeverReachHeldStock`.
 - Inventory postings consumer (#480): replaying a sales delivery that emptied its on-hand row no longer fails as a
   reused Idempotency-Key (the row's running average had moved to zero, so the replay was a different request);
   entries already booked are skipped.

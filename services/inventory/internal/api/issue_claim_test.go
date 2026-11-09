@@ -44,10 +44,11 @@ func TestIssueClaim_OnlyTheServiceDutyReachesIt(t *testing.T) {
 
 func TestIssueClaim_PassesTheRequestAndMarksAReplay(t *testing.T) {
 	fs := &fakeStore{claim: issueClaimFake{replay: true}}
-	rec := do(t, newServer(t, fs), http.MethodPost, "/v1/inventory/issue-claims", claimBody("CONSUME"), []string{"inventory.issue.claim"}, map[string]string{"Idempotency-Key": "k1"})
+	body := strings.Replace(claimBody("CONSUME"), `"qty":"2"`, `"qty":"2","issueRef":"SALES_LINE:l1"`, 1)
+	rec := do(t, newServer(t, fs), http.MethodPost, "/v1/inventory/issue-claims", body, []string{"inventory.issue.claim"}, map[string]string{"Idempotency-Key": "k1"})
 	in := fs.claim.in
 	if rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" || in.IdempotencyKey != "k1" || in.Kind != "CONSUME" ||
-		in.Warehouse != "W1" || in.Batch != "B1" || in.Qty.String() != "2" {
+		in.Warehouse != "W1" || in.Batch != "B1" || in.Qty.String() != "2" || in.IssueRef != "SALES_LINE:l1" {
 		t.Fatalf("replay: %d %v %+v", rec.Code, rec.Header(), in)
 	}
 }
@@ -66,6 +67,7 @@ func TestIssueClaim_RejectsMalformedRequests(t *testing.T) {
 		"zero quantity":  {strings.Replace(claimBody("PICK"), `"qty":"2"`, `"qty":"0"`, 1), "qty"},
 		"no warehouse":   {strings.Replace(claimBody("PICK"), `"warehouse":"W1"`, `"warehouse":""`, 1), "warehouse"},
 		"bad product id": {strings.Replace(claimBody("PICK"), `"productId":"`, `"productId":"x`, 1), "productId"},
+		"long issue ref": {strings.Replace(claimBody("PICK"), `"qty":"2"`, `"qty":"2","issueRef":"`+strings.Repeat("r", 256)+`"`, 1), "issueRef"},
 	}
 	for name, c := range cases {
 		rec := do(t, newServer(t, &fakeStore{}), http.MethodPost, "/v1/inventory/issue-claims", c.body, []string{"inventory.issue.claim"}, map[string]string{"Idempotency-Key": "k"})
