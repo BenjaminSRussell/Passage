@@ -19,6 +19,7 @@ import {
   type LookupScope,
 } from "./entities";
 import { pushRecent, readRecent } from "./recent";
+import { useWorkContext } from "./workContextState";
 
 const DEBOUNCE_MS = 200;
 const PASTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -39,6 +40,7 @@ export interface EntityLookupProps {
   invalid?: boolean;
   disabled?: boolean;
   compact?: boolean;
+  prefill?: boolean;
   placeholder?: string;
   "aria-label"?: string;
   "aria-describedby"?: string;
@@ -59,6 +61,7 @@ export function EntityLookup({
   invalid,
   disabled,
   compact,
+  prefill = true,
   placeholder,
   ...aria
 }: EntityLookupProps) {
@@ -75,6 +78,21 @@ export function EntityLookup({
   const [phase, setPhase] = useState<Phase>("idle");
   const requestId = useRef(0);
   const scopeKey = `${scope?.legalEntityId ?? ""}|${scope?.siteId ?? ""}`;
+
+  const work = useWorkContext();
+  const preset =
+    entity === "legalEntity"
+      ? work.legalEntityId
+      : entity === "site"
+        ? work.siteId
+        : "";
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefill && !disabled && !prefilled.current && value === "" && preset !== "") {
+      prefilled.current = true;
+      onChange({ target: { name, value: preset }, option: null });
+    }
+  }, [prefill, disabled, value, preset]);
 
   useEffect(() => {
     if (value === "") {

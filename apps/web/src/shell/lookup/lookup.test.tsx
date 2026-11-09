@@ -296,6 +296,42 @@ describe("work context", () => {
   });
 });
 
+describe("work context prefill", () => {
+  function Form({ prefill, disabled }: { prefill?: boolean; disabled?: boolean }) {
+    const [entity, setEntity] = useState("");
+    return (
+      <MemoryRouter>
+        <label htmlFor="le-field">Legal entity</label>
+        <EntityLookup id="le-field" entity="legalEntity" prefill={prefill} disabled={disabled} value={entity} onChange={(e) => setEntity(e.target.value)} />
+        <output aria-label="chosen">{entity}</output>
+      </MemoryRouter>
+    );
+  }
+
+  beforeEach(() => {
+    window.localStorage.setItem("passage.workContext", JSON.stringify({ legalEntityId: "le-9", siteId: "" }));
+  });
+
+  it("fills an empty legal entity field from the working context", async () => {
+    render(
+      <WorkContextProvider>
+        <Form />
+      </WorkContextProvider>,
+    );
+    await waitFor(() => expect(screen.getByLabelText("chosen")).toHaveTextContent("le-9"));
+  });
+
+  it("leaves the field empty when prefill is off or the field is disabled", () => {
+    render(
+      <WorkContextProvider>
+        <Form prefill={false} />
+        <Form disabled />
+      </WorkContextProvider>,
+    );
+    screen.getAllByLabelText("chosen").forEach((out) => expect(out).toHaveTextContent(""));
+  });
+});
+
 describe("EntityLookup accessibility", () => {
   it("passes axe with a FormField-style visible label, a value and an open list", async () => {
     const user = userEvent.setup();

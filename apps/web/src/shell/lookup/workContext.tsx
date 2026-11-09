@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -9,24 +7,11 @@ import {
 } from "react";
 import { EntityLookup } from "./EntityLookup";
 import { lookupDefs } from "./entities";
+import { useWorkContext, WorkContext } from "./workContextState";
+
+export { useWorkContext };
 
 const STORAGE_KEY = "passage.workContext";
-
-export interface WorkContextValue {
-  legalEntityId: string;
-  siteId: string;
-  setLegalEntityId(id: string): void;
-  setSiteId(id: string): void;
-}
-
-const empty: WorkContextValue = {
-  legalEntityId: "",
-  siteId: "",
-  setLegalEntityId: () => undefined,
-  setSiteId: () => undefined,
-};
-
-const WorkContext = createContext<WorkContextValue>(empty);
 
 interface Stored {
   legalEntityId: string;
@@ -75,10 +60,6 @@ export function WorkContextProvider({ children }: { children: ReactNode }) {
     [state, setLegalEntityId, setSiteId],
   );
   return <WorkContext.Provider value={value}>{children}</WorkContext.Provider>;
-}
-
-export function useWorkContext(): WorkContextValue {
-  return useContext(WorkContext);
 }
 
 export function ContextPicker() {
