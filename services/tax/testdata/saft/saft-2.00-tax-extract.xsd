@@ -54,6 +54,38 @@
         <xs:element name="MasterFiles">
           <xs:complexType>
             <xs:sequence>
+              <xs:element name="Customers" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="Customer" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="CustomerID" type="Text200"/>
+                          <xs:element name="AccountID" type="Text200"/>
+                          <xs:element name="CustomerTaxID" type="Text200"/>
+                          <xs:element name="CompanyName" type="Text200"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <xs:element name="Suppliers" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="Supplier" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="SupplierID" type="Text200"/>
+                          <xs:element name="AccountID" type="Text200"/>
+                          <xs:element name="SupplierTaxID" type="Text200"/>
+                          <xs:element name="CompanyName" type="Text200"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
               <xs:element name="TaxTable">
                 <xs:complexType>
                   <xs:sequence>
@@ -64,6 +96,49 @@
                           <xs:element name="TaxCode" type="Text200"/>
                           <xs:element name="TaxAmount" type="xs:decimal"/>
                           <xs:element name="NumberOfTransactions" type="xs:nonNegativeInteger"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="GeneralLedgerEntries" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="NumberOfEntries" type="xs:nonNegativeInteger"/>
+              <xs:element name="TotalDebit" type="xs:decimal"/>
+              <xs:element name="TotalCredit" type="xs:decimal"/>
+              <xs:element name="Journal" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="JournalID" type="Text200"/>
+                    <xs:element name="Description" type="xs:string"/>
+                    <xs:element name="Type" type="Text200"/>
+                    <xs:element name="Transaction" minOccurs="0" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="TransactionID" type="Text200"/>
+                          <xs:element name="Period"><xs:simpleType><xs:restriction base="xs:integer"><xs:minInclusive value="1"/><xs:maxInclusive value="12"/></xs:restriction></xs:simpleType></xs:element>
+                          <xs:element name="TransactionDate" type="xs:date"/>
+                          <xs:element name="Description" type="xs:string"/>
+                          <xs:element name="Line" minOccurs="2" maxOccurs="unbounded">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="RecordID" type="Text200"/>
+                                <xs:element name="AccountID" type="Text200"/>
+                                <xs:element name="Description" type="xs:string"/>
+                                <xs:choice>
+                                  <xs:element name="DebitAmount" type="xs:decimal"/>
+                                  <xs:element name="CreditAmount" type="xs:decimal"/>
+                                </xs:choice>
+                                <xs:element name="CustomerID" type="Text200" minOccurs="0"/>
+                                <xs:element name="SupplierID" type="Text200" minOccurs="0"/>
+                              </xs:sequence>
+                            </xs:complexType>
+                          </xs:element>
                         </xs:sequence>
                       </xs:complexType>
                     </xs:element>
