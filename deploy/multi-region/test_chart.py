@@ -80,6 +80,53 @@ class TestRoles(unittest.TestCase):
 
 
 @unittest.skipUnless(HELM, "helm not installed")
+class TestBackup(unittest.TestCase):
+    def test_primary_archives_wal_and_takes_scheduled_backups(self) -> None:
+        docs = render("eu-west.yaml")
+        cluster = doc(docs, "Cluster")
+        self.assertIn("name: barman-cloud.cloudnative-pg.io", cluster)
+        self.assertIn("isWALArchiver: true", cluster)
+        self.assertIn("barmanObjectName: passage-pg-backup", cluster)
+        store = doc(docs, "ObjectStore")
+        self.assertIn("name: passage-pg-backup", store)
+        self.assertIn('destinationPath: "s3://passage-pg-backups-eu-west/"', store)
+        self.assertIn('retentionPolicy: "30d"', store)
+        self.assertIn("key: ACCESS_SECRET_KEY", store)
+        scheduled = doc(docs, "ScheduledBackup")
+        self.assertIn('schedule: "0 0 2 * * *"', scheduled)
+        self.assertIn("method: plugin", scheduled)
+        self.assertRegex(scheduled, r"cluster:\n\s+name: passage-pg\s*$")
+
+    def test_each_region_archives_to_its_own_bucket(self) -> None:
+        self.assertIn("passage-pg-backups-eu-central", doc(render("eu-west.yaml", "region.id=eu-central"), "ObjectStore"))
+        self.assertIn("s3://override/", doc(render("eu-west.yaml", "backup.destinationPath=s3://override/"), "ObjectStore"))
+
+    def test_passive_replica_does_not_archive(self) -> None:
+        docs = render("eu-central.yaml")
+        self.assertNotIn("ObjectStore", kinds(docs))
+        self.assertNotIn("ScheduledBackup", kinds(docs))
+        self.assertNotIn("barman-cloud", doc(docs, "Cluster"))
+
+    def test_disabled_renders_no_backup(self) -> None:
+        docs = render("eu-west.yaml", "backup.enabled=false")
+        self.assertNotIn("ObjectStore", kinds(docs))
+        self.assertNotIn("barman-cloud", doc(docs, "Cluster"))
+        self.assertNotIn("PassageBackupStale", doc(docs, "PrometheusRule"))
+
+    def test_backup_alerts_page_on_archive_failure(self) -> None:
+        rules = doc(render("eu-west.yaml"), "PrometheusRule")
+        self.assertIn("> 93600", rules)
+        self.assertIn("alert: PassageWalArchiveFailing", rules)
+        self.assertIn("cnpg_pg_stat_archiver_last_failed_time", rules)
+
+    def test_schema_rejects_bad_retention_and_schedule(self) -> None:
+        for setting in ("backup.retentionPolicy=forever", "backup.schedule=daily"):
+            proc = subprocess.run([HELM, "template", "mr", str(CHART), "--set", setting], capture_output=True, text=True)
+            self.assertNotEqual(proc.returncode, 0, setting)
+            self.assertIn("/backup/", proc.stderr)
+
+
+@unittest.skipUnless(HELM, "helm not installed")
 class TestMirrorMaker(unittest.TestCase):
     def test_mm2_runs_only_next_to_its_target(self) -> None:
         self.assertNotIn("KafkaMirrorMaker2", kinds(render("eu-west.yaml")))

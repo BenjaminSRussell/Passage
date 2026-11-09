@@ -10,6 +10,11 @@ release may change public APIs.
 
 ### Added
 
+- Postgres backups and tenant-scoped point-in-time restore (#48, P3a): the multi-region chart renders a
+  barman-cloud `ObjectStore` (per-region bucket, 30 d retention), continuous WAL archiving from the CNPG cluster, a
+  daily `ScheduledBackup` and `PassageBackupStale` / `PassageWalArchiveFailing` alerts; `tools/tenant-restore`
+  prints the recovery manifest for a scratch cluster at a timestamp and copies one tenant's rows back into the
+  live database, dry run by default. The restore drill on a cluster and the pen test stay open.
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
