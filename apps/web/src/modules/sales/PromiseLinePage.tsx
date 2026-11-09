@@ -24,7 +24,8 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface PromiseValues {
   lineNo: string;
-  completeOnly: boolean;
+  /** true: whole quantity on one date; false: partial deliveries allowed; null: follow the partial delivery policy of the product and customer. */
+  completeOnly: boolean | null;
   periods: AtpPeriod[];
 }
 
@@ -41,7 +42,20 @@ export function validatePromise(values: PromiseValues): { errors: Errors; input?
     if (!DECIMAL.test(p.demand)) errors[at("demand")] = "Enter 0 or more.";
   });
   if (Object.keys(errors).length > 0) return { errors };
-  return { errors, lineNo: Number(values.lineNo), input: { completeOnly: values.completeOnly, periods: values.periods } };
+  return { errors, lineNo: Number(values.lineNo), input: { ...(values.completeOnly === null ? {} : { completeOnly: values.completeOnly }), periods: values.periods } };
+}
+
+const POLICY_SENTENCE: Record<string, string> = {
+  COMPLETE_ONLY: "the complete only partial delivery policy",
+  ONE_SHIPMENT: "the one shipment partial delivery policy",
+  ALLOWED: "the partial delivery policy, which allows deliveries in parts",
+};
+
+/** Says where the whole-quantity choice came from when the service took it from the partial delivery policy. */
+export function promisePolicyNote(result: PromiseLineResult): string {
+  if (!result.partialDelivery) return "";
+  const basis = POLICY_SENTENCE[result.partialDelivery] ?? "the partial delivery policy";
+  return result.completeOnly ? `The whole quantity was kept on one date, following ${basis}.` : `Partial deliveries were allowed, following ${basis}.`;
 }
 
 /** The result in one sentence: how much ships by the requested date and how much is backordered. */
@@ -69,7 +83,7 @@ export function PromiseLinePage() {
   const [search] = useSearchParams();
   const state = useLoad((signal) => getOrder(id, signal), id);
   const [latest, setLatest] = useState<Versioned<Order> | null>(null);
-  const [values, setValues] = useState<PromiseValues>({ lineNo: search.get("line") ?? "", completeOnly: false, periods: [{ date: "", supply: "0", demand: "0" }] });
+  const [values, setValues] = useState<PromiseValues>({ lineNo: search.get("line") ?? "", completeOnly: null, periods: [{ date: "", supply: "0", demand: "0" }] });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [result, setResult] = useState<{ value: PromiseLineResult; lineNo: number } | null>(null);
@@ -163,13 +177,23 @@ export function PromiseLinePage() {
                 </Select>
               )}
             </FormField>
-            <div className={styles.formActions}>
-              <span className={styles.check}>
-                <Input id="promise-complete" type="checkbox" checked={values.completeOnly} onChange={(e) => setValues((v) => ({ ...v, completeOnly: e.target.checked }))} />
-                <label htmlFor="promise-complete">Complete delivery only</label>
-              </span>
-              <span className={styles.note}>Clear it to allow partial deliveries split over buckets.</span>
-            </div>
+            <FormField
+              id="promise-complete"
+              label="Delivery in parts"
+              hint="Follow the policy takes the delivery tolerance rule of the product and customer, else the legal entity's partial delivery default. Complete only and one shipment keep the whole quantity on one date."
+            >
+              {(control) => (
+                <Select
+                  {...control}
+                  value={values.completeOnly === null ? "policy" : values.completeOnly ? "whole" : "parts"}
+                  onChange={(e) => setValues((v) => ({ ...v, completeOnly: e.target.value === "policy" ? null : e.target.value === "whole" }))}
+                >
+                  <option value="policy">Follow the partial delivery policy</option>
+                  <option value="whole">Whole quantity on one date</option>
+                  <option value="parts">Allow partial deliveries</option>
+                </Select>
+              )}
+            </FormField>
             <div className={`${styles.formActions} ${styles.lines}`}>
               {values.periods.map((p, i) => (
                 <fieldset key={i} className={styles.lineCard}>
@@ -235,7 +259,7 @@ export function PromiseLinePage() {
         </Card>
       )}
       <p role="status" className={styles.muted}>
-        {result ? promiseOutcome(result.value, result.lineNo) : ""}
+        {result ? [promiseOutcome(result.value, result.lineNo), promisePolicyNote(result.value)].filter(Boolean).join(" ") : ""}
       </p>
       {result ? <ScheduleTable lines={result.value.scheduleLines} /> : null}
     </div>

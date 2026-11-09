@@ -61,9 +61,16 @@ func TestPromiseLineHandler(t *testing.T) {
 		t.Fatalf("line number must be numeric: %d", rec.Code)
 	}
 	rec := serveBody(t, s, http.MethodPost, path, body, principal(dutyWrite), match)
-	if rec.Code != http.StatusOK || s.promised == nil || s.promised.LineNo != 2 || !s.promised.CompleteOnly || len(s.promised.Periods) != 2 || s.version != 3 {
+	if rec.Code != http.StatusOK || s.promised == nil || s.promised.LineNo != 2 || s.promised.CompleteOnly == nil || !*s.promised.CompleteOnly || len(s.promised.Periods) != 2 || s.version != 3 {
 		t.Fatalf("promise: %d %s %+v", rec.Code, rec.Body, s.promised)
 	}
+	// Without completeOnly the request carries nil, so the store follows the partial delivery policy.
+	s.promised = nil
+	plain := `{"periods":[{"date":"2027-03-01","supply":"40","demand":"0"}]}`
+	if rec := serveBody(t, s, http.MethodPost, path, plain, principal(dutyWrite), match); rec.Code != http.StatusOK || s.promised == nil || s.promised.CompleteOnly != nil {
+		t.Fatalf("absent completeOnly must reach the store as nil: %d %s %+v", rec.Code, rec.Body, s.promised)
+	}
+	rec = serveBody(t, s, http.MethodPost, path, body, principal(dutyWrite), match)
 	if rec.Header().Get("ETag") != `"4"` || !strings.Contains(rec.Body.String(), `"scheduleLines"`) || !strings.Contains(rec.Body.String(), `"order"`) {
 		t.Fatalf("response %s %v", rec.Body, rec.Header())
 	}

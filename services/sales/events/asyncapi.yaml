@@ -1028,7 +1028,7 @@ components:
         version: {type: integer, description: version after the change}
     ParametersChangedData:
       type: object
-      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, credit_check_points, intake_dedup_window_days, delivery_date_control_default, sales_lead_time_days, actor, version]
+      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, credit_check_points, intake_dedup_window_days, delivery_date_control_default, sales_lead_time_days, partial_delivery_default, actor, version]
       properties:
         legal_entity_id: {type: string, format: uuid}
         quotation_expiry_days: {type: integer, minimum: 1, maximum: 365}
@@ -1042,6 +1042,7 @@ components:
         intake_dedup_window_days: {type: integer, minimum: 1, maximum: 90, description: how many days a (channel, externalRef) pair identifies one order of the legal entity}
         delivery_date_control_default: {type: string, enum: [NONE, SALES_LEAD_TIME], description: the control of a line without its own (FR-27.3)}
         sales_lead_time_days: {type: integer, minimum: 0, maximum: 365, description: days SALES_LEAD_TIME adds to today}
+        partial_delivery_default: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT], description: "the partial delivery policy of a product and customer without a delivery tolerance rule (partial_delivery_default, FR-27.6)"}
         actor: {type: string}
         version: {type: integer, description: version after the change}
     OrderProgressData:

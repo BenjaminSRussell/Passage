@@ -709,6 +709,8 @@ export interface SalesParametersInput {
   deliveryDateControlDefault?: DeliveryDateControl;
   /** Days SALES_LEAD_TIME adds to today, 0 to 365; the service defaults to 0 when absent. */
   salesLeadTimeDays?: number;
+  /** The partial delivery policy of a product and customer without a tolerance rule (FR-27.6); absent keeps the saved policy (ALLOWED when none was saved). */
+  partialDeliveryDefault?: PartialDelivery;
 }
 
 /** The parameters of a legal entity; version 0 means none were saved and these are the defaults. */
@@ -1516,12 +1518,17 @@ export interface ScheduleLine {
 }
 
 export interface PromiseLineInput {
-  completeOnly: boolean;
+  /** Absent: the service follows the partial delivery policy of the line's product and the order's customer. */
+  completeOnly?: boolean;
   periods: AtpPeriod[];
 }
 
 export interface PromiseLineResult {
   order: Order;
+  /** Whether the promise had to carry the whole quantity on one date. */
+  completeOnly?: boolean;
+  /** The policy completeOnly was taken from; absent when the request set it. */
+  partialDelivery?: PartialDelivery;
   scheduleLines: ScheduleLine[];
 }
 

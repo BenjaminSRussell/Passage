@@ -7,7 +7,7 @@ import type { BackorderItem, Order, PromiseLineResult, ScheduleLine } from "./ap
 import { lateness, validateBackorderFilter } from "./BackordersPage";
 import sales from "./module";
 import { scheduleSource } from "./OrderSchedule";
-import { promiseOutcome, validatePromise } from "./PromiseLinePage";
+import { promiseOutcome, promisePolicyNote, validatePromise } from "./PromiseLinePage";
 
 const ORDER_ID = "66666666-0000-4000-8000-000000000006";
 const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region", "bypass"]);
@@ -119,10 +119,16 @@ describe("validatePromise", () => {
     expect(input?.periods).toHaveLength(2);
   });
 
+  it("leaves completeOnly out when the policy decides", () => {
+    const periods = [{ date: "2027-03-01", supply: "40", demand: "0" }];
+    expect(validatePromise({ lineNo: "1", completeOnly: null, periods }).input).toEqual({ periods });
+    expect(validatePromise({ lineNo: "1", completeOnly: false, periods }).input).toEqual({ completeOnly: false, periods });
+  });
+
   it("refuses what the service would refuse", () => {
     const { errors, input } = validatePromise({
       lineNo: "",
-      completeOnly: false,
+      completeOnly: null,
       periods: [
         { date: "2027-03-04", supply: "-1", demand: "0" },
         { date: "2027-03-01", supply: "1", demand: "x" },
@@ -130,7 +136,7 @@ describe("validatePromise", () => {
     });
     expect(Object.keys(errors).sort()).toEqual(["lineNo", "periods[0].supply", "periods[1].date", "periods[1].demand"]);
     expect(input).toBeUndefined();
-    expect(validatePromise({ lineNo: "1", completeOnly: false, periods: [] }).errors.periods).toBeDefined();
+    expect(validatePromise({ lineNo: "1", completeOnly: null, periods: [] }).errors.periods).toBeDefined();
   });
 });
 
@@ -197,6 +203,17 @@ describe("Backorders page", () => {
   });
 });
 
+describe("promisePolicyNote", () => {
+  const base: PromiseLineResult = { order: order(), scheduleLines: [] };
+  it("is empty when the caller chose", () => {
+    expect(promisePolicyNote({ ...base, completeOnly: true })).toBe("");
+  });
+  it("names the policy that decided", () => {
+    expect(promisePolicyNote({ ...base, completeOnly: true, partialDelivery: "COMPLETE_ONLY" })).toContain("whole quantity was kept on one date");
+    expect(promisePolicyNote({ ...base, completeOnly: false, partialDelivery: "ALLOWED" })).toContain("Partial deliveries were allowed");
+  });
+});
+
 describe("Promise order line page", () => {
   it("promises a line with If-Match and shows the split (AC-27.8)", async () => {
     const result: PromiseLineResult = { order: order({ version: 4 }), scheduleLines: SPLIT };
@@ -219,13 +236,34 @@ describe("Promise order line page", () => {
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe(`/api/v1/sales/orders/${ORDER_ID}/lines/1:promise`);
     expect(post?.headers.get("If-Match")).toBe('"3"');
+    // Untouched, the choice is left to the service, which follows the partial delivery policy.
     expect(post?.body).toEqual({
-      completeOnly: false,
       periods: [
         { date: "2027-03-01", supply: "40", demand: "0" },
         { date: "2027-03-04", supply: "5", demand: "0" },
       ],
     });
+  });
+
+  it("sends the explicit choice and says when the partial delivery policy decided", async () => {
+    const result: PromiseLineResult = { order: order({ version: 4 }), scheduleLines: SPLIT, completeOnly: true, partialDelivery: "ONE_SHIPMENT" };
+    handler = (_url, init) => (init.method === "POST" ? { status: 200, body: result, etag: '"4"' } : { status: 200, body: order(), etag: '"3"' });
+    renderAt(`/sales/orders/${ORDER_ID}/promise`);
+    await screen.findByRole("heading", { name: "Promise order SO-0000042" });
+    const choice = screen.getByLabelText("Delivery in parts");
+    expect(choice).toHaveValue("policy");
+    fireEvent.change(screen.getByLabelText("Line"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2027-03-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Promise line" }));
+    expect(await screen.findByText(/following the one shipment partial delivery policy/)).toBeInTheDocument();
+    fireEvent.change(choice, { target: { value: "whole" } });
+    fireEvent.click(screen.getByRole("button", { name: "Promise line" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(2));
+    expect(calls.filter((c) => c.method === "POST")[1].body).toMatchObject({ completeOnly: true });
+    fireEvent.change(choice, { target: { value: "parts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Promise line" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(3));
+    expect(calls.filter((c) => c.method === "POST")[2].body).toMatchObject({ completeOnly: false });
   });
 
   it("preselects the line named in the link from the backorder list", async () => {

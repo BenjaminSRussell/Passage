@@ -1516,7 +1516,7 @@ paths:
               type: object
               required: [periods]
               properties:
-                completeOnly: {type: boolean, default: false, description: ship the whole quantity on one date or backorder it in full}
+                completeOnly: {type: boolean, description: "ship the whole quantity on one date or backorder it in full. When absent the promise follows the partial delivery policy of the line's product and the order's customer (delivery tolerance rule, else the legal entity's partialDeliveryDefault): COMPLETE_ONLY and ONE_SHIPMENT mean true, ALLOWED false. An explicit value always wins"}
                 periods:
                   type: array
                   minItems: 1
@@ -1531,9 +1531,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [order, scheduleLines]
+                required: [order, completeOnly, scheduleLines]
                 properties:
                   order: {$ref: "#/components/schemas/Order"}
+                  completeOnly: {type: boolean, description: whether the promise had to carry the whole quantity on one date}
+                  partialDelivery: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT], description: the policy completeOnly was taken from; absent when the request set completeOnly}
                   scheduleLines:
                     type: array
                     items: {$ref: "#/components/schemas/ScheduleLine"}
@@ -2495,7 +2497,7 @@ paths:
           schema: {$ref: "#/components/schemas/WeightQuantity"}
       responses:
         "200":
-          description: the governing tolerance; source DEFAULT means no rule exists (exact quantities, partial delivery allowed)
+          description: the governing tolerance; source DEFAULT means no rule exists (exact quantities and the legal entity partialDeliveryDefault, ALLOWED when never saved)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ResolvedDeliveryTolerance"}
@@ -4050,6 +4052,7 @@ components:
         intakeDedupWindowDays: {type: integer, minimum: 1, maximum: 90, default: 30, description: "how many days a (channel, externalRef) pair identifies one order of the legal entity (intake_dedup_window_days, BR-27.10); optional, default 30. A repeat of the pair for the same legal entity whose order is younger than the window returns the stored order, or 409 SLS-0007 when the body differs; once the order is that many days old the same reference opens a new order. An Idempotency-Key never expires"}
         deliveryDateControlDefault: {type: string, enum: [NONE, SALES_LEAD_TIME], default: NONE, description: "delivery_date_control_default (FR-27.3): the control of a line without its own; optional, default NONE (the PRD default ATP needs the ATP projection, and ATP and CTP are refused with 400 until then)"}
         salesLeadTimeDays: {type: integer, minimum: 0, maximum: 365, default: 0, description: "days after today before SALES_LEAD_TIME confirms a line; optional, default 0"}
+        partialDeliveryDefault: {type: string, enum: [ALLOWED, COMPLETE_ONLY, ONE_SHIPMENT], description: "partial_delivery_default (FR-27.6): the partial delivery policy of a product and customer that have no delivery tolerance rule, returned by delivery-tolerances:resolve as the DEFAULT source, and followed by a line promise that does not set completeOnly (COMPLETE_ONLY and ONE_SHIPMENT ask for the whole quantity on one date); optional on the PUT: absent keeps the saved policy (ALLOWED when none was saved), unlike the other optional parameters, so a client that predates it cannot reset it"}
     SalesParameters:
       allOf:
         - $ref: "#/components/schemas/SalesParametersRequest"

@@ -242,7 +242,7 @@ func (s *Postgres) DeleteDeliveryTolerance(ctx context.Context, id, actor string
 
 // ResolveDeliveryTolerance returns the tolerance of productID for customerID in
 // a legal entity: the customer's own rule, else the all-customers rule, else
-// the default (exact quantities, partial delivery allowed).
+// the default (exact quantities and the legal entity's partial delivery default).
 func (s *Postgres) ResolveDeliveryTolerance(ctx context.Context, legalEntityID, productID, customerID string) (ResolvedTolerance, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ResolvedTolerance
@@ -272,6 +272,15 @@ func resolveToleranceTx(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID,
 	for i, t := range stored {
 		rules[i] = domain.ToleranceRule{ID: t.ID, CustomerID: t.CustomerID, DeliveryTolerance: t.values()}
 	}
-	out.Tolerance, out.ToleranceID, out.Source = domain.ResolveTolerance(rules, customerID)
+	// The legal entity's partial_delivery_default is the policy of a product and
+	// customer without a rule; a legal entity that never saved parameters, or
+	// one outside the caller's scope, reads as ALLOWED.
+	entityDefault := domain.PartialAllowed
+	err = tx.QueryRow(ctx, `select partial_delivery_default from sales_parameter where tenant_id = $1 and legal_entity_id = $2`,
+		tenantID, legalEntityID).Scan(&entityDefault)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	out.Tolerance, out.ToleranceID, out.Source = domain.ResolveTolerance(rules, customerID, entityDefault)
 	return out, nil
 }

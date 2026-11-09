@@ -28,6 +28,10 @@ type parametersRequest struct {
 	// NONE and 0 apply.
 	DeliveryDateControlDefault *string `json:"deliveryDateControlDefault"`
 	SalesLeadTimeDays          *int    `json:"salesLeadTimeDays"`
+	// PartialDeliveryDefault is optional; absent, the saved value is kept
+	// (ALLOWED when none was saved), so a client that predates the field
+	// cannot silently turn a COMPLETE_ONLY legal entity back to ALLOWED.
+	PartialDeliveryDefault *string `json:"partialDeliveryDefault"`
 	// OneTimeOrderLimit and OneTimeOrderLimitCurrency are optional and go
 	// together; absent, the defaults apply (5,000 USD, 4,500 EUR).
 	OneTimeOrderLimit         *string `json:"oneTimeOrderLimit"`
@@ -60,6 +64,12 @@ func (r parametersRequest) parameters() (domain.Parameters, map[string]string) {
 	out.DeliveryDateControlDefault = domain.DeliveryControlNone
 	if r.DeliveryDateControlDefault != nil {
 		out.DeliveryDateControlDefault = *r.DeliveryDateControlDefault
+	}
+	if r.PartialDeliveryDefault != nil {
+		out.PartialDeliveryDefault = *r.PartialDeliveryDefault
+		if out.PartialDeliveryDefault == "" {
+			f["partialDeliveryDefault"] = "must not be empty; leave it out to keep the saved value"
+		}
 	}
 	if r.SalesLeadTimeDays != nil {
 		out.SalesLeadTimeDays = *r.SalesLeadTimeDays

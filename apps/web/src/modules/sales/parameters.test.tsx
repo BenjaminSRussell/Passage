@@ -71,6 +71,11 @@ describe("validateParameters", () => {
   it("accepts the defaults and returns numbers", () => {
     expect(validateParameters(ok).input).toEqual({ quotationExpiryDays: 30, quotationProbabilityDefault: 50, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["confirm", "release"], intakeDedupWindowDays: 30, deliveryDateControlDefault: "NONE", salesLeadTimeDays: 0 });
   });
+  it("sends the partial delivery default", () => {
+    expect(validateParameters({ ...ok, partialDeliveryDefault: "COMPLETE_ONLY" }).input).toMatchObject({ partialDeliveryDefault: "COMPLETE_ONLY" });
+    // Left out when unknown, so the service keeps the saved policy instead of resetting it.
+    expect(validateParameters(ok).input).not.toHaveProperty("partialDeliveryDefault");
+  });
   it("needs the confirm check point and sends the points in service order", () => {
     expect(Object.keys(validateParameters({ ...ok, creditCheckPoints: [] }).errors)).toEqual(["creditCheckPoints"]);
     expect(Object.keys(validateParameters({ ...ok, creditCheckPoints: ["entry", "release"] }).errors)).toEqual(["creditCheckPoints"]);
@@ -119,7 +124,7 @@ describe("Sales parameters page", () => {
     expect(await screen.findByText("Sales parameters saved.")).toBeInTheDocument();
     const put = calls.find((c) => c.method === "PUT");
     expect(put?.headers.get("If-Match")).toBe('"0"');
-    expect(put?.body).toEqual({ quotationExpiryDays: 45, quotationProbabilityDefault: 35, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["entry", "confirm", "release"], intakeDedupWindowDays: 90, deliveryDateControlDefault: "NONE", salesLeadTimeDays: 0 });
+    expect(put?.body).toEqual({ quotationExpiryDays: 45, quotationProbabilityDefault: 35, creditReleaseValidityDays: 7, creditHoldSlaBusinessDays: 2, defaultOrderType: "ORDER", creditCheckPoints: ["entry", "confirm", "release"], intakeDedupWindowDays: 90, deliveryDateControlDefault: "NONE", salesLeadTimeDays: 0, partialDeliveryDefault: "ALLOWED" });
   });
 
   it("shows the values without a save action to a caller lacking the maintain duty", async () => {

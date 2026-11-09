@@ -502,8 +502,10 @@ type ParametersChangedData struct {
 	// DeliveryDateControlDefault and SalesLeadTimeDays are the FR-27.3 settings.
 	DeliveryDateControlDefault string `json:"delivery_date_control_default"`
 	SalesLeadTimeDays          int    `json:"sales_lead_time_days"`
-	Actor                      string `json:"actor"`
-	Version                    int    `json:"version"`
+	// PartialDeliveryDefault is partial_delivery_default (FR-27.6).
+	PartialDeliveryDefault string `json:"partial_delivery_default"`
+	Actor                  string `json:"actor"`
+	Version                int    `json:"version"`
 }
 
 // OrderChangeRequestedData is the data member of orderchange.requested.v1: a

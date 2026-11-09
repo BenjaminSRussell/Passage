@@ -86,9 +86,10 @@ type ToleranceRule struct {
 
 // ResolveTolerance picks the rule that governs customerID: its own rule
 // replaces the all-customers rule (as for allocation quotas and listings), and
-// without either the default applies. It returns the rule id ("" for the
-// default) and the source.
-func ResolveTolerance(rules []ToleranceRule, customerID string) (DeliveryTolerance, string, string) {
+// without either the default applies: exact quantities and the legal entity's
+// partial_delivery_default (ALLOWED when entityDefault is empty). It returns
+// the rule id ("" for the default) and the source.
+func ResolveTolerance(rules []ToleranceRule, customerID, entityDefault string) (DeliveryTolerance, string, string) {
 	var all *ToleranceRule
 	for i := range rules {
 		r := rules[i]
@@ -102,5 +103,16 @@ func ResolveTolerance(rules []ToleranceRule, customerID string) (DeliveryToleran
 	if all != nil {
 		return all.DeliveryTolerance, all.ID, ToleranceAllCustomers
 	}
-	return DefaultTolerance(), "", ToleranceDefault
+	def := DefaultTolerance()
+	if entityDefault != "" {
+		def.PartialDelivery = entityDefault
+	}
+	return def, "", ToleranceDefault
+}
+
+// CompleteOnlyFor reports whether a partial delivery policy asks for the whole
+// quantity of a line on one date: COMPLETE_ONLY and ONE_SHIPMENT do, ALLOWED
+// does not (FR-27.6, the AX "complete delivery" flag).
+func CompleteOnlyFor(partialDelivery string) bool {
+	return partialDelivery == PartialCompleteOnly || partialDelivery == PartialOneShipment
 }

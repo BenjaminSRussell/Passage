@@ -81,3 +81,18 @@ func TestParametersChecksAt(t *testing.T) {
 		t.Fatalf("default points are confirm and release: %v", p.CreditCheckPoints)
 	}
 }
+
+func TestParametersPartialDeliveryDefault(t *testing.T) {
+	p := DefaultParameters()
+	if p.PartialDeliveryDefault != PartialAllowed || len(p.Validate()) != 0 {
+		t.Fatalf("default: %+v %v", p, p.Validate())
+	}
+	p.PartialDeliveryDefault = PartialOneShipment
+	if len(p.Validate()) != 0 {
+		t.Fatalf("ONE_SHIPMENT is allowed: %v", p.Validate())
+	}
+	p.PartialDeliveryDefault = "SOMETIMES"
+	if p.Validate()["partialDeliveryDefault"] == "" {
+		t.Fatal("an unknown policy must be refused")
+	}
+}

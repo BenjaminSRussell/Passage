@@ -81,10 +81,28 @@ func TestResolveTolerance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, id, source := ResolveTolerance(tc.rules, tc.customer)
+			got, id, source := ResolveTolerance(tc.rules, tc.customer, "")
 			if source != tc.wantSource || id != tc.wantID || !got.OverdeliveryPct.Equal(tdec(tc.wantOver)) || got.PartialDelivery != tc.wantPartials {
 				t.Fatalf("got %+v id=%q source=%s", got, id, source)
 			}
 		})
+	}
+}
+
+func TestResolveToleranceEntityDefault(t *testing.T) {
+	got, id, source := ResolveTolerance(nil, "c", PartialCompleteOnly)
+	if got.PartialDelivery != PartialCompleteOnly || !got.OverdeliveryPct.IsZero() || id != "" || source != ToleranceDefault {
+		t.Fatalf("entity default: %+v %q %q", got, id, source)
+	}
+	if got, _, _ := ResolveTolerance(nil, "c", ""); got.PartialDelivery != PartialAllowed {
+		t.Fatalf("empty default is ALLOWED: %+v", got)
+	}
+}
+
+func TestCompleteOnlyFor(t *testing.T) {
+	for policy, want := range map[string]bool{PartialAllowed: false, PartialCompleteOnly: true, PartialOneShipment: true, "": false} {
+		if CompleteOnlyFor(policy) != want {
+			t.Fatalf("%q: want %v", policy, want)
+		}
 	}
 }

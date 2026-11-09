@@ -39,6 +39,11 @@ type Parameters struct {
 	// SalesLeadTimeDays is the lead time SALES_LEAD_TIME adds to today.
 	DeliveryDateControlDefault string `json:"deliveryDateControlDefault"`
 	SalesLeadTimeDays          int    `json:"salesLeadTimeDays"`
+
+	// PartialDeliveryDefault is partial_delivery_default (FR-27.6): the partial
+	// delivery policy of a product and customer that have no delivery tolerance
+	// rule. ALLOWED is the PRD default.
+	PartialDeliveryDefault string `json:"partialDeliveryDefault"`
 }
 
 const (
@@ -60,7 +65,8 @@ func DefaultParameters() Parameters {
 	return Parameters{QuotationExpiryDays: QuotationExpiryDays, QuotationProbabilityDefault: DefaultProbabilityPct,
 		CreditReleaseValidityDays: CreditReleaseDays, CreditHoldSLABusinessDays: DefaultCreditHoldSLABusinessDays,
 		DefaultOrderType: "ORDER", CreditCheckPoints: []string{CheckPointConfirm, CheckPointRelease},
-		IntakeDedupWindowDays: DefaultIntakeDedupWindowDays, DeliveryDateControlDefault: DeliveryControlNone}
+		IntakeDedupWindowDays: DefaultIntakeDedupWindowDays, DeliveryDateControlDefault: DeliveryControlNone,
+		PartialDeliveryDefault: PartialAllowed}
 }
 
 // The credit_check_points values.
@@ -129,6 +135,9 @@ func (p Parameters) Validate() map[string]string {
 	}
 	if p.SalesLeadTimeDays < 0 || p.SalesLeadTimeDays > MaxSalesLeadTimeDays {
 		f["salesLeadTimeDays"] = fmt.Sprintf("must be 0 to %d", MaxSalesLeadTimeDays)
+	}
+	if p.PartialDeliveryDefault != "" && !ValidPartialDelivery(p.PartialDeliveryDefault) {
+		f["partialDeliveryDefault"] = fmt.Sprintf("must be %s, %s or %s", PartialAllowed, PartialCompleteOnly, PartialOneShipment)
 	}
 	if msg := validateCheckPoints(p.CreditCheckPoints); msg != "" {
 		f["creditCheckPoints"] = msg

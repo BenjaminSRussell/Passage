@@ -18,9 +18,10 @@ const backorders = "/v1/sales/backorders"
 
 // promiseLineRequest is the body of POST /v1/sales/orders/{id}/lines/{lineNo}:promise:
 // the ATP buckets to place the line against (stateless until the projection
-// exists) and whether the whole quantity must ship on one date.
+// exists) and whether the whole quantity must ship on one date. Absent
+// completeOnly follows the partial delivery policy of the product and customer.
 type promiseLineRequest struct {
-	CompleteOnly bool               `json:"completeOnly"`
+	CompleteOnly *bool              `json:"completeOnly"`
 	Periods      []atpPeriodRequest `json:"periods"`
 }
 

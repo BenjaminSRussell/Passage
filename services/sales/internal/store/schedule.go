@@ -40,16 +40,24 @@ type ScheduleLine struct {
 // PromiseRequest places one confirmed line against caller-supplied ATP
 // buckets until the projection exists (see NOT-IMPLEMENTED).
 type PromiseRequest struct {
-	LineNo       int
-	Periods      []domain.Period
-	CompleteOnly bool
+	LineNo  int
+	Periods []domain.Period
+	// CompleteOnly is whether the whole quantity must ship on one date. Nil
+	// follows the partial delivery policy of the line's product and the
+	// order's customer (COMPLETE_ONLY and ONE_SHIPMENT ask for it).
+	CompleteOnly *bool
 }
 
 // PromiseResult is the order after a promise with the line's new schedule.
 type PromiseResult struct {
-	Order    Order          `json:"order"`
-	Promise  domain.Promise `json:"-"`
-	Schedule []ScheduleLine `json:"scheduleLines"`
+	Order   Order          `json:"order"`
+	Promise domain.Promise `json:"-"`
+	// CompleteOnly is whether the promise had to carry the whole quantity on one
+	// date, and PartialDelivery the policy the caller's choice or the default
+	// came from ("" when the caller chose and the policy was not read).
+	CompleteOnly    bool           `json:"completeOnly"`
+	PartialDelivery string         `json:"partialDelivery,omitempty"`
+	Schedule        []ScheduleLine `json:"scheduleLines"`
 }
 
 // BackorderItem is one schedule line promised after the requested date or not
@@ -284,7 +292,18 @@ func (s *Postgres) PromiseLine(ctx context.Context, orderID string, version int,
 			}
 			source = allocationSource
 		}
-		promise, err := domain.PromiseDate(req.Periods, earliest, line.Quantity, req.CompleteOnly)
+		completeOnly, policy := false, ""
+		if req.CompleteOnly != nil {
+			completeOnly = *req.CompleteOnly
+		} else {
+			tol, err := resolveToleranceTx(ctx, tx, p.TenantID, o.LegalEntityID, line.ProductID, o.CustomerID)
+			if err != nil {
+				return err
+			}
+			policy = tol.Tolerance.PartialDelivery
+			completeOnly = domain.CompleteOnlyFor(policy)
+		}
+		promise, err := domain.PromiseDate(req.Periods, earliest, line.Quantity, completeOnly)
 		if err != nil {
 			return problem(http.StatusBadRequest, "COM-0001", err.Error())
 		}
@@ -373,7 +392,7 @@ func (s *Postgres) PromiseLine(ctx context.Context, orderID string, version int,
 		if err != nil {
 			return err
 		}
-		out = PromiseResult{Order: order, Promise: promise, Schedule: schedule}
+		out = PromiseResult{Order: order, Promise: promise, CompleteOnly: completeOnly, PartialDelivery: policy, Schedule: schedule}
 		return nil
 	})
 	return out, err

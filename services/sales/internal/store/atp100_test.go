@@ -64,7 +64,7 @@ func TestPostgres_ATP100PromisedAndStored(t *testing.T) {
 		for i, p := range fx.Periods {
 			periods[i] = domain.Period{Date: day(p.Date), Supply: decimal.RequireFromString(p.Supply), Demand: decimal.RequireFromString(p.Demand)}
 		}
-		res, err := s.PromiseLine(ctx, o.ID, o.Version, PromiseRequest{LineNo: 1, Periods: periods, CompleteOnly: fx.CompleteOnly}, "planner", time.Now())
+		res, err := s.PromiseLine(ctx, o.ID, o.Version, PromiseRequest{LineNo: 1, Periods: periods, CompleteOnly: &fx.CompleteOnly}, "planner", time.Now())
 		if err != nil {
 			t.Fatalf("%s: promise: %v", fx.ID, err)
 		}

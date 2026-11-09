@@ -146,7 +146,7 @@ func TestPostgres_ScheduleLinesAndBackorders(t *testing.T) {
 	if len(back) != 1 || back[0].PromisedDate != nil || back[0].Status != domain.SchedUnpromised {
 		t.Fatalf("undated backorder: %+v", back)
 	}
-	res, err = s.PromiseLine(ctx, o.ID, res.Order.Version, PromiseRequest{LineNo: 1, CompleteOnly: true, Periods: []domain.Period{{Date: day("2027-03-01"), Supply: d(30)}}}, "planner", time.Now())
+	res, err = s.PromiseLine(ctx, o.ID, res.Order.Version, PromiseRequest{LineNo: 1, CompleteOnly: boolRef(true), Periods: []domain.Period{{Date: day("2027-03-01"), Supply: d(30)}}}, "planner", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,3 +234,5 @@ func TestPostgres_ScheduleLegalEntityScope(t *testing.T) {
 		t.Fatalf("own legal entity: %v %+v", err, back)
 	}
 }
+
+func boolRef(b bool) *bool { return &b }

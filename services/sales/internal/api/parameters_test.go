@@ -133,3 +133,30 @@ func TestParameters_CreditCheckPoints(t *testing.T) {
 		t.Fatalf("default: %d %+v", rec.Code, s.saved)
 	}
 }
+
+func TestParameters_PartialDeliveryDefault(t *testing.T) {
+	path := parameters + "?legalEntityId=" + testLE
+	match := map[string]string{"If-Match": `"0"`}
+	s := &parametersStore{}
+	// Absent reaches the store empty, which keeps the saved policy (ALLOWED on create).
+	if rec := serveBody(t, s, http.MethodPut, path, validParameters, principal(dutyParameter), match); rec.Code != http.StatusOK || s.saved.PartialDeliveryDefault != "" {
+		t.Fatalf("absent keeps the saved value: %d %+v", rec.Code, s.saved)
+	}
+	body := strings.Replace(validParameters, `"defaultOrderType"`, `"partialDeliveryDefault":"COMPLETE_ONLY","defaultOrderType"`, 1)
+	if rec := serveBody(t, s, http.MethodPut, path, body, principal(dutyParameter), match); rec.Code != http.StatusOK || s.saved.PartialDeliveryDefault != domain.PartialCompleteOnly ||
+		!strings.Contains(rec.Body.String(), `"partialDeliveryDefault":"COMPLETE_ONLY"`) {
+		t.Fatalf("COMPLETE_ONLY: %d %s", rec.Code, rec.Body)
+	}
+	puts := s.puts
+	bad := strings.Replace(validParameters, `"defaultOrderType"`, `"partialDeliveryDefault":"SOMETIMES","defaultOrderType"`, 1)
+	if rec := serveBody(t, s, http.MethodPut, path, bad, principal(dutyParameter), match); rec.Code != http.StatusBadRequest || s.puts != puts || !strings.Contains(rec.Body.String(), "partialDeliveryDefault") {
+		t.Fatalf("unknown policy: %d %s", rec.Code, rec.Body)
+	}
+	empty := strings.Replace(validParameters, `"defaultOrderType"`, `"partialDeliveryDefault":"","defaultOrderType"`, 1)
+	if rec := serveBody(t, s, http.MethodPut, path, empty, principal(dutyParameter), match); rec.Code != http.StatusBadRequest || s.puts != puts || !strings.Contains(rec.Body.String(), "partialDeliveryDefault") {
+		t.Fatalf("an empty policy is refused, not read as absent: %d %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, &parametersStore{}, http.MethodGet, path, principal(dutyRead), nil); !strings.Contains(rec.Body.String(), `"partialDeliveryDefault":"ALLOWED"`) {
+		t.Fatalf("default read: %s", rec.Body)
+	}
+}

@@ -163,7 +163,7 @@ function ResolveCard() {
 
   return (
     <Card title="Check what applies">
-      <p className={styles.note}>The customer's own rule replaces the rule for every customer, which replaces the default of exact quantities with partial delivery allowed.</p>
+      <p className={styles.note}>The customer's own rule replaces the rule for every customer, which replaces the default of exact quantities and the legal entity's partial delivery default (set on the sales parameters page, partial delivery allowed until then).</p>
       <form className={styles.form} onSubmit={submit} noValidate aria-label="Check the delivery tolerance">
         {field("legalEntityId", "Legal entity")}
         {field("productId", "Product")}
@@ -185,7 +185,7 @@ function ResolveCard() {
           <dl className={styles.details}>
             {(
               [
-                ["Source", result.source === "DEFAULT" ? "Default (no rule)" : result.source === "CUSTOMER" ? "The customer's own rule" : "The rule for every customer"],
+                ["Source", result.source === "DEFAULT" ? "Default (no rule; the legal entity partial delivery default)" : result.source === "CUSTOMER" ? "The customer's own rule" : "The rule for every customer"],
                 ["Over-delivery", percentText(result.overdeliveryPct)],
                 ["Under-delivery", percentText(result.underdeliveryPct)],
                 ["Partial delivery", sentence(result.partialDelivery)],

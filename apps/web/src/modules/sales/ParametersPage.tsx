@@ -10,10 +10,12 @@ import {
   etagOf,
   getSalesParameters,
   INACTIVE_CREDIT_CHECK_POINTS,
+  PARTIAL_DELIVERY_POLICIES,
   putSalesParameters,
   type CreditCheckPoint,
   type DefaultOrderType,
   type DeliveryDateControl,
+  type PartialDelivery,
   type Problem,
   type SalesParametersInput,
 } from "./api/client";
@@ -37,6 +39,8 @@ export interface ParameterValues {
   /** Optional in the type so callers that predate FR-27.3 compile; absent means NONE and 0. */
   deliveryDateControlDefault?: DeliveryDateControl;
   salesLeadTimeDays?: string;
+  /** Optional in the type; absent is left out of the PUT, which keeps the saved policy. */
+  partialDeliveryDefault?: PartialDelivery;
   /** Optional: empty means the defaults (5,000 USD, 4,500 EUR). */
   oneTimeOrderLimit?: string;
   oneTimeOrderLimitCurrency?: string;
@@ -53,6 +57,7 @@ export function parameterValues(p: SalesParametersInput): ParameterValues {
     intakeDedupWindowDays: String(p.intakeDedupWindowDays ?? 30),
     deliveryDateControlDefault: p.deliveryDateControlDefault ?? "NONE",
     salesLeadTimeDays: String(p.salesLeadTimeDays ?? 0),
+    partialDeliveryDefault: p.partialDeliveryDefault ?? "ALLOWED",
     oneTimeOrderLimit: p.oneTimeOrderLimit ?? "",
     oneTimeOrderLimitCurrency: p.oneTimeOrderLimitCurrency ?? "",
   };
@@ -97,6 +102,7 @@ export function validateParameters(v: ParameterValues): { errors: Errors; input?
       intakeDedupWindowDays: Number(v.intakeDedupWindowDays),
       deliveryDateControlDefault: v.deliveryDateControlDefault ?? "NONE",
       salesLeadTimeDays: Number(leadTime),
+      ...(v.partialDeliveryDefault ? { partialDeliveryDefault: v.partialDeliveryDefault } : {}),
     },
   };
 }
@@ -184,6 +190,27 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
             )}
           </FormField>
           {whole("salesLeadTimeDays", "Sales lead time, days", "Days after today before the sales lead time control confirms a line, 0 to 365.")}
+          <FormField
+            id="param-partialDeliveryDefault"
+            label="Partial delivery default"
+            hint="The policy of a product and customer that have no delivery tolerance rule. A line promise that does not say otherwise ships the whole quantity on one date under complete only and one shipment."
+            error={errors.partialDeliveryDefault}
+          >
+            {(control) => (
+              <Select
+                {...control}
+                value={values.partialDeliveryDefault ?? "ALLOWED"}
+                disabled={!canSave}
+                onChange={(e) => setValues({ ...values, partialDeliveryDefault: e.target.value as PartialDelivery })}
+              >
+                {PARTIAL_DELIVERY_POLICIES.map((c) => (
+                  <option key={c} value={c}>
+                    {sentence(c)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
           <FormField id="param-oneTimeOrderLimit" label="One-time order limit" hint="The most a one-time customer order may be worth. Empty: 5,000 USD and 4,500 EUR; other currencies then cannot place one-time orders." error={errors.oneTimeOrderLimit} optional>
             {(control) => (
               <Input {...control} inputMode="decimal" value={values.oneTimeOrderLimit ?? ""} readOnly={!canSave} onChange={(e) => setValues({ ...values, oneTimeOrderLimit: e.target.value })} invalid={Boolean(errors.oneTimeOrderLimit)} />
