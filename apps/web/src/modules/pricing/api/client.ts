@@ -569,8 +569,14 @@ export interface RebateAccrual {
   retroactive?: boolean;
 }
 
-export function listRebateAgreements(legalEntityId = "", signal?: AbortSignal, partyRole: RebatePartyRole | "" = ""): Promise<RebateAgreement[]> {
-  return items<RebateAgreement>(`/rebates/agreements${query({ legalEntityId, partyRole })}`, signal);
+/** The product or product group a rebate list is limited to: exactly that scope, not the unscoped agreements. */
+export interface RebateScopeFilter {
+  productId?: string;
+  productGroupId?: string;
+}
+
+export function listRebateAgreements(legalEntityId = "", signal?: AbortSignal, partyRole: RebatePartyRole | "" = "", scope: RebateScopeFilter = {}): Promise<RebateAgreement[]> {
+  return items<RebateAgreement>(`/rebates/agreements${query({ legalEntityId, partyRole, productId: scope.productId, productGroupId: scope.productGroupId })}`, signal);
 }
 
 export function getRebateAgreement(id: string, signal?: AbortSignal): Promise<RebateAgreement> {
@@ -650,7 +656,7 @@ export function createRebateAgreement(body: RebateAgreementInput, key: string = 
 }
 
 /** POST /rebates/agreements/{id}:revise - change the name, end date or (before any accrual) tiers of an ACTIVE agreement. */
-export function reviseRebateAgreement(id: string, body: { version: number; name?: string; validTo?: string; tiers?: RebateTier[] }, key: string = newKey()): Promise<RebateAgreement> {
+export function reviseRebateAgreement(id: string, body: { version: number; name?: string; validTo?: string; tiers?: RebateTier[]; productScope?: RebateScopeFilter }, key: string = newKey()): Promise<RebateAgreement> {
   return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:revise`, body, key);
 }
 

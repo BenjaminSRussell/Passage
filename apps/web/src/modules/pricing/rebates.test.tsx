@@ -322,7 +322,7 @@ describe("Rebate agreement lifecycle", () => {
     renderAt(`/pricing/rebates/${A1}`);
     await screen.findByRole("heading", { name: "Acme quarterly" });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText("Change the name or the end date.")).toBeInTheDocument();
+    expect(await screen.findByText("Change the name, the end date or the product scope.")).toBeInTheDocument();
     fill("Close date", "2030-01-01");
     fireEvent.click(screen.getByRole("button", { name: "Close agreement" }));
     expect(await screen.findByText(`Choose a day from ${tiered.validFrom} to ${tiered.validTo}.`)).toBeInTheDocument();
@@ -353,5 +353,69 @@ describe("Rebate agreement lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close on 2027-05-31" }));
     expect(await screen.findByText(/This agreement is closed\. Invoices dated after 2027-05-31/)).toBeInTheDocument();
     expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ version: 1, closeDate: "2027-05-31" });
+  });
+
+  it("limits the agreement to a product through the revise form and shows the service refusal after an accrual", async () => {
+    const P1 = "0190f0a0-0000-7000-8000-000000000701";
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/rebates/agreements/${A1}:revise`)) {
+        const body = JSON.parse(String(init.body)) as { productScope?: { productId?: string } };
+        if (body.productScope?.productId === P1) return json(200, { ...tiered, productId: P1, version: 2 });
+        return json(422, { code: "PRC-0071", detail: "the product scope cannot change after invoices have accrued" });
+      }
+      if (url.pathname.endsWith(`/rebates/agreements/${A1}`)) return json(200, { ...tiered, version: 1 });
+      if (url.pathname.endsWith("/rebates/accruals")) return json(200, { items: [] });
+      return undefined;
+    };
+    renderAt(`/pricing/rebates/${A1}`);
+    await screen.findByRole("heading", { name: "Acme quarterly" });
+    fill("Products", "product");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Enter the product id as a UUID.")).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+    fill("Product id", P1);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("The agreement is updated.")).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ version: 1, productScope: { productId: P1 } });
+    expect(await screen.findByText(`Product ${P1}`)).toBeInTheDocument();
+    fill("Products", "all");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("The product scope cannot change after invoices have accrued")).toBeInTheDocument();
+  });
+});
+
+describe("Rebate agreements by product scope", () => {
+  it("filters the list by product and by product group", async () => {
+    const P1 = "0190f0a0-0000-7000-8000-000000000701";
+    server.handler = (url) => {
+      if (url.pathname.endsWith("/rebates/agreements")) {
+        const scoped = url.searchParams.get("productId") === P1;
+        return json(200, { items: scoped ? [{ ...tiered, productId: P1 }] : [tiered, { ...tiered, id: "a2", name: "Group scoped", productGroupId: G1 }] });
+      }
+      return undefined;
+    };
+    renderAt("/pricing/rebates");
+    const table = await findTable({ name: "Rebate agreements" });
+    await waitFor(() => expect(table).toHaveTextContent("Group scoped"));
+    expect(table).toHaveTextContent(`Product group ${G1}`);
+    expect(table).toHaveTextContent("All products");
+    fill("Limited to", "product");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(await screen.findByText("Enter the product id as a UUID.")).toBeInTheDocument();
+    fill("Product id", P1);
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(table).not.toHaveTextContent("Group scoped"));
+    expect(server.calls.some((c) => c.url.searchParams.get("productId") === P1)).toBe(true);
+  });
+
+  it("explains an empty scoped list", async () => {
+    const G = G1;
+    server.handler = (url) => (url.pathname.endsWith("/rebates/agreements") ? json(200, { items: url.searchParams.has("productGroupId") ? [] : [tiered] }) : undefined);
+    renderAt("/pricing/rebates");
+    await screen.findByRole("table", { name: "Rebate agreements" });
+    fill("Limited to", "group");
+    fill("Product group id", G);
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(await screen.findByText("No agreements for that scope")).toBeInTheDocument();
   });
 });

@@ -56,6 +56,12 @@ func (f *fakeStore) ReviseAgreement(_ context.Context, rev store.AgreementRevisi
 		}
 		a.Tiers = *rev.Tiers
 	}
+	if rev.Scope != nil {
+		if last != nil && (rev.Scope.ProductID != a.ProductID || rev.Scope.ProductGroupID != a.ProductGroupID) {
+			return a, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeScopeHasAccruals, "the product scope cannot change after invoices have accrued")
+		}
+		a.ProductID, a.ProductGroupID = rev.Scope.ProductID, rev.Scope.ProductGroupID
+	}
 	if last != nil && a.ValidTo.Before(*last) {
 		return a, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeAgreementEndsEarly, "validTo is before an accrued invoice")
 	}

@@ -880,7 +880,7 @@ components:
     RebateAgreementEvent:
       type: object
       description: >
-        A rebate agreement after a revise (name, end date, tiers before the first accrual), an early
+        A rebate agreement after a revise (name, end date, tiers or product scope before the first accrual), an early
         close or a reopen (FR-26.11). After a close, valid_to is the close date and no invoice dated later
         accrues; after a reopen, status is ACTIVE and valid_to the new last day.
         Ids only.
@@ -893,6 +893,8 @@ components:
         valid_from: {type: string, format: date}
         valid_to: {type: string, format: date}
         version: {type: integer, minimum: 1}
+        product_id: {type: string, format: uuid, description: "The product the agreement is limited to; absent when it takes every invoice line or a product group."}
+        product_group_id: {type: string, format: uuid, description: "The product group the agreement is limited to; absent when it takes every invoice line or a product."}
     ParametersChanged:
       type: object
       description: A legal entity's pricing parameters after a change (PRD 5.26.13).

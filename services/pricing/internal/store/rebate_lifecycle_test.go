@@ -166,3 +166,52 @@ func TestPostgres_RebateCloseAfterRetroRecompute(t *testing.T) {
 }
 
 func dayStrOf(a domain.RebateAgreement) string { return a.ValidTo.Format("2006-01-02") }
+
+// FR-26.11 against Postgres: the product scope changes until the first accrual, the revised
+// event carries it, the list filters by it, and a scope change after an accrual is PRC-0071.
+func TestPostgres_RebateReviseProductScope(t *testing.T) {
+	pool := appPool(t)
+	ctx := principal(1, "")
+	s := store.New(pool)
+	const product, group = "00000000-0000-0000-0008-0000000000a1", "00000000-0000-0000-0008-0000000000a2"
+	a, err := s.CreateAgreement(ctx, agreement(tier("0", "2")), "scope-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.ReviseAgreement(ctx, store.AgreementRevision{ID: a.ID, Version: 1, Scope: &store.ProductScope{ProductID: product}}, "scope-rev-1")
+	if err != nil || r.ProductID != product || r.ProductGroupID != "" || r.Version != 2 {
+		t.Fatalf("scope to product = %+v, %v", r, err)
+	}
+	if again, err := s.ReviseAgreement(ctx, store.AgreementRevision{ID: a.ID, Version: 1, Scope: &store.ProductScope{ProductID: product}}, "scope-rev-1"); err != nil || again.Version != 2 {
+		t.Fatalf("replayed scope revise = %+v, %v", again, err)
+	}
+	if _, err := s.ReviseAgreement(ctx, store.AgreementRevision{ID: a.ID, Version: 1, Scope: &store.ProductScope{ProductGroupID: group}}, "scope-rev-1"); problemCode(err) != store.CodeIdempotencyUse {
+		t.Fatalf("reused key with another scope = %v; want %s", err, store.CodeIdempotencyUse)
+	}
+	if _, err := s.ReviseAgreement(ctx, store.AgreementRevision{ID: a.ID, Version: 2, Scope: &store.ProductScope{ProductID: product, ProductGroupID: group}}, ""); problemCode(err) != domain.CodeValidation {
+		t.Fatalf("both scopes = %v; want %s", err, domain.CodeValidation)
+	}
+	byProduct, err := s.ListAgreements(ctx, store.AgreementFilter{ProductID: product})
+	if err != nil || len(byProduct) != 1 || byProduct[0].ID != a.ID {
+		t.Fatalf("list by product = %+v, %v; want the agreement", byProduct, err)
+	}
+	if byGroup, err := s.ListAgreements(ctx, store.AgreementFilter{ProductGroupID: group}); err != nil || len(byGroup) != 0 {
+		t.Fatalf("list by group = %+v, %v; want none", byGroup, err)
+	}
+	g, err := s.ReviseAgreement(ctx, store.AgreementRevision{ID: a.ID, Version: 2, Scope: &store.ProductScope{ProductGroupID: group}}, "")
+	if err != nil || g.ProductID != "" || g.ProductGroupID != group {
+		t.Fatalf("scope to group = %+v, %v", g, err)
+	}
+	line := invoice(a.ID, "INV-S1", "2026-06-15", "10000")
+	line.ProductGroupID = group
+	if _, _, err := s.AccrueInvoiceLine(ctx, line); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReviseAgreement(ctx, store.AgreementRevision{ID: a.ID, Version: 3, Scope: &store.ProductScope{}}, ""); problemCode(err) != domain.CodeScopeHasAccruals {
+		t.Fatalf("clear scope after accrual = %v; want %s", err, domain.CodeScopeHasAccruals)
+	}
+	// Restating the same scope is not a change.
+	if same, err := s.ReviseAgreement(ctx, store.AgreementRevision{ID: a.ID, Version: 3, Scope: &store.ProductScope{ProductGroupID: group}}, ""); err != nil || same.Version != 4 {
+		t.Fatalf("same scope after accrual = %+v, %v; want accepted", same, err)
+	}
+}

@@ -895,6 +895,8 @@ paths:
       parameters:
         - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
         - {name: partyRole, in: query, required: false, schema: {type: string, enum: [CUSTOMER, VENDOR]}}
+        - {name: productId, in: query, required: false, description: "Only the agreements limited to exactly this product; agreements without a product scope are not returned.", schema: {type: string, format: uuid}}
+        - {name: productGroupId, in: query, required: false, description: "Only the agreements limited to exactly this product group; agreements without a product scope are not returned.", schema: {type: string, format: uuid}}
       responses:
         "200":
           description: Agreements, oldest validity first.
@@ -990,11 +992,13 @@ paths:
   /v1/pricing/rebates/agreements/{id}:revise:
     post:
       operationId: reviseRebateAgreement
-      summary: Change the name, end date or tiers of an ACTIVE rebate agreement (FR-26.11).
+      summary: Change the name, end date, tiers or product scope of an ACTIVE rebate agreement (FR-26.11).
       description: >
         Send only the fields to change, with the version read. The end date may not fall before an
         invoice already accrued (422 PRC-0048) and the tiers may not change once the agreement has
-        accruals (422 PRC-0049: close it and create a new one). 409 PRC-0031 when the agreement is CLOSED;
+        accruals (422 PRC-0049: close it and create a new one). productScope replaces the product or product
+        group the agreement is limited to ({} takes every invoice line again) and is refused once the agreement
+        has accruals (422 PRC-0071; sending the scope it already has is accepted). 409 PRC-0031 when the agreement is CLOSED;
         412 on a stale version. Writes dev.passage.pricing.rebateagreement.revised.v1 in the same
         transaction; a repeated Idempotency-Key replays the first response.
       x-passage-duty: pricing.rebate.maintain
@@ -3988,11 +3992,17 @@ components:
     RebateAgreementRevision:
       type: object
       required: [version]
-      description: Send at least one of name, validTo or tiers.
+      description: Send at least one of name, validTo, tiers or productScope.
       properties:
         version: {type: integer, minimum: 1}
         name: {type: string, minLength: 1, maxLength: 120}
         validTo: {type: string, format: date}
+        productScope:
+          type: object
+          description: Replaces the product scope. At most one of productId and productGroupId; neither means every invoice line.
+          properties:
+            productId: {type: string, format: uuid}
+            productGroupId: {type: string, format: uuid}
         tiers:
           type: array
           minItems: 1

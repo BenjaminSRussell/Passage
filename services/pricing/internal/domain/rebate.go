@@ -53,6 +53,8 @@ const (
 	CodeAgreementEndsEarly = "PRC-0048"
 	// CodeOutOfProductScope: the invoice line is not of the agreement's product or product group.
 	CodeOutOfProductScope = "PRC-0070"
+	// CodeScopeHasAccruals: the product scope cannot change once the agreement has accruals.
+	CodeScopeHasAccruals = "PRC-0071"
 	// CodeAgreementHasAccruals: tiers cannot change once the agreement has accruals.
 	CodeAgreementHasAccruals = "PRC-0049"
 )

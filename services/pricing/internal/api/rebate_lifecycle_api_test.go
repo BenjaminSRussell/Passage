@@ -94,3 +94,71 @@ func TestRebateLifecycle_Close(t *testing.T) {
 		t.Fatalf("read after close = %d %v", code, out)
 	}
 }
+
+// FR-26.11: the product scope of an agreement is revised until the first invoice accrues, and
+// the agreement list filters by it.
+func TestRebateLifecycle_ReviseProductScopeAndFilter(t *testing.T) {
+	h := router(newFake())
+	id := newAgreementID(t, h)
+	const prod, grp = "0f8fad5b-d9cb-469f-a165-70867728950e", "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+	code, out := call(t, h, http.MethodPost, agreementsURL+"/"+id+":revise", allDuties, `{"version":1,"productScope":{"productId":"`+prod+`"}}`)
+	if code != http.StatusOK || out["productId"] != prod || out["version"] != float64(2) {
+		t.Fatalf("scope to product = %d %v", code, out)
+	}
+	_, list := call(t, h, http.MethodGet, agreementsURL+"?productId="+prod, allDuties, "")
+	if items, _ := list["items"].([]any); len(items) != 1 {
+		t.Fatalf("filter by product = %v; want the one agreement", list)
+	}
+	_, list = call(t, h, http.MethodGet, agreementsURL+"?productId="+grp, allDuties, "")
+	if items, _ := list["items"].([]any); len(items) != 0 {
+		t.Fatalf("filter by another product = %v; want none", list)
+	}
+	if code, out := call(t, h, http.MethodGet, agreementsURL+"?productGroupId=nope", allDuties, ""); code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad productGroupId filter = %d %v; want 422", code, out)
+	}
+	for name, body := range map[string]string{
+		"both":    `{"version":2,"productScope":{"productId":"` + prod + `","productGroupId":"` + grp + `"}}`,
+		"not id":  `{"version":2,"productScope":{"productId":"x"}}`,
+		"not grp": `{"version":2,"productScope":{"productGroupId":"x"}}`,
+	} {
+		if code, out := call(t, h, http.MethodPost, agreementsURL+"/"+id+":revise", allDuties, body); code != http.StatusUnprocessableEntity {
+			t.Fatalf("%s = %d %v; want 422", name, code, out)
+		}
+	}
+	// {} takes every line again.
+	code, out = call(t, h, http.MethodPost, agreementsURL+"/"+id+":revise", allDuties, `{"version":2,"productScope":{}}`)
+	if _, has := out["productId"]; code != http.StatusOK || has {
+		t.Fatalf("clear scope = %d %v", code, out)
+	}
+	accrueOne(t, h, id, "INV-1", "2026-02-10")
+	code, out = call(t, h, http.MethodPost, agreementsURL+"/"+id+":revise", allDuties, `{"version":3,"productScope":{"productGroupId":"`+grp+`"}}`)
+	if code != http.StatusUnprocessableEntity || out["code"] != "PRC-0071" {
+		t.Fatalf("scope after accrual = %d %v; want 422 PRC-0071", code, out)
+	}
+}
+
+// A scope id is compared in canonical form (an upper-case spelling of the same group is the same
+// scope, at the accrual and at a restating revise), and a revise without productScope keeps it.
+func TestRebateLifecycle_ProductScopeCanonicalAndKept(t *testing.T) {
+	h := router(newFake())
+	id := newAgreementID(t, h)
+	const grp, upper = "7c9e6679-7425-40de-944b-e07fc1f90ae7", "7C9E6679-7425-40DE-944B-E07FC1F90AE7"
+	code, out := call(t, h, http.MethodPost, agreementsURL+"/"+id+":revise", allDuties, `{"version":1,"productScope":{"productGroupId":"`+upper+`"}}`)
+	if code != http.StatusOK || out["productGroupId"] != grp {
+		t.Fatalf("scope to group = %d %v; want the canonical id", code, out)
+	}
+	code, out = call(t, h, http.MethodPost, agreementsURL+"/"+id+":revise", allDuties, `{"version":2,"name":"Renamed"}`)
+	if code != http.StatusOK || out["productGroupId"] != grp {
+		t.Fatalf("revise without productScope = %d %v; want the scope kept", code, out)
+	}
+	body := `{"agreementId":"` + id + `","invoiceLineId":"INV-U1","invoiceDate":"2026-02-10","value":"1000","quantity":"1","currency":"USD","productGroupId":"` + upper + `"}`
+	if code, out := call(t, h, http.MethodPost, "/v1/pricing/rebates/accruals", allDuties, body); code != http.StatusCreated {
+		t.Fatalf("accrue upper-case group = %d %v", code, out)
+	}
+	if code, out := call(t, h, http.MethodPost, agreementsURL+"/"+id+":revise", allDuties, `{"version":3,"productScope":{"productGroupId":"`+upper+`"}}`); code != http.StatusOK {
+		t.Fatalf("restate the scope after an accrual = %d %v; want 200", code, out)
+	}
+	if _, list := call(t, h, http.MethodGet, agreementsURL+"?productGroupId="+upper, allDuties, ""); len(list["items"].([]any)) != 1 {
+		t.Fatalf("filter by upper-case group = %v; want the agreement", list)
+	}
+}

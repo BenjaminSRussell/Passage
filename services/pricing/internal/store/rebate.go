@@ -304,11 +304,15 @@ func (s *Postgres) ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual
 type AgreementFilter struct {
 	LegalEntityID string
 	PartyRole     string
-	Limit         int
+	// ProductID and ProductGroupID keep the agreements limited to exactly that product or
+	// product group; unscoped agreements are not returned for them.
+	ProductID      string
+	ProductGroupID string
+	Limit          int
 }
 
-// ListAgreements returns rebate agreements, optionally filtered by legal entity and party
-// role (FR-26.11, FR-26.15).
+// ListAgreements returns rebate agreements, optionally filtered by legal entity, party
+// role and product scope (FR-26.11, FR-26.15).
 func (s *Postgres) ListAgreements(ctx context.Context, f AgreementFilter) ([]domain.RebateAgreement, error) {
 	if f.Limit <= 0 || f.Limit > MaxListLimit {
 		f.Limit = MaxListLimit
@@ -316,7 +320,9 @@ func (s *Postgres) ListAgreements(ctx context.Context, f AgreementFilter) ([]dom
 	out := []domain.RebateAgreement{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, agreementColumns+`where ($1::text = '' or legal_entity_id::text = $1)
-			and ($2::text = '' or party_role = $2) order by valid_from, id limit $3`, f.LegalEntityID, f.PartyRole, f.Limit)
+			and ($2::text = '' or party_role = $2) and ($3::text = '' or product_id::text = $3)
+			and ($4::text = '' or product_group_id::text = $4) order by valid_from, id limit $5`,
+			f.LegalEntityID, f.PartyRole, f.ProductID, f.ProductGroupID, f.Limit)
 		if err != nil {
 			return err
 		}
@@ -346,6 +352,13 @@ func tiersHash(t *[]domain.Tier) string {
 	}
 	b, _ := json.Marshal(*t)
 	return string(b)
+}
+
+func scopeHash(s *ProductScope) string {
+	if s == nil {
+		return "-"
+	}
+	return "=" + s.ProductID + "/" + s.ProductGroupID
 }
 
 func ptrStr(s *string) string {

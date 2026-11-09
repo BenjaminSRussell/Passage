@@ -107,12 +107,8 @@ func (a *API) retroRecompute(w http.ResponseWriter, r *http.Request) {
 		if !currencyCode.MatchString(l.Currency) {
 			fields[key+"currency"] = "must be an ISO 4217 code"
 		}
-		if l.ProductID != "" && !ids.Valid(l.ProductID) {
-			fields[key+"productId"] = "must be a UUID"
-		}
-		if l.ProductGroupID != "" && !ids.Valid(l.ProductGroupID) {
-			fields[key+"productGroupId"] = "must be a UUID"
-		}
+		canonicalUUID(fields, key+"productId", &l.ProductID)
+		canonicalUUID(fields, key+"productGroupId", &l.ProductGroupID)
 		in.Lines = append(in.Lines, store.RetroLine{InvoiceLineID: l.InvoiceLineID, InvoiceDate: day, Value: value, Quantity: qty, Currency: l.Currency,
 			ProductID: l.ProductID, ProductGroupID: l.ProductGroupID})
 	}

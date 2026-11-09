@@ -298,6 +298,10 @@ type RebateAgreementData struct {
 	ValidFrom     string `json:"valid_from"`
 	ValidTo       string `json:"valid_to"`
 	Version       int    `json:"version"`
+	// ProductID or ProductGroupID is the agreement's product scope, absent for an agreement
+	// that takes every invoice line.
+	ProductID      string `json:"product_id,omitempty"`
+	ProductGroupID string `json:"product_group_id,omitempty"`
 }
 
 // Commodity pricing (FR-26.21). A basis, an index quote, a price calculation and a completed

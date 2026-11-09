@@ -134,12 +134,8 @@ func (a *API) createAgreement(w http.ResponseWriter, r *http.Request) {
 	if req.VendorID != "" && !ids.Valid(req.VendorID) {
 		fields["vendorId"] = "must be a UUID"
 	}
-	if req.ProductID != "" && !ids.Valid(req.ProductID) {
-		fields["productId"] = "must be a UUID"
-	}
-	if req.ProductGroupID != "" && !ids.Valid(req.ProductGroupID) {
-		fields["productGroupId"] = "must be a UUID"
-	}
+	canonicalUUID(fields, "productId", &req.ProductID)
+	canonicalUUID(fields, "productGroupId", &req.ProductGroupID)
 	party := orDefault(req.PartyRole, domain.PartyCustomer)
 	if !currencyCode.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
@@ -227,12 +223,8 @@ func (a *API) accrue(w http.ResponseWriter, r *http.Request, party string) {
 	if !currencyCode.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
 	}
-	if req.ProductID != "" && !ids.Valid(req.ProductID) {
-		fields["productId"] = "must be a UUID"
-	}
-	if req.ProductGroupID != "" && !ids.Valid(req.ProductGroupID) {
-		fields["productGroupId"] = "must be a UUID"
-	}
+	canonicalUUID(fields, "productId", &req.ProductID)
+	canonicalUUID(fields, "productGroupId", &req.ProductGroupID)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -253,18 +245,35 @@ func (a *API) accrue(w http.ResponseWriter, r *http.Request, party string) {
 	httpx.JSON(w, status, accrualResponse(acc))
 }
 
-// listAgreements returns rebate agreements, optionally filtered by legalEntityId and
-// partyRole (FR-26.11, FR-26.15).
+// canonicalUUID rewrites a non-empty UUID in place to its lowercase hyphenated form, the form
+// Postgres returns, so a product scope compares equal however the caller spelled it; anything
+// else is a field error.
+func canonicalUUID(fields map[string]string, name string, v *string) {
+	if *v == "" {
+		return
+	}
+	if c, ok := ids.Canonical(*v); ok {
+		*v = c
+		return
+	}
+	fields[name] = "must be a UUID"
+}
+
+// listAgreements returns rebate agreements, optionally filtered by legalEntityId,
+// partyRole, productId and productGroupId (FR-26.11, FR-26.15).
 func (a *API) listAgreements(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.AgreementFilter{LegalEntityID: q.Get("legalEntityId"), PartyRole: q.Get("partyRole"), Limit: store.MaxListLimit}
+	f := store.AgreementFilter{LegalEntityID: q.Get("legalEntityId"), PartyRole: q.Get("partyRole"),
+		ProductID: q.Get("productId"), ProductGroupID: q.Get("productGroupId"), Limit: store.MaxListLimit}
 	fields := map[string]string{}
 	if f.LegalEntityID != "" && !ids.Valid(f.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
+	canonicalUUID(fields, "productId", &f.ProductID)
+	canonicalUUID(fields, "productGroupId", &f.ProductGroupID)
 	if f.PartyRole != "" && f.PartyRole != domain.PartyCustomer && f.PartyRole != domain.PartyVendor {
 		fields["partyRole"] = "must be CUSTOMER or VENDOR"
 	}

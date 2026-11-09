@@ -24,11 +24,20 @@ type AgreementRevision struct {
 	Name    *string
 	ValidTo *time.Time
 	Tiers   *[]domain.Tier
+	// Scope replaces the product scope; an empty ProductScope takes every invoice line again.
+	Scope *ProductScope
+}
+
+// ProductScope is the product or product group an agreement is limited to (at most one set).
+type ProductScope struct {
+	ProductID      string
+	ProductGroupID string
 }
 
 func agreementEventData(a domain.RebateAgreement) pevents.RebateAgreementData {
 	return pevents.RebateAgreementData{AgreementID: a.ID, LegalEntityID: a.LegalEntityID, PartyRole: domain.PartyRoleOf(a), Status: a.Status,
-		ValidFrom: dayStr(a.ValidFrom), ValidTo: dayStr(a.ValidTo), Version: a.Version}
+		ValidFrom: dayStr(a.ValidFrom), ValidTo: dayStr(a.ValidTo), Version: a.Version,
+		ProductID: a.ProductID, ProductGroupID: a.ProductGroupID}
 }
 
 // lockAgreement reads the agreement under a row lock and returns the date of its latest
@@ -66,7 +75,7 @@ func (s *Postgres) ReviseAgreement(ctx context.Context, rev AgreementRevision, i
 		if err != nil {
 			return err
 		}
-		hash := commandHash("agreement-revise", rev.ID, strconv.Itoa(rev.Version), ptrStr(rev.Name), ptrDay(rev.ValidTo), tiersHash(rev.Tiers))
+		hash := commandHash("agreement-revise", rev.ID, strconv.Itoa(rev.Version), ptrStr(rev.Name), ptrDay(rev.ValidTo), tiersHash(rev.Tiers), scopeHash(rev.Scope))
 		if ok, err := replayJSON(ctx, tx, p.TenantID, idempotencyKey, hash, &out); err != nil || ok {
 			return err
 		}
@@ -90,6 +99,21 @@ func (s *Postgres) ReviseAgreement(ctx context.Context, rev AgreementRevision, i
 			}
 			next.Tiers = *rev.Tiers
 		}
+		if rev.Scope != nil {
+			next.ProductID, next.ProductGroupID = rev.Scope.ProductID, rev.Scope.ProductGroupID
+			if next.ProductID != cur.ProductID || next.ProductGroupID != cur.ProductGroupID {
+				// Any accrual row counts, a replayed retroactive line included: it joined the
+				// basis under the scope that was in force.
+				var accrued bool
+				if err := tx.QueryRow(ctx, `select exists (select 1 from rebate_accrual where agreement_id = $1)`, rev.ID).Scan(&accrued); err != nil {
+					return err
+				}
+				if accrued {
+					return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeScopeHasAccruals,
+						"the product scope cannot change after invoices have accrued; close this agreement and create a new one")
+				}
+			}
+		}
 		if e := domain.ValidateAgreement(next); e != nil {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, e.Code, e.Detail)
 		}
@@ -101,8 +125,9 @@ func (s *Postgres) ReviseAgreement(ctx context.Context, rev AgreementRevision, i
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update rebate_agreement set name = $2, valid_to = $3, tiers = $4, version = version + 1 where id = $1`,
-			rev.ID, next.Name, next.ValidTo, tiers); err != nil {
+		if _, err := tx.Exec(ctx, `update rebate_agreement set name = $2, valid_to = $3, tiers = $4, product_id = nullif($5, '')::uuid,
+			product_group_id = nullif($6, '')::uuid, version = version + 1 where id = $1`,
+			rev.ID, next.Name, next.ValidTo, tiers, next.ProductID, next.ProductGroupID); err != nil {
 			return err
 		}
 		next.Version = cur.Version + 1

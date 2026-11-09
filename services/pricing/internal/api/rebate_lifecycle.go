@@ -25,6 +25,13 @@ type agreementReviseRequest struct {
 	Name    *string    `json:"name"`
 	ValidTo *string    `json:"validTo"`
 	Tiers   *[]tierDTO `json:"tiers"`
+	// ProductScope replaces the scope; {} takes every invoice line again.
+	ProductScope *productScopeDTO `json:"productScope"`
+}
+
+type productScopeDTO struct {
+	ProductID      string `json:"productId"`
+	ProductGroupID string `json:"productGroupId"`
 }
 
 type agreementCloseRequest struct {
@@ -81,8 +88,17 @@ func (a *API) reviseAgreement(w http.ResponseWriter, r *http.Request) {
 		}
 		rev.Tiers = &tiers
 	}
-	if rev.Name == nil && rev.ValidTo == nil && rev.Tiers == nil {
-		fields["body"] = "change at least one of name, validTo or tiers"
+	if req.ProductScope != nil {
+		sc := req.ProductScope
+		canonicalUUID(fields, "productScope.productId", &sc.ProductID)
+		canonicalUUID(fields, "productScope.productGroupId", &sc.ProductGroupID)
+		if sc.ProductID != "" && sc.ProductGroupID != "" {
+			fields["productScope"] = "at most one of productId or productGroupId"
+		}
+		rev.Scope = &store.ProductScope{ProductID: sc.ProductID, ProductGroupID: sc.ProductGroupID}
+	}
+	if rev.Name == nil && rev.ValidTo == nil && rev.Tiers == nil && rev.Scope == nil {
+		fields["body"] = "change at least one of name, validTo, tiers or productScope"
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

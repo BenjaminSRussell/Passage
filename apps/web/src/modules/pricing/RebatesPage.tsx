@@ -1,15 +1,19 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
-import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { listRebateAgreements, type RebateAgreement, type RebatePartyRole } from "./api/client";
+import { useState, type FormEvent } from "react";
+import { Alert, Badge, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { listRebateAgreements, type RebateAgreement, type RebatePartyRole, type RebateScopeFilter } from "./api/client";
 import styles from "./pages.module.css";
-import { basisLabel, describeRebateCustomer, describeTiers, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
+import { UUID } from "./format";
+import { basisLabel, describeProductScope, describeRebateCustomer, describeTiers, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+
+type ScopeKind = "" | "product" | "group";
 
 const columns: DataTableColumn<RebateAgreement>[] = [
   { key: "name", header: "Agreement" },
   { key: "partyRole", header: "Type", render: (row) => <Badge tone={row.partyRole === "VENDOR" ? "info" : "neutral"}>{PARTY_LABELS[row.partyRole ?? "CUSTOMER"]}</Badge> },
   { key: "customerId", header: "Customer or vendor", mono: true, render: describeRebateCustomer },
+  { key: "productId", header: "Products", render: describeProductScope },
   { key: "basis", header: "Basis", render: basisLabel },
   { key: "period", header: "Period", render: (row) => PERIOD_LABELS[row.period] },
   { key: "tiers", header: "Tiers", mono: true, render: describeTiers },
@@ -22,7 +26,25 @@ const columns: DataTableColumn<RebateAgreement>[] = [
 export function RebatesPage() {
   const navigate = useNavigate();
   const [party, setParty] = useState<RebatePartyRole | "">("");
-  const state = useLoad((signal) => listRebateAgreements("", signal, party), party || "all");
+  const [scopeKind, setScopeKind] = useState<ScopeKind>("");
+  const [scopeId, setScopeId] = useState("");
+  const [applied, setApplied] = useState<RebateScopeFilter>({});
+  const [scopeError, setScopeError] = useState("");
+  const state = useLoad((signal) => listRebateAgreements("", signal, party, applied), `${party || "all"}|${applied.productId ?? ""}|${applied.productGroupId ?? ""}`);
+
+  function applyScope(event: FormEvent) {
+    event.preventDefault();
+    const id = scopeId.trim();
+    if (scopeKind === "") {
+      setScopeError("");
+      setApplied({});
+    } else if (!UUID.test(id)) {
+      setScopeError(scopeKind === "product" ? "Enter the product id as a UUID." : "Enter the product group id as a UUID.");
+    } else {
+      setScopeError("");
+      setApplied(scopeKind === "product" ? { productId: id } : { productGroupId: id });
+    }
+  }
 
   return (
     <div className={styles.stack}>
@@ -50,6 +72,23 @@ export function RebatesPage() {
             </Select>
           )}
         </FormField>
+        <form className={styles.toolbar} onSubmit={applyScope} noValidate>
+          <FormField id="rb-scope-kind" label="Limited to">
+            {(c) => (
+              <Select {...c} value={scopeKind} onChange={(e) => setScopeKind(e.target.value as ScopeKind)}>
+                <option value="">Any product scope</option>
+                <option value="product">One product</option>
+                <option value="group">One product group</option>
+              </Select>
+            )}
+          </FormField>
+          {scopeKind !== "" ? (
+            <FormField id="rb-scope-id" label={scopeKind === "product" ? "Product id" : "Product group id"} error={scopeError || undefined}>
+              {(c) => <Input {...c} className={styles.mono} value={scopeId} onChange={(e) => setScopeId(e.target.value)} invalid={Boolean(scopeError)} />}
+            </FormField>
+          ) : null}
+          <Button type="submit">Apply</Button>
+        </form>
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the rebate agreements" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
@@ -62,7 +101,11 @@ export function RebatesPage() {
           rows={state.data ?? []}
           getRowKey={(row) => row.id}
           loading={state.loading}
-          empty={{ title: "No rebate agreements", description: "Create an agreement to start accruing rebates on posted invoices." }}
+          empty={
+            applied.productId || applied.productGroupId
+              ? { title: "No agreements for that scope", description: "No rebate agreement is limited to exactly this product or product group. Agreements without a product scope are not listed here." }
+              : { title: "No rebate agreements", description: "Create an agreement to start accruing rebates on posted invoices." }
+          }
           onRowOpen={(row) => navigate(`/pricing/rebates/${row.id}`)}
         />
       )}

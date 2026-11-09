@@ -1,31 +1,41 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Alert, Button, Card, ConfirmDialog, FormField, Input } from "../../shell/ui";
+import { Alert, Button, Card, ConfirmDialog, FormField, Input, Select } from "../../shell/ui";
 import { closeRebateAgreement, describeProblem, newKey, PricingApiError, reopenRebateAgreement, reviseRebateAgreement, type Problem, type RebateAgreement } from "./api/client";
-import { DAY } from "./format";
+import { DAY, UUID } from "./format";
 import styles from "./pages.module.css";
 
 /** What a closed or revised agreement tells the planner, by service code. */
 function failureTitle(code: string): string {
   if (code === "PRC-0048") return "That date is before an invoice this agreement already accrued";
   if (code === "PRC-0049") return "Tiers cannot change after invoices have accrued";
+  if (code === "PRC-0071") return "The product scope cannot change after invoices have accrued";
   if (code === "PRC-0031") return "The agreement is closed";
   if (code === "conflict_version") return "The agreement changed since you opened it";
   return "The change failed";
 }
 
 type Kind = "revise" | "close" | "reopen";
+type ScopeKind = "all" | "product" | "group";
+
+function scopeOf(a: Pick<RebateAgreement, "productId" | "productGroupId">): { kind: ScopeKind; id: string } {
+  if (a.productId) return { kind: "product", id: a.productId };
+  if (a.productGroupId) return { kind: "group", id: a.productGroupId };
+  return { kind: "all", id: "" };
+}
 
 /**
- * Revise (name, end date), close an ACTIVE rebate agreement and reopen a CLOSED one (FR-26.11). Tiers cannot change
+ * Revise (name, end date, product scope), close an ACTIVE rebate agreement and reopen a CLOSED one (FR-26.11). Tiers cannot change
  * once invoices have accrued (PRC-0049); the service refuses, and the note says to create a new agreement.
  * Closing cannot be undone, so it is confirmed first.
  */
 export function RebateLifecycleCard({ agreement, onChange }: { agreement: RebateAgreement; onChange: (next: RebateAgreement) => void }) {
   const [name, setName] = useState(agreement.name);
   const [validTo, setValidTo] = useState(agreement.validTo);
+  const [scopeKind, setScopeKind] = useState<ScopeKind>(scopeOf(agreement).kind);
+  const [scopeId, setScopeId] = useState(scopeOf(agreement).id);
   const [closeDate, setCloseDate] = useState(agreement.validTo);
   const [reopenTo, setReopenTo] = useState("");
-  const [errors, setErrors] = useState<{ name?: string; validTo?: string; closeDate?: string; reopenTo?: string }>({});
+  const [errors, setErrors] = useState<{ name?: string; validTo?: string; scope?: string; closeDate?: string; reopenTo?: string }>({});
   const [busy, setBusy] = useState<Kind | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -63,6 +73,11 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
     );
   }
 
+  function scopeChanged(): boolean {
+    const current = scopeOf(agreement);
+    return scopeKind !== current.kind || (scopeKind !== "all" && scopeId.trim() !== current.id);
+  }
+
   function check(kind: Kind): boolean {
     setFailure(null);
     setDone("");
@@ -71,7 +86,10 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
       if (name.trim() === "" || name.length > 120) next.name = "Enter a name of 1 to 120 characters.";
       if (!DAY.test(validTo)) next.validTo = "Enter the end date as YYYY-MM-DD.";
       else if (validTo < agreement.validFrom) next.validTo = "The end date cannot be before the start date.";
-      if (!next.name && !next.validTo && name.trim() === agreement.name && validTo === agreement.validTo) next.name = "Change the name or the end date.";
+      if (scopeKind !== "all" && !UUID.test(scopeId.trim())) next.scope = scopeKind === "product" ? "Enter the product id as a UUID." : "Enter the product group id as a UUID.";
+      if (!next.name && !next.validTo && !next.scope && name.trim() === agreement.name && validTo === agreement.validTo && !scopeChanged()) {
+        next.name = "Change the name, the end date or the product scope.";
+      }
     } else if (kind === "reopen") {
       if (!DAY.test(reopenTo)) next.reopenTo = "Enter the new end date as YYYY-MM-DD.";
       else if (reopenTo <= agreement.validTo) next.reopenTo = `Choose a day after ${agreement.validTo}.`;
@@ -94,7 +112,11 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
           : kind === "revise"
           ? await reviseRebateAgreement(
               agreement.id,
-              { version, name: name.trim() !== agreement.name ? name.trim() : undefined, validTo: validTo !== agreement.validTo ? validTo : undefined },
+              {
+                version,
+                name: name.trim() !== agreement.name ? name.trim() : undefined, validTo: validTo !== agreement.validTo ? validTo : undefined,
+                productScope: scopeChanged() ? (scopeKind === "product" ? { productId: scopeId.trim() } : scopeKind === "group" ? { productGroupId: scopeId.trim() } : {}) : undefined,
+              },
               keys.current.revise,
             )
           : await closeRebateAgreement(agreement.id, version, closeDate, keys.current.close);
@@ -102,6 +124,8 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
       setName(changed.name);
       setValidTo(changed.validTo);
       setCloseDate(changed.validTo);
+      setScopeKind(scopeOf(changed).kind);
+      setScopeId(scopeOf(changed).id);
       if (kind === "reopen") setReopenTo("");
       setDone(
         kind === "revise"
@@ -153,7 +177,23 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
           <FormField id="rb-revise-valid-to" label="Valid to" error={errors.validTo}>
             {(c) => <Input {...c} type="date" value={validTo} onChange={(e) => { setValidTo(e.target.value); keys.current.revise = newKey(); }} invalid={Boolean(errors.validTo)} />}
           </FormField>
-          <p className={`${styles.note} ${styles.wide}`}>The end date cannot move before an invoice already accrued. Tiers cannot change once invoices have accrued: close the agreement and create a new one.</p>
+          <FormField id="rb-revise-scope-kind" label="Products">
+            {(c) => (
+              <Select {...c} value={scopeKind} onChange={(e) => { setScopeKind(e.target.value as ScopeKind); keys.current.revise = newKey(); }}>
+                <option value="all">All products</option>
+                <option value="product">One product</option>
+                <option value="group">One product group</option>
+              </Select>
+            )}
+          </FormField>
+          {scopeKind !== "all" ? (
+            <FormField id="rb-revise-scope-id" label={scopeKind === "product" ? "Product id" : "Product group id"} error={errors.scope}>
+              {(c) => <Input {...c} className={styles.mono} value={scopeId} onChange={(e) => { setScopeId(e.target.value); keys.current.revise = newKey(); }} invalid={Boolean(errors.scope)} />}
+            </FormField>
+          ) : null}
+          <p className={`${styles.note} ${styles.wide}`}>
+            The end date cannot move before an invoice already accrued. Tiers and the product scope cannot change once invoices have accrued: close the agreement and create a new one.
+          </p>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={busy === "revise"}>
               Save changes

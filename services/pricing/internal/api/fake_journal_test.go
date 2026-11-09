@@ -209,7 +209,8 @@ func (f *fakeStore) ListAgreements(_ context.Context, flt store.AgreementFilter)
 	defer f.mu.Unlock()
 	out := []domain.RebateAgreement{}
 	for _, a := range f.agreements {
-		if (flt.LegalEntityID == "" || a.LegalEntityID == flt.LegalEntityID) && (flt.PartyRole == "" || a.PartyRole == flt.PartyRole) {
+		if (flt.LegalEntityID == "" || a.LegalEntityID == flt.LegalEntityID) && (flt.PartyRole == "" || a.PartyRole == flt.PartyRole) &&
+			(flt.ProductID == "" || a.ProductID == flt.ProductID) && (flt.ProductGroupID == "" || a.ProductGroupID == flt.ProductGroupID) {
 			out = append(out, a)
 		}
 	}
