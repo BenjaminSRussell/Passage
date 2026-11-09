@@ -3,6 +3,7 @@ package store_test
 import (
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -24,6 +25,11 @@ const (
 	oracleMaxDepth = 14
 	oracleP95Limit = 20 * time.Millisecond
 )
+
+// envPerfTest turns on the as-of p95 assertion. Without it the oracle still checks every sample
+// against domain.ParentAsOf and logs the timings, but no wall-clock budget is asserted, since
+// `go test ./...` runs packages in parallel against one database.
+const envPerfTest = "PASSAGE_PERF_TEST"
 
 var oraclePurposes = []string{"reporting", "procurement", "expenditure", "security", "centralized_payments"}
 
@@ -153,9 +159,13 @@ func TestPostgres_HierarchyAsOfOracle1k(t *testing.T) {
 		t.Fatalf("%d of %d samples disagree with domain.ParentAsOf", mismatches, oracleSamples)
 	}
 	slices.Sort(latencies)
-	if p95 := latencies[oracleSamples*95/100-1]; p95 >= oracleP95Limit {
+	p95 := latencies[oracleSamples*95/100-1]
+	t.Logf("as-of p95 = %v, max = %v", p95, latencies[oracleSamples-1])
+	if os.Getenv(envPerfTest) == "" {
+		t.Logf("p95 budget %v not asserted; set %s=1 to assert it", oracleP95Limit, envPerfTest)
+		return
+	}
+	if p95 >= oracleP95Limit {
 		t.Fatalf("as-of p95 = %v; want < %v", p95, oracleP95Limit)
-	} else {
-		t.Logf("as-of p95 = %v, max = %v", p95, latencies[oracleSamples-1])
 	}
 }

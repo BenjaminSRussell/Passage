@@ -9,16 +9,19 @@ import (
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 	"github.com/BenjaminSRussell/passage/services/org/migrations"
 )
 
-func (m *memOrg) UpdateLegalEntity(_ context.Context, id string, version int, in store.LegalEntityPatch) (store.LegalEntity, error) {
+func (m *memOrg) UpdateLegalEntity(ctx context.Context, id string, version int, in store.LegalEntityPatch) (store.LegalEntity, error) {
 	for i := range m.entities {
 		if m.entities[i].ID == id && m.entities[i].Version == version {
 			m.creates++
+			p, _ := tenant.FromContext(ctx)
+			m.entityUpdateScopes = append(m.entityUpdateScopes, p.LegalEntityID)
 			m.entities[i].FiscalCalendarID = in.FiscalCalendarID
 			m.entities[i].Version++
 			return m.entities[i], nil
@@ -65,6 +68,20 @@ func TestImportPackage_FiscalCalendarAssignments(t *testing.T) {
 	code, second, _ := importPackage(t, r, "", assignBody)
 	if code != http.StatusOK || second.Created != 0 || second.Unchanged != assignRecords || len(second.Differences) != 0 || mem.creates != creates {
 		t.Fatalf("second import = %d %+v (wrote %d)", code, second, mem.creates-creates)
+	}
+}
+
+// The package import duty (org.package.manage, tenant administrator with no legal-entity claim)
+// is meant to cover filling an unassigned calendar on an existing record, so the legal-entity
+// update runs scoped to that entity, the same as the site update.
+func TestImportPackage_LegalEntityCalendarUpdateIsScopedToThatEntity(t *testing.T) {
+	mem := &memOrg{}
+	r, _ := memRouter(mem)
+	if code, _, raw := importPackage(t, r, "", assignBody); code != http.StatusOK {
+		t.Fatalf("import = %d %v", code, raw)
+	}
+	if len(mem.entityUpdateScopes) != 1 || mem.entityUpdateScopes[0] != mem.entities[0].ID {
+		t.Fatalf("legal entity update scopes = %v, want [%s]", mem.entityUpdateScopes, mem.entities[0].ID)
 	}
 }
 

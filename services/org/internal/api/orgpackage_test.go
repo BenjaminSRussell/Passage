@@ -18,24 +18,25 @@ import (
 // memOrg keeps the records an organization package touches; every other Store method panics.
 type memOrg struct {
 	store.Store
-	n          int
-	creates    int
-	entities   []store.LegalEntity
-	units      []store.OperatingUnit
-	sites      []store.Site
-	warehouses []store.Warehouse
-	locations  []store.Location
-	hier       []store.HierarchyType
-	teamTypes  []store.TeamType
-	teams      []store.Team
-	cals       []store.FiscalCalendar
-	refUnits   []store.Unit
-	refConvs   []store.Conversion
-	rules      []store.CurrencyRounding
-	names      []store.NameTranslation
-	custom     map[string][]store.FiscalPeriod // calendar id/year -> operating periods
-	versions   []memVersion
-	publishes  []publishCall
+	n                  int
+	creates            int
+	entityUpdateScopes []string
+	entities           []store.LegalEntity
+	units              []store.OperatingUnit
+	sites              []store.Site
+	warehouses         []store.Warehouse
+	locations          []store.Location
+	hier               []store.HierarchyType
+	teamTypes          []store.TeamType
+	teams              []store.Team
+	cals               []store.FiscalCalendar
+	refUnits           []store.Unit
+	refConvs           []store.Conversion
+	rules              []store.CurrencyRounding
+	names              []store.NameTranslation
+	custom             map[string][]store.FiscalPeriod // calendar id/year -> operating periods
+	versions           []memVersion
+	publishes          []publishCall
 	// failPublish makes the publish of a version with this effectiveFrom fail once, leaving its draft open.
 	failPublish string
 	// limits stands in for the store's configured tree limits; zero means the defaults.

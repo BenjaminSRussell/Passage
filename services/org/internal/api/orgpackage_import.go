@@ -625,6 +625,9 @@ func (im *importer) teamsOf(pkg OrgPackage) error {
 // without a generated year. A record that already has another calendar is reported under
 // differences and left alone; one with none (a record this import just created, or one an
 // earlier run stopped before assigning) gets the package's calendar, so a re-run finishes.
+// The import duty (org.package.manage, tenant administrator without a legal-entity claim) is
+// intended to cover filling an unassigned calendar on an existing record; both writes run scoped
+// to the record's own legal entity.
 func (im *importer) calendarAssignments(pkg OrgPackage) error {
 	for _, e := range pkg.LegalEntities {
 		if e.FiscalCalendar == "" {
@@ -633,7 +636,7 @@ func (im *importer) calendarAssignments(pkg OrgPackage) error {
 		code := strings.ToUpper(e.Code)
 		rec := im.entities[code]
 		err := im.assign(kindLegalEntity, code, strings.ToUpper(e.FiscalCalendar), rec.calendar, func(calendarID string) error {
-			updated, err := im.st.UpdateLegalEntity(im.ctx, rec.id, rec.version, store.LegalEntityPatch{FiscalCalendarID: &calendarID})
+			updated, err := im.st.UpdateLegalEntity(scopedTo(im.ctx, rec.id), rec.id, rec.version, store.LegalEntityPatch{FiscalCalendarID: &calendarID})
 			if err == nil {
 				rec.version, rec.calendar = updated.Version, calendarID
 				im.entities[code] = rec
