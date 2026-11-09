@@ -255,6 +255,9 @@ type Message struct {
 	SuggestedDate string  `json:"suggestedDate"`
 	DelayDays     int     `json:"delayDays"`
 	Qty           string  `json:"qty"`
+	// ParentAction is, for a derived message (FR-22.7), the action of the parent supply's message it
+	// follows (cancel, decrease, postpone or advance); null for every other action.
+	ParentAction *string `json:"parentAction"`
 	// PlanningPriority and BufferZone are those of the planned order the message is about when that
 	// order replenishes a DDMRP buffer (FR-22.16); null otherwise.
 	PlanningPriority *string `json:"planningPriority"`
@@ -455,9 +458,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		messageIDs := make([]string, len(r.Messages))
 		for i, m := range r.Messages {
 			messageIDs[i] = ids.New()
-			if err := batch.queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id)
-				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, nullif($11, '')::uuid)`,
-				p.TenantID, messageIDs[i], versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID); err != nil {
+			if err := batch.queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id, parent_action)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, nullif($11, '')::uuid, $12)`,
+				p.TenantID, messageIDs[i], versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID, m.ParentAction); err != nil {
 				return err
 			}
 		}
@@ -487,7 +490,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			if err := enqueue(ctx, tx, planevents.MessageRaised, planID, p.TenantID, messageIDs[i], planevents.MessageRaisedData{
 				MessageID: messageIDs[i], PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, SiteID: req.SiteID,
 				Action: m.Action, ItemID: m.ItemID, WarehouseID: optional(m.WarehouseID), SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
-				SuggestedDate: dayDate(req.AsOf, m.SuggestedDate), DelayDays: m.DelayDays, Qty: m.Qty.String(),
+				SuggestedDate: dayDate(req.AsOf, m.SuggestedDate), DelayDays: m.DelayDays, Qty: m.Qty.String(), ParentAction: optional(m.ParentAction),
 			}); err != nil {
 				return err
 			}
@@ -826,7 +829,7 @@ func (s *Postgres) PegsOf(ctx context.Context, versionID, supplyRef string) ([]d
 
 // messageSelect reads messages with the planning priority and zone of the planned order they are about.
 const messageSelect = `select m.id::text, m.action, m.item_id::text, m.warehouse_id::text, m.supply_ref, m.demand_ref, to_char(m.suggested_date, 'YYYY-MM-DD'),
-		m.delay_days, m.qty::text, o.planning_priority::text, o.buffer_zone, m.status, m.version, m.decided_by,
+		m.delay_days, m.qty::text, nullif(m.parent_action, ''), o.planning_priority::text, o.buffer_zone, m.status, m.version, m.decided_by,
 		to_char(m.decided_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), m.decision_note, m.carried_from::text
 	from action_message m join plan_version v on v.tenant_id = m.tenant_id and v.id = m.plan_version_id
 	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
@@ -836,7 +839,7 @@ func scanMessages(rows pgx.Rows) ([]Message, error) {
 	out := []Message{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Action, &m.ItemID, &m.WarehouseID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty,
+		if err := rows.Scan(&m.ID, &m.Action, &m.ItemID, &m.WarehouseID, &m.SupplyRef, &m.DemandRef, &m.SuggestedDate, &m.DelayDays, &m.Qty, &m.ParentAction,
 			&m.PlanningPriority, &m.BufferZone, &m.Status, &m.Version, &m.DecidedBy, &m.DecidedAt, &m.DecisionNote, &m.CarriedFrom); err != nil {
 			return nil, err
 		}

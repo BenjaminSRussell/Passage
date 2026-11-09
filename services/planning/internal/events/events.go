@@ -154,6 +154,9 @@ type MessageRaisedData struct {
 	SuggestedDate string  `json:"suggested_date"`
 	DelayDays     int     `json:"delay_days"`
 	Qty           string  `json:"qty"`
+	// ParentAction is, for a derived message (FR-22.7), the action of the parent supply's message
+	// it follows; null for every other action.
+	ParentAction *string `json:"parent_action"`
 }
 
 // MessageDecidedData is the data member of message.applied.v1 and message.dismissed.v1. The
@@ -175,9 +178,11 @@ type MessageDecidedData struct {
 	SuggestedDate string  `json:"suggested_date"`
 	DelayDays     int     `json:"delay_days"`
 	Qty           string  `json:"qty"`
-	Version       int     `json:"version"`
-	DecidedBy     string  `json:"decided_by"`
-	Note          string  `json:"note"`
+	// ParentAction is that of message.raised.v1.
+	ParentAction *string `json:"parent_action"`
+	Version      int     `json:"version"`
+	DecidedBy    string  `json:"decided_by"`
+	Note         string  `json:"note"`
 }
 
 // PlannedOrderFirmedData is the data member of plannedorder.firmed.v1. The

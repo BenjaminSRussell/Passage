@@ -2,7 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "./api/client";
-import { isApplicable, noteError } from "./MessageDetail";
+import {
+  applyEffectOf,
+  isApplicable,
+  noteError,
+  parentSupplyOf,
+} from "./MessageDetail";
 import planning from "./module";
 import { messageDelay } from "./pages";
 
@@ -74,6 +79,7 @@ describe("message decision rules", () => {
       "cancel",
       "decrease",
       "increase",
+      "derived",
     ] as const)
       expect(isApplicable({ action })).toBe(true);
     for (const action of [
@@ -128,6 +134,45 @@ describe("Action messages list with decisions", () => {
         "No message of this status in the current plan version.",
       ),
     ).toBeTruthy();
+  });
+});
+
+describe("Derived messages (FR-22.7)", () => {
+  const derived: Message = {
+    ...cancel,
+    id: "00000000-0000-0000-0000-00000000f203",
+    action: "derived",
+    parentAction: "decrease",
+    supplyRef: "PO-9",
+    demandRef: "MO-2/10/00000000-0000-0000-0000-0000000000c1",
+    suggestedDate: "2026-12-02",
+    qty: "120",
+  };
+  it("says what applying does by the parent's action", () => {
+    expect(
+      applyEffectOf({ action: "derived", parentAction: "cancel" }),
+    ).toMatch(/reduce .* cancelled/);
+    expect(
+      applyEffectOf({ action: "derived", parentAction: "postpone" }),
+    ).toMatch(/move .* to the suggested date/);
+    expect(
+      applyEffectOf({ action: "derived", parentAction: "advance" }),
+    ).toMatch(/forward to the suggested date/);
+    expect(applyEffectOf({ action: "cancel" })).toBe("cancel the receipt");
+  });
+  it("names the parent supply from the dependent demand, which may hold a slash", () => {
+    expect(parentSupplyOf("MO-2/10/c1")).toBe("MO-2/10");
+    expect(parentSupplyOf("SO-1")).toBe("");
+    expect(parentSupplyOf(null)).toBe("");
+  });
+  it("shows the parent supply and its action and can be applied", async () => {
+    stubApi([`/messages/${derived.id}`, () => json(derived)]);
+    renderAt(`/planning/messages/${derived.id}`);
+    expect(await screen.findByText("MO-2/10 (decrease)")).toBeTruthy();
+    expect(
+      screen.getByText(/reduce the component receipt by the quantity shown/),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply message" })).toBeTruthy();
   });
 });
 
@@ -239,10 +284,14 @@ describe("Message detail page", () => {
     renderAt(`/planning/messages/${ID}`);
     expect(await screen.findByText("This message was applied")).toBeTruthy();
     expect(
-      screen.getByText(/sent to the owner of PO-2; the order is changed there, not in planning/),
+      screen.getByText(
+        /sent to the owner of PO-2; the order is changed there, not in planning/,
+      ),
     ).toBeTruthy();
     expect(screen.getByText(/Decided on an earlier plan version/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Dismiss message" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Dismiss message" }),
+    ).toBeNull();
   });
 
   it("offers a reload after a stale version and shows the new state", async () => {

@@ -225,16 +225,20 @@ components:
         site_id: {type: string, format: uuid}
         action:
           type: string
-          enum: [delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]
-          description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity). lot-split is PLAN-0005, a requirement split over its maximum order quantity (supply_ref its first order, delay_days the number of orders, qty the maximum order quantity). bom-cycle is PLAN-0004, a component line that closes a BOM cycle and was not exploded (item_id the parent, demand_ref the component, qty the line quantity per unit). no-quota-source is PLAN-0009, a planned order no source of the quota arrangement valid on its delivery day could take; the order stays without a source (supply_ref the order, demand_ref the arrangement id, suggested_date its delivery date, qty its quantity)'
-          x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224, lot-split: PSG-2232, bom-cycle: PSG-2233, no-quota-source: PSG-2233}
+          enum: [delay, postpone, advance, shortage, cancel, decrease, increase, derived, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]
+          description: 'Values are added within v1 only (PRD appendix: additive evolution); a consumer must ignore an action it does not know. no-vendor is PLAN-0008, a planned purchase of the item with no vendor (supply_ref its earliest such order, qty the item''s vendorless quantity). lot-split is PLAN-0005, a requirement split over its maximum order quantity (supply_ref its first order, delay_days the number of orders, qty the maximum order quantity). derived is the Derived action of FR-22.7: an existing component receipt (supply_ref) pegged to the dependent demand "<parent supply>/<component>" (demand_ref) of a parent supply that got a cancel, decrease, postpone or advance message follows it; parent_action names that action (see parent_action). bom-cycle is PLAN-0004, a component line that closes a BOM cycle and was not exploded (item_id the parent, demand_ref the component, qty the line quantity per unit). no-quota-source is PLAN-0009, a planned order no source of the quota arrangement valid on its delivery day could take; the order stays without a source (supply_ref the order, demand_ref the arrangement id, suggested_date its delivery date, qty its quantity)'
+          x-passage-added-in: {red-zone: PSG-2220, sales-on-top: PSG-2223, no-vendor: PSG-2224, lot-split: PSG-2232, bom-cycle: PSG-2233, no-quota-source: PSG-2233, derived: PSG-2234}
         item_id: {type: string, format: uuid}
         warehouse_id: {type: [string, 'null'], format: uuid, description: 'The warehouse planning scope the message is about (FR-22.18, added in PSG-2227); null for the site scope. A consumer that ignores it reads a warehouse message as a site one'}
         supply_ref: {type: string, description: 'Planned order number or receipt ref as the run was sent it; for an open purchase order that is the PO number, unchanged, so procurement matches it to the order (a carried-forward firmed order is FP:<planned order id>); empty for a shortage'}
         demand_ref: {type: string, description: 'Demand the message is about (sales line, forecast, bom line); empty when none. bom-cycle: the component of the skipped line; no-quota-source: the quota arrangement id'}
         suggested_date: {type: string, format: date}
-        delay_days: {type: integer, description: Days of delay; for lot-split the number of planned orders the requirement was split into, not a delay}
+        delay_days: {type: integer, description: 'Days of delay; for lot-split the number of planned orders the requirement was split into, not a delay; for derived the days the component receipt moves (0 for a parent cancel or decrease)'}
         qty: {type: string, description: Decimal string in the inventory unit}
+        parent_action:
+          type: [string, 'null']
+          enum: [cancel, decrease, postpone, advance, null]
+          description: 'derived only (added in PSG-2234; null for every other action): the action of the parent supply''s message the component receipt follows, and so what applying asks of the receipt. cancel or decrease: reduce it by qty (the quantity pegged to the dependent demand, or the parent''s decreased share of it, rounded half away from zero to 6 decimals), suggested_date is the receipt''s own date. postpone or advance: move qty of it to suggested_date. A parent with both a decrease and a move raises one derived message for each'
     MessageDecidedData:
       type: object
       description: Data of message.applied.v1 and message.dismissed.v1; the message fields are those of message.raised.v1
@@ -248,8 +252,8 @@ components:
         legal_entity_id: {type: [string, 'null'], format: uuid, description: Legal entity of the plan; null for a plan with none}
         action:
           type: string
-          enum: [postpone, advance, cancel, decrease, increase, delay, shortage, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]
-          description: 'Only postpone, advance, cancel, decrease and increase can be applied; every action can be dismissed. A consumer must ignore an action it does not know'
+          enum: [postpone, advance, cancel, decrease, increase, derived, delay, shortage, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split, bom-cycle]
+          description: 'Only postpone, advance, cancel, decrease, increase and derived can be applied; every action can be dismissed. A consumer must ignore an action it does not know. An applied derived message asks the owner of supply_ref to do what parent_action says'
         item_id: {type: string, format: uuid}
         warehouse_id: {type: [string, 'null'], format: uuid, description: The warehouse planning scope the message is about; null for the site scope}
         supply_ref: {type: string, description: Number or ref of the supply the message is about; empty for a shortage}
@@ -257,6 +261,7 @@ components:
         suggested_date: {type: string, format: date}
         delay_days: {type: integer}
         qty: {type: string, description: Decimal string in the inventory unit}
+        parent_action: {type: [string, 'null'], enum: [cancel, decrease, postpone, advance, null], description: 'As in message.raised.v1: for derived the parent supply''s action, null for every other action'}
         version: {type: integer, description: The message's ETag after the decision}
         decided_by: {type: string, description: User who decided}
         note: {type: string, description: The planner's reason; empty when none}

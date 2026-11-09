@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 33)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 34)
 
 Every ticket deliverable and acceptance criterion that slices 1 to 18 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
@@ -257,6 +257,31 @@ per-run scope limit after discovery, and the precise contract above. No migratio
 `TestRun_WarehouseScopeDiscoveredWithoutDemandPlansNothing`, `TestRun_WarehouseScopesFromCoverageOverTheLimitIs400`, store
 `TestRunWarehouseCoverages`, `TestRunPlan_FirmingFenceOfAPlanWithoutLegalEntity` (JSON null, no extension), `pages.test.tsx`.
 
+Slice 34 adds the Derived action message (FR-22.7): after a run, each existing receipt of a component (inside its action fence)
+that is pegged to the dependent demand `<parent supply ref>/<component>` of a parent receipt with a cancel, decrease, postpone or
+advance message gets a `derived` message. That naming is how the engine already names the dependent demand of its own planned
+orders and of carried firmed transfers (`FP:<order id>/<item>`); the run takes open orders as a snapshot, so a caller that sends
+an open production order as a receipt must name its component demand the same way for the link to exist (handoff below). The parent
+ref is everything before the last `/`, so a ref that itself holds a `/` works; when receipts of two items share the parent ref, the
+item whose BOM lists the component is the parent, and an ambiguous link raises nothing. Migration `0031` admits the action and adds
+`parent_action` (cancel, decrease, postpone or advance; empty and refused for every other action by a CHECK), so the message says
+what to do: `supply_ref` the component receipt, `demand_ref` the dependent demand naming the parent, and by `parent_action`:
+cancel, reduce the receipt by `qty`, the quantity pegged to that demand; decrease, reduce it by the parent's decreased share of that
+quantity (pegged x removed / parent quantity, rounded half away from zero to 6 decimals, none when that is 0), `suggested_date`
+the receipt's own date and `delay_days` 0 for both; postpone, move `qty` (the pegged quantity) later by the parent's shift but not
+past the moved demand date less the component's receipt margin; advance, move it to the moved demand date less the receipt margin,
+only when the receipt would otherwise be late (`delay_days` the days it moves). A parent with both a decrease and a move raises one
+derived message for each; several parents pegged to one component receipt raise one message each (each names its own dependent
+demand, so nothing is counted twice). A component supply that is a planned order of the run gets none (it is replanned), and a
+derived message is not passed further down. It is applied or dismissed like the other messages about existing supply
+(`MessageActionable`; applying changes no order in planning, it publishes `message.applied.v1` with `parent_action` for the
+owning context), carried across runs with `parent_action` in the message identity, filterable (`action=derived`) and shown on
+the web message detail with its parent supply and action. No catalog code (the PRD has none). Tests: `TestRun_DerivedFollowsTheParentMessage`,
+`TestRun_DerivedOneMessagePerParentAction`, `TestRun_DerivedDecreaseShareIsRounded`, `TestRun_DerivedPerParentOnASharedComponentReceipt`,
+`TestRun_DerivedParentByBOMWhenRefsCollide`, `TestRun_DerivedNeedsAParentMessageAndAnExistingReceipt`,
+`TestRun_DerivedAdvanceOnlyWhenTheComponentWouldBeLate`, store `TestRunPlan_StoresDerivedMessage` (parent action stored, on both
+events, carried, CHECK), `messagedecision.test.tsx`. No new duty, route or table, so no authz seed.
+
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -289,7 +314,7 @@ not edit that code).
 | 3 | Approved orders "become firmed on next run" (FR-22.11), and firmed orders as supply of the next run (FR-22.1) | partly built | Firmed orders as supply: built opt-in (slice 14, `carryForward`; `TestRun_CarryForwardCountsFirmedOrdersAsSupply`, `TestFirmedSupply`). It is off by default because a caller that already sends the target orders as `receipts` would count them twice; an order whose delivery date has passed is taken as received (part of on-hand). Built in slice 16: approved orders become firmed (batch and event, grouped `vendor-date`) by the next operational run and, with `carryForward`, are supply of that same run (`store/approved_firm.go`, `TestRunPlan_FirmsApprovedOrders`). Gaps: the legal-entity grouping parameter is still not persisted (default `vendor-date`); a run without `carryForward` plans the demand of an order it just firmed again; an approved order deleted or edited while a run is computing was counted as supply at its snapshot quantity but is then not firmed (deleted) or firmed at its new quantity (edited). Not built: carrying edited or unprocessed orders of the previous version forward; matching a carried order to the target order once it reaches the snapshot (handoff PSG-17, PSG-21: the target order must name the planned order id), and knowing whether a target order was delivered (an order whose delivery date has passed is dropped rather than read from the target order). The firmed orders are read before the run's transaction, so an order firmed while a run is computing is first carried by the following run. |
 | 3 | Vendor check against w17 vendors on PATCH | handoff (PSG-17) | `vendorId` is checked as a UUID and only on purchase orders; whether the vendor exists is not checked. |
 | 3 | Order grouping on firm (vendor, vendor-date, vendor-week) | built | `domain.GroupForFirming`: planned purchases of one site and vendor merge per grouping (weeks run Monday to Sunday); production and transfer orders never merge. AC-22.8 is `TestGroupForFirming_AC228` and the store test `TestFirmPlannedOrders`. The legal-entity default is the request default `vendor-date`; the parameter itself is not persisted (setup, see "Coverage groups API"). |
-| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence, and (slice 6) Increase: a shortage inside the freeze fence, where no planned order may be created, raises Increase on the latest existing receipt dated on or before it inside the action fence (`domain/increase_test.go`, with a property that increases never exceed the reported shortages; stored and filtered in `TestRunPlan_StoresIncrease`). Outside the freeze fence a shortfall still becomes a new planned order rather than an Increase of existing supply, and a receipt after the shortage gets no combined Advance-and-Increase. Not built: Derived (a parent's message passed to its components). Slice 30 adds the planner's decision on a message (see the slice 30 handoffs): apply or dismiss with `message.applied.v1` or `message.dismissed.v1`; applying changes no order inside planning because the existing supply belongs to purchasing and production. |
+| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence, and (slice 6) Increase: a shortage inside the freeze fence, where no planned order may be created, raises Increase on the latest existing receipt dated on or before it inside the action fence (`domain/increase_test.go`, with a property that increases never exceed the reported shortages; stored and filtered in `TestRunPlan_StoresIncrease`). Outside the freeze fence a shortfall still becomes a new planned order rather than an Increase of existing supply, and a receipt after the shortage gets no combined Advance-and-Increase. Slice 34 built Derived (see the slice 34 note and handoffs above); the run's caller must name an open production order's component demand `<parent supply ref>/<component>` for it to be linked. Not built: Derived of a derived message (more than one level down). Slice 30 adds the planner's decision on a message (see the slice 30 handoffs): apply or dismiss with `message.applied.v1` or `message.dismissed.v1`; applying changes no order inside planning because the existing supply belongs to purchasing and production. |
 | 3 | Kanban planned-order type (FR-22.3) | later slice of PSG-22 | Order types purchase, production and transfer are planned; kanban needs wave 24 kanban rules. |
 | 3 | Planned transfer demand at the from-warehouse (BR-22.7) | built | A transfer order of a warehouse scope creates demand for the item at the site on its order date (delivery date less the transfer lead time), pegged as a `bom-line` and delaying the transfer when the site is late (`domain.ExpandWarehouses`; `TestWarehouseScopeTransfer_AC2216`, `TestWarehouseSiteDemandAddsToTransfer`). The from-warehouse is the site's inventory; a different from-warehouse per transfer needs w16 warehouse topology (handoff PSG-16). |
 | 3 | Message catalog codes on messages (PLAN-0006, PLAN-0007, PLAN-0008, PLAN-0010 to PLAN-0015) | partly built | Slice 24: `GET /messages` carries `code` and `text` for postpone (PLAN-0006), delay (PLAN-0007), no-vendor (PLAN-0008), red-zone (PLAN-0010) and sales-on-top (PLAN-0015). Slice 32 adds PLAN-0005 (`lot-split`, see the slice 32 note below). Not built: the catalog lines of the actions with none in the PRD (advance, shortage, cancel, decrease, increase), PLAN-0004 BOM cycle (built in slice 33, see the slice 33 note below), PLAN-0009 (built in slice 33 as `no-quota-source`, see the slice 33 note below), PLAN-0011, PLAN-0013 and PLAN-0014 (their causes are not raised yet), item names in the text and translation. Earlier note: messages carry an action (`delay`, `postpone`, `advance`, `shortage`, `cancel`, `decrease`, `increase`, since slice 20 `red-zone` for PLAN-0010 and since slice 23 `sales-on-top` for PLAN-0015), not a catalog code; the user texts of 4.22.18 are not rendered yet. |
@@ -400,7 +425,7 @@ dismissed or all) and every message carries its `id`, `status` and `version`; `G
 `POST /messages/{id}:dismiss` (duty `planning.order.maintain`, If-Match, optional Idempotency-Key, optional `note` up to 500 characters). Rules:
 404 `PLAN-MESSAGE-NOT-FOUND`; 409 `PLAN-MESSAGE-DECIDED` for a message decided before (a retry with the same Idempotency-Key and decision replays it
 with 200 and `Idempotent-Replayed`); 409 `PLAN-MESSAGE-STALE` when its plan version is no longer current; 412 for a stale If-Match; 422
-`PLAN-MESSAGE-NOT-ACTIONABLE` when applying delay, shortage, red-zone, sales-on-top or no-vendor (they can only be dismissed). The event is written in the deciding
+`PLAN-MESSAGE-NOT-ACTIONABLE` when applying delay, shortage, red-zone, sales-on-top or no-vendor (they can only be dismissed; derived, slice 34, can be applied). The event is written in the deciding
 transaction. Decisions across runs (review fix): every run writes new message rows under a new version, so the run now carries each
 applied or dismissed decision of the version it replaces onto the identical message of the new version (same item, scope, action, supply,
 demand, suggested date, quantity and delay; `carried_from` names the message the planner decided, `carriedFrom` in the API) and raises no
@@ -577,3 +602,14 @@ quota in simulation runs (so a simulation raises no PLAN-0009). Tests: domain `T
 - **authz seed (main session)**: none. No new duty, route row, service grant or service principal.
 - **PSG-9 BOM**: the planning run now tolerates a cyclic BOM; the owner of the BOM should still reject cycles on save.
 - **Event consumers** of `message.raised.v1` and `message.dismissed.v1`: ignore the new actions `bom-cycle` and `no-quota-source` (an unknown action must already be ignored).
+
+## Slice 34 handoffs
+
+- **PSG-21 manufacturing / snapshot builder (producer of the run input)**: when an open production order is sent as a receipt
+  (`ref` its number), send each of its open component lines as a `bom-line` demand of the component named
+  `<that receipt ref>/<component item id>`; otherwise its components get no derived message. Nothing in the repository builds
+  that snapshot yet.
+- **PSG-17 procurement / PSG-21 manufacturing (consumers)**: in addition to the slice 30 contract, an applied `derived` message asks
+  the owner of `supply_ref` to do what `parent_action` says: cancel or decrease, lower the receipt by `qty`; postpone or advance, move
+  `qty` of it to `suggested_date` (the whole receipt when `qty` is its quantity, otherwise a split).
+- **authz seed (main session)**: none. No new duty, route row, service grant or service principal.

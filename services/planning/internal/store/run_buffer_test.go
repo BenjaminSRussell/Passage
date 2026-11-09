@@ -434,3 +434,64 @@ func TestRunPlan_StoresNoQuotaSourceMessageWithCatalogText(t *testing.T) {
 		t.Fatalf("apply a no-quota-source message: %v; want %s", err, store.CodeMessageNotActionable)
 	}
 }
+
+// TestRunPlan_StoresDerivedMessage: migration 0031 admits the derived action and its parent_action
+// (FR-22.7). A component receipt that serves a cancelled parent receipt is stored with its dependent
+// demand naming the parent and the parent's action, raised and applied with parent_action on the
+// event, and a later identical run carries the decision. A derived row without a parent action, or
+// another action with one, is refused by the table.
+func TestRunPlan_StoresDerivedMessage(t *testing.T) {
+	st, admin, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "planning.run", "planning.read", "planning.order.maintain")
+	p, c := ids.New(), ids.New()
+	res, err := domain.Run(0, []domain.Item{
+		{ID: p, Coverage: domain.CoverageRequirement, OrderType: domain.OrderProduction, CoverageDays: 5,
+			Components: []domain.BOMLine{{ItemID: c, Qty: decimal.NewFromInt(2)}},
+			Receipts:   []domain.Requirement{{Ref: "MO-1", RefType: "production-order", Date: 10, Qty: decimal.NewFromInt(100)}}},
+		{ID: c, Coverage: domain.CoverageRequirement, OrderType: domain.OrderPurchase,
+			Demand:   []domain.Requirement{{Ref: "MO-1/" + c, RefType: domain.RefBOM, Date: 10, Qty: decimal.NewFromInt(200), Priority: domain.PriorityDependent}},
+			Receipts: []domain.Requirement{{Ref: "PO-9", RefType: "purchase-line", Date: 1, Qty: decimal.NewFromInt(200)}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-derived", "in-derived")); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(ctx, "MAIN", domain.ActionDerived, "", "", 10)
+	if err != nil || len(msgs) != 1 || msgs[0].ItemID != c || msgs[0].SupplyRef != "PO-9" || msgs[0].DemandRef != "MO-1/"+c ||
+		msgs[0].ParentAction == nil || *msgs[0].ParentAction != domain.ActionCancel || msgs[0].Qty != "200.000000" {
+		t.Fatalf("derived messages = %+v, %v", msgs, err)
+	}
+	others, err := st.ListMessages(ctx, "MAIN", domain.ActionCancel, "", "", 10)
+	if err != nil || len(others) != 1 || others[0].ParentAction != nil {
+		t.Fatalf("cancel messages = %+v, %v; want one without a parent action", others, err)
+	}
+	var raised string
+	if err := admin.QueryRow(context.Background(), `select payload->'data'->>'parent_action' from outbox where type = $1 and payload->'data'->>'action' = 'derived'`,
+		planevents.MessageRaised).Scan(&raised); err != nil || raised != domain.ActionCancel {
+		t.Fatalf("message.raised.v1 parent_action of the derived message = %q, %v", raised, err)
+	}
+	if _, _, err := st.DecideMessage(ctx, msgs[0].ID, msgs[0].Version, store.MessageDecision{Apply: true}); err != nil {
+		t.Fatalf("apply a derived message: %v", err)
+	}
+	var applied, supply string
+	if err := admin.QueryRow(context.Background(), `select payload->'data'->>'parent_action', payload->'data'->>'supply_ref' from outbox where type = $1`,
+		planevents.MessageApplied).Scan(&applied, &supply); err != nil || applied != domain.ActionCancel || supply != "PO-9" {
+		t.Fatalf("message.applied.v1 parent_action %q supply_ref %q, %v", applied, supply, err)
+	}
+	// The same run again raises the same derived message: the decision is carried, not reopened.
+	if _, _, err := st.RunPlan(ctx, runRequest(res, "run-derived-2", "in-derived-2")); err != nil {
+		t.Fatal(err)
+	}
+	again, err := st.ListMessages(ctx, "MAIN", domain.ActionDerived, store.StatusAll, "", 10)
+	if err != nil || len(again) != 1 || again[0].Status != domain.MessageApplied || again[0].CarriedFrom == nil {
+		t.Fatalf("derived after a second run = %+v, %v; want the applied decision carried", again, err)
+	}
+	for _, bad := range []struct{ action, parent string }{{"derived", ""}, {"derived", "increase"}, {"cancel", "cancel"}} {
+		_, err := admin.Exec(context.Background(), `update action_message set action = $1, parent_action = $2 where id = $3`, bad.action, bad.parent, again[0].ID)
+		if err == nil {
+			t.Fatalf("action %q with parent_action %q was stored; want the check to refuse it", bad.action, bad.parent)
+		}
+	}
+}

@@ -59,6 +59,31 @@ const applyEffect: Record<string, string> = {
   increase: "increase the receipt by the quantity shown",
 };
 
+/** What applying a derived message asks, by the action of the parent supply it follows (FR-22.7). */
+const derivedEffect: Record<string, string> = {
+  cancel:
+    "reduce the component receipt by the quantity shown, as the parent supply it serves is cancelled",
+  decrease:
+    "reduce the component receipt by the quantity shown, as the parent supply it serves is decreased",
+  postpone:
+    "move the quantity shown of the component receipt to the suggested date, as the parent supply it serves is postponed",
+  advance:
+    "bring the quantity shown of the component receipt forward to the suggested date, as the parent supply it serves is advanced",
+};
+
+/** What applying a message asks of the order named by its supply reference. */
+export const applyEffectOf = (m: Pick<Message, "action" | "parentAction">) =>
+  m.action === "derived"
+    ? (m.parentAction && derivedEffect[m.parentAction]) ||
+      "change the component receipt as its parent supply changes"
+    : applyEffect[m.action];
+
+/** The parent supply a derived message's dependent demand "<parent supply>/<component>" names. */
+export const parentSupplyOf = (demandRef: string | null | undefined) => {
+  const i = demandRef ? demandRef.lastIndexOf("/") : -1;
+  return i > 0 ? demandRef!.slice(0, i) : "";
+};
+
 /** Checks the planner's note before it is sent; returns the error or null. */
 export const noteError = (note: string) =>
   note.trim().length > MAX_NOTE
@@ -172,7 +197,7 @@ function DecisionCard({
         </Alert>
         <p>
           {applicable
-            ? `Applying asks the owner of ${message.supplyRef || "the supply"} to ${applyEffect[message.action]}; the order is changed there, not in planning. Dismiss it when no change is needed. Either decision stays with the message while later runs raise it unchanged.`
+            ? `Applying asks the owner of ${message.supplyRef || "the supply"} to ${applyEffectOf(message)}; the order is changed there, not in planning. Dismiss it when no change is needed. Either decision stays with the message while later runs raise it unchanged.`
             : `A ${sentence(message.action).toLowerCase()} message changes no source order, so it can only be dismissed once you have dealt with it.`}
         </p>
         <FormField
@@ -278,6 +303,15 @@ export function MessageDetailPage() {
               ["Scope", scopeLabel(m)],
               ["Supply", m.supplyRef || dash, true],
               ["Demand", m.demandRef || dash, true],
+              ...(m.action === "derived"
+                ? [
+                    [
+                      "Parent supply",
+                      `${parentSupplyOf(m.demandRef) || dash} (${m.parentAction ? sentence(m.parentAction).toLowerCase() : "changed"})`,
+                      true,
+                    ] as [string, string, boolean],
+                  ]
+                : []),
               ["Suggested date", m.suggestedDate || dash],
               ["Delay", messageDelay(m) > 0 ? `${messageDelay(m)} days` : dash],
               ["Quantity", m.qty],

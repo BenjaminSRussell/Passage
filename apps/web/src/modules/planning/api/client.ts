@@ -5,7 +5,7 @@ export const PLANNING_API = "/api/v1/planning";
 
 export const OrderType = z.enum(["purchase", "production", "transfer"]);
 export const OrderStatus = z.enum(["unprocessed", "approved", "firmed", "deleted"]);
-export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "no-quota-source", "lot-split", "bom-cycle"]);
+export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "derived", "red-zone", "sales-on-top", "no-vendor", "no-quota-source", "lot-split", "bom-cycle"]);
 export const TargetType = z.enum(["purchase-order", "production-order", "transfer-order"]);
 export const BufferZone = z.enum(["red", "yellow", "green"]);
 export type BufferZone = z.infer<typeof BufferZone>;
@@ -48,7 +48,7 @@ export const MessageStatus = z.enum(["open", "applied", "dismissed"]);
 export type MessageStatus = z.infer<typeof MessageStatus>;
 
 /** Only messages about existing supply change a source order when applied; the others can only be dismissed. */
-export const APPLICABLE_ACTIONS: readonly z.infer<typeof MessageAction>[] = ["postpone", "advance", "cancel", "decrease", "increase"];
+export const APPLICABLE_ACTIONS: readonly z.infer<typeof MessageAction>[] = ["postpone", "advance", "cancel", "decrease", "increase", "derived"];
 
 export const Message = z.object({
   id: z.string(),
@@ -69,6 +69,8 @@ export const Message = z.object({
   suggestedDate: z.string().nullish(),
   delayDays: z.number().int(),
   qty: z.string(),
+  /** derived (FR-22.7): the action of the parent supply's message the component receipt follows; null for the other actions. */
+  parentAction: z.enum(["cancel", "decrease", "postpone", "advance"]).nullish(),
   /** Message catalog entry of the action (PRD 4.22.18); absent for an action without one. */
   code: z.string().nullish(),
   text: z.string().nullish(),

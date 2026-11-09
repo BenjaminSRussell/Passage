@@ -137,9 +137,9 @@ func (s *Postgres) RunSimulation(ctx context.Context, req SimulationRequest) (Ve
 				p.TenantID, ids.New(), versionID, pg.ItemID, pg.SupplyRef, pg.DemandRef, pg.DemandRefType, dayDate(req.AsOf, pg.DemandDate), pg.Qty.String(), pg.WarehouseID)
 		}
 		for _, m := range r.Messages {
-			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id)
-				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, nullif($11, '')::uuid)`,
-				p.TenantID, ids.New(), versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID)
+			batch.Queue(`insert into action_message (tenant_id, id, plan_version_id, item_id, action, supply_ref, demand_ref, suggested_date, delay_days, qty, warehouse_id, parent_action)
+				values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, nullif($11, '')::uuid, $12)`,
+				p.TenantID, ids.New(), versionID, m.ItemID, m.Action, m.SupplyRef, m.DemandRef, dayDate(req.AsOf, m.SuggestedDate), m.DelayDays, m.Qty.String(), m.WarehouseID, m.ParentAction)
 		}
 		for _, n := range r.Net {
 			batch.Queue(`insert into net_requirement (tenant_id, id, plan_version_id, item_id, day, gross_requirements, scheduled_receipts, planned_receipts, pab, net_requirement, warehouse_id)

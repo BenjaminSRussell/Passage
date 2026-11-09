@@ -49,7 +49,7 @@ export const scopeLabel = (x: { warehouseId?: string | null }) => (x.warehouseId
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
 const MESSAGE_STATUS_FILTERS = ["open", "applied", "dismissed", "all"] as const;
-export const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "red-zone", "sales-on-top", "no-vendor", "no-quota-source", "lot-split", "bom-cycle"] as const;
+export const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease", "increase", "derived", "red-zone", "sales-on-top", "no-vendor", "no-quota-source", "lot-split", "bom-cycle"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -65,6 +65,7 @@ export const actionTone: Record<Message["action"], BadgeTone> = {
   cancel: "warning",
   decrease: "warning",
   increase: "warning",
+  derived: "info",
   "red-zone": "danger",
   "sales-on-top": "info",
   "no-vendor": "warning",

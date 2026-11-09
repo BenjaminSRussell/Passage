@@ -14,7 +14,7 @@ const (
 // planning decision, so they can only be dismissed.
 func MessageActionable(action string) bool {
 	switch action {
-	case ActionPostpone, ActionAdvance, ActionCancel, ActionDecrease, ActionIncrease:
+	case ActionPostpone, ActionAdvance, ActionCancel, ActionDecrease, ActionIncrease, ActionDerived:
 		return true
 	}
 	return false

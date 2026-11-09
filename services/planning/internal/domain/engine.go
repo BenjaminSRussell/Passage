@@ -42,6 +42,16 @@ const (
 	ActionCancel   = "cancel"
 	ActionDecrease = "decrease"
 	ActionIncrease = "increase"
+	// ActionDerived is the Derived action of FR-22.7: an existing receipt of a
+	// component that serves a parent supply which got a cancel, decrease,
+	// postpone or advance message follows that message. ParentAction names the
+	// parent's action and so what to do with the component receipt (SupplyRef);
+	// DemandRef is the dependent demand "<parent supply>/<component>" that names
+	// the parent. cancel or decrease: reduce the receipt by Qty (the quantity
+	// pegged to that demand, or the parent's decreased share of it), SuggestedDate
+	// is the receipt's date and DelayDays 0. postpone or advance: move Qty of the
+	// receipt to SuggestedDate, DelayDays days later or earlier.
+	ActionDerived = "derived"
 	// ActionRedZone is the PLAN-0010 message: a DDMRP buffer is in its red zone (FR-22.16).
 	ActionRedZone = "red-zone"
 	// ActionSalesOnTop is the PLAN-0015 information message: a sales line under
@@ -178,6 +188,9 @@ type Message struct {
 	Qty                                  decimal.Decimal
 	// WarehouseID is the warehouse scope of ItemID, empty for the site scope.
 	WarehouseID string
+	// ParentAction is, for a Derived message, the action of the parent supply's
+	// message it follows (cancel, decrease, postpone or advance); empty otherwise.
+	ParentAction string
 }
 
 // Result is the output of one run.
@@ -206,6 +219,22 @@ type runState struct {
 	index map[string]*Item
 	res   Result
 	seq   int
+	// parentChanges maps an existing receipt ref to the cancel, decrease,
+	// postpone and advance messages raised for it; deriveMessages passes them on
+	// to the component receipts pegged to that receipt's dependent demand
+	// (FR-22.7). receiptDates holds the date of every existing receipt by
+	// item and ref.
+	parentChanges map[string][]parentChange
+	receiptDates  map[string]int
+}
+
+// parentChange is the message raised for an existing receipt of ItemID: a
+// cancel or decrease of Removed out of Qty, or a postpone or advance of Shift
+// days (negative: earlier).
+type parentChange struct {
+	ItemID, Action string
+	Shift          int
+	Removed, Qty   decimal.Decimal
 }
 
 type ledger struct {
@@ -284,6 +313,7 @@ func RunWithCalendar(today int, cal *Calendar, in []Item) (Result, error) {
 		}
 	}
 	rs.propagateFutures(order)
+	rs.deriveMessages()
 	sort.Slice(rs.res.Orders, func(a, b int) bool { return rs.res.Orders[a].Number < rs.res.Orders[b].Number })
 	sort.Slice(rs.res.Pegging, func(a, b int) bool { return pegLess(rs.res.Pegging[a], rs.res.Pegging[b]) })
 	sort.Slice(rs.res.Messages, func(a, b int) bool { return msgLess(rs.res.Messages[a], rs.res.Messages[b]) })
@@ -791,6 +821,7 @@ func (L *ledger) finish(receipts []Requirement) {
 		}
 	}
 	for _, r := range receipts {
+		L.rs.noteReceipt(it, r)
 		earliest, earliestRef, found := 0, "", false
 		pegged := decimal.Zero
 		for _, p := range L.pegs {
@@ -812,8 +843,10 @@ func (L *ledger) finish(receipts []Requirement) {
 		if surplus := r.Qty.Sub(pegged); surplus.IsPositive() && beyondFence(L.rs.today, r.Date, it.CoverageDays) {
 			if found {
 				L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionDecrease, ItemID: it.ID, SupplyRef: r.Ref, DemandRef: earliestRef, SuggestedDate: r.Date, Qty: surplus})
+				L.rs.noteChange(r.Ref, parentChange{ItemID: it.ID, Action: ActionDecrease, Removed: surplus, Qty: r.Qty})
 			} else {
 				L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionCancel, ItemID: it.ID, SupplyRef: r.Ref, SuggestedDate: r.Date, Qty: surplus})
+				L.rs.noteChange(r.Ref, parentChange{ItemID: it.ID, Action: ActionCancel, Removed: surplus, Qty: r.Qty})
 			}
 		}
 		if !found {
@@ -822,10 +855,12 @@ func (L *ledger) finish(receipts []Requirement) {
 		suggested := L.rs.back(earliest, it.MarginDays)
 		if it.PositiveDays > 0 && earliest-r.Date > it.PositiveDays {
 			L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionPostpone, ItemID: it.ID, SupplyRef: r.Ref, DemandRef: earliestRef, SuggestedDate: suggested, Qty: r.Qty})
+			L.rs.noteChange(r.Ref, parentChange{ItemID: it.ID, Action: ActionPostpone, Shift: suggested - r.Date})
 		} else if r.Date > earliest {
 			// The receipt was waited for (negative days) and arrives after the
 			// demand it covers: suggest bringing it forward to the demand date.
 			L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionAdvance, ItemID: it.ID, SupplyRef: r.Ref, DemandRef: earliestRef, SuggestedDate: suggested, DelayDays: r.Date - earliest, Qty: r.Qty})
+			L.rs.noteChange(r.Ref, parentChange{ItemID: it.ID, Action: ActionAdvance, Shift: suggested - r.Date})
 		}
 	}
 }
@@ -1114,6 +1149,9 @@ func msgLess(a, b Message) bool {
 	if a.DelayDays != b.DelayDays {
 		return a.DelayDays < b.DelayDays
 	}
+	if a.ParentAction != b.ParentAction {
+		return a.ParentAction < b.ParentAction
+	}
 	return a.Qty.LessThan(b.Qty)
 }
 
@@ -1150,6 +1188,10 @@ func hashResult(r Result) string {
 	}
 	for _, m := range r.Messages {
 		fmt.Fprintf(h, "M|%s|%s|%s|%s|%d|%d|%s\n", m.Action, m.ItemID, m.SupplyRef, m.DemandRef, m.SuggestedDate, m.DelayDays, m.Qty)
+		if m.ParentAction != "" {
+			// Only Derived messages add a line, so the hashes of other runs are unchanged.
+			fmt.Fprintf(h, "D|%s\n", m.ParentAction)
+		}
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
@@ -1267,4 +1309,142 @@ func breakBOMCycles(today int, items []Item, index map[string]*Item) (map[string
 	}
 	llc, err := lowLevelCodes(items, index)
 	return llc, msgs, err
+}
+
+// noteChange records a cancel, decrease, postpone or advance message raised
+// for the existing receipt ref, for deriveMessages.
+func (rs *runState) noteChange(ref string, c parentChange) {
+	if rs.parentChanges == nil {
+		rs.parentChanges = map[string][]parentChange{}
+	}
+	rs.parentChanges[ref] = append(rs.parentChanges[ref], c)
+}
+
+// noteReceipt records the date of an existing receipt of it inside its action
+// fence (BR-22.4: action messages only for supply inside the action fence), so
+// deriveMessages can tell an existing receipt from a planned order and knows
+// where it stands.
+func (rs *runState) noteReceipt(it *Item, r Requirement) {
+	if !withinFence(rs.today, r.Date, it.ActionDays) {
+		return
+	}
+	if rs.receiptDates == nil {
+		rs.receiptDates = map[string]int{}
+	}
+	rs.receiptDates[it.ID+"\x00"+r.Ref] = r.Date
+}
+
+// parentOf returns the message of the parent supply a dependent demand ref
+// "<parent supply ref>/<component>" of component belongs to, and false when
+// there is none or it is ambiguous. The parent ref is everything before the
+// last "/" (component ids hold none, a receipt ref may). When receipts of
+// different items share the parent ref, the one whose BOM lists the component
+// is the parent.
+func (rs *runState) parentOf(demandRef, component string) []parentChange {
+	i := strings.LastIndex(demandRef, "/")
+	if i <= 0 || demandRef[i+1:] != component {
+		return nil
+	}
+	notes := rs.parentChanges[demandRef[:i]]
+	items := map[string]bool{}
+	for _, n := range notes {
+		items[n.ItemID] = true
+	}
+	if len(items) <= 1 {
+		return notes
+	}
+	var out []parentChange
+	owner := ""
+	for _, n := range notes {
+		parent := rs.index[n.ItemID]
+		if parent == nil || !slices.ContainsFunc(parent.Components, func(b BOMLine) bool { return b.ItemID == component }) {
+			continue
+		}
+		if owner != "" && owner != n.ItemID {
+			return nil
+		}
+		owner = n.ItemID
+		out = append(out, n)
+	}
+	return out
+}
+
+// deriveMessages raises the Derived action (FR-22.7) on each existing receipt of
+// a component pegged to the dependent demand "<parent supply ref>/<component>"
+// of a parent receipt that got a cancel, decrease, postpone or advance message:
+// the dependent demand names its parent supply that way, as the run names the
+// demand of its own planned orders and of carried firmed transfers, and as the
+// caller must name the component demand of an open production order it sends.
+// One Derived message per pegged receipt, dependent demand and parent action:
+//   - cancel: reduce the receipt by the quantity pegged to the demand;
+//   - decrease: reduce it by the same share of that quantity as the parent loses
+//     (pegged x removed / parent quantity, rounded half away from zero to 6
+//     decimals, the scale of a stored quantity; none when that rounds to 0);
+//   - postpone: move the pegged quantity later by the parent's shift, but not
+//     past the moved demand date less the component's receipt margin;
+//   - advance: move it to the moved demand date less the receipt margin, only
+//     when the receipt would otherwise be late.
+//
+// Several parents pegged to one component receipt each raise their own
+// message. A component supply that is a planned order of this run follows its
+// parent by being replanned, so it gets none, and a Derived message is not
+// passed further down.
+func (rs *runState) deriveMessages() {
+	if len(rs.parentChanges) == 0 {
+		return
+	}
+	type key struct{ item, supply, demand string }
+	pegged := map[key]decimal.Decimal{}
+	var keys []key
+	demandDate := map[key]int{}
+	warehouse := map[key]string{}
+	for _, p := range rs.res.Pegging {
+		if p.DemandRefType != RefBOM {
+			continue
+		}
+		if _, existing := rs.receiptDates[p.ItemID+"\x00"+p.SupplyRef]; !existing {
+			continue
+		}
+		k := key{p.ItemID, p.SupplyRef, p.DemandRef}
+		if q, seen := pegged[k]; seen {
+			pegged[k] = q.Add(p.Qty)
+			demandDate[k] = min(demandDate[k], p.DemandDate)
+			continue
+		}
+		keys = append(keys, k)
+		pegged[k], demandDate[k], warehouse[k] = p.Qty, p.DemandDate, p.WarehouseID
+	}
+	for _, k := range keys {
+		comp := rs.index[k.item]
+		received := rs.receiptDates[k.item+"\x00"+k.supply]
+		for _, c := range rs.parentOf(k.demand, k.item) {
+			m := Message{Action: ActionDerived, ItemID: k.item, SupplyRef: k.supply, DemandRef: k.demand, WarehouseID: warehouse[k], ParentAction: c.Action}
+			switch c.Action {
+			case ActionCancel:
+				m.SuggestedDate, m.Qty = received, pegged[k]
+			case ActionDecrease:
+				m.SuggestedDate, m.Qty = received, pegged[k].Mul(c.Removed).Div(c.Qty).Round(6)
+				if !m.Qty.IsPositive() {
+					continue
+				}
+			case ActionPostpone:
+				// Keep the receipt's slack: later by the parent's shift, but not
+				// past the moved demand less the receipt margin.
+				target := min(rs.supplyDate(received+c.Shift), rs.back(demandDate[k]+c.Shift, comp.MarginDays))
+				if target <= received {
+					continue
+				}
+				m.SuggestedDate, m.DelayDays, m.Qty = target, target-received, pegged[k]
+			case ActionAdvance:
+				// Only a receipt that would now be late moves: to the moved demand
+				// less the receipt margin.
+				target := rs.back(demandDate[k]+c.Shift, comp.MarginDays)
+				if target >= received {
+					continue
+				}
+				m.SuggestedDate, m.DelayDays, m.Qty = target, received-target, pegged[k]
+			}
+			rs.res.Messages = append(rs.res.Messages, m)
+		}
+	}
 }

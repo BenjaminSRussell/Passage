@@ -1034,9 +1034,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor, domain.ActionLotSplit, domain.ActionBOMCycle, domain.ActionNoQuotaSource:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease, domain.ActionIncrease, domain.ActionDerived, domain.ActionRedZone, domain.ActionSalesOnTop, domain.ActionNoVendor, domain.ActionLotSplit, domain.ActionBOMCycle, domain.ActionNoQuotaSource:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split or bom-cycle"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel, decrease, increase, derived, red-zone, sales-on-top, no-vendor, no-quota-source, lot-split or bom-cycle"})
 		return
 	}
 	limit, ok := limitParam(w, r)

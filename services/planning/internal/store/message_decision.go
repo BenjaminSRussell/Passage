@@ -65,12 +65,12 @@ func (s *Postgres) DecideMessage(ctx context.Context, id string, expectedVersion
 			return err
 		}
 		err = tx.QueryRow(ctx, `select m.action, m.item_id::text, m.warehouse_id::text, m.supply_ref, m.demand_ref, m.suggested_date,
-				m.delay_days, m.qty::text, m.status, m.version, m.decision_key, p.id::text, p.code, v.id::text, v.site_id::text, v.status,
+				m.delay_days, m.qty::text, nullif(m.parent_action, ''), m.status, m.version, m.decision_key, p.id::text, p.code, v.id::text, v.site_id::text, v.status,
 				coalesce(v.legal_entity_id::text, '')
 			from action_message m join plan_version v on v.tenant_id = m.tenant_id and v.id = m.plan_version_id
 			join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
 			where m.tenant_id = $1 and m.id = $2 for update of m`, p.TenantID, id).
-			Scan(&m.Action, &m.ItemID, &m.WarehouseID, &m.SupplyRef, &m.DemandRef, &date, &m.DelayDays, &m.Qty, &m.Status, &m.Version,
+			Scan(&m.Action, &m.ItemID, &m.WarehouseID, &m.SupplyRef, &m.DemandRef, &date, &m.DelayDays, &m.Qty, &m.ParentAction, &m.Status, &m.Version,
 				&key, &planID, &planCode, &versionID, &siteID, &versionStatus, &entity)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, CodeMessageNotFound, "message not found")
@@ -115,7 +115,7 @@ func (s *Postgres) DecideMessage(ctx context.Context, id string, expectedVersion
 		if err := enqueue(ctx, tx, typ, planID, p.TenantID, id, planevents.MessageDecidedData{
 			MessageID: id, PlanID: planID, PlanCode: planCode, VersionID: versionID, SiteID: siteID, LegalEntityID: optional(entity),
 			Action: m.Action, ItemID: m.ItemID, WarehouseID: m.WarehouseID, SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
-			SuggestedDate: m.SuggestedDate, DelayDays: m.DelayDays, Qty: m.Qty, Version: m.Version + 1, DecidedBy: p.UserID, Note: d.Note,
+			SuggestedDate: m.SuggestedDate, DelayDays: m.DelayDays, Qty: m.Qty, ParentAction: m.ParentAction, Version: m.Version + 1, DecidedBy: p.UserID, Note: d.Note,
 		}); err != nil {
 			return err
 		}
@@ -143,8 +143,8 @@ func readMessage(ctx context.Context, tx pgx.Tx, tenantID, id string) (Message, 
 }
 
 // carryDecisions copies the decisions of the replaced version's messages onto the identical messages
-// of the new version (FR-22.7): same item, scope, action, supply, demand, suggested date, quantity and
-// delay. A message the run raises again unchanged keeps its applied or dismissed status, so a dismissed
+// of the new version (FR-22.7): same item, scope, action, supply, demand, suggested date, quantity,
+// delay and (for a derived message) parent action. A message the run raises again unchanged keeps its applied or dismissed status, so a dismissed
 // message does not come back as open and an applied one is not applied twice while its owner has not
 // changed the order yet; a message whose date or quantity changed is a new one and stays open.
 // carried_from names the message the planner decided. It returns the ids of the new messages that
@@ -160,7 +160,7 @@ func carryDecisions(ctx context.Context, tx pgx.Tx, tenantID, previousID, versio
 		where n.tenant_id = $1 and n.plan_version_id = $3 and o.tenant_id = $1 and o.plan_version_id = $2 and o.status <> 'open'
 			and o.item_id = n.item_id and o.warehouse_id is not distinct from n.warehouse_id and o.action = n.action
 			and o.supply_ref = n.supply_ref and o.demand_ref = n.demand_ref and o.suggested_date = n.suggested_date
-			and o.qty = n.qty and o.delay_days = n.delay_days
+			and o.qty = n.qty and o.delay_days = n.delay_days and o.parent_action = n.parent_action
 		returning n.id::text`, tenantID, previousID, versionID)
 	if err != nil {
 		return nil, err
