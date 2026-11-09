@@ -328,8 +328,7 @@
       {"resource": "/v1/hub/subscriptions/*:replay", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*:test", "methods": ["POST"]},
       {"resource": "/v1/hub/deliveries/*:replay", "methods": ["POST"]},
-      {"resource": "/v1/hub/subscriptions/*:rotate", "methods": ["POST"]},
-      {"resource": "/v1/hub/coexistence:retry-parked", "methods": ["POST"]}
+      {"resource": "/v1/hub/subscriptions/*:rotate", "methods": ["POST"]}
     ]},
     "hub.delivery.read": {"permissions": [
       {"resource": "/v1/hub/subscriptions", "methods": ["GET"]},
@@ -354,6 +353,9 @@
       {"resource": "/v1/hub/catalog/*", "methods": ["PATCH"]},
       {"resource": "/v1/hub/catalog/*:deprecate", "methods": ["POST"]},
       {"resource": "/v1/hub/catalog/*:retire", "methods": ["POST"]}
+    ]},
+    "hub.coexistence.operate": {"permissions": [
+      {"resource": "/v1/hub/coexistence:retry-parked", "methods": ["POST"]}
     ]},
     "hub.client.consume": {"service_only": true, "permissions": [{"resource": "/v1/hub/clients:consume", "methods": ["POST"]}]},
     "inventory.read": {"permissions": [

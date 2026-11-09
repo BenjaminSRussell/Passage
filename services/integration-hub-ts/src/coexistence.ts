@@ -263,12 +263,13 @@ export class CoexistenceStore {
     });
   }
 
-  /** Puts a tenant's parked rows back in the queue (an operator's retry after fixing the adapter). Returns how many. */
-  async retryParked(tenantId: string, now: Date): Promise<number> {
+  /** Puts one legacy company's parked rows back in the queue (an operator's retry after fixing the adapter). Returns how many; a repeat finds none parked and changes nothing. */
+  async retryParked(tenantId: string, sourceSystem: SourceSystem, sourceCompany: string, now: Date): Promise<number> {
     return this.#withTenant(tenantId, async (c) => {
       const res = await c.query(
-        "update hub_coexistence_adapter set status = 'pending', attempts = 0, next_attempt_at = $1, updated_at = $1 where status = 'parked'",
-        [now],
+        `update hub_coexistence_adapter set status = 'pending', attempts = 0, next_attempt_at = $1, updated_at = $1
+          where status = 'parked' and source_system = $2 and source_company = $3`,
+        [now, sourceSystem, sourceCompany],
       );
       return res.rowCount ?? 0;
     });

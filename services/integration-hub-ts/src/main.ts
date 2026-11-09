@@ -81,7 +81,7 @@ maintenance.start(Number(env["HUB_MAINTENANCE_INTERVAL_MS"] ?? 300_000));
 // Legacy coexistence adapters (wave 49): the consumer records the mode each adapter should be in from the migration
 // factory's coexistence and rollback events, and the sweep suspends or resumes it. The AX and SAP adapter implementations
 // are not built yet (NOT-IMPLEMENTED.md), so with none registered a due row is parked with HUB-COEXIST-NO-ADAPTER.
-const coexistence =new CoexistenceSweeper({
+const coexistence = new CoexistenceSweeper({
   store: coexistenceStore,
   adapters: [],
   metrics,

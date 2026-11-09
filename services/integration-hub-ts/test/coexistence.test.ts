@@ -171,7 +171,7 @@ describe.skipIf(ownerUrl === undefined)("coexistence adapters on Postgres", () =
     expect(await sweep.runOnce()).toEqual({ applied: 0, retried: 0, parked: 0 });
 
     sap.fail = null;
-    expect(await cs.retryParked(tenant, now)).toBe(1);
+    expect(await cs.retryParked(tenant, "SAPECC", "1000", now)).toBe(1);
     expect(await sweep.runOnce()).toEqual({ applied: 1, retried: 0, parked: 0 });
     [row] = await cs.list(tenant, "SAPECC", "1000");
     expect([row?.status, row?.appliedMode, row?.attempts]).toEqual(["applied", "LEGACY", 0]);
@@ -245,10 +245,17 @@ describe.skipIf(ownerUrl === undefined)("coexistence adapters on Postgres", () =
       expect((await a.call("GET", "/v1/hub/coexistence?sourceSystem=S4HANA", { tenant: t })).status).toBe(400);
 
       const retry = "/v1/hub/coexistence:retry-parked";
-      expect((await a.call("POST", retry, { tenant: t, duties: ["hub.delivery.read"] })).status).toBe(403);
+      const scope = { sourceSystem: "S4HANA", sourceCompany: "1710" };
+      const operator = { tenant: t, duties: ["hub.coexistence.operate"] };
+      expect((await a.call("POST", retry, { tenant: t, duties: ["hub.delivery.read", "hub.subscription.write"] }, scope)).status).toBe(403);
       expect((await a.call("GET", retry, { tenant: t })).status).toBe(405);
-      expect((await a.call("POST", retry, { tenant: randomUUID() })).body).toEqual({ retried: 0 });
-      expect((await a.call("POST", retry, { tenant: t })).body).toEqual({ retried: 1 });
+      expect((await a.call("POST", retry, operator, { sourceSystem: "S4HANA" })).status).toBe(400);
+      expect((await a.call("POST", retry, operator, { ...scope, extra: 1 })).status).toBe(400);
+      expect((await a.call("POST", retry, { ...operator, tenant: randomUUID() }, scope)).body).toEqual({ retried: 0 });
+      expect((await a.call("POST", retry, operator, { ...scope, sourceCompany: "9999" })).body).toEqual({ retried: 0 });
+      expect((await a.call("GET", q, { tenant: t })).body.items[0].status).toBe("parked");
+      expect((await a.call("POST", retry, operator, scope)).body).toEqual({ retried: 1 });
+      expect((await a.call("POST", retry, operator, scope)).body).toEqual({ retried: 0 });
       expect((await a.call("GET", q, { tenant: t })).body.items[0].status).toBe("pending");
     } finally {
       a.server.close();

@@ -62,6 +62,9 @@ export const DUTY_CLIENT_WRITE = "hub.client.write";
 /** Spend a client's quota: a service-only duty (never a person or role); no caller holds it until the edge quota check is built. */
 export const DUTY_CLIENT_CONSUME = "hub.client.consume";
 
+/** Retry the parked legacy coexistence rows of one company (the retry is idempotent: a repeat finds nothing parked). */
+export const DUTY_COEXISTENCE_OPERATE = "hub.coexistence.operate";
+
 /** Publish, change, deprecate and retire catalog entries (new duty; enforced here, seeded by the main session). */
 export const DUTY_CATALOG_WRITE = "hub.catalog.write";
 
@@ -378,21 +381,22 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         return allow(retry ? "POST" : "GET");
       }
       const p = principalFromHeaders(req.headers);
-      requireDuty(p, retry ? DUTY_SUBSCRIPTION_WRITE : DUTY_DELIVERY_READ);
+      requireDuty(p, retry ? DUTY_COEXISTENCE_OPERATE : DUTY_DELIVERY_READ);
       if (deps.coexistence === undefined) {
         throw new ApiError(501, "HUB-0502", "legacy coexistence is not configured on this hub");
       }
-      if (retry) {
-        const retried = await deps.coexistence.retryParked(p.tenantId, new Date(clock() * 1000));
-        return { name: "retryParkedCoexistence", status: 200, body: { retried } };
-      }
-      const system = url.searchParams.get("sourceSystem");
-      const company = url.searchParams.get("sourceCompany");
-      if (system === null || !(SOURCE_SYSTEMS as readonly string[]).includes(system)) {
+      const scope = retry ? object(await readBody(req), ["sourceSystem", "sourceCompany"]) : Object.fromEntries(url.searchParams);
+      const system = scope["sourceSystem"];
+      const company = scope["sourceCompany"];
+      if (typeof system !== "string" || !(SOURCE_SYSTEMS as readonly string[]).includes(system)) {
         throw new ApiError(400, "HUB-0400", `sourceSystem must be one of ${SOURCE_SYSTEMS.join(", ")}`);
       }
-      if (company === null || company.length < 1 || company.length > 64) {
+      if (typeof company !== "string" || company.length < 1 || company.length > 64) {
         throw new ApiError(400, "HUB-0400", "sourceCompany must be 1 to 64 characters");
+      }
+      if (retry) {
+        const retried = await deps.coexistence.retryParked(p.tenantId, system as SourceSystem, company, new Date(clock() * 1000));
+        return { name: "retryParkedCoexistence", status: 200, body: { retried } };
       }
       return { name: "listCoexistence", status: 200, body: { items: await deps.coexistence.list(p.tenantId, system as SourceSystem, company) } };
     }
