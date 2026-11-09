@@ -7,11 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,7 +26,6 @@ const (
 	EventFailed   = "failed"
 	EventUnknown  = "unknown"
 
-	ebicsOK       = "000000"
 	maxReplyBytes = 1 << 20
 )
 
@@ -147,7 +144,7 @@ type VaultTransit struct {
 }
 
 func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) (Signature, error) {
-	if err := checkURL(v.Addr); err != nil {
+	if err := CheckURL(v.Addr); err != nil {
 		return Signature{}, err
 	}
 	if !vaultName.MatchString(keyName) {
@@ -203,83 +200,8 @@ func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) 
 	return Signature{Bytes: sig, KeyVersion: out.Data.KeyVersion}, nil
 }
 
-// EBICS delivers a file as an EBICS upload order. The subset built here is one
-// unencrypted upload request carrying the order data and the electronic
-// signature, and the response's technical return code.
-type EBICS struct {
-	URL       string
-	HostID    string
-	PartnerID string
-	UserID    string
-	Client    *http.Client
-}
-
-func (EBICS) Protocol() string { return ProtocolEBICS }
-
-type ebicsRequest struct {
-	XMLName   xml.Name `xml:"urn:org:ebics:H004 ebicsRequest"`
-	Version   string   `xml:"Version,attr"`
-	HostID    string   `xml:"header>static>HostID"`
-	PartnerID string   `xml:"header>static>PartnerID"`
-	UserID    string   `xml:"header>static>UserID"`
-	OrderType string   `xml:"header>static>OrderDetails>OrderType"`
-	Signature string   `xml:"body>SignatureData"`
-	OrderData string   `xml:"body>DataTransfer>OrderData"`
-}
-
-type ebicsResponse struct {
-	ReturnCode    string `xml:"header>mutable>ReturnCode"`
-	ReportText    string `xml:"header>mutable>ReportText"`
-	TransactionID string `xml:"header>static>TransactionID"`
-}
-
-func (e EBICS) Send(ctx context.Context, f File, sig Signature) (Receipt, error) {
-	if err := checkURL(e.URL); err != nil {
-		return Receipt{}, err
-	}
-	body, err := xml.Marshal(ebicsRequest{
-		Version: "H004", HostID: e.HostID, PartnerID: e.PartnerID, UserID: e.UserID, OrderType: f.OrderType,
-		Signature: base64.StdEncoding.EncodeToString(sig.Bytes), OrderData: base64.StdEncoding.EncodeToString(f.Data),
-	})
-	if err != nil {
-		return Receipt{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.URL, bytes.NewReader(body))
-	if err != nil {
-		return Receipt{}, err
-	}
-	req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
-	if err := ctx.Err(); err != nil {
-		return Receipt{}, fmt.Errorf("ebics upload not started: %w", err)
-	}
-	resp, err := httpClient(e.Client).Do(req)
-	if err != nil {
-		var opErr *net.OpError
-		if errors.As(err, &opErr) && opErr.Op == "dial" {
-			return Receipt{}, fmt.Errorf("ebics upload not sent: %w", err)
-		}
-		return Receipt{}, fmt.Errorf("ebics upload: %w: %w", ErrAmbiguous, err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBytes))
-	if err != nil {
-		return Receipt{}, fmt.Errorf("ebics upload: %w: %w", ErrAmbiguous, err)
-	}
-	var out ebicsResponse
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		return Receipt{}, fmt.Errorf("ebics upload refused: status %d", resp.StatusCode)
-	}
-	if resp.StatusCode != http.StatusOK || xml.Unmarshal(raw, &out) != nil {
-		return Receipt{}, fmt.Errorf("ebics upload: %w: status %d, unreadable reply", ErrAmbiguous, resp.StatusCode)
-	}
-	if out.ReturnCode != ebicsOK {
-		return Receipt{}, fmt.Errorf("ebics upload refused: %s %s", out.ReturnCode, out.ReportText)
-	}
-	return Receipt{Reference: out.TransactionID}, nil
-}
-
-// checkURL accepts https, and http only to a loopback host (local fakes).
-func checkURL(raw string) error {
+// CheckURL accepts https, and http only to a loopback host (local fakes).
+func CheckURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("invalid url %q", raw)

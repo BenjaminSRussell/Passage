@@ -77,7 +77,7 @@ func LoadVaultConfig(getenv func(string) string) (VaultConfig, error) {
 		}
 		return VaultConfig{}, nil
 	}
-	if err := checkURL(c.Addr); err != nil {
+	if err := CheckURL(c.Addr); err != nil {
 		return VaultConfig{}, fmt.Errorf("VAULT_ADDR: %w", err)
 	}
 	if (c.Token == "") == (c.K8sRole == "") {
