@@ -1,4 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -159,10 +161,19 @@ export function NewConfirmationRunPage() {
     }
   }
 
-  function text(id: string, field: Exclude<keyof RunDraft, "includeZeroBalances">, label: string, opts: { hint?: string; type?: string; optional?: boolean } = {}) {
+  function text(id: string, field: Exclude<keyof RunDraft, "includeZeroBalances">, label: string, opts: { entity?: LookupEntityKey; hint?: string; type?: string; optional?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} error={errors[field]} optional={opts.optional}>
-        {(c) => (
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<RunDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             type={opts.type}
@@ -184,7 +195,7 @@ export function NewConfirmationRunPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("bc-entity", "legalEntityId", "Legal entity id")}
+          {text("bc-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
           {text("bc-date", "asOfDate", "Key date", { type: "date" })}
           {text("bc-threshold", "threshold", "Threshold", { hint: "Customers whose balance reaches this amount, debit or credit." })}
           {text("bc-sample", "sampleSize", "Sample size", { optional: true, hint: "A random but reproducible sample of the qualifying customers." })}

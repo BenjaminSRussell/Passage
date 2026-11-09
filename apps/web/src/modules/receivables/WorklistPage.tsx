@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { buttonClassName, DataTable, EmptyState, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchWorklist, type CustomerRisk, type WorklistResponse } from "./api/client";
@@ -50,11 +51,11 @@ export function WorklistPage() {
       <div className={styles.toolbar}>
         <FormField
           id="wl-entity"
-          label="Legal entity id"
+          label="Legal entity"
           error={entity !== "" && !entityValid ? "Enter the legal entity id (a UUID)." : undefined}
         >
           {(c) => (
-            <Input {...c} className={styles.mono} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />
+            <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />
           )}
         </FormField>
         <FormField id="wl-as-of" label="As of" error={dateValid ? undefined : "Enter a date as YYYY-MM-DD."}>

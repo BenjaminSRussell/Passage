@@ -230,7 +230,7 @@ describe("Balance confirmations", () => {
     };
     const { container } = renderAt("/receivables/balance-confirmations/new");
     expect(pageViolations(container)).toEqual([]);
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Key date", "2027-03-31");
     fill("Sample size", "0");
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));

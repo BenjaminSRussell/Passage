@@ -1,4 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -203,10 +205,19 @@ export function NewDownPaymentPage() {
     }
   }
 
-  function text(id: string, field: Exclude<keyof DownPaymentDraft, "kind">, label: string, opts: { hint?: string; optional?: boolean; decimal?: boolean } = {}) {
+  function text(id: string, field: Exclude<keyof DownPaymentDraft, "kind">, label: string, opts: { entity?: LookupEntityKey; hint?: string; optional?: boolean; decimal?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} error={errors[field]} optional={opts.optional}>
-        {(c) => (
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<DownPaymentDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             className={styles.mono}
@@ -236,8 +247,8 @@ export function NewDownPaymentPage() {
               </Select>
             )}
           </FormField>
-          {text("nd-entity", "legalEntityId", "Legal entity id")}
-          {text("nd-customer", "customerId", "Customer id")}
+          {text("nd-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
+          {text("nd-customer", "customerId", "Customer", { entity: "customer" })}
           {text("nd-order", "salesOrderId", "Sales order id", { optional: true })}
           {text("nd-currency", "currency", "Currency")}
           {text("nd-amount", "amount", "Amount", { decimal: true })}

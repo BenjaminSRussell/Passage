@@ -669,61 +669,15 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/receivables/BankStatements.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/receivables/DownPayments.tsx": {
       "labels": [
         "Open item id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/receivables/Dunning.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/receivables/Interest.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/receivables/Lockbox.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/receivables/OpenItemsPage.tsx": {
-      "labels": [
-        "Customer id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/receivables/Promises.tsx": {
       "labels": [
-        "Customer id",
-        "Legal entity id",
         "Open item id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/receivables/Statements.tsx": {
-      "labels": [
-        "Customer id",
-        "Legal entity id",
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/receivables/WorklistPage.tsx": {
-      "labels": [
-        "Legal entity id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },

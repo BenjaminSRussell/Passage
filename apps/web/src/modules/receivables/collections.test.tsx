@@ -119,9 +119,10 @@ describe("Collections worklist", () => {
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
 
-    fill("Legal entity id", "nope");
-    expect(screen.getByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
-    fill("Legal entity id", LE);
+    fill("Legal entity", "nope");
+    expect(screen.getByText("Choose a legal entity")).toBeInTheDocument();
+    expect(server.calls).toHaveLength(0);
+    fill("Legal entity", LE);
     fill("As of", "2027-03-31");
     const table = await findTable({ name: "Collections worklist" });
     await waitFor(() => expect(table).toHaveTextContent("74"));
@@ -135,7 +136,7 @@ describe("Collections worklist", () => {
   it("shows the error with a retry and the empty state", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "legal entity is outside the caller's scope" });
     renderAt("/receivables/worklist");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     const alert = await findAlert();
     expect(alert).toHaveTextContent("AUTH-0003");
     server.handler = () => json(200, { asOf: "2027-03-31", items: [] });
@@ -274,7 +275,7 @@ describe("Promises to pay", () => {
     expect(table).toHaveTextContent("Holds");
     expect(table).toHaveTextContent("Past due");
     expect(pageViolations(container)).toEqual([]);
-    fill("Customer id", CUST);
+    fill("Customer", CUST);
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("customer") === CUST)).toBe(true));
   });
 
@@ -355,7 +356,7 @@ describe("Dunning runs", () => {
     fill("Grace days", "99");
     fireEvent.click(screen.getByRole("button", { name: "Propose run" }));
     expect(await screen.findByText("Enter whole days from 0 to 60.")).toBeInTheDocument();
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Grace days", "5");
     fill("Run date", "2027-03-31");
     fireEvent.click(screen.getByRole("button", { name: "Propose run" }));
@@ -443,7 +444,7 @@ describe("Interest", () => {
     };
     const { container } = renderAt("/receivables/interest-notes/new");
     expect(pageViolations(container)).toEqual([]);
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Annual rate", "9");
     fireEvent.click(screen.getByRole("button", { name: "Preview interest" }));
     expect(await screen.findByText(/as a fraction above 0/)).toBeInTheDocument();
@@ -471,7 +472,7 @@ describe("Interest", () => {
       return json(403, { code: "AUTH-0003", detail: "missing duty receivables.interest.post" });
     };
     renderAt("/receivables/interest-notes/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Annual rate", "0.12");
     fireEvent.click(screen.getByRole("button", { name: "Preview interest" }));
     fireEvent.click(await screen.findByRole("button", { name: "Post interest notes" }));
@@ -533,7 +534,7 @@ describe("Lockbox", () => {
     expect(await screen.findByText(/credit codes from 100 to 399/)).toBeInTheDocument();
     expect(screen.getByText("Choose the BAI2 file or paste its content.")).toBeInTheDocument();
 
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Check type codes", "");
     fill("File content", "01,BANKX/");
     fireEvent.click(screen.getByRole("button", { name: "Import file" }));
@@ -547,7 +548,7 @@ describe("Lockbox", () => {
   it("names a duplicate file and a malformed line", async () => {
     server.handler = () => json(409, { code: "AR-0003", detail: "File already imported" });
     renderAt("/receivables/lockbox/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("File content", "01,BANKX/");
     fireEvent.click(screen.getByRole("button", { name: "Import file" }));
     expect(await findAlert()).toHaveTextContent("This file was already imported");

@@ -1,4 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -222,10 +224,19 @@ export function NewDeductionPage() {
     }
   }
 
-  function text(id: string, field: "legalEntityId" | "openItemId" | "paymentId" | "reasonCode" | "amount", label: string, opts: { hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean } = {}) {
+  function text(id: string, field: "legalEntityId" | "openItemId" | "paymentId" | "reasonCode" | "amount", label: string, opts: { entity?: LookupEntityKey; hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} error={errors[field]} optional={opts.optional}>
-        {(c) => (
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<DeductionDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             className={opts.mono === false ? undefined : styles.mono}
@@ -247,7 +258,7 @@ export function NewDeductionPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("nde-entity", "legalEntityId", "Legal entity id")}
+          {text("nde-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
           {text("nde-item", "openItemId", "Open item id", { hint: "The short-paid invoice; the deduction takes its customer and currency." })}
           {text("nde-payment", "paymentId", "Payment id", { optional: true, hint: "The short payment, if it is recorded." })}
           <FormField id="nde-type" label="Type">

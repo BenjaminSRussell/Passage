@@ -1,4 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -185,10 +187,19 @@ export function NewDisputePage() {
     }
   }
 
-  function text(id: string, field: keyof DisputeDraft, label: string, opts: { hint?: string; mono?: boolean; decimal?: boolean } = {}) {
+  function text(id: string, field: keyof DisputeDraft, label: string, opts: { entity?: LookupEntityKey; hint?: string; mono?: boolean; decimal?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} error={errors[field]}>
-        {(c) => (
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<DisputeDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             className={opts.mono ? styles.mono : undefined}
@@ -207,7 +218,7 @@ export function NewDisputePage() {
       <PageHeader title="Open dispute" description="The item leaves dunning and interest until the dispute is resolved or rejected. The SLA is 120 hours." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("nd-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          {text("nd-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true })}
           {text("nd-item", "openItemId", "Open item id", { mono: true })}
           {text("nd-reason", "reasonCode", "Reason code", { mono: true, hint: "For example PRICE, QUANTITY, DAMAGE or DELIVERY." })}
           {text("nd-amount", "disputedAmount", "Disputed amount", { mono: true, decimal: true, hint: "At most the item's open amount." })}

@@ -1,4 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createPayment, describeProblem, newKey, PAYMENT_MODES, ReceivablesApiError, type PaymentInput, type PaymentMode, type Problem } from "./api/client";
@@ -126,10 +128,19 @@ export function NewPaymentPage() {
   }
 
   type TextField = "legalEntityId" | "customerId" | "sourceRef" | "amount" | "currency" | "payerName" | "payerAccount" | "shortPayReason";
-  function text(id: string, field: TextField, label: string, opts: { hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean } = {}) {
+  function text(id: string, field: TextField, label: string, opts: { entity?: LookupEntityKey; hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} optional={opts.optional} error={errors[field]}>
-        {(c) => (
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<PaymentDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             className={opts.mono ? styles.mono : undefined}
@@ -148,8 +159,8 @@ export function NewPaymentPage() {
       <PageHeader title="Record payment" description="The payment arrives as Received. Match and apply it to open items from its page." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("np-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
-          {text("np-customer", "customerId", "Customer id", { optional: true, mono: true, hint: "Leave empty when the payer is not yet identified." })}
+          {text("np-legal-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true })}
+          {text("np-customer", "customerId", "Customer", { entity: "customer", optional: true, mono: true, hint: "Leave empty when the payer is not yet identified." })}
           <FormField id="np-mode" label="Payment mode">
             {(c) => (
               <Select {...c} value={values.paymentMode} onChange={(e) => update({ paymentMode: e.target.value as PaymentMode })}>

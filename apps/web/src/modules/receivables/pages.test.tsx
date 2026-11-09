@@ -99,9 +99,9 @@ describe("Open items", () => {
     expect(table).toHaveTextContent("20.00 USD by 2027-03-11");
     expect(pageViolations(container)).toEqual([]);
 
-    fill("Customer id", "nope");
-    expect(await screen.findByText("Enter a customer id (a UUID).")).toBeInTheDocument();
-    fill("Customer id", CUST);
+    fill("Customer", "nope");
+    expect(server.calls.some((c) => c.url.searchParams.get("customer") === "nope")).toBe(false);
+    fill("Customer", CUST);
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("customer") === CUST)).toBe(true));
   });
 
@@ -182,8 +182,8 @@ describe("Record payment", () => {
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
 
-    fill("Legal entity id", LE);
-    fill("Customer id", CUST);
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
     fill("Amount", "980.00");
     fill("Check or bank reference", "ACH-7");
     fill("Reference 1", "INV-30001");
@@ -197,7 +197,7 @@ describe("Record payment", () => {
   it("shows the service's field errors and refusals", async () => {
     server.handler = () => json(409, { code: "AR-PAYMENT-DUPLICATE", detail: "a payment or open item with this reference already exists" });
     renderAt("/receivables/payments/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Amount", "10");
     fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
     expect(await findAlert()).toHaveTextContent("AR-PAYMENT-DUPLICATE");
