@@ -35,7 +35,7 @@ metadata:
 spec:
   instances: 1
   imageName: {{ .Image }}
-  enableSuperuserAccess: true
+  enableSuperuserAccess: false
   storage:
     size: {{ .Storage }}
   bootstrap:

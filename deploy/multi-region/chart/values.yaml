@@ -52,7 +52,7 @@ backup:
   maxAgeHours: 26
 
 kafka:
-  namespace: kafka                        # namespace of the Strimzi Kafka cluster (deploy/kafka)
+  namespace: kafka                          # namespace of the Strimzi Kafka cluster (deploy/kafka)
   clusterName: passage                      # Strimzi Kafka name; its CA secret is <name>-cluster-ca-cert
   localAlias: eu-west
   localBootstrap: passage-kafka-bootstrap.kafka.svc:9093

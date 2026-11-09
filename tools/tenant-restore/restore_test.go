@@ -272,3 +272,137 @@ func TestRunCopyDryRunPrintsCountsAndNeedsEnvironment(t *testing.T) {
 		t.Fatalf("missing environment error = %v", err)
 	}
 }
+
+func roleConn(t *testing.T, p *pair, attrs string) *pgx.Conn {
+	t.Helper()
+	raw := make([]byte, 5)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatal(err)
+	}
+	name := "tr_r_" + hex.EncodeToString(raw)
+	exec(t, p.liveAdmin, "create role "+name+" login password 'x' "+attrs)
+	exec(t, p.liveAdmin, "grant usage on schema "+p.schema+" to "+name)
+	exec(t, p.liveAdmin, "grant select, insert, update on all tables in schema "+p.schema+" to "+name)
+	cfg, err := pgx.ParseConfig(os.Getenv("PASSAGE_TEST_APP_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.User, cfg.Password = name, "x"
+	conn, err := pgx.ConnectConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close(context.Background())
+		_, _ = p.liveAdmin.Exec(context.Background(), "drop owned by "+name)
+		_, _ = p.liveAdmin.Exec(context.Background(), "drop role "+name)
+	})
+	return conn
+}
+
+const shapedDDL = `
+create table S.program_position (tenant_id uuid not null, id uuid primary key, parent_id uuid, name text,
+  unique (tenant_id, id), foreign key (tenant_id, parent_id) references S.program_position (tenant_id, id));
+create table S.seq_line (tenant_id uuid not null, id bigint generated always as identity primary key, note text);
+create table S.part (tenant_id uuid not null, id int primary key, v text) partition by range (id);
+create table S.part_1 partition of S.part for values from (0) to (100);
+`
+
+func TestRestoreTenantOrdersSelfReferencesAndKeepsIdentityValues(t *testing.T) {
+	p := newPair(t, shapedDDL)
+	exec(t, p.liveAdmin, strings.ReplaceAll(rlsTable("program_position")+rlsTable("seq_line")+rlsTable("part"), "S.", p.schema+"."))
+	p.scratchOnly(`alter table S.program_position drop constraint program_position_tenant_id_parent_id_fkey`)
+	p.scratchOnly(`
+insert into S.program_position values ('` + tenantA + `','` + id(3) + `','` + id(2) + `','leaf');
+insert into S.program_position values ('` + tenantA + `','` + id(2) + `','` + id(1) + `','middle');
+insert into S.program_position values ('` + tenantA + `','` + id(1) + `',null,'root');
+insert into S.seq_line overriding system value values ('` + tenantA + `', 5, 'five');
+insert into S.seq_line overriding system value values ('` + tenantA + `', 6, 'six');
+insert into S.part values ('` + tenantA + `', 1, 'x');`)
+	res, err := RestoreTenant(context.Background(), p.scratch, p.liveApp, p.schema, tenantA, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byTable(res)
+	if got["program_position"].Inserted != 3 || got["seq_line"].Inserted != 2 {
+		t.Fatalf("results = %+v", res.Tables)
+	}
+	if _, partition := got["part_1"]; partition {
+		t.Fatal("a partition was copied as its own table")
+	}
+	if n := count(t, p, `select count(*) from S.seq_line where id in (5, 6)`); n != 2 {
+		t.Fatalf("identity values were not preserved: %d", n)
+	}
+	if n := count(t, p, `select count(*) from S.part_1`); n != 1 {
+		t.Fatal("partitioned parent row did not route to its partition")
+	}
+}
+
+func TestRestoreTenantRefusesRolesAndTablesThatRelyOnNothingButTheCopy(t *testing.T) {
+	p := newPair(t, ledgerDDL)
+	seedScenario(t, p)
+	ctx := context.Background()
+	if _, err := RestoreTenant(ctx, p.scratch, p.liveAdmin, p.schema, tenantA, true); err == nil || !strings.Contains(err.Error(), "BYPASSRLS") {
+		t.Fatalf("superuser live role error = %v", err)
+	}
+	if _, err := RestoreTenant(ctx, p.scratch, roleConn(t, p, "bypassrls"), p.schema, tenantA, true); err == nil || !strings.Contains(err.Error(), "BYPASSRLS") {
+		t.Fatalf("bypassrls live role error = %v", err)
+	}
+	owner := roleConn(t, p, "")
+	exec(t, p.liveAdmin, "alter table "+p.schema+".account owner to "+owner.Config().User)
+	exec(t, p.liveAdmin, "alter table "+p.schema+".account no force row level security")
+	if _, err := RestoreTenant(ctx, p.scratch, owner, p.schema, tenantA, true); err == nil || !strings.Contains(err.Error(), "FORCE") {
+		t.Fatalf("owner without FORCE error = %v", err)
+	}
+	exec(t, p.liveAdmin, "alter table "+p.schema+".entry disable row level security")
+	if _, err := RestoreTenant(ctx, p.scratch, p.liveApp, p.schema, tenantA, true); err == nil || !strings.Contains(err.Error(), "row-level security") {
+		t.Fatalf("table without RLS error = %v", err)
+	}
+	if n := count(t, p, `select count(*) from S.account where name = 'old name'`); n != 0 {
+		t.Fatal("a refused restore wrote rows")
+	}
+}
+
+func TestRestoreTenantAbortsOnCrossTenantPrimaryKeyCollision(t *testing.T) {
+	for name, extra := range map[string]string{
+		"strict RLS":           "",
+		"visible to all reads": "create policy read_all on S.account for select using (true); create policy upd_all on S.account for update using (true);",
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPair(t, ledgerDDL)
+			exec(t, p.liveAdmin, strings.ReplaceAll(rlsTable("account")+rlsTable("entry")+extra, "S.", p.schema+"."))
+			p.scratchOnly(`insert into S.account values ('` + tenantA + `','` + id(1) + `','mine',null,0,null,null)`)
+			p.liveOnly(`insert into S.account values ('` + tenantB + `','` + id(1) + `','theirs',null,0,null,null)`)
+			_, err := RestoreTenant(context.Background(), p.scratch, p.liveApp, p.schema, tenantA, true)
+			if err == nil {
+				t.Fatal("collision with another tenant's primary key was accepted")
+			}
+			if n := count(t, p, `select count(*) from S.account where name = 'theirs' and tenant_id = '`+tenantB+`'`); n != 1 {
+				t.Fatal("the other tenant's row was changed")
+			}
+			if name == "visible to all reads" && !strings.Contains(err.Error(), "another tenant") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRestoreTenantUsesTheColumnsBothDatabasesShareAndAbortsOnUniqueCollisions(t *testing.T) {
+	p := newPair(t, `create table S.item (tenant_id uuid not null, id int primary key, code text unique, only_both text);`)
+	exec(t, p.liveAdmin, strings.ReplaceAll(rlsTable("item"), "S.", p.schema+"."))
+	p.liveOnly(`alter table S.item add column live_extra text default 'kept'`)
+	p.scratchOnly(`alter table S.item add column scratch_extra text`)
+	p.scratchOnly(`insert into S.item values ('` + tenantA + `', 1, 'c1', 'restored', 's')`)
+	p.liveOnly(`insert into S.item (tenant_id, id, code, only_both) values ('` + tenantA + `', 1, 'c1', 'changed')`)
+	if _, err := RestoreTenant(context.Background(), p.scratch, p.liveApp, p.schema, tenantA, true); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, p, `select count(*) from S.item where only_both = 'restored' and live_extra = 'kept'`); n != 1 {
+		t.Fatal("shared column not restored or live-only column lost")
+	}
+	p.scratchOnly(`insert into S.item values ('` + tenantA + `', 2, 'dup', 'x', 's')`)
+	p.liveOnly(`insert into S.item (tenant_id, id, code) values ('` + tenantA + `', 3, 'dup')`)
+	if _, err := RestoreTenant(context.Background(), p.scratch, p.liveApp, p.schema, tenantA, true); err == nil {
+		t.Fatal("a non-primary-key unique collision was accepted")
+	}
+}

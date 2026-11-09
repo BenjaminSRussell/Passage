@@ -56,7 +56,9 @@ spec:
     - name: passage-multiregion.backup
       rules:
         - alert: PassageBackupStale
-          expr: time() - max(cnpg_collector_last_available_backup_timestamp{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"}) > {{ mul .Values.backup.maxAgeHours 3600 }}
+          expr: >-
+            time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"}) > {{ mul .Values.backup.maxAgeHours 3600 }}
+            or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"})
           for: 15m
           labels:
             severity: warning

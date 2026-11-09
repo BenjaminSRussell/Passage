@@ -23,6 +23,11 @@ and tables without `tenant_id` are never read or written. The dry run executes t
 back, so its counts and any constraint failure are exactly what `--apply` would hit. Any failure rolls back
 every table.
 
+The live role must be the application role: the tool refuses a superuser or BYPASSRLS role, a table without
+row-level security and a table the role owns without FORCE. A primary key already held by another tenant, or a
+unique collision on another column, aborts the restore. The scratch cluster has no superuser access; read it
+as the owner role (secret `<scratch-name>-app`), the tool sets `passage.tenant_id` for its reads.
+
 Tests need Postgres: `PASSAGE_TEST_DATABASE_URL` and `PASSAGE_TEST_APP_DATABASE_URL` (live database, admin and
 application role) and `PASSAGE_TEST_RESTORE_DATABASE_URL` (a second database standing in for the scratch one).
 They skip when unset.

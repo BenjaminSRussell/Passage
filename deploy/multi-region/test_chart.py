@@ -116,6 +116,9 @@ class TestBackup(unittest.TestCase):
     def test_backup_alerts_page_on_archive_failure(self) -> None:
         rules = doc(render("eu-west.yaml"), "PrometheusRule")
         self.assertIn("> 93600", rules)
+        self.assertIn("max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{", rules)
+        self.assertNotIn("cnpg_collector_last_available_backup_timestamp", rules)
+        self.assertIn("or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{", rules)
         self.assertIn("alert: PassageWalArchiveFailing", rules)
         self.assertIn("cnpg_pg_stat_archiver_last_failed_time", rules)
 
