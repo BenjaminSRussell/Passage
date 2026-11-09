@@ -18,12 +18,18 @@ schedules, and reports the deferred revenue roll-forward (FR-29.7 to FR-29.9).
   Dr 2400 / Cr 4000 through its journal API with the service token, and the
   roll-forward is reconciled to the ledger's 2400 balance.
 
+- **Credit notes (#29, P3)**: the `revrec consume` consumer reverses the schedules of
+  billing's booked credit notes (BR-29.6), the reversal of recognized revenue is
+  posted as Dr 4000 / Cr 2400, and the roll-forward keeps tying to GL 2400 through
+  partial and full credit notes.
+
 What is still missing is listed in `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
 ```
-cmd/revrec/             entrypoint: dbx.Connect → (MIGRATE_ON_START) dbx.Migrate → router on HTTP_ADDR, /metrics on ADMIN_ADDR
+cmd/revrec/             entrypoint: dbx.Connect → (MIGRATE_ON_START) dbx.Migrate → router on HTTP_ADDR, /metrics on ADMIN_ADDR;
+                        `revrec consume` runs the credit-note consumer (Kafka, admin port only)
 internal/domain/        pure rules: Allocate, RatableSchedule, ScheduleLines, CheckSatisfy, CheckSSPSources, FullyRecognized, NewRollForward
 internal/store/         Postgres repository (pgx, RLS through dbx.WithTenantTx, outbox in the same transaction)
 internal/api/           HTTP handlers, DTOs, validation, duties
@@ -32,8 +38,10 @@ migrations/             0001_revrec_init.sql: revenue_contract, performance_obli
                         0002_ratable_basis.sql: revenue_contract.ratable_basis (DAILY | MONTHLY)
                         0004_outbox_and_child_scope.sql: outbox tenant RLS and legal-entity scope inherited by child rows
                         0006_journal_posting.sql: journal_posting (one ledger entry per entity, currency and month)
+                        0008_credit_note_reversal.sql: credit_note_reversal (one per credit note and line, with its reversal
+                        posting state), revenue_schedule.credited_amount, consumer_inbox
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
-events/asyncapi.yaml    AsyncAPI 3 for contract.allocated and schedule.recognized
+events/asyncapi.yaml    AsyncAPI 3 for contract.allocated and schedule.recognized, and the consumed creditnote.booked
 charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admin port, ServiceMonitor toggle)
 ```
 
@@ -48,10 +56,10 @@ charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admi
 | POST | `/v1/revrec/milestones/{obligationId}:satisfy` | `revrec.maintain` | recognizes a MILESTONE; optional `If-Match`; same-date retry replays; emits `schedule.recognized` |
 | POST | `/v1/revrec/recognition-runs` | `revrec.post` (RevRecPost) | key = (legal entity, period end); 201, or 200 replay; emits `schedule.recognized` per line |
 | GET | `/v1/revrec/recognition-runs` | `revrec.view` | latest period first |
-| GET | `/v1/revrec/roll-forward?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | opening, additions, recognized, adjustments, closing |
+| GET | `/v1/revrec/roll-forward?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | opening, additions, recognized, reversed, adjustments, closing |
 | GET | `/v1/revrec/roll-forward?contractId=&period=YYYY-MM` | `revrec.view` | the same for one contract, in its currency (drill-down); 404 when unknown or out of scope |
-| POST | `/v1/revrec/journal-postings` | `revrec.post` | `{legalEntityId, through?, retryRejected?}`; posts every recognized, unposted RATABLE and MILESTONE line through `through` (default and upper bound the last completed month end) as one ledger entry per currency and month, Dr 2400 / Cr 4000 dated the month end, to the ledger configured for the entity in `REVREC_LEDGER_IDS` (never the request); a pending post is retried with the same ledger idempotency key; a post the ledger refuses with a 4xx is marked rejected, its lines released, and listed under `rejected` while the other postings continue; 503 `REV-0200` without `LEDGER_URL`, 422 `REV-0202` for an entity with no configured ledger, 502 `REV-0201` when the ledger does not answer |
-| GET | `/v1/revrec/gl-reconciliation?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | revenue recognized through the month end against the ledger's 2400 debits through the same period (`difference`), and the roll-forward's closing deferred balance (allocated deferred amounts less recognized) against the ledger's closing 2400 balance, credits less debits (`closingDifference`; the roll-forward adds on `contractDate`, the ledger on the invoice's posting date, so a later-posted invoice is a timing difference until it posts); `reconciled` needs both differences at zero |
+| POST | `/v1/revrec/journal-postings` | `revrec.post` | `{legalEntityId, through?, retryRejected?}`; posts every recognized, unposted RATABLE and MILESTONE line through `through` (default and upper bound the last completed month end) as one ledger entry per currency and month, Dr 2400 / Cr 4000 dated the month end, to the ledger configured for the entity in `REVREC_LEDGER_IDS` (never the request), pinned to the entity first (`ledger.ledger.lookup`; 422 `REV-0203` when it belongs to another entity); then posts the credit-note reversals (`reversals`: Dr 4000 / Cr 2400 per credited line for the stored recognized revenue reversed, dated the credit note's posting date, key `revrec-reversal-<id>`; a refusal backs off and parks after 5, `failedReversals`, `retryRejected` offers parked ones again); a pending post is retried with the same ledger idempotency key; a post the ledger refuses with a 4xx is marked rejected, its lines released, and listed under `rejected` while the other postings continue; 503 `REV-0200` without `LEDGER_URL`, 422 `REV-0202` for an entity with no configured ledger, 502 `REV-0201` when the ledger does not answer |
+| GET | `/v1/revrec/gl-reconciliation?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | revenue recognized through the month end against the ledger's 2400 debits through the same period (`difference`), and the roll-forward's closing deferred balance (allocated deferred amounts less recognized) against the ledger's closing 2400 balance, credits less debits (`closingDifference`; the roll-forward adds on `contractDate`, the ledger on the invoice's posting date, so a later-posted invoice is a timing difference until it posts); `reconciled` needs both differences at zero. Credit notes: the debit side is recognized plus `creditNotes` (the deferred parts billing debited to 2400, reversed by the consumer), and `reversed` (recognized revenue revrec reverses, a 2400 credit) is in the closing |
 
 Duties are enforced with `platform/authz` (401 without a principal, 403 `AUTH-0003`
 without the duty). A principal scoped to one legal entity (`X-Passage-Legal-Entity`)
@@ -93,10 +101,30 @@ contracts and runs from its reads.
 - **Roll-forward** (FR-29.9): only deferred methods (RATABLE, MILESTONE) enter it.
   Additions are their allocations on contracts dated in the month; recognized are
   their lines recognized in the month; opening is everything before the month.
-  Adjustments are 0.00 until credit notes reverse schedules (BR-29.6). AC-29.4:
+  Adjustments are the credit notes' deferred amounts (negative) and reversed the
+  recognized revenue they reversed, both on the credit note's posting date (see
+  Credit notes). AC-29.4:
   March 2027 additions 3,600.00, recognized 1,483.06 (1,350.00 + 133.06),
   closing 2,116.94. With `contractId` the same sums cover one contract; the
   contracts of an entity add up to its roll-forward.
+- **Credit notes** (BR-29.6, AC-29.6, #29): billing books a credit note as the mirror
+  of its original at the allocation and debits 2400 by the deferred part of each
+  credited line, whatever revrec recognized since; `creditnote.booked` carries that
+  amount per line with the order and product of the credited line. The consumer
+  (group and service principal `revrec-creditnotes`, duty `revrec.creditnote.reverse`)
+  treats the credit as a reduction of the transaction price of the credited
+  obligations, applied to what is still unsatisfied first (ASC 606-10-32-42 to
+  32-45, allocated on the contract's allocation basis, prospective for the remaining
+  schedule): the line's deferred amount is split over the RATABLE and MILESTONE
+  obligations of its product by allocation; each share comes off the obligation's
+  SCHEDULED lines pro rata (largest remainder at the minor unit, a line taken to zero
+  is REVERSED, `credited_amount` keeps what was taken), so the remaining service is
+  still recognized on its plan at the lower price; what exceeds the unrecognized
+  amount reverses recognized revenue, never more than recognized less earlier
+  reversals (REV-0303 otherwise). One `credit_note_reversal` row per (credit note,
+  line) makes it idempotent; REV-0300 (no contract for the order), REV-0301 (several),
+  REV-0302 (no deferred obligation for the product), REV-0303 and REV-0304 (currency)
+  park the event on `passage.revrec.creditnotes.dlq`, anything else is retried.
 - **Versions**: a contract starts at version 1; every satisfaction and every run
   that recognizes one of its lines bumps it. A contract becomes COMPLETE when no
   line is SCHEDULED and it has no USAGE obligation.
@@ -109,6 +137,11 @@ contracts and runs from its reads.
 | `dev.passage.revrec.schedule.recognized.v1` | milestone satisfied; each line of a recognition run |
 
 Both are written to the outbox in the same transaction and keyed by contract id.
+Consumed: `dev.passage.billing.creditnote.booked.v1` on `passage.billing.invoice` (the
+credit-note consumer, `revrec consume`; KafkaUser and dead-letter topic in
+`deploy/kafka/revrec-consumer.yaml`, chart `consumer.*`, off by default). Billing's
+outbox connector, which creates that topic, is not in `deploy/kafka/connect.yaml` yet.
+
 `revenue_schedule.journal_posting_id` is set when `POST /v1/revrec/journal-postings`
 claims a recognized line for a `journal_posting` row; the row keeps the ledger entry
 id once the ledger answers.
@@ -119,7 +152,8 @@ id once the ledger answers.
 (`PASSAGE_SERVICE_NAME=revrec`, `PASSAGE_SERVICE_SIGNING_KEY[_FILE]`) enable the
 posting and the reconciliation through `platform/ledgerclient`; the ledger must trust
 revrec's public key (`PASSAGE_SERVICE_PUBLIC_KEYS`). The service holds only
-`ledger.entry.post` and `ledger.balance.read` (`service_grants`). A line is claimed
+`ledger.entry.post`, `ledger.balance.read` and `ledger.ledger.lookup` (`service_grants`; the
+lookup pins the configured ledger to its legal entity before each posting call). A line is claimed
 for a posting in the transaction that creates the posting row, so no line is posted
 twice; an unanswered post leaves the posting pending for the next call, a post the
 ledger refuses for good is marked rejected and its lines are released with

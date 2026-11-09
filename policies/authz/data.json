@@ -2919,6 +2919,7 @@
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]}
     ]},
+    "revrec.creditnote.reverse": {"flag": true, "permissions": []},
     "revrec.post": {"permissions": [
       {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
       {"resource": "/v1/revrec/journal-postings", "methods": ["POST"]}
@@ -3406,7 +3407,7 @@
       "audit": ["audit.write"]
     },
     "revrec": {
-      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "costacct": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup"]
@@ -3502,6 +3503,7 @@
     "production-planning": ["production.planned.intake"],
     "production-shopfloor": ["production.jobcard.shopfloor"],
     "receiving-erasure": ["compliance.legal-hold.check"],
+    "revrec-creditnotes": ["revrec.creditnote.reverse"],
     "receiving-ers": ["receiving.vendor-invoice.post"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"],

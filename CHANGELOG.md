@@ -50,6 +50,20 @@ release may change public APIs.
   adapter with backoff and parking (`src/coexistence.ts`, hub migration 0007, `HUB_COEXISTENCE_INTERVAL_MS`); the AX and
   SAP adapter implementations are still to come, so a row without one parks with `HUB-COEXIST-NO-ADAPTER`. Add
   `passage.cutover.plan` and `passage.migration.coexistence` to the hub's `HUB_TOPICS` to drive it.
+- Credit-note reversal in revrec (#29, P3): billing now publishes `dev.passage.billing.creditnote.booked.v1` when it books a
+  credit note's journal, with the allocated and deferred amounts the journal reversed per line (the deferred part is its
+  Dr 2400) and the order and product of the credited line. `creditnote.posted` cannot carry these, because it is published
+  before the journal exists. A new revrec consumer (`revrec consume`, group and service principal `revrec-creditnotes`, duty
+  `revrec.creditnote.reverse`, dead-letter topic `passage.revrec.creditnotes.dlq`, `deploy/kafka/revrec-consumer.yaml`,
+  chart `consumer.*` off by default) reverses the schedules of the credited obligations. It reduces the unrecognized
+  schedule pro rata first, and a line taken to zero is REVERSED. Any excess reverses recognized revenue (ASC 606 change in
+  transaction price, applied to the unsatisfied part first). The consumer is idempotent per (credit note, line); rule
+  failures (`REV-0300` to `REV-0304`) are parked and other failures retried. `POST /v1/revrec/journal-postings` posts the
+  reversed revenue as Dr 4000 / Cr 2400 on the credit note's posting date. A refused posting backs off and is parked after
+  5 refusals, and the configured ledger is pinned to its legal entity first (`REV-0203`; revrec's ledger grant gains
+  `ledger.ledger.lookup`). The roll-forward gains `reversed`, and `adjustments` now carries the credit notes. The GL 2400
+  reconciliation counts the credit-note debits (`creditNotes`) and stays tied through partial and full credit notes (revrec
+  migration 0008). The accountant-reviewed ASC 606 workbook (P2b) remains a human sign-off.
 
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an

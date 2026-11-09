@@ -125,7 +125,7 @@ var serviceGrants = map[string]map[string][]string{
 		"audit": {"audit.write"},
 	},
 	"revrec": {
-		"ledger": {"ledger.entry.post", "ledger.balance.read"},
+		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"costacct": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup"},
