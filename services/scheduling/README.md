@@ -278,8 +278,8 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | POST | `/v1/scheduling/orders/{orderId}:schedule` (Idempotency-Key; every operation of one order, scope `order`; 404 `SCHED-0135` when scheduling holds no operation of it) | `scheduling.run` |
 | GET | `/v1/scheduling/runs`, `/v1/scheduling/runs/{id}` | `scheduling.read` |
 | GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars; `outsideCapacity` and `blockBreach` per bar) | `scheduling.read` |
-| POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`; `overrideConstraints` also needs `scheduling.constraints.override`, checked in the handler, 403 `SCHED-0141` without it) | `scheduling.schedule.write` |
-| POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
+| POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`; optional If-Match with the bar's `placementVersion`, 412 `SCHED-0154` when the order changed; `overrideConstraints` also needs `scheduling.constraints.override`, checked in the handler, 403 `SCHED-0141` without it) | `scheduling.schedule.write` |
+| POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key, optional If-Match with `placementVersion`) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/capacity-load?period&from&weeks&days&resourceIds` | `scheduling.read` |
 | GET | `/v1/scheduling/capacity-load/jobs?resourceId&from&to` | `scheduling.read` |
 | GET | `/v1/scheduling/bottlenecks?status&resourceId&limit` (bottleneck episodes; `bottleneck.detected` is published once when one opens) | `scheduling.read` |
@@ -402,6 +402,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0151` | 409 | Unplace: the campaign is not placed |
 | `SCHED-0152` | 409 | A placed campaign keeps its orders and sequence: unplace it before adding, removing or re-sequencing orders |
 | `SCHED-0153` | 422 | Campaign placement: an earlier operation of a campaign order is not scheduled, so the campaign job could run ahead of it; schedule the order first |
+| `SCHED-0154` | 412 | Move or firm: the If-Match `placementVersion` is no longer the order's placement (another move, a run, a firm or an unschedule changed it); reload the Gantt and preview again |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 
 A dry-run move never fails for a constraint: it returns `feasible: false` and

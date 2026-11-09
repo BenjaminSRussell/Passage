@@ -37,6 +37,7 @@ type fakeStore struct {
 	err         error
 	lastMove    store.MoveRequest
 	lastIdem    store.Idem
+	lastIfMatch string
 	lastLoad    store.LoadFilter
 	lastDaily   store.DailyLoadFilter
 	lastLate    store.LateOrderFilter
@@ -165,6 +166,11 @@ func (f *fakeStore) FirmJob(_ context.Context, id string, firmed bool, idem stor
 		return store.Firm{}, false, f.err
 	}
 	return store.Firm{JobID: id, OrderID: ids.New(), ResourceID: resID, Start: at0, End: at0.Add(time.Hour), Firmed: firmed}, f.replay, nil
+}
+
+func (f *fakeStore) FirmJobIfMatch(ctx context.Context, id string, firmed bool, ifMatch string, idem store.Idem) (store.Firm, bool, error) {
+	f.lastIfMatch = ifMatch
+	return f.FirmJob(ctx, id, firmed, idem)
 }
 
 func (f *fakeStore) CapacityLoad(_ context.Context, f2 store.LoadFilter) ([]domain.WeekLoad, error) {
@@ -456,5 +462,37 @@ func TestCreateRun_ValidatesDirection(t *testing.T) {
 		if rec := do(h, http.MethodPost, "/v1/scheduling/runs", `{"scope":"site","direction":"`+d+`"}`, allDuties, "dir-"+d); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"direction":"`+d+`"`) {
 			t.Fatalf("%s: status %d body %s", d, rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestMoveAndFirm_PassIfMatchToTheStore(t *testing.T) {
+	f := &fakeStore{}
+	h := newRouter(f)
+	send := func(path, body, key string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("X-Passage-Tenant", tenantID)
+		req.Header.Set("X-Passage-Duties", allDuties)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", key)
+		req.Header.Set("If-Match", `"abc123"`)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	move := `{"resourceId":"` + resID + `","start":"` + at0.Format(time.RFC3339) + `"}`
+	if rec := send("/v1/scheduling/jobs/"+jobID+":move", move, "m9"); rec.Code != http.StatusOK || f.lastMove.IfMatch != `"abc123"` {
+		t.Fatalf("move: status %d ifMatch %q body %s", rec.Code, f.lastMove.IfMatch, rec.Body)
+	}
+	if rec := send("/v1/scheduling/jobs/"+jobID+":firm", `{"firmed":true}`, "f9"); rec.Code != http.StatusOK || f.lastIfMatch != `"abc123"` {
+		t.Fatalf("firm: status %d ifMatch %q body %s", rec.Code, f.lastIfMatch, rec.Body)
+	}
+}
+
+func TestMove_StalePlacementIs412(t *testing.T) {
+	h := newRouter(&fakeStore{err: httpx.NewProblem(http.StatusPreconditionFailed, store.CodePlacementVersion, "changed")})
+	body := `{"resourceId":"` + resID + `","start":"` + at0.Format(time.RFC3339) + `"}`
+	rec := do(h, http.MethodPost, "/v1/scheduling/jobs/"+jobID+":move", body, allDuties, "m10")
+	if rec.Code != http.StatusPreconditionFailed || !strings.Contains(rec.Body.String(), "SCHED-0154") {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body)
 	}
 }

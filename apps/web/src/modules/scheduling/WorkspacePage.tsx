@@ -9,6 +9,7 @@ import {
   listResources,
   moveJob,
   newKey,
+  STALE_PLACEMENT,
   type GanttBar,
   type MoveResponse,
   type Problem,
@@ -82,6 +83,19 @@ export function WorkspacePage() {
   const jobs = jobsOf(bars);
   const codeOf = (id: string) => resources.find((r) => r.id === id)?.code ?? shortId(id);
 
+  /** A move or firm built on a stale picture is refused (SCHED-0154): drop it and show the current plan. */
+  function failWith(error: unknown) {
+    const problem = describeProblem(error);
+    if (problem.code === STALE_PLACEMENT) {
+      setPreview(null);
+      setProposal(null);
+      board.reload();
+      setFailure({ ...problem, message: "Another change moved this order after the Gantt loaded. The Gantt now shows the current plan; preview your move again." });
+      return;
+    }
+    setFailure(problem);
+  }
+
   function select(job: GanttBar, start = job.start) {
     const whole = jobs.find((j) => j.jobId === job.jobId) ?? job;
     setProposal({ job: whole, resourceId: whole.resourceId, start, propagate, override: false });
@@ -97,12 +111,12 @@ export function WorkspacePage() {
     setFailure(null);
     setNotice("");
     try {
-      const response = await moveJob(next.job.jobId, moveBody(next, true));
+      const response = await moveJob(next.job.jobId, moveBody(next, true), undefined, next.job.placementVersion);
       setPreview({ proposal: next, response, key: newKey() });
       setViolations(response.feasible && !response.overridden ? {} : Object.fromEntries(response.violations.map((v) => [v.jobId ?? next.job.jobId, `${v.detail} (${v.code})`])));
     } catch (error) {
       setPreview(null);
-      setFailure(describeProblem(error));
+      failWith(error);
     } finally {
       setBusy(null);
     }
@@ -123,7 +137,7 @@ export function WorkspacePage() {
     setFailure(null);
     try {
       const { proposal: p } = preview;
-      const done = await moveJob(p.job.jobId, moveBody(p, false), preview.key);
+      const done = await moveJob(p.job.jobId, moveBody(p, false), preview.key, p.job.placementVersion);
       setPreview(null);
       setProposal(null);
       const pegged = done.dependents?.length ? ` ${done.dependents.length} pegged order(s) moved with it.` : "";
@@ -133,7 +147,7 @@ export function WorkspacePage() {
       );
       board.reload();
     } catch (error) {
-      setFailure(describeProblem(error));
+      failWith(error);
     } finally {
       setBusy(null);
     }
@@ -144,13 +158,13 @@ export function WorkspacePage() {
     setFailure(null);
     setNotice("");
     try {
-      const out = await firmJob(job.jobId, !job.firmed);
+      const out = await firmJob(job.jobId, !job.firmed, undefined, job.placementVersion);
       setNotice(out.firmed ? `Operation ${job.operNumber} is firmed; runs and moves leave it in place.` : `Operation ${job.operNumber} is no longer firmed.`);
       setProposal(null);
       setPreview(null);
       board.reload();
     } catch (error) {
-      setFailure(describeProblem(error));
+      failWith(error);
     } finally {
       setFirming(null);
     }

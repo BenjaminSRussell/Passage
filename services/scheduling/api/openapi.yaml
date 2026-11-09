@@ -661,6 +661,15 @@ paths:
           required: false
           description: Required when dryRun is false.
           schema: { type: string, maxLength: 200 }
+        - name: If-Match
+          in: header
+          required: false
+          description: >
+            The placementVersion of the job's Gantt bar, quoted or not. When the
+            order's placement has changed since (another move, a run, a firm or
+            an unschedule) the request is refused with 412 SCHED-0154 and
+            nothing is written; omit it to skip the check.
+          schema: { type: string, maxLength: 100 }
       requestBody:
         required: true
         content:
@@ -676,6 +685,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/jobs/{id}:firm:
     post:
@@ -685,6 +695,15 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          description: >
+            The placementVersion of the job's Gantt bar, quoted or not. When the
+            order's placement has changed since (another move, a run, a firm or
+            an unschedule) the request is refused with 412 SCHED-0154 and
+            nothing is written; omit it to skip the check.
+          schema: { type: string, maxLength: 100 }
       requestBody:
         required: true
         content:
@@ -702,6 +721,7 @@ paths:
               schema: { $ref: '#/components/schemas/Firm' }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/order-pegs:
     post:
@@ -2411,6 +2431,7 @@ components:
       properties:
         jobId: { type: string, format: uuid, description: 'The scheduled job (operation) the bar belongs to. On a cleanout bar it is the campaign id instead (campaignId repeats it): not a job, so never pass it to :move or :firm.' }
         orderId: { type: string, format: uuid }
+        placementVersion: { type: string, description: 'Identifies the placement of the whole order the job belongs to (every job segment resource, span and firmed flag). Send it as If-Match on a move or a firm; a changed order answers 412 SCHED-0154. Absent on cleanout bars.' }
         operNumber: { type: integer }
         orderRef: { type: string, description: 'Shop floor key: the production order id.' }
         operationRef: { type: string, description: 'Shop floor key: the operation number as text without leading zeros.' }

@@ -813,7 +813,7 @@ func (a *API) firmJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	idem.Fingerprint = fingerprint(jobID, body)
-	out, replayed, err := a.store.FirmJob(r.Context(), jobID, *req.Firmed, idem)
+	out, replayed, err := a.store.FirmJobIfMatch(r.Context(), jobID, *req.Firmed, r.Header.Get("If-Match"), idem)
 	if err != nil {
 		slog.Error("firm job failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -896,7 +896,7 @@ func (a *API) moveJob(w http.ResponseWriter, r *http.Request) {
 	}
 	a.moves.Add(1)
 	out, replayed, err := a.store.MoveJob(r.Context(), store.MoveRequest{JobID: jobID, ResourceID: strings.ToLower(req.ResourceID),
-		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun, Propagate: req.Propagate, Override: req.OverrideConstraints}, idem)
+		Start: req.Start.UTC(), HorizonDays: a.cfg.HorizonDays, DryRun: req.DryRun, Propagate: req.Propagate, Override: req.OverrideConstraints, IfMatch: r.Header.Get("If-Match")}, idem)
 	if err != nil {
 		slog.Error("move job failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

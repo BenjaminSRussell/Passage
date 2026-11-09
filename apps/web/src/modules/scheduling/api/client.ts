@@ -228,7 +228,17 @@ export interface GanttBar {
    */
   cleanout?: boolean;
   campaignId?: string | null;
+  /**
+   * Identifies the placement of the whole order the job belongs to. Sent as
+   * If-Match on a move or a firm: when the order was changed since the Gantt
+   * loaded (another planner, a run), the service answers 412 SCHED-0154 and
+   * writes nothing. Absent on cleanout bars and older servers.
+   */
+  placementVersion?: string;
 }
+
+/** The code of a move or firm built on a placement that has changed since it was loaded. */
+export const STALE_PLACEMENT = "SCHED-0154";
 
 export interface MoveRequest {
   resourceId?: string;
@@ -389,9 +399,10 @@ export function newKey(): string {
   return crypto.randomUUID();
 }
 
-function post<T>(path: string, body: unknown, key?: string): Promise<T> {
+function post<T>(path: string, body: unknown, key?: string, ifMatch?: string): Promise<T> {
   const headers: Record<string, string> = {};
   if (key) headers["Idempotency-Key"] = key;
+  if (ifMatch) headers["If-Match"] = `"${ifMatch}"`;
   return send<T>(path, { method: "POST", headers, body: JSON.stringify(body) });
 }
 
@@ -485,12 +496,12 @@ export function fetchGantt(from: string, to: string, resourceIds: string[] = [],
 }
 
 /** Preview (dryRun) or commit a move. A commit needs the key; send the same key to retry safely. */
-export function moveJob(jobId: string, req: MoveRequest, key?: string): Promise<MoveResponse> {
-  return post<MoveResponse>(`/jobs/${encodeURIComponent(jobId)}:move`, req, req.dryRun ? undefined : (key ?? newKey()));
+export function moveJob(jobId: string, req: MoveRequest, key?: string, placementVersion?: string): Promise<MoveResponse> {
+  return post<MoveResponse>(`/jobs/${encodeURIComponent(jobId)}:move`, req, req.dryRun ? undefined : (key ?? newKey()), placementVersion);
 }
 
-export function firmJob(jobId: string, firmed: boolean, key: string = newKey()): Promise<Firm> {
-  return post<Firm>(`/jobs/${encodeURIComponent(jobId)}:firm`, { firmed }, key);
+export function firmJob(jobId: string, firmed: boolean, key: string = newKey(), placementVersion?: string): Promise<Firm> {
+  return post<Firm>(`/jobs/${encodeURIComponent(jobId)}:firm`, { firmed }, key, placementVersion);
 }
 
 export function fetchCapacityLoad(from: string, weeks: number, resourceIds: string[] = [], signal?: AbortSignal): Promise<LoadItem[]> {

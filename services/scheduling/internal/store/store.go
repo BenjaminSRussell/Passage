@@ -208,6 +208,12 @@ type Bar struct {
 	// flagged outside capacity: the window is itself closed capacity.
 	Cleanout   bool    `json:"cleanout"`
 	CampaignID *string `json:"campaignId"`
+	// PlacementVersion identifies the placement of the whole order the bar's
+	// job belongs to (every job's resource, span and firmed flag). Send it as
+	// If-Match on a move or a firm: when another planner, a run or a move has
+	// changed the order since, the command is refused with SCHED-0154.
+	// Empty on cleanout bars.
+	PlacementVersion string `json:"placementVersion,omitempty"`
 }
 
 type RunRequest struct {
@@ -236,6 +242,9 @@ type MoveRequest struct {
 	// (SCHED-0002, SCHED-0005; see domain.MoveInput.Override). The caller has
 	// checked the override duty.
 	Override bool
+	// IfMatch is the placement version the planner saw (Bar.PlacementVersion);
+	// empty skips the check.
+	IfMatch string
 }
 
 // Violation is a constraint a move was committed over.
@@ -325,6 +334,9 @@ type Store interface {
 	Gantt(ctx context.Context, from, to time.Time, resourceIDs []string) ([]Bar, error)
 	MoveJob(ctx context.Context, req MoveRequest, idem Idem) (MoveOutcome, bool, error)
 	FirmJob(ctx context.Context, jobID string, firmed bool, idem Idem) (Firm, bool, error)
+	// FirmJobIfMatch is FirmJob refused with SCHED-0154 when ifMatch (not
+	// empty) is not the order's current placement version.
+	FirmJobIfMatch(ctx context.Context, jobID string, firmed bool, ifMatch string, idem Idem) (Firm, bool, error)
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
 	LoadStore
 	BottleneckStore
@@ -591,6 +603,9 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 		if err != nil {
 			return err
 		}
+		if err := checkPlacementVersion(ctx, tx, orderID, req.IfMatch); err != nil {
+			return err
+		}
 		var walk []string
 		var limit domain.PropagationLimit
 		var pegs []domain.Peg
@@ -731,6 +746,13 @@ func (s *Postgres) MoveJob(ctx context.Context, req MoveRequest, idem Idem) (Mov
 // placement is frozen against later runs and moves (FR-23.4). The change is
 // announced as job.scheduled in the same transaction.
 func (s *Postgres) FirmJob(ctx context.Context, jobID string, firmed bool, idem Idem) (Firm, bool, error) {
+	return s.FirmJobIfMatch(ctx, jobID, firmed, "", idem)
+}
+
+// FirmJobIfMatch is FirmJob under the placement version the planner saw: a
+// non-empty ifMatch that is no longer the order's version is refused with 412
+// SCHED-0154 and nothing changes.
+func (s *Postgres) FirmJobIfMatch(ctx context.Context, jobID string, firmed bool, ifMatch string, idem Idem) (Firm, bool, error) {
 	var out Firm
 	replayed := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -741,13 +763,26 @@ func (s *Postgres) FirmJob(ctx context.Context, jobID string, firmed bool, idem 
 				return err
 			}
 		}
+		// Lock the order's operations first, as runs, moves and campaign
+		// placement do, so a firm and a concurrent move of the same order
+		// serialize: the second one then reads the first one's placement and
+		// its If-Match check sees the change instead of both passing.
 		var runID string
-		err := tx.QueryRow(ctx, `select order_id::text, run_id::text from scheduled_job where job_id = $1::uuid limit 1 for update`, jobID).
-			Scan(&out.OrderID, &runID)
+		err := tx.QueryRow(ctx, `select order_id::text from scheduled_job where job_id = $1::uuid limit 1`, jobID).Scan(&out.OrderID)
+		if err == nil {
+			_, err = tx.Exec(ctx, `select id from scheduling_operation where order_id = $1::uuid order by oper_number for update`, out.OrderID)
+		}
+		if err == nil {
+			err = tx.QueryRow(ctx, `select order_id::text, run_id::text from scheduled_job where job_id = $1::uuid limit 1 for update`, jobID).
+				Scan(&out.OrderID, &runID)
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, CodeJobNotFound, "scheduled job not found")
 		}
 		if err != nil {
+			return err
+		}
+		if err := checkPlacementVersion(ctx, tx, out.OrderID, ifMatch); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update scheduled_job set firmed = $2 where job_id = $1::uuid`, jobID, firmed); err != nil {
@@ -898,6 +933,9 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		}
 		if len(bars) == 0 || len(bars) > MaxBars {
 			return nil
+		}
+		if err := fillPlacementVersions(ctx, tx, bars); err != nil {
+			return err
 		}
 		return flagOutsideCapacity(ctx, tx, bars)
 	})

@@ -1209,6 +1209,44 @@ that row is now only the campaign drawn as one block.
 |---|---|---|
 | Opening the campaign from its cleanout bar | later slice of PSG-23 | The bar shows its campaign in `data-cleanout-campaign` and a title; the campaign detail is reached from the campaign list. |
 
+## Slice 39: optimistic placement check on moves and firms (FR-23.8)
+
+A planner dragged a bar from a picture that another planner, a schedule run or
+a move had already changed, and the move was planned against the new state
+without telling them. Every job bar on `GET /gantt` now carries
+`placementVersion`: an md5 over all segments of the bar's order (job, segment,
+resource, start, end, firmed flag; epoch seconds, so independent of the session
+time zone). It is computed on read, so there is no migration and no counter to
+keep in step with the many writers (runs, moves, firms, unschedule, rollback,
+campaign placement all change it by changing a segment). `POST /jobs/{id}:move`
+(preview and commit) and `POST /jobs/{id}:firm` accept it in `If-Match`
+(quotes and a `W/` prefix are ignored); when it is no longer the order's
+version the service answers 412 `SCHED-0154` and writes nothing. The check runs
+inside the transaction after the order's operations are locked, so it cannot
+race another move of the order; a replay of the same Idempotency-Key still
+returns the stored answer first. If-Match stays optional (older clients work
+unchanged); without it the old behaviour applies. Cleanout bars carry no
+version. Web: the workspace sends the version on preview, commit and
+firm/unfirm; on SCHED-0154 it drops the pending move, reloads the Gantt and
+tells the planner to preview again.
+
+Scope of the version: it covers the moved or firmed job's own order only. A
+competing order that takes the target slot is not part of it: if that order
+committed first, the move's plan sees the booking (the preview shows the
+double booking `SCHED-0001`, a commit answers 422 `SCHED-0001`); if both commit
+at once, the exclusion constraint refuses the second with 409 `SCHED-0001`.
+Either way nothing is overwritten. Secondary
+resource bookings are not hashed; they follow the primary span, which is.
+Review: `:firm` now locks the order's operations before the check, like runs,
+moves and campaign placement, so a firm and a move of the same order sent with
+the same version serialize and the second is refused (it used to lock one job
+row only, and both could pass).
+
+| Item | Status | Reason |
+|---|---|---|
+| Making If-Match required on moves and firms | later slice of PSG-23 | Kept optional so existing API clients keep working; the web workspace already sends it. |
+| A version on dependents pushed by `propagate` | later slice of PSG-23 | The check covers the moved job's own order; pegged orders are re-planned against current placements under the existing exclusion constraint (their own versions change when they are pushed). |
+
 ## Ticket deliverables
 
 | # | Deliverable | Status | Reason |
@@ -1287,7 +1325,7 @@ that row is now only the campaign drawn as one block.
 | Extension points `scheduling.constraint`, `scheduling.objective` | later slice of PSG-23 | |
 | `ScheduledJob.overlap_qty` (the overlap lives on the operation since slice 28); `ScheduleRun.time_limit_s`, `started_at`, `objective_value` | later slice of PSG-23 | Columns arrive with the features that fill them. |
 | Rollback by re-pointing to a previous run | built (slice 29) | `POST /runs/{id}:rollback` restores the run's snapshot under a new run; see the slice 29 section. |
-| Optimistic version check on moves (If-Match) | later slice of PSG-23 | Moves lock the order's operations and the exclusion constraint refuses concurrent bookings, so a stale screen gets a fresh preview rather than a silent overwrite; resources now have an If-Match update (slice 13), moves still do not take If-Match. |
+| Optimistic version check on moves and firms (If-Match) | built (slice 39) | `Bar.placementVersion` on `GET /gantt`; see the slice 39 section. Sending If-Match is optional for API clients; the web workspace always sends it. |
 | scheduler-opt KEDA scale-to-zero and the `scheduling-db` CloudNativePG cluster | handoff — deploy owner | Charts ship the deployment and service only. |
 | Playwright Gantt move + propagate test (4.23.9) | later slice of PSG-23 | Covered by the store move and propagation tests and the page tests. |
 | `sched-propagation` fixture (pegged chains 5 deep, 4.23.9) | partial | The store test builds a 7-order chain in code and checks the 5-level cut; no fixture file under testdata. |
