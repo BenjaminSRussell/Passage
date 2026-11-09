@@ -60,6 +60,7 @@ type Route struct {
 type Reader interface {
 	ActiveBOM(ctx context.Context, legalEntityID, productID, siteID, asOf string) (*BOM, error)
 	ActiveRoute(ctx context.Context, legalEntityID, productID, siteID, asOf string) (*Route, error)
+	ActiveBOMProducts(ctx context.Context, legalEntityID, siteID, asOf string, limit int) ([]string, error)
 }
 
 type Client struct {
@@ -100,9 +101,10 @@ func FromEnv(getenv func(string) string) (*Client, error) {
 var bomUsageRank = map[string]int{"costing": 0, "production": 1, "": 1, "universal": 2}
 
 type bomHeader struct {
-	ID       string `json:"id"`
-	Usage    string `json:"usage"`
-	Category string `json:"category"`
+	ID        string `json:"id"`
+	ProductID string `json:"productId"`
+	Usage     string `json:"usage"`
+	Category  string `json:"category"`
 }
 
 func (c *Client) ActiveBOM(ctx context.Context, legalEntityID, productID, siteID, asOf string) (*BOM, error) {
@@ -136,6 +138,42 @@ func (c *Client) ActiveBOM(ctx context.Context, legalEntityID, productID, siteID
 		return nil, err
 	}
 	return &bom, nil
+}
+
+// ActiveBOMProducts lists the distinct products with an active material BOM at
+// the site on asOf, in the order engineering pages them. It stops once it holds
+// more than limit products, so the caller sees the overflow without reading on.
+func (c *Client) ActiveBOMProducts(ctx context.Context, legalEntityID, siteID, asOf string, limit int) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	cursor := ""
+	for {
+		var page struct {
+			Items      []bomHeader `json:"items"`
+			NextCursor string      `json:"nextCursor"`
+		}
+		query := url.Values{"siteId": {siteID}, "status": {"active"}, "asOf": {asOf}, "limit": {"100"}}
+		if cursor != "" {
+			query.Set("cursor", cursor)
+		}
+		if found, err := c.get(ctx, legalEntityID, bomPath+"?"+query.Encode(), &page); err != nil || !found {
+			return out, err
+		}
+		for _, h := range page.Items {
+			if _, ok := bomUsageRank[h.Usage]; !ok || (h.Category != "" && h.Category != "material") || seen[h.ProductID] {
+				continue
+			}
+			seen[h.ProductID] = true
+			out = append(out, h.ProductID)
+			if len(out) > limit {
+				return out, nil
+			}
+		}
+		if page.NextCursor == "" {
+			return out, nil
+		}
+		cursor = page.NextCursor
+	}
 }
 
 func (c *Client) ActiveRoute(ctx context.Context, legalEntityID, productID, siteID, asOf string) (*Route, error) {

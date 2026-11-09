@@ -10,6 +10,15 @@ release may change public APIs.
 
 ### Added
 
+- Product costing: activation revaluation report and mass roll by stored-BOM selection (#39). `GET
+  /v1/product-costing/activations/{id}/revaluation-report` (duty `productcost.view`) sets each stored activation line
+  beside the inventory on-hand read again from the inventory service for the posting date (the existing
+  `inventory.read`-only grant) and reports `tiedToJournal` (lines, total and booked journal agree) and `tiedToOnHand`.
+  `POST /v1/product-costing/versions/{id}/roll` takes `"selection": "allActive"` instead of `itemIds`: the roots are
+  every item with an active material BOM at the site on `asOf`, listed from engineering (`ActiveBOMProducts`), up to
+  50,000, so the request stays small against the 4 MiB body cap (tested with 30,000 BOMs whose equivalent body is over
+  4 MiB).
+
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

@@ -20,10 +20,14 @@ import (
 	"github.com/BenjaminSRussell/passage/services/productcost/internal/store"
 )
 
-// maxStoredRollItems bounds the items one stored roll reads from engineering
-// (one or two requests each).
+// maxStoredRollItems bounds the items one stored roll that names its items reads
+// from engineering (one or two requests each); a stored-BOM selection reads up to
+// MaxItems, because the request carries no item list to outgrow the body cap.
 // ponytail: one roll per request and sequential reads; upgrade to the durable mass roll (D5).
-const maxStoredRollItems = 200
+const (
+	maxStoredRollItems = 200
+	selectAllActive    = "allActive"
+)
 
 func (a *API) WithEngineering(r engineering.Reader) *API {
 	a.engineering = r
@@ -37,6 +41,7 @@ func (a *API) WithEngineering(r engineering.Reader) *API {
 type storedRollRequest struct {
 	SiteID         string                     `json:"siteId"`
 	ItemIDs        []string                   `json:"itemIds"`
+	Selection      string                     `json:"selection"`
 	AsOf           string                     `json:"asOf"`
 	Prices         map[string]decimal.Decimal `json:"prices"`
 	OperationRates map[string]decimal.Decimal `json:"operationRates"`
@@ -47,19 +52,13 @@ func (r storedRollRequest) validate(fields map[string]string) {
 	if !ids.Valid(r.SiteID) {
 		fields["siteId"] = "must be a UUID"
 	}
-	if len(r.ItemIDs) == 0 || len(r.ItemIDs) > maxStoredRollItems {
-		fields["itemIds"] = fmt.Sprintf("must contain 1 to %d item ids", maxStoredRollItems)
-	}
-	seen := map[string]bool{}
-	for i, id := range r.ItemIDs {
-		canonical, ok := ids.Canonical(id)
-		switch {
-		case !ok:
-			fields[fmt.Sprintf("itemIds[%d]", i)] = "must be a UUID"
-		case seen[canonical]:
-			fields[fmt.Sprintf("itemIds[%d]", i)] = "must be unique"
-		}
-		seen[canonical] = true
+	switch {
+	case r.Selection != "" && len(r.ItemIDs) > 0:
+		fields["selection"] = "name the items with itemIds or select the stored BOMs, not both"
+	case r.Selection != "" && r.Selection != selectAllActive:
+		fields["selection"] = "must be " + selectAllActive + ": every item with an active BOM at the site on asOf"
+	case r.Selection == "":
+		r.validateItemIDs(fields)
 	}
 	if r.AsOf != "" {
 		if _, err := time.Parse(time.DateOnly, r.AsOf); err != nil {
@@ -75,6 +74,23 @@ func (r storedRollRequest) validate(fields map[string]string) {
 		if v.IsNegative() {
 			fields["operationRates."+key] = "must not be negative"
 		}
+	}
+}
+
+func (r storedRollRequest) validateItemIDs(fields map[string]string) {
+	if len(r.ItemIDs) == 0 || len(r.ItemIDs) > maxStoredRollItems {
+		fields["itemIds"] = fmt.Sprintf("must contain 1 to %d item ids, or set selection", maxStoredRollItems)
+	}
+	seen := map[string]bool{}
+	for i, id := range r.ItemIDs {
+		canonical, ok := ids.Canonical(id)
+		switch {
+		case !ok:
+			fields[fmt.Sprintf("itemIds[%d]", i)] = "must be a UUID"
+		case seen[canonical]:
+			fields[fmt.Sprintf("itemIds[%d]", i)] = "must be unique"
+		}
+		seen[canonical] = true
 	}
 }
 
@@ -148,17 +164,17 @@ func routeOperations(route *engineering.Route, item string, rates map[string]dec
 	return out, nil
 }
 
-func (a *API) readCatalog(ctx context.Context, legalEntityID string, req storedRollRequest, asOf string) (rollSource, error) {
+func (a *API) readCatalog(ctx context.Context, legalEntityID string, roots []string, limit int, req storedRollRequest, asOf string) (rollSource, error) {
 	out := rollSource{catalog: domain.Catalog{}, sources: map[string]store.RollSource{}}
-	queue := slices.Clone(req.ItemIDs)
+	queue := slices.Clone(roots)
 	for len(queue) > 0 {
 		id := queue[0]
 		queue = queue[1:]
 		if _, seen := out.catalog[id]; seen {
 			continue
 		}
-		if len(out.catalog) >= maxStoredRollItems {
-			return out, rollInputError(fmt.Sprintf("the structures reach more than %d items; roll the subassemblies first", maxStoredRollItems))
+		if len(out.catalog) >= limit {
+			return out, rollInputError(fmt.Sprintf("the structures reach more than %d items; roll the subassemblies first", limit))
 		}
 		bom, err := a.engineering.ActiveBOM(ctx, legalEntityID, id, req.SiteID, asOf)
 		if err != nil {
@@ -261,14 +277,22 @@ func (a *API) rollStoredVersion(w http.ResponseWriter, r *http.Request) {
 		storeFailure(w, r, &domain.CodedError{Code: domain.CodeVersionNotRollable, Detail: "version " + v.Code + " is " + v.Status + "; only an Open version can be rolled"})
 		return
 	}
-	src, err := a.readCatalog(r.Context(), v.LegalEntityID, req, asOf)
+	roots, limit := req.ItemIDs, maxStoredRollItems
+	if req.Selection != "" {
+		limit = MaxItems
+		if roots, err = a.selectRoots(r.Context(), v.LegalEntityID, req.SiteID, asOf); err != nil {
+			a.rollInputFailure(w, r, id, err)
+			return
+		}
+	}
+	src, err := a.readCatalog(r.Context(), v.LegalEntityID, roots, limit, req, asOf)
 	if err != nil {
 		a.rollInputFailure(w, r, id, err)
 		return
 	}
 	run := domain.MassRoll(src.catalog, opts)
 	res, replayed, err := a.store.StoreRoll(r.Context(), store.RollInput{
-		VersionID: id, SiteID: req.SiteID, Key: key, Options: opts, Roots: req.ItemIDs, Sources: src.sources, Run: run,
+		VersionID: id, SiteID: req.SiteID, Key: key, Options: opts, Roots: roots, Sources: src.sources, Run: run,
 		Fingerprint: fingerprint,
 	})
 	if err != nil {
@@ -281,6 +305,28 @@ func (a *API) rollStoredVersion(w http.ResponseWriter, r *http.Request) {
 		a.rollErrors.Add(int64(res.ErrorCount))
 	}
 	created(w, res, replayed)
+}
+
+func (a *API) selectRoots(ctx context.Context, legalEntityID, siteID, asOf string) ([]string, error) {
+	products, err := a.engineering.ActiveBOMProducts(ctx, legalEntityID, siteID, asOf, MaxItems)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case len(products) == 0:
+		return nil, rollInputError("no item has an active BOM at the site on " + asOf)
+	case len(products) > MaxItems:
+		return nil, rollInputError(fmt.Sprintf("more than %d items have an active BOM at the site; roll them in parts with itemIds", MaxItems))
+	}
+	roots := make([]string, len(products))
+	for i, p := range products {
+		canonical, ok := ids.Canonical(p)
+		if !ok {
+			return nil, rollInputError("engineering listed the product " + p + ", which is not a UUID")
+		}
+		roots[i] = canonical
+	}
+	return roots, nil
 }
 
 func (a *API) rollInputFailure(w http.ResponseWriter, r *http.Request, versionID string, err error) {

@@ -1060,6 +1060,7 @@
     ]},
     "productcost.variance.compute": {"permissions": [{"resource": "/v1/product-costing/variances/compute", "methods": ["POST"]}]},
     "productcost.view": {"permissions": [
+      {"resource": "/v1/product-costing/activations/*/revaluation-report", "methods": ["GET"]},
       {"resource": "/v1/product-costing/comparisons", "methods": ["POST"]},
       {"resource": "/v1/product-costing/cost-components", "methods": ["GET"]},
       {"resource": "/v1/product-costing/cost-groups", "methods": ["GET"]},
