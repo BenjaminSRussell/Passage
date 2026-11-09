@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { checkAxeAA } from "../a11y";
 import { EntityLookup, type EntityLookupProps } from "./EntityLookup";
 import { EntityName } from "./EntityName";
 import { clearResolvedOptions, formatOption, lookupDefs, setLookupFetcher } from "./entities";
@@ -292,5 +293,17 @@ describe("work context", () => {
       </WorkContextProvider>,
     );
     expect(screen.getByLabelText("context")).toHaveTextContent("le-9|s-9");
+  });
+});
+
+describe("EntityLookup accessibility", () => {
+  it("passes axe with a FormField-style visible label, a value and an open list", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Harness initial={VENDOR_ID} />);
+    await screen.findByDisplayValue("Contoso Ltd (V-00042)");
+    await user.click(screen.getByRole("combobox", { name: "Vendor" }));
+    await screen.findByRole("option", { name: /Contoso Ltd/ });
+    const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region", "bypass"]);
+    expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]);
   });
 });
