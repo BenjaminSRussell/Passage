@@ -10,6 +10,11 @@ release may change public APIs.
 
 ### Added
 
+- Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org
+  unit, up to 10 scenarios with copy-from, a plan grid (account x cost center x period) with bulk upsert under ETag and
+  If-Match, even and prior-year-actuals spreading, and RLS on the five new tables. workflow-ts runs the approval as a Temporal
+  workflow per submission; approval posts the scenario as the Original budget register entry that budget control reads.
+
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

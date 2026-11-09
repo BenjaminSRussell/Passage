@@ -6,7 +6,11 @@ Every PSG-38 deliverable and acceptance criterion that slices 1 to 4 do not buil
 |---|---|---|---|
 | Register entry workflow: Draft, Submitted, Approved, Rejected; `submit` endpoint; BR-38.2 state machine | FR-38.1, BR-38.2 | later slice of PSG-38 | Slice 1 posts entries directly; workflow runs on Temporal in a later slice. |
 | Budget model hierarchies (sub-models roll up); 2M lines per model | FR-38.1 | later slice of PSG-38 | Needs the model entity; slice 1 keeps one flat combination key. |
-| Budget planning: processes, stages, up to 10 scenarios, top-down and bottom-up, distribution keys, plan grid, scenario comparison | FR-38.2, AC-38.7 (AC4) | later slice of PSG-38 | Large entity set; depends on the workflow above. |
+| Budget planning: processes, stages, up to 10 scenarios, plan grid, even and prior-year-actuals spreading, approval workflow (P4) | built (#38) | `migrations/0006_planning.sql`, `internal/store/plan.go`, `internal/api/plan.go`, workflow-ts `budgetPlanWorkflow`; proof in `internal/store/plan_test.go`, `internal/api/plan_test.go`, `internal/domain/plan_test.go`, `test/budgetPlan.test.ts` |
+| Planning: top-down and bottom-up distribution keys beyond even and prior-year, scenario comparison | not built | FR-38.2 remainder; the grid and spread are the base |
+| Planning: xlsx templates and generation from other sources (FR-38.13, FR-38.14), web plan grid | not built | no spreadsheet engine or UI in this slice |
+| Planning: org unit validation and cost center level ledger weights | not built | owners are not checked against the org service; the ledger balance is per account |
+| Planning: plan.submitted Kafka subscription and workflow timeout | not built | `handlePlanSubmitted` is the tested starter, nothing consumes the topic yet; no timeout because budgeting has no system actor to reject a stuck plan |
 | Budget control rule activation and disable history; budget cycle time spans (year, quarter, period, custom) | FR-38.3, BR-38.5, CO-0603 | later slice of PSG-38 | Slice 1 takes the span key from the request; cycles need the fiscal calendar (wave 14). |
 | User-group overrides (`BudgetControlUserGroup` mapped to Keycloak groups) | FR-38.3, FR-38.4 step 7 | partial | Slice 1 uses the `budget.override` duty only. |
 | Documents under control: Expense, Project | FR-38.3 | later slice of PSG-38 | Requisition, PurchaseOrder, Invoice and Journal are checked; Reservation is checked on creation (slice 2). |

@@ -3,6 +3,8 @@
 | Deliverable | Status | Reason |
 |---|---|---|
 | Payment run workflow (#102) | built | `src/paymentRunWorkflow.ts`, `src/paymentRunActivities.ts`, `src/startPaymentRun.ts`; crash and re-run proof in `test/paymentRun.test.ts` |
+| Budget plan approval workflow (#38 P4) | built | `src/budgetPlanWorkflow.ts`, `src/budgetPlanActivities.ts`, `src/budgetPlanTriggers.ts`; stage owners, segregation of duties, reject, stale submission and lost-reply proof in `test/budgetPlan.test.ts` |
+| Kafka subscription that calls `handlePlanSubmitted` | not built | the starter is tested; nothing consumes `plan.submitted` yet |
 | ECO approval workflow (wave 09 AC3) | built | `src/ecoApprovalWorkflow.ts`, `src/ecoActivities.ts`; approve, reject, timeout, scheduled release and lost-reply proof in `test/ecoApproval.test.ts` |
 | CAPA workflow (wave 33 AC4) | built | `src/capaWorkflow.ts`, `src/capaActivities.ts`; effectiveness check, reopen, escalation and stall proof in `test/capa.test.ts` |
 | Tender cascade workflow (wave 34 AC4) | built | `src/tenderWorkflow.ts`, `src/tenderActivities.ts`; timeout, decline, accept, all-declined escalation and stalled-sweep proof in `test/tender.test.ts` against a stateful fake of the transport tender contract |
