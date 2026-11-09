@@ -10,6 +10,8 @@ release may change public APIs.
 
 ### Added
 
+- Dispatch optimization (#45): passage-dispatch solves a day with CP-SAT (greedy fallback on timeout or infeasible model) behind `POST /v1/dispatch/runs` and `GET /v1/dispatch/runs/{id}`, honoring skills, shifts, windows, due times, pinned visits and overtime. Fieldservice `POST /v1/service/dispatch/optimizations` snapshots a territory-day's open work orders, technicians and held visits, calls it over a duty-scoped service token (new fieldservice to dispatch grant in `platform/go/tenant` and `policies/authz/data.json`), backs off and parks failures, and `:accept` writes the plan back through the assignment path (migration 0011, codes `SVC-DSP-014` to `017`, `DISPATCH_URL`). The technician mobile app and a deployment chart for dispatch are still open.
+
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

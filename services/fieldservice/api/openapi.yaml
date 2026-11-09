@@ -931,6 +931,132 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/optimizations:
+    post:
+      operationId: requestDispatchOptimization
+      summary: Optimize a territory-day with the dispatch service (BR-45.3)
+      description: |
+        Snapshots the active technicians of the legal entity who cover the territory, the territory's
+        UNSCHEDULED work orders and the orders those technicians already hold on the day (which stay where
+        they are), stores the snapshot and makes the first call to the dispatch service. Work orders without
+        coordinates or with a window outside the day, and technicians off that day, in another time zone,
+        without a home position or whose held visits cannot be reached by travel, are listed in skipped.
+        A failed call is retried by :sync after min(3600, 60 * 2^attempts) seconds and the optimization is
+        PARKED after five failures or a refusal that cannot change. Nothing to place is SVC-DSP-016; a
+        service without DISPATCH_URL or signing key is SVC-DSP-017.
+      x-passage-duty: fieldservice.technician.dispatch
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OptimizeRequest" }
+      responses:
+        "201":
+          description: The optimization after the first call
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchOptimization" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listDispatchOptimizations
+      summary: List dispatch optimizations newest first
+      x-passage-duty: fieldservice.inquire
+      parameters:
+        - { name: territoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, RUNNING, SUCCEEDED, ACCEPTED, PARKED] } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchOptimizationPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/optimizations/{id}:
+    get:
+      operationId: getDispatchOptimization
+      summary: Read an optimization with its plan and, once accepted, its outcome
+      x-passage-duty: fieldservice.inquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The optimization
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchOptimization" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/optimizations/{id}:sync:
+    post:
+      operationId: syncDispatchOptimization
+      summary: Take the next step of an optimization
+      description: Submits a PENDING optimization whose back-off has passed, or polls the RUNNING run at the dispatch service and stores its plan. Any other state is returned unchanged.
+      x-passage-duty: fieldservice.technician.dispatch
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The optimization
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchOptimization" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/optimizations/{id}:retry:
+    post:
+      operationId: retryDispatchOptimization
+      summary: Put a PARKED optimization back at attempt zero and try it now
+      x-passage-duty: fieldservice.technician.dispatch
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The optimization
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchOptimization" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/service/dispatch/optimizations/{id}:accept:
+    post:
+      operationId: acceptDispatchOptimization
+      summary: Write the plan of a SUCCEEDED optimization as assignments
+      description: |
+        Each planned visit goes through the manual assignment checks of BR-45.3 in route order and becomes a
+        SCHEDULED work order (dev.passage.service.assignment.changed.v1 per visit). A visit that fails the checks,
+        or whose work order is no longer UNSCHEDULED, is listed in outcome.rejected and does not stop the others.
+        Orders assigned when the snapshot was taken keep their assignment. A second accept returns the first
+        outcome. Any status but SUCCEEDED and ACCEPTED is SVC-DSP-015.
+      x-passage-duty: fieldservice.technician.dispatch
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The ACCEPTED optimization
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DispatchOptimization" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /v1/service/service-objects:
     post:
       operationId: createServiceObject
@@ -3068,4 +3194,95 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/DispatchRun" } }
+        nextCursor: { type: string, format: uuid }
+    OptimizeRequest:
+      type: object
+      required: [legalEntityId, territoryId, date]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        territoryId: { type: string, format: uuid }
+        date: { type: string, format: date, description: The local calendar day. }
+        timeZone: { type: string, example: America/Chicago, description: UTC when absent; technicians of another time zone are skipped. }
+        timeLimitSeconds: { type: integer, minimum: 1, maximum: 120, default: 20, description: Solver time limit; the greedy plan is the fallback. }
+    OptimizationAssignment:
+      type: object
+      properties:
+        workOrderId: { type: string, format: uuid }
+        technicianId: { type: string, format: uuid }
+        start: { type: integer, description: Minutes from the start of the local day. }
+        end: { type: integer }
+        sequence: { type: integer }
+    OptimizationResult:
+      type: object
+      properties:
+        assignments: { type: array, items: { $ref: "#/components/schemas/OptimizationAssignment" } }
+        unassigned: { type: array, items: { type: string, format: uuid } }
+        solver: { type: string, enum: [cpsat, greedy] }
+        cpsatStatus: { type: string }
+        fallbackReason: { type: string, nullable: true }
+        elapsedSeconds: { type: number }
+        cost:
+          type: object
+          properties:
+            unassignedPriority: { type: integer }
+            latenessMinutes: { type: integer }
+            travelMinutes: { type: integer }
+            overtimeMinutes: { type: integer }
+            technicians: { type: integer }
+            total: { type: integer }
+    OptimizationSkipped:
+      type: object
+      properties:
+        kind: { type: string, enum: [TECHNICIAN, WORK_ORDER] }
+        id: { type: string, format: uuid }
+        reason: { type: string, enum: [TIME_ZONE, OFF_DAY, NO_HOME, HELD_ROUTE_UNREACHABLE, NO_LOCATION, WINDOW_OUTSIDE_DAY, OVER_LIMIT] }
+    OptimizationOutcome:
+      type: object
+      properties:
+        applied:
+          type: array
+          items:
+            type: object
+            properties:
+              workOrderId: { type: string, format: uuid }
+              technicianId: { type: string, format: uuid }
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
+        rejected:
+          type: array
+          items:
+            type: object
+            properties:
+              workOrderId: { type: string, format: uuid }
+              code: { type: string }
+              detail: { type: string }
+    DispatchOptimization:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        territoryId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        timeZone: { type: string }
+        status: { type: string, enum: [PENDING, RUNNING, SUCCEEDED, ACCEPTED, PARKED] }
+        technicians: { type: integer, description: Technicians in the snapshot. }
+        workOrders: { type: integer, description: Open work orders in the snapshot. }
+        pinned: { type: integer, description: Held orders fixed in place. }
+        skipped: { type: array, items: { $ref: "#/components/schemas/OptimizationSkipped" } }
+        remoteRunId: { type: string }
+        result: { $ref: "#/components/schemas/OptimizationResult" }
+        outcome: { $ref: "#/components/schemas/OptimizationOutcome" }
+        attemptCount: { type: integer }
+        nextAttemptAt: { type: string, format: date-time }
+        lastError: { type: string }
+        requestedBy: { type: string }
+        acceptedBy: { type: string }
+        acceptedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    DispatchOptimizationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/DispatchOptimization" } }
         nextCursor: { type: string, format: uuid }

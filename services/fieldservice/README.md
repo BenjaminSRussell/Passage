@@ -44,7 +44,8 @@ migrations/             0001_init.sql (RLS, tenant_id first, money numeric(20,6)
                         0007 supplier claims and email intake, 0008_agreement_lifecycle_visits.sql
                         (agreement version and status log, included-visit consumption),
                         0009_dispatch.sql (technicians, work-order scheduling and assignment columns,
-                        published dispatch runs, with their passage_app grants)
+                        published dispatch runs, with their passage_app grants),
+                        0011_dispatch_optimization.sql (optimizer runs: snapshot, result, outcome, backoff)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event published
 charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor)
@@ -111,6 +112,8 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | POST | `/v1/service/work-orders/{id}/actions` (a batch of the technician's offline actions; each action id idempotent) | fieldservice.work-order.execute |
 | GET | `/v1/service/work-orders/{id}/actions` (the log in merge order) | fieldservice.inquire |
 | GET | `/v1/service/dispatch/runs` (`territoryId`), `/v1/service/dispatch/runs/{id}` | fieldservice.inquire |
+| POST | `/v1/service/dispatch/optimizations` (`territoryId`, `date`, `timeZone`, `timeLimitSeconds`), `/{id}:sync`, `/{id}:retry`, `/{id}:accept` | fieldservice.technician.dispatch (Idempotency-Key on create) |
+| GET | `/v1/service/dispatch/optimizations` (`territoryId`), `/v1/service/dispatch/optimizations/{id}` | fieldservice.inquire |
 Lists are newest first (activities: earliest due first, undated last) and page with `cursor` (the previous page's `nextCursor`)
 and `limit` (1 to 200, default 50); they see only the caller's legal entities.
 Work-order, case (service and generic), service-object and activity responses carry `ETag: "<version>"`, and
@@ -170,7 +173,7 @@ export MIGRATE_ON_START=true          # dev only
 go run ./cmd/fieldservice             # HTTP_ADDR :8080, ADMIN_ADDR :9090
 ```
 
-Environment: `DATABASE_URL` (required), `MIGRATE_ON_START`, `HTTP_ADDR`, `ADMIN_ADDR`.
+Environment: `DATABASE_URL` (required), `MIGRATE_ON_START`, `HTTP_ADDR`, `ADMIN_ADDR`, `DISPATCH_URL` (base URL of passage-dispatch; without it optimizations answer 503 `SVC-DSP-017`) with the service-token signing key.
 
 ## Test
 
@@ -186,6 +189,7 @@ without `PASSAGE_TEST_DATABASE_URL`.
 
 ## Behaviour notes
 
+- Dispatch optimization (BR-45.3, issue #45): a request snapshots the territory-day's open work orders, qualified technicians and held visits into one run for passage-dispatch (CP-SAT, greedy fallback), over a service token carrying only `dispatch.run.create` or `dispatch.run.read`. There is no background worker: `:sync` polls the run. A failure backs off `min(3600, 60*2^n)` seconds and parks at the 5th failure, or at once when dispatch refuses the problem (400/422); `:retry` revives a parked run. `:accept` writes the plan through the normal assignment path, one savepoint per visit, reports what it could not apply, and a second accept returns the stored outcome.
 - SLA clocks count business minutes of the profile calendar (Monday to Friday between
   opening and closing, the profile's holidays excluded) in the profile's time zone
   (`time/tzdata` is embedded); a 24x7 profile counts wall-clock minutes.
@@ -390,6 +394,10 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `SVC-SYNC-006` | action | REJECTED: the device time is more than 5 minutes before the work order was created (check the device clock) |
 | `SVC-DSP-009` | 422 | Nothing scheduled to dispatch on that territory-day (or an unreadable day) |
 | `SVC-DSP-010` | 404 | Dispatch run not found |
+| `SVC-DSP-014` | 404 | Optimization not found |
+| `SVC-DSP-015` | 422 | Optimization is not in a state that allows the action |
+| `SVC-DSP-016` | 422 | Nothing to optimize: no qualified technicians or no open work orders on that territory-day |
+| `SVC-DSP-017` | 503 | The dispatch service is not configured |
 | `SVC-ENT-001` | — | Info in the entitlement trace: no agreement matched, fallback profile applied |
 | `SVC-ENT-002` | 422 | No agreement matched and no fallback SLA profile supplied |
 | `SVC-CASE-001` | 404 / 422 | Service case not found (422 when a work order references it) |
