@@ -465,6 +465,16 @@ test_payment_status_parse_duty_does_not_open_file_preview if {
 	not allowed("payment-status.parse", "POST", "/v1/payables/payment-files:preview")
 }
 
+test_fulfillment_carrier_manifests if {
+	allowed("fulfillment.warehouse.view", "GET", "/v1/fulfillment/manifest-candidates")
+	allowed("fulfillment.warehouse.view", "GET", "/v1/fulfillment/manifests")
+	allowed("fulfillment.warehouse.view", "GET", "/v1/fulfillment/manifests/m-1")
+	allowed("fulfillment.warehouse.ship", "POST", "/v1/fulfillment/manifests")
+	allowed("fulfillment.warehouse.ship", "POST", "/v1/fulfillment/manifests/m-1:cancel")
+	not allowed("fulfillment.warehouse.view", "POST", "/v1/fulfillment/manifests")
+	not allowed("fulfillment.warehouse.view", "POST", "/v1/fulfillment/manifests/m-1:cancel")
+}
+
 test_aging_duties_open_only_their_routes if {
 	allowed("aging.read", "GET", "/v1/payables/aging")
 	not allowed("aging.read", "GET", "/v1/payables/aging:reconcile")

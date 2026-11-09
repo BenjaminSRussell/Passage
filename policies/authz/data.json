@@ -1829,7 +1829,9 @@
       {"resource": "/v1/fulfillment/shipments/*/tracking", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/shipments/*:carrier-rates", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/shipments/*:carrier-label", "methods": ["POST"]},
-      {"resource": "/v1/fulfillment/shipments/*:carrier-track", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/shipments/*:carrier-track", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/manifests", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/manifests/*:cancel", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.view": {"permissions": [
       {"resource": "/v1/fulfillment/backorders", "methods": ["GET"]},
@@ -1861,7 +1863,10 @@
       {"resource": "/v1/fulfillment/returnable-packaging/movements", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/delivery-tolerances", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/operation-rules", "methods": ["GET"]},
-      {"resource": "/v1/fulfillment/operation-rules/*", "methods": ["GET"]}
+      {"resource": "/v1/fulfillment/operation-rules/*", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/manifest-candidates", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/manifests", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/manifests/*", "methods": ["GET"]}
     ]},
     "fulfillment.returnable-packaging.maintain": {"permissions": [{"resource": "/v1/fulfillment/returnable-packaging:adjust", "methods": ["POST"]}]},
     "audit.read": {"permissions": [
