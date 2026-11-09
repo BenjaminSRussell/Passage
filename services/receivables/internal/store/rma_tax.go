@@ -47,6 +47,13 @@ func (s *Postgres) rmaTaxAccountsFor(in RMACredit) (map[string]string, error) {
 	return out, nil
 }
 
+func (s *Postgres) markTaxRecorded(ctx context.Context, tenantID, id string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update rma_credit set tax_recorded = true where tenant_id = $1 and id = $2`, tenantID, id)
+		return err
+	})
+}
+
 func (s *Postgres) WithBilling(b billingclient.Reader) *Postgres {
 	s.billing = b
 	return s

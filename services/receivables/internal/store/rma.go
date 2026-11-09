@@ -113,7 +113,7 @@ type rmaCreditRow struct {
 	gross, restocking, net, tax                                                                                         decimal.Decimal
 	attempts                                                                                                            int
 	nextAttempt                                                                                                         *time.Time
-	parked                                                                                                              bool
+	parked, taxRecorded                                                                                                 bool
 	createdAt                                                                                                           time.Time
 }
 
@@ -137,7 +137,7 @@ func (r rmaCreditRow) view() RMACreditView {
 
 const rmaCreditColumns = `id::text, legal_entity_id::text, rma_id::text, rma_number, credit_open_item_id::text, customer_id::text, currency::text,
 	posting_date::text, ledger_id::text, request_hash, status, journal_posting_id, gross::text, restocking::text, net::text, tax::text, gl_attempts,
-	gl_next_attempt_at, gl_parked, created_at`
+	gl_next_attempt_at, gl_parked, created_at, tax_recorded`
 
 // WithLedger sets the journal poster used by RMA credits.
 func (s *Postgres) WithLedger(l ledgerclient.Ledger) *Postgres {
@@ -234,14 +234,9 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 	if s.ledger == nil || ledgerID == "" {
 		return RMACreditNote{}, httpx.NewProblem(http.StatusServiceUnavailable, CodeRMAUnavailable, "the ledger or the legal entity's RMA ledger is not configured")
 	}
-	taxAccounts, err := s.rmaTaxAccountsFor(in)
-	if err != nil {
-		return RMACreditNote{}, err
-	}
-	billed, err := s.billedTax(ctx, in)
-	if err != nil {
-		return RMACreditNote{}, err
-	}
+	var err error
+	var taxAccounts map[string]string
+	var billed map[string]decimal.Decimal
 	tax := taxTotal(in.TaxLines)
 	p, _ := tenant.FromContext(ctx)
 	doc := "CN-" + in.RMANumber
@@ -257,6 +252,12 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if taxAccounts, err = s.rmaTaxAccountsFor(in); err != nil {
+			return err
+		}
+		if billed, err = s.billedTax(ctx, in); err != nil {
 			return err
 		}
 		invoice, err := scanOpenItem(tx.QueryRow(ctx, `select `+openItemColumns+` from open_item
@@ -337,9 +338,14 @@ func (s *Postgres) postRMAJournal(ctx context.Context, tenantID string, row rmaC
 	if err != nil {
 		return row, err
 	}
-	journalID, err := s.ledgerPost(ctx, row, taxLines)
+	var journalID string
+	if !row.taxRecorded {
+		if err = s.recordTax(ctx, row, taxLines); err == nil {
+			err = s.markTaxRecorded(ctx, tenantID, row.id)
+		}
+	}
 	if err == nil {
-		err = s.recordTax(ctx, row, taxLines)
+		journalID, err = s.ledgerPost(ctx, row, taxLines)
 	}
 	if err != nil {
 		parked := ledgerclient.Rejected(err) || taxclient.Rejected(err)
@@ -575,7 +581,7 @@ func scanRMACredit(row rowScanner) (rmaCreditRow, error) {
 	var r rmaCreditRow
 	var gross, restocking, net, tax string
 	if err := row.Scan(&r.id, &r.legalEntityID, &r.rmaID, &r.rmaNumber, &r.creditItemID, &r.customerID, &r.currency, &r.postingDate, &r.ledgerID,
-		&r.requestHash, &r.status, &r.journal, &gross, &restocking, &net, &tax, &r.attempts, &r.nextAttempt, &r.parked, &r.createdAt); err != nil {
+		&r.requestHash, &r.status, &r.journal, &gross, &restocking, &net, &tax, &r.attempts, &r.nextAttempt, &r.parked, &r.createdAt, &r.taxRecorded); err != nil {
 		return rmaCreditRow{}, err
 	}
 	r.gross, r.restocking, r.net, r.tax = decimal.RequireFromString(gross), decimal.RequireFromString(restocking), decimal.RequireFromString(net), decimal.RequireFromString(tax)

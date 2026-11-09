@@ -180,3 +180,15 @@ func (e *taxEnv) creditOnlyUntilCredit(t *testing.T, qtyA, qtyB int64) ReturnOrd
 	}
 	return disp
 }
+
+func TestRMA_TaxedInvoiceLineWithoutATaxCodeIsRefusedNotDropped(t *testing.T) {
+	e := newTaxEnv(t)
+	e.src.invoice.Lines[0].TaxCode = ""
+	in := e.creditOnlyUntilCredit(t, 3, 0)
+	if _, err := e.s.CreditReturnOrder(e.ctx, in.ID, in.Version, "ar-clerk", e.now); stateCode(t, err) != CodeRMAInvoice {
+		t.Fatalf("tax 190.00 on a line without a code: %v", err)
+	}
+	if len(e.ar.credits) != 0 {
+		t.Fatalf("nothing is sent to AR: %+v", e.ar.credits)
+	}
+}

@@ -49,6 +49,9 @@ func storeReversedTax(ctx context.Context, tx pgx.Tx, tenantID string, o ReturnO
 	total := decimal.Zero
 	for _, r := range domain.ReverseTax(o.Currency, basis, returned) {
 		if r.TaxCode == "" {
+			if r.Tax.IsPositive() {
+				return decimal.Zero, problem(http.StatusUnprocessableEntity, CodeRMAInvoice, "an invoice line with tax has no tax code; its tax cannot be reversed")
+			}
 			continue
 		}
 		if _, err := tx.Exec(ctx, `insert into return_order_tax (tenant_id, id, legal_entity_id, return_order_id, original_invoice_id, invoice_line_no, tax_code, qty, tax)

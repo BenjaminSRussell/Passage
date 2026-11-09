@@ -150,7 +150,7 @@ func TestPostRMACredit_TaxServiceOutageKeepsCreditPendingAndRecordsOnceWhenBack(
 }
 
 func TestPostRMACredit_TaxServiceRefusalParksTheCredit(t *testing.T) {
-	s, _, tax := rmaTaxSetup(t)
+	s, gl, tax := rmaTaxSetup(t)
 	ctx := tenantCtx(1)
 	inv := seedInvoice(t, s, ctx)
 	tax.Err = &taxclient.StatusError{Status: http.StatusBadRequest}
@@ -160,6 +160,17 @@ func TestPostRMACredit_TaxServiceRefusalParksTheCredit(t *testing.T) {
 	parked, err := s.ListRMACredits(ctx, RMACreditFilter{ParkedOnly: true, Limit: 10})
 	if err != nil || len(parked) != 1 || !parked[0].Tax.Equal(amt("64.00")) {
 		t.Fatalf("parked: %+v %v", parked, err)
+	}
+	if len(gl.Entries()) != 0 || len(creditItems(t, s, ctx, inv.CustomerID)) != 0 {
+		t.Fatalf("a tax refusal leaves the GL and AR untouched: %d journals", len(gl.Entries()))
+	}
+	tax.Err = nil
+	if _, err := s.RetryRMACredit(ctx, parked[0].ID, "2027-03-05"); err != nil {
+		t.Fatalf("retry after the fix: %v", err)
+	}
+	items := creditItems(t, s, ctx, inv.CustomerID)
+	if len(gl.Entries()) != 1 || len(items) != 1 || !items[0].Amount.Equal(amt("-319.00")) || len(tax.Recorded()) != 2 {
+		t.Fatalf("one journal, one open item, tax once: %d journals %+v %d tax transactions", len(gl.Entries()), items, len(tax.Recorded()))
 	}
 }
 
@@ -277,5 +288,19 @@ func TestPostRMACredit_TaxBasisIsBillingsNotTheCallers(t *testing.T) {
 	s.billing = nil
 	if _, err := s.PostRMACredit(ctx, taxOnly(inv.DocumentNumber, "RMA-0000001", "DE7", "1.00")); problemCode(err) != CodeRMAUnavailable {
 		t.Fatalf("billing not configured: %v", err)
+	}
+}
+
+func TestPostRMACredit_ReplayOfAStoredCreditSurvivesABillingOutage(t *testing.T) {
+	s, _, _ := rmaTaxSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := taxedIn(inv.DocumentNumber)
+	if _, err := s.PostRMACredit(ctx, in); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	s.billing = nil
+	if _, err := s.PostRMACredit(ctx, in); err != nil {
+		t.Fatalf("replay without billing: %v", err)
 	}
 }
