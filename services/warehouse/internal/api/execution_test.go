@@ -324,7 +324,8 @@ func TestPersistedRoutes_PassTheCommand(t *testing.T) {
 		t.Fatalf("pick for an order line: %d %s %+v", rec.Code, rec.Body, fake.plan.Lines)
 	}
 	for name, ln := range map[string]string{"a put": `"direction":"PUT","orderLineId":"` + line + `"`, "not an id": `"direction":"PICK","orderLineId":"x"`,
-		"both": `"direction":"PICK","orderLineId":"` + line + `","attributes":{"issueRef":"SALES_LINE:other"}`} {
+		"both":           `"direction":"PICK","orderLineId":"` + line + `","attributes":{"issueRef":"SALES_LINE:` + line + `"}`,
+		"upper-case ref": `"direction":"PICK","attributes":{"issueRef":"SALES_LINE:` + strings.ToUpper(line) + `"}`} {
 		rec = call(h, req{method: "POST", path: "/v1/warehouse/work", duties: dutyWorkSupervise, key: "k2c",
 			body: `{"warehouseId":"` + wh + `","workType":"SALES_PICK","lines":[{"itemId":"BOLT","qty":"1",` + ln + `}]}`})
 		if rec.Code != 400 {

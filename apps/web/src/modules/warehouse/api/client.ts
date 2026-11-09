@@ -222,6 +222,7 @@ export interface WorkLineInput {
   weight?: string;
   volume?: string;
   lps?: number;
+  orderLineId?: string;
 }
 
 export interface WorkInput {

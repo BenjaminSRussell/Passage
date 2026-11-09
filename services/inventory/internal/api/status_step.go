@@ -13,8 +13,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
-	"github.com/BenjaminSRussell/passage/platform/issueclaim"
-	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -56,10 +54,6 @@ type applyRequest struct {
 	Currency      string            `json:"currency"`
 	CostPrice     string            `json:"costPrice"`
 	CWQty         *int              `json:"cwQty"`
-	// IssueRef names the sales line an issue registration is booked for; it must
-	// be SALES_LINE:<origin.sourceId> of a SALES_LINE origin and comes from a
-	// service principal, so a caller can settle only its own line's claims.
-	IssueRef string `json:"issueRef"`
 	// Both.
 	ToStatus string `json:"toStatus"`
 	Date     string `json:"date"`
@@ -165,7 +159,7 @@ func (a *API) stepTransaction(w http.ResponseWriter, r *http.Request, req applyR
 	}
 	for name, set := range map[string]bool{"legalEntityId": req.LegalEntityID != "", "productId": req.ProductID != "", "qty": req.Qty != "",
 		"dimensions": req.Dimensions != nil, "currency": req.Currency != "", "costPrice": req.CostPrice != "", "enteredUnit": req.EnteredUnit != "",
-		"cwQty": req.CWQty != nil, "issueRef": req.IssueRef != ""} {
+		"cwQty": req.CWQty != nil} {
 		if set {
 			fields[name] = "applies only when origin registers a new transaction"
 		}
@@ -183,10 +177,6 @@ func (a *API) stepTransaction(w http.ResponseWriter, r *http.Request, req applyR
 	}
 	a.runStep(w, r, store.StatusStepInput{TransactionID: req.TransactionID, Command: domain.CommandStep, From: domain.Status(req.FromStatus),
 		To: domain.Status(req.ToStatus), Date: date, CostAmount: cost, IdempotencyKey: key, Negative: a.post.Negative})
-}
-
-func ownSalesLineRef(o *originRequest, ref string) bool {
-	return o.SourceType == "SALES_LINE" && ref == issueclaim.SalesLineRef(o.SourceID)
 }
 
 // registerTransaction answers the registration form of transactions:apply.
@@ -240,27 +230,13 @@ func (a *API) registerTransaction(w http.ResponseWriter, r *http.Request, req ap
 			cwQty = *req.CWQty
 		}
 	}
-	if len(req.IssueRef) > domain.MaxIssueRef || (req.IssueRef != "" && qty.IsPositive()) {
-		fields["issueRef"] = "must be at most 255 characters and applies only to an issue"
-	}
-	if len(fields) == 0 && req.IssueRef != "" {
-		if p, _ := tenant.FromContext(r.Context()); p.Service == "" {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "issueRef is accepted from service principals only"))
-			return
-		}
-	}
-	if len(fields) == 0 && req.IssueRef != "" && !ownSalesLineRef(o, req.IssueRef) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeInvalid,
-			"issueRef must be SALES_LINE:<origin.sourceId> of an origin with sourceType SALES_LINE: a registration settles only its own line's claims"))
-		return
-	}
 	if len(fields) > 0 {
 		return
 	}
 	change, applied, err := a.store.CreateTransaction(r.Context(), store.CreateTransactionInput{LegalEntityID: req.LegalEntityID,
 		SourceType: o.SourceType, SourceID: o.SourceID, Reference: o.Reference, ProductID: req.ProductID, Dims: domain.Dimensions(req.Dimensions),
 		Qty: qty, EnteredQty: entered, EnteredUnit: req.EnteredUnit, Status: domain.Status(req.ToStatus), Currency: req.Currency,
-		CostPrice: cost, CWQty: cwQty, Date: date, IdempotencyKey: key, Negative: a.post.Negative, IssueRef: req.IssueRef})
+		CostPrice: cost, CWQty: cwQty, Date: date, IdempotencyKey: key, Negative: a.post.Negative})
 	writeStatusChange(w, r, a, "register transaction", change, applied, err)
 }
 

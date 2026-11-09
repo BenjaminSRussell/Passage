@@ -196,22 +196,25 @@ batch, so a batch with no hold cannot reach another batch's held stock
 whose withdrawal is lost (crash between claim and commit) stays and only makes later movements stricter. Which claims an issue settles
 (migrations 0040 and 0041 let an `ISSUED` row carry no ref; settlement keys start `issued:`, which `ClaimIssue` refuses in a
 caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): only an issue that names a ref settles anything, and
-it draws on the quantity it moved once, net of what left the warehouse: first the claims of its own ref (the postings consumer's
-DELIVERED booking, or a `transactions:apply` registration that sends `issueRef`, which a user token cannot send (403 `AUTH-0003`) and a service principal sends only as `SALES_LINE:<origin.sourceId>` of
-a SALES_LINE origin (otherwise 422 with nothing settled), `TestApplyRegistrationSettlesOnlyItsOwnSalesLine`), then
-the `PICK` claims that carry no ref, each up to what it still has outstanding. A warehouse pick for an order line carries the
-line's ref (`orderLineId` on the work line), so for one ref the pick and the ship are the same units: outstanding is the larger of
-the two kinds minus what was issued, and a delivery lowers it by at most the delivered quantity across both
-(`TestIssueClaim_APickLinkedToItsLineIsSettledWithTheShipByTheDelivery`, `TestIssueClaim_APartialDeliveryLeavesTheRestOfTheLinesPickAndShipOutstanding`,
-`TestIssueClaim_AnotherLinesDeliveryLeavesThisLinesPickAlone`). A pick with no source document (ad hoc) stays ref-less and is released
-explicitly (`POST /v1/inventory/issue-claims:release`) or settled by a ref-bearing issue after the ref's own claims. Journals,
-status steps and registrations that name no ref settle nothing, so a scrap or
-an adjustment lowers free stock by what it takes and never releases another order's claim
-(`TestIssueClaim_UnlinkedIssuesAndInScopeMovesSettleNothing`, and the property test, which compares free stock with the model's
-own after every journal issue). Known limits: production does not yet book its consumption in inventory at all (no call in
-`services/production` posts one), and `transactions:apply` cannot carry a production ref, so its `CONSUME` claims stay
-outstanding until released; a `SHIP` or `CONSUME` claim without a ref is never settled; fulfillment has no code that creates
-warehouse work, so only work created through the warehouse API with `orderLineId` is linked. A hold is placed against the row's physical stock and does not
+it settles only the claims of that ref (the postings consumer's DELIVERED booking of a sales order line, ref `SALES_LINE:<line id>`),
+drawing on the quantity it moved once, net of what left the warehouse, and never more than the ref still has outstanding. Claims
+without a ref and claims of another ref are never settled by an issue (`TestIssueClaim_ADeliveryNeverSettlesAnotherLinesRefLessPick`:
+a delivery with no claim of its own cannot move held stock a ref-less pick stands for). A warehouse pick for an order line carries
+the line's ref (`orderLineId` on the work line, set by the web work form), so for one ref the pick and the ship are the same units:
+outstanding is the larger of the two kinds minus what was issued, and a delivery lowers it by at most the delivered quantity across
+both (`TestIssueClaim_APickLinkedToItsLineIsSettledWithTheShipByTheDelivery`, `..._APartialDeliveryLeavesTheRestOfTheLinesPickAndShipOutstanding`,
+`..._AnotherLinesDeliveryLeavesThisLinesPickAlone`, `TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims`). A pick
+with no source document (ad hoc) stays ref-less and is released explicitly (`POST /v1/inventory/issue-claims:release`): the warehouse
+has no step after COMPLETED where the units are handed on (no shipment or load object), and releasing at completion would let
+repeated picks add up to held stock again, so it does not. Journals, status steps and `transactions:apply` registrations (which take
+no `issueRef`: the field is refused) settle nothing, so a scrap or an adjustment lowers free stock by what it takes and never releases
+another order's claim (`TestIssueClaim_UnlinkedIssuesAndInScopeMovesSettleNothing`, and the property test, whose model never settles
+a ref-less claim and which checks that an issue with no free stock passes only when its own ref had the quantity open). A ref the
+claim API accepts is exactly `SALES_LINE:<lower-case uuid>` or `PRODUCTION_ORDER:<uuid>:<uuid>` (`issueclaim.CanonicalRef`). Known
+limits: production does not yet book its consumption in inventory at all (no call in `services/production` posts one), so its `CONSUME`
+claims stay outstanding until released; a `SHIP` or `CONSUME` claim without a ref is never settled; fulfillment has no code that creates
+warehouse work (the wave release in warehouse has no route), so only work created through `POST /v1/warehouse/work` with `orderLineId`
+is linked. A hold is placed against the row's physical stock and does not
 subtract outstanding claims. A hold placed over stock already claimed may therefore cover units that have left. It then
 stops every further claim and every issue that settles nothing until the usage decision, so it is stricter, not a leak. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.

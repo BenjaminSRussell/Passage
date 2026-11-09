@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,8 +12,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/issueclaim"
-	"github.com/BenjaminSRussell/passage/platform/tenant"
-	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -141,51 +137,16 @@ func TestApplyRegistersAnExternalOrigin(t *testing.T) {
 	}
 }
 
-func doAsService(t *testing.T, h http.Handler, body, idemKey string) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, applyURL, strings.NewReader(body))
-	p, _ := tenant.FromContext(testkit.Ctx(testkit.TenantID(1), applyDuty))
-	p.Service = "sales"
-	req = req.WithContext(tenant.With(req.Context(), p))
-	for k, v := range key(idemKey) {
-		req.Header.Set(k, v)
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	return rec
-}
-
-func TestApplyRegistrationSettlesOnlyItsOwnSalesLine(t *testing.T) {
+func TestApplyRegistrationRefusesAnIssueRef(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	le, product, line, other := ids.New(), ids.New(), ids.New(), ids.New()
-	body := func(sourceType, source, ref string) string {
-		return `{"origin":{"sourceType":"` + sourceType + `","sourceId":"` + source + `"},"legalEntityId":"` + le + `","productId":"` + product + `",
-			"dimensions":{"site":"S1","warehouse":"W1"},"qty":"-2","enteredUnit":"EA","currency":"USD","toStatus":"SOLD","date":"2026-10-01","issueRef":"` + ref + `"}`
-	}
-	for name, b := range map[string]string{
-		"another line":     body("SALES_LINE", line, issueclaim.SalesLineRef(other)),
-		"a production ref": body("SALES_LINE", line, "PRODUCTION_ORDER:"+other+":"+line),
-		"another origin":   body("PROD_LINE", line, issueclaim.SalesLineRef(line)),
-	} {
-		fs.createIn = store.CreateTransactionInput{}
-		rec := doAsService(t, h, b, "mismatch")
-		if rec.Code != http.StatusUnprocessableEntity || fs.createIn.SourceID != "" {
-			t.Fatalf("%s: status %d body %s store input %+v, want 422 and no store call", name, rec.Code, rec.Body.String(), fs.createIn)
-		}
-	}
-	rec := doAsService(t, h, body("SALES_LINE", line, strings.ToUpper(issueclaim.SalesLineRef(line))), "mismatch-case")
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("a ref that is not the canonical form: status %d", rec.Code)
-	}
-	own := body("SALES_LINE", line, issueclaim.SalesLineRef(line))
-	fs.createIn = store.CreateTransactionInput{}
-	if rec := do(t, h, http.MethodPost, applyURL, own, []string{applyDuty}, key("human")); rec.Code != http.StatusForbidden || fs.createIn.SourceID != "" {
-		t.Fatalf("a user token naming issueRef: status %d body %s, want 403 and no store call", rec.Code, rec.Body.String())
-	}
-	rec = doAsService(t, h, own, "own")
-	if rec.Code != http.StatusCreated || fs.createIn.IssueRef != issueclaim.SalesLineRef(line) {
-		t.Fatalf("own line: status %d body %s input %+v", rec.Code, rec.Body.String(), fs.createIn)
+	line := ids.New()
+	body := `{"origin":{"sourceType":"SALES_LINE","sourceId":"` + line + `"},"legalEntityId":"` + ids.New() + `","productId":"` + ids.New() + `",
+		"dimensions":{"site":"S1","warehouse":"W1"},"qty":"-2","enteredUnit":"EA","currency":"USD","toStatus":"SOLD","date":"2026-10-01",
+		"issueRef":"` + issueclaim.SalesLineRef(line) + `"}`
+	rec := do(t, h, http.MethodPost, applyURL, body, []string{applyDuty}, key("ref"))
+	if rec.Code != http.StatusBadRequest || fs.createIn.SourceID != "" {
+		t.Fatalf("status %d body %s input %+v, want 400 and no store call", rec.Code, rec.Body.String(), fs.createIn)
 	}
 }
 

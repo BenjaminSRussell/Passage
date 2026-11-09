@@ -99,6 +99,20 @@ func ProductionItemRef(orderID, itemID string) string {
 	return "PRODUCTION_ORDER:" + strings.ToLower(orderID) + ":" + strings.ToLower(itemID)
 }
 
+// CanonicalRef reports whether ref is exactly what SalesLineRef or
+// ProductionItemRef forms: a ref in any other spelling (upper case, another
+// prefix) would never match the claims taken under the canonical one.
+func CanonicalRef(ref string) bool {
+	switch kind, rest, _ := strings.Cut(ref, ":"); kind {
+	case "SALES_LINE":
+		return ids.Valid(rest) && rest == strings.ToLower(rest) && ref == SalesLineRef(rest)
+	case "PRODUCTION_ORDER":
+		order, item, ok := strings.Cut(rest, ":")
+		return ok && ids.Valid(order) && ids.Valid(item) && ref == ProductionItemRef(order, item)
+	}
+	return false
+}
+
 // Outstanding is what claims stand for together under the rule above: every
 // claim without a ref in full, and per ref the largest per-kind total.
 func Outstanding(claims []Claim) decimal.Decimal {

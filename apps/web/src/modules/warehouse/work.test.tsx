@@ -108,6 +108,11 @@ describe("NewWorkPage", () => {
     fill("Line 1 item", "BOLT");
     fill("Line 1 quantity", "10");
     fireEvent.change(screen.getByLabelText("Line 1 direction"), { target: { value: "PICK" } });
+    fill("Line 1 sales order line", "not-an-id");
+    fireEvent.click(screen.getByRole("button", { name: "Create work" }));
+    expect(await screen.findByText(/Enter the sales order line id/)).toBeInTheDocument();
+    expect(server.calls).toHaveLength(0);
+    fill("Line 1 sales order line", "0190F0A0-0000-7000-8000-000000000301");
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
     expect(screen.getByLabelText("Line 2 direction")).toHaveValue("PICK");
     fill("Line 2 item", "NUT");
@@ -125,7 +130,7 @@ describe("NewWorkPage", () => {
       workType: "SALES_PICK",
       priority: 5,
       lines: [
-        { itemId: "BOLT", direction: "PICK", qty: "10" },
+        { itemId: "BOLT", direction: "PICK", qty: "10", orderLineId: "0190f0a0-0000-7000-8000-000000000301" },
         { itemId: "NUT", direction: "PICK", qty: "2.5", weight: "1.25" },
       ],
     });

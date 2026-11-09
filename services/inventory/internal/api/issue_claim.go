@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -68,8 +69,8 @@ func (a *API) claimIssue(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !qty.IsPositive() {
 		fields["qty"] = "must be a positive decimal number"
 	}
-	if len(req.IssueRef) > domain.MaxIssueRef {
-		fields["issueRef"] = "must be at most 255 characters"
+	if req.IssueRef != "" && !issueclaim.CanonicalRef(req.IssueRef) {
+		fields["issueRef"] = "must be SALES_LINE:<order line id> or PRODUCTION_ORDER:<order id>:<item id>, ids in lower case"
 	}
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {

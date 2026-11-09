@@ -179,14 +179,16 @@ func TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims(t *tes
 	if err := handle(flowEvent(t, api.ReceiptPostedType, api.ReceiptSource, receipt)); err != nil {
 		t.Fatal(err)
 	}
-	claim := func(key, kind, ref string) {
+	claim := func(key, kind, qty, ref string) {
 		t.Helper()
 		if _, err := s.ClaimIssue(read, store.IssueClaimInput{IdempotencyKey: key, LegalEntityID: fx.LegalEntityID, ProductID: l.ProductID, Warehouse: l.WarehouseID,
-			Kind: kind, Qty: dec("3"), IssueRef: ref}); err != nil {
+			Kind: kind, Qty: dec(qty), IssueRef: ref}); err != nil {
 			t.Fatalf("%s claim: %v", kind, err)
 		}
 	}
-	claim("fulfillment-ship", "SHIP", issueclaim.SalesLineRef(l.LineID))
+	claim("warehouse-pick", "PICK", "3", issueclaim.SalesLineRef(l.LineID))
+	claim("fulfillment-ship", "SHIP", "3", issueclaim.SalesLineRef(l.LineID))
+	claim("adhoc-pick", "PICK", "1", "")
 	room := func() store.IssueRoom {
 		r, err := s.GetIssueRoom(read, fx.LegalEntityID, l.ProductID, l.WarehouseID, "")
 		if err != nil {
@@ -194,8 +196,8 @@ func TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims(t *tes
 		}
 		return r
 	}
-	if r := room(); !r.Physical.Equal(dec("4")) || !r.Outstanding.Equal(dec("3")) {
-		t.Fatalf("before the delivery: %s physical, %s claimed, want 4 and 3", r.Physical, r.Outstanding)
+	if r := room(); !r.Physical.Equal(dec("4")) || !r.Outstanding.Equal(dec("4")) {
+		t.Fatalf("before the delivery: %s physical, %s claimed, want 4 and 4 (the line's pick and ship once, the ad hoc pick)", r.Physical, r.Outstanding)
 	}
 	for i := 0; i < 2; i++ {
 		if err := handle(delivery); err != nil {
@@ -205,7 +207,13 @@ func TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims(t *tes
 	if n := len(flowTransactions(t, s, read, l.ProductID, "SALES_LINE")); n != 3 {
 		t.Fatalf("%d sales transactions, want the 3 serials issued once", n)
 	}
-	if r := room(); !r.Physical.Equal(dec("1")) || !r.Held.IsZero() || !r.Outstanding.IsZero() {
-		t.Fatalf("after the delivery: %s physical, %s held, %s claimed, want 1, 0 and 0", r.Physical, r.Held, r.Outstanding)
+	if r := room(); !r.Physical.Equal(dec("1")) || !r.Held.IsZero() || !r.Outstanding.Equal(dec("1")) {
+		t.Fatalf("after the delivery: %s physical, %s held, %s claimed, want 1, 0 and the ad hoc pick's 1", r.Physical, r.Held, r.Outstanding)
+	}
+	if err := s.ReleaseIssueClaim(read, "adhoc-pick"); err != nil {
+		t.Fatal(err)
+	}
+	if r := room(); !r.Outstanding.IsZero() {
+		t.Fatalf("after releasing the ad hoc pick: %s claimed, want 0", r.Outstanding)
 	}
 }

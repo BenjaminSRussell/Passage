@@ -308,30 +308,14 @@ func (m *issueModel) refOutstanding(ref string, extra *issueclaim.Claim) decimal
 	return decimal.Max(decimal.Zero, most.Sub(m.issued[ref]))
 }
 
-// settledBy is what an issue of qty settles, drawing on qty once: nothing for
-// an issue that names no ref, else the claims of its ref and then the picks
-// without a ref.
+// settledBy is what an issue of qty settles: nothing for an issue that names no
+// ref, else no more than the ref's own open claims. Claims without a ref and
+// claims of other refs are never settled by an issue.
 func (m *issueModel) settledBy(qty decimal.Decimal, ref string) map[string]decimal.Decimal {
 	if ref == "" {
 		return nil
 	}
-	var named, picks decimal.Decimal
-	perKind := map[issueclaim.Kind]decimal.Decimal{}
-	for _, c := range m.claims {
-		switch {
-		case c.Ref == ref:
-			perKind[c.Kind] = perKind[c.Kind].Add(c.Qty)
-		case c.Ref == "" && c.Kind == issueclaim.Pick:
-			picks = picks.Add(c.Qty)
-		}
-	}
-	for _, q := range perKind {
-		named = decimal.Max(named, q)
-	}
-	named = decimal.Max(decimal.Zero, named.Sub(m.issued[ref]))
-	took := decimal.Min(qty, named)
-	left := decimal.Max(decimal.Zero, picks.Sub(m.issued[""]))
-	return map[string]decimal.Decimal{ref: took, "": decimal.Min(qty.Sub(took), left)}
+	return map[string]decimal.Decimal{ref: decimal.Min(qty, m.refOutstanding(ref, nil))}
 }
 
 // outstanding is what the claims stand for that inventory has not booked:
@@ -475,6 +459,7 @@ func TestHoldProperty_MixedMovementsNeverReachHeldStock(t *testing.T) {
 					ref = refs[rapid.IntRange(0, len(refs)-1).Draw(rt, "ref")]
 				}
 				settled, code := m.issueOutcome(qty, ref)
+				open := m.refOutstanding(ref, nil)
 				var err error
 				if op == 2 {
 					err = journalMove(ctx, s, product, qty.Neg())
@@ -492,6 +477,16 @@ func TestHoldProperty_MixedMovementsNeverReachHeldStock(t *testing.T) {
 				case code != "" && problemCode(err) != code:
 					rt.Fatalf("issue %s ref %q with %s free, %s physical, %s held: %v, want %s", qty, ref, m.free(), m.physical, m.held, err, code)
 				case code == "":
+					total := decimal.Zero
+					for _, q := range settled {
+						total = total.Add(q)
+					}
+					if total.GreaterThan(decimal.Min(qty, open)) {
+						rt.Fatalf("issue %s settled %s, more than the %s open under ref %q", qty, total, open, ref)
+					}
+					if m.held.IsPositive() && !freeBefore.IsPositive() && (ref == "" || qty.GreaterThan(open)) {
+						rt.Fatalf("issue %s ref %q passed with %s free and %s held, %s open under its ref", qty, ref, freeBefore, m.held, open)
+					}
 					m.physical = m.physical.Sub(qty)
 					for r, q := range settled {
 						m.issued[r] = m.issued[r].Add(q)
@@ -539,25 +534,30 @@ func TestHoldProperty_MixedMovementsNeverReachHeldStock(t *testing.T) {
 	})
 }
 
-// A warehouse pick sets no issueRef, so its claim has no ref; the delivery
-// booking of the line moves the picked units out and settles it, so a quality
-// hold placed afterwards is not blocked by a claim for units that left.
-func TestIssueClaim_APickWithoutARefIsSettledByTheDeliveryOfItsUnits(t *testing.T) {
+// A pick without a document carries no ref: no issue settles it, so a delivery
+// of another line never releases it and never moves the stock it stands for. It
+// is released explicitly.
+func TestIssueClaim_ADeliveryNeverSettlesAnotherLinesRefLessPick(t *testing.T) {
 	s, _, _ := setup(t)
 	ctx := entityCtx(1, ids.New())
 	product := ids.New()
-	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "20", "1", dims()))
-	l := issueclaim.SalesLineRef(ids.New())
-	if _, err := s.ClaimIssue(ctx, refClaim(ctx, product, "pick", "PICK", "5", "")); err != nil {
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "10", "1", dims()))
+	if _, err := s.PlaceHold(ctx, holdInput(ctx, product, "h1", "5", "qo-1", dims())); err != nil {
 		t.Fatal(err)
 	}
-	if err := deliver(ctx, s, product, "d1", dec("5"), l); err != nil {
+	if _, err := s.ClaimIssue(ctx, refClaim(ctx, product, "pick-b", "PICK", "5", "")); err != nil {
 		t.Fatal(err)
 	}
-	wantRoom(t, roomOf(t, ctx, s, product), "15", "0", "0")
-	if _, err := s.PlaceHold(ctx, holdInput(ctx, product, "h1", "15", "qo-1", dims())); err != nil {
-		t.Fatalf("hold of the 15 free units: %v", err)
+	wantRoom(t, roomOf(t, ctx, s, product), "10", "5", "5")
+	a := issueclaim.SalesLineRef(ids.New())
+	if err := deliver(ctx, s, product, "d-a", dec("5"), a); problemCode(err) != domain.CodeQualityHold {
+		t.Fatalf("delivery of 5 with nothing free and no claim of its own: %v, want %s", err, domain.CodeQualityHold)
 	}
+	wantRoom(t, roomOf(t, ctx, s, product), "10", "5", "5")
+	if err := s.ReleaseIssueClaim(ctx, "pick-b"); err != nil {
+		t.Fatal(err)
+	}
+	wantRoom(t, roomOf(t, ctx, s, product), "10", "5", "0")
 }
 
 // A production consumption booked for its order item settles the item's
@@ -603,14 +603,14 @@ func TestIssueClaim_UnlinkedIssuesAndInScopeMovesSettleNothing(t *testing.T) {
 		t.Fatalf("registration naming no ref: %v", err)
 	}
 	wantRoom(t, roomOf(t, ctx, s, product), "14", "0", "9")
-	// An issue of 6 naming one ref settles at most the 6 issued: 5 of the
-	// item and 1 of the picks.
+	// An issue of 6 naming the item's ref settles the item's 5 and nothing of
+	// the pick without a ref.
 	if err := deliver(ctx, s, product, "c1", dec("6"), item); err != nil {
 		t.Fatal(err)
 	}
-	wantRoom(t, roomOf(t, ctx, s, product), "8", "0", "3")
+	wantRoom(t, roomOf(t, ctx, s, product), "8", "0", "4")
 	post(t, ctx, s, domain.JournalTransfer, transferLine(product, "2", dims(), dims("location", "B")))
-	wantRoom(t, roomOf(t, ctx, s, product), "8", "0", "3")
+	wantRoom(t, roomOf(t, ctx, s, product), "8", "0", "4")
 }
 
 func TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused(t *testing.T) {

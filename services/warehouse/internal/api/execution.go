@@ -473,6 +473,9 @@ func (a *API) createWork(w http.ResponseWriter, r *http.Request) {
 			fields[p+".lps"] = "must not be negative"
 		}
 		attrs := in.Attributes
+		if ref := attrs[issueclaim.RefAttribute]; ref != "" && !issueclaim.CanonicalRef(ref) {
+			fields[p+".attributes.issueRef"] = "must be SALES_LINE:<order line id> or PRODUCTION_ORDER:<order id>:<item id>, ids in lower case"
+		}
 		if in.OrderLineID != "" {
 			switch {
 			case in.Direction != domain.DirectionPick || !ids.Valid(in.OrderLineID):

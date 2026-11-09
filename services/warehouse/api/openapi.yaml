@@ -805,8 +805,9 @@ components:
           description: >-
             PICK only: the sales order line the pick serves. It sets the `issueRef` attribute to `SALES_LINE:<id>`,
             the ref of fulfillment's ship claim and of the line's DELIVERED booking, so the delivery settles the pick
-            and the ship together. Not together with `issueRef`. A pick with neither has no ref and is settled only by
-            an issue that names a ref in the same warehouse, or released.
+            and the ship together. Not together with `issueRef`. A pick with neither has no ref, no issue settles it, and it is released
+            explicitly at inventory. An `issueRef` attribute must be canonical (`SALES_LINE:<lower-case uuid>` or
+            `PRODUCTION_ORDER:<uuid>:<uuid>`).
     WorkRequest:
       type: object
       additionalProperties: false
