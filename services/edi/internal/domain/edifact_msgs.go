@@ -184,8 +184,20 @@ func MapORDERS(m EdifactMessage) (Order, []Issue) {
 		case "ALC":
 			o.Charges = append(o.Charges, Charge{Indicator: s.El(0, 0), Code: s.El(4, 0), Description: s.El(4, 3)})
 		case "MOA":
+			// The amount takes the decimal point the canonical order uses
+			// (the 850's SAC05 is read the same way), whichever decimal mark
+			// the partner writes.
 			if q := s.El(0, 0); (q == "23" || q == "204") && len(o.Charges) > 0 {
-				o.Charges[len(o.Charges)-1].Amount = s.El(0, 1)
+				v, err := edifactNumber(s.El(0, 1))
+				if err != nil || v.IsNegative() {
+					malformed("MOA "+q+" "+s.El(0, 1)+" is not a non-negative amount", ContrlPlace{ContrlErrInvalidValue, pos, 1, 2})
+					continue
+				}
+				amount := v.String()
+				if v.Exponent() >= -2 {
+					amount = v.StringFixed(2)
+				}
+				o.Charges[len(o.Charges)-1].Amount = amount
 			}
 		case "LIN":
 			o.Lines = append(o.Lines, OrderLine{LineNo: s.El(0, 0)})
@@ -398,7 +410,8 @@ func MapDESADV(m EdifactMessage) (ASN, error) {
 			if pack == nil {
 				return a, outboundf("LIN %s outside a packed CPS", s.El(0, 0))
 			}
-			pack.Items = append(pack.Items, ASNItem{LineNo: s.El(0, 0)})
+			// LIN 03 (C212) carries the GTIN in EANCOM, as in ORDERS and INVOIC.
+			pack.Items = append(pack.Items, ASNItem{LineNo: s.El(0, 0), ItemRefs: itemRefsOf(s, 2)})
 			item = &pack.Items[len(pack.Items)-1]
 		case "PIA":
 			if item != nil {

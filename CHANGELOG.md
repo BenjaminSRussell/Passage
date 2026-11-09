@@ -10,6 +10,17 @@ release may change public APIs.
 
 ### Added
 
+- Partner simulator round trips for every transaction set edi supports (#35, AC-35.1): the in-test demo distributor
+  gains its own EDIFACT reader and writer next to its X12 one (neither uses `internal/domain`) and trades over the
+  real transports. Over AS2 (`TestPartnerSim_X12RemittanceStatusAndTA1OverAS2`) it sends an 820 group and a 214 that
+  are mapped and answered with 997s, and a 204 rejected as unsupported; it reads our 820 and 214 and answers with a
+  997, a TA1 A beside a 997 E, and a TA1 R; its duplicate is answered with TA1 R 025 and a wrong IEA02 with TA1 R 001.
+  Over SFTP (`TestPartnerSim_EdifactRoundTripOverSFTP`) it sends ORDERS, DESADV and INVOIC with a decimal comma and
+  released service characters and reads the CONTRL (UCM 29 for a CNT mismatch), gets CONTRL UCI 4 26 for a duplicate,
+  and reads our DESADV, INVOIC and ORDERS and answers them with CONTRLs the service matches (ACKED, or FAILED for a
+  UCM 4). AC-35.1 is still not fully met: the 855 and the 856/810 are not produced without a manual step
+  (`services/edi/NOT-IMPLEMENTED.md`). 204 and 990 remain unsupported.
+
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
@@ -242,6 +253,13 @@ release may change public APIs.
   free stock below zero while anything is held, so a hold placed after a pick also stops the ship of the staged units
   until the usage decision. Inventory migrations 0038 and 0039 add `inventory_issue_claim.issue_ref` and the `ISSUED`
   rows (NOT VALID checks, validated apart). Property test: `TestHoldProperty_MixedMovementsNeverReachHeldStock`.
+- edi EDIFACT ORDERS (#35, found by the partner simulator): a charge amount (MOA 23 or 204) written with a decimal
+  comma was stored in the canonical order as text such as `12,50`, and one that was not a number passed unchecked; it
+  now takes the decimal point (two decimals unless the partner writes more, like the 850's SAC05) and a non-numeric
+  amount rejects the message with CONTRL code 12 at the MOA.
+- edi EDIFACT DESADV (#35, found by the partner simulator): the item reference in LIN 03 (the EANCOM GTIN, 7143 SRV
+  or EN) was ignored, so a DESADV identifying its items there alone was refused for want of an item reference; it is
+  now read like in ORDERS and INVOIC.
 - Inventory postings consumer (#480): replaying a sales delivery that emptied its on-hand row no longer fails as a
   reused Idempotency-Key (the row's running average had moved to zero, so the replay was a different request);
   entries already booked are skipped.
