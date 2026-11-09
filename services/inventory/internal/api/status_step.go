@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/issueclaim"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -56,8 +57,8 @@ type applyRequest struct {
 	CostPrice     string            `json:"costPrice"`
 	CWQty         *int              `json:"cwQty"`
 	// IssueRef names the sales line an issue registration is booked for; it must
-	// be SALES_LINE:<origin.sourceId> of a SALES_LINE origin, so a caller can
-	// settle only the claims of the line it registers against.
+	// be SALES_LINE:<origin.sourceId> of a SALES_LINE origin and comes from a
+	// service principal, so a caller can settle only its own line's claims.
 	IssueRef string `json:"issueRef"`
 	// Both.
 	ToStatus string `json:"toStatus"`
@@ -241,6 +242,12 @@ func (a *API) registerTransaction(w http.ResponseWriter, r *http.Request, req ap
 	}
 	if len(req.IssueRef) > domain.MaxIssueRef || (req.IssueRef != "" && qty.IsPositive()) {
 		fields["issueRef"] = "must be at most 255 characters and applies only to an issue"
+	}
+	if len(fields) == 0 && req.IssueRef != "" {
+		if p, _ := tenant.FromContext(r.Context()); p.Service == "" {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "issueRef is accepted from service principals only"))
+			return
+		}
 	}
 	if len(fields) == 0 && req.IssueRef != "" && !ownSalesLineRef(o, req.IssueRef) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeInvalid,

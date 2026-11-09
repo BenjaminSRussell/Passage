@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/issueclaim"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -138,6 +141,20 @@ func TestApplyRegistersAnExternalOrigin(t *testing.T) {
 	}
 }
 
+func doAsService(t *testing.T, h http.Handler, body, idemKey string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, applyURL, strings.NewReader(body))
+	p, _ := tenant.FromContext(testkit.Ctx(testkit.TenantID(1), applyDuty))
+	p.Service = "sales"
+	req = req.WithContext(tenant.With(req.Context(), p))
+	for k, v := range key(idemKey) {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestApplyRegistrationSettlesOnlyItsOwnSalesLine(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
@@ -152,16 +169,21 @@ func TestApplyRegistrationSettlesOnlyItsOwnSalesLine(t *testing.T) {
 		"another origin":   body("PROD_LINE", line, issueclaim.SalesLineRef(line)),
 	} {
 		fs.createIn = store.CreateTransactionInput{}
-		rec := do(t, h, http.MethodPost, applyURL, b, []string{applyDuty}, key("mismatch"))
+		rec := doAsService(t, h, b, "mismatch")
 		if rec.Code != http.StatusUnprocessableEntity || fs.createIn.SourceID != "" {
 			t.Fatalf("%s: status %d body %s store input %+v, want 422 and no store call", name, rec.Code, rec.Body.String(), fs.createIn)
 		}
 	}
-	rec := do(t, h, http.MethodPost, applyURL, body("SALES_LINE", line, strings.ToUpper(issueclaim.SalesLineRef(line))), []string{applyDuty}, key("own"))
+	rec := doAsService(t, h, body("SALES_LINE", line, strings.ToUpper(issueclaim.SalesLineRef(line))), "mismatch-case")
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("a ref that is not the canonical form: status %d", rec.Code)
 	}
-	rec = do(t, h, http.MethodPost, applyURL, body("SALES_LINE", line, issueclaim.SalesLineRef(line)), []string{applyDuty}, key("own"))
+	own := body("SALES_LINE", line, issueclaim.SalesLineRef(line))
+	fs.createIn = store.CreateTransactionInput{}
+	if rec := do(t, h, http.MethodPost, applyURL, own, []string{applyDuty}, key("human")); rec.Code != http.StatusForbidden || fs.createIn.SourceID != "" {
+		t.Fatalf("a user token naming issueRef: status %d body %s, want 403 and no store call", rec.Code, rec.Body.String())
+	}
+	rec = doAsService(t, h, own, "own")
 	if rec.Code != http.StatusCreated || fs.createIn.IssueRef != issueclaim.SalesLineRef(line) {
 		t.Fatalf("own line: status %d body %s input %+v", rec.Code, rec.Body.String(), fs.createIn)
 	}

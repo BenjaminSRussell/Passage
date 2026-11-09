@@ -325,8 +325,8 @@ release may change public APIs.
   `orderLineId` (PICK only; becomes the `issueRef` attribute `SALES_LINE:<id>`, refused together with an explicit
   `issueRef`), so pick 5, ship 5 and a DELIVERED booking of 5 leave nothing outstanding and the pick and ship of one line
   count once; a partial delivery of 3 leaves exactly 2. A pick with no source document stays ref-less and is released
-  explicitly or by an issue naming a ref. `transactions:apply` accepts `issueRef` only as `SALES_LINE:<origin.sourceId>`
-  on a SALES_LINE origin; any other ref is refused 422 and settles nothing.
+  explicitly or by an issue naming a ref. `transactions:apply` accepts `issueRef` only from a service principal (a user token is
+  refused 403) and only as `SALES_LINE:<origin.sourceId>` on a SALES_LINE origin; any other ref is refused 422 and settles nothing.
 - edi EDIFACT ORDERS (#35, found by the partner simulator): a charge amount (MOA 23 or 204) written with a decimal
   comma was stored in the canonical order as text such as `12,50`, and one that was not a number passed unchecked; it
   now takes the decimal point (two decimals unless the partner writes more, like the 850's SAC05) and a non-numeric

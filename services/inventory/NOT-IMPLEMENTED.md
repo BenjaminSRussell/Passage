@@ -197,8 +197,8 @@ whose withdrawal is lost (crash between claim and commit) stays and only makes l
 (migrations 0040 and 0041 let an `ISSUED` row carry no ref; settlement keys start `issued:`, which `ClaimIssue` refuses in a
 caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): only an issue that names a ref settles anything, and
 it draws on the quantity it moved once, net of what left the warehouse: first the claims of its own ref (the postings consumer's
-DELIVERED booking, or a `transactions:apply` registration that sends `issueRef`, which must be `SALES_LINE:<origin.sourceId>` of
-a SALES_LINE origin and is otherwise refused 422 with nothing settled, `TestApplyRegistrationSettlesOnlyItsOwnSalesLine`), then
+DELIVERED booking, or a `transactions:apply` registration that sends `issueRef`, which a user token cannot send (403 `AUTH-0003`) and a service principal sends only as `SALES_LINE:<origin.sourceId>` of
+a SALES_LINE origin (otherwise 422 with nothing settled), `TestApplyRegistrationSettlesOnlyItsOwnSalesLine`), then
 the `PICK` claims that carry no ref, each up to what it still has outstanding. A warehouse pick for an order line carries the
 line's ref (`orderLineId` on the work line), so for one ref the pick and the ship are the same units: outstanding is the larger of
 the two kinds minus what was issued, and a delivery lowers it by at most the delivered quantity across both
