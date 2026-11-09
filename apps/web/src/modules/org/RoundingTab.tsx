@@ -17,6 +17,7 @@ import {
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { FilterSelect, useRows } from "./referenceParts";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const unitPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 const amountPattern = /^-?[0-9]{1,18}(\.[0-9]+)?$/;
@@ -40,7 +41,8 @@ const ruleMessages: Record<string, string> = {
   "ORG-CUR-ROUNDING-NOT-FOUND": "That rule no longer exists.",
 };
 
-const formatProblem = (problem: Problem) => `${ruleMessages[problem.code] ?? problem.message} (${problem.code})`;
+/** Plain wording for a problem; `ProblemMessage` keeps its code under Details. */
+const formatProblem = (problem: Problem) => ruleMessages[problem.code] ?? problemSummary(problem);
 
 export function validateRule(unit: string): string | undefined {
   if (!unitPattern.test(unit) || !/[1-9]/.test(unit)) {
@@ -141,7 +143,7 @@ function RuleForm({ currency, entities, onSaved }: { currency: string; entities:
         <EntitySelect id="rule-entity" label="Applies to" entities={entities} value={entityId} blank="Whole tenant" onChange={setEntityId} />
         {failure ? (
           <Alert tone="danger" title="Could not save the rule" live="alert">
-            {formatProblem(failure)}
+            <ProblemMessage problem={failure} message={formatProblem(failure)} />
           </Alert>
         ) : null}
         <div>
@@ -190,7 +192,7 @@ function RemoveRule({ rule, onRemoved }: { rule: CurrencyRounding; onRemoved(): 
       )}
       {failure ? (
         <span role="alert" className={styles.rowError}>
-          {formatProblem(failure)}
+          <ProblemMessage problem={failure} message={formatProblem(failure)} />
         </span>
       ) : null}
     </div>
@@ -255,7 +257,7 @@ function TestRoundPanel({ currency, entities }: { currency: string; entities: Le
       </div>
       {failure ? (
         <Alert tone="danger" title="Could not round" live="alert">
-          {formatProblem(failure)}
+          <ProblemMessage problem={failure} message={formatProblem(failure)} />
         </Alert>
       ) : null}
     </Card>
@@ -285,7 +287,7 @@ export function RoundingTab() {
     <>
       {currencies.error ? (
         <Alert tone="danger" title="Could not load currencies" live="alert">
-          {formatProblem(currencies.error)}
+          <ProblemMessage problem={currencies.error} message={formatProblem(currencies.error)} />
         </Alert>
       ) : null}
       <div className={styles.filters}>
@@ -305,7 +307,7 @@ export function RoundingTab() {
           <TestRoundPanel currency={currency} entities={entities} />
           {rules.error ? (
             <Alert tone="danger" title="Could not load rounding rules" live="alert">
-              {formatProblem(rules.error)}
+              <ProblemMessage problem={rules.error} message={formatProblem(rules.error)} />
             </Alert>
           ) : null}
           {scopedEntity ? (

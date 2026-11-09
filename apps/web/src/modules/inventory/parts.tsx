@@ -3,6 +3,7 @@ import { Alert, Button, type BadgeTone } from "../../shell/ui";
 import { describeProblem, type Problem } from "./api/client";
 import { dash } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Dimensions a slice 2 form can name (owner and license_plate are reserved). */
 export const FORM_DIMENSIONS = ["site", "warehouse", "location", "batch", "serial"] as const;
@@ -25,7 +26,7 @@ export function Detail({ term, children, mono = false }: { term: string; childre
 export function ProblemAlert({ title, problem, onRetry }: { title: string; problem: Problem; onRetry?: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={onRetry ? <Button size="sm" onClick={onRetry}>Try again</Button> : undefined}>
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }

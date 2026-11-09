@@ -27,6 +27,7 @@ import {
 import { describeError, PLAN_CODE, useLoad, usePlanCode, withPlan, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { SAMPLE_ITEMS, validateRun } from "./RunPlanPage";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIST = "/planning/scenarios";
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -162,7 +163,7 @@ export function ScenariosPage() {
         }
       />
       <Alert tone="danger" title={state.error ? "Could not load scenarios" : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       {state.error ? null : (
         <DataTable
@@ -242,7 +243,7 @@ function ScenarioForm({ scenario, defaultPlan, onSaved, onReload }: FormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
       </div>
       {creating ? (
@@ -343,7 +344,7 @@ function RunScenarioCard({ scenario, today }: { scenario: Scenario; today: strin
       <form className={styles.form} onSubmit={submit} noValidate aria-label={`Run scenario ${scenario.code}`}>
         <div className={styles.wide}>
           <Alert tone="danger" title={failure ? "The simulation did not run" : undefined} live="alert">
-            {failure ? `${failure.message} (${failure.code})` : null}
+            {failure ? <ProblemMessage problem={failure} /> : null}
           </Alert>
           <Alert tone="success" title={result ? `Simulation version ${result.number} of plan ${result.planCode} stored` : undefined} live="status">
             {result ? (
@@ -453,7 +454,7 @@ export function ScenarioPage({ today = new Date().toISOString().slice(0, 10) }: 
         }
       />
       <Alert tone="danger" title={state.error ? `Could not load scenario ${code}` : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {saved ? `Saved. Version ${saved.version}.` : null}

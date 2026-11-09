@@ -4,6 +4,7 @@ import { describeProblem, previewActivation, type ActivationPreview, type Journa
 import { amount, dash, isDecimal, isSignedDecimal } from "./format";
 import { LineGrid, type LineField } from "./LineGrid";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type LineKey = keyof RevalLine;
 type LineValues = Record<LineKey, string>;
@@ -131,7 +132,7 @@ export function ActivationPreviewPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The preview was not computed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

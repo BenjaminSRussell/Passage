@@ -6,6 +6,7 @@ import { clock, fromUtcInput, parseClock, WEEK_ORDER, WEEKDAYS } from "./format"
 import { CODE, DATE, mapFields, optionalWhole } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BlockValues {
   resourceId: string;
@@ -297,7 +298,7 @@ export function NewCapacityBlockPage() {
               {failure ? (
                 <div className={styles.formActions}>
                   <Alert tone="danger" title="Could not create the block" live="alert">
-                    {failure.message} ({failure.code})
+                    <ProblemMessage problem={failure} />
                   </Alert>
                 </div>
               ) : null}

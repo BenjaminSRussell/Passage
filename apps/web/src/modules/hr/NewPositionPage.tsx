@@ -5,6 +5,7 @@ import { createPosition, describeProblem, listPositions, newKey, type NewPositio
 import { DATE, todayIso, UUID, validFte } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   positionNumber: string;
@@ -150,7 +151,7 @@ export function NewPositionPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the position" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

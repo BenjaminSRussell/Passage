@@ -22,6 +22,7 @@ import {
 import { formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -266,7 +267,7 @@ function ParametersForm({ legalEntityId, initial, etag, saved, updatedAt, canSav
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.code === "SLS-0006" ? "Someone else changed these parameters" : "Could not save the parameters"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.actions}>
@@ -316,7 +317,7 @@ export function ParametersPage() {
         </Alert>
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the sales parameters" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.data || !initial ? (
         <div aria-busy="true">

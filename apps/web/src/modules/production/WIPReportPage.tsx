@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Se
 import { STATUSES, describeProblem, getWIPBalances, type Problem, type ProductionStatus, type WIPQuery, type WIPRow, type WIPTotal } from "./api/client";
 import { statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -120,7 +121,7 @@ export function WIPReportPage({ onOpenOrder }: WIPReportPageProps) {
       </Card>
       {state.error ? (
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The WIP balance is not available" live="alert">
-          {state.error.status === 403 ? "You need the View production costs duty to see the WIP balance." : `${state.error.message} (${state.error.code})`}
+          {state.error.status === 403 ? "You need the View production costs duty to see the WIP balance." : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>

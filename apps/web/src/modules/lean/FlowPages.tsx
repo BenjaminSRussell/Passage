@@ -36,6 +36,7 @@ import {
 import { dash, formatDateTime, shortId, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const listColumns: DataTableColumn<Flow>[] = [
   { key: "name", header: "Flow" },
@@ -77,7 +78,7 @@ export function FlowsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load production flows" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -292,7 +293,7 @@ export function NewFlowPage() {
         </Card>
         {failure ? (
           <Alert tone="danger" title="Could not create the flow" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -343,7 +344,7 @@ export function FlowDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Production flow" />
         <Alert tone="danger" title="Could not load the flow" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -450,7 +451,7 @@ export function FlowDetailPage() {
             </form>
             {failure ? (
               <Alert tone="danger" title="The flow cannot go live yet" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
           </div>
@@ -472,7 +473,7 @@ export function FlowDetailPage() {
             </form>
             {versionFailure ? (
               <Alert tone="danger" title="Could not create a new version" live="alert">
-                {versionFailure.message} ({versionFailure.code})
+                <ProblemMessage problem={versionFailure} />
               </Alert>
             ) : null}
           </div>

@@ -81,7 +81,7 @@ describe("Free goods rules", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/free-goods");
-    expect(await findAlert()).toHaveTextContent("(AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("AUTH-0003");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -153,7 +153,7 @@ describe("New free goods rule", () => {
     fill("Valid from", "2026-01-01");
     fill("Valid to", "2026-12-31");
     fireEvent.click(screen.getByRole("button", { name: "Save rule" }));
-    expect(await findAlert()).toHaveTextContent("(PRC-0002)");
+    expect(await findAlert()).toHaveTextContent("PRC-0002");
   });
 });
 
@@ -183,7 +183,7 @@ describe("Free goods rule detail", () => {
     };
     renderAt(`/pricing/free-goods/${FG}`);
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw rule" }));
-    expect(await findAlert()).toHaveTextContent("(conflict_version)");
+    expect(await findAlert()).toHaveTextContent("conflict_version");
     expect(server.calls.find((c) => c.method === "POST")!.body).toEqual({ version: 4 });
   });
 
@@ -281,7 +281,7 @@ describe("Free goods rule detail", () => {
     await screen.findByLabelText("Valid to");
     fireEvent.change(screen.getByLabelText("Valid to"), { target: { value: addDays(day, 90) } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await findAlert()).toHaveTextContent("overlapping free goods rule r-9 (PRC-0002)");
+    expect(await findAlert()).toHaveTextContent("overlapping free goods rule r-9");
     expect(screen.getByText("Another rule covers those dates")).toBeInTheDocument();
     expect(screen.getByLabelText("Valid to")).toHaveValue(addDays(day, 90));
   });
@@ -296,7 +296,7 @@ describe("Free goods rule detail", () => {
   it("shows the error state when the rule is unknown", async () => {
     server.handler = () => json(404, { code: "PRC-0047", detail: "no free goods rule x" });
     renderAt(`/pricing/free-goods/${FG}`);
-    expect(await findAlert()).toHaveTextContent("(PRC-0047)");
+    expect(await findAlert()).toHaveTextContent("PRC-0047");
   });
 });
 

@@ -22,6 +22,7 @@ import {
 import styles from "./pages.module.css";
 import { ChooseWarehouse, DECIMAL, Detail, INTEGER, LINE_STATUS_TONES, sentence, shortId, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 100;
 
@@ -99,7 +100,7 @@ export function WorkListPage() {
         </FormField>
       </div>
       <Alert tone="danger" title={assignFailure ? "Could not assign work" : undefined} live="alert">
-        {assignFailure ? `${assignFailure.message} (${assignFailure.code})` : null}
+        {assignFailure ? <ProblemMessage problem={assignFailure} /> : null}
       </Alert>
       <Alert tone="info" live="status">
         {nothing ? "No work is waiting in this warehouse." : null}
@@ -108,7 +109,7 @@ export function WorkListPage() {
         <ChooseWarehouse />
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the work" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -357,7 +358,7 @@ export function WorkDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Work" />
         <Alert tone="danger" title="Could not load the work" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -472,7 +473,7 @@ export function WorkDetailPage() {
         </dl>
       </Card>
       <Alert tone="danger" title={failure?.title} live="alert">
-        {failure ? `${failure.problem.message} (${failure.problem.code})` : null}
+        {failure ? <ProblemMessage problem={failure.problem} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice ? (

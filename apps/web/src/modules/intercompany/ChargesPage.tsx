@@ -7,6 +7,7 @@ import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey }
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type LineKey =
   | "lendingEntity"
@@ -193,7 +194,7 @@ export function ChargesPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The charge was not priced" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -16,6 +16,7 @@ import {
 import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const baseColumns: DataTableColumn<InvoiceLine>[] = [
   { key: "lineNo", header: "Line", mono: true, align: "end" },
@@ -87,7 +88,7 @@ function CreditNotesCard({ invoiceId }: { invoiceId: string }) {
     <Card title="Credit notes">
       {state.error ? (
         <Alert tone="danger" title="Could not load the credit notes" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -118,7 +119,7 @@ export function InvoiceDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Invoice" />
         <Alert tone="danger" title="Could not load the invoice" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -205,7 +206,7 @@ export function InvoiceDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failureTitle(failure.code, creditNote)} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {invoice.status === "PROPOSAL" ? (

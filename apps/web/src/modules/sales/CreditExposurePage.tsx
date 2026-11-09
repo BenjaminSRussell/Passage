@@ -5,6 +5,7 @@ import { UTILIZATION_STATUSES, listCreditExposure, type CreditExposureFilter, ty
 import { dash, money, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PERCENT_2 = /^\d+(\.\d{1,2})?$/;
 
@@ -100,7 +101,7 @@ export function CreditExposurePage() {
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load credit exposure" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

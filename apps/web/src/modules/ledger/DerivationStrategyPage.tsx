@@ -20,6 +20,7 @@ import { ledgerQuery, useLedgerParam } from "./LedgerPicker";
 import { errorText } from "./OpenItemsPage";
 import styles from "./pages.module.css";
 import { splitFields } from "./LookupTableFormPage";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_STEPS = 50;
 const ATTRIBUTE = /^[A-Z][A-Z0-9_]{0,19}$/;
@@ -145,9 +146,9 @@ export function toStrategyDraft(s: DerivationStrategy): StrategyDraft {
   };
 }
 
-function failureOf(error: unknown): { message: string; violations: Violation[] } {
-  if (error instanceof LedgerApiError) return { message: `${error.message} (${error.code})`, violations: error.violations };
-  return { message: errorText(error), violations: [] };
+function failureOf(error: unknown): { problem: unknown; violations: Violation[] } {
+  if (error instanceof LedgerApiError) return { problem: error, violations: error.violations };
+  return { problem: error, violations: [] };
 }
 
 interface FormProps {
@@ -164,7 +165,7 @@ function StrategyForm({ ledgerId, version, initial, existing }: FormProps) {
   const [values, setValues] = useState(initial);
   const [nextKey, setNextKey] = useState(initial.steps.length);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<{ message: string; violations: Violation[] } | null>(null);
+  const [failure, setFailure] = useState<{ problem: unknown; violations: Violation[] } | null>(null);
   const [busy, setBusy] = useState<"draft" | "active" | null>(null);
   // The lockVersion of the stored draft: moves on after a save, so a retry after a failed activation is not stale.
   const [lockVersion, setLockVersion] = useState(existing?.lockVersion);
@@ -316,7 +317,7 @@ function StrategyForm({ ledgerId, version, initial, existing }: FormProps) {
         {failure ? (
           <div className={styles.wide}>
             <Alert tone="danger" title="Could not save the strategy" live="alert">
-              {failure.message}
+              <ProblemMessage problem={failure.problem} />
               {failure.violations.length > 0 ? (
                 <ul className={styles.problems}>
                   {failure.violations.map((v, i) => <li key={i}>{v.message}</li>)}

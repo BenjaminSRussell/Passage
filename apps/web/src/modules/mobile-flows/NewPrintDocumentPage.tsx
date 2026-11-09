@@ -5,6 +5,7 @@ import { CODE, createJob, describeProblem, newKey, pdfToBase64, type DocumentTyp
 import { DOCUMENT_LABELS } from "./format";
 import styles from "./pages.module.css";
 import type { Target } from "./NewPrintJobPage";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Office documents that print on PDF over IPP devices (FR-32.13). */
 export const PDF_DOCUMENT_TYPES = ["PICK_LIST", "COUNT_SHEET", "COA", "BOL"] as const satisfies readonly DocumentType[];
@@ -170,7 +171,7 @@ export function NewPrintDocumentPage() {
           ) : failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not print the document" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

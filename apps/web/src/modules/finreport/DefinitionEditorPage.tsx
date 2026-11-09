@@ -27,6 +27,7 @@ import {
 import { ColumnsEditor, RowsEditor } from "./PartEditors";
 import { PartsPicker } from "./PartsPicker";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 function notFoundProblem(code: string) {
   return new ReportingApiError(404, "REPORT-0020", `Definition ${code} has no draft and no published version.`);
@@ -255,7 +256,7 @@ export function DefinitionEditorPage() {
           live="alert"
           action={missing ? undefined : <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}
         >
-          {loadError.message} ({loadError.code})
+          <ProblemMessage problem={loadError} />
         </Alert>
         <Link to="/finreport/definitions">Back to report definitions</Link>
       </div>
@@ -409,7 +410,7 @@ export function DefinitionEditorPage() {
             ) : undefined
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </div>

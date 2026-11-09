@@ -6,6 +6,7 @@ import { fromUtcInput } from "./format";
 import { CODE, decimalText, mapFields, optionalWhole, positive } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface CampaignValues {
   resourceId: string;
@@ -177,7 +178,7 @@ export function NewCampaignPage() {
               {failure ? (
                 <div className={styles.formActions}>
                   <Alert tone="danger" title="Could not create the campaign" live="alert">
-                    {failure.message} ({failure.code})
+                    <ProblemMessage problem={failure} />
                   </Alert>
                 </div>
               ) : null}

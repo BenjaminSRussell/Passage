@@ -5,6 +5,7 @@ import { calibrateInstrument, createInstrument, describeProblem, listInstruments
 import { CALIBRATION_LABELS, CODE, formatDate, pickFields } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const baseColumns: DataTableColumn<Instrument>[] = [
   { key: "code", header: "Code", mono: true },
@@ -105,12 +106,12 @@ export function InstrumentsPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not record the calibration" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load instruments" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -206,7 +207,7 @@ export function NewInstrumentPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the instrument" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

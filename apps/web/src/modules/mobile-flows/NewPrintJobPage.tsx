@@ -5,6 +5,7 @@ import { CODE, createJob, describeProblem, newKey, TEMPLATES, type DocumentType,
 import { inSet82, mod10Valid } from "./domain/gs1";
 import { DOCUMENT_LABELS } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export type Target = "queue" | "rule";
 
@@ -194,7 +195,7 @@ export function NewPrintJobPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not print the label" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

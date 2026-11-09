@@ -145,7 +145,7 @@ describe("Transaction detail", () => {
     fireEvent.click(unpick);
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The status was not changed");
-    expect(alert).toHaveTextContent("(INV-NEG-001)");
+    expect(alert).toHaveTextContent("INV-NEG-001");
     fireEvent.click(screen.getByRole("button", { name: "Unpick to reserved physical" }));
     await waitFor(() => expect(sent("POST")).toHaveLength(2));
     const [first, second] = sent("POST");

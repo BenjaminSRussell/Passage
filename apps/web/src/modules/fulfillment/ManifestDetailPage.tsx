@@ -9,6 +9,7 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import { ManifestStatusBadge } from "./ManifestsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_SHIP = "fulfillment.warehouse.ship";
 
@@ -78,7 +79,7 @@ export function ManifestDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Carrier manifest" />
         <Alert tone="danger" title="Could not load the manifest" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

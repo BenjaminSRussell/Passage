@@ -30,6 +30,7 @@ import {
 import { describeError, useLoad, type LoadError } from "./hooks";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIST = "/planning/item-coverages";
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -238,7 +239,7 @@ const columns: DataTableColumn<ItemCoverage>[] = [
 function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }
@@ -379,10 +380,10 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <Alert tone="danger" title={groups.error ? "Could not load coverage groups" : undefined} live="alert">
-          {groups.error ? `${groups.error.message} (${groups.error.code})` : null}
+          {groups.error ? <ProblemMessage problem={groups.error} /> : null}
         </Alert>
         {!groups.loading && !groups.error && groupOptions.length === 0 ? (
           <Alert tone="info" title="No coverage groups yet" live="status">

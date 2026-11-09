@@ -267,7 +267,7 @@ describe("Load on-hand stock page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run onhand" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not load the stock");
-    expect(alert).toHaveTextContent(/already has opening stock.*\(MIG-0001\)/);
+    expect(alert).toHaveTextContent(/already has opening stock/);
     expect(screen.getByRole("button", { name: "Run onhand" })).toBeInTheDocument();
   });
 });

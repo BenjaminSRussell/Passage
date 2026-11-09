@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { deletePlannedOrder, isOpen, updatePlannedOrder, type PlannedOrder, type PlannedOrderPatch } from "./api/client";
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -150,7 +151,7 @@ export function MaintainOrderCard({ order, onChanged, onDeleted, onReload }: Pro
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <Alert tone="success" live="status">
           {done}

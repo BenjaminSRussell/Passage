@@ -30,6 +30,7 @@ import {
 import { GenerateCard } from "./ForecastGenerate";
 import { describeError, PLAN_CODE, useLoad, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const DEFAULT_FORECAST_MODEL = "BASE";
 /** Rows the forecast endpoint returns at most (MaxPageSize in the service). */
@@ -185,7 +186,7 @@ function CellForm({ model, draft, setDraft, onSaved }: {
           title={failure ? (failure.status === 412 ? "Someone else changed this forecast; reload it and try again" : "The cell was not saved") : undefined}
           live="alert"
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Forecast cell">
           <FormField id="cell-item" label="Item" hint="Item id (UUID)." error={errors.itemId}>
@@ -302,7 +303,7 @@ function ConsensusCard({ model, onDone }: { model: ForecastModel; onDone: (step:
               : `Published${model.publishedAt ? ` on ${model.publishedAt.slice(0, 10)}` : ""}${model.decidedBy ? ` by ${model.decidedBy}` : ""}. The forecast is final and its cells stay locked.`}
         </p>
         <Alert tone="danger" title={failureTitle} live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         {steps.length > 0 ? (
           <div className={styles.formActions}>
@@ -388,7 +389,7 @@ export function ForecastPage() {
       </Alert>
       {state.error && !missing ? (
         <Alert tone="danger" title={`Could not load forecast model ${model}`} live="alert">
-          {`${state.error.message} (${state.error.code})`}
+          {<ProblemMessage problem={state.error} />}
         </Alert>
       ) : null}
       <Card title="Model">

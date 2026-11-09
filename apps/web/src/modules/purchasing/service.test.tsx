@@ -214,7 +214,7 @@ describe("service line page", () => {
     renderAt(PAGE);
     await screen.findByLabelText("Unplanned limit (USD)");
     fireEvent.click(screen.getByRole("button", { name: "Save specification" }));
-    expect(await screen.findByText("the planned services (650) are worth more than the line (500) (PRC-SRV-002)")).toBeInTheDocument();
+    expect(await screen.findByText("the planned services (650) are worth more than the line (500)")).toBeInTheDocument();
   });
 
   it("shows the outline and the limits and removes the specification after confirmation", async () => {
@@ -270,7 +270,7 @@ describe("service line page", () => {
     const stale = renderAt(PAGE);
     await screen.findByLabelText("Unplanned limit (USD)");
     fireEvent.click(screen.getByRole("button", { name: "Save specification" }));
-    expect(await screen.findByText("Someone else changed this order. Reload the page and try again. (PRC-PO-009)")).toBeInTheDocument();
+    expect(await screen.findByText("Someone else changed this order. Reload the page and try again.")).toBeInTheDocument();
     stale.unmount();
     stubFetch(() => problem(404, "PRC-PO-NOT-FOUND", "purchase order not found"));
     renderAt(PAGE);
@@ -352,7 +352,7 @@ describe("model service specifications", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Maintenance visit" } });
     fireEvent.click(screen.getByRole("button", { name: "Remove row 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Save model" }));
-    expect(await screen.findByText(/already has a model service specification MAINT \(PRC-SRV-006\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already has a model service specification MAINT/)).toBeInTheDocument();
   });
 
   it("changes a model under its version and reports a stale one", async () => {

@@ -29,6 +29,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, StatusBadge, datePattern, dash, decimalPattern, money, useResource, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -299,8 +300,8 @@ export function InvoicingPlanPage() {
       <Alert tone="danger" live="alert">
         {failure
           ? failure.code === "PRC-PO-009"
-            ? `Someone else changed this order. Reload the page and try again. (${failure.code})`
-            : `${failure.message} (${failure.code})`
+            ? <ProblemMessage problem={failure} message="Someone else changed this order. Reload the page and try again." />
+            : <ProblemMessage problem={failure} />
           : null}
       </Alert>
       <Alert tone="success" live="status">

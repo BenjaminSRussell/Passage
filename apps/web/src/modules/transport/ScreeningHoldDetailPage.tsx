@@ -6,6 +6,7 @@ import { Details } from "./Details";
 import { checkTone, dash, formatDateTime, stateTone, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_REASON = 500;
 
@@ -51,7 +52,7 @@ function ReleaseCard({ hold, onDone }: { hold: ScreeningHold; onDone(h: Screenin
         </FormField>
         {failure ? (
           <Alert tone="danger" title="The hold was not released" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.actions}>
@@ -76,7 +77,7 @@ export function ScreeningHoldDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Screening hold" />
         <Alert tone="danger" title="Could not load the screening hold" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/screening-holds">Back to screening holds</Link>
       </div>

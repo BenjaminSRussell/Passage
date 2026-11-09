@@ -22,6 +22,7 @@ import { dash, formatDateTime } from "./format";
 import { JobStatusBadge, qty } from "./JobsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const KIND_LABELS: Record<JobCheck["kind"], string> = { numeric: "Numeric", "pass-fail": "Pass or fail", text: "Text" };
 
@@ -131,7 +132,7 @@ export function JobDetailPage() {
       ) : null}
       {state.error && !job ? (
         <Alert tone="danger" title="Could not load the job" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !job ? (
         <Card>
@@ -227,7 +228,7 @@ export function JobDetailPage() {
             <Card title="Reopenings" padded={false}>
               {reopenings.error ? (
                 <Alert tone="danger" title="Could not load the reopenings" live="alert" action={<Button size="sm" onClick={reopenings.reload}>Try again</Button>}>
-                  {reopenings.error.message} ({reopenings.error.code})
+                  <ProblemMessage problem={reopenings.error} />
                 </Alert>
               ) : (
                 <DataTable
@@ -306,7 +307,7 @@ function ReopenForm({ job, onDone }: ReopenFormProps) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not reopen the job" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -437,7 +438,7 @@ function FeedbackForm({ job, onDone }: FeedbackFormProps) {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the report" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

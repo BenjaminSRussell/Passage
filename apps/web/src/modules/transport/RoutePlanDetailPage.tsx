@@ -6,6 +6,7 @@ import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { km } from "./RoutePlansPage";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One vehicle's route in stop order, with arrival and lateness per stop. */
 function RouteCard({ plan, index }: { plan: RoutePlan; index: number }) {
@@ -53,7 +54,7 @@ export function RoutePlanDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Route plan" />
         <Alert tone="danger" title="Could not load the route plan" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/routes">Back to route plans</Link>
       </div>

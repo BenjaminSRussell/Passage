@@ -15,6 +15,7 @@ import {
 import { absenceUnitLabel, DATE, frequencyLabel, lastWholeMonth, planYearOf, shiftDays, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const periodColumns: DataTableColumn<AccrualPeriod>[] = [
   { key: "periodStart", header: "From", mono: true },
@@ -106,7 +107,7 @@ function AccrualCard({ plan, onDone }: { plan: AbsencePlan; onDone(): void }) {
           </Alert>
           {failure ? (
             <Alert tone="danger" title="Could not run the accrual" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
         </div>
@@ -181,7 +182,7 @@ function PlanYearCard({ plan, onDone }: { plan: AbsencePlan; onDone(): void }) {
           </Alert>
           {failure ? (
             <Alert tone="danger" title={failure.title} live="alert">
-              {failure.problem.message} ({failure.problem.code})
+              <ProblemMessage problem={failure.problem} />
             </Alert>
           ) : null}
         </div>
@@ -224,7 +225,7 @@ export function AbsencePlanDetailPage() {
           </Card>
         ) : (
           <Alert tone="danger" title="Could not load the plan" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>

@@ -5,6 +5,7 @@ import { describeProblem, getProcessCategory, updateProcessCategory, type NewPro
 import styles from "./pages.module.css";
 import { categoryValues, ProcessCategoryForm } from "./ProcessCategoryForm";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One process message category with the form that changes it; the code stays (FR-25.17). */
 export function ProcessCategoryDetailPage() {
@@ -38,7 +39,7 @@ export function ProcessCategoryDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Process category" />
         <Alert tone="danger" title="Could not load the category" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

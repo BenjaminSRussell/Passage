@@ -5,6 +5,7 @@ import { describeProblem, getInsuranceReport, INSURANCE_TYPES, type InsuranceRep
 import { DATE, dash, money, sentence, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<InsuranceReportRow>[] = [
   { key: "assetNumber", header: "Asset", mono: true },
@@ -74,7 +75,7 @@ function ReportResults({ filter }: { filter: InsuranceReportFilter }) {
   if (state.error) {
     return (
       <Alert tone="danger" title="Could not load the insurance report" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }
@@ -99,7 +100,7 @@ function ReportResults({ filter }: { filter: InsuranceReportFilter }) {
       />
       {moreError ? (
         <Alert tone="danger" title="Could not load more policies" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor ? (

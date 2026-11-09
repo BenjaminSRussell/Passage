@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatGroup
 import { describeProblem, stackLoadPlan, type LoadPlan, type PlanPallet, type Problem, type Trailer } from "./api/client";
 import styles from "./pages.module.css";
 import { RowsEditor, type RowField } from "./RowsEditor";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PlanValues {
   lengthMm: string;
@@ -143,7 +144,7 @@ export function LoadPlanPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "TMS-0123" ? "The load planner is unavailable" : "Could not plan the load"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -5,6 +5,7 @@ import { MAX_SKILL_SCALE, searchSkills, SKILL_CODE, type SkillGapRow, type Skill
 import { DATE, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface SearchValues {
   skills: string;
@@ -139,7 +140,7 @@ export function SkillSearchPage() {
         </Card>
       ) : state.error ? (
         <Alert tone="danger" title="Could not search" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

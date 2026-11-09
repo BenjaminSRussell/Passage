@@ -15,6 +15,7 @@ import {
 import { dash, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const WINDOWS = [30, 90, 365] as const;
 export const EXPIRY_WINDOWS = [7, 30, 90] as const;
@@ -158,7 +159,7 @@ export function SalesWorkspacePage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the workspace" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : state.loading && !summary ? (
         <p role="status" className={styles.muted}>Loading the workspace.</p>
@@ -205,7 +206,7 @@ export function SalesWorkspacePage() {
           </div>
           {runError ? (
             <Alert tone="danger" title="Could not expire the quotations" live="alert">
-              {runError.message} ({runError.code})
+              <ProblemMessage problem={runError} />
             </Alert>
           ) : null}
           {result ? (

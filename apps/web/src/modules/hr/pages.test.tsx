@@ -172,7 +172,7 @@ describe("workers list", () => {
     let fail = true;
     handler = (url) => (url.pathname === "/api/v1/hr/workers" ? (fail ? json(503, { code: "COM-0500", detail: "HR is down" }) : json(200, { items: [] })) : undefined);
     renderAt("/hr/workers");
-    expect(await findAlert()).toHaveTextContent("HR is down (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("HR is down");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No workers yet")).toBeInTheDocument();
@@ -272,7 +272,7 @@ describe("worker detail", () => {
     renderAt(`/hr/workers/${ADA}`);
     fireEvent.change(await screen.findByLabelText("Reason for reveal"), { target: { value: "audit sample review" } });
     fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
-    expect(await screen.findByText("missing duty hr.pii.read (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty hr.pii.read")).toBeInTheDocument();
     expect(screen.getByText("***-**-6789")).toBeInTheDocument();
   });
 

@@ -98,7 +98,7 @@ describe("rework order list", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/rework-orders");
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -161,7 +161,7 @@ describe("create a rework order", () => {
     renderAt("/processmfg/rework-orders/new");
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Create rework order" }));
-    expect(await findAlert()).toHaveTextContent("batch L-1 already has an open rework order (PMF-0132)");
+    expect(await findAlert()).toHaveTextContent("batch L-1 already has an open rework order");
   });
 
   it("explains the missing duty", () => {
@@ -214,14 +214,14 @@ describe("rework order detail", () => {
     handler = (_url, init) => (init.method === "POST" ? { status: 409, body: { code: "PMF-0104", detail: "stale" } } : { status: 200, body: rework({ orderStatus: "reported" }) });
     renderAt(`/processmfg/rework-orders/${REWORK}`);
     fireEvent.click(await screen.findByRole("button", { name: "Receive output" }));
-    expect(await findAlert()).toHaveTextContent("stale (PMF-0104)");
+    expect(await findAlert()).toHaveTextContent("stale");
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
   });
 
   it("shows a load failure", async () => {
     handler = () => ({ status: 404, body: { code: "PMF-0131", detail: "rework order not found" } });
     renderAt(`/processmfg/rework-orders/${REWORK}`);
-    expect(await findAlert()).toHaveTextContent("rework order not found (PMF-0131)");
+    expect(await findAlert()).toHaveTextContent("rework order not found");
   });
 });
 

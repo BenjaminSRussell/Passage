@@ -49,6 +49,7 @@ import { dash, formatDateTime, formatMinutes, fromUtcInput, sentence, shortId, U
 import { CODE, CURRENCY, decimalText, mapFields, positive, wholeNumber, WEEK_MINUTES } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Detail {
   campaign: Campaign;
@@ -126,7 +127,7 @@ export function CampaignDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Campaign" />
         <Alert tone="danger" title="Could not load the campaign" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -304,7 +305,7 @@ export function CampaignDetailPage() {
           live="alert"
           action={failure.code === "SCHED-0115" ? <Button size="sm" onClick={reload}>Reload</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {notice ? (
@@ -756,7 +757,7 @@ function AllocationCard({ campaign }: { campaign: Campaign }) {
         </form>
         {failure ? (
           <Alert tone="danger" title="Could not allocate the cost" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {result ? (

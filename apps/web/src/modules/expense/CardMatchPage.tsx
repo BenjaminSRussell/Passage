@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { describeProblem, matchCards, type CardMatchInput, type CardMatchPair, type CardMatchResult, type MatchItem, type Problem } from "./api/client";
 import { DAY, DECIMAL, splitProblem } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -137,7 +138,7 @@ export function CardMatchPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not match the transactions" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

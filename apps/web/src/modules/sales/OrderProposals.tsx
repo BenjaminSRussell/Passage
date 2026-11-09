@@ -4,6 +4,7 @@ import { describeProblem, evaluateProposals, respondToProposal, type Problem, ty
 import { sentence, UUID } from "./format";
 import type { LineValues } from "./lines";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface OrderProposalsProps {
   legalEntityId: string;
@@ -102,7 +103,7 @@ export function OrderProposals({ legalEntityId, customerId, lines, onAccept }: O
         {!ready ? <p className={styles.muted}>Enter the legal entity and at least one product to see proposals.</p> : null}
         {failure ? (
           <Alert tone="danger" title="Could not load proposals" live="alert" action={<Button size="sm" onClick={check}>Try again</Button>}>
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {notRecorded ? (

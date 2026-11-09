@@ -146,7 +146,7 @@ describe("Override scheduling constraints", () => {
     fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     fireEvent.click(await screen.findByRole("button", { name: "Preview with override" }));
-    expect(await screen.findByText(/needs the scheduling\.constraints\.override duty \(SCHED-0141\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/needs the scheduling\.constraints\.override duty/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Confirm move/ })).not.toBeInTheDocument();
   });
 });

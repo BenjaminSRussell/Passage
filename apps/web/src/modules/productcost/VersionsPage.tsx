@@ -17,6 +17,7 @@ import { dash } from "./format";
 import { ProblemAlert } from "./shared";
 import { isUuid, useIdempotencyKey } from "./stored";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Every lifecycle move a user can request; the service decides whether it is allowed (BR-39.2). */
 export type Move = "block" | "unblock" | "activate" | "close";
@@ -334,7 +335,7 @@ export function VersionsPage() {
           </div>
           {list.error ? (
             <Alert tone="danger" title="Could not load costing versions" live="alert">
-              {list.error.message} ({list.error.code})
+              <ProblemMessage problem={list.error} />
             </Alert>
           ) : null}
           <DataTable

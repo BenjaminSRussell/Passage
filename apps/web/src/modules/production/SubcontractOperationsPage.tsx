@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { dash, operStatusLabel, operStatusTone, statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -198,7 +199,7 @@ export function SubcontractOperationsPage({ onOpenOrder }: SubcontractOperations
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The subcontract operations are not available" live="alert">
           {state.error.status === 403
             ? "You need the View production orders duty to see the subcontract operations."
-            : `${state.error.message} (${state.error.code})`}
+            : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>

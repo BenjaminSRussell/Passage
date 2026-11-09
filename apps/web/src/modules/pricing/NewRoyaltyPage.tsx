@@ -6,6 +6,7 @@ import { DEFAULT_CONTRACT_ACCOUNTS, ROYALTY_BASIS_LABELS } from "./contractForma
 import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { PERIOD_LABELS } from "./rebateFormat";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RoyaltyTierDraft {
   from: string;
@@ -229,7 +230,7 @@ export function NewRoyaltyPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the agreement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

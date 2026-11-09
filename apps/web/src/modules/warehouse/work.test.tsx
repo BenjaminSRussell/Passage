@@ -82,7 +82,7 @@ describe("WorkListPage", () => {
     renderAt(`/warehouse/work?warehouse=${WH}`);
     await screen.findByText("No work");
     fireEvent.click(screen.getByRole("button", { name: "Assign next work to me" }));
-    expect(await screen.findByText("missing duty warehouse.work.execute (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty warehouse.work.execute")).toBeInTheDocument();
   });
 });
 
@@ -178,7 +178,7 @@ describe("WorkDetailPage", () => {
     renderAt(`/warehouse/work/${WORK}`);
     fireEvent.click(await screen.findByRole("button", { name: "Short pick line 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Record short pick" }));
-    expect(await screen.findByText("Enter the quantity picked (0 or more) and a reason. (COM-0001)")).toBeInTheDocument();
+    expect(await screen.findByText("Enter the quantity picked (0 or more) and a reason.")).toBeInTheDocument();
     fill("Quantity picked", "6");
     fill("Reason", "EMPTY");
     fireEvent.click(screen.getByRole("button", { name: "Record short pick" }));
@@ -200,10 +200,10 @@ describe("WorkDetailPage", () => {
     };
     renderAt(`/warehouse/work/${WORK}`);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel work" }));
-    expect(await screen.findByText("Enter why the work is cancelled. (COM-0001)")).toBeInTheDocument();
+    expect(await screen.findByText("Enter why the work is cancelled.")).toBeInTheDocument();
     fill("Cancellation reason", "DAMAGED");
     fireEvent.click(screen.getByRole("button", { name: "Cancel work" }));
-    expect(await screen.findByText("work is assigned to another user (WMS-NOT-ASSIGNEE)")).toBeInTheDocument();
+    expect(await screen.findByText("work is assigned to another user")).toBeInTheDocument();
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Cancel work" }));
     expect(await screen.findByText("Work cancelled.")).toBeInTheDocument();
@@ -217,6 +217,6 @@ describe("WorkDetailPage", () => {
     server.handler = () => json(404, { code: "WMS-WORK-NOT-FOUND", detail: "not found" });
     renderAt(`/warehouse/work/${WORK}`);
     expect(await screen.findByText("Could not load the work")).toBeInTheDocument();
-    expect(screen.getByText("not found (WMS-WORK-NOT-FOUND)")).toBeInTheDocument();
+    expect(screen.getByText("not found")).toBeInTheDocument();
   });
 });

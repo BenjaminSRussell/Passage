@@ -3,9 +3,10 @@ import { useState } from "react";
 import { Alert, Button, Card, PageHeader, Input, Skeleton } from "../../shell/ui";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { fetchLedger, LedgerApiError, patchLedgerReinstatement, type Ledger } from "./api/client";
+import { fetchLedger, patchLedgerReinstatement, type Ledger } from "./api/client";
 import { LedgerPicker, useLedgerParam } from "./LedgerPicker";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The duty PATCH /ledgers/{id} enforces; the service has the last word. */
 export const DUTY_LEDGER_SETTINGS = "ledger.ledger.write";
@@ -15,7 +16,7 @@ function SettingsCard({ ledger }: { ledger: Ledger }) {
   const canEdit = holdsDuty(usePrincipalDuties(), DUTY_LEDGER_SETTINGS);
   const [allow, setAllow] = useState(ledger.allowReinstate ?? true);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [saved, setSaved] = useState(false);
   const changed = allow !== (ledger.allowReinstate ?? true);
 
@@ -29,7 +30,7 @@ function SettingsCard({ ledger }: { ledger: Ledger }) {
       queryClient.setQueryData(["ledger", "ledger", ledger.id], updated);
       setSaved(true);
     } catch (error) {
-      setFailure(error instanceof LedgerApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      setFailure(error);
     } finally {
       setBusy(false);
     }
@@ -53,7 +54,7 @@ function SettingsCard({ ledger }: { ledger: Ledger }) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the ledger settings" live="alert">
-              {failure}
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

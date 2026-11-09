@@ -127,7 +127,7 @@ describe("lookup tables list", () => {
   it("shows a failed load and loads again on retry", async () => {
     routes((url) => (url.pathname.endsWith("/lookup-tables") ? json(500, { code: "COM-0500", detail: "internal error" }) : undefined));
     renderAt("/migration/lookups");
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     routes();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Lookup tables" })).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe("new lookup table", () => {
     fireEvent.change(screen.getByLabelText("Holds"), { target: { value: "price_list" } });
     expect((screen.getByLabelText("Entries") as HTMLTextAreaElement).value).toBe('{"A":"x"}');
     fireEvent.click(screen.getByRole("button", { name: "Create table" }));
-    expect(await screen.findByText(/price needs a decimal \(MIG-LOOKUP-INVALID\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/price needs a decimal/)).toBeInTheDocument();
   });
 
   it("disables creating without the write duty", () => {
@@ -220,7 +220,7 @@ describe("lookup table detail", () => {
     renderAt(`/migration/lookups/${ID}`);
     await screen.findByRole("heading", { name: "unit-codes" });
     fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
-    expect(await screen.findByText(/current version is 3 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/current version is 3/)).toBeInTheDocument();
   });
 
   it("explains an archived table, is read-only without the write duty and reports a missing table", async () => {
@@ -233,7 +233,7 @@ describe("lookup table detail", () => {
     first.unmount();
     routes((url) => (url.pathname.includes("/lookup-tables/") ? json(404, { code: "MIG-LOOKUP-NOT-FOUND", detail: "lookup table not found" }) : undefined));
     renderAt(`/migration/lookups/${ID}`);
-    expect(await screen.findByText(/lookup table not found \(MIG-LOOKUP-NOT-FOUND\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/lookup table not found/)).toBeInTheDocument();
   });
 });
 
@@ -300,7 +300,7 @@ describe("lookup table CSV import", () => {
     await screen.findByRole("heading", { name: "unit-codes" });
     fireEvent.change(screen.getByLabelText("CSV lines"), { target: { value: "kg,KGM\n" } });
     fireEvent.click(screen.getByRole("button", { name: "Import as version 3" }));
-    expect(await screen.findByText(/current version is 3 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/current version is 3/)).toBeInTheDocument();
     const before = calls.filter((c) => c.method === "GET").length;
     fireEvent.click(screen.getByRole("button", { name: "Reload the table" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(before));
@@ -312,7 +312,7 @@ describe("lookup table CSV import", () => {
     await screen.findByRole("heading", { name: "unit-codes" });
     fireEvent.change(screen.getByLabelText("CSV lines"), { target: { value: "kg,KGM\nbox,x\n" } });
     fireEvent.click(screen.getByRole("button", { name: "Import as version 3" }));
-    expect(await screen.findByText(/line 2: price needs a decimal \(MIG-LOOKUP-INVALID\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/line 2: price needs a decimal/)).toBeInTheDocument();
   });
 
   it("is hidden without the write duty and for an archived table", async () => {

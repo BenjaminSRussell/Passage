@@ -158,7 +158,7 @@ describe("invoicing plan page", () => {
     fireEvent.change(within(second).getByLabelText("Percent"), { target: { value: "60" } });
     fireEvent.click(screen.getByRole("checkbox", { name: /without waiting for a receipt/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save plan" }));
-    expect(await screen.findByText("milestone percents sum to 90, not 100 (PRC-IP-001)")).toBeInTheDocument();
+    expect(await screen.findByText("milestone percents sum to 90, not 100")).toBeInTheDocument();
     const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === "PUT") as [string, Init];
     expect(JSON.parse(String(put[1].body))).toEqual({
       kind: "PARTIAL",
@@ -212,7 +212,7 @@ describe("invoicing plan page", () => {
 
     const fetchMock = stubFetch(() => problem(500, "COM-0500", "internal error"));
     renderAt(PAGE);
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Try again" })[0]);
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(2));
   });

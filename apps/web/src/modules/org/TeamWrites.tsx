@@ -16,6 +16,7 @@ import {
 } from "./api/structure";
 import { dayNumber } from "./hierarchyTree";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const typeCodePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{1,19}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,7 +82,7 @@ const kindChoices: { value: string; label: string; kinds: string[] }[] = [
 function FailureAlert({ title, failure }: { title: string; failure: Problem | null }) {
   return failure ? (
     <Alert tone="danger" title={title} live="alert">
-      {failure.message} ({failure.code})
+      <ProblemMessage problem={failure} />
     </Alert>
   ) : null;
 }
@@ -404,7 +405,7 @@ export function MemberActions({ team, member, onChanged }: { team: Team; member:
       ) : null}
       {failure ? (
         <span role="alert" className={styles.rowError}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </span>
       ) : null}
     </div>

@@ -37,6 +37,7 @@ import {
 import { elapsedSince, formatDateTime, formatMinutes, formatOffset, overrunTone, parsePostings, toneLabel, type Tone } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const EXPORT_FILES: { file: ExportFile; label: string }[] = [
   { file: "runbook.csv", label: "Download runbook (CSV)" },
@@ -277,12 +278,12 @@ export function CutoverPlanDetailPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the plan" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       {failure ? (
         <Alert tone="danger" title="The change was not saved" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {plan ? (

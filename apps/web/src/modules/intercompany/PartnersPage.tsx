@@ -5,6 +5,7 @@ import { describeProblem, type Problem } from "./api/client";
 import { listPartners, type Partner, type PartnerQuery } from "./api/partners";
 import { pricingLabels } from "./PartnerFormPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "±0.5 % price, ±2 days" */
 export function toleranceText(p: Partner): string {
@@ -111,7 +112,7 @@ export function PartnersPage() {
             </Button>
           }
         >
-          {state.failure.message} ({state.failure.code})
+          <ProblemMessage problem={state.failure} />
         </Alert>
       ) : (
         <DataTable

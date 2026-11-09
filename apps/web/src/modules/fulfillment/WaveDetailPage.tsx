@@ -8,6 +8,7 @@ import { compareDecimal, dash, DECIMAL, formatDate, formatDateTime, GROUP_LABELS
 import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const shipmentColumns: DataTableColumn<WaveShipment>[] = [
   { key: "shipmentNumber", header: "Shipment", mono: true },
@@ -145,7 +146,7 @@ export function WaveDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Pick wave" />
         <Alert tone="danger" title="Could not load the wave" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

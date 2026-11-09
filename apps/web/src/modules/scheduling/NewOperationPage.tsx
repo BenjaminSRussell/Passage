@@ -6,6 +6,7 @@ import { fromUtcInput, UUID } from "./format";
 import { CODE, compareDecimal, decimalText, optionalWhole, positive, wholeNumber, WEEK_MINUTES } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The service books at most this many secondary resources per operation (BR-23.4). */
 export const MAX_SECONDARIES = 5;
@@ -221,7 +222,7 @@ export function NewOperationPage() {
       <Card>
         {resources.error ? (
           <Alert tone="danger" title="Could not load resources and networks" live="alert" action={<Button size="sm" onClick={resources.reload}>Try again</Button>}>
-            {resources.error.message} ({resources.error.code})
+            <ProblemMessage problem={resources.error} />
           </Alert>
         ) : resources.loading && !resources.data ? (
           <div className={styles.loading} aria-busy="true">
@@ -369,7 +370,7 @@ export function NewOperationPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not add the operation" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { describeProblem, getNetPriceList, getPriceList, type ConditionType, type NetPriceList, type PriceList, type PriceListItem, type PriceListQuery, type PriceListScope, type Problem } from "./api/client";
 import { DAY, describePercent, describeProduct, netPriceLines, netPricesCsv, today, TYPE_LABELS, UUID, winningQuantities, type NetPriceLine } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const SCOPE_LABELS: Record<PriceListScope, string> = { CUSTOMER: "This customer", GROUP: "Customer group", ALL: "All customers" };
 
@@ -165,7 +166,7 @@ export function PriceListPage() {
       </Card>
       {failure ? (
         <Alert tone="danger" title="The price list could not be loaded" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {loading ? <Skeleton height="tile" /> : null}
@@ -177,7 +178,7 @@ export function PriceListPage() {
       ) : null}
       {moreFailure ? (
         <Alert tone="danger" title="The next page could not be loaded" live="alert">
-          {moreFailure.message} ({moreFailure.code})
+          <ProblemMessage problem={moreFailure} />
         </Alert>
       ) : null}
       {!loading && list ? (
@@ -198,7 +199,7 @@ export function PriceListPage() {
       ) : null}
       {!loading && netFailure ? (
         <Alert tone="warning" title="The net prices could not be loaded" live="alert">
-          {netFailure.message} ({netFailure.code})
+          <ProblemMessage problem={netFailure} />
         </Alert>
       ) : null}
       {!loading && net?.truncated ? (

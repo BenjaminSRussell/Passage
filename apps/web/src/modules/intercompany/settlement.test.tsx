@@ -114,7 +114,7 @@ describe("intercompany charges page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Price charge" }));
     await waitFor(() => expect(screen.getByText("The charge was not priced")).toBeInTheDocument());
     expect(screen.getByText("The charge was not priced").closest("[role=alert]")).toHaveTextContent(
-      "no transfer price for Hour / Consultant on 2025-12-31 (IC-0821)",
+      "no transfer price for Hour / Consultant on 2025-12-31",
     );
     expect(screen.getByLabelText("Transaction date")).toHaveValue("2025-12-31");
     expect(screen.queryByRole("table", { name: "Charge legs" })).not.toBeInTheDocument();
@@ -192,7 +192,7 @@ describe("centralized payments page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview postings" }));
     await waitFor(() => expect(screen.getByText("The payment postings were not derived")).toBeInTheDocument());
     expect((calls[0].body as { direction: string }).direction).toBe("Receive");
-    expect(screen.getByText("The payment postings were not derived").closest("[role=alert]")).toHaveTextContent("(IC-0805)");
+    expect(screen.getByText("The payment postings were not derived").closest("[role=alert]")).toHaveTextContent("IC-0805");
   });
 
   it("checks the payment before sending", () => {
@@ -257,7 +257,7 @@ describe("intercompany planning page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sequence group" }));
     expect(await screen.findByText("Stale supplier plan")).toBeInTheDocument();
     expect((calls[0].body as { replannedBuyer: string }).replannedBuyer).toBe("A");
-    expect(screen.getByText("Stale supplier plan").parentElement).toHaveTextContent("Supplier plan for B is stale after buyer replanning (IC-0815)");
+    expect(screen.getByText("Stale supplier plan").parentElement).toHaveTextContent("Supplier plan for B is stale after buyer replanning");
   });
 
   it("explains a cycle without sequence (IC-0816)", async () => {
@@ -265,7 +265,7 @@ describe("intercompany planning page", () => {
     renderAt("/intercompany/planning");
     fireEvent.click(screen.getByRole("button", { name: "Sequence group" }));
     await waitFor(() => expect(screen.getByText("The planning group was not sequenced")).toBeInTheDocument());
-    expect(screen.getByText("The planning group was not sequenced").closest("[role=alert]")).toHaveTextContent("(IC-0816)");
+    expect(screen.getByText("The planning group was not sequenced").closest("[role=alert]")).toHaveTextContent("IC-0816");
     expect(screen.queryByRole("table", { name: "Run order" })).not.toBeInTheDocument();
   });
 

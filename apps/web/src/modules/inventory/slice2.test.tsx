@@ -170,7 +170,7 @@ describe("Transaction inquiry", () => {
     first.unmount();
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt("/inventory/transactions");
-    expect(await findAlert()).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty inventory.read");
   });
 });
 
@@ -200,7 +200,7 @@ describe("Reservations", () => {
     handler = (_url, init) => (init.method === "DELETE" ? json(404, { code: "INV-RES-003", detail: "reservation not found" }) : json(200, { items: [reservation()] }));
     renderAt("/inventory/reservations");
     fireEvent.click(await screen.findByRole("button", { name: "Release reservation 7a7a7a7a" }));
-    expect(await findAlert()).toHaveTextContent("reservation not found (INV-RES-003)");
+    expect(await findAlert()).toHaveTextContent("reservation not found");
   });
 });
 
@@ -262,7 +262,7 @@ describe("New reservation", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
     fireEvent.change(screen.getByLabelText("Demand reference"), { target: { value: "SO-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Reserve" }));
-    expect(await findAlert()).toHaveTextContent("only 3 available to reserve, 10 requested (INV-RES-001)");
+    expect(await findAlert()).toHaveTextContent("only 3 available to reserve, 10 requested");
     handler = () => json(400, { code: "COM-0001", detail: "one or more fields are invalid", errors: { demandId: "is required (1 to 60 characters)" } });
     fireEvent.click(screen.getByRole("button", { name: "Reserve" }));
     expect(await screen.findByText("is required (1 to 60 characters)")).toBeInTheDocument();
@@ -296,7 +296,7 @@ describe("Blocking", () => {
   it("shows load failures", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/inventory/blockings");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
   });
 
   it("validates a blocking before sending it", () => {
@@ -332,7 +332,7 @@ describe("Blocking", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "9" } });
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: "S1" } });
     fireEvent.click(screen.getByRole("button", { name: "Block stock" }));
-    expect(await findAlert()).toHaveTextContent("exceeds available 4 (INV-BLK-003)");
+    expect(await findAlert()).toHaveTextContent("exceeds available 4");
   });
 });
 
@@ -437,7 +437,7 @@ describe("Cycle counting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Post count" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Supervisor approval required");
-    expect(alert).toHaveTextContent("(INV-CNT-001)");
+    expect(alert).toHaveTextContent("INV-CNT-001");
   });
 
   it("shows a not-found state for an unknown sheet", async () => {

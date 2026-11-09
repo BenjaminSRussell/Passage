@@ -20,6 +20,7 @@ import {
 import { dash, formatDate, formatDateTime, PULL_STATUS_LABELS, shortId, STUDY_STATUS_LABELS, STUDY_STATUSES, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** ICH Q1A(R2) storage conditions offered on the form; any other condition can be typed. */
 export const ICH_CONDITIONS = ["25C/60RH", "30C/65RH", "30C/75RH", "40C/75RH", "5C", "-20C"] as const;
@@ -95,7 +96,7 @@ export function StabilityStudiesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load stability studies" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -268,7 +269,7 @@ export function NewStudyPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not plan the study" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -311,7 +312,7 @@ export function StudyDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Stability study" />
         <Alert tone="danger" title="Could not load the study" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -450,7 +451,7 @@ function StudyLifecyclePanel({ study, onChanged }: { study: Study; onChanged(): 
             live="alert"
             action={failure.code === "conflict_version" ? <Button size="sm" onClick={onChanged}>Reload the study</Button> : undefined}
           >
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {forward ? (

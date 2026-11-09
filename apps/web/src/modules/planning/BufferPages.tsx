@@ -33,6 +33,7 @@ import { describeError, useLoad, type LoadError } from "./hooks";
 import { compareQty } from "./ItemCoveragePage";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const PROFILES = "/planning/buffer-profiles";
 export const BUFFERS = "/planning/ddmrp-buffers";
@@ -184,7 +185,7 @@ function newKey(): string {
 function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }
@@ -315,7 +316,7 @@ function BufferProfileForm({ profile, onSaved, onReload }: ProfileFormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
       </div>
       <FormField id="bp-code" label="Code" error={errors.code}>
@@ -542,7 +543,7 @@ function RecalculateCard({ profiles, initialProfile, onStored }: { profiles: Buf
         </p>
         <div className={styles.wide}>
           <Alert tone="danger" title={failure ? "The buffer was not recalculated" : undefined} live="alert">
-            {failure ? `${failure.message} (${failure.code})` : null}
+            {failure ? <ProblemMessage problem={failure} /> : null}
           </Alert>
           <Alert tone="success" title={result ? "Buffer stored" : undefined} live="status">
             {result

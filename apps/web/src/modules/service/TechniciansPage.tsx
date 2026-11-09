@@ -21,6 +21,7 @@ import { PagedTable } from "./PagedTable";
 import { clock, dash, duration, minuteOf, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DAYS = [
   { value: 1, label: "Mon" },
@@ -316,7 +317,7 @@ function TechnicianForm({ creating, initial, submitLabel, onSubmit, failure, fie
               title={failure.code === "SVC-TECH-001" ? "That code is taken" : failure.code === "conflict_version" ? "Someone else changed this technician" : "Could not save the technician"}
               live="alert"
             >
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
               {failure.code === "SVC-TECH-005" ? (
                 <ul>
                   {Object.entries(failure.fields).map(([number, rules]) => (
@@ -390,7 +391,7 @@ export function TechnicianDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Technician" />
         <Alert tone="danger" title="Could not load the technician" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

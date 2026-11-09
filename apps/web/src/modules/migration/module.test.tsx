@@ -100,7 +100,7 @@ describe("runs list", () => {
   it("shows the error state and retries", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
     renderAt("/migration");
-    expect(await screen.findByText(/missing duty \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty/)).toBeInTheDocument();
     handler = () => json(200, { items: [run] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Migration runs" })).toHaveTextContent("customer");

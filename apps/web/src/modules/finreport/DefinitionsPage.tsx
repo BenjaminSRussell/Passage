@@ -16,6 +16,7 @@ import {
 import { KIND_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<DefinitionSummary>[] = [
   { key: "code", header: "Code", mono: true },
@@ -48,7 +49,7 @@ export function DefinitionsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the report definitions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -116,7 +117,7 @@ export function StandardCard({ onInstalled }: { onInstalled(): void }) {
         </p>
         {state.error ? (
           <Alert tone="danger" title="Could not load the standard definitions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable
@@ -141,7 +142,7 @@ export function StandardCard({ onInstalled }: { onInstalled(): void }) {
         ) : null}
         {failure ? (
           <Alert tone="danger" title="The standard definitions were not installed" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
       </div>
@@ -221,7 +222,7 @@ export function ImportCard({ onImported }: { onImported(code: string): void }) {
       </form>
       {failure ? (
         <Alert tone="danger" title="The definition was not imported" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </Card>

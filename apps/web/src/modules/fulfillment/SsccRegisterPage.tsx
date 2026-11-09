@@ -6,6 +6,7 @@ import { ContainerStatusBadge } from "./badges";
 import { formatDate, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Rows per page of the register. */
 export const SSCC_PAGE = 100;
@@ -131,7 +132,7 @@ export function SsccRegisterPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the SSCC register" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

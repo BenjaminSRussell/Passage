@@ -282,7 +282,8 @@ describe("Release a load to the tender workflow", () => {
       fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
       const alert = await findAlert();
       expect(alert).toHaveTextContent("Could not release the load");
-      expect(alert).toHaveTextContent(`${detail} (${code})`);
+      expect(alert).toHaveTextContent(detail);
+      expect(alert).toHaveTextContent(code);
       // A 409 rereads the load so the planner sees its status now; a 422 does not need to.
       await waitFor(() => expect(reads).toBe(status === 409 ? 2 : 1));
       view.unmount();

@@ -16,6 +16,7 @@ import {
 } from "./api/client";
 import { coProductTypeLabel, flushingLabel, reworkRefLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimalPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -378,7 +379,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
       <Alert tone="danger" live="alert" title={failure ? "The order was not created" : undefined}>
         {failure ? (
           <>
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
             {failure.errors ? (
               <ul>
                 {Object.entries(failure.errors).map(([field, message]) => (

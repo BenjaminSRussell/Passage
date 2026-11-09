@@ -40,6 +40,7 @@ import {
 import { count, dateTime, enumLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Mirrors BR-46.15: three consecutive below-threshold evaluations escalate. */
 const ESCALATE_AFTER = 3;
@@ -171,7 +172,7 @@ export function DataQualityPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load data-quality rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>
@@ -447,7 +448,7 @@ export function DQRuleDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Data-quality rule" />
         <Alert tone="danger" title="Could not load the rule" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error?.message} ({state.error?.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

@@ -15,6 +15,7 @@ import {
 import { DECIMAL, formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -277,7 +278,7 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.code === "SLS-0006" ? "Someone else changed this profile" : "Could not save the credit profile"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.actions}>
@@ -314,7 +315,7 @@ export function CreditProfilePage() {
       <div className={styles.stack}>
         <PageHeader title="Credit profile" />
         <Alert tone="danger" title="Could not load the credit profile" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

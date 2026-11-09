@@ -7,6 +7,7 @@ import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey }
 import { RowGrid } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Key = "payingEntity" | "owningEntity" | "paymentMethod" | "direction" | "amount" | "currency" | "bankAccount" | "owningAccount";
 
@@ -128,7 +129,7 @@ export function CentralPaymentsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The payment postings were not derived" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -160,7 +161,7 @@ export function CentralPaymentsPage() {
               </p>
               {reversal.failure ? (
                 <Alert tone="danger" title="The reversal was not derived" live="alert">
-                  {reversal.failure.message} ({reversal.failure.code})
+                  <ProblemMessage problem={reversal.failure} />
                 </Alert>
               ) : null}
               <div>

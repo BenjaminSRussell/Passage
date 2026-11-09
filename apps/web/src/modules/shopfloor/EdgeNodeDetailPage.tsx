@@ -20,6 +20,7 @@ import { configState, EdgeStatusBadge, RING_LABELS } from "./EdgeNodesPage";
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Parses the document text; the service validates the content. */
 export function parseDocument(text: string): { document?: Record<string, unknown>; error?: string } {
@@ -66,7 +67,7 @@ export function EdgeNodeDetailPage() {
       <PageHeader title={current?.name ?? "Edge node"} description={<Link to="/shopfloor/edge-nodes">All edge nodes</Link>} />
       {node.error && !current ? (
         <Alert tone="danger" title="Could not load the edge node" live="alert" action={<Button size="sm" onClick={node.reload}>Try again</Button>}>
-          {node.error.message} ({node.error.code})
+          <ProblemMessage problem={node.error} />
         </Alert>
       ) : !current ? (
         <Card>
@@ -115,7 +116,7 @@ export function EdgeNodeDetailPage() {
           )}
           {configs.error ? (
             <Alert tone="danger" title="Could not load configuration versions" live="alert" action={<Button size="sm" onClick={configs.reload}>Try again</Button>}>
-              {configs.error.message} ({configs.error.code})
+              <ProblemMessage problem={configs.error} />
             </Alert>
           ) : (
             <DataTable
@@ -197,7 +198,7 @@ function EditForm({ node, onSaved }: { node: EdgeNode; onSaved(saved: EdgeNode):
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the edge node" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -259,7 +260,7 @@ function PublishForm({ nodeId, onPublished }: { nodeId: string; onPublished(): v
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not publish the configuration" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

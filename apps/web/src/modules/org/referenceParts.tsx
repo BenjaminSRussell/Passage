@@ -4,6 +4,7 @@ import { describeProblem, type Problem } from "./api/client";
 import type { ReferenceStatus } from "./api/reference";
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export type StatusFilterValue = "" | ReferenceStatus;
 
@@ -146,7 +147,7 @@ export function StatusAction({ subject, status, apply }: StatusActionProps) {
       )}
       {failure ? (
         <span role="alert" className={styles.rowError}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </span>
       ) : null}
     </div>
@@ -185,7 +186,7 @@ export function StatusTable<T extends { status: string }>({ label, emptyTitle, c
     <>
       {state.error ? (
         <Alert tone="danger" title={`Could not load ${label.toLowerCase()}`} live="alert">
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       <DataTable label={label} columns={all} rows={state.rows} getRowKey={getRowKey} loading={state.loading} empty={{ title: emptyTitle }} />

@@ -14,6 +14,7 @@ import { amount, dash, isCount, isCurrency, isDecimal, isNonZero, isSignedDecima
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type HeadKey = "currency" | "periodEnd";
 type RuleKey = "code" | "type" | "order" | "sourceAccount" | "targetAccount" | "threshold" | "termMonths";
@@ -178,7 +179,7 @@ export function ReclassificationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The dry run failed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

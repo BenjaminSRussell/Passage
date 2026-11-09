@@ -6,6 +6,7 @@ import { SlipStatusBadge } from "./badges";
 import { fixed, formatDate, formatMoney, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type SlipLine = PackingSlip["lines"][number];
 
@@ -69,7 +70,7 @@ export function PackingSlipDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Packing slip" />
         <Alert tone="danger" title="Could not load the packing slip" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -137,7 +138,7 @@ export function PackingSlipDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not cancel the packing slip" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card>

@@ -31,6 +31,7 @@ import {
 import { amount, dash } from "./format";
 import { ExplosionModeField } from "./shared";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The FR-39.4 worked example: SA-200 under FG-100 rolls to 104.32. */
 export const workedExample: CostItem[] = [
@@ -358,7 +359,7 @@ export function RollPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The roll was refused" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
                 {fieldErrors.length > 0 ? (
                   <ul className={styles.fieldErrors}>
                     {fieldErrors.map(([field, message]) => (

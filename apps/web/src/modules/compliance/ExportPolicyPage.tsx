@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { sentence } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const channelLabel: Record<ExportChannel, string> = {
   GRID: "Grid export",
@@ -130,7 +131,7 @@ export function ExportPolicyPage() {
           </div>
         </form>
         <Alert tone="danger" title={exportFailure ? "The download is refused" : undefined} live="alert">
-          {exportFailure ? `${exportFailure.message} (${exportFailure.code})` : null}
+          {exportFailure ? <ProblemMessage problem={exportFailure} /> : null}
         </Alert>
         <Alert tone={decision?.allowed ? "success" : "warning"} live="status">
           {decision ? decisionText(decision) : null}
@@ -157,7 +158,7 @@ export function ExportPolicyPage() {
           </div>
         </form>
         <Alert tone="danger" title={readFailure ? "The read could not be checked" : undefined} live="alert">
-          {readFailure ? `${readFailure.message} (${readFailure.code})` : null}
+          {readFailure ? <ProblemMessage problem={readFailure} /> : null}
         </Alert>
         <Alert tone="info" live="status">
           {read ? (read.logged ? `Logged and kept ${read.retentionDays} days: ${read.fields.join(", ")}.` : "None of these fields is logged.") : null}

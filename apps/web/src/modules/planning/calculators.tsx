@@ -23,6 +23,7 @@ import {
 } from "./api/calculators";
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
 const SIGNED_DECIMAL = /^-?\d+(\.\d{1,6})?$/;
@@ -154,7 +155,7 @@ function useCalculation<I, R>(call: (input: I) => Promise<R>) {
 function Failure({ error, title }: { error: LoadError | null; title: string }) {
   return (
     <Alert tone="danger" title={error ? title : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }

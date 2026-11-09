@@ -20,6 +20,7 @@ import { canReconcile, dash, formatDateTime, formatKey, money, projectsOf, proje
 import styles from "./pages.module.css";
 import { TargetLoadPanel } from "./TargetLoadPanel";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const totalColumns: DataTableColumn<ControlTotal>[] = [
   { key: "name", header: "Control total", mono: true },
@@ -218,12 +219,12 @@ export function PackRunDetailPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the pack run" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       {failure ? (
         <Alert tone="danger" title="The record was not released" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {notice ? (

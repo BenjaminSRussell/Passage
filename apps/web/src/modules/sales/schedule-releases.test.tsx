@@ -189,7 +189,8 @@ describe("Scheduling releases", () => {
     fill("Date", "2027-04-15");
     fill("Cumulative required", "2");
     fireEvent.click(await screen.findByRole("button", { name: "Store release" }));
-    expect(await screen.findByText(/already received/)).toBeInTheDocument();
+    expect(await screen.findByText("This release was already received for the agreement. Check the release number.")).toBeInTheDocument();
+    expect(screen.getByText("release R-17 was already received for agreement SA-0000007")).toBeInTheDocument();
   });
 
   it("a held release shows the mismatch and is rejected at its ETag with a reason", async () => {
