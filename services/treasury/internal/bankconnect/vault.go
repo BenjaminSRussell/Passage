@@ -45,6 +45,7 @@ type VaultConfig struct {
 	SFTPKeyVersion  int
 	SigningKeyNames []string
 	BankChannels    []string
+	EBICSKVMount    string
 	Client          *http.Client
 }
 
@@ -61,7 +62,7 @@ func LoadVaultConfig(getenv func(string) string) (VaultConfig, error) {
 		Addr: getenv("VAULT_ADDR"), Token: getenv("VAULT_TOKEN"), K8sRole: getenv("VAULT_K8S_ROLE"),
 		K8sMount: orDefault(getenv("VAULT_K8S_AUTH_MOUNT"), defaultK8sMount), K8sJWTPath: orDefault(getenv("VAULT_K8S_JWT_PATH"), defaultK8sJWTPath),
 		SFTPKeyName: getenv("TREASURY_SFTP_KEY_NAME"), SigningKeyNames: splitList(getenv("TREASURY_SIGNING_KEY_NAMES")),
-		BankChannels: splitList(getenv("TREASURY_BANK_CHANNELS")),
+		BankChannels: splitList(getenv("TREASURY_BANK_CHANNELS")), EBICSKVMount: orDefault(getenv("TREASURY_EBICS_KV_MOUNT"), "secret"),
 	}
 	channels, err := normalizeBankChannels(c.BankChannels)
 	if err != nil {
@@ -83,7 +84,7 @@ func LoadVaultConfig(getenv func(string) string) (VaultConfig, error) {
 	if (c.Token == "") == (c.K8sRole == "") {
 		return VaultConfig{}, errors.New("set exactly one of VAULT_TOKEN and VAULT_K8S_ROLE")
 	}
-	names := append(append([]string{c.K8sMount}, c.SigningKeyNames...), c.SFTPKeyName)
+	names := append(append([]string{c.K8sMount, c.EBICSKVMount}, c.SigningKeyNames...), c.SFTPKeyName)
 	for _, n := range names {
 		if n != "" && !vaultName.MatchString(n) {
 			return VaultConfig{}, fmt.Errorf("vault name %q must be letters, digits, - or _", n)

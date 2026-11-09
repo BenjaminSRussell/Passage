@@ -169,6 +169,11 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0495` | 404 | EBICS subscriber not found |
 | `TRS-0496` | 409 | an EBICS subscriber with this host, partner and user already exists |
 | `TRS-0497` | 422 | EBICS subscriber host, partner or user id, or bank URL, is not acceptable |
+| `TRS-0498` | 409 | the EBICS subscriber's state does not allow this step (or it is not parked, for unpark) |
+| `TRS-0499` | 422 | the hashes given do not match the bank keys that were downloaded; nothing is activated |
+| `TRS-0500` | 409 | the EBICS subscriber is parked after a bank refusal until a person unparks it |
+| `TRS-0501` | 502 | the bank refused the EBICS order; the bank's return code is in the detail |
+| `TRS-0502` | 503 | EBICS is not enabled on this instance (`ebics` is not in `TREASURY_BANK_CHANNELS`) |
 | `conflict_version` | 412 | `If-Match` does not match the current ETag |
 | `precondition_required` | 428 | `If-Match` is required on every custom method |
 | `AUTH-0003` | 403 | missing duty, including `treasury.facility.override` when `overrideLimit` is set; or a legal-entity-scoped caller creating a bank account, forecast entry, facility or loan for another legal entity |
@@ -178,3 +183,11 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 
 Only the platform module and what it pulls in (chi, pgx/v5, shopspring/decimal,
 google/uuid). No new dependencies.
+
+## EBICS onboarding, polling and key custody
+
+Routes (all under `/v1/treasury/ebics-subscribers`): `POST` creates a subscriber (duty `treasury.ebics.write`); `POST /{id}:send-ini`, `:send-hia` and `:fetch-bank-keys` run the key ceremony (`treasury.ebics.keys`); `POST /{id}:confirm-bank-keys` and `:unpark` need `treasury.ebics.approve`, a duty other than the one that runs the ceremony, and record the authenticated user as the confirmer (never a body field); `GET /{id}` and `GET /{id}/letters/{INI|HIA}` need `treasury.view`. The routes answer 503 TRS-0502 unless `TREASURY_BANK_CHANNELS` contains `ebics` (it needs `VAULT_ADDR`).
+
+Env: `TREASURY_EBICS_KV_MOUNT` (KV v2 mount of the E002 keys, default `secret`); polling is off unless `TREASURY_EBICS_POLL_WORKERS=true`, with `TREASURY_EBICS_POLL_TENANT_IDS` (required), `TREASURY_EBICS_POLL_INTERVAL` (default 1h, at least 1m), `TREASURY_EBICS_POLL_ORDER` (`C53` or `STA`, default `C53`) and `TREASURY_EBICS_POLL_LOOKBACK_DAYS` (1 to 31, default 3). Each tick the poller downloads the statements of every READY, unparked subscriber of the listed tenants under that subscriber's own tenant and legal entity, and imports them; a statement is routed to the bank account its own account number names. The bank is told a download arrived (receipt code 0) only after every file was imported; any failure sends receipt code 1, so the bank keeps the data and redelivers, and imports replay. Back-off return codes wait and retry inside the tick, and an exhausted retry is tried again at the next tick; a parked subscriber is skipped until it is unparked. Payment files go out through `bankconnect.Channels` (`ebics.AccountSender`, which picks the subscriber bound to the file's bank account and writes the same `bank_file_audit` rows as every channel); the payment-file producers (wave 19) are the callers.
+
+Key custody. A006 and X002 are non-exportable Vault transit keys: signing happens inside Vault. E002 is a deliberate deviation from "keys never leave Vault": the transaction key is wrapped with RSA PKCS#1 v1.5, which the transit engine cannot decrypt (it offers OAEP only), so the E002 private key is a KV v2 secret (`<e002KvPath>`, field `pem`) that the service reads for each unwrap, wipes after use (the key's secret integers and the DER bytes are overwritten; Go cannot wipe the JSON and PEM strings it was parsed from, which are never logged and not kept), and never caches. The E002 public key lives apart at `<e002KvPath>-pub` (field `pem`), so letters and the HIA order never load the private key. The Vault policy should grant read on the private path to this service only.

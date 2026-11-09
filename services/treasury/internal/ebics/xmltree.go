@@ -48,6 +48,20 @@ func (n *xnode) child(local string) *xnode {
 	return nil
 }
 
+// childIn is child restricted to elements in namespace ns, so an element that
+// only carries the right local name in another namespace is not mistaken for it.
+func (n *xnode) childIn(ns, local string) *xnode {
+	if n == nil {
+		return nil
+	}
+	for _, k := range n.kids {
+		if !k.isText && k.local == local && k.uri() == ns {
+			return k
+		}
+	}
+	return nil
+}
+
 func (n *xnode) path(locals ...string) *xnode {
 	for _, l := range locals {
 		n = n.child(l)

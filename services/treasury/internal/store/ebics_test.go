@@ -2,10 +2,12 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/ebics"
 )
 
@@ -126,5 +128,88 @@ func TestImportStatementFile_FeedsTheStatementImportAndReplays(t *testing.T) {
 	var (
 		_ ebics.SubscriberStore = (*Postgres)(nil)
 		_ ebics.StatementSink   = (*Postgres)(nil).ImportStatementFile
+		_ ebics.PollableLister  = (*Postgres)(nil)
+		_ ebics.AccountLookup   = (*Postgres)(nil)
 	)
+}
+
+const secondIBAN = "GB82WEST12345698765432"
+
+func twoAccountFile(secondAccountIBAN string) []byte {
+	first := string(camt("S-A", 0, 1, ""))
+	second := strings.ReplaceAll(string(camt("S-B", 0, 2, "")), testIBAN, secondAccountIBAN)
+	stmt := second[strings.Index(second, "<Stmt>") : strings.Index(second, "</Stmt>")+len("</Stmt>")]
+	return []byte(strings.Replace(first, "</BkToCstmrStmt>", stmt+"</BkToCstmrStmt>", 1))
+}
+
+func TestImportStatementFile_RoutesEachStatementToTheAccountItNames(t *testing.T) {
+	s, _ := newStore(t)
+	le := ids.New()
+	ctx := ctxFor(1, le)
+	a1 := activeAccount(t, s, ctx, le)
+	in2 := newAccount(le)
+	in2.IBAN, in2.AccountCode = secondIBAN, "OPS-02"
+	a2, err := s.CreateBankAccount(ctx, in2, ids.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a2, err = s.TransitionBankAccount(ctx, a2.ID, a2.Version, domain.AccountActive); err != nil {
+		t.Fatal(err)
+	}
+	file := twoAccountFile(secondIBAN)
+	for range 2 {
+		if err := s.ImportStatementFile(ctx, a1.ID, "c53.xml", file); err != nil {
+			t.Fatalf("a file with two accounts, imported twice (the second is a replay): %v", err)
+		}
+	}
+	for acct, want := range map[string]string{a1.ID: "S-A", a2.ID: "S-B"} {
+		list, err := s.ListStatements(ctx, acct)
+		if err != nil || len(list) != 1 || list[0].StatementID != want {
+			t.Fatalf("account %s: %v %+v", acct, err, list)
+		}
+	}
+	err = s.ImportStatementFile(ctx, a1.ID, "c53.xml", twoAccountFile("FR1420041010050500013M02606"))
+	if err == nil || !strings.Contains(err.Error(), domain.CodeStatementAccount) && !strings.Contains(err.Error(), "no single bank account") {
+		t.Fatalf("a statement for an unregistered account must fail the file: %v", err)
+	}
+}
+
+func TestEBICSSubscriber_PollableAndByAccount(t *testing.T) {
+	s, _ := newStore(t)
+	le := ids.New()
+	ctx := ctxFor(1, le)
+	acct := activeAccount(t, s, ctx, le)
+	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le))
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := ctxFor(1, "")
+	if got, err := s.PollableSubscribers(all); err != nil || len(got) != 0 {
+		t.Fatalf("a NEW subscriber is not pollable: %v %v", got, err)
+	}
+	now := time.Now().UTC()
+	sub.State, sub.KeysConfirmed, sub.ConfirmedBy, sub.ConfirmedAt, sub.BankX002, sub.BankE002 = ebics.StateReady, true, "treasurer", &now, []byte{1}, []byte{2}
+	if sub, err = s.UpdateSubscriber(ctx, sub); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.PollableSubscribers(all); err != nil || len(got) != 1 || got[0].ID != sub.ID {
+		t.Fatalf("READY subscriber: %v %v", got, err)
+	}
+	if got, err := s.PollableSubscribers(ctxFor(2, "")); err != nil || len(got) != 0 {
+		t.Fatalf("another tenant: %v %v", got, err)
+	}
+	byAccount, err := s.SubscriberForAccount(ctx, acct.ID)
+	if err != nil || byAccount.ID != sub.ID {
+		t.Fatalf("by account: %v %+v", err, byAccount)
+	}
+	if _, err := s.SubscriberForAccount(ctx, ids.New()); problemCode(t, err) != CodeSubscriberNotFound {
+		t.Fatalf("unknown account: %v", err)
+	}
+	sub.ParkedCode = "091118"
+	if _, err := s.UpdateSubscriber(ctx, sub); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.PollableSubscribers(all); err != nil || len(got) != 0 {
+		t.Fatalf("a parked subscriber is not pollable: %v %v", got, err)
+	}
 }

@@ -400,7 +400,7 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 	if err != nil {
 		return b.refuse("091104")
 	}
-	once := sha256.Sum256(plain)
+	once := sha256.Sum256([]byte(strings.NewReplacer("\r", "", "\n", "", "\x1a", "").Replace(string(plain))))
 	twice := sha256.Sum256(once[:])
 	if rsa.VerifyPSS(b.userA006, crypto.SHA256, twice[:], tx.a006, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}) != nil {
 		return b.refuse(CodeSignatureFailed)
@@ -474,6 +474,10 @@ func (v *fakeVault) serve(w http.ResponseWriter, r *http.Request) {
 		reply(`{"signature":"vault:v1:` + base64.StdEncoding.EncodeToString(sig) + `","key_version":1}`)
 	case r.Method == http.MethodGet && p == "secret/data/passage/ebics-e002":
 		text := strings.ReplaceAll(string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: mustPKCS8(v.e002)})), "\n", `\n`)
+		reply(`{"data":{"pem":"` + text + `"}}`)
+	case r.Method == http.MethodGet && p == "secret/data/passage/ebics-e002-pub":
+		der, _ := x509.MarshalPKIXPublicKey(&v.e002.PublicKey)
+		text := strings.ReplaceAll(string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})), "\n", `\n`)
 		reply(`{"data":{"pem":"` + text + `"}}`)
 	default:
 		w.WriteHeader(http.StatusNotFound)

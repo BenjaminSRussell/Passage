@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -116,17 +118,100 @@ func (s *Postgres) UpdateSubscriber(ctx context.Context, sub ebics.Subscriber) (
 }
 
 // ImportStatementFile feeds one downloaded statement file (camt.053, BAI2 or
-// MT940) into the same import the upload endpoint uses. A file already imported
-// is a replay, not an error, so a bank that redelivers does no harm.
-func (s *Postgres) ImportStatementFile(ctx context.Context, bankAccountID, _ string, data []byte) error {
-	sum := sha256.Sum256(data)
+// MT940) into the same import the upload endpoint uses. The file may hold
+// several statements, for several accounts: each is routed to the bank account
+// of the subscriber's legal entity that its own account number names, and a
+// statement for an account that is not registered fails the file. A statement
+// already imported is a replay, not an error, so a bank that redelivers does no
+// harm. Every statement is tried; the failures are returned together.
+func (s *Postgres) ImportStatementFile(ctx context.Context, subscriberAccountID, _ string, data []byte) error {
 	parsed, err := domain.ParseStatements(data)
-	if err == nil && len(parsed) != 1 {
-		err = &domain.Error{Code: domain.CodeStatementFormat, Detail: "a file must hold exactly one statement; split multi-statement files"}
-	}
 	if err != nil {
 		return err
 	}
-	_, err = s.ImportStatement(ctx, StatementImport{BankAccountID: bankAccountID, FileHash: hex.EncodeToString(sum[:]), Parsed: parsed[0]})
-	return err
+	fileSum := sha256.Sum256(data)
+	var errs []error
+	for i, st := range parsed {
+		hash := fileSum
+		if len(parsed) > 1 {
+			hash = sha256.Sum256(append(append([]byte{}, data...), []byte("#"+strconv.Itoa(i))...))
+		}
+		accountID, err := s.accountForStatement(ctx, subscriberAccountID, st.Account)
+		if err == nil {
+			_, err = s.ImportStatement(ctx, StatementImport{BankAccountID: accountID, FileHash: hex.EncodeToString(hash[:]), Parsed: st})
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("statement %d: %w", i+1, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Postgres) accountForStatement(ctx context.Context, subscriberAccountID, account string) (string, error) {
+	p, _ := tenant.FromContext(ctx)
+	var found []string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select b.id::text from bank_account b
+			join bank_account s on s.tenant_id = b.tenant_id and s.legal_entity_id = b.legal_entity_id
+			where b.tenant_id = $1 and s.id = $2 and (b.iban_hash = $3 or b.statement_account_hash = $3) limit 2`,
+			p.TenantID, subscriberAccountID, ibanHash(account))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			found = append(found, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(found) != 1 {
+		return "", httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeStatementAccount, "the statement names no single bank account of this legal entity")
+	}
+	return found[0], nil
+}
+
+// PollableSubscribers lists the subscribers of the principal's tenant that may
+// be polled: READY, bank keys confirmed, not parked.
+func (s *Postgres) PollableSubscribers(ctx context.Context) ([]ebics.Subscriber, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out []ebics.Subscriber
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+subscriberColumns+` from ebics_subscriber
+			where tenant_id = $1 and state = 'READY' and keys_confirmed and parked_code is null order by id`, p.TenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			sub, err := scanSubscriber(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, sub)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// SubscriberForAccount finds the subscriber bound to a bank account.
+func (s *Postgres) SubscriberForAccount(ctx context.Context, bankAccountID string) (ebics.Subscriber, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out ebics.Subscriber
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanSubscriber(tx.QueryRow(ctx, `select `+subscriberColumns+` from ebics_subscriber where tenant_id = $1 and bank_account_id = $2`, p.TenantID, bankAccountID))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ebics.Subscriber{}, notFound(CodeSubscriberNotFound, "no EBICS subscriber is bound to this bank account")
+	}
+	return out, err
 }

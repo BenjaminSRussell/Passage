@@ -907,6 +907,187 @@ paths:
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers:
+    post:
+      operationId: createEbicsSubscriber
+      summary: Register an EBICS user at a bank for one bank account
+      description: >-
+        Only the names of the Vault keys are given; no key material passes through the API. The subscriber starts in NEW.
+        TRS-0496 when host, partner and user exist already, TRS-0497 for an unacceptable id or URL, 503 TRS-0502 when EBICS is not enabled.
+      x-passage-duty: treasury.ebics.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateEbicsSubscriberRequest"}
+      responses:
+        "201":
+          description: Subscriber created
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:
+    get:
+      operationId: getEbicsSubscriber
+      summary: Read a subscriber with its state and the hashes of the bank keys downloaded so far
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:send-ini:
+    post:
+      operationId: sendEbicsIni
+      summary: Send the A006 signature key to the bank (INI) and return the letter to print
+      description: Allowed in NEW only (409 TRS-0498 otherwise). NEW to INI_SENT. 502 TRS-0501 when the bank refuses.
+      x-passage-duty: treasury.ebics.keys
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Order accepted by the bank
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsLetterResult"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "502": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:send-hia:
+    post:
+      operationId: sendEbicsHia
+      summary: Send the X002 and E002 keys to the bank (HIA) and return the letter to print
+      description: Allowed in INI_SENT only (409 TRS-0498 otherwise). INI_SENT to HIA_SENT.
+      x-passage-duty: treasury.ebics.keys
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Order accepted by the bank
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsLetterResult"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "502": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:fetch-bank-keys:
+    post:
+      operationId: fetchEbicsBankKeys
+      summary: Download the bank's keys (HPB) and store them unconfirmed
+      description: >-
+        Allowed in HIA_SENT or BANK_KEYS_PENDING. The keys are not used for anything until they are confirmed. The response carries
+        the hashes of the downloaded keys, to compare with the hashes on the bank's own letter.
+      x-passage-duty: treasury.ebics.keys
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "502": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:confirm-bank-keys:
+    post:
+      operationId: confirmEbicsBankKeys
+      summary: Activate the subscriber after the bank's key hashes were compared
+      description: >-
+        The hashes the bank printed must equal the hashes of the downloaded keys (422 TRS-0499 otherwise, and nothing is activated).
+        The confirmer recorded is the authenticated user, never a value from the body. BANK_KEYS_PENDING to READY. Needs a duty other
+        than the one that runs the key ceremony.
+      x-passage-duty: treasury.ebics.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ConfirmEbicsBankKeysRequest"}
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:unpark:
+    post:
+      operationId: unparkEbicsSubscriber
+      summary: Let a parked subscriber transact again after a person reviewed the bank's refusal
+      description: 409 TRS-0498 when the subscriber is not parked. The authenticated user is logged.
+      x-passage-duty: treasury.ebics.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}/letters/{order}:
+    get:
+      operationId: getEbicsLetter
+      summary: Rebuild the INI or HIA letter from the subscriber's public keys
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: order
+          in: path
+          required: true
+          schema: {type: string, enum: [INI, HIA]}
+      responses:
+        "200":
+          description: Letter
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsLetter"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     Id:
@@ -1375,3 +1556,62 @@ components:
           type: object
           description: Field name to message; parse errors carry "line"
           additionalProperties: {type: string}
+    CreateEbicsSubscriberRequest:
+      type: object
+      required: [legalEntityId, bankAccountId, hostId, partnerId, userId, url, a006KeyName, x002KeyName, e002KvPath]
+      additionalProperties: false
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        hostId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
+        partnerId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
+        userId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
+        url: {type: string, description: HTTPS URL of the bank's EBICS server}
+        a006KeyName: {type: string, description: Name of the Vault transit key that signs orders (A006)}
+        x002KeyName: {type: string, description: Name of the Vault transit key that signs requests (X002)}
+        e002KvPath: {type: string, description: "Vault KV path of the E002 private key; the public key is read from the same path with -pub appended"}
+    EbicsSubscriber:
+      type: object
+      required: [id, legalEntityId, bankAccountId, hostId, partnerId, userId, url, state, keysConfirmed, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        hostId: {type: string}
+        partnerId: {type: string}
+        userId: {type: string}
+        url: {type: string}
+        state: {type: string, enum: [NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY]}
+        keysConfirmed: {type: boolean}
+        confirmedBy: {type: string}
+        confirmedAt: {type: string, format: date-time}
+        parkedCode: {type: string, description: Return code of the bank refusal that parked the subscriber}
+        parkedText: {type: string}
+        bankKeyHashes:
+          type: object
+          properties:
+            x002: {type: string, description: "SHA-256 of the bank's X002 key, uppercase hex pairs"}
+            e002: {type: string}
+        version: {type: integer, minimum: 1}
+    EbicsLetter:
+      type: object
+      required: [order, text, hashes]
+      properties:
+        order: {type: string, enum: [INI, HIA]}
+        text: {type: string, description: Letter to print, sign and send to the bank}
+        hashes:
+          type: object
+          additionalProperties: {type: string}
+    EbicsLetterResult:
+      type: object
+      required: [subscriber, letter]
+      properties:
+        subscriber: {$ref: "#/components/schemas/EbicsSubscriber"}
+        letter: {$ref: "#/components/schemas/EbicsLetter"}
+    ConfirmEbicsBankKeysRequest:
+      type: object
+      required: [x002Hash, e002Hash]
+      additionalProperties: false
+      properties:
+        x002Hash: {type: string, description: Hash printed on the bank's own letter for its authentication key}
+        e002Hash: {type: string, description: Hash printed on the bank's own letter for its encryption key}

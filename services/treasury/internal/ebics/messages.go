@@ -92,16 +92,16 @@ var errAuthSignature = errors.New("ebics: authentication signature is invalid")
 // key. Only the exact algorithms and reference EBICS defines are accepted, and
 // at least one element must be covered, so a signature over nothing never passes.
 func verifyAuthSignature(root *xnode, pub *rsa.PublicKey) error {
-	sig := root.child("AuthSignature")
-	si := sig.child("SignedInfo")
-	ref := si.child("Reference")
+	sig := root.childIn(nsH004, "AuthSignature")
+	si := sig.childIn(nsDS, "SignedInfo")
+	ref := si.childIn(nsDS, "Reference")
 	if si == nil || ref == nil {
 		return fmt.Errorf("%w: missing", errAuthSignature)
 	}
-	if si.child("CanonicalizationMethod").attr("Algorithm") != algC14N ||
-		si.child("SignatureMethod").attr("Algorithm") != algRSASHA256 ||
+	if si.childIn(nsDS, "CanonicalizationMethod").attr("Algorithm") != algC14N ||
+		si.childIn(nsDS, "SignatureMethod").attr("Algorithm") != algRSASHA256 ||
 		ref.attr("URI") != authReference ||
-		ref.child("DigestMethod").attr("Algorithm") != algSHA256 {
+		ref.childIn(nsDS, "DigestMethod").attr("Algorithm") != algSHA256 {
 		return fmt.Errorf("%w: unsupported algorithm", errAuthSignature)
 	}
 	covered := authenticated(root)
@@ -109,11 +109,11 @@ func verifyAuthSignature(root *xnode, pub *rsa.PublicKey) error {
 		return fmt.Errorf("%w: nothing is authenticated", errAuthSignature)
 	}
 	want := sha256.Sum256(canonicalNodes(covered))
-	got, err := base64.StdEncoding.DecodeString(ref.child("DigestValue").content())
+	got, err := base64.StdEncoding.DecodeString(ref.childIn(nsDS, "DigestValue").content())
 	if err != nil || !bytes.Equal(got, want[:]) {
 		return fmt.Errorf("%w: digest mismatch", errAuthSignature)
 	}
-	value, err := base64.StdEncoding.DecodeString(sig.child("SignatureValue").content())
+	value, err := base64.StdEncoding.DecodeString(sig.childIn(nsDS, "SignatureValue").content())
 	if err != nil {
 		return fmt.Errorf("%w: signature value", errAuthSignature)
 	}
@@ -297,11 +297,9 @@ func transactionKeyOf(root *xnode, bankE002Digest []byte) ([]byte, error) {
 	if info == nil || info.attr("authenticate") != "true" {
 		return nil, errors.New("response encryption info is not authenticated")
 	}
-	if d := info.child("EncryptionPubKeyDigest").content(); d != "" {
-		got, err := base64.StdEncoding.DecodeString(d)
-		if err != nil || !bytes.Equal(got, bankE002Digest) {
-			return nil, errors.New("response is encrypted for another key")
-		}
+	got, err := base64.StdEncoding.DecodeString(info.child("EncryptionPubKeyDigest").content())
+	if err != nil || len(got) == 0 || !bytes.Equal(got, bankE002Digest) {
+		return nil, errors.New("response is not encrypted for our key (digest missing or different)")
 	}
 	return base64.StdEncoding.DecodeString(info.child("TransactionKey").content())
 }

@@ -268,7 +268,7 @@ func TestPark_RefusalNeedingAPersonParksUntilUnparked(t *testing.T) {
 		if e.bank.requests != before {
 			t.Fatalf("%s: a parked subscriber still contacted the bank", code)
 		}
-		if _, err := e.client.Unpark(context.Background(), "sub-1"); err != nil {
+		if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := e.client.Upload(context.Background(), "sub-1", "CCT", payload(50)); err != nil {

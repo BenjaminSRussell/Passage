@@ -28,7 +28,8 @@ const (
 	testMainAcct = "0190b7a0-0000-7000-8000-000000000003"
 	testIBAN     = "DE89370400440532013000"
 	allDuties    = "treasury.view,treasury.bank-account.write,treasury.bank-account.approve,treasury.statement.import,treasury.forecast.write," +
-		"treasury.check.write,treasury.facility.write,treasury.facility.override,treasury.loan.write,treasury.reconciliation.write"
+		"treasury.check.write,treasury.facility.write,treasury.facility.override,treasury.loan.write,treasury.reconciliation.write," +
+		"treasury.ebics.write,treasury.ebics.keys,treasury.ebics.approve"
 )
 
 // fakeStore is an in-memory store.Store for handler tests.

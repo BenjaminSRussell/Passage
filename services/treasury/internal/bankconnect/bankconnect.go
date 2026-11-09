@@ -89,6 +89,25 @@ type AuditSink interface {
 	RecordBankFile(ctx context.Context, e AuditEntry) error
 }
 
+// FileSender delivers one bank file over one channel and audits it.
+type FileSender interface {
+	Send(ctx context.Context, f File) (Receipt, error)
+}
+
+// Channels are the senders of the channels TREASURY_BANK_CHANNELS enabled, by
+// protocol name.
+type Channels map[string]FileSender
+
+// Send delivers f over the channel named by protocol; a channel that is not
+// enabled is an error, never a silent fallback to another one.
+func (c Channels) Send(ctx context.Context, protocol string, f File) (Receipt, error) {
+	s, ok := c[protocol]
+	if !ok {
+		return Receipt{}, fmt.Errorf("bank channel %q is not enabled (TREASURY_BANK_CHANNELS)", protocol)
+	}
+	return s.Send(ctx, f)
+}
+
 // Sender signs, audits and delivers bank files.
 type Sender struct {
 	Signer    Signer

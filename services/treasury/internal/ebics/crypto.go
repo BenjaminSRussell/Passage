@@ -150,6 +150,19 @@ func segments(encoded string, size int) []string {
 	return append(out, encoded)
 }
 
+// orderDigest is the SHA-256 the A006 signature covers: the order data with
+// CR, LF and Ctrl-Z removed (EBICS 2.5 section 14, signature of the order data;
+// the open-source ebics-client-php strips CR and LF from XML orders before it
+// hashes them the same way). The data that is uploaded keeps its line breaks.
+func orderDigest(data []byte) []byte {
+	return sha256Sum(bytes.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == 0x1A {
+			return -1
+		}
+		return r
+	}, data))
+}
+
 func sha256Sum(data []byte) []byte {
 	sum := sha256.Sum256(data)
 	return sum[:]

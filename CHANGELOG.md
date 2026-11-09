@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- Treasury EBICS wiring (#36): subscriber onboarding routes with split duties (`treasury.ebics.write|keys|approve`; the confirmer is the authenticated user), a statement poller (`TREASURY_EBICS_POLL_WORKERS`), the `ebics` bank channel behind `TREASURY_BANK_CHANNELS`, downloads acknowledged only after import with per-statement account routing, E002 private key wiped after use with its public key stored apart, A006 over the order without CR/LF/Ctrl-Z.
 - EBICS H004 bank connectivity in treasury (#36, FR-36.12): `internal/ebics` replaces the unencrypted upload subset. A
   subscriber moves NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY (migration 0009; bank key hashes must be confirmed by
   a named person before any order). Keys stay in Vault: A006 (RSASSA-PSS) and X002 (PKCS#1 v1.5) sign in transit, E002 is

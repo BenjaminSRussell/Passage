@@ -3258,6 +3258,16 @@
       {"resource": "/v1/treasury/checks/*:stop", "methods": ["POST"]},
       {"resource": "/v1/treasury/checks/*:void", "methods": ["POST"]}
     ]},
+    "treasury.ebics.approve": {"permissions": [
+      {"resource": "/v1/treasury/ebics-subscribers/*:confirm-bank-keys", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:unpark", "methods": ["POST"]}
+    ]},
+    "treasury.ebics.keys": {"permissions": [
+      {"resource": "/v1/treasury/ebics-subscribers/*:fetch-bank-keys", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:send-hia", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:send-ini", "methods": ["POST"]}
+    ]},
+    "treasury.ebics.write": {"permissions": [{"resource": "/v1/treasury/ebics-subscribers", "methods": ["POST"]}]},
     "treasury.facility.override": {"flag": true, "permissions": []},
     "treasury.facility.write": {"permissions": [
       {"resource": "/v1/treasury/facilities", "methods": ["POST"]},
@@ -3281,6 +3291,8 @@
       {"resource": "/v1/treasury/cash-forecast", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*/letters/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities/*/instruments", "methods": ["GET"]},

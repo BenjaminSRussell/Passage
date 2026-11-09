@@ -35,6 +35,7 @@ type Client struct {
 	Store       SubscriberStore
 	Keys        func(Subscriber) (Keys, error)
 	HTTP        *http.Client
+	HTTPTimeout time.Duration
 	SegmentSize int
 	Backoff     BackoffPolicy
 	Sleep       func(context.Context, time.Duration) error
@@ -92,7 +93,11 @@ func (c *Client) post(ctx context.Context, sub Subscriber, body []byte) (raw []b
 	}
 	hc := c.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: 60 * time.Second}
+		timeout := c.HTTPTimeout
+		if timeout <= 0 {
+			timeout = 60 * time.Second
+		}
+		hc = &http.Client{Timeout: timeout}
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -237,6 +242,34 @@ func (c *Client) SendHIA(ctx context.Context, id string) (Letter, error) {
 	return letter(sub, "HIA", map[KeyUsage]*rsa.PublicKey{UsageX002: x002, UsageE002: e002}), nil
 }
 
+// ErrUnknownLetter is returned for a letter other than INI or HIA.
+var ErrUnknownLetter = errors.New("ebics: letters exist for the INI and HIA orders only")
+
+// Letter rebuilds the initialisation letter of the INI or HIA order from the
+// subscriber's public keys, so it can be printed again without sending anything.
+func (c *Client) Letter(ctx context.Context, id, order string) (Letter, error) {
+	var usages []KeyUsage
+	switch order {
+	case "INI":
+		usages = []KeyUsage{UsageA006}
+	case "HIA":
+		usages = []KeyUsage{UsageX002, UsageE002}
+	default:
+		return Letter{}, ErrUnknownLetter
+	}
+	sub, keys, err := c.load(ctx, id)
+	if err != nil {
+		return Letter{}, err
+	}
+	pubs := map[KeyUsage]*rsa.PublicKey{}
+	for _, u := range usages {
+		if pubs[u], err = keys.Public(ctx, u); err != nil {
+			return Letter{}, err
+		}
+	}
+	return letter(sub, order, pubs), nil
+}
+
 func letter(sub Subscriber, order string, pubs map[KeyUsage]*rsa.PublicKey) Letter {
 	l := Letter{Hashes: map[KeyUsage]string{}}
 	var b strings.Builder
@@ -351,13 +384,21 @@ func (c *Client) ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, co
 	return c.Store.UpdateSubscriber(ctx, sub)
 }
 
-// Unpark lets a subscriber transact again after a person has dealt with the
-// refusal that parked it.
-func (c *Client) Unpark(ctx context.Context, id string) (Subscriber, error) {
+// Unpark lets a parked subscriber transact again after a person (actor, who is
+// logged) has dealt with the refusal that parked it. A subscriber that is not
+// parked is ErrBadState.
+func (c *Client) Unpark(ctx context.Context, id, actor string) (Subscriber, error) {
+	if actor == "" {
+		return Subscriber{}, errors.New("ebics: who unparked the subscriber must be recorded")
+	}
 	sub, err := c.Store.GetSubscriber(ctx, id)
 	if err != nil {
 		return Subscriber{}, err
 	}
+	if sub.ParkedCode == "" {
+		return Subscriber{}, fmt.Errorf("%w: subscriber is not parked", ErrBadState)
+	}
+	slog.WarnContext(ctx, "ebics subscriber unparked", "subscriber", id, "actor", actor, "code", sub.ParkedCode)
 	sub.ParkedCode, sub.ParkedText = "", ""
 	return c.Store.UpdateSubscriber(ctx, sub)
 }
@@ -405,14 +446,21 @@ func (c *Client) withBackoff(ctx context.Context, sub Subscriber, fn func() erro
 	}
 }
 
+const parkAttempts = 3
+
 func (c *Client) park(ctx context.Context, id string, re *ReturnError) error {
 	ctx = context.WithoutCancel(ctx)
-	sub, err := c.Store.GetSubscriber(ctx, id)
-	if err != nil {
-		return err
+	var err error
+	for range parkAttempts {
+		var sub Subscriber
+		if sub, err = c.Store.GetSubscriber(ctx, id); err != nil {
+			return err
+		}
+		sub.ParkedCode, sub.ParkedText = re.Code, re.Text
+		if _, err = c.Store.UpdateSubscriber(ctx, sub); !errors.Is(err, ErrVersionConflict) {
+			return err
+		}
 	}
-	sub.ParkedCode, sub.ParkedText = re.Code, re.Text
-	_, err = c.Store.UpdateSubscriber(ctx, sub)
 	return err
 }
 
@@ -444,8 +492,7 @@ func (c *Client) Upload(ctx context.Context, id, orderType string, data []byte) 
 }
 
 func (c *Client) uploadOnce(ctx context.Context, sub Subscriber, keys Keys, bx, be *rsa.PublicKey, orderType string, data []byte) (UploadReceipt, error) {
-	hash := sha256Sum(data)
-	a006, err := keys.SignA006(ctx, hash)
+	a006, err := keys.SignA006(ctx, orderDigest(data))
 	if err != nil {
 		return UploadReceipt{}, fmt.Errorf("sign order (A006): %w", err)
 	}
@@ -543,6 +590,14 @@ type DownloadedFile struct {
 // A ZIP container is unpacked into its files. ErrNoData means the bank has
 // nothing new.
 func (c *Client) Download(ctx context.Context, id, orderType, from, to string) ([]DownloadedFile, error) {
+	return c.downloadWith(ctx, id, orderType, from, to, nil)
+}
+
+// downloadWith is Download with a hook that takes the unpacked files before the
+// receipt is sent: when the hook refuses, the bank is told the transfer failed
+// (ReceiptCode 1) and keeps the data, so a file is acknowledged only once it is
+// stored.
+func (c *Client) downloadWith(ctx context.Context, id, orderType, from, to string, process func(context.Context, []DownloadedFile) error) ([]DownloadedFile, error) {
 	if !downloadOrders[orderType] {
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedOrder, orderType)
 	}
@@ -556,13 +611,13 @@ func (c *Client) Download(ctx context.Context, id, orderType, from, to string) (
 	var files []DownloadedFile
 	err = c.withBackoff(ctx, sub, func() error {
 		var err error
-		files, err = c.downloadOnce(ctx, sub, keys, bx, be, orderType, from, to)
+		files, err = c.downloadOnce(ctx, sub, keys, bx, be, orderType, from, to, process)
 		return err
 	})
 	return files, err
 }
 
-func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx, be *rsa.PublicKey, orderType, from, to string) ([]DownloadedFile, error) {
+func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx, be *rsa.PublicKey, orderType, from, to string, process func(context.Context, []DownloadedFile) error) ([]DownloadedFile, error) {
 	n, err := nonce()
 	if err != nil {
 		return nil, err
@@ -614,21 +669,27 @@ func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx
 		sb.WriteString(more)
 		r = next
 	}
+	var files []DownloadedFile
 	plain, procErr := openDownload(ctx, keys, wrapped, sb.String())
+	if procErr == nil {
+		files, procErr = unpack(plain)
+	}
+	if procErr == nil && process != nil {
+		procErr = process(ctx, files)
+	}
 	code := "0"
 	if procErr != nil {
 		code = "1"
 	}
 	receipt := phaseRequest(sub, r.txID, "Receipt", 0, false, `<TransferReceipt authenticate="true"><ReceiptCode>`+code+`</ReceiptCode></TransferReceipt>`)
-	if _, err := c.exchange(ctx, sub, keys, bx, signable{doc: receipt}); err != nil {
-		if procErr == nil {
-			slog.WarnContext(ctx, "ebics download receipt not acknowledged; the bank will redeliver", "subscriber", sub.ID, "err", err)
-		}
-	}
+	_, rerr := c.exchange(ctx, sub, keys, bx, signable{doc: receipt})
 	if procErr != nil {
-		return nil, fmt.Errorf("ebics download: %w", procErr)
+		return nil, errors.Join(fmt.Errorf("ebics download: %w", procErr), rerr)
 	}
-	return unpack(plain)
+	if rerr != nil {
+		return nil, fmt.Errorf("ebics download receipt: %w", rerr)
+	}
+	return files, nil
 }
 
 func openDownload(ctx context.Context, keys Keys, wrappedKey []byte, encoded string) ([]byte, error) {
@@ -697,9 +758,11 @@ func unpack(data []byte) ([]DownloadedFile, error) {
 type StatementSink func(ctx context.Context, bankAccountID, fileName string, data []byte) error
 
 // FetchStatements downloads end-of-day statements (C53 camt.053, or STA MT940)
-// and hands each file to the sink. A file the sink refuses does not stop the
-// others; every refusal is returned together. It returns how many files the
-// sink took.
+// and hands each file to the sink before the bank is told the transfer arrived.
+// Every file is tried; if any is refused (or the archive is corrupt) the bank is
+// sent a negative receipt, keeps the data and redelivers, and the refusals are
+// returned together. The sink replays what it has already stored, so a
+// redelivery is harmless. It returns how many files the sink took.
 func (c *Client) FetchStatements(ctx context.Context, id, orderType, from, to string, sink StatementSink) (int, error) {
 	if orderType != "C53" && orderType != "STA" {
 		return 0, fmt.Errorf("%w: %q carries no statements the import reads", ErrUnsupportedOrder, orderType)
@@ -708,18 +771,18 @@ func (c *Client) FetchStatements(ctx context.Context, id, orderType, from, to st
 	if err != nil {
 		return 0, err
 	}
-	files, err := c.Download(ctx, id, orderType, from, to)
-	if err != nil {
-		return 0, err
-	}
-	var errs []error
 	taken := 0
-	for _, f := range files {
-		if err := sink(ctx, sub.BankAccountID, f.Name, f.Data); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", f.Name, err))
-			continue
+	_, err = c.downloadWith(ctx, id, orderType, from, to, func(ctx context.Context, files []DownloadedFile) error {
+		var errs []error
+		taken = 0
+		for _, f := range files {
+			if err := sink(ctx, sub.BankAccountID, f.Name, f.Data); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", f.Name, err))
+				continue
+			}
+			taken++
 		}
-		taken++
-	}
-	return taken, errors.Join(errs...)
+		return errors.Join(errs...)
+	})
+	return taken, err
 }

@@ -94,6 +94,16 @@ func (s Subscriber) bankKeys() (x002, e002 *rsa.PublicKey, err error) {
 	return x002, e002, nil
 }
 
+// BankHashes are the hashes of the bank keys stored by HPB, in the form letters
+// print; false while no keys were downloaded.
+func (s Subscriber) BankHashes() (BankKeyHashes, bool) {
+	x002, e002, err := s.bankKeys()
+	if err != nil {
+		return BankKeyHashes{}, false
+	}
+	return BankKeyHashes{X002: FormatDigest(KeyDigest(x002)), E002: FormatDigest(KeyDigest(e002))}, true
+}
+
 func parsePKIX(der []byte) (*rsa.PublicKey, error) {
 	if len(der) == 0 {
 		return nil, errors.New("not downloaded yet")

@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -113,11 +114,7 @@ func (k *VaultKeys) Public(ctx context.Context, usage string) (*rsa.PublicKey, e
 	case ebicsUsageX002:
 		return k.transitPublic(ctx, k.refs.X002)
 	case ebicsUsageE002:
-		priv, err := k.e002(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return &priv.PublicKey, nil
+		return k.e002Public(ctx)
 	}
 	return nil, fmt.Errorf("unknown ebics key usage %q", usage)
 }
@@ -168,6 +165,7 @@ func (k *VaultKeys) DecryptE002(ctx context.Context, wrapped []byte) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
+	defer zeroPrivateKey(priv)
 	key := make([]byte, 16)
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
@@ -176,6 +174,62 @@ func (k *VaultKeys) DecryptE002(ctx context.Context, wrapped []byte) ([]byte, er
 		return nil, fmt.Errorf("unwrap transaction key: %w", err)
 	}
 	return key, nil
+}
+
+// E002PublicPath is where the E002 public key is kept, apart from the private
+// key, so that building a letter or an HIA order never reads the private key.
+func (r EBICSKeyRefs) E002PublicPath() string { return r.E002KVPath + "-pub" }
+
+func (k *VaultKeys) e002Public(ctx context.Context) (*rsa.PublicKey, error) {
+	tok, err := k.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Data struct {
+			Data struct {
+				PEM string `json:"pem"`
+			} `json:"data"`
+		} `json:"data"`
+	}
+	if err := k.vault.cfg.call(ctx, http.MethodGet, "/v1/"+k.refs.E002KVMount+"/data/"+k.refs.E002PublicPath(), tok, nil, &out); err != nil {
+		k.vault.dropOnForbidden(err)
+		return nil, fmt.Errorf("vault read ebics E002 public key: %w", err)
+	}
+	block, _ := pem.Decode([]byte(out.Data.Data.PEM))
+	if block == nil {
+		return nil, errors.New("vault read ebics E002 public key: malformed PEM")
+	}
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	pub, ok := parsed.(*rsa.PublicKey)
+	if err != nil || !ok || pub.N.BitLen() < minEBICSBits {
+		return nil, errors.New("vault read ebics E002 public key: not an RSA key of 2048 bits or more")
+	}
+	return pub, nil
+}
+
+// zeroPrivateKey overwrites the key's secret integers in place. Go cannot wipe
+// the JSON reply and PEM strings the key was parsed from; they are short lived
+// and never logged.
+func zeroPrivateKey(k *rsa.PrivateKey) {
+	wipe := func(x *big.Int) {
+		if x != nil {
+			clear(x.Bits())
+			x.SetInt64(0)
+		}
+	}
+	wipe(k.D)
+	for _, p := range k.Primes {
+		wipe(p)
+	}
+	wipe(k.Precomputed.Dp)
+	wipe(k.Precomputed.Dq)
+	wipe(k.Precomputed.Qinv)
+	for _, c := range k.Precomputed.CRTValues {
+		wipe(c.Exp)
+		wipe(c.Coeff)
+		wipe(c.R)
+	}
 }
 
 func (k *VaultKeys) e002(ctx context.Context) (*rsa.PrivateKey, error) {
@@ -198,6 +252,7 @@ func (k *VaultKeys) e002(ctx context.Context) (*rsa.PrivateKey, error) {
 	if block == nil {
 		return nil, errors.New("vault read ebics E002 key: malformed PEM")
 	}
+	defer clear(block.Bytes)
 	var priv *rsa.PrivateKey
 	if parsed, perr := x509.ParsePKCS8PrivateKey(block.Bytes); perr == nil {
 		priv, _ = parsed.(*rsa.PrivateKey)
