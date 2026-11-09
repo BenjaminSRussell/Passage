@@ -64,6 +64,7 @@ var services = []service{
 var startOrder = []string{"ledger", "numbering", "party", "purchasing", "receiving"}
 
 type proc struct {
+	name string
 	cmd  *exec.Cmd
 	done chan struct{}
 	log  string
@@ -227,31 +228,50 @@ func (s *Stack) launch(ctx context.Context, svc service) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(s.cfg.RunDir, "logs"), 0o755); err != nil {
-		return err
-	}
-	logPath := filepath.Join(s.cfg.RunDir, "logs", svc.name+".log")
-	logFile, err := os.Create(logPath)
+	p, err := s.spawn(svc.name, "", env, filepath.Join(s.binDir(), svc.name))
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(s.binDir(), svc.name))
-	cmd.Env = env
+	return s.waitReady(ctx, svc.name, p)
+}
+
+// Spawn runs one more process under the stack's supervision: its output goes to the run directory's logs, FirstExit
+// reports it, and Stop ends it.
+func (s *Stack) Spawn(name, dir string, extraEnv map[string]string, command string, args ...string) error {
+	env := append([]string(nil), os.Environ()...)
+	for k, v := range extraEnv {
+		env = append(env, k+"="+v)
+	}
+	_, err := s.spawn(name, dir, env, command, args...)
+	return err
+}
+
+func (s *Stack) spawn(name, dir string, env []string, command string, args ...string) (*proc, error) {
+	if err := os.MkdirAll(filepath.Join(s.cfg.RunDir, "logs"), 0o755); err != nil {
+		return nil, err
+	}
+	logPath := filepath.Join(s.cfg.RunDir, "logs", name+".log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(command, args...)
+	cmd.Dir, cmd.Env = dir, env
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
-		return fmt.Errorf("start %s: %w", svc.name, err)
+		return nil, fmt.Errorf("start %s: %w", name, err)
 	}
-	p := &proc{cmd: cmd, done: make(chan struct{}), log: logPath}
+	p := &proc{name: name, cmd: cmd, done: make(chan struct{}), log: logPath}
 	go func() {
 		_ = cmd.Wait()
 		_ = logFile.Close()
 		close(p.done)
 	}()
 	s.mu.Lock()
-	s.procs[svc.name] = p
+	s.procs[name] = p
 	s.mu.Unlock()
-	return s.waitReady(ctx, svc.name, p)
+	return p, nil
 }
 
 func (s *Stack) waitReady(ctx context.Context, name string, p *proc) error {
@@ -345,15 +365,13 @@ func (s *Stack) Stop() {
 	}
 }
 
-func (s *Stack) Done() <-chan struct{} {
+// FirstExit reports the name of the first supervised process to exit.
+func (s *Stack) FirstExit() <-chan string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(chan struct{})
-	var wg sync.WaitGroup
+	out := make(chan string, len(s.procs))
 	for _, p := range s.procs {
-		wg.Add(1)
-		go func() { defer wg.Done(); <-p.done }()
+		go func() { <-p.done; out <- p.name }()
 	}
-	go func() { wg.Wait(); close(out) }()
 	return out
 }
