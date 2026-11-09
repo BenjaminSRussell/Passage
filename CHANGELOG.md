@@ -19,6 +19,13 @@ release may change public APIs.
 
 ### Added
 
+- Plain-language copy and actionable errors in the web app (#501, part of #497): a UX writing guide
+  (`apps/web/docs/ux-writing.md`), rendered strings free of spec, wave and slice references with a test that fails if one
+  returns, and a user-facing message catalog keyed by problem code. `ProblemMessage` shows the message and what to do,
+  with the code, the server's own text and the request id under "Details". The catalog covers every code the purchasing,
+  receiving, payables, sales, inventory, fulfillment, billing, receivables and pricing services can return, and a test
+  reads their Go sources so a new code without a message fails the build. The pull request template gains a copy-review
+  item for web changes. The in-app glossary tooltips from the issue's scope are not part of this change.
 - Partner simulator round trips for every transaction set edi supports (#35, AC-35.1): the in-test demo distributor
   gains its own EDIFACT reader and writer next to its X12 one (neither uses `internal/domain`) and trades over the
   real transports. Over AS2 (`TestPartnerSim_X12RemittanceStatusAndTA1OverAS2`) it sends an 820 group and a 214 that

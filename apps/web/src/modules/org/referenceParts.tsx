@@ -146,9 +146,9 @@ export function StatusAction({ subject, status, apply }: StatusActionProps) {
         </Button>
       )}
       {failure ? (
-        <span role="alert" className={styles.rowError}>
+        <div role="alert" className={styles.rowError}>
           <ProblemMessage problem={failure} />
-        </span>
+        </div>
       ) : null}
     </div>
   );

@@ -1,3 +1,4 @@
+import axe from "axe-core";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { lookupProblem, problemCatalog } from "./catalog";
@@ -52,6 +53,23 @@ describe("ProblemMessage", () => {
     expect(screen.getByText("The request failed.")).toBeInTheDocument();
   });
 
+  it("keeps the specific server detail reachable under Details when the catalog message is shown", async () => {
+    const user = userEvent.setup();
+    render(<ProblemMessage problem={{ code: "SLS-0058", detail: "order SO-1042 is in status DRAFT", requestId: "req-9" }} />);
+    expect(screen.getByText(/The order can't move to the next step in its current state/)).toBeInTheDocument();
+    await user.click(screen.getByText("Details"));
+    expect(screen.getByText("order SO-1042 is in status DRAFT")).toBeVisible();
+  });
+
+  it("has no accessibility violations, collapsed or open", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ProblemMessage problem={{ code: "PRC-PO-009", detail: "stale", requestId: "req-42" }} />);
+    const rules = { rules: { "color-contrast": { enabled: false } } };
+    expect((await axe.run(container, rules)).violations).toEqual([]);
+    await user.click(screen.getByText("Details"));
+    expect((await axe.run(container, rules)).violations).toEqual([]);
+  });
+
   it("uses module wording when given, and still keeps the code", () => {
     render(<ProblemMessage problem={{ code: "HCM-LOAN-001", message: "loans open" }} message="Items are still out on loan." />);
     expect(screen.getByText("Items are still out on loan.")).toBeInTheDocument();
@@ -101,5 +119,46 @@ describe("normalizeProblem and problemSummary", () => {
     );
     expect(problemSummary({ code: "XYZ-1", message: "Server words." })).toBe("Server words.");
     expect(problemSummary(null, "Fallback.")).toBe("Fallback.");
+  });
+});
+
+const goSources = import.meta.glob(
+  [
+    "../../../../../services/{fulfillment,billing,receivables,pricing,purchasing,receiving,payables,sales,inventory}/**/*.go",
+    "!../../../../../services/**/*_test.go",
+  ],
+  { query: "?raw", import: "default", eager: true },
+) as Record<string, string>;
+
+const orderToCashCodePatterns: Record<string, RegExp> = {
+  fulfillment: /^FUL-\d{4}$/,
+  billing: /^BIL-\d{4}$/,
+  receivables: /^AR-\d{4}$/,
+  pricing: /^PRC-\d{4}$/,
+  purchasing: /^PRC-[A-Z]+-\d{3}$/,
+  receiving: /^(?:RCV-[A-Z]+-\d{3}|INV-SER-\d{3}|PER-AP-\d{3})$/,
+  payables: /^(?:AP-[A-Z]+-\d{3}|PAY-\d{4})$/,
+  sales: /^SLS-\d{4}$/,
+  inventory: /^INV-[A-Z]+-\d{3}$/,
+};
+
+describe("procure-to-pay and order-to-cash problem codes", () => {
+  const found = new Map<string, string>();
+  for (const [path, source] of Object.entries(goSources)) {
+    const service = /\/services\/([^/]+)\//.exec(path)?.[1] ?? "";
+    for (const match of source.matchAll(/"([A-Z][A-Z0-9_-]+?)(?::|")/g)) {
+      if (orderToCashCodePatterns[service]?.test(match[1])) found.set(match[1], service);
+    }
+  }
+
+  it("reads the Go sources of every procure-to-pay and order-to-cash service", () => {
+    const services = new Set(found.values());
+    expect([...services].sort()).toEqual(Object.keys(orderToCashCodePatterns).sort());
+    expect(found.size).toBeGreaterThan(300);
+  });
+
+  it("has a catalog message for every code those services can return", () => {
+    const missing = [...found.keys()].filter((code) => !lookupProblem(code)).sort();
+    expect(missing).toEqual([]);
   });
 });

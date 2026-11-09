@@ -88,13 +88,7 @@ export function DropShipsPage() {
       state.reload();
     } catch (error) {
       const problem = describeProblem(error);
-      setFailure(
-        problem.code === "FUL-0061"
-          ? { ...problem, message: "This order line already has an active drop-ship. Cancel it before creating another." }
-          : problem.code === "FUL-0062"
-            ? { ...problem, message: "This order line is on a warehouse shipment, so it ships from stock. Cancel the shipment before drop-shipping it." }
-            : problem,
-      );
+      setFailure(problem);
       if (problem.code === "idempotency_key_reuse") key.renew();
     } finally {
       setBusy(false);

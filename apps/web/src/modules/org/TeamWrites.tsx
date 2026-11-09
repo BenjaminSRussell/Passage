@@ -404,9 +404,9 @@ export function MemberActions({ team, member, onChanged }: { team: Team; member:
         </>
       ) : null}
       {failure ? (
-        <span role="alert" className={styles.rowError}>
+        <div role="alert" className={styles.rowError}>
           <ProblemMessage problem={failure} />
-        </span>
+        </div>
       ) : null}
     </div>
   );

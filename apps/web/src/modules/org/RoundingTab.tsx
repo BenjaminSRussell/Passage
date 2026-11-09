@@ -191,9 +191,9 @@ function RemoveRule({ rule, onRemoved }: { rule: CurrencyRounding; onRemoved(): 
         </Button>
       )}
       {failure ? (
-        <span role="alert" className={styles.rowError}>
+        <div role="alert" className={styles.rowError}>
           <ProblemMessage problem={failure} message={formatProblem(failure)} />
-        </span>
+        </div>
       ) : null}
     </div>
   );
