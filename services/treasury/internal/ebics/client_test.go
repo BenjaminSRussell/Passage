@@ -435,3 +435,27 @@ func mustMarshalPKIX(t *testing.T, pub *rsa.PublicKey) []byte {
 	}
 	return der
 }
+
+func TestFetchStatements_EachFileGoesToTheSinkAndOneRefusalDoesNotStopTheRest(t *testing.T) {
+	e := newEnv(t, false)
+	e.onboard()
+	e.bank.served["C53"] = zipOf(t, map[string][]byte{"stmt-1.xml": []byte("<a/>"), "stmt-2.xml": []byte("<b/>")})
+	var seen []string
+	sink := func(_ context.Context, account, name string, data []byte) error {
+		if account != "ba-1" {
+			t.Errorf("sink got bank account %q; the subscriber's own account is expected", account)
+		}
+		seen = append(seen, name+":"+string(data))
+		if name == "stmt-1.xml" {
+			return errors.New("unparsable")
+		}
+		return nil
+	}
+	n, err := e.client.FetchStatements(context.Background(), "sub-1", "C53", "", "", sink)
+	if n != 1 || err == nil || !strings.Contains(err.Error(), "stmt-1.xml") || len(seen) != 2 {
+		t.Fatalf("taken %d, err %v, seen %v", n, err, seen)
+	}
+	if _, err := e.client.FetchStatements(context.Background(), "sub-1", "HAC", "", "", sink); !errors.Is(err, ErrUnsupportedOrder) {
+		t.Fatalf("HAC carries no statements: %v", err)
+	}
+}

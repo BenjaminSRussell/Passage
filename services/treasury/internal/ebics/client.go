@@ -691,3 +691,35 @@ func unpack(data []byte) ([]DownloadedFile, error) {
 	}
 	return files, nil
 }
+
+// StatementSink takes one downloaded statement file for a bank account; the
+// treasury store's ImportStatementFile is the production sink.
+type StatementSink func(ctx context.Context, bankAccountID, fileName string, data []byte) error
+
+// FetchStatements downloads end-of-day statements (C53 camt.053, or STA MT940)
+// and hands each file to the sink. A file the sink refuses does not stop the
+// others; every refusal is returned together. It returns how many files the
+// sink took.
+func (c *Client) FetchStatements(ctx context.Context, id, orderType, from, to string, sink StatementSink) (int, error) {
+	if orderType != "C53" && orderType != "STA" {
+		return 0, fmt.Errorf("%w: %q carries no statements the import reads", ErrUnsupportedOrder, orderType)
+	}
+	sub, err := c.Store.GetSubscriber(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	files, err := c.Download(ctx, id, orderType, from, to)
+	if err != nil {
+		return 0, err
+	}
+	var errs []error
+	taken := 0
+	for _, f := range files {
+		if err := sink(ctx, sub.BankAccountID, f.Name, f.Data); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", f.Name, err))
+			continue
+		}
+		taken++
+	}
+	return taken, errors.Join(errs...)
+}

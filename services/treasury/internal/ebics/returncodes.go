@@ -20,25 +20,19 @@ func (d Disposition) String() string {
 }
 
 const (
-	CodeOK                 = "000000"
-	CodeDownloadDone       = "011000"
-	CodeDownloadSkipped    = "011001"
-	CodeNoDownloadData     = "090005"
-	CodeInternalError      = "061099"
-	CodeTxRecoverySync     = "061101"
-	CodeAuthFailed         = "061001"
-	CodeInvalidRequest     = "061002"
-	CodeInvalidUserState   = "091002"
-	CodeUserUnknown        = "091003"
-	CodeBankKeyUpdate      = "091008"
-	CodeInvalidXML         = "091010"
-	CodeTxUnknown          = "091012"
-	CodeTxAbort            = "091013"
-	CodeTxReplay           = "091014"
-	CodeSignatureFailed    = "091118"
-	CodeAuthorisationFails = "090003"
-	CodeUnsupportedOrder   = "091006"
-	CodeInvalidOrderType   = "091005"
+	CodeOK              = "000000"
+	CodeDownloadDone    = "011000"
+	CodeDownloadSkipped = "011001"
+	CodeNoDownloadData  = "090005"
+	CodeInternalError   = "061099"
+	CodeTxRecoverySync  = "061101"
+	CodeAuthFailed      = "061001"
+	CodeUserUnknown     = "091003"
+	CodeBankKeyUpdate   = "091008"
+	CodeTxUnknown       = "091012"
+	CodeTxAbort         = "091013"
+	CodeTxReplay        = "091014"
+	CodeSignatureFailed = "091118"
 )
 
 var dispositions = map[string]Disposition{

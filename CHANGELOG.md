@@ -10,6 +10,14 @@ release may change public APIs.
 
 ### Added
 
+- EBICS H004 bank connectivity in treasury (#36, FR-36.12): `internal/ebics` replaces the unencrypted upload subset. A
+  subscriber moves NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY (migration 0009; bank key hashes must be confirmed by
+  a named person before any order). Keys stay in Vault: A006 (RSASSA-PSS) and X002 (PKCS#1 v1.5) sign in transit, E002 is
+  read from KV for each unwrap. Orders carry the C14N `AuthSignature`, E002 hybrid encryption (AES-128-CBC, RSA key
+  transport), zlib and segmentation; the bank's answers are verified against its X002 key. Upload CCT, CDD, CDB, CIP;
+  download C53, C52, C54, HAC, PTK, STA, VMK; C53 and STA feed the existing statement import. Return codes map to
+  back-off (bounded retries) or park (subscriber refuses orders until a person unparks it). Tested against an in-process
+  fake bank that verifies signatures, decrypts, segments and answers in H004; live bank sandbox and Vault stay with #213.
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

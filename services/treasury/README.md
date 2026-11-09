@@ -44,7 +44,8 @@ always run, including the OpenAPI-matches-routes contract test.
 - `internal/store`: pgx repositories, tenant-scoped transactions (RLS).
 - `internal/api`: HTTP handlers, RFC 9457 problems, idempotency and `If-Match`.
 - `internal/events`: event type constants and payloads.
-- `internal/bankconnect`: bank file sending. `Signer` (Vault transit `sign`; private keys never leave Vault), an EBICS upload-order subset, an SFTP channel (`SFTP` over an `SFTPClient` interface; drop `.sig` and `.part`, publish by rename), and `Sender`, which audits every file in `bank_file_audit` (migration 0007) before and after it is sent. Not yet wired to a route.
+- `internal/bankconnect`: bank file sending. `Signer` (Vault transit `sign`; private keys never leave Vault), an SFTP channel (`SFTP` over an `SFTPClient` interface; drop `.sig` and `.part`, publish by rename), and `Sender`, which audits every file in `bank_file_audit` (migration 0007) before and after it is sent. Not yet wired to a route. `Vault.EBICSKeys` is the EBICS key custody (A006 and X002 signed in transit, E002 read from KV for each unwrap).
+- `internal/ebics`: EBICS H004 client. Subscriber state machine NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY (bank key hashes confirmed by a named person); INI, HIA and HPB key orders and the letters; upload (CCT, CDD, CDB, CIP) and download (C53, C52, C54, HAC, PTK, STA, VMK) transactions with C14N `AuthSignature` (X002), E002 hybrid encryption, zlib and segmentation; return codes mapped to proceed, no-data, back off or park (`Classify`). `Client.FetchStatements` feeds `Postgres.ImportStatementFile`. Migration `0009_ebics_subscriber.sql`. Not yet wired to a route or a schedule.
 - `migrations/0008_reconciliation.sql`: `reconciliation_rule`, `reconciliation_match`,
   `reconciliation_match_line`, `reconciliation_match_item` (a line and an item are in at
   most one active match; an unmatch keeps the row as history) and the column-level
@@ -165,6 +166,9 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0491` | 400 | statement file could not be read |
 | `TRS-0493` | 422 | statement cannot be parsed as camt.053, BAI2 or MT940, or the file holds more than one statement; `errors.line` names the BAI2 / MT940 line, `errors.entry` the camt.053 entry |
 | `TRS-0494` | 422 | opening balance plus lines does not equal closing balance |
+| `TRS-0495` | 404 | EBICS subscriber not found |
+| `TRS-0496` | 409 | an EBICS subscriber with this host, partner and user already exists |
+| `TRS-0497` | 422 | EBICS subscriber host, partner or user id, or bank URL, is not acceptable |
 | `conflict_version` | 412 | `If-Match` does not match the current ETag |
 | `precondition_required` | 428 | `If-Match` is required on every custom method |
 | `AUTH-0003` | 403 | missing duty, including `treasury.facility.override` when `overrideLimit` is set; or a legal-entity-scoped caller creating a bank account, forecast entry, facility or loan for another legal entity |
