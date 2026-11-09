@@ -1,0 +1,18 @@
+image: { repository: ghcr.io/benjaminsrussell/mobile, digest: "", tag: "", pullPolicy: IfNotPresent }
+# Secret holding DATABASE_URL. The service needs its database.
+databaseSecret: mobile-db
+migrateOnStart: false
+# Idle minutes before a device session is STALE (BR-32.6), 5-240.
+idleTimeoutMin: 30
+# Base URL of the warehouse work API the flows call.
+warehouseUrl: "http://warehouse:8080"
+replicaCount: 2
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 128Mi }
+serviceMonitor: { enabled: false }
+
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+  publicKeys: ""

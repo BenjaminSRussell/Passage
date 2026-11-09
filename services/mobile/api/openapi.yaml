@@ -1,0 +1,352 @@
+openapi: 3.1.0
+info:
+  title: Passage mobile warehouse execution (wave 32)
+  version: 0.1.0
+  description: >
+    Device sessions with timeout and resume, role- and site-based menus,
+    versioned server-driven flows and their step runner, GS1-128 and DataMatrix
+    scan parsing, and idempotent offline replay with a supervisor conflict
+    queue. Work-changing steps call the warehouse work API as the signed-in
+    user. Commands require an Idempotency-Key (kept 24 hours): a repeat returns
+    the first answer with Idempotent-Replayed: true, a repeat with another
+    request is 422 idempotency_key_reuse. Errors are RFC 7807 problems with a
+    catalog code (MOB-0101 to MOB-0117) or a service code.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+paths:
+  /v1/mobile/sessions:
+    post:
+      operationId: startSession
+      summary: Start or resume a device session
+      description: >
+        Binds a device to the caller, a warehouse and a menu. The caller's own
+        open session on the device is resumed (200, with MOB-0117 in notice when
+        a flow run is in progress). Another user's session blocks the login
+        (409 MOB-SESSION-ACTIVE) unless it has been silent past the idle
+        timeout, in which case it ends as TAKEOVER and its work lock is released.
+      x-passage-duty: warehouse.work.execute
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/StartSession" } } }
+      responses:
+        "201": { description: Session started., content: { application/json: { schema: { $ref: "#/components/schemas/SessionResponse" } } } }
+        "200": { description: Session resumed., content: { application/json: { schema: { $ref: "#/components/schemas/SessionResponse" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listSessions
+      summary: List sessions (workId lists the open sessions holding a work)
+      x-passage-duty: warehouse.work.supervise
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [ACTIVE, STALE, ENDED] } }
+        - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+        - { name: workId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
+      responses:
+        "200": { description: Sessions., content: { application/json: { schema: { $ref: "#/components/schemas/ItemList" } } } }
+  /v1/mobile/sessions:sweep:
+    post:
+      operationId: sweepStaleSessions
+      summary: Mark sessions silent past the idle timeout STALE, releasing their work locks
+      x-passage-duty: warehouse.work.supervise
+      responses:
+        "200": { description: Count marked., content: { application/json: { schema: { type: object, properties: { marked: { type: integer } } } } } }
+  /v1/mobile/sessions/{id}:heartbeat:
+    post:
+      operationId: heartbeat
+      summary: Record liveness and the device clock; resume a STALE session
+      description: >
+        A STALE session that comes back keeps its work only if the warehouse
+        still has it OPEN or ASSIGNED and no other ACTIVE session holds it
+        (BR-32.6); otherwise relocked is false and the session lets it go. deviceTime
+        records the clock skew used by replay (MOB-0114 above 300 s).
+      x-passage-duty: warehouse.work.execute
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { deviceTime: { type: string, format: date-time } } } } }
+      responses:
+        "200": { description: Session., content: { application/json: { schema: { $ref: "#/components/schemas/Heartbeat" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { description: The session has ended (MOB-SESSION-ENDED)., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/mobile/sessions/{id}:end:
+    post:
+      operationId: endSession
+      summary: Sign out
+      x-passage-duty: warehouse.work.execute
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: Ended session. }
+  /v1/mobile/sessions/{id}:force-signout:
+    post:
+      operationId: forceSignOut
+      summary: End another user's session (reason required)
+      x-passage-duty: warehouse.work.supervise
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 200 } } } } }
+      responses:
+        "200": { description: Ended session. }
+  /v1/mobile/sessions/{id}:assign-work:
+    post:
+      operationId: assignWork
+      summary: Ask the warehouse for the user's next work and hold it on the session
+      x-passage-duty: warehouse.work.execute
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: The work (null when nothing is assignable) and the session. }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/sessions/{id}/runs:
+    post:
+      operationId: startRun
+      summary: Start a flow run pinned to the flow's published version
+      x-passage-duty: warehouse.work.execute
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [flowCode], properties: { flowCode: { type: string } } } } }
+      responses:
+        "201": { description: The run and its first step. }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/sessions/{id}/runs/current/steps/{step}:submit:
+    post:
+      operationId: submitStep
+      summary: Apply a scan, value or outcome to the current step
+      description: >
+        A scan that fails its check is 422 with MOB-0101 to MOB-0104 and leaves
+        the run where it was. A call step calls the warehouse as the user, keyed
+        by Idempotency-Key, and advances only when the call succeeds; a warehouse
+        409 is passed through.
+      x-passage-duty: warehouse.work.execute
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: step, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { value: { type: string }, outcome: { type: string } } } } }
+      responses:
+        "200": { description: The run and its next step. }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/menus/{id}:
+    get:
+      operationId: getMenu
+      summary: The menu of a key for the caller's roles and site
+      description: >
+        A menu's role is a duty the caller must hold; a role menu outranks a site
+        menu, which outranks the general one. The default key always exists and
+        offers every published flow. Flows are the versions published now.
+      x-passage-duty: warehouse.work.execute
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Menu., content: { application/json: { schema: { $ref: "#/components/schemas/Menu" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/menus:
+    get: { operationId: listMenus, summary: List menus, x-passage-duty: warehouse.mobile-flow.admin, responses: { "200": { description: Menus. } } }
+    post:
+      operationId: upsertMenu
+      summary: Create or update a menu for a key, role and site
+      x-passage-duty: warehouse.mobile-flow.admin
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Menu, version bumped on update. }
+  /v1/mobile/devices:
+    get: { operationId: listDevices, summary: List devices, x-passage-duty: warehouse.mobile-flow.admin, responses: { "200": { description: Devices. } } }
+    post:
+      operationId: registerDevice
+      summary: Register a device and its scanner profile
+      x-passage-duty: warehouse.mobile-flow.admin
+      responses:
+        "200": { description: Device. }
+  /v1/mobile/flows:
+    get: { operationId: listFlows, summary: List flow versions, x-passage-duty: warehouse.mobile-flow.admin, responses: { "200": { description: Flows. } } }
+    post:
+      operationId: saveFlowDraft
+      summary: Create the next draft version of a flow code, or replace its open draft
+      x-passage-duty: warehouse.mobile-flow.admin
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Draft., content: { application/json: { schema: { $ref: "#/components/schemas/Flow" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/flows:install-core:
+    post:
+      operationId: installCoreFlows
+      summary: Publish the core flows (receive, put-away, pick, cluster pick, pack, move, count, inquiry) that have no published version
+      x-passage-duty: warehouse.mobile-flow.admin
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: The published core flows. }
+  /v1/mobile/flows/{id}:
+    get: { operationId: getFlow, summary: Get a flow version, x-passage-duty: warehouse.mobile-flow.admin, parameters: [{ $ref: "#/components/parameters/Id" }], responses: { "200": { description: Flow. } } }
+  /v1/mobile/flows/{id}:publish:
+    post:
+      operationId: publishFlow
+      summary: Validate and publish a draft
+      description: >
+        An unreachable step, a missing target or a path that cannot finish is 422
+        MOB-0113. A published version never changes; the previous one is retired
+        but stays readable for runs pinned to it (BR-32.9). If-Match is the
+        draft version; a mismatch is 412.
+      x-passage-duty: warehouse.mobile-flow.admin
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { name: If-Match, in: header, schema: { type: string } }]
+      responses:
+        "200": { description: Published flow. }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/scan:parse:
+    post:
+      operationId: parseScan
+      summary: Parse a scan (GS1-128, GS1 DataMatrix or plain) and optionally check it against an expected class
+      x-passage-duty: warehouse.work.execute
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [raw], properties: { raw: { type: string, maxLength: 512 }, expect: { type: string, enum: [LP, GTIN, LOT, LOCATION, ANY] }, requireSymbologyId: { type: boolean }, fnc1Substitute: { type: string } } } } }
+      responses:
+        "200": { description: Kind, value, parsed AIs, and a verdict (MOB-0101 to MOB-0104) when expect is set and the scan fails. }
+  /v1/mobile/offline:replay:
+    post:
+      operationId: replayOffline
+      summary: Replay queued offline transactions in sequence order, exactly once
+      description: >
+        Batch form (deviceId, transactions) answers 200 with a status per
+        transaction. Single form (idempotencyKey = "deviceId:seq", the browser
+        device) answers 200 APPLIED, 409 MOB-0107 CONFLICT, 422 REJECTED, MOB-0108
+        (sequence gap) or idempotency_key_reuse, 429 while it waits behind an
+        earlier transaction that is not applied, and 503 when the warehouse is
+        unreachable or the device clock is more than 300 s off (MOB-0114); the
+        device keeps those PENDING. The first conflict or rejection stops the
+        run and an unresolved conflict blocks the device's later transactions.
+        Each transaction reaches the warehouse as the user who queued it with its
+        key as Idempotency-Key.
+      x-passage-duty: warehouse.work.execute
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Replay" } } }
+      responses:
+        "200": { description: Applied, or per-transaction results. }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/offline/conflicts:
+    get:
+      operationId: listConflicts
+      summary: The supervisor conflict queue, oldest capture first
+      x-passage-duty: warehouse.offline-conflict.resolve
+      parameters: [{ name: cursor, in: query, schema: { type: string } }, { name: limit, in: query, schema: { type: integer, maximum: 200 } }]
+      responses:
+        "200": { description: "items and nextCursor.", content: { application/json: { schema: { $ref: "#/components/schemas/ItemList" } } } }
+  /v1/mobile/offline/conflicts/{key}:resolve:
+    post:
+      operationId: resolveConflict
+      summary: Resolve a conflict (BR-32.4)
+      description: >
+        action reapply records the decision to move the inventory as scanned and
+        emits offline.resolved.v1; the mobile service does not move it. action
+        reject ends the transaction. Either unblocks the device's queue.
+        If-Match is the conflict version (required); a mismatch, or a conflict
+        already resolved, is 412.
+      x-passage-duty: warehouse.offline-conflict.resolve
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string }, description: "device_id:seq" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [action], properties: { action: { type: string, enum: [reapply, reject] } } } } }
+      responses:
+        "200": { description: The resolved transaction. }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+  /v1/mobile/events:
+    get:
+      operationId: events
+      summary: Server-sent events; flow.published carries {flow_id, code, version}
+      description: The stream is recycled by the request timeout; EventSource reconnects. Devices also poll the menu.
+      x-passage-duty: warehouse.work.execute
+      responses:
+        "200": { description: text/event-stream., content: { text/event-stream: { schema: { type: string } } } }
+components:
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 200 } }
+  responses:
+    Problem:
+      description: RFC 7807 problem.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+    ItemList: { type: object, required: [items], properties: { items: { type: array, items: { type: object } }, nextCursor: { type: string } } }
+    StartSession:
+      type: object
+      required: [deviceId, warehouseId]
+      properties:
+        deviceId: { type: string, maxLength: 80, description: Without ':'. }
+        warehouseId: { type: string, format: uuid }
+        menuKey: { type: string, default: default }
+    SessionResponse:
+      type: object
+      properties:
+        session: { type: object }
+        resumed: { type: boolean }
+        notice: { type: object, properties: { code: { type: string }, message: { type: string } } }
+    Heartbeat:
+      type: object
+      properties:
+        session: { type: object }
+        resumed: { type: boolean }
+        relocked: { type: boolean }
+        reason: { type: string }
+    Flow:
+      type: object
+      required: [flowId, code, version, status, entryStepId, steps]
+      properties:
+        flowId: { type: string, format: uuid }
+        code: { type: string, pattern: "^[A-Z][A-Z0-9_]{1,39}$" }
+        version: { type: integer }
+        status: { type: string, enum: [DRAFT, PUBLISHED, RETIRED] }
+        entryStepId: { type: string }
+        steps: { type: array, items: { $ref: "#/components/schemas/Step" } }
+        warehouses: { type: array, items: { type: string, format: uuid } }
+    Step:
+      type: object
+      required: [id, type, prompt, next]
+      properties:
+        id: { type: string, pattern: "^[a-z][a-z0-9_]{0,39}$" }
+        type: { type: string, enum: [scan, input, select, confirm, display, branch, call] }
+        prompt: { type: string, maxLength: 200 }
+        expectedScan: { type: array, items: { type: string, enum: [LP, GTIN, LOT, LOCATION, ANY] } }
+        next: { type: object, additionalProperties: { type: [string, "null"] } }
+        call: { type: object, properties: { op: { type: string, enum: [assign, confirm, exception, receive, get-work] }, params: { type: object, additionalProperties: { type: string } } } }
+    Menu:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version: { type: integer }
+        flows: { type: array, items: { $ref: "#/components/schemas/Flow" } }
+    Replay:
+      type: object
+      properties:
+        idempotencyKey: { type: string, description: "Single form: device_id:seq." }
+        command: { type: string, enum: [ConfirmWorkLine, ReceiveLine, ReportException] }
+        payload: { type: object }
+        capturedAt: { type: string, format: date-time }
+        deviceId: { type: string }
+        sessionId: { type: string }
+        transactions:
+          type: array
+          maxItems: 500
+          items: { type: object, required: [seq, command, payload, capturedAt], properties: { seq: { type: integer, minimum: 1 }, command: { type: string }, payload: { type: object }, capturedAt: { type: string, format: date-time } } }
