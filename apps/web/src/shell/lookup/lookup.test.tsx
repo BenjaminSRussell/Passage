@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -144,6 +144,16 @@ describe("EntityLookup", () => {
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(options[0]).toHaveTextContent("Fabrikam Inc");
     expect(options).toHaveLength(2);
+  });
+
+  it("accepts an id copied from the details menu and shows its name", async () => {
+    const seen: string[] = [];
+    render(<Harness onValue={(v) => seen.push(v)} />);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: VENDOR_ID.toUpperCase() } });
+    expect(seen).toEqual([VENDOR_ID]);
+    await waitFor(() => expect(screen.getByRole("combobox")).toHaveValue("Contoso Ltd (V-00042)"));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "not an id" } });
+    expect(seen).toEqual([VENDOR_ID]);
   });
 
   it("clears the value", async () => {

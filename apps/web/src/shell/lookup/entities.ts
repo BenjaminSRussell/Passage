@@ -32,12 +32,13 @@ export interface LookupDef {
 }
 
 export const PAGE_SIZE = 20;
+export const LOOKUP_HEADER = "X-Passage-Lookup";
 
 type Raw = Record<string, unknown>;
 
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, {
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", [LOOKUP_HEADER]: "1" },
     signal,
   });
   if (!res.ok) {

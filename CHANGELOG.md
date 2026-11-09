@@ -8,6 +8,8 @@ release may change public APIs.
 
 ## [Unreleased]
 
+- Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 208 existing raw id fields are allowlisted for conversion (#500).
+
 ### Added
 
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the

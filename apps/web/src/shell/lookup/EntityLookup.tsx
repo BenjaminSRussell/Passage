@@ -21,6 +21,7 @@ import {
 import { pushRecent, readRecent } from "./recent";
 
 const DEBOUNCE_MS = 200;
+const PASTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface LookupChange {
   target: { name: string; value: string };
@@ -229,6 +230,13 @@ export function EntityLookup({
           value={typed ?? label}
           onFocus={openList}
           onChange={(e) => {
+            const pasted = e.target.value.trim();
+            if (PASTED_ID.test(pasted)) {
+              setTyped(null);
+              setOpen(false);
+              onChange({ target: { name, value: pasted.toLowerCase() }, option: null });
+              return;
+            }
             setTyped(e.target.value);
             if (!open) {
               openList();
