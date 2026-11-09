@@ -2,8 +2,8 @@ package api
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
