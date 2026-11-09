@@ -286,7 +286,7 @@ func (a *API) ownSession(w http.ResponseWriter, r *http.Request, id string) (sto
 		fail(w, r, err)
 		return store.Session{}, false
 	}
-	if p := principalOf(r); s.UserID != p.UserID {
+	if s.UserID != userOf(r) {
 		fail(w, r, store.ErrNotOwner)
 		return store.Session{}, false
 	}
@@ -450,9 +450,4 @@ func stepProblem(err error) error {
 		return httpx.NewProblem(http.StatusBadRequest, codeValidation, err.Error())
 	}
 	return err
-}
-
-func principalOf(r *http.Request) (p struct{ UserID string }) {
-	p.UserID = userOf(r)
-	return p
 }
