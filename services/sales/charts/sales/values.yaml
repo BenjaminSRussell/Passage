@@ -46,6 +46,9 @@ securityContext:
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+  # Callers' public keys (name[:kid]=base64 Ed25519 public key, comma separated; not secret).
+  # List fulfillment's key so its packing slip reports reach :record-progress (#496,
+  # sales.order.record-delivery only) and billing's for invoice reports.
   publicKeys: ""
 
 upstream:

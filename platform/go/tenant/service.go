@@ -62,6 +62,7 @@ var serviceGrants = map[string]map[string][]string{
 		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
 	// fulfillment and transport reach carriers only through carrier-gateway (#482); transport buys no labels.
+	// fulfillment reports posted packing slips to sales' :record-progress (#496) and may report nothing else there.
 	"fulfillment": {
 		"sales":           {"sales.order.record-delivery"},
 		"inventory":       {"inventory.issue.claim"},

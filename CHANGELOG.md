@@ -20,6 +20,20 @@ release may change public APIs.
   and reads our DESADV, INVOIC and ORDERS and answers them with CONTRLs the service matches (ACKED, or FAILED for a
   UCM 4). AC-35.1 is still not fully met: the 855 and the 856/810 are not produced without a manual step
   (`services/edi/NOT-IMPLEMENTED.md`). 204 and 990 remain unsupported.
+- Fulfillment reports posted packing slips to sales (#496): each post queues one report per (slip, order)
+  (fulfillment migration 0035, `sales_delivery_report`), and a reporter in every API replica (`SALES_URL`,
+  `SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it after the post commits to
+  `POST /v1/sales/orders/{id}:record-progress`: kind DELIVERED, `sourceRef` the slip number, the slip's quantities,
+  `actualWeight` on catch-weight lines and the pick tracking (batch, serial, quantity; no location), with a stable
+  `Idempotency-Key` per (slip, order). Reports are leased (`FOR UPDATE SKIP LOCKED`), retried with back-off on an
+  outage, 5xx, 401, 403, 408 or 429, and parked on any other 4xx or after 20 attempts;
+  `GET /v1/fulfillment/sales-delivery-reports` lists them and `POST /v1/fulfillment/sales-delivery-reports/{id}:retry`
+  queues a parked one again. A slip cancelled before it was reported is withdrawn; one cancelled after stays reported,
+  since sales has no reversal of a delivery. Calls are signed as fulfillment with only `sales.order.record-delivery`,
+  acting as the new service principal `service:fulfillment-sales-report`; `sales.order.record-delivery` is now
+  service-only. Sales' `:record-progress` lines take `lineId` as an alternative to `lineNo`, which is how fulfillment
+  names them. Ops: give fulfillment a signing key, list its public key in the sales chart's
+  `serviceIdentity.publicKeys`, then set `salesUrl`.
 
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an

@@ -195,7 +195,7 @@
     ]},
     "production.planned.intake": {"flag": true, "permissions": []},
     "production.jobcard.shopfloor": {"flag": true, "permissions": []},
-    "sales.order.record-delivery": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
+    "sales.order.record-delivery": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "sales.order.record-invoice": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "tax.transaction.record": {"permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
     "tax.settlement.run": {"permissions": [{"resource": "/v1/tax/settlements:run", "methods": ["POST"]}]},
@@ -1477,7 +1477,8 @@
     ]},
     "fulfillment.packing-slip.post": {"permissions": [
       {"resource": "/v1/fulfillment/packing-slips/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/fulfillment/shipments/*:post-packing-slip", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/shipments/*:post-packing-slip", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/sales-delivery-reports/*:retry", "methods": ["POST"]}
     ]},
     "compliance.privacy-request.create": {"permissions": [{"resource": "/v1/privacy/requests", "methods": ["POST"]}]},
     "compliance.privacy-request.process": {"permissions": [
@@ -1843,6 +1844,7 @@
     ]},
     "fulfillment.warehouse.view": {"permissions": [
       {"resource": "/v1/fulfillment/backorders", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/sales-delivery-reports", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/container-types", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/delivered-not-invoiced", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/packing-rules", "methods": ["GET"]},
@@ -3493,6 +3495,7 @@
     "pricing-cache": ["pricing.cache.invalidate"],
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
+    "fulfillment-sales-report": ["sales.order.record-delivery"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "inventory-postings": ["inventory.transaction.apply"],
     "migration-loader": ["party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"],

@@ -542,6 +542,45 @@ cannot be read, the auto-pack card is disabled with an explanation when the
 warehouse turned it off, and the workbench "Group by" has a "Warehouse default" choice (now its initial value). No new
 duty is introduced. The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 
+### #496: posted packing slips reported to sales' `:record-progress`, with pick tracking
+
+Built. A packing slip post queues one report per (slip, order) in its own transaction (`sales_delivery_report`,
+migration 0035, RLS by tenant and legal entity); a slip belongs to one shipment and so to one order. The body is frozen
+at post time: kind DELIVERED, `sourceRef` the slip number, one line per sales order line with the slip's quantity, the
+catch weight as `actualWeight`, and the batch and serial entries stamped with the slip as `tracking` (`batch_no` as
+`batch`, `serial_no` as `serial`, `qty` as `quantity`; no location: inventory books none, so one batch picked from two
+locations becomes one entry; entries are ordered by batch and serial; a catch-weight line with one entry gives the entry
+the line's weight). The `Idempotency-Key` is `fulfillment-packing-slip:{slipId}:{orderId}`. Lines name the sales line by
+`lineId`: fulfillment knows sales' line ids (the release line's `orderLineId`, `line_id` on `order.confirmed`) but not
+their numbers, and `order.confirmed` carries no `line_no`, leaves out lines without a confirmed ship date and is not sent
+again on an order change, while reading the order from sales would need a read grant; so sales' `:record-progress` now
+takes `lineId` as an alternative to `lineNo` and resolves it (sales #496). The reporter (`internal/salesreport`, started
+in every API replica when `SALES_URL` is set) follows edi's delivery dispatcher: the SECURITY DEFINER
+`fulfillment_sales_report_due_tenants()` over a trigger-kept index (`sales_delivery_report_due`, no `passage_app` grant,
+allowlisted in `tools/rlscheck`) lists tenants with due reports; per tenant it leases a batch (attempts + 1, next attempt
+pushed past a 2 minute lease, `FOR UPDATE SKIP LOCKED`) and signs each call as fulfillment for the slip's legal entity
+with only `sales.order.record-delivery`, acting as the new service principal `service:fulfillment-sales-report`. 2xx
+records REPORTED; a transport failure, 5xx, 401, 403, 408 or 429 is retried (30 s doubling up to 1 h) and PARKED after 20
+attempts; any other 4xx is PARKED at once with sales' code and detail. A finish whose attempt lost its lease changes
+nothing. `GET /v1/fulfillment/sales-delivery-reports` (`fulfillment.warehouse.view`) lists the reports and
+`POST /v1/fulfillment/sales-delivery-reports/{id}:retry` (`fulfillment.packing-slip.post`, Idempotency-Key) queues a
+PARKED one again with the same body and key (FUL-0080 not found, FUL-0081 REPORTED or WITHDRAWN). Tests: the Postgres
+reporter tests against a fake sales server that verifies the service token (one call per slip with the expected body and
+key, a 503 retried with the same body and key, a 422 parked and only re-sent after `:retry`, 5xx parked after the
+attempts, a slip cancelled before it was reported never sent, a lost lease, tenant isolation), the body test against
+the shared fixture `testdata/sales-progress/record-progress-delivered.json` that sales' handler test accepts, and the API
+tests.
+
+| Item | Status | Reason |
+|---|---|---|
+| A slip cancelled after its report reached sales is not reversed in sales | handoff to sales returns (wave 30) | Sales has no reversal of a delivery (its `:record-progress` takes positive quantities only). The report stays REPORTED with `cancelledAt`; the slip's `packingslip.cancelled` still lets inventory offset the stock it booked under the slip number, so stock is right and the sales order keeps the delivered quantity until a return or correction exists. A slip cancelled before its report was sent is WITHDRAWN and never reported; if the cancel lands while an attempt is in flight and sales takes it, the report ends REPORTED (what sales holds). |
+| A cancelled slip whose report was withdrawn leaves inventory's `packingslip.cancelled` without a booking to offset | handoff to inventory | Nothing was delivered in sales, so inventory booked nothing under the slip number; its postings consumer answers that with `INV-PST-003` (retried, then parked). Inventory should treat a cancelled slip with no booked delivery as nothing to do. |
+| `final` (close for delivery) is not set | later slice | Sales' under-delivery tolerance closes a line only on a report line marked `final`. Fulfillment does not know whether a shipment line is the last for its order line (a backorder or another shipment may follow), so it never sets it; a short last delivery stays partial in sales. |
+| A catch-weight line split over several batch or serial entries carries no entry weights | handoff to warehouse (wave 31) | Fulfillment does not weigh per entry. Sales accepts it (weights on all entries or none), but inventory parks such a delivery with `INV-PST-005`. |
+| SLS-0058 on a slip posted before `order.remaindercancelled` arrived is parked, not raised as an exception | deviation | The parked report (`lastError` names SLS-0058) is the record; the remainder consumer already raises `SLIP_POSTED_BEYOND_KEPT` for that slip when the cancellation arrives. |
+| Reports of slips posted before migration 0035 | not built (backfill) | Only slips posted after the migration queue a report. A backfill that queues reports for older POSTED slips is not built; `sales.order.record-delivery` is now service-only, so no person can report them by hand either. |
+| Parked reports raise no alert | ops | The reporter logs every attempt (WARN when not REPORTED); a metric and an alert on PARKED reports are not built. |
+
 ## Important gaps (read first)
 
 | Item | Status | Reason |
