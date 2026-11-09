@@ -1923,6 +1923,22 @@
     "budget.configure": {"permissions": [{"resource": "/v1/budget/control-rules", "methods": ["POST"]}]},
     "budget.maintain": {"permissions": [{"resource": "/v1/budget/register-entries", "methods": ["POST"]}]},
     "budget.override": {"flag": true, "permissions": []},
+    "budget.plan.decide": {"permissions": [
+      {"resource": "/v1/workflows/budget-plans/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/workflows/budget-plans/*/stages/*:sign-off", "methods": ["POST"]}
+    ]},
+    "budget.plan.maintain": {"permissions": [
+      {"resource": "/v1/budget/plans", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["PUT"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
+      {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
+    ]},
+    "budget.plan.workflow": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*:reject", "methods": ["POST"]}
+    ]},
     "budget.program.maintain": {"permissions": [
       {"resource": "/v1/budget/investment-programs", "methods": ["POST"]},
       {"resource": "/v1/budget/investment-programs/*:assign", "methods": ["POST"]},
@@ -1935,6 +1951,9 @@
       {"resource": "/v1/budget/reservations:expire", "methods": ["POST"]}
     ]},
     "budget.view": {"permissions": [
+      {"resource": "/v1/budget/plans", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["GET"]},
       {"resource": "/v1/budget/available", "methods": ["GET"]},
       {"resource": "/v1/budget/checks", "methods": ["GET"]},
       {"resource": "/v1/budget/checks/*", "methods": ["GET"]},
@@ -3387,6 +3406,9 @@
       "inventory": ["inventory.read"],
       "engineering": ["engineering.read"]
     },
+    "budgeting": {
+      "ledger": ["ledger.balance.read"]
+    },
     "costing": {
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
@@ -3449,6 +3471,7 @@
     "workflow-ts": {
       "payables": ["payment-run.execute"],
       "engineering": ["engineering.eco.workflow"],
+      "budgeting": ["budget.plan.workflow"],
       "quality": ["quality.capa.execute"],
       "transport": ["transport.tender.execute"],
       "party": ["party.approve", "party.merge.execute"]

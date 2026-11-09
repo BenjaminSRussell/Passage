@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/budgeting/internal/api"
 	"github.com/BenjaminSRussell/passage/services/budgeting/internal/store"
 	"github.com/BenjaminSRussell/passage/services/budgeting/migrations"
@@ -56,7 +57,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	router := httpx.NewRouter()
-	api.New(store.New(pool)).Register(router)
+	pg := store.New(pool)
+	a := api.New(pg)
+	gl, err := ledgerclient.FromEnv(getenv, "budgeting")
+	if err != nil {
+		return err
+	}
+	if gl != nil {
+		a.WithPlanning(pg, gl)
+	} else {
+		a.WithPlanning(pg, nil)
+	}
+	a.Register(router)
 	admin := http.NewServeMux()
 	admin.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")

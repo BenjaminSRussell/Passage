@@ -1,0 +1,346 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/budgeting/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/budgeting/internal/store"
+)
+
+const (
+	planID     = "0196a6a4-0000-7000-8000-000000000011"
+	scenarioID = "0196a6a4-0000-7000-8000-000000000012"
+	orgUnitID  = "0196a6a4-0000-7000-8000-000000000013"
+	ledgerID   = "0196a6a4-0000-7000-8000-000000000014"
+	entityID   = "0196a6a4-0000-7000-8000-000000000015"
+)
+
+type fakePlans struct {
+	calls     int
+	version   int64
+	cells     []domain.PlanCell
+	signOff   store.SignOffRequest
+	reject    store.RejectRequest
+	newScen   store.NewScenario
+	owners    []store.StageOwnerInput
+	plan      store.Plan
+	planError error
+}
+
+func (f *fakePlans) CreatePlan(context.Context, string, string, store.NewPlan) (int, []byte, error) {
+	f.calls++
+	return http.StatusCreated, []byte(`{"id":"p"}`), nil
+}
+
+func (f *fakePlans) SetStageOwners(_ context.Context, _, _, _ string, o []store.StageOwnerInput) (int, []byte, error) {
+	f.calls++
+	f.owners = o
+	return http.StatusOK, []byte(`{}`), nil
+}
+
+func (f *fakePlans) CreateScenario(_ context.Context, _, _, _ string, in store.NewScenario) (int, []byte, error) {
+	f.calls++
+	f.newScen = in
+	return http.StatusCreated, []byte(`{}`), nil
+}
+
+func (f *fakePlans) UpsertCells(_ context.Context, _, _, _, _ string, version int64, cells []domain.PlanCell) (int, []byte, error) {
+	f.calls++
+	f.version, f.cells = version, cells
+	return http.StatusOK, []byte(`{"scenarioId":"s","version":8,"cells":1,"total":"1"}`), nil
+}
+
+func (f *fakePlans) SubmitPlan(context.Context, string, string, string) (int, []byte, error) {
+	f.calls++
+	return http.StatusOK, []byte(`{}`), nil
+}
+
+func (f *fakePlans) SignOff(_ context.Context, _, _ string, in store.SignOffRequest) (int, []byte, error) {
+	f.calls++
+	f.signOff = in
+	return http.StatusOK, []byte(`{}`), nil
+}
+
+func (f *fakePlans) RejectPlan(_ context.Context, _, _ string, in store.RejectRequest) (int, []byte, error) {
+	f.calls++
+	f.reject = in
+	return http.StatusOK, []byte(`{}`), nil
+}
+
+func (f *fakePlans) ListPlans(context.Context, string) ([]store.Plan, error) {
+	f.calls++
+	return []store.Plan{}, nil
+}
+
+func (f *fakePlans) GetPlan(context.Context, string) (store.PlanView, error) {
+	f.calls++
+	return store.PlanView{Plan: f.plan}, f.planError
+}
+
+func (f *fakePlans) GetGrid(context.Context, string, string, store.GridFilter) (store.Grid, error) {
+	f.calls++
+	return store.Grid{Scenario: store.Scenario{Version: 5}, Cells: []domain.PlanCell{}}, nil
+}
+
+type fakeActuals struct {
+	byPeriod map[string]string
+	queries  []ledgerclient.BalanceQuery
+	err      error
+}
+
+func (f *fakeActuals) Balances(_ context.Context, q ledgerclient.BalanceQuery) (ledgerclient.AccountBalances, error) {
+	f.queries = append(f.queries, q)
+	if f.err != nil {
+		return ledgerclient.AccountBalances{}, f.err
+	}
+	amount, ok := f.byPeriod[q.PeriodFrom]
+	if !ok {
+		return ledgerclient.AccountBalances{}, nil
+	}
+	return ledgerclient.AccountBalances{Rows: []ledgerclient.AccountBalance{{Account: q.Account, Debit: decimal.RequireFromString(amount)}}}, nil
+}
+
+func servePlan(t *testing.T, ps PlanStore, gl PriorActuals, method, path, body, duties string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := chi.NewRouter()
+	New(&fakeStore{}).WithPlanning(ps, gl).Register(r)
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(idempotencyKey, "k-1")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	req = req.WithContext(testkit.Ctx(tenantID, strings.Split(duties, ",")...))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+const planPath = "/v1/budget/plans/" + planID
+const gridPath = planPath + "/scenarios/" + scenarioID + "/grid"
+
+func TestPlan_RoutesNeedTheirOwnDuty(t *testing.T) {
+	body := `{"cells":[{"account":"6000","costCenter":"CC1","period":"2027-01","amount":"1"}]}`
+	cases := []struct {
+		method, path, body, duty string
+	}{
+		{http.MethodPut, gridPath, body, dutyPlanMaintain},
+		{http.MethodPost, planPath + ":submit", ``, dutyPlanMaintain},
+		{http.MethodPost, planPath + "/stages/review:sign-off", `{"orgUnitId":"` + orgUnitID + `","submission":1}`, dutyPlanWorkflow},
+		{http.MethodPost, planPath + ":reject", `{"reason":"no","submission":1}`, dutyPlanWorkflow},
+		{http.MethodGet, planPath, ``, dutyView},
+		{http.MethodGet, gridPath, ``, dutyView},
+	}
+	for _, c := range cases {
+		t.Run(c.method+" "+c.path, func(t *testing.T) {
+			h := map[string]string{"If-Match": `"1"`}
+			if rec := servePlan(t, &fakePlans{}, nil, c.method, c.path, c.body, "budget.check", h); rec.Code != http.StatusForbidden {
+				t.Fatalf("without the duty: %d, want 403", rec.Code)
+			}
+			if rec := servePlan(t, &fakePlans{}, nil, c.method, c.path, c.body, c.duty, h); rec.Code != http.StatusOK {
+				t.Fatalf("with %s: %d %s, want 200", c.duty, rec.Code, rec.Body)
+			}
+		})
+	}
+}
+
+func TestPlan_HumanDutyCannotCallTheWorkflowRoutes(t *testing.T) {
+	rec := servePlan(t, &fakePlans{}, nil, http.MethodPost, planPath+"/stages/approve:sign-off", `{"orgUnitId":"`+orgUnitID+`","scenarioId":"`+scenarioID+`","submission":1}`, "budget.plan.maintain,budget.view", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a maintainer signing off directly: %d, want 403", rec.Code)
+	}
+}
+
+func TestPlanGrid_PutRequiresIfMatchAndPassesTheVersion(t *testing.T) {
+	body := `{"cells":[{"account":"6000","costCenter":"CC1","period":"2027-01","amount":"12.5"}]}`
+	f := &fakePlans{}
+	rec := servePlan(t, f, nil, http.MethodPut, gridPath, body, dutyPlanMaintain, nil)
+	if rec.Code != http.StatusPreconditionRequired || problemCode(t, rec) != codePreconditionReq || f.calls != 0 {
+		t.Fatalf("without If-Match: %d %s, want 428 and no write", rec.Code, rec.Body)
+	}
+	rec = servePlan(t, f, nil, http.MethodPut, gridPath, body, dutyPlanMaintain, map[string]string{"If-Match": `"7"`})
+	if rec.Code != http.StatusOK || f.version != 7 || len(f.cells) != 1 || !f.cells[0].Amount.Equal(decimal.RequireFromString("12.5")) {
+		t.Fatalf("with If-Match: %d version %d cells %+v", rec.Code, f.version, f.cells)
+	}
+	if got := rec.Header().Get("ETag"); got != `"8"` {
+		t.Fatalf("ETag = %q, want the new grid version \"8\"", got)
+	}
+	rec = servePlan(t, f, nil, http.MethodPut, gridPath, body, dutyPlanMaintain, map[string]string{"If-Match": "abc"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed If-Match: %d, want 400", rec.Code)
+	}
+}
+
+func TestPlanGrid_GetCarriesTheETag(t *testing.T) {
+	rec := servePlan(t, &fakePlans{}, nil, http.MethodGet, gridPath, ``, dutyView, nil)
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"5"` {
+		t.Fatalf("grid read: %d ETag %q, want \"5\"", rec.Code, rec.Header().Get("ETag"))
+	}
+}
+
+func TestPlanGrid_PutRejectsBadCells(t *testing.T) {
+	cases := map[string]string{
+		"empty":            `{"cells":[]}`,
+		"negative":         `{"cells":[{"account":"6000","costCenter":"CC1","period":"2027-01","amount":"-1"}]}`,
+		"five decimals":    `{"cells":[{"account":"6000","costCenter":"CC1","period":"2027-01","amount":"1.00001"}]}`,
+		"bad period":       `{"cells":[{"account":"6000","costCenter":"CC1","period":"2027-1","amount":"1"}]}`,
+		"missing account":  `{"cells":[{"costCenter":"CC1","period":"2027-01","amount":"1"}]}`,
+		"duplicate":        `{"cells":[{"account":"6000","costCenter":"CC1","period":"2027-01","amount":"1"},{"account":"6000","costCenter":"CC1","period":"2027-01","amount":"2"}]}`,
+		"unknown property": `{"cells":[{"account":"6000","costCenter":"CC1","period":"2027-01","amount":"1","note":"x"}]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &fakePlans{}
+			rec := servePlan(t, f, nil, http.MethodPut, gridPath, body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
+			if rec.Code != http.StatusBadRequest || f.calls != 0 {
+				t.Fatalf("%d %s calls %d, want 400 and no write", rec.Code, rec.Body, f.calls)
+			}
+		})
+	}
+}
+
+func TestPlanSpread_EvenAllocatesTheTotalExactly(t *testing.T) {
+	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027}}
+	body := `{"account":"6000","total":"1000","method":"even","costCenters":[{"costCenter":"CC1","weight":"1"},{"costCenter":"CC2","weight":"2"}]}`
+	rec := servePlan(t, f, nil, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"3"`})
+	if rec.Code != http.StatusOK || f.version != 3 || len(f.cells) != 24 {
+		t.Fatalf("spread: %d %s version %d cells %d, want 24 cells", rec.Code, rec.Body, f.version, len(f.cells))
+	}
+	totals := map[string]decimal.Decimal{}
+	sum := decimal.Zero
+	for _, c := range f.cells {
+		totals[c.CostCenter] = totals[c.CostCenter].Add(c.Amount)
+		sum = sum.Add(c.Amount)
+	}
+	if !sum.Equal(decimal.NewFromInt(1000)) || !totals["CC1"].Equal(decimal.RequireFromString("333.3334")) && !totals["CC1"].Equal(decimal.RequireFromString("333.3333")) {
+		t.Fatalf("spread totals %v sum %s, want 1000 split 1:2", totals, sum)
+	}
+}
+
+func TestPlanSpread_PriorYearActualsWeighsPeriodsByTheLedger(t *testing.T) {
+	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LegalEntityID: entityID, LedgerID: ledgerID}}
+	gl := &fakeActuals{byPeriod: map[string]string{"2026-01": "100", "2026-02": "300"}}
+	body := `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
+	rec := servePlan(t, f, gl, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("spread: %d %s", rec.Code, rec.Body)
+	}
+	want := map[string]string{"2027-01": "100", "2027-02": "300", "2027-03": "0"}
+	for _, c := range f.cells {
+		if w, ok := want[c.Period]; ok && !c.Amount.Equal(decimal.RequireFromString(w)) {
+			t.Errorf("%s = %s, want %s", c.Period, c.Amount, w)
+		}
+	}
+	if len(gl.queries) != 12 || gl.queries[0].PeriodFrom != "2026-01" || gl.queries[0].LedgerID != ledgerID || gl.queries[0].LegalEntityID != entityID {
+		t.Fatalf("ledger queries = %+v, want the 12 months of 2026 on the plan's ledger", gl.queries)
+	}
+}
+
+func TestPlanSpread_PriorYearNeedsLedgerAndPlanLedger(t *testing.T) {
+	body := `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
+	h := map[string]string{"If-Match": `"1"`}
+	noLedgerOnPlan := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027}}
+	if rec := servePlan(t, noLedgerOnPlan, &fakeActuals{}, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, h); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != codeLedgerNotSet {
+		t.Fatalf("plan without a ledger: %d %s, want 422 %s", rec.Code, rec.Body, codeLedgerNotSet)
+	}
+	withLedger := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LedgerID: ledgerID}}
+	if rec := servePlan(t, withLedger, nil, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, h); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("service without a ledger client: %d, want 503", rec.Code)
+	}
+	failing := &fakeActuals{err: context.DeadlineExceeded}
+	rec := servePlan(t, withLedger, failing, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, h)
+	if rec.Code != http.StatusServiceUnavailable || problemCode(t, rec) != codeLedgerUnreadable || withLedger.version != 0 {
+		t.Fatalf("ledger down: %d %s, want 503 %s and no write", rec.Code, rec.Body, codeLedgerUnreadable)
+	}
+}
+
+func TestPlanSignOff_ValidatesStageAndCarriesTheSubmission(t *testing.T) {
+	f := &fakePlans{}
+	body := `{"orgUnitId":"` + orgUnitID + `","scenarioId":"` + scenarioID + `","submission":4}`
+	rec := servePlan(t, f, nil, http.MethodPost, planPath+"/stages/approve:sign-off", body, dutyPlanWorkflow, nil)
+	if rec.Code != http.StatusOK || f.signOff.Stage != domain.StageApprove || f.signOff.Submission != 4 || f.signOff.ScenarioID != scenarioID || f.signOff.PlanID != planID {
+		t.Fatalf("approve sign-off: %d %+v", rec.Code, f.signOff)
+	}
+	for name, c := range map[string]struct{ stage, body string }{
+		"approve without a scenario": {"approve", `{"orgUnitId":"` + orgUnitID + `","submission":1}`},
+		"review with a scenario":     {"review", `{"orgUnitId":"` + orgUnitID + `","scenarioId":"` + scenarioID + `","submission":1}`},
+		"no submission":              {"review", `{"orgUnitId":"` + orgUnitID + `"}`},
+		"bad org unit":               {"review", `{"orgUnitId":"x","submission":1}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := &fakePlans{}
+			if rec := servePlan(t, g, nil, http.MethodPost, planPath+"/stages/"+c.stage+":sign-off", c.body, dutyPlanWorkflow, nil); rec.Code != http.StatusBadRequest || g.calls != 0 {
+				t.Fatalf("%d %s, want 400", rec.Code, rec.Body)
+			}
+		})
+	}
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodPost, planPath+"/stages/final:sign-off", body, dutyPlanWorkflow, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown stage: %d, want 404", rec.Code)
+	}
+}
+
+func TestPlanReject_NeedsReasonAndSubmission(t *testing.T) {
+	f := &fakePlans{}
+	if rec := servePlan(t, f, nil, http.MethodPost, planPath+":reject", `{"reason":" too high ","submission":2}`, dutyPlanWorkflow, nil); rec.Code != http.StatusOK || f.reject.Reason != "too high" || f.reject.Submission != 2 {
+		t.Fatalf("reject: %d %+v", rec.Code, f.reject)
+	}
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodPost, planPath+":reject", `{"reason":"","submission":2}`, dutyPlanWorkflow, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty reason: %d, want 400", rec.Code)
+	}
+}
+
+func TestPlanScenario_ValidatesKindAndAdjustment(t *testing.T) {
+	f := &fakePlans{}
+	ok := `{"name":"Optimistic","kind":"Optimistic","copyFromScenarioId":"` + scenarioID + `","adjustmentPct":"10"}`
+	if rec := servePlan(t, f, nil, http.MethodPost, planPath+"/scenarios", ok, dutyPlanMaintain, nil); rec.Code != http.StatusCreated || f.newScen.CopyFromID != scenarioID || !f.newScen.AdjustmentPct.Equal(decimal.NewFromInt(10)) {
+		t.Fatalf("copy scenario: %d %+v", rec.Code, f.newScen)
+	}
+	for name, body := range map[string]string{
+		"unknown kind":              `{"name":"x","kind":"Wild"}`,
+		"adjustment without a copy": `{"name":"x","kind":"Custom","adjustmentPct":"5"}`,
+		"adjustment of -100":        `{"name":"x","kind":"Custom","copyFromScenarioId":"` + scenarioID + `","adjustmentPct":"-100"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := &fakePlans{}
+			if rec := servePlan(t, g, nil, http.MethodPost, planPath+"/scenarios", body, dutyPlanMaintain, nil); rec.Code != http.StatusBadRequest || g.calls != 0 {
+				t.Fatalf("%d %s, want 400", rec.Code, rec.Body)
+			}
+		})
+	}
+}
+
+func TestPlanOwners_ValidatesEntries(t *testing.T) {
+	f := &fakePlans{}
+	ok := `{"owners":[{"stage":"Review","orgUnitId":"` + orgUnitID + `","owner":"alex"}]}`
+	if rec := servePlan(t, f, nil, http.MethodPut, planPath+"/stage-owners", ok, dutyPlanMaintain, nil); rec.Code != http.StatusOK || len(f.owners) != 1 {
+		t.Fatalf("owners: %d %+v", rec.Code, f.owners)
+	}
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodPut, planPath+"/stage-owners", `{"owners":[{"stage":"Audit","orgUnitId":"x","owner":""}]}`, dutyPlanMaintain, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad owner: %d, want 400", rec.Code)
+	}
+}
+
+func TestPlanCreate_ValidatesBody(t *testing.T) {
+	ok := `{"legalEntityId":"` + entityID + `","ruleVersionId":"` + ruleID + `","name":"FY27","fiscalYear":2027}`
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodPost, "/v1/budget/plans", ok, dutyPlanMaintain, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodPost, "/v1/budget/plans", `{"legalEntityId":"x","name":"","fiscalYear":12}`, dutyPlanMaintain, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad create: %d, want 400", rec.Code)
+	}
+}
+
+func TestPlan_RoutesAbsentWithoutPlanning(t *testing.T) {
+	if rec := serve(t, &fakeStore{}, http.MethodGet, "/v1/budget/plans", ``, dutyView, ""); rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("plans route without a plan store: %d", rec.Code)
+	}
+}
