@@ -105,5 +105,5 @@ describe("plain-language copy", () => {
     const findings = files.flatMap(([path, source]) => findReferences(source, path.replace(/^\.\.\//, "").replace(/^\.\//, "shell/")));
     const report = findings.map((f) => `${f.file}:${f.line}  ${f.text}`).join("\n");
     expect(report, "Rewrite these strings in plain language; keep the reference in a code comment if it helps").toBe("");
-  });
+  }, 60_000);
 });

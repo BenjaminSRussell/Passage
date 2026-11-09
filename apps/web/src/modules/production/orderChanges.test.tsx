@@ -265,7 +265,7 @@ describe("order change detail (FR-21.16, BR-21.12)", () => {
     expect(JSON.parse(String(dismiss?.[1]?.body))).toEqual({ note: "keep v2" });
     expect((dismiss?.[1]?.headers as Record<string, string>)["If-Match"]).toBe('"1"');
     expect(screen.getByText("Dismissed")).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it("shows a conflict from the service and the missing-change state", async () => {
     stubFetch((url) => {

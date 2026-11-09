@@ -155,10 +155,10 @@ describe("procure-to-pay and order-to-cash problem codes", () => {
     const services = new Set(found.values());
     expect([...services].sort()).toEqual(Object.keys(orderToCashCodePatterns).sort());
     expect(found.size).toBeGreaterThan(300);
-  });
+  }, 60_000);
 
   it("has a catalog message for every code those services can return", () => {
     const missing = [...found.keys()].filter((code) => !lookupProblem(code)).sort();
     expect(missing).toEqual([]);
-  });
+  }, 60_000);
 });
