@@ -3462,6 +3462,9 @@
     "warehouse": {
       "inventory": ["inventory.issue.claim"]
     },
+    "mobile": {
+      "warehouse": ["warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"]
+    },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],
       "compliance": ["compliance.legal-hold.check"]

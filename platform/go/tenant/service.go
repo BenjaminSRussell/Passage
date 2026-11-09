@@ -174,6 +174,9 @@ var serviceGrants = map[string]map[string][]string{
 	"warehouse": {
 		"inventory": {"inventory.issue.claim"},
 	},
+	"mobile": {
+		"warehouse": {"warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"},
+	},
 	"hr": {
 		"compliance": {"compliance.legal-hold.check"},
 		"numbering":  {"numbering.sequence.allocate"},

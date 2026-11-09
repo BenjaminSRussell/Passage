@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/issueclaim"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/api"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/store"
 	"github.com/BenjaminSRussell/passage/services/warehouse/migrations"
@@ -51,6 +52,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	a := api.New()
 	if url := getenv("DATABASE_URL"); url != "" {
 		pool, err := dbx.Connect(ctx, url)
