@@ -146,7 +146,7 @@ func (a *API) split(w http.ResponseWriter, r *http.Request, id string) {
 		in.Multiple = *req.Multiple
 	}
 	sentMin, sentMultiple := in.MinQty, in.Multiple // the request hash covers what was sent, not what the product answered
-	if req.ReleasedProductID != "" && len(fields) == 0 {
+	if len(fields) == 0 {
 		// A replay goes to the store without reading the product: it returns the stored split or refuses the key.
 		used, err := a.store.OrderKeyUsed(r.Context(), key)
 		if err != nil {
@@ -159,7 +159,7 @@ func (a *API) split(w http.ResponseWriter, r *http.Request, id string) {
 				a.refuse(w, r, err)
 				return
 			}
-			settings, ok := a.readProductSettings(w, r, current.LegalEntityID, req.ReleasedProductID, current.SiteID)
+			settings, ok := a.orderSettings(w, r, current, req.ReleasedProductID)
 			if !ok {
 				return
 			}
@@ -236,6 +236,22 @@ func (a *API) merge(w http.ResponseWriter, r *http.Request) {
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return
+	}
+	// A replay of a merge that succeeded is answered by the store; the quantity rules are read only for a new one.
+	used, err := a.store.OrderKeyUsed(r.Context(), key)
+	if err != nil {
+		a.refuse(w, r, err)
+		return
+	}
+	if !used {
+		settings, total, ok := a.mergeSettings(w, r, refs)
+		if !ok {
+			return
+		}
+		if err := settings.check(total); err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
 	}
 	res, err := a.store.MergeOrders(r.Context(), store.Merge{Orders: refs, Actor: p.UserID, TraceID: middleware.GetReqID(r.Context()),
 		IdempotencyKey: key, RequestHash: hashOf(struct {

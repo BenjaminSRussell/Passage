@@ -137,11 +137,11 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		// depends on it); every other split is origin Split from the original.
 		if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
 				quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id,
-				status, split_from_order_id, order_bom_modified, scheduling_method, schedule_start)
+				status, split_from_order_id, order_bom_modified, scheduling_method, schedule_start, released_product_id)
 			select tenant_id, $2, legal_entity_id, $3, product_id, site_id, warehouse_id, currency,
 				$4::numeric, delivery_date, case when origin_type = 'Rework' then 'Rework' else 'Split' end,
 				case when origin_type = 'Rework' then origin_id else id end, $5, $6, item_group, rework_reference_type, rework_reference_id,
-				status, id, order_bom_modified, scheduling_method, schedule_start
+				status, id, order_bom_modified, scheduling_method, schedule_start, released_product_id
 			from production_order where tenant_id = $1 and id = $7`,
 			p.TenantID, newID, number, plan.SplitQty.String(), in.IdempotencyKey, in.RequestHash, in.OrderID); err != nil {
 			return err
@@ -298,6 +298,16 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// A key that created or split an order is not a merge's: refusing it here keeps the API's replay
+		// shortcut (OrderKeyUsed, which skips the released product's rules) from letting a new merge through.
+		var keyed bool
+		if err := tx.QueryRow(ctx, `select exists(select 1 from production_order where tenant_id = $1 and idempotency_key = $2)`,
+			p.TenantID, in.IdempotencyKey).Scan(&keyed); err != nil {
+			return err
+		}
+		if keyed {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used for another request")
+		}
 
 		sorted := append([]MergeRef(nil), in.Orders...)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].OrderID < sorted[j].OrderID })
@@ -315,12 +325,20 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		inputs := make([]domain.MergeInput, 0, len(in.Orders))
 		// The survivor carries the merged orders' BOM, so it is flagged when any of them was edited (FR-21.18).
 		modified := false
+		// FR-21.1: the orders must not carry different released products; the survivor keeps the one they carry.
+		var released *string
 		for _, ref := range in.Orders {
 			o, err := loadOrder(ctx, tx, p.TenantID, ref.OrderID)
 			if err != nil {
 				return err
 			}
 			modified = modified || o.OrderBOMModified
+			if o.ReleasedProductID != nil {
+				if released != nil && *released != *o.ReleasedProductID {
+					return domainProblem(&domain.Error{Code: domain.CodeMergeRefused, Detail: "order " + o.OrderNumber + " was created with a different released product"})
+				}
+				released = o.ReleasedProductID
+			}
 			inputs = append(inputs, domain.MergeInput{ID: o.ID, LegalEntityID: o.LegalEntityID, ProductID: o.ProductID, SiteID: o.SiteID,
 				WarehouseID: o.WarehouseID, Currency: o.Currency, ItemGroup: o.ItemGroup, ReworkReference: o.ReworkReference,
 				Status: o.Status, Quantity: o.Quantity, Lines: o.Lines, Operations: o.Operations, CoProducts: o.CoProducts})
@@ -346,9 +364,10 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 		if err := settleSubcontracts(ctx, tx, p.TenantID, survivorID, in.Actor, requested, false); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, order_bom_modified = order_bom_modified or $4, version = version + 1,
-				updated_at = now() where tenant_id = $1 and id = $2`,
-			p.TenantID, survivorID, merged.Quantity.String(), modified); err != nil {
+		if _, err := tx.Exec(ctx, `update production_order set quantity = $3, order_bom_modified = order_bom_modified or $4,
+				released_product_id = coalesce(released_product_id, $5::uuid), version = version + 1, updated_at = now()
+				where tenant_id = $1 and id = $2`,
+			p.TenantID, survivorID, merged.Quantity.String(), modified, released); err != nil {
 			return err
 		}
 		if survivor.status != domain.Created {

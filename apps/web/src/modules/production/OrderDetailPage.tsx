@@ -537,6 +537,11 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
             {current.warehouseId}
           </Detail>
           <Detail term="Origin">{current.originType}</Detail>
+          {current.releasedProductId ? (
+            <Detail term="Released product" mono>
+              {current.releasedProductId}
+            </Detail>
+          ) : null}
           {current.quotaArrangementId ? (
             <Detail term="Quota arrangement" mono>
               {current.quotaArrangementId}

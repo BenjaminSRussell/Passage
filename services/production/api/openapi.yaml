@@ -329,7 +329,9 @@ components:
         minimumQty, maximumQty and multiple are the item's order rules (FR-21.1) that the new
         quantity must meet; they are accepted only with a quantity. releasedProductId reads the
         minimum and multiple from the released product's site default for the order's site and
-        enforces them alongside any rules sent here; it is accepted only with a quantity.
+        enforces them alongside any rules sent here; it is accepted only with a quantity. An order
+        created with a releasedProductId is always checked against that product, with or without the
+        id in the body; naming another released product is refused (400, field releasedProductId).
       properties:
         quantity: { $ref: '#/components/schemas/Decimal' }
         deliveryDate: { type: [string, 'null'], format: date }
@@ -381,6 +383,7 @@ components:
         configurationId: { type: string, format: uuid }
         quotaArrangementId: { type: string, format: uuid, description: 'The quota arrangement planning allocated the converted planned order to (FR-22.17); absent on other orders.' }
         quotaSourceId: { type: string, format: uuid, description: 'The quota source within that arrangement; absent on other orders.' }
+        releasedProductId: { type: string, format: uuid, description: 'The released product (wave 8) whose site default supplied the order quantity rules at creation (FR-21.1); a quantity change, split or merge is checked against it. Absent when the order was made without one.' }
         reworkReference: { $ref: '#/components/schemas/ReworkReference' }
         splitFromOrderId: { type: string, format: uuid, description: 'The order a split took this order''s quantity from (FR-21.15).' }
         mergedIntoOrderId: { type: string, format: uuid, description: 'Set on a Cancelled order that a merge moved into this order (FR-21.15).' }
@@ -1650,7 +1653,11 @@ paths:
         PRODUCTION_MERGE_REFUSED, PROD-0016) when any order has posted journals, an order
         to be cancelled has draft journals, or the orders differ (the declared co-products and
         by-products included: line, type, item and quantity per unit). The survivor's co-products
-        are re-planned for the summed quantity (FR-21.14).
+        are re-planned for the summed quantity (FR-21.14). The summed quantity must meet the minimum and
+        multiple of the released product the orders were created with (FR-21.1): 422
+        PRODUCTION_ORDER_QUANTITY otherwise; orders created with different released products are
+        refused with PRODUCTION_MERGE_REFUSED, and an order made without one joins the one that has it.
+        A replay of a merge that succeeded is answered without reading the product service.
       x-passage-duty: production.order.release
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -1672,7 +1679,8 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: 'An order version is stale (conflict_version)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PRODUCTION_MERGE_REFUSED (PROD-0016, or the orders declare different co-products or by-products) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_MERGE_REFUSED (PROD-0016, or the orders declare different co-products or by-products, or were created with different released products), PRODUCTION_ORDER_QUANTITY (the summed quantity breaks the released product''s rules) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { description: 'PRODUCTION_PRODUCT_UNAVAILABLE: an order holds a released product and the product service is not configured or could not be read; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:
     get:
       operationId: getProductionOrder
@@ -1721,7 +1729,7 @@ paths:
         '412': { description: If-Match does not match the current version (conflict_version, PROD-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: The new quantity breaks the order rules (PRODUCTION_ORDER_QUANTITY), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match missing (precondition_required), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '503': { description: 'PRODUCTION_PRODUCT_UNAVAILABLE: releasedProductId was sent and the product service is not configured or could not be read; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { description: 'PRODUCTION_PRODUCT_UNAVAILABLE: releasedProductId was sent, or the order holds one and the quantity changes, and the product service is not configured or could not be read; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}/status-log:
     get:
       operationId: getProductionOrderStatusLog
@@ -1926,7 +1934,7 @@ paths:
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRODUCTION_SPLIT_QUANTITY (PROD-0015) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '503': { description: 'PRODUCTION_PRODUCT_UNAVAILABLE: releasedProductId was sent and the product service is not configured or could not be read; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { description: 'PRODUCTION_PRODUCT_UNAVAILABLE: releasedProductId was sent, or the order holds one and the quantity changes, and the product service is not configured or could not be read; nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:apply-finite-dates:
     post:
       operationId: applyProductionOrderFiniteDates

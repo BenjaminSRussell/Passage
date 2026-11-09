@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -232,6 +233,126 @@ func TestSplit_ProductRulesCannotBeLoosenedAndReplaysSkipTheProduct(t *testing.T
 		_ = do(h, splitCall(order.ID, `{"splitQty":"40","releasedProductId":"`+released+`"}`, DutyRelease))
 		if len(f.splits) != 2 || f.splits[0].RequestHash == f.splits[1].RequestHash {
 			t.Fatalf("the hashes must differ: %+v", f.splits)
+		}
+	})
+}
+
+// An order remembers the released product it was created with, so the product's rules bind a later change
+// even when the caller leaves the id out (FR-21.1), and a different product cannot be named to loosen them.
+func TestCreate_StoresTheReleasedProduct(t *testing.T) {
+	released, site := ids.New(), ids.New()
+	f := &fakeStore{}
+	h, _ := productServer(t, f, released, site, productclient.SiteDefault{MinQty: qty("5")})
+	rec := do(h, call{method: http.MethodPost, path: "/v1/production/orders", duties: []string{DutyWrite},
+		headers: map[string]string{idempotencyName: "keep-1"},
+		body:    createBody(func(m map[string]any) { m["siteId"], m["releasedProductId"] = site, released })})
+	if rec.Code != http.StatusCreated || len(f.created) != 1 || f.created[0].ReleasedProductID != released {
+		t.Fatalf("got %d, created %+v: %s", rec.Code, f.created, rec.Body.String())
+	}
+}
+
+func TestPatchAndSplit_StoredReleasedProductBindsWithoutTheId(t *testing.T) {
+	released, site := ids.New(), ids.New()
+	def := productclient.SiteDefault{MinQty: qty("10"), MultipleQty: qty("5")}
+	order := store.Order{ID: ids.New(), LegalEntityID: entityID, SiteID: site, ReleasedProductID: &released}
+	patch := func(h http.Handler, body string) *httptest.ResponseRecorder {
+		return do(h, call{method: http.MethodPatch, path: "/v1/production/orders/" + order.ID, duties: []string{DutyWrite},
+			headers: map[string]string{"If-Match": `"3"`}, body: body})
+	}
+	t.Run("patch is checked without the id in the body", func(t *testing.T) {
+		f := &fakeStore{order: order}
+		h, _ := productServer(t, f, released, site, def)
+		expectProblem(t, patch(h, `{"quantity":"62"}`), http.StatusUnprocessableEntity, domain.CodeOrderQuantity)
+		if len(f.updates) != 0 {
+			t.Fatal("a refused quantity must not reach the store")
+		}
+		if rec := patch(h, `{"quantity":"60"}`); rec.Code != http.StatusOK || len(f.updates) != 1 {
+			t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+	t.Run("a delivery date change reads no product", func(t *testing.T) {
+		f := &fakeStore{order: order}
+		h, fake := productServer(t, f, released, site, def)
+		if rec := patch(h, `{"deliveryDate":"2027-01-31"}`); rec.Code != http.StatusOK || fake.Calls != 0 {
+			t.Fatalf("got %d, product calls %d: %s", rec.Code, fake.Calls, rec.Body.String())
+		}
+	})
+	t.Run("another released product is refused", func(t *testing.T) {
+		f := &fakeStore{order: order}
+		h, _ := productServer(t, f, released, site, def)
+		rec := patch(h, `{"quantity":"60","releasedProductId":"`+ids.New()+`"}`)
+		expectProblem(t, rec, http.StatusBadRequest, validationCode)
+		if !strings.Contains(rec.Body.String(), "releasedProductId") {
+			t.Fatalf("body: %s", rec.Body.String())
+		}
+	})
+	t.Run("split takes the stored product's rules", func(t *testing.T) {
+		f := &fakeStore{order: order}
+		h, _ := productServer(t, f, released, site, def)
+		rec := do(h, splitCall(order.ID, `{"splitQty":"40"}`, DutyRelease))
+		if rec.Code != http.StatusCreated || len(f.splits) != 1 || !f.splits[0].MinQty.Equal(qty("10")) || !f.splits[0].Multiple.Equal(qty("5")) {
+			t.Fatalf("got %d %+v: %s", rec.Code, f.splits, rec.Body.String())
+		}
+	})
+	t.Run("an order without a product keeps the request's rules", func(t *testing.T) {
+		f := &fakeStore{order: store.Order{ID: order.ID, LegalEntityID: entityID, SiteID: site}}
+		h, fake := productServer(t, f, released, site, def)
+		if rec := patch(h, `{"quantity":"62"}`); rec.Code != http.StatusOK || fake.Calls != 0 {
+			t.Fatalf("got %d, product calls %d: %s", rec.Code, fake.Calls, rec.Body.String())
+		}
+	})
+}
+
+func TestMerge_SummedQuantityMeetsTheProductRules(t *testing.T) {
+	released, other, site := ids.New(), ids.New(), ids.New()
+	a, b, c := ids.New(), ids.New(), ids.New()
+	mk := func(id, q string, rp *string) store.Order {
+		return store.Order{ID: id, OrderNumber: "PO-" + q, LegalEntityID: entityID, SiteID: site, Quantity: qty(q), ReleasedProductID: rp}
+	}
+	body := func(x, y string) string {
+		return `{"orders":[{"orderId":"` + x + `","version":2},{"orderId":"` + y + `","version":1}]}`
+	}
+	t.Run("the sum meets the rules", func(t *testing.T) {
+		f := &fakeStore{orders: map[string]store.Order{a: mk(a, "40", &released), b: mk(b, "35", &released)}}
+		h, _ := productServer(t, f, released, site, productclient.SiteDefault{MinQty: qty("50"), MultipleQty: qty("5")})
+		if rec := do(h, mergeCall(body(a, b), DutyRelease)); rec.Code != http.StatusOK || len(f.merges) != 1 {
+			t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+	t.Run("the product's multiple changed since the orders were made", func(t *testing.T) {
+		f := &fakeStore{orders: map[string]store.Order{a: mk(a, "40", &released), b: mk(b, "35", &released)}}
+		h, _ := productServer(t, f, released, site, productclient.SiteDefault{MultipleQty: qty("20")})
+		expectProblem(t, do(h, mergeCall(body(a, b), DutyRelease)), http.StatusUnprocessableEntity, domain.CodeOrderQuantity)
+		if len(f.merges) != 0 {
+			t.Fatal("a refused merge must not reach the store")
+		}
+	})
+	t.Run("orders of different released products", func(t *testing.T) {
+		f := &fakeStore{orders: map[string]store.Order{a: mk(a, "40", &released), b: mk(b, "35", &other)}}
+		h, _ := productServer(t, f, released, site, productclient.SiteDefault{})
+		expectProblem(t, do(h, mergeCall(body(a, b), DutyRelease)), http.StatusUnprocessableEntity, domain.CodeMergeRefused)
+	})
+	t.Run("an order without a product joins the one that has it", func(t *testing.T) {
+		f := &fakeStore{orders: map[string]store.Order{a: mk(a, "40", nil), b: mk(b, "35", &released), c: mk(c, "5", nil)}}
+		h, _ := productServer(t, f, released, site, productclient.SiteDefault{MultipleQty: qty("20")})
+		expectProblem(t, do(h, mergeCall(body(a, b), DutyRelease)), http.StatusUnprocessableEntity, domain.CodeOrderQuantity)
+		if rec := do(h, mergeCall(body(a, c), DutyRelease)); rec.Code != http.StatusOK {
+			t.Fatalf("orders without a product are not checked: %d %s", rec.Code, rec.Body.String())
+		}
+	})
+	t.Run("an order holding a product needs the product service", func(t *testing.T) {
+		f := &fakeStore{orders: map[string]store.Order{a: mk(a, "40", nil), b: mk(b, "35", &released)}}
+		_, h := newServer(t, f)
+		expectProblem(t, do(h, mergeCall(body(a, b), DutyRelease)), http.StatusServiceUnavailable, CodeProductUnavailable)
+		if len(f.merges) != 0 {
+			t.Fatal("a merge whose rules could not be read must not reach the store")
+		}
+	})
+	t.Run("a replay reads no product", func(t *testing.T) {
+		f := &fakeStore{replayHash: map[string]string{"merge-1": "x"}, orders: map[string]store.Order{a: mk(a, "40", &released), b: mk(b, "35", &released)}}
+		h, fake := productServer(t, f, released, site, productclient.SiteDefault{MultipleQty: qty("20")})
+		if rec := do(h, mergeCall(body(a, b), DutyRelease)); rec.Code != http.StatusOK || fake.Calls != 0 {
+			t.Fatalf("got %d, product calls %d: %s", rec.Code, fake.Calls, rec.Body.String())
 		}
 	})
 }

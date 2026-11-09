@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -485,4 +488,105 @@ func TestSplit_StartedOrderRefusalsAndKeepOnOriginal(t *testing.T) {
 	st2.must(domain.CmdReportFinished, func(tr *Transition) { tr.Good = d("10") })
 	_, err = s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: st2.version, SplitQty: d("5"), IdempotencyKey: "split-st-3", RequestHash: "h3"})
 	expectProblem(t, err, http.StatusConflict, domain.CodeIllegalTransition)
+}
+
+// AC-21.10 (FR-21.12): 500 Released orders bulk-started finish in under 5 minutes and the answer lists a
+// result per order. The batch runs synchronously in the request here (the Temporal job is a wave 4 handoff),
+// so this is the budget the request has to meet.
+//
+// The set-up alone (500 creates and three bulk commands) takes minutes on a loaded machine, so the test runs
+// with PASSAGE_PERF_TEST=1 like the journal post budget (the bulk start itself took 22 s on a loaded laptop).
+func TestBulkTransition_Start500ReleasedOrders(t *testing.T) {
+	if os.Getenv("PASSAGE_PERF_TEST") != "1" {
+		t.Skip("set PASSAGE_PERF_TEST=1 to run the 500-order bulk start budget")
+	}
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(66))
+	le := ids.New()
+	allProfile(t, s, ctx, le)
+	orderIDs := make([]string, 0, domain.MaxBulkOrders)
+	for i := 0; i < domain.MaxBulkOrders; i++ {
+		o, _, err := s.CreateOrder(ctx, sampleOrder(t, fmt.Sprintf("bulk500-%d", i), le))
+		if err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+		orderIDs = append(orderIDs, o.ID)
+	}
+	for _, cmd := range []domain.Command{domain.CmdEstimate, domain.CmdSchedule, domain.CmdRelease} {
+		for i, item := range s.BulkTransition(ctx, Bulk{OrderIDs: orderIDs, Command: cmd, Actor: "planner-1", IdempotencyKey: "prep-" + string(cmd), RequestHash: string(cmd)}) {
+			if !item.OK {
+				t.Fatalf("%s order %d: %+v", cmd, i, item)
+			}
+		}
+	}
+	began := time.Now()
+	items := s.BulkTransition(ctx, Bulk{OrderIDs: orderIDs, Command: domain.CmdStart, Actor: "planner-1", IdempotencyKey: "bulk500-start", RequestHash: "start"})
+	took := time.Since(began)
+	if took > 5*time.Minute {
+		t.Fatalf("bulk start of %d orders took %s, the budget is 5 minutes", len(orderIDs), took)
+	}
+	t.Logf("bulk start of %d Released orders took %s", len(orderIDs), took)
+	if len(items) != len(orderIDs) {
+		t.Fatalf("%d results for %d orders", len(items), len(orderIDs))
+	}
+	for i, item := range items {
+		if item.OrderID != orderIDs[i] || !item.OK || item.Status != domain.Started || item.Replayed {
+			t.Fatalf("order %d: %+v", i, item)
+		}
+	}
+	// A retry of the whole batch (the same key) replays every order and changes none.
+	for i, item := range s.BulkTransition(ctx, Bulk{OrderIDs: orderIDs, Command: domain.CmdStart, Actor: "planner-1", IdempotencyKey: "bulk500-start", RequestHash: "start"}) {
+		if !item.OK || !item.Replayed || item.Status != domain.Started {
+			t.Fatalf("replay of order %d: %+v", i, item)
+		}
+	}
+}
+
+// FR-21.1: the released product an order was created with stays with its quantity. A split's new order
+// carries it, a merge's survivor takes it from an order merged into it, orders of different released
+// products are refused under the locks, and a key that created an order cannot start a merge (the API skips
+// the product's rules for a key it has seen).
+func TestSplitAndMerge_KeepTheReleasedProduct(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(69))
+	released, other := ids.New(), ids.New()
+	base := sampleOrder(t, "rpk-a", ids.New())
+	plain, _, err := s.CreateOrder(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withProduct := sameShape(base, "rpk-b")
+	withProduct.ReleasedProductID = released
+	held, _, err := s.CreateOrder(ctx, withProduct)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.SplitOrder(ctx, Split{OrderID: held.ID, IfMatch: held.Version, SplitQty: d("40"), IdempotencyKey: "rpk-split", RequestHash: "s"})
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	if res.New.ReleasedProductID == nil || *res.New.ReleasedProductID != released {
+		t.Fatalf("split order's released product: %v", res.New.ReleasedProductID)
+	}
+
+	_, err = s.MergeOrders(ctx, Merge{Orders: []MergeRef{{plain.ID, plain.Version}, {held.ID, res.Original.Version}}, IdempotencyKey: "rpk-a", RequestHash: "m"})
+	expectProblem(t, err, http.StatusUnprocessableEntity, CodeIdempotencyReuse)
+
+	foreign := sameShape(base, "rpk-c")
+	foreign.ReleasedProductID = other
+	fo, _, err := s.CreateOrder(ctx, foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.MergeOrders(ctx, Merge{Orders: []MergeRef{{held.ID, res.Original.Version}, {fo.ID, fo.Version}}, IdempotencyKey: "rpk-merge-x", RequestHash: "x"})
+	expectProblem(t, err, http.StatusUnprocessableEntity, domain.CodeMergeRefused)
+
+	merged, err := s.MergeOrders(ctx, Merge{Orders: []MergeRef{{plain.ID, plain.Version}, {held.ID, res.Original.Version}}, IdempotencyKey: "rpk-merge", RequestHash: "m"})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if merged.Survivor.ReleasedProductID == nil || *merged.Survivor.ReleasedProductID != released || !merged.Survivor.Quantity.Equal(d("160")) {
+		t.Fatalf("survivor: product %v quantity %s", merged.Survivor.ReleasedProductID, merged.Survivor.Quantity)
+	}
 }

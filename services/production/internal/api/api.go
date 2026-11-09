@@ -392,7 +392,7 @@ func (a *API) createWith(w http.ResponseWriter, r *http.Request, p tenant.Princi
 	a.storeOrder(w, r, store.NewOrder{
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID, ConfigurationID: req.ConfigurationID,
-		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
+		ReworkReference: req.ReworkReference, ReleasedProductID: req.ReleasedProductID, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
 		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: requestHash,
 		ID: intakeOrderID(intake), PlannedIntakeID: intakeRowID(intake),
 		QuotaArrangementID: intakeQuota(intake, false), QuotaSourceID: intakeQuota(intake, true),
@@ -561,20 +561,18 @@ func (a *API) patchOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Quantity != nil {
-		if req.ReleasedProductID != "" {
-			current, err := a.store.GetOrder(r.Context(), id)
-			if err != nil {
-				a.fail(w, r, "read production order", err)
-				return
-			}
-			settings, ok := a.readProductSettings(w, r, current.LegalEntityID, req.ReleasedProductID, current.SiteID)
-			if !ok {
-				return
-			}
-			if err := settings.check(*req.Quantity); err != nil {
-				httpx.Fail(w, r, problemFrom(err))
-				return
-			}
+		current, err := a.store.GetOrder(r.Context(), id)
+		if err != nil {
+			a.fail(w, r, "read production order", err)
+			return
+		}
+		settings, ok := a.orderSettings(w, r, current, req.ReleasedProductID)
+		if !ok {
+			return
+		}
+		if err := settings.check(*req.Quantity); err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
 		}
 		if err := domain.CheckOrderQuantity(*req.Quantity, rules); err != nil {
 			httpx.Fail(w, r, problemFrom(err))

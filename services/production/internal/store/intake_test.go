@@ -293,22 +293,24 @@ func TestIntake_ConvertOfAPlannedOrderThatAlreadyHasAnOrder(t *testing.T) {
 // plain create before slice 26) with a message naming them, and builds the index once they are resolved.
 func TestMigration0026_RefusesExistingDuplicatePlannedOrigins(t *testing.T) {
 	pool := testkit.DB(t)
-	upTo0025 := fstest.MapFS{}
+	without0026 := fstest.MapFS{}
 	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Every migration but 0026: CreateOrder below writes the columns later files add, and 0026 only adds the
+	// planned-origin index, so the schema is today's without it. The full run below then applies 0026 alone.
 	for _, e := range entries {
-		if e.Name() >= "0026" {
+		if strings.HasPrefix(e.Name(), "0026") || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
 		}
 		body, err := fs.ReadFile(migrations.FS, e.Name())
 		if err != nil {
 			t.Fatal(err)
 		}
-		upTo0025[e.Name()] = &fstest.MapFile{Data: body}
+		without0026[e.Name()] = &fstest.MapFile{Data: body}
 	}
-	if err := dbx.Migrate(context.Background(), pool, upTo0025); err != nil {
+	if err := dbx.Migrate(context.Background(), pool, without0026); err != nil {
 		t.Fatal(err)
 	}
 	s := New(pool)

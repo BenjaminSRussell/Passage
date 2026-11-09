@@ -25,6 +25,7 @@ type fakeStore struct {
 	created        []store.NewOrder
 	replayHash     map[string]string // idempotency key → request hash already stored
 	order          store.Order
+	orders         map[string]store.Order // by id; GetOrder falls back to order
 	getErr         error
 	endReport      domain.EndReport
 	endCheckDuty   bool
@@ -118,7 +119,12 @@ func (f *fakeStore) OrderKeyUsed(_ context.Context, key string) (bool, error) {
 	return ok, nil
 }
 
-func (f *fakeStore) GetOrder(context.Context, string) (store.Order, error) { return f.order, f.getErr }
+func (f *fakeStore) GetOrder(_ context.Context, id string) (store.Order, error) {
+	if o, ok := f.orders[id]; ok {
+		return o, f.getErr
+	}
+	return f.order, f.getErr
+}
 
 func (f *fakeStore) ListOrders(_ context.Context, lf store.ListFilter) (store.OrderPage, error) {
 	f.listFilter = lf

@@ -73,6 +73,10 @@ type Order struct {
 	// converted planned order to (FR-22.17); null on other orders.
 	QuotaArrangementID *string `json:"quotaArrangementId,omitempty"`
 	QuotaSourceID      *string `json:"quotaSourceId,omitempty"`
+	// ReleasedProductID is the released product (wave 8) whose site default supplied the order's quantity
+	// rules at creation (FR-21.1); a quantity change, split or merge is checked against it. Null when the
+	// order was made without one.
+	ReleasedProductID *string `json:"releasedProductId,omitempty"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20).
 	ReworkReference *domain.ReworkRef `json:"reworkReference,omitempty"`
 	// SplitFromOrderID is the order a split took this order's quantity from;
@@ -162,6 +166,8 @@ type NewOrder struct {
 	ConfigurationID *string
 	// QuotaArrangementID and QuotaSourceID come from the planned order of an intake conversion.
 	QuotaArrangementID, QuotaSourceID *string
+	// ReleasedProductID is stored when the request named one (FR-21.1); empty stores none.
+	ReleasedProductID string
 	// ID is the id the order takes; empty draws a new one. A planned-order conversion sets it to the
 	// planned order's target id (FR-22.10).
 	ID string
@@ -486,10 +492,10 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 	number := fmt.Sprintf("PO-%06d", seq)
 	if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
 		quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id, configuration_id,
-		quota_arrangement_id, quota_source_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+		quota_arrangement_id, quota_source_id, released_product_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21, '')::uuid)`,
 		tenantID, id, in.LegalEntityID, number, in.ProductID, in.SiteID, in.WarehouseID, in.Currency,
-		in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID, in.ConfigurationID, in.QuotaArrangementID, in.QuotaSourceID); err != nil {
+		in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID, in.ConfigurationID, in.QuotaArrangementID, in.QuotaSourceID, in.ReleasedProductID); err != nil {
 		return "", err
 	}
 	if err := insertLines(ctx, tx, tenantID, id, in.Lines); err != nil {
@@ -562,13 +568,15 @@ func insertOperations(ctx context.Context, tx pgx.Tx, tenantID, orderID string, 
 	return nil
 }
 
-// OrderKeyUsed reports whether an order (a create or a split) already carries idempotencyKey, so the API can
+// OrderKeyUsed reports whether an order (a create or a split) or a status command (a merge) already carries
+// idempotencyKey, so the API can
 // send a replay straight to the store without first reading the released product (FR-21.1).
 func (s *Postgres) OrderKeyUsed(ctx context.Context, idempotencyKey string) (bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	var used bool
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `select exists(select 1 from production_order where tenant_id = $1 and idempotency_key = $2)`,
+		return tx.QueryRow(ctx, `select exists(select 1 from production_order where tenant_id = $1 and idempotency_key = $2)
+			or exists(select 1 from production_status_log where tenant_id = $1 and idempotency_key = $2)`,
 			p.TenantID, idempotencyKey).Scan(&used)
 	})
 	return used, err
@@ -1074,12 +1082,12 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
 		item_group, rework_reference_type, rework_reference_id, split_from_order_id::text, merged_into_order_id::text, order_bom_modified,
 		configuration_id::text, start_date::text, end_date::text, scheduling_method, schedule_basis, finite_run_id, finite_scheduled_at, finite_compressed_opers,
-		quota_arrangement_id::text, quota_source_id::text
+		quota_arrangement_id::text, quota_source_id::text, released_product_id::text
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
 		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID, &o.SplitFromOrderID, &o.MergedIntoOrderID, &o.OrderBOMModified, &o.ConfigurationID,
 		&o.StartDate, &o.EndDate, &o.SchedulingMethod, &o.ScheduleBasis, &o.FiniteRunID, &o.FiniteScheduledAt, &o.FiniteCompressedOperations,
-		&o.QuotaArrangementID, &o.QuotaSourceID)
+		&o.QuotaArrangementID, &o.QuotaSourceID, &o.ReleasedProductID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}

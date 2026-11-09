@@ -167,6 +167,20 @@ describe("Production order detail", () => {
     expect(screen.getByText("quota-src-1")).toBeInTheDocument();
   });
 
+  it("shows the released product the order's quantity rules come from", async () => {
+    detailFetch({ order: order({ releasedProductId: "released-1" }) });
+    renderAt(`/production/${orderId}`);
+    expect(await screen.findByText("Released product")).toBeInTheDocument();
+    expect(screen.getByText("released-1")).toBeInTheDocument();
+  });
+
+  it("omits the released product line on an order made without one", async () => {
+    detailFetch({ order: order() });
+    renderAt(`/production/${orderId}`);
+    await findTable({ name: "Status log" });
+    expect(screen.queryByText("Released product")).not.toBeInTheDocument();
+  });
+
   it("applies a command with If-Match and an Idempotency-Key, then shows the new status", async () => {
     const state = { order: order({ status: "Released", version: 4 }) };
     const fetchMock = detailFetch(state, () => {

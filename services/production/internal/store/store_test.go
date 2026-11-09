@@ -588,3 +588,67 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 		t.Fatalf("another tenant sees %d WIP or journal rows (%v)", leaked, err)
 	}
 }
+
+// FR-21.1: the released product named at creation is stored on the order, comes back on every read and on a
+// replay; an order created without one holds none (TestSplitAndMerge_KeepTheReleasedProduct covers split and merge).
+func TestStore_KeepsTheReleasedProduct(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(67))
+	le := ids.New()
+	plain, _, err := s.CreateOrder(ctx, sampleOrder(t, "rp-none", le))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.ReleasedProductID != nil {
+		t.Fatalf("an order created without a released product holds %v", *plain.ReleasedProductID)
+	}
+	released := ids.New()
+	in := sampleOrder(t, "rp-set", le)
+	in.ReleasedProductID = released
+	o, _, err := s.CreateOrder(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.ReleasedProductID == nil || *o.ReleasedProductID != released {
+		t.Fatalf("created order: %v", o.ReleasedProductID)
+	}
+	read, err := s.GetOrder(ctx, o.ID)
+	if err != nil || read.ReleasedProductID == nil || *read.ReleasedProductID != released {
+		t.Fatalf("read order: %+v %v", read.ReleasedProductID, err)
+	}
+	if replay, created, err := s.CreateOrder(ctx, in); err != nil || created || replay.ID != o.ID || replay.ReleasedProductID == nil {
+		t.Fatalf("replay: %+v created=%v err=%v", replay.ReleasedProductID, created, err)
+	}
+	if used, err := s.OrderKeyUsed(ctx, "rp-set"); err != nil || !used {
+		t.Fatalf("create key used: %v %v", used, err)
+	}
+}
+
+// A merge's idempotency key lives in the status log, not on an order; OrderKeyUsed sees it so the API's replay
+// path skips the product read.
+func TestStore_OrderKeyUsedSeesAMergeKey(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(68))
+	le := ids.New()
+	first := sampleOrder(t, "mk-a", le)
+	a, _, err := s.CreateOrder(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := first // the same product, site and BOM and route snapshot
+	b.IdempotencyKey, b.RequestHash = "mk-b", "hash-mk-b"
+	bo, _, err := s.CreateOrder(ctx, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used, _ := s.OrderKeyUsed(ctx, "mk-merge"); used {
+		t.Fatal("key used before the merge")
+	}
+	if _, err := s.MergeOrders(ctx, Merge{Orders: []MergeRef{{OrderID: a.ID, Version: a.Version}, {OrderID: bo.ID, Version: bo.Version}},
+		Actor: "planner-1", IdempotencyKey: "mk-merge", RequestHash: "merge"}); err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if used, err := s.OrderKeyUsed(ctx, "mk-merge"); err != nil || !used {
+		t.Fatalf("merge key used: %v %v", used, err)
+	}
+}

@@ -125,6 +125,17 @@ Slice 4:
   stored result without reading the product. An unknown released
   product is 422, an unset or unreachable product service 503 `PRODUCTION_PRODUCT_UNAVAILABLE`, and a
   product with no default for the site gives no rules. Needs the authz seed in NOT-IMPLEMENTED.md.
+- The order remembers its released product (slice 32, migration 0028, `releasedProductId` on the order):
+  a quantity PATCH, a split and a merge are checked against that product's rules without the id in
+  the request, so they cannot be skipped by leaving it out; a request naming another released product
+  is refused (400 on `releasedProductId`). A merge checks the summed quantity (422
+  PRODUCTION_ORDER_QUANTITY) and refuses orders created with different released products
+  (PRODUCTION_MERGE_REFUSED, checked again under the merge's locks); an order made without one joins
+  the one that has it and the survivor keeps the product. A split's new order carries the product. Once
+  an order holds a product, a quantity PATCH, split or merge of it needs the product service (503
+  `PRODUCTION_PRODUCT_UNAVAILABLE` when it cannot be read), as a create naming the product does. A
+  replay of a merge reads no product. `OrderKeyUsed` also sees the keys of status commands, for that
+  replay check; a merge refuses a key that created or split an order, so that check cannot skip the rules.
 - Split (FR-21.15): `POST /v1/production/orders/{id}:split` with `splitQty` (and the item's
   `minimumQty` and `multiple` until wave 8 supplies them, PROD-0015) on a Created to Released
   order. The new order takes the header, BOM and route snapshot and status, origin `Split` with
