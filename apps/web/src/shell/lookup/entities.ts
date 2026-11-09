@@ -36,8 +36,17 @@ export const LOOKUP_HEADER = "X-Passage-Lookup";
 
 type Raw = Record<string, unknown>;
 
+export type LookupFetcher = (url: string, init: RequestInit) => Promise<Response>;
+
+const browserFetcher: LookupFetcher = (url, init) => fetch(url, init);
+let lookupFetcher: LookupFetcher = browserFetcher;
+
+export function setLookupFetcher(fetcher: LookupFetcher | null): void {
+  lookupFetcher = fetcher ?? browserFetcher;
+}
+
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
-  const res = await fetch(url, {
+  const res = await lookupFetcher(url, {
     headers: { Accept: "application/json", [LOOKUP_HEADER]: "1" },
     signal,
   });

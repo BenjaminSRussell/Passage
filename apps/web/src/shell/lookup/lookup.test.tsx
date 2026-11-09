@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntityLookup, type EntityLookupProps } from "./EntityLookup";
 import { EntityName } from "./EntityName";
-import { clearResolvedOptions, formatOption, lookupDefs } from "./entities";
+import { clearResolvedOptions, formatOption, lookupDefs, setLookupFetcher } from "./entities";
 import { ContextPicker, useWorkContext, WorkContextProvider } from "./workContext";
 
 const VENDOR_ID = "11111111-1111-4111-8111-111111111111";
@@ -25,6 +25,7 @@ let handler: (url: URL) => Response;
 
 beforeEach(() => {
   calls = [];
+  setLookupFetcher(null);
   window.localStorage.clear();
   clearResolvedOptions();
   handler = (url) => {
