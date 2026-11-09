@@ -34,6 +34,22 @@ release may change public APIs.
   service-only. Sales' `:record-progress` lines take `lineId` as an alternative to `lineNo`, which is how fulfillment
   names them. Ops: give fulfillment a signing key, list its public key in the sales chart's
   `serviceIdentity.publicKeys`, then set `salesUrl`.
+- Migration factory wave proof on all nine packs, the month replay and the rollback rehearsal (#49):
+  `TestWave49_SyntheticYearCutoverRehearsal` now migrates the synthetic AX 2012 and SAP ECC years (three entities each)
+  through all nine packs with every control total MATCH; the onhand, open_orders, bank_balances, wip_prod, fixed_assets
+  and payroll_ytd year is simulated at test time (`internal/api/synth_year_test.go`, `PASSAGE_SYNTH_SCALE=full` for the
+  1.1M AX and 1.3M SAP row fixture size). RND-001 now allows 0.01 per document as BR-49.7 says: a parallel-run tuple
+  and variance carry an optional `documents` count (the replay counts, per account, the documents that posted to it;
+  migration 0022), and the generated 42k-document `fx-replay-month` replays with no unexplained variance. Executing a
+  cutover rollback now moves the plan's loaded and reconciled pack runs to ROLLED_BACK (BR-49.1, migration 0023; such
+  a run is no longer loaded into receivables), flips every coexistence flag of the plan's legacy companies back to
+  LEGACY in the same transaction, lists them on `dev.passage.cutover.plan.rolledback.v1` with the rolled-back run count,
+  and, given `ledgers`, posts the compensating journals at once (a ledger problem is reported in `rollbackOutcome`).
+  Every flag change writes the new `dev.passage.migration.coexistence.changed.v1`. The integration hub records the mode
+  each legacy coexistence adapter should be in from both events, in flag version order, and suspends or resumes the
+  adapter with backoff and parking (`src/coexistence.ts`, hub migration 0007, `HUB_COEXISTENCE_INTERVAL_MS`); the AX and
+  SAP adapter implementations are still to come, so a row without one parks with `HUB-COEXIST-NO-ADAPTER`. Add
+  `passage.cutover.plan` and `passage.migration.coexistence` to the hub's `HUB_TOPICS` to drive it.
 
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
