@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -48,7 +49,7 @@ func TestRevaluationReport_TiesLinesToTheJournalAndToTheInventoryOnHand(t *testi
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	got := decodeReport(t, rec.Body.Bytes())
-	if !got.TiedToJournal || !got.TiedToOnHand || got.LinesTotal.String() != "500" || got.Lines[0].OnHand.String() != "1000" || !got.Lines[0].Tied {
+	if !got.TiedToJournal || !*got.TiedToOnHand || got.LinesTotal.String() != "500" || got.Lines[0].OnHand.String() != "1000" || !*got.Lines[0].Tied {
 		t.Fatalf("report %+v", got)
 	}
 	if oh.legal != rollLE || oh.asOf != "2026-01-02" || len(oh.asked) != 1 || oh.asked[0].ItemID != itemOne || f.reportID != someID {
@@ -61,13 +62,13 @@ func TestRevaluationReport_FlagsAQuantityTheInventoryNoLongerHolds(t *testing.T)
 	h, _ := activationRouter(f, nil, onHandOf("900"))
 	rec := call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h)
 	got := decodeReport(t, rec.Body.Bytes())
-	if rec.Code != http.StatusOK || got.TiedToOnHand || got.Lines[0].Tied || got.Lines[0].Difference.String() != "-100" || !got.TiedToJournal {
+	if rec.Code != http.StatusOK || *got.TiedToOnHand || *got.Lines[0].Tied || got.Lines[0].Difference.String() != "-100" || !got.TiedToJournal {
 		t.Fatalf("%d report %+v", rec.Code, got)
 	}
 	empty := &fakeOnHand{positions: map[inventory.Position]decimal.Decimal{}}
 	h, _ = activationRouter(f, nil, empty)
 	got = decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h).Body.Bytes())
-	if got.TiedToOnHand || got.Lines[0].OnHand.String() != "0" {
+	if *got.TiedToOnHand || got.Lines[0].OnHand.String() != "0" {
 		t.Fatalf("a position inventory has no row for is zero on hand: %+v", got)
 	}
 }
@@ -77,7 +78,7 @@ func TestRevaluationReport_NotTiedToTheJournalWhenTheStoredAmountsDisagree(t *te
 	act.JournalLines[1].Amount = decimal.RequireFromString("499.99")
 	h, _ := activationRouter(&fakeStore{report: act}, nil, onHandOf("1000"))
 	got := decodeReport(t, call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h).Body.Bytes())
-	if got.TiedToJournal || !got.TiedToOnHand {
+	if got.TiedToJournal || !*got.TiedToOnHand {
 		t.Fatalf("%+v", got)
 	}
 	act = reportActivation("1000")
@@ -128,5 +129,21 @@ func TestRevaluationReport_RefusesWithoutDutyInventoryOrActivation(t *testing.T)
 	h, _ = activationRouter(missing, nil, onHandOf("1"))
 	if rec := (call{http.MethodGet, reportPath(ids.New()), "", view, "", rollLE}).do(h); rec.Code != http.StatusInternalServerError {
 		t.Errorf("store failure: %d", rec.Code)
+	}
+}
+
+func TestRevaluationReport_AReversalIsNotComparedWithTheStockHeldNow(t *testing.T) {
+	act := reportActivation("1000")
+	original := ids.New()
+	act.ReversesActivationID = &original
+	oh := onHandOf("0")
+	h, _ := activationRouter(&fakeStore{report: act}, nil, oh)
+	rec := call{http.MethodGet, reportPath(someID), "", view, "", rollLE}.do(h)
+	got := decodeReport(t, rec.Body.Bytes())
+	if rec.Code != http.StatusOK || got.TiedToOnHand != nil || got.Lines[0].OnHand != nil || got.Lines[0].Tied != nil || !got.TiedToJournal || oh.calls != 0 {
+		t.Fatalf("%d %s inventory calls %d", rec.Code, rec.Body.String(), oh.calls)
+	}
+	if !strings.Contains(rec.Body.String(), `"tiedToOnHand":null`) {
+		t.Fatalf("tiedToOnHand must be an explicit null: %s", rec.Body.String())
 	}
 }

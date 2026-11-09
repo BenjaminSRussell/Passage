@@ -78,7 +78,7 @@ func TestActiveBOMProducts_PagesDistinctMaterialProductsAndStopsPastTheLimit(t *
 	c, _ := clientFor(t, func(w http.ResponseWriter, r *http.Request) {
 		cursor := r.URL.Query().Get("cursor")
 		cursors = append(cursors, cursor)
-		if r.URL.Query().Get("siteId") != site || r.URL.Query().Get("status") != "active" || r.URL.Query().Get("asOf") != "2026-01-02" {
+		if r.URL.Query().Get("category") != "material" || r.URL.Query().Get("siteId") != site || r.URL.Query().Get("status") != "active" || r.URL.Query().Get("asOf") != "2026-01-02" {
 			t.Errorf("filters %s", r.URL.RawQuery)
 		}
 		switch cursor {

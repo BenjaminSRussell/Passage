@@ -16,19 +16,20 @@ import (
 
 type reportLine struct {
 	domain.RevalPreviewLine
-	OnHand     decimal.Decimal `json:"onHand"`
-	Difference decimal.Decimal `json:"difference"`
-	Tied       bool            `json:"tied"`
+	OnHand     *decimal.Decimal `json:"onHand"`
+	Difference *decimal.Decimal `json:"difference"`
+	Tied       *bool            `json:"tied"`
 }
 
+// revaluationReport leaves the on-hand fields null for a reversal: its lines
+// carry the reversed quantities, which are not the stock held now.
 type revaluationReport struct {
-	Activation       store.Activation `json:"activation"`
-	Lines            []reportLine     `json:"lines"`
-	LinesTotal       decimal.Decimal  `json:"linesTotal"`
-	TiedToJournal    bool             `json:"tiedToJournal"`
-	TiedToOnHand     bool             `json:"tiedToOnHand"`
-	OnHandAsOf       string           `json:"onHandAsOf"`
-	TiedToOnHandNote string           `json:"tiedToOnHandNote,omitempty"`
+	Activation    store.Activation `json:"activation"`
+	Lines         []reportLine     `json:"lines"`
+	LinesTotal    decimal.Decimal  `json:"linesTotal"`
+	TiedToJournal bool             `json:"tiedToJournal"`
+	TiedToOnHand  *bool            `json:"tiedToOnHand"`
+	OnHandAsOf    string           `json:"onHandAsOf"`
 }
 
 // revaluationReport answers the value report of an activation: its stored
@@ -45,10 +46,6 @@ func (a *API) revaluationReport(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeReversalTarget, "activation "+chi.URLParam(r, "id")+" not found"))
 		return
 	}
-	if a.onHand == nil {
-		httpx.Fail(w, r, activationProblem(http.StatusServiceUnavailable, domain.CodeOnHandUnavailable, "the inventory service is not configured; the report cannot be tied to the on-hand"))
-		return
-	}
 	act, err := a.store.GetActivation(r.Context(), id)
 	if err != nil {
 		storeFailure(w, r, err)
@@ -58,21 +55,33 @@ func (a *API) revaluationReport(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeLegalEntityScope, "legal entity "+act.LegalEntityID+" is outside your scope"))
 		return
 	}
+	report := revaluationReport{Activation: act, Lines: make([]reportLine, len(act.Lines)), LinesTotal: decimal.Zero, OnHandAsOf: act.PostingDate}
+	var onHand map[inventory.Position]decimal.Decimal
 	positions := make([]inventory.Position, len(act.Lines))
 	for i, l := range act.Lines {
 		positions[i] = inventory.Position{ItemID: l.ItemID, SiteID: l.SiteID}
 	}
-	onHand, err := a.quantities(r.Context(), act.LegalEntityID, act.PostingDate, positions)
-	if err != nil {
-		storeFailure(w, r, err)
-		return
+	if act.ReversesActivationID == nil {
+		if a.onHand == nil {
+			httpx.Fail(w, r, activationProblem(http.StatusServiceUnavailable, domain.CodeOnHandUnavailable, "the inventory service is not configured; the report cannot be tied to the on-hand"))
+			return
+		}
+		if onHand, err = a.quantities(r.Context(), act.LegalEntityID, act.PostingDate, positions); err != nil {
+			storeFailure(w, r, err)
+			return
+		}
+		allTied := true
+		report.TiedToOnHand = &allTied
 	}
-	report := revaluationReport{Activation: act, Lines: make([]reportLine, len(act.Lines)), LinesTotal: decimal.Zero, TiedToOnHand: true, OnHandAsOf: act.PostingDate}
 	for i, l := range act.Lines {
-		have := onHand[positions[i]]
-		line := reportLine{RevalPreviewLine: l, OnHand: have, Difference: have.Sub(l.Qty)}
-		line.Tied = line.Difference.IsZero()
-		report.TiedToOnHand = report.TiedToOnHand && line.Tied
+		line := reportLine{RevalPreviewLine: l}
+		if report.TiedToOnHand != nil {
+			have := onHand[positions[i]]
+			diff := have.Sub(l.Qty)
+			tied := diff.IsZero()
+			line.OnHand, line.Difference, line.Tied = &have, &diff, &tied
+			*report.TiedToOnHand = *report.TiedToOnHand && tied
+		}
 		report.LinesTotal = report.LinesTotal.Add(l.Amount)
 		report.Lines[i] = line
 	}

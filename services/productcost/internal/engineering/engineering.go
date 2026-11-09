@@ -152,7 +152,7 @@ func (c *Client) ActiveBOMProducts(ctx context.Context, legalEntityID, siteID, a
 			Items      []bomHeader `json:"items"`
 			NextCursor string      `json:"nextCursor"`
 		}
-		query := url.Values{"siteId": {siteID}, "status": {"active"}, "asOf": {asOf}, "limit": {"100"}}
+		query := url.Values{"siteId": {siteID}, "status": {"active"}, "category": {"material"}, "asOf": {asOf}, "limit": {"100"}}
 		if cursor != "" {
 			query.Set("cursor", cursor)
 		}

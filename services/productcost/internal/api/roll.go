@@ -174,7 +174,7 @@ func (a *API) readCatalog(ctx context.Context, legalEntityID string, roots []str
 			continue
 		}
 		if len(out.catalog) >= limit {
-			return out, rollInputError(fmt.Sprintf("the structures reach more than %d items; roll the subassemblies first", limit))
+			return out, rollInputError(fmt.Sprintf("the structures reach more than %d items including their components; roll fewer items or the subassemblies first", limit))
 		}
 		bom, err := a.engineering.ActiveBOM(ctx, legalEntityID, id, req.SiteID, asOf)
 		if err != nil {
@@ -279,7 +279,7 @@ func (a *API) rollStoredVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	roots, limit := req.ItemIDs, maxStoredRollItems
 	if req.Selection != "" {
-		limit = MaxItems
+		limit = 2 * MaxItems
 		if roots, err = a.selectRoots(r.Context(), v.LegalEntityID, req.SiteID, asOf); err != nil {
 			a.rollInputFailure(w, r, id, err)
 			return

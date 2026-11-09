@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -283,5 +284,23 @@ func TestRollStoredVersion_ASelectionRetryReplaysWithoutListingEngineeringAgain(
 	rec := call{http.MethodPost, rollPath, selectionBody(stored.SiteID, ""), calculate, "sel-1", rollLE}.do(rollRouterWith(f, eng))
 	if rec.Code != http.StatusCreated || rec.Header().Get(headerReplayed) != "true" || eng.listed != 0 || f.roll != nil {
 		t.Fatalf("%d %s listed %d", rec.Code, rec.Body.String(), eng.listed)
+	}
+}
+
+func TestRollStoredVersion_ASelectionOverTheLimitIsRefusedAndAPurchasedLeafDoesNotCountAgainstIt(t *testing.T) {
+	eng := &fakeEngineering{boms: map[string]*engineering.BOM{}}
+	for range MaxItems + 1 {
+		eng.boms[ids.New()] = &engineering.BOM{ID: "b", Lines: []engineering.BOMLine{{ComponentProductID: childID, Quantity: "1", Series: "1", LineType: "item"}}}
+	}
+	f := &fakeStore{versionLE: rollLE}
+	rec := call{http.MethodPost, rollPath, selectionBody(ids.New(), ""), calculate, "k", rollLE}.do(rollRouterWith(f, eng))
+	code, _ := problemCode(t, rec)
+	if rec.Code != http.StatusUnprocessableEntity || code != domain.CodeRollInput || !strings.Contains(rec.Body.String(), "more than 50000 items have an active BOM") || f.roll != nil {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	delete(eng.boms, slices.Sorted(maps.Keys(eng.boms))[0])
+	rec = call{http.MethodPost, rollPath, selectionBody(ids.New(), ""), calculate, "k2", rollLE}.do(rollRouterWith(f, eng))
+	if rec.Code != http.StatusCreated || len(f.roll.Roots) != MaxItems {
+		t.Fatalf("exactly %d roots plus a purchased leaf: %d %s", MaxItems, rec.Code, rec.Body.String())
 	}
 }
