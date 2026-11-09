@@ -34,7 +34,7 @@ const (
 	rmaIdempotencyKey  = "return_order_tenant_id_idempotency_key_key"
 	rmaNumberUnique    = "return_order_tenant_id_legal_entity_id_rma_number_key"
 	returnOrderColumns = `id::text, legal_entity_id::text, rma_number, customer_id::text, original_invoice_id::text, original_invoice_number,
-		return_reason_code, status, currency::text, expires_at::text, version, gross::text, restocking::text, net::text,
+		return_reason_code, status, currency::text, expires_at::text, version, gross::text, restocking::text, net::text, tax::text,
 		credit_note_id, journal_posting_id, disposition_date::text, credit_posting_date::text, created_by, updated_by, created_at, updated_at`
 	returnLineColumns = `id::text, line_no, product_id::text, site_id::text, warehouse_id::text, quantity_expected::text, quantity_received::text,
 		quantity_accepted::text, unit, unit_price::text, unit_cost::text, credit_only, disposition_code, return_cost_method, restocking_pct::text,
@@ -56,6 +56,8 @@ type InvoiceLine struct {
 	LineNo                                int
 	ProductID, OrderLineID, PackingSlipID string
 	Qty, Net, CreditedQty                 decimal.Decimal
+	TaxCode                               string
+	Tax, CreditedTax                      decimal.Decimal
 }
 
 // InvoiceReader loads a billing invoice with its lines.
@@ -89,6 +91,12 @@ type ARCreditor interface {
 type ARCredit struct {
 	RMAID, RMANumber, LegalEntityID, InvoiceNumber, PostingDate, IdempotencyKey string
 	Gross, Restocking, Net                                                      decimal.Decimal
+	TaxLines                                                                    []ARTaxLine
+}
+
+type ARTaxLine struct {
+	Code   string
+	Amount decimal.Decimal
 }
 
 // CreditNote is the AR open item and journal produced from an RMA credit.
@@ -190,6 +198,7 @@ type ReturnOrder struct {
 	Gross             decimal.Decimal `json:"gross"`
 	Restocking        decimal.Decimal `json:"restocking"`
 	Net               decimal.Decimal `json:"net"`
+	Tax               decimal.Decimal `json:"tax"`
 	CreditNoteID      *string         `json:"creditNoteId,omitempty"`
 	JournalPostingID  *string         `json:"journalPostingId,omitempty"`
 	DispositionDate   *string         `json:"dispositionDate,omitempty"`
@@ -753,12 +762,18 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 		return ReturnOrder{}, err
 	}
 	needsAR := current.Net.IsPositive()
+	var invoice Invoice
 	if current.Status == domain.RMADispositioned {
 		plan, err := planCredit(current)
 		if err != nil {
 			return ReturnOrder{}, err
 		}
 		needsAR = plan.total.Net.IsPositive()
+		if needsAR {
+			if invoice, err = s.readTaxBasis(ctx, current); err != nil {
+				return ReturnOrder{}, err
+			}
+		}
 	}
 	if needsAR && s.ar == nil {
 		return ReturnOrder{}, problem(http.StatusServiceUnavailable, CodeARUnavailable, "receivables is not configured; the credit note cannot be posted")
@@ -767,15 +782,19 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 		if current.Version != version {
 			return ReturnOrder{}, versionConflict()
 		}
-	} else if current, err = s.moveReturn(ctx, id, version, actor, now, domain.RMACreditStart, s.storeCredit(now)); err != nil {
+	} else if current, err = s.moveReturn(ctx, id, version, actor, now, domain.RMACreditStart, s.storeCredit(now, invoice)); err != nil {
 		return ReturnOrder{}, err
 	}
 	if !current.Net.IsPositive() {
 		return s.moveReturn(ctx, id, current.Version, actor, now, domain.RMACredit, nil)
 	}
+	taxLines, err := s.creditTaxLines(ctx, current.ID)
+	if err != nil {
+		return ReturnOrder{}, err
+	}
 	note, err := s.ar.PostRMACredit(ctx, ARCredit{RMAID: current.ID, RMANumber: current.RMANumber, LegalEntityID: current.LegalEntityID,
 		InvoiceNumber: current.OriginalInvoiceNo, PostingDate: *current.CreditPostingDate, IdempotencyKey: "rma-credit-" + current.ID,
-		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net})
+		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net, TaxLines: taxLines})
 	if err != nil {
 		return ReturnOrder{}, upstreamProblem(ctx, "receivables", err)
 	}
@@ -787,7 +806,7 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 	})
 }
 
-func (s *Postgres) storeCredit(now time.Time) func(context.Context, pgx.Tx, string, *ReturnOrder) error {
+func (s *Postgres) storeCredit(now time.Time, invoice Invoice) func(context.Context, pgx.Tx, string, *ReturnOrder) error {
 	return func(ctx context.Context, tx pgx.Tx, tenantID string, o *ReturnOrder) error {
 		if n := o.pendingRestocks(); n > 0 {
 			return rmaState(fmt.Sprintf("%d accepted line(s) are not restocked yet; repeat :disposition", n))
@@ -806,8 +825,11 @@ func (s *Postgres) storeCredit(now time.Time) func(context.Context, pgx.Tx, stri
 		}
 		date := now.UTC().Format(dayLayout)
 		o.Gross, o.Restocking, o.Net = plan.total.Gross, plan.total.Restocking, plan.total.Net
-		_, err = tx.Exec(ctx, `update return_order set gross = $3, restocking = $4, net = $5, credit_posting_date = $6 where tenant_id = $1 and id = $2`,
-			tenantID, o.ID, o.Gross.String(), o.Restocking.String(), o.Net.String(), date)
+		if o.Tax, err = storeReversedTax(ctx, tx, tenantID, *o, invoice, plan); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `update return_order set gross = $3, restocking = $4, net = $5, tax = $6, credit_posting_date = $7 where tenant_id = $1 and id = $2`,
+			tenantID, o.ID, o.Gross.String(), o.Restocking.String(), o.Net.String(), o.Tax.String(), date)
 		return err
 	}
 }
@@ -818,6 +840,7 @@ type creditPlan struct {
 	total   domain.CreditNoteAmounts
 	lines   []int
 	charges []decimal.Decimal
+	qty     []decimal.Decimal
 }
 
 func planCredit(o ReturnOrder) (creditPlan, error) {
@@ -829,6 +852,7 @@ func planCredit(o ReturnOrder) (creditPlan, error) {
 			continue
 		}
 		plan.lines = append(plan.lines, i)
+		plan.qty = append(plan.qty, qty)
 		in = append(in, domain.ReturnCredit{Disposition: l.Disposition, Quantity: qty, UnitPrice: l.UnitPrice, Currency: o.Currency, RestockingPct: l.RestockingPct})
 	}
 	if len(in) == 0 {
@@ -932,7 +956,7 @@ func rmaEvent(o ReturnOrder, actor string) salesevents.ReturnOrderData {
 	}
 	return salesevents.ReturnOrderData{
 		ReturnOrderID: o.ID, RMANumber: o.RMANumber, LegalEntityID: o.LegalEntityID, CustomerID: o.CustomerID,
-		Status: o.Status, Currency: o.Currency, Gross: o.Gross.String(), Restocking: o.Restocking.String(), Net: o.Net.String(),
+		Status: o.Status, Currency: o.Currency, Gross: o.Gross.String(), Restocking: o.Restocking.String(), Net: o.Net.String(), Tax: o.Tax.String(),
 		CreditNoteID: o.CreditNoteID, JournalPostingID: o.JournalPostingID, Lines: lines, Actor: actor, Version: o.Version,
 	}
 }
@@ -974,14 +998,14 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanReturn(row scanner) (ReturnOrder, error) {
 	var o ReturnOrder
-	var expires, gross, restock, net *string
+	var expires, gross, restock, net, tax *string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.RMANumber, &o.CustomerID, &o.OriginalInvoiceID, &o.OriginalInvoiceNo, &o.ReturnReasonCode, &o.Status, &o.Currency,
-		&expires, &o.Version, &gross, &restock, &net, &o.CreditNoteID, &o.JournalPostingID, &o.DispositionDate, &o.CreditPostingDate,
+		&expires, &o.Version, &gross, &restock, &net, &tax, &o.CreditNoteID, &o.JournalPostingID, &o.DispositionDate, &o.CreditPostingDate,
 		&o.CreatedBy, &o.UpdatedBy, &o.CreatedAt, &o.UpdatedAt); err != nil {
 		return ReturnOrder{}, err
 	}
 	o.ExpiresAt = expires
-	o.Gross, o.Restocking, o.Net = decOrZero(gross), decOrZero(restock), decOrZero(net)
+	o.Gross, o.Restocking, o.Net, o.Tax = decOrZero(gross), decOrZero(restock), decOrZero(net), decOrZero(tax)
 	return o, nil
 }
 

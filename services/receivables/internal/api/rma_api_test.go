@@ -15,6 +15,10 @@ func rmaBody(le, gross, restocking, net string) string {
 		"gross":"` + gross + `","restocking":"` + restocking + `","net":"` + net + `"}`
 }
 
+func withTax(body, lines string) string {
+	return strings.Replace(body, `"net":`, `"taxLines":`+lines+`,"net":`, 1)
+}
+
 func TestPostRMACredit_Validation(t *testing.T) {
 	h := router(&fakeStore{})
 	tests := []struct {
@@ -34,6 +38,10 @@ func TestPostRMACredit_Validation(t *testing.T) {
 		{"gross is not restocking plus net", rmaBody(testLE, "400.00", "60.00", "300.00"), "ar.rmacredit.post", http.StatusUnprocessableEntity, "amounts"},
 		{"zero net", rmaBody(testLE, "60.00", "60.00", "0"), "ar.rmacredit.post", http.StatusUnprocessableEntity, "amounts"},
 		{"valid", rmaBody(testLE, "400.00", "60.00", "340.00"), "ar.rmacredit.post", http.StatusCreated, ""},
+		{"valid with tax lines", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"57.00"},{"code":"DE7","amount":"7.00"}]`), "ar.rmacredit.post", http.StatusCreated, ""},
+		{"tax line without amount", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"0"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "taxLines"},
+		{"tax code listed twice", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"1"},{"code":"DE19","amount":"2"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "taxLines"},
+		{"tax line with an unknown field", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"1","rate":"19"}]`), "ar.rmacredit.post", http.StatusBadRequest, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

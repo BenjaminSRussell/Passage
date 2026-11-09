@@ -3428,7 +3428,8 @@
       "party": ["party.read"]
     },
     "receivables": {
-      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"]
+      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
+      "tax": ["tax.transaction.record"]
     },
     "ledger": {
       "close": ["period.check"],

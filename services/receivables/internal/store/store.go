@@ -28,6 +28,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 	rcvevents "github.com/BenjaminSRussell/passage/services/receivables/internal/events"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/taxclient"
 )
 
 const (
@@ -211,9 +212,11 @@ type Store interface {
 
 // Postgres implements Store on pgx.
 type Postgres struct {
-	pool       *pgxpool.Pool
-	ledger     ledgerclient.Ledger
-	rmaLedgers map[string]string
+	pool        *pgxpool.Pool
+	ledger      ledgerclient.Ledger
+	rmaLedgers  map[string]string
+	taxAccounts map[string]map[string]string
+	tax         taxclient.Recorder
 }
 
 // New returns a Postgres store over pool.
