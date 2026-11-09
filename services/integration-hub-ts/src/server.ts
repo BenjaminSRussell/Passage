@@ -21,6 +21,7 @@ import {
   type ApiClientPatch,
 } from "./clients.ts";
 import { validateFilter, MAX_EXPRESSION_LENGTH } from "./cesql.ts";
+import { SOURCE_SYSTEMS, type CoexistenceStore, type SourceSystem } from "./coexistence.ts";
 import { parseEvent } from "./consumer.ts";
 import {
   CATALOG_KINDS,
@@ -135,6 +136,8 @@ export interface HubApiDeps {
   catalog?: CatalogStore;
   /** api_deprecation_months: the least notice between a deprecation and its sunset; defaults to 12, never below 12. */
   deprecationMonths?: number;
+  /** The legacy coexistence adapter state; without it the coexistence routes answer 501 HUB-0502. */
+  coexistence?: CoexistenceStore;
   /** Pushes rest-push subscriptions; without it creating one answers 501 HUB-0502. */
   rest?: RestPusher;
   /** Total events one replay may enqueue (BR-35.9); defaults to 1,000,000. */
@@ -324,6 +327,7 @@ const MAX_GRACE_SECONDS = 7 * 86_400;
 
 const SUBSCRIPTIONS = "/v1/hub/subscriptions";
 const ONE = new RegExp(`^${SUBSCRIPTIONS}/([0-9a-fA-F-]{36})(?::(resume|replay|test|rotate))?$`);
+const COEXISTENCE = "/v1/hub/coexistence";
 const CLIENTS = "/v1/hub/clients";
 const CLIENT_ONE = new RegExp(`^${CLIENTS}/([0-9a-fA-F-]{36})(?::(revoke)|/(usage))?$`);
 const CATALOG = "/v1/hub/catalog";
@@ -366,6 +370,31 @@ export function createHubHandler(deps: HubApiDeps): (req: IncomingMessage, res: 
         throw new ApiError(503, "HUB-0503", "the database is not reachable");
       }
       return { name: "readyz", status: 200, body: { status: "ready" } };
+    }
+
+    if (path === COEXISTENCE || path === `${COEXISTENCE}:retry-parked`) {
+      const retry = path !== COEXISTENCE;
+      if (method !== (retry ? "POST" : "GET")) {
+        return allow(retry ? "POST" : "GET");
+      }
+      const p = principalFromHeaders(req.headers);
+      requireDuty(p, retry ? DUTY_SUBSCRIPTION_WRITE : DUTY_DELIVERY_READ);
+      if (deps.coexistence === undefined) {
+        throw new ApiError(501, "HUB-0502", "legacy coexistence is not configured on this hub");
+      }
+      if (retry) {
+        const retried = await deps.coexistence.retryParked(p.tenantId, new Date(clock() * 1000));
+        return { name: "retryParkedCoexistence", status: 200, body: { retried } };
+      }
+      const system = url.searchParams.get("sourceSystem");
+      const company = url.searchParams.get("sourceCompany");
+      if (system === null || !(SOURCE_SYSTEMS as readonly string[]).includes(system)) {
+        throw new ApiError(400, "HUB-0400", `sourceSystem must be one of ${SOURCE_SYSTEMS.join(", ")}`);
+      }
+      if (company === null || company.length < 1 || company.length > 64) {
+        throw new ApiError(400, "HUB-0400", "sourceCompany must be 1 to 64 characters");
+      }
+      return { name: "listCoexistence", status: 200, body: { items: await deps.coexistence.list(p.tenantId, system as SourceSystem, company) } };
     }
 
     if (path === `${CLIENTS}:consume`) {

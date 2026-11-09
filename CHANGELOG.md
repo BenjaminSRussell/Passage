@@ -8,6 +8,15 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
+  so parked coexistence rows can be seen and retried (`hub.delivery.read`, `hub.subscription.write`); a replayed revrec
+  credit-note line is acknowledged from its stored reversal after the contract was cancelled; the migration factory refuses a
+  parallel-run tuple claiming more documents than the run replayed (RND-001); the debezium user gains literal write ACLs for
+  `passage.sales.deliverytolerance`, `passage.fulfillment.manifest` and `passage.fulfillment.warehouseoperationrule`; the
+  revrec README states that booked credit notes show as a reconciliation difference until its consumer is enabled.
+
 ### Added
 
 - Partner simulator round trips for every transaction set edi supports (#35, AC-35.1): the in-test demo distributor

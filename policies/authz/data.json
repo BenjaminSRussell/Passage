@@ -328,13 +328,15 @@
       {"resource": "/v1/hub/subscriptions/*:replay", "methods": ["POST"]},
       {"resource": "/v1/hub/subscriptions/*:test", "methods": ["POST"]},
       {"resource": "/v1/hub/deliveries/*:replay", "methods": ["POST"]},
-      {"resource": "/v1/hub/subscriptions/*:rotate", "methods": ["POST"]}
+      {"resource": "/v1/hub/subscriptions/*:rotate", "methods": ["POST"]},
+      {"resource": "/v1/hub/coexistence:retry-parked", "methods": ["POST"]}
     ]},
     "hub.delivery.read": {"permissions": [
       {"resource": "/v1/hub/subscriptions", "methods": ["GET"]},
       {"resource": "/v1/hub/subscriptions/*", "methods": ["GET"]},
       {"resource": "/v1/hub/deliveries", "methods": ["GET"]},
       {"resource": "/v1/hub/dead-letters", "methods": ["GET"]},
+      {"resource": "/v1/hub/coexistence", "methods": ["GET"]},
       {"resource": "/v1/hub/clients", "methods": ["GET"]},
       {"resource": "/v1/hub/clients/*", "methods": ["GET"]},
       {"resource": "/v1/hub/clients/*/usage", "methods": ["GET"]},

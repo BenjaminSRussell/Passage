@@ -88,6 +88,9 @@ func (s *Postgres) ApplyCreditLine(ctx context.Context, cn CreditNote, l CreditL
 	var out Reversal
 	applied := false
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if found, err := existingReversal(ctx, tx, cn.ID, l.LineNo, &out); err != nil || found {
+			return err
+		}
 		rows, err := tx.Query(ctx, `select id::text, currency::text from revenue_contract
 			where legal_entity_id = $1::uuid and order_id = $2::uuid and status <> 'CANCELLED' order by id for update`, cn.LegalEntityID, l.OrderID)
 		if err != nil {
@@ -147,8 +150,8 @@ func (s *Postgres) ApplyCreditLine(ctx context.Context, cn CreditNote, l CreditL
 func existingReversal(ctx context.Context, tx pgx.Tx, creditNoteID string, lineNo int, out *Reversal) (bool, error) {
 	var deferred, reduced, reversed string
 	var raw []byte
-	err := tx.QueryRow(ctx, `select id::text, deferred_amount::text, deferred_reduced::text, revenue_reversed::text, obligations
-		from credit_note_reversal where credit_note_id = $1::uuid and line_no = $2`, creditNoteID, lineNo).Scan(&out.ID, &deferred, &reduced, &reversed, &raw)
+	err := tx.QueryRow(ctx, `select id::text, contract_id::text, deferred_amount::text, deferred_reduced::text, revenue_reversed::text, obligations
+		from credit_note_reversal where credit_note_id = $1::uuid and line_no = $2`, creditNoteID, lineNo).Scan(&out.ID, &out.ContractID, &deferred, &reduced, &reversed, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

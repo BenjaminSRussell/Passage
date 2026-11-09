@@ -319,6 +319,29 @@ func TestCreditNoteConsumer_ParksWhatItCannotApplyAndRetriesTheRest(t *testing.T
 	}
 }
 
+// TestCreditNoteConsumer_ReplayAfterTheContractWasCancelledReturnsTheStoredReversal: a redelivery of a credit note whose line was
+// already applied is acknowledged although the contract has since been cancelled; a new credit note still parks with no contract.
+func TestCreditNoteConsumer_ReplayAfterTheContractWasCancelledReturnsTheStoredReversal(t *testing.T) {
+	g := newLedgerRig(t)
+	g.bill(t, "3600.00", "2027-03-10")
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+
+	applied := g.creditNote(t, "CN-2027-0000001", "2027-03-20", creditLine{bundleSupport, "0.00", "250.00"})
+	if err := g.consume(t, applied); err != nil {
+		t.Fatalf("first delivery: %v", err)
+	}
+	if _, err := g.admin.Exec(context.Background(), `update revenue_contract set status = 'CANCELLED' where order_id = $1::uuid`, bundleOrder); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.consume(t, applied); err != nil {
+		t.Errorf("replay after the contract was cancelled: %v, want it acknowledged", err)
+	}
+	fresh := g.creditNote(t, "CN-2027-0000002", "2027-03-21", creditLine{bundleSupport, "0.00", "10.00"})
+	if err := g.consume(t, fresh); !eventing.IsPermanent(err) {
+		t.Errorf("new credit note against the cancelled contract: %v, want a permanent failure", err)
+	}
+}
+
 type failingCreditStore struct{ err error }
 
 func (f failingCreditStore) ApplyCreditLine(context.Context, store.CreditNote, store.CreditLine) (store.Reversal, bool, error) {

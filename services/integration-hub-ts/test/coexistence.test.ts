@@ -19,7 +19,7 @@ import {
 } from "../src/coexistence.ts";
 import { createMessageHandler, type KafkaMessageInput } from "../src/consumer.ts";
 import type { HubEvent } from "../src/dispatcher.ts";
-import { fixture, ownerUrl, type Fixture } from "./pgHelper.ts";
+import { api, fixture, ownerUrl, type Fixture } from "./pgHelper.ts";
 
 const planId = "01a1c232-bdf8-7494-ba3b-d67787e3c644";
 
@@ -226,5 +226,41 @@ describe.skipIf(ownerUrl === undefined)("coexistence adapters on Postgres", () =
     sap.fail = null;
     expect(await sweep.runOnce()).toEqual({ applied: 1, retried: 0, parked: 0 });
     expect(sap.suspended.has("2000/customer")).toBe(true);
+  });
+
+  test("the HTTP API lists a company's adapter state and retries parked rows under the owning duties", async () => {
+    const t = randomUUID();
+    const a = await api({ store: f.store, coexistence: cs, clock: () => now.getTime() / 1000 });
+    try {
+      await cs.record(t, [{ sourceSystem: "S4HANA", sourceCompany: "1710", entity: "customer", mode: "LEGACY", version: 1, planId: null }], "e9", now);
+      await new CoexistenceSweeper({ store: cs, adapters: [], clock }).runOnce();
+      const q = "/v1/hub/coexistence?sourceSystem=S4HANA&sourceCompany=1710";
+
+      const listed = await a.call("GET", q, { tenant: t });
+      expect(listed.status).toBe(200);
+      expect(listed.body.items.map((r: any) => [r.entity, r.status, r.lastCode])).toEqual([["customer", "parked", CODE_NO_ADAPTER]]);
+      expect((await a.call("GET", q, { tenant: randomUUID() })).body.items).toEqual([]);
+      expect((await a.call("GET", q, { tenant: t, duties: ["hub.subscription.write"] })).status).toBe(403);
+      expect((await a.call("GET", "/v1/hub/coexistence?sourceSystem=NOPE&sourceCompany=1", { tenant: t })).status).toBe(400);
+      expect((await a.call("GET", "/v1/hub/coexistence?sourceSystem=S4HANA", { tenant: t })).status).toBe(400);
+
+      const retry = "/v1/hub/coexistence:retry-parked";
+      expect((await a.call("POST", retry, { tenant: t, duties: ["hub.delivery.read"] })).status).toBe(403);
+      expect((await a.call("GET", retry, { tenant: t })).status).toBe(405);
+      expect((await a.call("POST", retry, { tenant: randomUUID() })).body).toEqual({ retried: 0 });
+      expect((await a.call("POST", retry, { tenant: t })).body).toEqual({ retried: 1 });
+      expect((await a.call("GET", q, { tenant: t })).body.items[0].status).toBe("pending");
+    } finally {
+      a.server.close();
+    }
+  });
+
+  test("the coexistence routes answer 501 on a hub without the store", async () => {
+    const a = await api({ store: f.store });
+    try {
+      expect((await a.call("GET", "/v1/hub/coexistence?sourceSystem=AX2012&sourceCompany=USMF", { tenant })).status).toBe(501);
+    } finally {
+      a.server.close();
+    }
   });
 });

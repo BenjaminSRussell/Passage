@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -27,6 +28,7 @@ type ledgerRig struct {
 	ledgerID string
 	clock    *time.Time
 	st       *store.Postgres
+	admin    *pgxpool.Pool
 }
 
 func newLedgerRig(t *testing.T) *ledgerRig {
@@ -36,7 +38,7 @@ func newLedgerRig(t *testing.T) *ledgerRig {
 		t.Fatalf("migrate: %v", err)
 	}
 	st := store.New(app)
-	rig := &ledgerRig{ledger: ledgerclient.NewFake(), ledgerID: ids.New(), clock: new(time.Time), st: st}
+	rig := &ledgerRig{ledger: ledgerclient.NewFake(), ledgerID: ids.New(), clock: new(time.Time), st: st, admin: admin}
 	*rig.clock = time.Date(2027, 4, 2, 9, 30, 0, 0, time.UTC)
 	rig.ledger.AddLedger(rig.ledgerID, entityID)
 	rig.api = New(st).WithLedger(rig.ledger, st, map[string]string{entityID: rig.ledgerID})

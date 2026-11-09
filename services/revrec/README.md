@@ -141,6 +141,9 @@ Consumed: `dev.passage.billing.creditnote.booked.v1` on `passage.billing.invoice
 credit-note consumer, `revrec consume`; KafkaUser and dead-letter topic in
 `deploy/kafka/revrec-consumer.yaml`, chart `consumer.*`, off by default). Billing's
 outbox connector, which creates that topic, is not in `deploy/kafka/connect.yaml` yet.
+Until the consumer is enabled, a booked credit note is not applied: billing has already debited
+2400, revrec's schedules are not reversed, and `GET /v1/revrec/gl-reconciliation` shows the
+credit note as a difference (`difference` and `closingDifference` stay non-zero).
 
 `revenue_schedule.journal_posting_id` is set when `POST /v1/revrec/journal-postings`
 claims a recognized line for a `journal_posting` row; the row keeps the ledger entry
