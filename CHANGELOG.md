@@ -10,6 +10,12 @@ release may change public APIs.
 
 ### Added
 
+- EDI: an inbound 850 or ORDERS becomes a sales order (#35 P4a). Partner item cross-references (BP, VP, UP or EN to product,
+  site and warehouse) and partner sales defaults under `edi.admin` with legal-entity RLS (migration 0010);
+  `POST /edi/v1/messages/{id}:post` places the order with sales under the new service grant `edi` -> `sales`
+  `sales.channel.intake` (key = message id, externalRef = partner id and PO number), records the sales order on the
+  message (POSTED, `message.posted`), and parks what it cannot map or sales refuses (FAILED with a park code in the
+  message monitor).
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

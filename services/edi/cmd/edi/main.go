@@ -97,7 +97,8 @@ func run() error {
 	a.AllowBodyOutbound = os.Getenv("EDI_ALLOW_BODY_OUTBOUND") == "true"
 	fulfillmentURL, billingURL, salesURL := os.Getenv("EDI_FULFILLMENT_URL"), os.Getenv("EDI_BILLING_URL"), os.Getenv("EDI_SALES_URL")
 	if signer != nil && fulfillmentURL != "" && billingURL != "" && salesURL != "" {
-		a.Sources = sources.New(signer, fulfillmentURL, billingURL, salesURL, nil)
+		src := sources.New(signer, fulfillmentURL, billingURL, salesURL, nil)
+		a.Sources, a.Intake = src, src
 	}
 	tc, err := loadTransportConfig(os.Getenv, addr)
 	if err != nil {
