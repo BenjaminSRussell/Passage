@@ -77,8 +77,13 @@ type fakeStore struct {
 	}
 
 	// RFQ cycle: the one stored RFQ and what the RFQ methods received.
-	rfq    *domain.RFQ
-	rfqLog rfqLog
+	rfq       *domain.RFQ
+	rfqLog    rfqLog
+	rfqTypes  map[string]domain.RFQType
+	typeSaved *domain.RFQType
+	amended   *domain.AmendmentInput
+	edited    *domain.RFQEdit
+	acked     string
 
 	// Invoicing plans: what the plan methods received and what they answer.
 	planLog  planLog

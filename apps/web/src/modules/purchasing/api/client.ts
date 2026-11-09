@@ -1054,6 +1054,15 @@ export interface RFQ {
   openedAt?: string;
   openedBy?: string;
   version: number;
+  /** The RFQ type it was created from (FR-17.19). */
+  rfqTypeId?: string;
+  /** Copied from the type at create; true without a type. */
+  amendmentsAllowed?: boolean;
+  /** The type demands sealed bids, so a draft edit cannot clear the flag. */
+  sealedRequired?: boolean;
+  /** Amendments issued; the last is RFQ-n-A<amendmentNo>. */
+  amendmentNo?: number;
+  amendments?: RFQAmendment[];
   lines: RFQLine[];
   invitations: RFQInvitation[];
   replies: RFQReply[];
@@ -1063,6 +1072,26 @@ export interface RFQ {
   updatedAt: string;
   /** Returned when replies are recorded: PRC-RFQ-003 for each late line. */
   warnings?: Warning[];
+}
+
+/** One vendor's acknowledgement of an amendment; acknowledgedAt is absent until recorded. */
+export interface RFQAmendmentAck {
+  vendorId: string;
+  acknowledgedAt?: string;
+}
+
+/** An addendum to a sent RFQ (RFQ-n-A<k>). */
+export interface RFQAmendment {
+  amendmentNo: number;
+  summary: string;
+  previousDeadline?: string;
+  newDeadline?: string;
+  criteriaChanged: boolean;
+  /** Vendors whose replies were late only against previousDeadline and count as on time since (BR-17.11). */
+  lateClearedVendorIds?: string[];
+  issuedBy?: string;
+  issuedAt: string;
+  acknowledgements: RFQAmendmentAck[];
 }
 
 export interface RFQSummary {
@@ -1088,7 +1117,53 @@ export interface RFQInput {
   sealed?: boolean;
   /** The scoring group; WEIGHTED_SCORE needs at least one. */
   criteria?: { name: string; weight: string }[];
+  /** An ACTIVE RFQ type of the legal entity; it fills the sealed flag, ranking rule and criteria left out. */
+  rfqTypeId?: string;
   lines: { productId?: string; description?: string; qty: string; unit: string; requiredDate?: string }[];
+}
+
+export type RFQTypeStatus = "ACTIVE" | "INACTIVE";
+
+/** The setup of a kind of RFQ (FR-17.19). */
+export interface RFQType {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  sealed: boolean;
+  amendmentsAllowed: boolean;
+  rankingRule: RankingRule;
+  status: RFQTypeStatus;
+  criteria: ScoringCriterion[];
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RFQTypeInput {
+  legalEntityId: string;
+  code: string;
+  name: string;
+  sealed?: boolean;
+  amendmentsAllowed?: boolean;
+  rankingRule?: RankingRule;
+  status?: RFQTypeStatus;
+  criteria?: { name: string; weight: string }[];
+}
+
+/** The edit of a DRAFT RFQ. */
+export interface RFQEditInput {
+  replyDeadline: string;
+  rankingRule?: RankingRule;
+  sealed?: boolean;
+  criteria?: { name: string; weight: string }[];
+}
+
+/** An amendment: a summary, optionally a later deadline, optionally a replacement scoring group. */
+export interface RFQAmendmentInput {
+  summary: string;
+  replyDeadline?: string;
+  criteria?: { name: string; weight: string }[];
 }
 
 export interface RFQReplyInput {
@@ -1159,6 +1234,41 @@ export interface RFQFromRequisitionsInput {
 /** Starts a DRAFT RFQ from requisition lines that need sourcing; the lines leave the consolidation queue. */
 export function createRFQFromRequisitions(input: RFQFromRequisitionsInput, idempotencyKey = newIdempotencyKey()) {
   return send<RFQ>("POST", "/rfqs:from-requisitions", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+export function listRFQTypes(filters: { status?: RFQTypeStatus | ""; legalEntityId?: string } = {}, options: ListOptions = {}) {
+  return list<RFQType>("/rfq-types", { status: filters.status || undefined, legalEntityId: filters.legalEntityId }, options);
+}
+
+export function getRFQType(id: string, signal?: AbortSignal) {
+  return send<RFQType>("GET", `/rfq-types/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createRFQType(input: RFQTypeInput, idempotencyKey = newIdempotencyKey()) {
+  return send<RFQType>("POST", "/rfq-types", { body: input, headers: { "Idempotency-Key": idempotencyKey } });
+}
+
+/** Replaces everything but the code under the version read. PUT is idempotent, so no key is sent. */
+export function changeRFQType(id: string, input: RFQTypeInput, version: number) {
+  return send<RFQType>("PUT", `/rfq-types/${encodeURIComponent(id)}`, { body: input, headers: { "If-Match": `"${version}"` } });
+}
+
+/** Edits the deadline, ranking rule, sealed flag and criteria of a DRAFT RFQ under its version. */
+export function editRFQ(id: string, version: number, input: RFQEditInput) {
+  return send<RFQ>("PUT", `/rfqs/${encodeURIComponent(id)}`, { body: input, headers: { "If-Match": `"${version}"` } });
+}
+
+/** Issues an amendment to a SENT or REPLIES_OPEN RFQ; version is the ETag read when it was loaded. */
+export function amendRFQ(id: string, version: number, input: RFQAmendmentInput, idempotencyKey = newIdempotencyKey()) {
+  return send<RFQ>("POST", `/rfqs/${encodeURIComponent(id)}/amendments`, {
+    body: input,
+    headers: { "If-Match": `"${version}"`, "Idempotency-Key": idempotencyKey },
+  });
+}
+
+/** Records that an invited vendor acknowledged an amendment. Idempotent; the RFQ version does not change. */
+export function acknowledgeRFQAmendment(id: string, amendmentNo: number, vendorId: string) {
+  return send<RFQ>("PUT", `/rfqs/${encodeURIComponent(id)}/amendments/${amendmentNo}/acknowledgements/${encodeURIComponent(vendorId)}`);
 }
 
 /** Sends a DRAFT RFQ to vendors; version is the ETag read when it was loaded. */

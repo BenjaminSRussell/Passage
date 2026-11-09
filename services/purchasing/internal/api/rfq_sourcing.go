@@ -18,6 +18,7 @@ type rfqFromRequisitionsBody struct {
 	RankingRule        string             `json:"rankingRule,omitempty"`
 	Sealed             bool               `json:"sealed,omitempty"`
 	Criteria           []rfqCriterionBody `json:"criteria,omitempty"`
+	RFQTypeID          string             `json:"rfqTypeId,omitempty"`
 }
 
 // createRFQFromRequisitions handles POST /rfqs:from-requisitions. The lines must be OPEN on APPROVED
@@ -61,7 +62,7 @@ func (a *API) createRFQFromRequisitions(w http.ResponseWriter, r *http.Request) 
 	for _, l := range found {
 		byID[l.ID] = l
 	}
-	spec := rfqBody{ReplyDeadline: body.ReplyDeadline, RankingRule: body.RankingRule, Sealed: body.Sealed, Criteria: body.Criteria}
+	spec := rfqBody{ReplyDeadline: body.ReplyDeadline, RankingRule: body.RankingRule, Sealed: body.Sealed, Criteria: body.Criteria, RFQTypeID: body.RFQTypeID}
 	for _, id := range lineIDs {
 		l, ok := byID[id]
 		if !ok {
@@ -79,6 +80,15 @@ func (a *API) createRFQFromRequisitions(w http.ResponseWriter, r *http.Request) 
 		spec.Lines = append(spec.Lines, rfqLineBody{ProductID: l.ProductID, Description: l.Description, Qty: l.Qty.String(),
 			Unit: l.Unit, RequiredDate: &day})
 	}
+	if err := inScope(p, spec.LegalEntityID); err != nil {
+		fail(w, r, err)
+		return
+	}
+	typ, err := a.applyRFQType(r.Context(), &spec)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	in, err := buildRFQ(spec, a.now())
 	if err != nil {
 		fail(w, r, err)
@@ -87,11 +97,7 @@ func (a *API) createRFQFromRequisitions(w http.ResponseWriter, r *http.Request) 
 	for i := range in.Lines {
 		in.Lines[i].RequisitionLineID = lineIDs[i]
 	}
-	if err := inScope(p, in.LegalEntityID); err != nil {
-		fail(w, r, err)
-		return
-	}
-	out, err := a.store.CreateRFQ(r.Context(), in, store.Idem{Key: key, Hash: hashBody("rfq.from-requisitions", body)})
+	out, err := a.store.CreateRFQ(r.Context(), withType(in, typ), store.Idem{Key: key, Hash: hashBody("rfq.from-requisitions", body)})
 	if err != nil {
 		fail(w, r, err)
 		return

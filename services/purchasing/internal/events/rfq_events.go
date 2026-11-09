@@ -58,3 +58,46 @@ type RFQAwardedData struct {
 	LegalEntityID string           `json:"legal_entity_id"`
 	Awards        []RFQAwardedLine `json:"awards"`
 }
+
+// RFQ amendment and type events (FR-17.19).
+const (
+	// RFQAmended is written by POST /rfqs/{id}/amendments, when an addendum is issued to the invited vendors.
+	RFQAmended = "dev.passage.procurement.rfq.amended.v1"
+	// RFQTypeCreated is written when an RFQ type is created.
+	RFQTypeCreated = "dev.passage.procurement.rfqtype.created.v1"
+	// RFQTypeChanged is written when an RFQ type is changed or deactivated.
+	RFQTypeChanged = "dev.passage.procurement.rfqtype.changed.v1"
+)
+
+// RFQAmendedData is the data member of rfq.amended.v1: the addendum RFQ-n-A<k>, the vendors that must
+// acknowledge it, and the deadline it moved, when it did.
+type RFQAmendedData struct {
+	RFQID            string   `json:"rfq_id"`
+	Number           string   `json:"number"`
+	AmendmentNo      int      `json:"amendment_no"`
+	LegalEntityID    string   `json:"legal_entity_id"`
+	Summary          string   `json:"summary"`
+	VendorIDs        []string `json:"vendor_ids"`
+	PreviousDeadline string   `json:"previous_deadline,omitempty"`
+	ReplyDeadline    string   `json:"reply_deadline"`
+	CriteriaChanged  bool     `json:"criteria_changed"`
+	// LateClearedVendorIDs are the vendors whose replies were late only against PreviousDeadline and are
+	// on time since the deadline moved (BR-17.11).
+	LateClearedVendorIDs []string `json:"late_cleared_vendor_ids"`
+	IssuedBy             string   `json:"issued_by,omitempty"`
+}
+
+// RFQTypeData is the data member of rfqtype.created.v1 and rfqtype.changed.v1.
+type RFQTypeData struct {
+	RFQTypeID         string `json:"rfq_type_id"`
+	LegalEntityID     string `json:"legal_entity_id"`
+	Code              string `json:"code"`
+	Name              string `json:"name"`
+	Sealed            bool   `json:"sealed"`
+	AmendmentsAllowed bool   `json:"amendments_allowed"`
+	RankingRule       string `json:"ranking_rule"`
+	CriteriaCount     int    `json:"criteria_count"`
+	Status            string `json:"status"`
+	Version           int    `json:"version"`
+	ChangedBy         string `json:"changed_by,omitempty"`
+}

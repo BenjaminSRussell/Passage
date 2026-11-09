@@ -112,6 +112,10 @@ type API struct {
 	rfqsAwarded        atomic.Int64
 	rfqVendorsScored   atomic.Int64
 	sealedRFQsOpened   atomic.Int64
+	rfqTypesSaved      atomic.Int64
+	rfqsEdited         atomic.Int64
+	rfqsAmended        atomic.Int64
+	rfqAmendmentsAcked atomic.Int64
 
 	invoicingPlansSaved atomic.Int64
 	planRowsInvoiced    atomic.Int64
@@ -284,6 +288,8 @@ func (a *API) Register(r chi.Router) {
 		a.registerCategoryRoutes(r)
 		// Charge codes and auto charges (FR-17.9).
 		a.registerChargeRoutes(r)
+		// RFQ types, draft edits and amendments (FR-17.19).
+		a.registerRFQTypeRoutes(r)
 		// Service lines and model service specifications (FR-17.23).
 		a.registerServiceRoutes(r)
 		// Signing limits and their requests (FR-17.17).
@@ -324,6 +330,10 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_rfqs_awarded_total", "RFQ awards accepted.", a.rfqsAwarded.Load()},
 			{"purchasing_rfq_vendors_scored_total", "RFQ vendor scorings recorded.", a.rfqVendorsScored.Load()},
 			{"purchasing_sealed_rfqs_opened_total", "Sealed RFQs whose replies were opened after the deadline.", a.sealedRFQsOpened.Load()},
+			{"purchasing_rfq_types_saved_total", "RFQ types created or changed.", a.rfqTypesSaved.Load()},
+			{"purchasing_rfqs_edited_total", "Draft RFQs edited.", a.rfqsEdited.Load()},
+			{"purchasing_rfqs_amended_total", "RFQ amendments issued.", a.rfqsAmended.Load()},
+			{"purchasing_rfq_amendments_acknowledged_total", "RFQ amendment acknowledgements recorded.", a.rfqAmendmentsAcked.Load()},
 			{"purchasing_delivery_schedules_saved_total", "Delivery schedules written by PUT.", a.deliverySchedulesSaved.Load()},
 			{"purchasing_delivery_dates_confirmed_total", "Vendor confirmed dates recorded on delivery schedule rows (replays are counted).", a.deliveryDatesConfirmed.Load()},
 			{"purchasing_invoicing_plans_saved_total", "Invoicing plans written by PUT.", a.invoicingPlansSaved.Load()},

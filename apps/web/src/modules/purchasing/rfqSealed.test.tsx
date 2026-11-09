@@ -144,7 +144,7 @@ describe("sealed RFQ pages", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save RFQ" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/rfqs/${RFQ_ID}`));
-    const sent = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    const sent = JSON.parse(String((fetchMock.mock.calls.find((c) => (c[1] as RequestInit).method === "POST") as [string, RequestInit])[1].body));
     expect(sent.sealed).toBe(true);
     expect(sent.rankingRule).toBe("WEIGHTED_SCORE");
     expect(sent.criteria).toEqual([

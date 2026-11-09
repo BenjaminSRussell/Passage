@@ -1418,6 +1418,7 @@ components:
               name: { type: string, minLength: 1, maxLength: 100 }
               weight: { $ref: '#/components/schemas/Money' }
         lines: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/RFQLineInput' } }
+        rfqTypeId: { type: string, format: uuid, description: "An ACTIVE RFQ type of the same legal entity; its sealed flag (a sealed type forces it), ranking rule and scoring group fill what the request leaves out, and the RFQ copies its amendment setting (FR-17.19)." }
     RFQFromRequisitionsInput:
       type: object
       required: [requisitionLineIds, replyDeadline]
@@ -1426,6 +1427,7 @@ components:
         replyDeadline: { type: string, format: date-time, description: Must lie in the future. }
         rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME, WEIGHTED_SCORE], default: LOWEST_PRICE, description: WEIGHTED_SCORE needs criteria. }
         sealed: { type: boolean, default: false }
+        rfqTypeId: { type: string, format: uuid, description: "An ACTIVE RFQ type of the same legal entity; its sealed flag (a sealed type forces it), ranking rule and scoring group fill what the request leaves out, and the RFQ copies its amendment setting (FR-17.19)." }
         criteria:
           type: array
           maxItems: 20
@@ -1435,6 +1437,106 @@ components:
             properties:
               name: { type: string, minLength: 1, maxLength: 100 }
               weight: { $ref: '#/components/schemas/Money' }
+    RFQTypeInput:
+      type: object
+      required: [legalEntityId, code, name]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Ignored on PUT; it does not change }
+        code: { type: string, pattern: '^[A-Z0-9_-]{1,20}$', description: Upper-cased; ignored on PUT }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        sealed: { type: boolean, default: false, description: RFQs of this type are sealed (BR-17.16) }
+        amendmentsAllowed: { type: boolean, default: true }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME, WEIGHTED_SCORE], default: LOWEST_PRICE, description: WEIGHTED_SCORE needs criteria. }
+        status: { type: string, enum: [ACTIVE, INACTIVE], default: ACTIVE }
+        criteria:
+          type: array
+          maxItems: 20
+          description: The default scoring group of the type's RFQs; replaced as a set.
+          items:
+            type: object
+            required: [name, weight]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 100 }
+              weight: { $ref: '#/components/schemas/Money' }
+    RFQType:
+      type: object
+      required: [id, legalEntityId, code, name, sealed, amendmentsAllowed, rankingRule, status, criteria, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        sealed: { type: boolean }
+        amendmentsAllowed: { type: boolean }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME, WEIGHTED_SCORE] }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        criteria: { type: array, items: { $ref: '#/components/schemas/ScoringCriterion' } }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+    RFQTypePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RFQType' } }
+        nextCursor: { type: string, format: uuid }
+    RFQEditInput:
+      type: object
+      required: [replyDeadline]
+      properties:
+        replyDeadline: { type: string, format: date-time, description: Must lie in the future. }
+        rankingRule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME, WEIGHTED_SCORE], default: LOWEST_PRICE }
+        sealed: { type: boolean, default: false, description: Cannot be false when the RFQ's type requires sealed bids (PRC-RFQ-009). }
+        criteria:
+          type: array
+          maxItems: 20
+          description: Replaces the scoring group; names unique, weights positive with at most 4 decimals.
+          items:
+            type: object
+            required: [name, weight]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 100 }
+              weight: { $ref: '#/components/schemas/Money' }
+    RFQAmendmentInput:
+      type: object
+      required: [summary]
+      properties:
+        summary: { type: string, minLength: 1, maxLength: 2000, description: What changed, sent to the invited vendors }
+        replyDeadline: { type: string, format: date-time, description: A later deadline; after now and after the current one }
+        criteria:
+          type: array
+          maxItems: 20
+          description: Replaces the scoring group (an empty list clears it); allowed only while no vendor is scored and, unless the RFQ is sealed, no reply is recorded. Leave out to keep it.
+          items:
+            type: object
+            required: [name, weight]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 100 }
+              weight: { $ref: '#/components/schemas/Money' }
+    RFQAmendment:
+      type: object
+      description: One addendum to a sent RFQ (RFQ-n-A<k>).
+      properties:
+        amendmentNo: { type: integer, minimum: 1 }
+        summary: { type: string }
+        previousDeadline: { type: string, format: date-time }
+        newDeadline: { type: string, format: date-time }
+        criteriaChanged: { type: boolean }
+        lateClearedVendorIds:
+          type: array
+          description: Vendors whose replies were late only against previousDeadline and count as on time since this amendment moved the deadline (BR-17.11).
+          items: { type: string, format: uuid }
+        issuedBy: { type: string, format: uuid }
+        issuedAt: { type: string, format: date-time }
+        acknowledgements:
+          type: array
+          items:
+            type: object
+            properties:
+              vendorId: { type: string, format: uuid }
+              acknowledgedAt: { type: string, format: date-time, description: Absent until the vendor's acknowledgement is recorded }
     ScoringCriterion:
       type: object
       properties:
@@ -1511,6 +1613,11 @@ components:
         openedAt: { type: string, format: date-time, description: When the sealed replies were first shown after the deadline (AC-17.14) }
         openedBy: { type: string, format: uuid, description: Who they were first shown to }
         version: { type: integer, minimum: 1 }
+        rfqTypeId: { type: string, format: uuid, description: The RFQ type it was created from (FR-17.19) }
+        amendmentsAllowed: { type: boolean, description: Copied from the type when the RFQ was created; true without a type }
+        sealedRequired: { type: boolean, description: The type demands sealed bids, so a draft edit cannot clear the sealed flag }
+        amendmentNo: { type: integer, minimum: 0, description: Amendments issued; the last one is RFQ-n-A<amendmentNo> }
+        amendments: { type: array, items: { $ref: '#/components/schemas/RFQAmendment' } }
         lines: { type: array, items: { $ref: '#/components/schemas/RFQLine' } }
         invitations: { type: array, items: { $ref: '#/components/schemas/RFQInvitation' } }
         replies: { type: array, items: { $ref: '#/components/schemas/RFQReply' } }
@@ -3702,6 +3809,100 @@ paths:
               schema: { $ref: '#/components/schemas/SchedulingRelease' }
         '404': { description: Agreement (PRC-SA-NOT-FOUND) or release (PRC-SA-REL-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/procurement/rfq-types:
+    post:
+      operationId: createRFQType
+      x-passage-duty: procurement.policy.maintain
+      summary: Create an RFQ type of a legal entity (FR-17.19; duty procurement.policy.maintain)
+      description: >-
+        An RFQ type sets whether its RFQs are sealed, whether they may be amended, the ranking rule and a default scoring group.
+        An RFQ created with rfqTypeId copies the flags, so changing a type never moves an RFQ already out. Writes rfqtype.created.v1.
+        A replayed Idempotency-Key returns the first row.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RFQTypeInput' }
+      responses:
+        '201':
+          description: The RFQ type at version 1
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQType' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty procurement.policy.maintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The legal entity already has an RFQ type with this code (PRC-RFQ-TYPE-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation - code, name, ranking rule, criteria (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      operationId: listRFQTypes
+      x-passage-duty: procurement.policy.maintain or procurement.rfq.maintain or procurement.rfq.award
+      summary: List RFQ types, newest first (FR-17.19)
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [ACTIVE, INACTIVE] } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQTypePage' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: A filter is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfq-types/{id}:
+    get:
+      operationId: getRFQType
+      x-passage-duty: procurement.policy.maintain or procurement.rfq.maintain or procurement.rfq.award
+      summary: Read one RFQ type with its default scoring criteria (FR-17.19)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The RFQ type
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQType' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ type not found (PRC-RFQ-TYPE-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: id is not a UUID (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: changeRFQType
+      x-passage-duty: procurement.policy.maintain
+      summary: Change an RFQ type under If-Match (FR-17.19; duty procurement.policy.maintain)
+      description: >-
+        PUT is idempotent, so no Idempotency-Key is taken. It replaces name, flags, rankingRule, status and the default criteria; the
+        code and the legal entity do not change. RFQs already created keep what they copied. Writes rfqtype.changed.v1.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RFQTypeInput' }
+      responses:
+        '200':
+          description: The RFQ type at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQType' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty procurement.policy.maintain or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ type not found (PRC-RFQ-TYPE-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: If-Match is not the stored version (PRC-RFQ-TYPE-003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation - code, name, ranking rule, criteria (COM-0001) or idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/rfqs:
     post:
       operationId: createRFQ
@@ -3786,6 +3987,93 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RFQ' }
         '404': { description: Not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: editRFQ
+      x-passage-duty: procurement.rfq.maintain
+      summary: Edit the deadline, ranking rule, sealed flag and scoring criteria of a DRAFT RFQ under If-Match (FR-17.19; duty procurement.rfq.maintain)
+      description: >-
+        Only a DRAFT RFQ is edited (409 PRC-RFQ-STATE); a sent RFQ changes through an amendment. The scoring group is replaced as a
+        set. When the RFQ's type requires sealed bids the flag cannot be cleared (422 PRC-RFQ-009). PUT is idempotent, so no
+        Idempotency-Key is taken.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RFQEditInput' }
+      responses:
+        '200':
+          description: The RFQ at its new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty procurement.rfq.maintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the RFQ is not in a status that allows it (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), an amendment rule (PRC-RFQ-008) or a locked field (PRC-RFQ-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}/amendments:
+    post:
+      operationId: amendRFQ
+      x-passage-duty: procurement.rfq.maintain
+      summary: Issue an amendment (addendum) to a sent RFQ (FR-17.19; duty procurement.rfq.maintain)
+      description: >-
+        The RFQ must be SENT or REPLIES_OPEN and its type must allow amendments (422 PRC-RFQ-008). The amendment carries a summary,
+        optionally a later reply deadline (after now and after the current one; replies that were late only because of the old deadline
+        stop being late, and the vendors cleared are listed in lateClearedVendorIds) and optionally a new scoring group (only while no
+        vendor is scored and, on an RFQ that is not sealed, before any reply is recorded, since the buyer can already read the prices).
+        A sealed RFQ cannot be amended once its deadline has passed, and the response keeps its replies hidden before it. Every invited vendor gets an acknowledgement due. Writes rfq.amended.v1 and bumps the RFQ version.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RFQAmendmentInput' }
+      responses:
+        '201':
+          description: The RFQ with the new amendment (amendmentNo)
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty procurement.rfq.maintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Version changed (PRC-VERSION-CONFLICT) or the RFQ is not in a status that allows it (PRC-RFQ-STATE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), an amendment rule (PRC-RFQ-008) or a locked field (PRC-RFQ-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/rfqs/{id}/amendments/{no}/acknowledgements/{vendorId}:
+    put:
+      operationId: acknowledgeRFQAmendment
+      x-passage-duty: procurement.rfq.maintain
+      summary: Record that an invited vendor acknowledged an amendment (FR-17.19; duty procurement.rfq.maintain)
+      description: >-
+        Idempotent: a second call keeps the first acknowledgement time. It does not change the RFQ version. The vendor portal records
+        the same fact in wave 20.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: no, in: path, required: true, description: The amendment number, schema: { type: integer, minimum: 1 } }
+        - { name: vendorId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The RFQ with the acknowledgement recorded
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RFQ' }
+        '403': { description: Missing duty procurement.rfq.maintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: RFQ not found (PRC-RFQ-NOT-FOUND), or the amendment has no acknowledgement due from that vendor (PRC-RFQ-AMENDMENT-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), an amendment rule (PRC-RFQ-008) or a locked field (PRC-RFQ-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/rfqs/{id}:send:
     post:
       operationId: sendRFQ

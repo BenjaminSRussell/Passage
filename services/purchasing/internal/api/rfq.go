@@ -70,7 +70,10 @@ type rfqBody struct {
 	RankingRule   string             `json:"rankingRule,omitempty"`
 	Sealed        bool               `json:"sealed,omitempty"`
 	Criteria      []rfqCriterionBody `json:"criteria,omitempty"`
-	Lines         []rfqLineBody      `json:"lines"`
+	// RFQTypeID names an RFQ type whose sealed flag, ranking rule and scoring group fill what is left out
+	// (FR-17.19).
+	RFQTypeID string        `json:"rfqTypeId,omitempty"`
+	Lines     []rfqLineBody `json:"lines"`
 }
 
 type rfqCriterionBody struct {
@@ -168,16 +171,26 @@ func (a *API) createRFQ(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	hash := hashBody("rfq.create", body)
+	if err := uuidField("legalEntityId", body.LegalEntityID, true); err != nil {
+		fail(w, r, err)
+		return
+	}
+	if err := inScope(p, body.LegalEntityID); err != nil {
+		fail(w, r, err)
+		return
+	}
+	typ, err := a.applyRFQType(r.Context(), &body)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	in, err := buildRFQ(body, a.now())
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	if err := inScope(p, in.LegalEntityID); err != nil {
-		fail(w, r, err)
-		return
-	}
-	out, err := a.store.CreateRFQ(r.Context(), in, store.Idem{Key: key, Hash: hashBody("rfq.create", body)})
+	out, err := a.store.CreateRFQ(r.Context(), withType(in, typ), store.Idem{Key: key, Hash: hash})
 	if err != nil {
 		fail(w, r, err)
 		return

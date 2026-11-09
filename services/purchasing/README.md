@@ -282,6 +282,22 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   an unscored criterion counting 0. WEIGHTED_SCORE ranks by it, highest first, an
   unscored vendor after every scored one, then by price and lead time; the other
   rules show it alongside.
+- **RFQ types, draft edits and amendments (FR-17.19).** `rfq_type` is a per-legal-entity
+  setup (code, name, sealed, amendments allowed, ranking rule, status, default scoring
+  criteria) under procurement.policy.maintain, readable with an RFQ duty. An RFQ created
+  with `rfqTypeId` (also on `:from-requisitions`) takes the type's ranking rule and criteria
+  where the request leaves them out, is sealed when the type is, and copies the amendment
+  flag and the sealed requirement, so changing a type never moves an RFQ already out. A DRAFT
+  RFQ's deadline, ranking rule, sealed flag and criteria are edited with `PUT /rfqs/{id}`
+  (If-Match); a sent RFQ changes only by `POST /rfqs/{id}/amendments`: a summary, optionally
+  a later deadline (replies that were late only against the old deadline stop being late; the
+  amendment lists the vendors it cleared in `lateClearedVendorIds` and `rfq.amended.v1`) and a
+  replacement scoring group (only while nobody is scored and, on an RFQ that is not sealed,
+  before any reply is recorded: once the buyer can read prices, re-weighting could steer the
+  award; a sealed RFQ before its deadline may still replace it). It numbers the addendum
+  RFQ-n-A<k>, owes an acknowledgement from every invited vendor
+  (`PUT /rfqs/{id}/amendments/{no}/acknowledgements/{vendorId}`, idempotent) and writes
+  `rfq.amended.v1`. A sealed RFQ past its deadline cannot be amended.
 - **Invoicing plans (FR-17.21, BR-17.17).** A PO line that is not cancelled, on a PO
   that is not cancelled or finalized (PRC-IP-003), may carry one plan. PERIODIC:
   `periods` rows of `amountPerPeriod` from `start`'s month, monthly or quarterly, on
@@ -578,6 +594,13 @@ store codes are returned as the `code` field.
 | PRC-RFQ-006 | 422 | A late reply cannot replace the vendor's on-time reply to the line |
 | PRC-RFQ-004 | 403 | A sealed RFQ's replies cannot be compared, scored or awarded before its reply deadline |
 | PRC-RFQ-007 | 422 | A reply after the deadline to a sealed RFQ is rejected |
+| PRC-RFQ-008 | 422 | An amendment breaks a rule: the RFQ's type does not allow amendments, no summary, the new deadline is not after now and after the current one, the deadline has passed and no later one is given, a sealed RFQ is past its deadline, or the scoring criteria are replaced after vendors were scored or once an RFQ that is not sealed has replies |
+| PRC-RFQ-009 | 422 | A draft edit clears the sealed flag of an RFQ whose type requires sealed bids |
+| PRC-RFQ-TYPE-001 | 422 | The RFQ type named on a new RFQ is inactive or belongs to another legal entity |
+| PRC-RFQ-TYPE-002 | 409 | The legal entity already has an RFQ type with this code |
+| PRC-RFQ-TYPE-003 | 412 | If-Match is not the RFQ type's version |
+| PRC-RFQ-TYPE-NOT-FOUND | 404 | No such RFQ type |
+| PRC-RFQ-AMENDMENT-NOT-FOUND | 404 | The RFQ has no such amendment, or the vendor owes no acknowledgement of it |
 | PRC-IP-001 | 422 | Invoicing plan total ≠ line amount, percents not 100, a milestone rounding to nothing, or a line amount change the plan cannot absorb |
 | PRC-IP-002 | 422 | The plan has invoiced rows: it cannot be replaced or removed, nor its line cancelled |
 | PRC-IP-003 | 422 | The PO is cancelled or finalized, or the line is cancelled |

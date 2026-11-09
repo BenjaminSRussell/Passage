@@ -184,7 +184,7 @@ describe("new RFQ", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save RFQ" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/rfqs/${RFQ_ID}`));
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls.find((c) => (c[1] as RequestInit).method === "POST") as [string, RequestInit];
     expect(url).toBe("/api/v1/procurement/rfqs");
     expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
     const sent = body(init);

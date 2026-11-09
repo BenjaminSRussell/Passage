@@ -75,16 +75,13 @@ func insertRFQ(ctx context.Context, tx pgx.Tx, in domain.RFQ) (domain.RFQ, error
 		return domain.RFQ{}, err
 	}
 	number := fmt.Sprintf("RFQ-%08d", seq)
-	if _, err := tx.Exec(ctx, `insert into purchase_rfq (tenant_id, id, legal_entity_id, number, status, reply_deadline, ranking_rule, sealed, version)
-		values ($1, $2, $3, $4, 'DRAFT', $5, $6, $7, 1)`, p.TenantID, in.ID, in.LegalEntityID, number, in.ReplyDeadline, in.RankingRule,
-		in.Sealed); err != nil {
+	if _, err := tx.Exec(ctx, `insert into purchase_rfq (tenant_id, id, legal_entity_id, number, status, reply_deadline, ranking_rule, sealed, rfq_type_id, amendments_allowed, sealed_required, version)
+		values ($1, $2, $3, $4, 'DRAFT', $5, $6, $7, $8, $9, $10, 1)`, p.TenantID, in.ID, in.LegalEntityID, number, in.ReplyDeadline, in.RankingRule,
+		in.Sealed, nullable(in.RFQTypeID), in.AmendmentsAllowed, in.SealedRequired); err != nil {
 		return domain.RFQ{}, err
 	}
-	for i, c := range in.Criteria {
-		if _, err := tx.Exec(ctx, `insert into purchase_rfq_criterion (tenant_id, rfq_id, id, seq, name, weight)
-			values ($1, $2, $3, $4, $5, $6)`, p.TenantID, in.ID, ids.New(), i+1, c.Name, c.Weight); err != nil {
-			return domain.RFQ{}, err
-		}
+	if err := insertRFQCriteria(ctx, tx, in.ID, in.Criteria); err != nil {
+		return domain.RFQ{}, err
 	}
 	if err := claimRFQRequisitionLines(ctx, tx, in); err != nil {
 		return domain.RFQ{}, err
@@ -557,10 +554,11 @@ func loadRFQ(ctx context.Context, tx pgx.Tx, id string) (domain.RFQ, error) {
 	p, _ := tenant.FromContext(ctx)
 	var o domain.RFQ
 	err := tx.QueryRow(ctx, `select id, number, legal_entity_id, status, reply_deadline, ranking_rule, sealed, opened_at,
-		coalesce(opened_by::text, ''), version, created_at, updated_at
+		coalesce(opened_by::text, ''), version, coalesce(rfq_type_id::text, ''), amendments_allowed, sealed_required, amendment_no,
+		created_at, updated_at
 		from purchase_rfq where tenant_id = $1 and id = $2`, p.TenantID, id).
 		Scan(&o.ID, &o.Number, &o.LegalEntityID, &o.Status, &o.ReplyDeadline, &o.RankingRule, &o.Sealed, &o.OpenedAt, &o.OpenedBy,
-			&o.Version, &o.CreatedAt, &o.UpdatedAt)
+			&o.Version, &o.RFQTypeID, &o.AmendmentsAllowed, &o.SealedRequired, &o.AmendmentNo, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
 		return domain.RFQ{}, notFound(err, CodeRFQNotFound, "RFQ not found")
 	}
@@ -638,6 +636,9 @@ func loadRFQ(ctx context.Context, tx pgx.Tx, id string) (domain.RFQ, error) {
 		return r, err
 	})
 	if err != nil {
+		return domain.RFQ{}, err
+	}
+	if o.Amendments, err = loadAmendments(ctx, tx, id); err != nil {
 		return domain.RFQ{}, err
 	}
 	if o.Lines == nil {

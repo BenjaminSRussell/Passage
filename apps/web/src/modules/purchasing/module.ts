@@ -27,6 +27,7 @@ import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage
 import { RepricePage, RepriceRunPage } from "./RepricePages";
 import { RequisitionCreatePage, RequisitionDetailPage, RequisitionEditPage, RequisitionsPage } from "./RequisitionPages";
 import { RFQCreatePage, RFQDetailPage, RFQsPage } from "./RfqPages";
+import { RFQTypeCreatePage, RFQTypeDetailPage, RFQTypesPage } from "./RfqTypePages";
 import {
   SchedulingAgreementCreatePage,
   SchedulingAgreementDetailPage,
@@ -48,7 +49,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions with editing, withdrawal, approval, rejection and cancellation (of the whole requisition or one line), consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
+    "Requisitions with editing, withdrawal, approval, rejection and cancellation (of the whole requisition or one line), consolidation, requests for quotation with sealed bids, scoring, RFQ types and amendments that vendors acknowledge, purchase orders with approval, change versions, delivery warehouse per line and the open supply list, invoicing plans, delivery schedules and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, procurement catalogs that requesters pick from, category vendor assignments and managers, charge codes and auto charges for freight, handling and fees, service lines with outlines, unplanned limits and model service specifications, the changes planning messages and closed drop-ships made to purchase orders, signing limits with their requests and recertification, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -73,6 +74,9 @@ const purchasing: PassageModule = {
     { path: "/purchasing/rfqs", element: createElement(RFQsPage) },
     { path: "/purchasing/rfqs/new", element: createElement(RFQCreatePage), handle: { title: "New request for quotation" } },
     { path: "/purchasing/rfqs/:id", element: createElement(RFQDetailPage), handle: { title: "Request for quotation" } },
+    { path: "/purchasing/rfq-types", element: createElement(RFQTypesPage) },
+    { path: "/purchasing/rfq-types/new", element: createElement(RFQTypeCreatePage), handle: { title: "New RFQ type" } },
+    { path: "/purchasing/rfq-types/:id", element: createElement(RFQTypeDetailPage), handle: { title: "RFQ type" } },
     { path: "/purchasing/purchase-orders", element: createElement(PurchaseOrdersPage) },
     { path: "/purchasing/purchase-orders/new", element: createElement(PurchaseOrderCreatePage), handle: { title: "New purchase order" } },
     { path: "/purchasing/purchase-orders/:id", element: createElement(PurchaseOrderDetailPage), handle: { title: "Purchase order" } },
@@ -147,6 +151,7 @@ const purchasing: PassageModule = {
     { label: "Consolidation", to: "/purchasing/consolidation", duty: "procurement.purchase-order.maintain" },
     { label: "Release runs", to: "/purchasing/releases", duty: "procurement.purchase-order.inquire" },
     { label: "Requests for quotation", to: "/purchasing/rfqs", duty: "procurement.rfq.maintain" },
+    { label: "RFQ types", to: "/purchasing/rfq-types", duty: "procurement.rfq.maintain" },
     { label: "Purchase orders", to: "/purchasing/purchase-orders", duty: "procurement.purchase-order.inquire" },
     { label: "Open supply", to: "/purchasing/open-supply", duty: "procurement.purchase-order.inquire" },
     { label: "Inquiries", to: "/purchasing/inquiries", duty: "procurement.purchase-order.inquire" },

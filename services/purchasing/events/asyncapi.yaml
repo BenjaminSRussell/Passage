@@ -61,6 +61,16 @@ channels:
         $ref: '#/components/messages/RFQSent'
       rfqAwarded:
         $ref: '#/components/messages/RFQAwarded'
+      rfqAmended:
+        $ref: '#/components/messages/RFQAmended'
+  rfqtype:
+    address: passage.procurement.rfqtype
+    description: RFQ types (FR-17.19); the Kafka key is the RFQ type id.
+    messages:
+      rfqTypeCreated:
+        $ref: '#/components/messages/RFQTypeCreated'
+      rfqTypeChanged:
+        $ref: '#/components/messages/RFQTypeChanged'
   policy:
     address: passage.procurement.policy
     description: Purchasing policy changes (FR-17.13); the Kafka key is the legal entity id.
@@ -326,6 +336,24 @@ operations:
       $ref: '#/channels/rfq'
     messages:
       - $ref: '#/channels/rfq/messages/rfqAwarded'
+  publishRFQAmended:
+    action: send
+    channel:
+      $ref: '#/channels/rfq'
+    messages:
+      - $ref: '#/channels/rfq/messages/rfqAmended'
+  publishRFQTypeCreated:
+    action: send
+    channel:
+      $ref: '#/channels/rfqtype'
+    messages:
+      - $ref: '#/channels/rfqtype/messages/rfqTypeCreated'
+  publishRFQTypeChanged:
+    action: send
+    channel:
+      $ref: '#/channels/rfqtype'
+    messages:
+      - $ref: '#/channels/rfqtype/messages/rfqTypeChanged'
   publishSAReleaseCreated:
     action: send
     channel:
@@ -945,6 +973,48 @@ components:
               type: { type: string, const: dev.passage.procurement.rfq.awarded.v1 }
               subject: { type: string, format: uuid, description: RFQ id }
               data: { $ref: '#/components/schemas/RFQAwardedData' }
+    RFQAmended:
+      name: RFQAmended
+      title: rfq.amended.v1
+      x-passage-type: dev.passage.procurement.rfq.amended.v1
+      summary: An addendum was issued to a sent RFQ (FR-17.19). Carries the summary of the change, the vendors that must acknowledge it and the reply deadline in force. Portals and mail send it to the invited vendors.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.rfq.amended.v1 }
+              subject: { type: string, format: uuid, description: RFQ id }
+              data: { $ref: '#/components/schemas/RFQAmendedData' }
+    RFQTypeCreated:
+      name: RFQTypeCreated
+      title: rfqtype.created.v1
+      x-passage-type: dev.passage.procurement.rfqtype.created.v1
+      summary: An RFQ type was created for a legal entity (FR-17.19). Carries its sealed and amendment flags, ranking rule and the number of default scoring criteria.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.rfqtype.created.v1 }
+              subject: { type: string, format: uuid, description: RFQ type id }
+              data: { $ref: '#/components/schemas/RFQTypeData' }
+    RFQTypeChanged:
+      name: RFQTypeChanged
+      title: rfqtype.changed.v1
+      x-passage-type: dev.passage.procurement.rfqtype.changed.v1
+      summary: An RFQ type was changed or deactivated (FR-17.19); carries it at its new version. RFQs already created keep the flags they copied.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.rfqtype.changed.v1 }
+              subject: { type: string, format: uuid, description: RFQ type id }
+              data: { $ref: '#/components/schemas/RFQTypeData' }
   schemas:
     InboundChangeData:
       type: object
@@ -1246,6 +1316,38 @@ components:
               unit: { type: string }
               required_date: { type: string, format: date }
               requisition_line_id: { type: string, format: uuid, description: The requisition line the RFQ line was raised for, when it was }
+    RFQAmendedData:
+      type: object
+      required: [rfq_id, number, amendment_no, legal_entity_id, summary, vendor_ids, reply_deadline, criteria_changed, late_cleared_vendor_ids]
+      additionalProperties: false
+      properties:
+        rfq_id: { type: string, format: uuid }
+        number: { type: string, example: RFQ-00000001 }
+        amendment_no: { type: integer, minimum: 1, description: The addendum is RFQ-n-A<amendment_no> }
+        legal_entity_id: { type: string, format: uuid }
+        summary: { type: string }
+        vendor_ids: { type: array, items: { type: string, format: uuid }, description: The invited vendors, each owing an acknowledgement }
+        previous_deadline: { type: string, format: date-time, description: Present when the amendment moved the deadline }
+        reply_deadline: { type: string, format: date-time, description: The deadline in force after the amendment }
+        criteria_changed: { type: boolean, description: The amendment replaced the scoring criteria (only while no vendor is scored and no unsealed reply is readable) }
+        late_cleared_vendor_ids: { type: array, items: { type: string, format: uuid }, description: 'Vendors whose replies were late only against previous_deadline and count as on time since the deadline moved (BR-17.11); empty when none or when the deadline did not move' }
+        issued_by: { type: string, format: uuid }
+    RFQTypeData:
+      type: object
+      required: [rfq_type_id, legal_entity_id, code, name, sealed, amendments_allowed, ranking_rule, criteria_count, status, version]
+      additionalProperties: false
+      properties:
+        rfq_type_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        sealed: { type: boolean }
+        amendments_allowed: { type: boolean }
+        ranking_rule: { type: string, enum: [LOWEST_PRICE, LEAD_TIME, WEIGHTED_SCORE] }
+        criteria_count: { type: integer, minimum: 0 }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        version: { type: integer, minimum: 1 }
+        changed_by: { type: string, format: uuid }
     RFQAwardedData:
       type: object
       required: [rfq_id, number, legal_entity_id, awards]

@@ -22,6 +22,7 @@ import {
   createRFQ,
   describeProblem,
   getRFQ,
+  listRFQTypes,
   listRFQs,
   newIdempotencyKey,
   recordRFQReplies,
@@ -39,12 +40,15 @@ import {
   type RFQReplyInput,
   type RFQStatus,
   type RFQSummary,
+  type RFQType,
   type ScoringCriterion,
   type Warning,
 } from "./api/client";
 import {
   Details,
   LoadError,
+  formatInstant,
+  rankingLabels,
   ShortId,
   StatusBadge,
   currencyPattern,
@@ -56,22 +60,12 @@ import {
   uuidPattern,
   type Failure,
 } from "./parts";
+import { AmendmentsPanel, EditDraftForm } from "./RfqAmend";
 import styles from "./pages.module.css";
 
 const STATUSES: RFQStatus[] = ["DRAFT", "SENT", "REPLIES_OPEN", "CLOSED", "AWARDED", "CANCELLED"];
 
-export const rankingLabels: Record<RankingRule, string> = {
-  LOWEST_PRICE: "Lowest price, then lead time",
-  LEAD_TIME: "Shortest lead time, then price",
-  WEIGHTED_SCORE: "Highest weighted score, then price",
-};
-
-/** An instant as "2026-11-01 17:00 UTC", whatever offset the service used. */
-export function formatInstant(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
+export { formatInstant, rankingLabels };
 
 /** What a line asks for: its description, else the product id. */
 function lineItem(l: { productId?: string; description?: string }) {
@@ -189,6 +183,8 @@ interface HeaderDraft {
   sealed?: boolean;
   /** The scoring group (FR-17.19); WEIGHTED_SCORE needs one criterion at least. */
   criteria?: CriterionDraft[];
+  /** The RFQ type the request starts from (FR-17.19); it fills the flags and criteria. */
+  rfqTypeId?: string;
 }
 
 type Errors = Record<string, string>;
@@ -244,6 +240,7 @@ function toInput(h: HeaderDraft, lines: LineDraft[]): RFQInput {
     replyDeadline: new Date(h.deadline).toISOString(),
     rankingRule: h.rankingRule,
     sealed: h.sealed ? true : undefined,
+    rfqTypeId: h.rfqTypeId ? h.rfqTypeId : undefined,
     criteria: (h.criteria ?? []).length > 0 ? (h.criteria ?? []).map((c) => ({ name: c.name.trim(), weight: c.weight.trim() })) : undefined,
     lines: lines.map((l) => ({
       productId: opt(l.productId),
@@ -266,6 +263,27 @@ export function RFQCreatePage() {
     criteria: [],
   });
   const criteria = header.criteria ?? [];
+  // The type list only helps; the form works without it, so a failed load shows nothing.
+  const entityId = header.legalEntityId.trim();
+  const typeList = useResource(
+    async (signal) => (uuidPattern.test(entityId) ? (await listRFQTypes({ status: "ACTIVE", legalEntityId: entityId }, { signal })).items : []),
+    [entityId],
+  );
+  const types = typeList.data ?? [];
+  const chosenType = types.find((t) => t.id === header.rfqTypeId);
+  function chooseType(typeId: string) {
+    const t: RFQType | undefined = types.find((x) => x.id === typeId);
+    if (!t) {
+      setH({ rfqTypeId: "" });
+      return;
+    }
+    setH({
+      rfqTypeId: t.id,
+      sealed: t.sealed || header.sealed,
+      rankingRule: t.rankingRule,
+      criteria: criteria.length > 0 ? criteria : t.criteria.map((c) => ({ key: newIdempotencyKey(), name: c.name, weight: c.weight })),
+    });
+  }
   const setCriterion = (index: number, patch: Partial<CriterionDraft>) =>
     setH({ criteria: criteria.map((c, i) => (i === index ? { ...c, ...patch } : c)) });
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
@@ -310,6 +328,20 @@ export function RFQCreatePage() {
             <FormField id="rfq-deadline" label="Reply deadline" hint="Your local time" error={errors.replyDeadline}>
               {(c) => <Input {...c} type="datetime-local" value={header.deadline} onChange={(e) => setH({ deadline: e.target.value })} />}
             </FormField>
+            {types.length > 0 ? (
+              <FormField id="rfq-type" label="RFQ type" optional hint="Fills the bidding rules and scoring criteria below">
+                {(c) => (
+                  <Select {...c} value={header.rfqTypeId ?? ""} onChange={(e) => chooseType(e.target.value)}>
+                    <option value="">No type</option>
+                    {types.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.code} - {t.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+            ) : null}
             <FormField id="rfq-ranking" label="Rank replies by" error={errors.rankingRule}>
               {(c) => (
                 <Select {...c} value={header.rankingRule} onChange={(e) => setH({ rankingRule: e.target.value as RankingRule })}>
@@ -333,8 +365,16 @@ export function RFQCreatePage() {
         >
           <div className={styles.form}>
             <div className={styles.checkboxRow}>
-              <Input id="rfq-sealed" type="checkbox" checked={header.sealed ?? false} onChange={(e) => setH({ sealed: e.target.checked })} />
-              <label htmlFor="rfq-sealed">Sealed bids: keep replies hidden until the deadline and refuse late replies</label>
+              <Input
+                id="rfq-sealed"
+                type="checkbox"
+                checked={header.sealed ?? false}
+                disabled={chosenType?.sealed}
+                onChange={(e) => setH({ sealed: e.target.checked })}
+              />
+              <label htmlFor="rfq-sealed">
+                Sealed bids: keep replies hidden until the deadline and refuse late replies{chosenType?.sealed ? " (required by the type)" : ""}
+              </label>
             </div>
             {criteria.length === 0 ? (
               <p className={styles.muted}>
@@ -605,6 +645,7 @@ export function RFQDetailPage() {
             { label: "Reply deadline", value: formatInstant(rfq.replyDeadline), mono: true },
             { label: "Ranking", value: rankingLabels[rfq.rankingRule] ?? rfq.rankingRule },
             { label: "Bidding", value: biddingLabel(rfq) },
+            ...((rfq.amendmentNo ?? 0) > 0 ? [{ label: "Amendments", value: String(rfq.amendmentNo), mono: true }] : []),
             { label: "Version", value: String(rfq.version), mono: true },
             { label: "Created", value: rfq.createdAt.slice(0, 10), mono: true },
           ]}
@@ -617,6 +658,17 @@ export function RFQDetailPage() {
           columns={criterionColumns}
           rows={rfq.criteria ?? []}
           getRowKey={(c) => c.id}
+        />
+      ) : null}
+      {rfq.status === "DRAFT" ? (
+        <EditDraftForm
+          key={rfq.version}
+          rfq={rfq}
+          onSaved={(r) => {
+            setChanged(r);
+            setFailure(null);
+            setNotice("Draft changes saved.");
+          }}
         />
       ) : null}
       {rfq.status === "DRAFT" ? (
@@ -638,6 +690,15 @@ export function RFQDetailPage() {
           rows={rfq.invitations}
           getRowKey={(i) => i.vendorId}
           empty={{ title: "No vendors invited" }}
+        />
+      ) : null}
+      {rfq.status === "SENT" || rfq.status === "REPLIES_OPEN" || (rfq.amendments ?? []).length > 0 ? (
+        <AmendmentsPanel
+          rfq={rfq}
+          onChanged={(r) => {
+            setChanged(r);
+            setFailure(null);
+          }}
         />
       ) : null}
       {openForReplies ? (

@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, Badge, Button, type BadgeTone } from "../../shell/ui";
-import { describeProblem } from "./api/client";
+import { describeProblem, type RankingRule } from "./api/client";
 import styles from "./pages.module.css";
 
 export const dash = "—";
+
+export const rankingLabels: Record<RankingRule, string> = {
+  LOWEST_PRICE: "Lowest price, then lead time",
+  LEAD_TIME: "Shortest lead time, then price",
+  WEIGHTED_SCORE: "Highest weighted score, then price",
+};
+
+/** An instant as "2026-11-01 17:00 UTC", whatever offset the service used. */
+export function formatInstant(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
 
 export interface Failure {
   message: string;

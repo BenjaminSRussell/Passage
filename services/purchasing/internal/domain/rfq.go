@@ -117,25 +117,32 @@ type RFQReply struct {
 // ReplyCount still counts the replies. OpenedAt and OpenedBy log the first
 // time the sealed replies were shown after the deadline.
 type RFQ struct {
-	ID            string             `json:"id"`
-	Number        string             `json:"number"`
-	LegalEntityID string             `json:"legalEntityId"`
-	Status        string             `json:"status"`
-	ReplyDeadline time.Time          `json:"replyDeadline"`
-	RankingRule   string             `json:"rankingRule"`
-	Sealed        bool               `json:"sealed"`
-	RepliesSealed bool               `json:"repliesSealed"`
-	ReplyCount    int                `json:"replyCount"`
-	OpenedAt      *time.Time         `json:"openedAt,omitempty"`
-	OpenedBy      string             `json:"openedBy,omitempty"`
-	Version       int                `json:"version"`
-	Lines         []RFQLine          `json:"lines"`
-	Invitations   []RFQInvitation    `json:"invitations"`
-	Replies       []RFQReply         `json:"replies"`
-	Criteria      []ScoringCriterion `json:"criteria"`
-	Scores        []VendorScore      `json:"scores"`
-	CreatedAt     time.Time          `json:"createdAt"`
-	UpdatedAt     time.Time          `json:"updatedAt"`
+	ID            string     `json:"id"`
+	Number        string     `json:"number"`
+	LegalEntityID string     `json:"legalEntityId"`
+	Status        string     `json:"status"`
+	ReplyDeadline time.Time  `json:"replyDeadline"`
+	RankingRule   string     `json:"rankingRule"`
+	Sealed        bool       `json:"sealed"`
+	RepliesSealed bool       `json:"repliesSealed"`
+	ReplyCount    int        `json:"replyCount"`
+	OpenedAt      *time.Time `json:"openedAt,omitempty"`
+	OpenedBy      string     `json:"openedBy,omitempty"`
+	Version       int        `json:"version"`
+	// RFQTypeID is the RFQ type the RFQ was created from; AmendmentsAllowed was copied from it (true without
+	// a type) and AmendmentNo counts the amendments issued.
+	RFQTypeID         string             `json:"rfqTypeId,omitempty"`
+	AmendmentsAllowed bool               `json:"amendmentsAllowed"`
+	SealedRequired    bool               `json:"sealedRequired"`
+	AmendmentNo       int                `json:"amendmentNo"`
+	Amendments        []RFQAmendment     `json:"amendments"`
+	Lines             []RFQLine          `json:"lines"`
+	Invitations       []RFQInvitation    `json:"invitations"`
+	Replies           []RFQReply         `json:"replies"`
+	Criteria          []ScoringCriterion `json:"criteria"`
+	Scores            []VendorScore      `json:"scores"`
+	CreatedAt         time.Time          `json:"createdAt"`
+	UpdatedAt         time.Time          `json:"updatedAt"`
 }
 
 // Award gives one RFQ line to one reply. OverrideReason is required to award a
