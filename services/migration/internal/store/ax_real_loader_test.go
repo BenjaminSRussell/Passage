@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -137,25 +138,28 @@ func axDemoRows(t *testing.T, e axLoaderEntity) axRows {
 	return out
 }
 
-func axExpectedDemo(t *testing.T) map[string]struct {
-	Loaded  int
-	Rejects map[string][]string
-} {
+type axExpectation struct {
+	Demo map[string]struct {
+		Loaded  int
+		Rejects map[string][]string
+	}
+	DemoReal struct {
+		PartyRejectsByRecId map[string][]string
+		UnresolvedParty     map[string]map[string][]string
+	}
+}
+
+func axExpectedDemo(t *testing.T) axExpectation {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(axDemoDir, "expected.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc struct {
-		Demo map[string]struct {
-			Loaded  int
-			Rejects map[string][]string
-		}
-	}
+	var doc axExpectation
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	return doc.Demo
+	return doc
 }
 
 func axRejectCodes(rep domain.Report) map[string][]string {
@@ -171,7 +175,10 @@ func axRejectCodes(rep domain.Report) map[string][]string {
 	return out
 }
 
-func axJoin(rows axRows, productKeys []string, extra func(i int, product, next string) map[string]any) axRows {
+func axJoin(t *testing.T, rows axRows, productKeys []string, extra func(i int, product, next string) map[string]any) axRows {
+	if len(productKeys) == 0 {
+		t.Fatal("the item load created no rows, so there is no product to join onto the BOM and route extracts")
+	}
 	out := make(axRows, len(rows))
 	for i, r := range rows {
 		fields := map[string]any{}
@@ -206,17 +213,16 @@ func TestPostgres_AXDemoExtractMigratesThroughTheRealLoader(t *testing.T) {
 	expected := axExpectedDemo(t)
 
 	var items []string
-	deadParties := map[string]bool{}
 	created := map[string]int{}
 	for _, e := range axLoaderEntities {
 		rows := axDemoRows(t, e)
 		switch e.entity {
 		case "bom":
-			rows = axJoin(rows, items, func(i int, _, next string) map[string]any {
+			rows = axJoin(t, rows, items, func(i int, _, next string) map[string]any {
 				return map[string]any{"lines": fmt.Sprintf(`[{"lineNo":10,"componentKey":%q,"quantity":"2.5"}]`, next)}
 			})
 		case "route":
-			rows = axJoin(rows, items, func(int, string, string) map[string]any {
+			rows = axJoin(t, rows, items, func(int, string, string) map[string]any {
 				return map[string]any{"operations": `[{"no":10,"nextNo":20},{"no":20}]`}
 			})
 		}
@@ -234,25 +240,18 @@ func TestPostgres_AXDemoExtractMigratesThroughTheRealLoader(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", e.entity, err)
 		}
-		want := expected[e.entity]
-		orphans := map[string]bool{}
-		for _, r := range rows {
-			party, _ := r.Fields["Party"].(string)
-			if _, queued := want.Rejects[r.Key]; !queued && deadParties[strings.TrimSpace(party)] {
-				orphans[r.Key] = true
-			}
+		want := expected.Demo[e.entity]
+		wantRejects, orphans := want.Rejects, expected.DemoReal.UnresolvedParty[e.entity]
+		if e.entity == "party" {
+			wantRejects = expected.DemoReal.PartyRejectsByRecId
+		} else if len(orphans) > 0 {
+			wantRejects = map[string][]string{}
+			maps.Copy(wantRejects, want.Rejects)
+			maps.Copy(wantRejects, orphans)
 		}
 		got := axRejectCodes(rep)
-		for key, codes := range got {
-			for _, c := range codes {
-				refused := strings.HasPrefix(c, "MIG-TARGET-") || strings.HasPrefix(c, "MIG-LOAD-") || strings.HasPrefix(c, "MIG-REF-")
-				if refused && (c != "MIG-REF-UNRESOLVED" || !orphans[key]) {
-					t.Errorf("%s %s: the real loader refused the row: %s", e.entity, key, c)
-				}
-			}
-		}
-		if rep.Created != want.Loaded-len(orphans) || len(got) != len(want.Rejects)+len(orphans) {
-			t.Errorf("%s: created %d rejected %d, the reference loads %d and rejects %d plus %d rows whose party it rejected", e.entity, rep.Created, len(got), want.Loaded, len(want.Rejects), len(orphans))
+		if !maps.EqualFunc(got, wantRejects, slices.Equal) || rep.Created != want.Loaded-len(orphans) {
+			t.Errorf("%s: created %d, rejected %v\n want created %d, rejected %v", e.entity, rep.Created, got, want.Loaded-len(orphans), wantRejects)
 		}
 		recon := rep.Reconciliation
 		if recon == nil || recon.OK() != (len(orphans) == 0) || recon.Source != rep.Created+len(orphans) || recon.Target != rep.Created {
@@ -283,11 +282,6 @@ func TestPostgres_AXDemoExtractMigratesThroughTheRealLoader(t *testing.T) {
 			t.Fatalf("%s: re-run created=%d updated=%d unchanged=%d (want %d) rejects %d->%d", e.entity, again.Created, again.Updated, again.Unchanged, rep.Created, len(rep.Rejects), len(again.Rejects))
 		}
 		created[e.entity] = rep.Created
-		if e.entity == "party" {
-			for key := range got {
-				deadParties[key] = true
-			}
-		}
 		if e.entity == "item" {
 			for _, entry := range rep.Ledger {
 				items = append(items, entry.SourceKey)
@@ -307,13 +301,4 @@ func TestPostgres_AXDemoExtractMigratesThroughTheRealLoader(t *testing.T) {
 			t.Errorf("target services hold %d %s records, the loads created %d", held[name], name, n)
 		}
 	}
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
 }
