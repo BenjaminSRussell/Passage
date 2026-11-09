@@ -1,15 +1,14 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
-import { Link, NavLink, matchPath, useLocation } from "react-router-dom";
-import type { NavItem, PassageModule } from "../modules/registry";
+import { useRef, type RefObject } from "react";
+import { Link, NavLink } from "react-router-dom";
 import { copy, shortcutHint } from "./copy";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 import styles from "./Shell.module.css";
 import type { ShellNavItem } from "./shellNav";
 import { Button, Icon } from "./ui";
-import { workspaceIcon } from "./workspaceIcons";
+import { useWorkspaceNav } from "./workspaces/WorkspaceNav";
+import { WorkspaceSwitcher } from "./workspaces/WorkspaceSwitcher";
 
 export interface SidebarProps {
-  modules: PassageModule[];
   shellNav: ShellNavItem[];
   drawerOpen: boolean;
   searchRef: RefObject<HTMLButtonElement | null>;
@@ -17,23 +16,11 @@ export interface SidebarProps {
   onCloseDrawer(): void;
 }
 
-function containsPath(items: NavItem[], pathname: string): boolean {
-  return items.some((n) => matchPath({ path: n.to, end: true }, pathname) !== null);
-}
-
-export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
-  const { pathname } = useLocation();
+export function Sidebar({ shellNav, drawerOpen, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
   const asideRef = useRef<HTMLElement>(null);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const { active } = useWorkspaceNav();
 
   useFocusTrap(asideRef, drawerOpen);
-
-  useEffect(() => {
-    const owner = modules.find((m) => containsPath(m.nav, pathname));
-    if (owner) {
-      setCollapsed((current) => (current[owner.id] ? { ...current, [owner.id]: false } : current));
-    }
-  }, [pathname, modules]);
 
   const dialogProps = drawerOpen ? { role: "dialog", "aria-modal": true, "aria-label": "Navigation" } : {};
 
@@ -80,6 +67,7 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
           <kbd aria-hidden="true">{shortcutHint}</kbd>
         </button>
       </div>
+      <WorkspaceSwitcher />
       <nav aria-label="Workspaces" className={styles.nav}>
         <ul className={styles.list}>
           {shellNav.map((n) => (
@@ -91,38 +79,22 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
             </li>
           ))}
         </ul>
-        {modules.map((m) => {
-          const open = !collapsed[m.id];
-          const headerId = `nav-group-${m.id}`;
-          const listId = `nav-list-${m.id}`;
-          return (
-            <div key={m.id} className={styles.group}>
-              <button
-                type="button"
-                id={headerId}
-                className={styles.groupHeader}
-                aria-expanded={open}
-                aria-controls={listId}
-                onClick={() => setCollapsed((current) => ({ ...current, [m.id]: open }))}
-              >
-                <Icon name={workspaceIcon(m.id)} />
-                <span className={styles.groupTitle}>{m.title}</span>
-                <span className={styles.chevron}>
-                  <Icon name="chevronRight" />
-                </span>
-              </button>
-              <ul id={listId} className={styles.list} aria-labelledby={headerId} hidden={!open}>
-                {m.nav.map((n) => (
-                  <li key={n.to}>
-                    <NavLink end to={n.to} className={`${styles.item} ${styles.groupItem}`} onClick={onCloseDrawer}>
-                      {n.label}
-                    </NavLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
+        {active ? (
+          <div className={styles.group}>
+            <p id="nav-active-workspace" className={styles.groupLabel}>
+              {active.label}
+            </p>
+            <ul className={styles.list} aria-labelledby="nav-active-workspace">
+              {active.entries.map((n) => (
+                <li key={n.to}>
+                  <NavLink end to={n.to} className={styles.item} onClick={onCloseDrawer}>
+                    {n.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </nav>
     </aside>
   );

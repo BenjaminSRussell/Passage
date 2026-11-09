@@ -3,7 +3,21 @@ const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platfo
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
 export const copy = {
-  nav: { home: "Home", notes: "Notes", general: "General" },
+  nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features" },
+  workspaces: {
+    switcherLabel: "Workspace",
+    chooseSummary: "Choose my workspaces",
+    chooseLegend: "Workspaces shown in the switcher",
+  },
+  allFeatures: {
+    pageTitle: "All features",
+    description: "Everything you have access to, grouped by business area. Technical screens are under Advanced.",
+    filterLabel: "Filter features",
+    filterPlaceholder: "Type a task or screen name",
+    advanced: "Advanced",
+    count: (count: number) => (count === 1 ? "1 feature" : `${count} features`),
+    noMatches: (query: string) => `No features match “${query}”.`,
+  },
   buttons: {
     search: "Search",
     closeSearch: "Close search",
@@ -37,9 +51,11 @@ export const copy = {
   },
   home: {
     pageTitle: "Workspaces",
-    description: `Open a workspace, or press ${shortcutHint} to jump to any page.`,
+    description: `Start with your top tasks, or press ${shortcutHint} to jump to any page.`,
+    topTasks: "Top tasks",
+    seeAll: "See all features",
     emptyTitle: "No workspaces yet",
-    emptyDescription: "Workspaces appear here once they're installed.",
+    emptyDescription: "Workspaces appear here once your account has access to their features.",
   },
   notes: {
     title: "Notes",

@@ -1,41 +1,31 @@
-import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import type { PassageModule } from "../../modules/registry";
 import { copy } from "../copy";
-import { visibleModules } from "../dutyGate";
-import { usePrincipalDuties } from "../principal";
 import { Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
-import { workspaceIcon } from "../workspaceIcons";
+import { ALL_FEATURES_PATH, TOP_TASK_COUNT } from "../workspaces/model";
+import { useWorkspaceNav } from "../workspaces/WorkspaceNav";
 import styles from "./pages.module.css";
 
-export interface HomePageProps {
-  modules: PassageModule[];
-}
-
-export function HomePage({ modules: allModules }: HomePageProps) {
-  const duties = usePrincipalDuties();
-  const modules = useMemo(() => visibleModules(allModules, duties), [allModules, duties]);
+export function HomePage() {
+  const { held, active } = useWorkspaceNav();
+  const ordered = active ? [active, ...held.filter((w) => w.id !== active.id)] : held;
   return (
     <>
       <PageHeader title={copy.home.pageTitle} description={copy.home.description} />
-      {modules.length === 0 ? (
+      {ordered.length === 0 ? (
         <Card>
           <EmptyState icon="grid" title={copy.home.emptyTitle} description={copy.home.emptyDescription} />
         </Card>
       ) : (
         <CardGrid as="ul" label={copy.home.pageTitle}>
-          {modules.map((m) => (
-            <li key={m.id} className={styles.cell}>
+          {ordered.map((w) => (
+            <li key={w.id} className={styles.cell}>
               <Card>
                 <div className={styles.cardHead}>
-                  <span className={styles.tile}>
-                    <Icon name={workspaceIcon(m.id)} size={20} />
-                  </span>
-                  <h3 className={styles.cardTitle}>{m.title}</h3>
+                  <h3 className={styles.cardTitle}>{w.label}</h3>
                 </div>
-                {m.description ? <p className={styles.cardDescription}>{m.description}</p> : null}
-                <ul className={styles.links}>
-                  {m.nav.map((n) => (
+                <p className={styles.cardDescription}>{w.description}</p>
+                <ul className={styles.links} aria-label={`${w.label}: ${copy.home.topTasks}`}>
+                  {w.entries.slice(0, TOP_TASK_COUNT).map((n) => (
                     <li key={n.to}>
                       <Link to={n.to} className={styles.link}>
                         <span>{n.label}</span>
@@ -49,6 +39,9 @@ export function HomePage({ modules: allModules }: HomePageProps) {
           ))}
         </CardGrid>
       )}
+      <p>
+        <Link to={ALL_FEATURES_PATH}>{copy.home.seeAll}</Link>
+      </p>
     </>
   );
 }

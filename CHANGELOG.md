@@ -10,6 +10,15 @@ release may change public APIs.
 
 ### Added
 
+- Role-based workspaces and navigation in the web app (#498): the sidebar shows one of ten persona workspaces (AP clerk,
+  AR and collections clerk, buyer, receiving and warehouse worker, sales rep or order desk, production planner,
+  shop-floor supervisor, accountant or controller, HR or payroll admin, tenant admin) with 17 to 20 entries each in
+  task language, switchable and holdable several at a time, instead of every module. The new All features page groups
+  every entry the user may open by eight business areas, with technical screens under Advanced and a filter that also
+  matches the old screen names; search uses the task labels too. Workspaces and areas are data
+  (`apps/web/src/shell/workspaces/workspaces.json`) with a loader that accepts a per-tenant override. The audit of all
+  607 sidebar entries (`navAudit.json`: keep, merge or advanced, area and task label) is committed, and a test fails
+  when a module adds an entry that is not classified. Duty gating still applies inside workspaces.
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin

@@ -5,6 +5,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
 import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
+import { AllFeaturesPage } from "./shell/pages/AllFeaturesPage";
 import { HomePage } from "./shell/pages/HomePage";
 import { NotesPage } from "./shell/pages/NotesPage";
 import { NotFoundPage } from "./shell/pages/NotFoundPage";
@@ -17,8 +18,9 @@ const router = createBrowserRouter([
     path: "/",
     element: <Shell modules={modules} />,
     children: [
-      { index: true, element: <HomePage modules={modules} /> },
+      { index: true, element: <HomePage /> },
       { path: "notes", element: <NotesPage /> },
+      { path: "features", element: <AllFeaturesPage /> },
       ...modules.flatMap((m) => m.routes),
       { path: "*", element: <NotFoundPage /> },
     ],
