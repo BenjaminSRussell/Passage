@@ -2,7 +2,15 @@
 
 Passage is an open-architecture **ERP** (enterprise resource planning) system: the software a company runs its finance, purchasing, inventory, manufacturing, sales and HR on. It is being built from scratch to replace Microsoft Dynamics AX / D365 and SAP ECC / S/4HANA, in **50 sequential waves**. Every wave ships something that can be tested and deployed.
 
-**Status:** early build. Most domains exist as Go services with tests and a web screen, but there is no single "start everything" command yet, and the API gateway and login (Keycloak) are not wired. See [roadmap/README.md](roadmap/README.md) for where each wave stands.
+**Status:** early build. Most domains exist as Go services with tests and a web screen. `make dev` starts Postgres, Kafka, Keycloak and OPA in Docker plus a subset of services, a dev gateway and the web app, with Keycloak sign-in; the vendor, purchase order, receipt, invoice and ledger entry flow is proven end to end by `tools/e2e` (see [Run the whole thing](#run-the-whole-thing)). Not working yet:
+
+- Only ledger, numbering, party, purchasing and receiving run under `make dev`; the other services, and payables (so no payment run), are not started or routed.
+- The dev gateway is a local stand-in for the Envoy gateway ([#82](https://github.com/BenjaminSRussell/Passage/issues/82)); the Kubernetes gateway is not exercised locally.
+- Kafka runs but no service connects to it in this stack, so event-driven side effects (postings consumers, projections) do not happen.
+- Receiving runs in its fake mode (`PASSAGE_ALLOW_FAKES=1`): periods are not checked and posting accounts are defaults.
+- The Keycloak and Docker bring-up is documented but has not been run on CI; the Playwright login spec needs the live stack.
+
+See [roadmap/README.md](roadmap/README.md) for where each wave stands.
 
 ## What's in the repo
 
@@ -21,6 +29,16 @@ Stack ([ADR-0001](docs/adr/0001-platform-stack.md)): Kubernetes · Go, TypeScrip
 ## Run it locally
 
 **Prerequisites:** Go 1.26+, Node 24.15+ (or 22.22.2+), Python 3.11+, and Docker.
+
+### Run the whole thing
+
+**Prerequisites:** Docker with the compose plugin, `psql`, Go 1.26+, Node (see above) and `npm ci` once in `apps/web`.
+
+```sh
+make dev           # Ctrl-C stops the services; `make dev-down` removes the containers
+```
+
+Open http://localhost:5173 and sign in as `admin` / `passage-admin-dev` (every duty the purchase-to-ledger flow needs, plus the admin screens) or `clerk` / `passage-clerk-dev` (no admin duties: the admin navigation is hidden and the gateway answers 403 on admin routes). Users, duties and the tenant come from [deploy/local/seed.json](deploy/local/seed.json); see [deploy/local/README.md](deploy/local/README.md) for what runs where.
 
 ### 1. The web app
 
@@ -44,7 +62,7 @@ PASSAGE_DEV_DUTIES=ledger.journal.read,ledger.journal.post   # comma-separated; 
 
 `PASSAGE_DEV_DUTIES` defaults to empty, so any duty-guarded call returns 403 until you set the duties the service checks. The same list is given to the shell's modules so UI that needs a duty (for example `org.hierarchy.write` for the hierarchy designer's edit mode) is shown; restart `vite` after changing it. Gated nav entries and routes are hidden for duties you lack; set `PASSAGE_DEV_SHOW_ALL_NAV=1` to show every nav entry and open every page in `vite` without changing the duties sent to services.
 
-The gateway ([#82](https://github.com/BenjaminSRussell/Passage/issues/82)) is expected to do the same: its HTTPRoutes match `/api/v1/<svc>` and rewrite to `/v1/<svc>` (strip `/api`), and set the `X-Passage-*` headers from the verified token.
+The Kubernetes gateway ([#82](https://github.com/BenjaminSRussell/Passage/issues/82)) does the same: its HTTPRoutes match `/api/v1/<svc>` and rewrite to `/v1/<svc>` (strip `/api`), and set the `X-Passage-*` headers from the verified token.
 
 ### 2. One backend service
 

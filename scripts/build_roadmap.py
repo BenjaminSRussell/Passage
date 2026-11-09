@@ -44,6 +44,9 @@ def validate(phases, waves):
         for d in w["depends_on"]:
             if d >= w["n"]:
                 errors.append(f"wave {w['n']} depends on {d}, which is not earlier (must be sequential)")
+        for path in w.get("verified_by", []):
+            if not (ROOT / path).is_file():
+                errors.append(f"wave {w['n']} verified_by names {path}, which does not exist")
         for key in ("goal", "replaces", "deliverable", "proof", "deploy", "references"):
             if not w.get(key):
                 errors.append(f"wave {w['n']} missing {key}")
@@ -76,6 +79,8 @@ def wave_md(w, phases):
     lines += ["**Proof (testable acceptance)**", ""] + [f"- [ ] {t}" for t in w["proof"]] + [""]
     lines += ["**Deploy**", "", w["deploy"], ""]
     lines += ["**References**", ""] + [f"- [{r['name']}]({r['url']})" for r in w["references"]] + [""]
+    if w.get("verified_by"):
+        lines += ["**Partly verified end to end by**", ""] + [f"- `{t}`" for t in w["verified_by"]] + [""]
     deps = ", ".join(f"wave {d}" for d in w["depends_on"]) or "none (first wave)"
     lines += [f"**Depends on:** {deps}", ""]
     return "\n".join(lines)

@@ -10,6 +10,14 @@ release may change public APIs.
 
 ### Added
 
+- Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
+  seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
+  `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web
+  app. The web app signs in through Keycloak with the authorization-code flow and PKCE when `PASSAGE_OIDC_ISSUER` is
+  set and sends the bearer token on `/api/` calls. `tools/e2e` runs vendor, purchase order, receipt, invoice and
+  ledger entry against the real service binaries, directly and through the gateway with a real OPA, and checks that
+  a non-admin gets 403 on admin routes. `roadmap/waves.json` records which waves a test verifies end to end.
+
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
