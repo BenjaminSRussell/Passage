@@ -69,6 +69,7 @@ func newAdminFixture(t *testing.T) *adminFixture {
 	r := chi.NewRouter()
 	identity.NewTenantsAPI(app, f.operator).Register(r)
 	identity.NewLegalEntitiesAPI(app).Register(r)
+	identity.NewTenantFeaturesAPI(app).Register(r)
 	identity.NewRoleAssignmentsAPI(app, catalogue, f.operator).Register(r)
 	identity.NewEffectivePermissionsAPI(app, catalogue).Register(r)
 	identity.NewUsersAPI(app).Register(r)

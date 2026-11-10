@@ -50,6 +50,8 @@
     "platform.environment.rollback": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["POST"]}]},
     "identity.tenant.maintain": {"permissions": [{"resource": "/v1/tenants{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
+    "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
     "platform.saved-view.maintain": {"permissions": [{"resource": "/v1/saved-views{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "hello.ledger.maintain": {"permissions": [{"resource": "/v1/hello-ledger{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "product.product.view": {"permissions": [{"resource": "/v1/product{,/**}", "methods": ["GET"]}]},
@@ -584,7 +586,17 @@
       {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases/*", "methods": ["GET"]},
-      {"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}
+      {"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]},
+      {"resource": "/v1/procurement/acknowledgements", "methods": ["GET"]},
+      {"resource": "/v1/procurement/acknowledgements/awaiting", "methods": ["GET"]},
+      {"resource": "/v1/procurement/purchase-orders/*/acknowledgements", "methods": ["GET"]}
+    ]},
+    "procurement.vendor-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/vendor/purchase-orders", "methods": ["GET"]},
+      {"resource": "/v1/procurement/vendor/purchase-orders/*", "methods": ["GET"]}
+    ]},
+    "procurement.vendor-portal.acknowledge": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/vendor/purchase-orders/*/acknowledgements", "methods": ["POST"]}
     ]},
     "purchasing.inbound.apply": {"flag": true, "permissions": []},
     "procurement.purchase-order.confirm": {"permissions": [
@@ -592,6 +604,8 @@
       {"resource": "/v1/procurement/purchase-orders/*:reject", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders/*:confirm", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders:reprice", "methods": ["POST"]},
+      {"resource": "/v1/procurement/acknowledgements/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/procurement/acknowledgements/*:decline", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/drop-ships/*:confirm", "methods": ["POST"]}
     ]},
     "procurement.trade-agreement.maintain": {"permissions": [
@@ -1841,7 +1855,7 @@
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
       {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]},
       {"resource": "/v1/mobile/offline/conflicts", "methods": ["GET"]},
-      {"resource": "/v1/mobile/offline/conflicts/**:resolve", "methods": ["POST"]}
+      {"resource": "/v1/mobile/offline/conflicts/*:*:resolve", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.pack": {"permissions": [
       {"resource": "/v1/fulfillment/shipments/*/containers", "methods": ["POST"]},
@@ -2981,6 +2995,7 @@
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]}
     ]},
     "revrec.creditnote.reverse": {"flag": true, "permissions": []},
+    "receivables.openitem.from-billing": {"flag": true, "permissions": []},
     "revrec.post": {"permissions": [
       {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
       {"resource": "/v1/revrec/journal-postings", "methods": ["POST"]}
@@ -3599,6 +3614,9 @@
     },
     "fieldservice": {
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
+    },
+    "processmfg": {
+      "identity": ["identity.feature.view"]
     }
   },
   "service_principals": {
@@ -3615,6 +3633,7 @@
     "production-planning": ["production.planned.intake"],
     "production-shopfloor": ["production.jobcard.shopfloor"],
     "receiving-erasure": ["compliance.legal-hold.check"],
+    "receivables-billing": ["receivables.openitem.from-billing"],
     "revrec-creditnotes": ["revrec.creditnote.reverse"],
     "receiving-ers": ["receiving.vendor-invoice.post"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
