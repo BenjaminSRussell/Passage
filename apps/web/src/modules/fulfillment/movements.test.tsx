@@ -66,12 +66,11 @@ describe("Returnable packaging movements", () => {
     renderAt("/fulfillment/returnable-movements");
     expect(await screen.findByText("No returnable packaging movements yet")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Customer id"), { target: { value: "nope" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
-    expect(await screen.findByText(/Enter the customer id/)).toBeInTheDocument();
-    expect(calls(MOVEMENTS)).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "nope" } });
+    expect(screen.getByLabelText("Customer")).toHaveAttribute("data-value", "");
+    expect(screen.queryByText(/Enter the customer id/)).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Customer id"), { target: { value: CUSTOMER } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUSTOMER } });
     fireEvent.change(screen.getByLabelText("Container type"), { target: { value: "PALLET" } });
     fireEvent.change(screen.getByLabelText("Movement"), { target: { value: "RETURNED" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
@@ -123,7 +122,7 @@ describe("Correct a returnable balance", () => {
     expect(screen.getByText(/Give the reason, 3 to 200 characters/)).toBeInTheDocument();
     expect(calls(ADJUST, "POST")).toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText("Customer id", { selector: "#adj-customer" }), { target: { value: CUSTOMER } });
+    fireEvent.change(screen.getByLabelText("Customer", { selector: "#adj-customer" }), { target: { value: CUSTOMER } });
     fireEvent.change(screen.getByLabelText("Container type", { selector: "#adj-type" }), { target: { value: "PALLET" } });
     fireEvent.change(screen.getByLabelText("Change in containers"), { target: { value: "0" } });
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Lost" } });

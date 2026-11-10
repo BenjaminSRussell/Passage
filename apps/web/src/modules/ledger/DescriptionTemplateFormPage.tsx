@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
@@ -155,8 +156,8 @@ function TemplateForm({ id, initial, existing, lockVersion }: { id: string; init
           )}
         </FormField>
         {values.scope === "legal_entity" ? (
-          <FormField id="dt-legal-entity" label="Legal entity id" hint="Its template wins over the one for all legal entities." error={errors.legalEntityId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
+          <FormField id="dt-legal-entity" label="Legal entity" hint="Its template wins over the one for all legal entities." error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
         ) : null}
         <div className={styles.wide}>

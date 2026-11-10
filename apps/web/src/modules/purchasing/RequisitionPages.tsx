@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -377,8 +378,8 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Requisition">
           <div className={styles.grid}>
-            <FormField id="req-legal-entity" label="Legal entity id" error={field("legalEntityId")}>
-              {(control) => <Input {...control} value={legalEntityId} readOnly={existing !== undefined} onChange={(e) => setLegalEntityId(e.target.value)} />}
+            <FormField id="req-legal-entity" label="Legal entity" error={field("legalEntityId")}>
+              {(control) => <EntityLookup entity="legalEntity" {...control} value={legalEntityId} disabled={existing !== undefined} onChange={(e) => setLegalEntityId(e.target.value)} />}
             </FormField>
             <FormField id="req-operating-unit" label="Operating unit id" optional hint="Decides which catalogs you can pick from" error={field("operatingUnitId")}>
               {(control) => <Input {...control} value={operatingUnitId} onChange={(e) => setOperatingUnitId(e.target.value)} />}
@@ -425,19 +426,19 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
                       <FormField id={id("date")} label="Requested date" error={err("requestedDate")}>
                         {(c) => <Input {...c} type="date" value={line.requestedDate} onChange={(e) => update(i, { requestedDate: e.target.value })} />}
                       </FormField>
-                      <FormField id={id("warehouse")} label="Deliver to warehouse id" optional error={err("warehouseId")}>
-                        {(c) => <Input {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
+                      <FormField id={id("warehouse")} label="Deliver to warehouse" optional error={err("warehouseId")}>
+                        {(c) => <EntityLookup entity="warehouse" {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
                       </FormField>
-                      <FormField id={id("site")} label="Site id" optional error={err("siteId")}>
-                        {(c) => <Input {...c} value={line.siteId} onChange={(e) => update(i, { siteId: e.target.value })} />}
+                      <FormField id={id("site")} label="Site" optional error={err("siteId")}>
+                        {(c) => <EntityLookup entity="site" prefill={false} {...c} value={line.siteId} onChange={(e) => update(i, { siteId: e.target.value })} />}
                       </FormField>
                     </div>
                   </>
                 ) : null}
                 {fromCatalog ? null : (
                 <div className={styles.grid}>
-                  <FormField id={id("product")} label="Product id" optional error={err("productId")}>
-                    {(c) => <Input {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+                  <FormField id={id("product")} label="Product" optional error={err("productId")}>
+                    {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
                   </FormField>
                   <FormField id={id("description")} label="Description" error={err("description")}>
                     {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}
@@ -459,14 +460,14 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
                   <FormField id={id("date")} label="Requested date" error={err("requestedDate")}>
                     {(c) => <Input {...c} type="date" value={line.requestedDate} onChange={(e) => update(i, { requestedDate: e.target.value })} />}
                   </FormField>
-                  <FormField id={id("vendor")} label="Preferred vendor id" optional error={err("preferredVendorId")}>
-                    {(c) => <Input {...c} value={line.preferredVendorId} onChange={(e) => update(i, { preferredVendorId: e.target.value })} />}
+                  <FormField id={id("vendor")} label="Preferred vendor" optional error={err("preferredVendorId")}>
+                    {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: legalEntityId || undefined }} {...c} value={line.preferredVendorId} onChange={(e) => update(i, { preferredVendorId: e.target.value })} />}
                   </FormField>
-                  <FormField id={id("warehouse")} label="Deliver to warehouse id" optional error={err("warehouseId")}>
-                    {(c) => <Input {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
+                  <FormField id={id("warehouse")} label="Deliver to warehouse" optional error={err("warehouseId")}>
+                    {(c) => <EntityLookup entity="warehouse" {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
                   </FormField>
-                  <FormField id={id("site")} label="Site id" optional error={err("siteId")}>
-                    {(c) => <Input {...c} value={line.siteId} onChange={(e) => update(i, { siteId: e.target.value })} />}
+                  <FormField id={id("site")} label="Site" optional error={err("siteId")}>
+                    {(c) => <EntityLookup entity="site" prefill={false} {...c} value={line.siteId} onChange={(e) => update(i, { siteId: e.target.value })} />}
                   </FormField>
                 </div>
                 )}

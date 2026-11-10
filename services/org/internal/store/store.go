@@ -233,8 +233,9 @@ func (s *Postgres) ListLegalEntities(ctx context.Context, f LegalEntityFilter, a
 	page := LegalEntityPage{Items: []LegalEntity{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+legalEntityColumns+` from legal_entity where tenant_id = $1 and code > $2
-			and ($3::text = '' or status = $3) and ($4::text = '' or country = $4) and ($5::text = '' or currency = $5) order by code limit $6`,
-			p.TenantID, afterCode, f.Status, f.Country, f.Currency, limit+1)
+			and ($3::text = '' or status = $3) and ($4::text = '' or country = $4) and ($5::text = '' or currency = $5)
+			and ($7::text = '' or code ilike $7 or name ilike $7) order by code limit $6`,
+			p.TenantID, afterCode, f.Status, f.Country, f.Currency, limit+1, likePattern(f.Query))
 		if err != nil {
 			return err
 		}

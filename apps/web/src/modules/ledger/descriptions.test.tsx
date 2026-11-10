@@ -131,7 +131,7 @@ describe("description template form", () => {
     renderAt("/ledger/description-templates/new");
     fireEvent.change(screen.getByLabelText("Source type"), { target: { value: "Vendor_Invoice" } });
     fireEvent.change(screen.getByLabelText("Applies to"), { target: { value: "legal_entity" } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Template"), { target: { value: "Invoice %1 for %2" } });
     fireEvent.change(screen.getByLabelText("%1"), { target: { value: "source_id" } });
     fireEvent.change(screen.getByLabelText("%2"), { target: { value: "amount_txn" } });

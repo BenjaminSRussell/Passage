@@ -74,7 +74,7 @@ describe("effective permissions page", () => {
     server.handler = (url) => (url.pathname === `/api/v1/identity/users/${USER}/effective-permissions` ? json(200, report) : undefined);
     const { container } = renderAt("/admin/security/permissions");
     await fill("User id", ` ${USER} `);
-    await fill("Legal entity id", ENTITY);
+    await fill("Legal entity", ENTITY);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     const table = await screen.findByRole("table", { name: "Route permissions" });
     expect(server.calls[0].url.search).toBe(`?legalEntityId=${ENTITY}`);

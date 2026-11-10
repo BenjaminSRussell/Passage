@@ -97,7 +97,7 @@ describe("over-delivery tolerances page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save tolerance" }));
     await screen.findByText(/Saved:/);
     expect(header(calls("PUT", "/delivery-tolerances")[0], "If-Match")).toBe('"1"');
-    fireEvent.change(screen.getByLabelText(/Product id/), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText(/Product/), { target: { value: PRODUCT } });
     fireEvent.click(screen.getByRole("button", { name: "Save tolerance" }));
     await waitFor(() => expect(calls("PUT", "/delivery-tolerances")).toHaveLength(2));
     expect(header(calls("PUT", "/delivery-tolerances")[1], "If-Match")).toBe('"0"');

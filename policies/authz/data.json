@@ -708,6 +708,7 @@
     ]},
     "receiving.ap.inquire": {"permissions": [
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},
@@ -785,7 +786,10 @@
       {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]},
       {"resource": "/v1/party/merge-requests/*", "methods": ["GET"]},
-      {"resource": "/v1/party/customers/*", "methods": ["GET"]}
+      {"resource": "/v1/party/customers/*", "methods": ["GET"]},
+      {"resource": "/v1/party/parties:search", "methods": ["GET"]},
+      {"resource": "/v1/party/vendors:search", "methods": ["GET"]},
+      {"resource": "/v1/party/customers:search", "methods": ["GET"]}
     ]},
     "party.vendor-bank.write": {"permissions": [
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["POST"]}
@@ -1807,7 +1811,13 @@
     ]},
     "warehouse.mobile-flow.admin": {"permissions": [
       {"resource": "/api/v1/mobile/flows", "methods": ["POST"]},
-      {"resource": "/api/v1/mobile/flows/*:publish", "methods": ["POST"]}
+      {"resource": "/api/v1/mobile/flows/*:publish", "methods": ["POST"]},
+      {"resource": "/v1/mobile/flows", "methods": ["GET", "POST"]},
+      {"resource": "/v1/mobile/flows:install-core", "methods": ["POST"]},
+      {"resource": "/v1/mobile/flows/*", "methods": ["GET"]},
+      {"resource": "/v1/mobile/flows/*:publish", "methods": ["POST"]},
+      {"resource": "/v1/mobile/menus", "methods": ["GET", "POST"]},
+      {"resource": "/v1/mobile/devices", "methods": ["GET", "POST"]}
     ]},
     "print.job.submit": {"permissions": [
       {"resource": "/print/v1/jobs", "methods": ["GET", "POST"]},
@@ -1823,7 +1833,9 @@
     ]},
     "warehouse.offline-conflict.resolve": {"permissions": [
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
-      {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]}
+      {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]},
+      {"resource": "/v1/mobile/offline/conflicts", "methods": ["GET"]},
+      {"resource": "/v1/mobile/offline/conflicts/**:resolve", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.pack": {"permissions": [
       {"resource": "/v1/fulfillment/shipments/*/containers", "methods": ["POST"]},
@@ -1947,6 +1959,22 @@
     "budget.configure": {"permissions": [{"resource": "/v1/budget/control-rules", "methods": ["POST"]}]},
     "budget.maintain": {"permissions": [{"resource": "/v1/budget/register-entries", "methods": ["POST"]}]},
     "budget.override": {"flag": true, "permissions": []},
+    "budget.plan.decide": {"permissions": [
+      {"resource": "/v1/workflows/budget-plans/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/workflows/budget-plans/*/stages/*:sign-off", "methods": ["POST"]}
+    ]},
+    "budget.plan.maintain": {"permissions": [
+      {"resource": "/v1/budget/plans", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["PUT"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
+      {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
+    ]},
+    "budget.plan.workflow": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*:reject", "methods": ["POST"]}
+    ]},
     "budget.program.maintain": {"permissions": [
       {"resource": "/v1/budget/investment-programs", "methods": ["POST"]},
       {"resource": "/v1/budget/investment-programs/*:assign", "methods": ["POST"]},
@@ -1959,6 +1987,9 @@
       {"resource": "/v1/budget/reservations:expire", "methods": ["POST"]}
     ]},
     "budget.view": {"permissions": [
+      {"resource": "/v1/budget/plans", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["GET"]},
       {"resource": "/v1/budget/available", "methods": ["GET"]},
       {"resource": "/v1/budget/checks", "methods": ["GET"]},
       {"resource": "/v1/budget/checks/*", "methods": ["GET"]},
@@ -3283,6 +3314,16 @@
       {"resource": "/v1/treasury/checks/*:stop", "methods": ["POST"]},
       {"resource": "/v1/treasury/checks/*:void", "methods": ["POST"]}
     ]},
+    "treasury.ebics.approve": {"permissions": [
+      {"resource": "/v1/treasury/ebics-subscribers/*:confirm-bank-keys", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:unpark", "methods": ["POST"]}
+    ]},
+    "treasury.ebics.keys": {"permissions": [
+      {"resource": "/v1/treasury/ebics-subscribers/*:fetch-bank-keys", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:send-hia", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:send-ini", "methods": ["POST"]}
+    ]},
+    "treasury.ebics.write": {"permissions": [{"resource": "/v1/treasury/ebics-subscribers", "methods": ["POST"]}]},
     "treasury.facility.override": {"flag": true, "permissions": []},
     "treasury.facility.write": {"permissions": [
       {"resource": "/v1/treasury/facilities", "methods": ["POST"]},
@@ -3306,6 +3347,8 @@
       {"resource": "/v1/treasury/cash-forecast", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*/letters/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities/*/instruments", "methods": ["GET"]},
@@ -3345,9 +3388,24 @@
     "warehouse.work.execute": {"permissions": [
       {"resource": "/v1/warehouse/work/*/lines/*:confirm", "methods": ["POST"]},
       {"resource": "/v1/warehouse/work/*:exception", "methods": ["POST"]},
-      {"resource": "/v1/warehouse/work:assign", "methods": ["POST"]}
+      {"resource": "/v1/warehouse/work:assign", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:heartbeat", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:end", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:assign-work", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*/runs", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*/runs/current/steps/*:submit", "methods": ["POST"]},
+      {"resource": "/v1/mobile/menus/*", "methods": ["GET"]},
+      {"resource": "/v1/mobile/scan:parse", "methods": ["POST"]},
+      {"resource": "/v1/mobile/offline:replay", "methods": ["POST"]},
+      {"resource": "/v1/mobile/events", "methods": ["GET"]}
     ]},
-    "warehouse.work.supervise": {"permissions": [{"resource": "/v1/warehouse/work", "methods": ["POST"]}]},
+    "warehouse.work.supervise": {"permissions": [
+      {"resource": "/v1/warehouse/work", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions", "methods": ["GET"]},
+      {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
+    ]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
       {"resource": "/v1/workitems/*/actions", "methods": ["POST"]}
@@ -3411,6 +3469,9 @@
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
       "inventory": ["inventory.read"],
       "engineering": ["engineering.read"]
+    },
+    "budgeting": {
+      "ledger": ["ledger.balance.read"]
     },
     "costing": {
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
@@ -3476,6 +3537,7 @@
     "workflow-ts": {
       "payables": ["payment-run.execute"],
       "engineering": ["engineering.eco.workflow"],
+      "budgeting": ["budget.plan.workflow"],
       "quality": ["quality.capa.execute"],
       "transport": ["transport.tender.execute"],
       "party": ["party.approve", "party.merge.execute"]
@@ -3488,6 +3550,9 @@
     },
     "warehouse": {
       "inventory": ["inventory.issue.claim"]
+    },
+    "mobile": {
+      "warehouse": ["warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"]
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],

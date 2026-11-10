@@ -107,6 +107,8 @@ segregation_denials := [
 	["platform.release.view", "POST", "/v1/platform/releases"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
+	["party.write", "GET", "/v1/party/vendors:search"],
+	["party.vendor-bank.write", "GET", "/v1/party/customers:search"],
 ]
 
 test_narrow_duties_cannot_reach_verb_routes if {
@@ -138,6 +140,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/consignment-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/ers-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
@@ -157,6 +160,9 @@ segregation_grants := [
 	["platform.promotion.approve", "POST", "/v1/platform/releases"],
 	["platform.environment.rollback", "POST", "/v1/platform/releases"],
 	["platform.release.maintain", "POST", "/v1/platform/releases"],
+	["party.read", "GET", "/v1/party/parties:search"],
+	["party.read", "GET", "/v1/party/vendors:search"],
+	["party.read", "GET", "/v1/party/customers:search"],
 ]
 
 test_verb_routes_granted_to_their_own_duty if {
@@ -956,6 +962,51 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
 }
 
+test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject if {
+	data.duties["budget.plan.workflow"].service_only
+	data.service_grants["workflow-ts"].budgeting == ["budget.plan.workflow"]
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/review:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.workflow", "GET", "/v1/budget/plans/p1")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:submit")
+	not allowed("budget.plan.workflow", "PUT", "/v1/budget/plans/p1/scenarios/s1/grid")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
+}
+
+test_budget_plan_workflow_routes_are_refused_to_every_person_duty if {
+	routes := [
+		"/v1/budget/plans/p1/stages/review:sign-off",
+		"/v1/budget/plans/p1/stages/approve:sign-off",
+		"/v1/budget/plans/p1:reject",
+	]
+	every route in routes {
+		granting := granting_duties with input as {"action": "POST", "resource": route}
+		granting == {"budget.plan.workflow"}
+		person := person_duties with input as {"action": "POST", "resource": route}
+		person == set()
+		every duty in ["budget.plan.maintain", "budget.plan.decide", "budget.view", "budget.maintain", "budget.override"] {
+			not allowed(duty, "POST", route)
+		}
+	}
+}
+
+test_budget_plan_decide_routes_are_the_workflow_ts_decision_routes_only if {
+	not data.duties["budget.plan.decide"].service_only
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/review:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:reject")
+	not allowed("budget.plan.decide", "GET", "/v1/workflows/budget-plans/p1")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:submit")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/final:sign-off/extra")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/eco-approvals/e1:approve")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1:reject")
+}
+
 test_workflow_ts_transport_service_duty if {
 	data.service_grants["workflow-ts"].transport == ["transport.tender.execute"]
 	data.duties["transport.tender.execute"].service_only
@@ -1437,6 +1488,23 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
 }
 
+test_treasury_ebics_duties_split_ceremony_from_confirmation if {
+	allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers")
+	not allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-hia")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:fetch-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1/letters/INI")
+	not allowed("treasury.view", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+}
+
 test_payroll_run_duties_split_maintain_finalize_post_and_read if {
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs")
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/review")
@@ -1763,6 +1831,27 @@ test_sales_credit_exposure if {
 test_production_order_end_check if {
 	allowed("production.order.read", "GET", "/v1/production/orders/o-1/end-check")
 	not allowed("production.order.read", "POST", "/v1/production/orders/o-1/end-check")
+}
+
+test_mobile_service_routes if {
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1:heartbeat")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1/runs/current/steps/scan_item:submit")
+	allowed("warehouse.work.execute", "GET", "/v1/mobile/menus/default")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/offline:replay")
+	not allowed("warehouse.work.execute", "GET", "/v1/mobile/sessions")
+	not allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1:force-signout")
+	not allowed("warehouse.work.execute", "POST", "/v1/mobile/flows")
+	allowed("warehouse.work.supervise", "GET", "/v1/mobile/sessions")
+	allowed("warehouse.work.supervise", "POST", "/v1/mobile/sessions/s-1:force-signout")
+	not allowed("warehouse.work.supervise", "POST", "/v1/mobile/offline:replay")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/flows/f-1:publish")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/flows:install-core")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/menus")
+	not allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
+	allowed("warehouse.offline-conflict.resolve", "GET", "/v1/mobile/offline/conflicts")
+	allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
+	not allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/flows")
 }
 
 # Issue #495: the dev seed (deploy/local/seed.json) holds an admin and a clerk; admin routes are the admin's alone.

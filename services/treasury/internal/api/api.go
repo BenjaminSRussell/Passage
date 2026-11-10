@@ -21,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 )
@@ -48,6 +49,8 @@ type API struct {
 	store        store.Store
 	maxFileBytes int64
 	now          func() time.Time
+	ebics        EBICS
+	channels     bankconnect.Channels
 
 	accountsCreated      atomic.Int64
 	accountsTransitioned atomic.Int64
@@ -80,6 +83,13 @@ func (a *API) WithMaxFileMB(mb int) (*API, error) {
 	}
 	a.maxFileBytes = int64(mb) << 20
 	return a, nil
+}
+
+// WithChannels sets the bank channels TREASURY_BANK_CHANNELS enabled, for the
+// payment-file producers that send through them.
+func (a *API) WithChannels(c bankconnect.Channels) *API {
+	a.channels = c
+	return a
 }
 
 // Register mounts every route on r.
@@ -125,6 +135,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-matches", a.listMatches)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-matches/{id}", a.getMatch)
 	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-matches/{id}:unmatch", a.unmatch)
+	a.registerEBICS(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.

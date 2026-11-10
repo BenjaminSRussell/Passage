@@ -18,7 +18,7 @@ const dflt: ProcedureAssignment = { legalEntityId: LE, salesChannel: "", procedu
 const web: ProcedureAssignment = { legalEntityId: LE, salesChannel: "WEB", procedureName: "WEB_PRICING", version: 3 };
 
 function load() {
-  fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+  fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
   fireEvent.click(screen.getByRole("button", { name: "Load assignments" }));
 }
 

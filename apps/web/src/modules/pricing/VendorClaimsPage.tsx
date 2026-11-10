@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile } from "../../shell/ui";
 import { listVendorClaims, type ClaimStatus, type VendorClaimFilter } from "./api/client";
@@ -58,8 +59,8 @@ export function VendorClaimsPage() {
         }
       />
       <form className={styles.toolbar} onSubmit={apply} noValidate>
-        <FormField id="vcl-vendor" label="Vendor id" optional error={errors.vendorId}>
-          {(c) => <Input {...c} className={styles.mono} value={draft.vendorId} onChange={(e) => setDraft({ ...draft, vendorId: e.target.value })} invalid={Boolean(errors.vendorId)} />}
+        <FormField id="vcl-vendor" label="Vendor" optional error={errors.vendorId}>
+          {(c) => <EntityLookup entity="vendor" {...c} value={draft.vendorId} onChange={(e) => setDraft({ ...draft, vendorId: e.target.value })} invalid={Boolean(errors.vendorId)} />}
         </FormField>
         <FormField id="vcl-period" label="Period" optional error={errors.period}>
           {(c) => <Input {...c} className={styles.mono} value={draft.period} onChange={(e) => setDraft({ ...draft, period: e.target.value })} invalid={Boolean(errors.period)} />}

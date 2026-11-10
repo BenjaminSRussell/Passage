@@ -204,10 +204,9 @@ describe("Vendor rebate claims inquiry", () => {
     expect(totals).toHaveTextContent("Waiting for approval 2");
     expect(pageViolations(container)).toEqual([]);
 
-    fill("Vendor id", "V1");
-    fireEvent.click(screen.getByRole("button", { name: "Show claims" }));
-    expect(await screen.findByText("Enter the vendor id (a UUID).")).toBeInTheDocument();
-    fill("Vendor id", V1);
+    fill("Vendor", "V1");
+    expect(screen.getByLabelText("Vendor")).toHaveAttribute("data-value", "");
+    fill("Vendor", V1);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "APPROVED" } });
     fireEvent.click(screen.getByRole("button", { name: "Show claims" }));
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("APPROVED"));

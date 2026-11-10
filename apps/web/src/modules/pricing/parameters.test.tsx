@@ -9,7 +9,7 @@ const LE = "0190f0a0-0000-7000-8000-000000000001";
 const ADMIN = ["pricing.view", "pricing.admin"];
 
 function load() {
-  fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+  fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
   fireEvent.click(screen.getByRole("button", { name: "Load parameters" }));
 }
 

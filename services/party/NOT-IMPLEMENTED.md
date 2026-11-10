@@ -31,3 +31,4 @@
 | Architecture sheet says party is TypeScript (`party-ts`) | deviation | the ticket, CONVENTIONS and `roadmap/ownership.json` assign Go at `services/party/` |
 | Argo CD app `deploy/envs/dev/apps/party.yaml`, CI image jobs, Envoy route | handoff | outside the owned paths |
 | JWT validation | wave 2 | services trust gateway headers until Envoy Gateway lands |
+| Lookup search `GET /v1/party/{parties,vendors,customers}:search` (#500) | built | read-only, entity-scoped by RLS, keyset-paged (limit 1..50), `q` matches name or number; granted under `party.read`. Blocked vendors and customers are returned flagged, not hidden |

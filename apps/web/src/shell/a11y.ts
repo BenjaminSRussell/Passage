@@ -28,7 +28,7 @@ export function checkAxeAA(root: ParentNode): AxeViolation[] {
     violations.push({ id: "bypass", nodes: ["skip-link"] });
   }
   const unlabeled: string[] = [];
-  root.querySelectorAll("input, select, textarea").forEach((el) => {
+  root.querySelectorAll("input:not([type=hidden]), select, textarea").forEach((el) => {
     const id = el.getAttribute("id");
     const labelled = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || (id && root.querySelector(`label[for="${id}"]`));
     if (!labelled) {
