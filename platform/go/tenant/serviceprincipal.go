@@ -22,9 +22,11 @@ var servicePrincipals = map[string][]string{
 	// The reporter of posted invoices to sales (#29): it signs :record-progress calls, and its token holds only the one duty of
 	// billing's grant on sales that reports invoices (sales.order.record-invoice).
 	"billing-sales-report": {"sales.order.record-invoice"},
-	"finreport-ledger":     {"ledger.entry.lookup"},
-	"purchasing-inbound":   {"purchasing.inbound.apply"},
-	"fulfillment-order":    {"fulfillment.order.sync"},
+	// The reporter of booked invoices and credit notes to the tax service (#29): it signs POST /v1/tax/transactions only.
+	"billing-tax-report": {"tax.transaction.record"},
+	"finreport-ledger":   {"ledger.entry.lookup"},
+	"purchasing-inbound": {"purchasing.inbound.apply"},
+	"fulfillment-order":  {"fulfillment.order.sync"},
 	// The reporter of posted packing slips to sales (#496): it signs :record-progress calls, and its token holds only
 	// fulfillment's grant on sales (sales.order.record-delivery).
 	"fulfillment-sales-report": {"sales.order.record-delivery"},
@@ -48,6 +50,7 @@ var servicePrincipals = map[string][]string{
 // "service:migration-loader"), borrowing duties its own grant lacks.
 var servicePrincipalIssuers = map[string][]string{
 	"billing-sales-report":     {"billing"},
+	"billing-tax-report":       {"billing"},
 	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},
 	"purchasing-inbound":       {"purchasing"},
