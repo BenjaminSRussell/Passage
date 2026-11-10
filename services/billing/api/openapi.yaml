@@ -387,7 +387,7 @@ paths:
         The body does not change, so the tax service answers a transaction it already holds as a duplicate. A REPORTED report is
         refused with 409 BIL-0121; an unknown one is 404 BIL-0120.
       parameters:
-        - $ref: "#/components/parameters/InvoiceId"
+        - $ref: "#/components/parameters/ReportId"
       responses:
         "200":
           description: The report.
@@ -893,6 +893,14 @@ components:
       in: path
       required: true
       description: The credit reservation.
+      schema:
+        type: string
+        format: uuid
+    ReportId:
+      name: id
+      in: path
+      required: true
+      description: The report id.
       schema:
         type: string
         format: uuid
