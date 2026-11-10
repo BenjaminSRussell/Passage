@@ -20,6 +20,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: workflows
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: inbox
   rateLimit:
     type: Global
     global:

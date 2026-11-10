@@ -181,6 +181,8 @@ describe("Record payment", () => {
     fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
     expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
+    expect(screen.getByLabelText("Legal entity")).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Legal entity: Choose a legal entity." })).toBeInTheDocument();
 
     fill("Legal entity", LE);
     fill("Customer", CUST);
@@ -192,6 +194,22 @@ describe("Record payment", () => {
     const post = server.calls.find((c) => c.method === "POST")!;
     expect(idempotencyKey(post)).toBeTruthy();
     expect(post.body).toMatchObject({ legalEntityId: LE, customerId: CUST, amount: "980.00", source: "MANUAL", remittance: [{ reference: "INV-30001", amount: "0" }] });
+  });
+
+  it("is not dirty because the working legal entity was filled in, and is dirty after an edit", async () => {
+    window.localStorage.setItem("passage.workContext.tester", JSON.stringify({ legalEntityId: LE, siteId: "" }));
+    server.handler = () => json(200, { id: LE, name: "Acme", code: "ACME" });
+    renderAt("/receivables/payments/new");
+    await screen.findByLabelText("Amount");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const untouched = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+    fill("Amount", "5");
+    const edited = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(edited);
+    expect(edited.defaultPrevented).toBe(true);
+    window.localStorage.clear();
   });
 
   it("shows the service's field errors and refusals", async () => {

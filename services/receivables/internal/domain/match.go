@@ -333,6 +333,18 @@ func referenced(p Payment, docNumber string) bool {
 	if len(doc) < MaxRefLength {
 		return false
 	}
+	if mentions(p, doc) {
+		return true
+	}
+	slash := strings.LastIndex(doc, "/")
+	return slash >= MaxRefLength && isDigits(doc[slash+1:]) && mentions(p, doc[:slash])
+}
+
+func isDigits(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
+}
+
+func mentions(p Payment, doc string) bool {
 	for _, line := range p.Remittance {
 		ref := strings.ToUpper(line.Reference)
 		for from := 0; ; {

@@ -21,6 +21,7 @@ const (
 	eventSource      = "payables"
 	DueDateEvent     = "EVENT"
 	DueDateDefaulted = "DEFAULTED"
+	DueDateOpening   = "OPENING"
 	defaultLimit     = 100
 	maxLimit         = 500
 )
@@ -64,10 +65,14 @@ type OpenItem struct {
 	Status          string          `json:"status"`
 	Version         int             `json:"version"`
 	PaymentHold     bool            `json:"paymentHold"`
-	PayeeUnverified bool            `json:"payeeUnverified,omitempty"`
+	// PaymentHoldReason is why the item is held; empty when it is not held or no reason was given.
+	PaymentHoldReason string `json:"paymentHoldReason,omitempty"`
+	PayeeUnverified   bool   `json:"payeeUnverified,omitempty"`
 	// PayeeWorkerID is the HR worker an expense reimbursement pays; VendorID is the vendor the
 	// employee-vendor register maps them to, or the worker id itself while no mapping exists.
 	PayeeWorkerID string `json:"payeeWorkerId,omitempty"`
+	// OpeningReference is the legacy item reference of an item loaded at cutover (dueDateSource OPENING); empty otherwise.
+	OpeningReference string `json:"openingReference,omitempty"`
 }
 
 type Filter struct {
@@ -96,7 +101,7 @@ func (s *Postgres) WithFieldCrypt(k *fieldcrypt.Keys) *Postgres {
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const columns = `id, legal_entity_id, vendor_id, coalesce(vendor_group_id::text, ''), coalesce(vendor_group_code, ''), source_invoice_id, invoice_number, invoice_date::text, due_date::text, due_date_source, currency,
-	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold, payee_unverified, coalesce(payee_worker_id::text, '')`
+	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold, coalesce(payment_hold_reason, ''), payee_unverified, coalesce(payee_worker_id::text, ''), coalesce(opening_reference, '')`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -104,7 +109,7 @@ func scan(row rowScanner) (OpenItem, error) {
 	var o OpenItem
 	var amount, open, discount string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.VendorID, &o.VendorGroupID, &o.VendorGroupCode, &o.SourceInvoiceID, &o.InvoiceNumber, &o.InvoiceDate, &o.DueDate, &o.DueDateSource,
-		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold, &o.PayeeUnverified, &o.PayeeWorkerID); err != nil {
+		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold, &o.PaymentHoldReason, &o.PayeeUnverified, &o.PayeeWorkerID, &o.OpeningReference); err != nil {
 		return OpenItem{}, err
 	}
 	var err error

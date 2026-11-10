@@ -577,6 +577,9 @@ func (s *Postgres) PostProposal(ctx context.Context, id string, postingDate time
 		if err := outbox.Enqueue(ctx, tx, "invoice", inv.ID, evt); err != nil {
 			return err
 		}
+		if err := queueSalesReports(ctx, tx, p.TenantID, inv); err != nil {
+			return err
+		}
 		out = inv
 		return nil
 	})

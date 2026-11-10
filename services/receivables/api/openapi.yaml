@@ -1391,6 +1391,18 @@ paths:
         outage backs off (503 AR-RMA-GL) and the sweeper or a repeat posts it later; a ledger refusal
         parks the credit (409 AR-RMA-PARKED) until an operator retries it. A repeat of the same RMA
         returns the stored values; a repeat with other amounts is 422 idempotency_key_reuse.
+
+        When billing is configured (`BILLING_URL`) the credit first reserves `invoiceLines` in billing
+        (duty `billing.credit-reservation.write`, `Idempotency-Key` `rma-credit:{legalEntityId}:{rmaId}`),
+        before anything is stored. Billing refusing the room is 422 AR-RMA-INVOICE and nothing is
+        stored; billing unavailable is 503 AR-RMA-GL and nothing is stored or posted, so the repeat is safe.
+        Once the credit is POSTED the reservation is committed; if that call fails the credit stays
+        POSTED (the response is still 201) and a repeat or the sweep commits it later. A credit
+        that is parked or refused after reserving releases the reservation; `:retry` reserves again with the same
+        key and is refused 422 AR-RMA-INVOICE when the room is gone.
+        Any other billing rejection (400, 422 such as idempotency_key_reuse) is 422 AR-RMA-INVOICE with
+        a plain message; the reservation must cover the return value. A POSTED credit whose reservation
+        billing cannot restore is flagged needsAttention for an operator.
       x-passage-duty: ar.rmacredit.post
       requestBody:
         required: true
@@ -1416,6 +1428,7 @@ paths:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED] } }
         - { name: parked, in: query, description: true lists only credits the ledger refused, schema: { type: boolean } }
+        - { name: needsAttention, in: query, description: true lists only POSTED credits whose billing reservation was lost, schema: { type: boolean } }
         - { $ref: "#/components/parameters/Limit" }
       responses:
         "200":
@@ -1454,6 +1467,7 @@ paths:
                   posted: { type: integer }
                   failed: { type: integer }
                   parked: { type: integer }
+                  committed: { type: integer, description: Posted credits whose billing reservation the sweep committed }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
   /v1/receivables/rma-credits/{id}:retry:
@@ -2295,13 +2309,26 @@ components:
           type: string
           format: uuid
           description: |
-            The billing invoice id; required with taxLines. Receivables reads that invoice from billing (duty billing.invoice.read,
+            The billing invoice id; required with taxLines and with invoiceLines. Receivables reads that invoice from billing (duty billing.invoice.read,
             BILLING_URL) and refuses a tax code the invoice never billed, or more tax per code than the invoice billed less
             billing credit notes and earlier RMA credits (422 AR-RMA-INVOICE).
         postingDate: { type: string, format: date }
         gross: { $ref: "#/components/schemas/Money" }
         restocking: { $ref: "#/components/schemas/Money" }
         net: { $ref: "#/components/schemas/Money" }
+        invoiceLines:
+          type: array
+          maxItems: 2000
+          description: |
+            The invoice lines this credit returns and how much of each (quantity above 0, each line once). Required
+            when billing is configured, with invoiceId; billing holds them against credit notes and other RMA credits.
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineNo, qty]
+            properties:
+              lineNo: { type: integer, minimum: 1 }
+              qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$" }
         taxLines:
           type: array
           maxItems: 20
@@ -2337,7 +2364,10 @@ components:
         journalPostingId: { type: string }
         glAttempts: { type: integer }
         glNextAttemptAt: { type: string, format: date-time }
-        glParked: { type: boolean }
+        glParked: { type: boolean, description: True when the ledger or billing refused the credit and it waits for an operator's retry }
+        reservationId: { type: string, format: uuid, description: The billing reservation held for the credit, when it holds one }
+        needsAttention: { type: string, description: Why a POSTED credit needs an operator (its billing reservation was lost); the sweep does not retry it }
+        reservationCommitted: { type: boolean, description: True once billing consumed the reservation; a POSTED credit without it is committed by a repeat or the sweep }
         createdAt: { type: string, format: date-time }
     RMACreditNote:
       type: object
