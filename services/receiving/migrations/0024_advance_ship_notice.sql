@@ -41,7 +41,8 @@ BEGIN
   IF OLD.status = 'OPEN' AND NEW.status = 'RECEIVING' THEN
     RETURN NEW;
   END IF;
-  IF OLD.status = 'RECEIVING' AND NEW.status = 'OPEN' AND NEW.receipt_id IS NULL THEN
+  IF OLD.status = 'RECEIVING' AND NEW.status = 'OPEN' AND NEW.receipt_id IS NULL
+     AND EXISTS (SELECT 1 FROM receiving_receipt r WHERE r.tenant_id = OLD.tenant_id AND r.id = OLD.receipt_id AND r.state = 'CANCELLED') THEN
     RETURN NEW;
   END IF;
   RAISE EXCEPTION 'advance ship notice cannot move from % to %', OLD.status, NEW.status USING ERRCODE = 'check_violation';

@@ -32,7 +32,7 @@ func sampleAsn(id, legalEntityID, tracking, qty string) store.Asn {
 
 func asnReceipt(legalEntityID string) store.Receipt {
 	return store.Receipt{
-		LegalEntityID: legalEntityID, VendorID: vendorID, PurchaseOrderID: poID, PackingSlip: "ASN-" + ids.New()[:8], Date: time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC), Currency: "USD",
+		LegalEntityID: legalEntityID, VendorID: vendorID, PurchaseOrderID: poID, PackingSlip: "ASN-" + ids.New()[24:], Date: time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC), Currency: "USD",
 		Lines: []store.Line{{LineNo: 1, POLineNo: 1, ProductID: productID, Qty: decimal.NewFromInt(30), OrderedRemaining: decimal.NewFromInt(30), UnitPrice: decimal.NewFromInt(2), Unit: "EA", BatchTracked: true}},
 	}
 }
@@ -114,7 +114,7 @@ func TestAsn_BoundTrackingIsolationAndOneReceipt(t *testing.T) {
 		"a delete":                `delete from ` + asnTable,
 		"an update of the lines":  `update ` + asnTable + ` set lines = '[]'`,
 		"an update of the vendor": `update ` + asnTable + ` set vendor_id = gen_random_uuid()`,
-		"a return to OPEN":        `update ` + asnTable + ` set status = 'OPEN', receipt_id = null`,
+		"a return to OPEN":        `update ` + asnTable + ` set status = 'OPEN', receipt_id = null where id = '` + payeeOne + `'`,
 	} {
 		if err := db.run(db.one, sql); err == nil {
 			t.Errorf("passage_app must not run %s", name)
@@ -195,5 +195,34 @@ func TestAsn_ConcurrentCreatesOnOnePurchaseOrderLineNeverExceedTheOrderedQuantit
 	}
 	if accepted != 1 {
 		t.Fatalf("%d notices of 60 accepted against 100, want 1", accepted)
+	}
+}
+
+func TestAsn_ReopeningIsRefusedWhileTheReceiptIsLive(t *testing.T) {
+	db := seedInvoice(t)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	ordered := map[int]decimal.Decimal{1: decimal.NewFromInt(100)}
+	reopen := `update ` + asnTable + ` set status = 'OPEN', receipt_id = null where id = '` + payeeOne + `'`
+
+	if _, err := st.CreateAsn(ctx, sampleAsn(payeeOne, db.one.LegalEntityID, "TRK-1", "60"), ordered); err != nil {
+		t.Fatal(err)
+	}
+	_, rec, err := st.StartAsnReceipt(ctx, payeeOne, asnReceipt(db.one.LegalEntityID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.run(db.one, reopen); err == nil {
+		t.Fatal("reopened a notice whose receipt is ARRIVED")
+	}
+	if _, err := st.Register(ctx, rec.ID, func(cur store.Receipt, _ map[domain.SerialKey]struct{}) ([]store.Line, error) {
+		l := cur.Lines[0]
+		l.LocationID = "00000000-0000-0000-0000-0000000000f1"
+		return []store.Line{l}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.run(db.one, reopen); err == nil {
+		t.Fatal("reopened a notice whose receipt is REGISTERED")
 	}
 }

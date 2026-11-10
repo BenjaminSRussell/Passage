@@ -280,7 +280,7 @@ func (a *API) receiptFromAsn(r *http.Request, asn store.Asn, date time.Time) (st
 		byNo[l.LineNo] = l
 	}
 	rec := store.Receipt{
-		LegalEntityID: asn.LegalEntityID, VendorID: asn.VendorID, PurchaseOrderID: asn.PurchaseOrderID, PackingSlip: domain.AsnPackingPrefix + asn.ID + "-" + ids.New()[:8],
+		LegalEntityID: asn.LegalEntityID, VendorID: asn.VendorID, PurchaseOrderID: asn.PurchaseOrderID, PackingSlip: domain.AsnPackingPrefix + asn.ID + "-" + ids.New()[24:],
 		Carrier: asn.Carrier, Date: date, Currency: po.Currency, ExchangeRate: decimal.NewFromInt(1),
 	}
 	for i, l := range asn.Lines {
