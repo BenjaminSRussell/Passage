@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { installLookupStub } from "../purchasing/lookupStub";
 import inventory from "./module";
 import { validateLine } from "./JournalDetailPage";
 import { validateJournal } from "./NewJournalPage";
@@ -11,6 +12,7 @@ import { isIsoDate } from "./format";
 const JOURNAL_ID = "0a1b2c3d-0000-4000-8000-000000000001";
 const PRODUCT_ID = "5f2c1e7a-0000-4000-8000-000000000002";
 const ENTITY_ID = "9e8d7c6b-0000-4000-8000-000000000003";
+const WAREHOUSE_ID = "3b3b3b3b-0000-4000-8000-000000000004";
 
 type Handler = (url: URL, init: RequestInit) => { status: number; body: unknown };
 
@@ -29,6 +31,7 @@ function json(status: number, body: unknown) {
 }
 
 beforeEach(() => {
+  installLookupStub();
   calls = [];
   vi.stubGlobal(
     "fetch",
@@ -109,20 +112,19 @@ describe("On-hand inquiry", () => {
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("groupBy")).toBe("product,site,batch"));
     expect(await screen.findByRole("columnheader", { name: "Batch" })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Warehouse" }), { target: { value: "W1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Warehouse" }), { target: { value: WAREHOUSE_ID } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("warehouse")).toBe("W1"));
+    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("warehouse")).toBe(WAREHOUSE_ID));
   });
 
-  it("refuses a product filter that is not an id, without calling the service", async () => {
+  it("filters by a product picked by name, sending its id", async () => {
     handler = () => json(200, { items: [], truncated: false });
     renderAt("/inventory/onhand");
     await screen.findByText("No stock matches");
-    const before = calls.length;
-    fireEvent.change(screen.getByRole("textbox", { name: "Product" }), { target: { value: "SHIRT" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Product" }), { target: { value: PRODUCT_ID } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Enter the product id (a UUID).")).toBeInTheDocument();
-    expect(calls.length).toBe(before);
+    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("product")).toBe(PRODUCT_ID));
+    expect(await screen.findByRole("combobox", { name: "Product" })).toHaveValue("Product 5f2c1e7a");
   });
 
   it("replays the ledger on a date, drops the availability columns and says why", async () => {

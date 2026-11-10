@@ -3,7 +3,7 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Button, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listOpenOrderLines, type OpenOrderLine, type OpenSupplyFilters } from "./api/client";
-import { LoadError, ShortId, datePattern, useResource, uuidPattern } from "./parts";
+import { LoadError, datePattern, useResource, uuidPattern, Named } from "./parts";
 import styles from "./pages.module.css";
 
 interface Draft {
@@ -79,9 +79,9 @@ export function OpenSupplyPage() {
       ),
     },
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
-    { key: "warehouseId", header: "Warehouse", render: (l) => <ShortId id={l.warehouseId} /> },
-    { key: "siteId", header: "Site", render: (l) => <ShortId id={l.siteId} /> },
+    { key: "item", header: "Item", render: (l) => l.description || <Named entity="product" id={l.productId} /> },
+    { key: "warehouseId", header: "Warehouse", render: (l) => <Named entity="warehouse" id={l.warehouseId} /> },
+    { key: "siteId", header: "Site", render: (l) => <Named entity="site" id={l.siteId} /> },
     { key: "openQty", header: "Open quantity", align: "end", render: (l) => `${l.openQty} ${l.unit}` },
     { key: "qty", header: "Ordered", align: "end", render: (l) => `${l.qty} ${l.unit}` },
     { key: "deliveryDate", header: "Due", mono: true },

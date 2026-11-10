@@ -27,7 +27,7 @@ import {
   type PlanKind,
   type PurchaseOrderLine,
 } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, datePattern, dash, decimalPattern, money, useResource, type Failure } from "./parts";
+import { Details, LoadError, StatusBadge, datePattern, dash, decimalPattern, money, useResource, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -310,7 +310,7 @@ export function InvoicingPlanPage() {
       <Card title="Line">
         <Details
           items={[
-            { label: "Item", value: line.description || <ShortId id={line.productId} /> },
+            { label: "Item", value: line.description || <Named entity="product" id={line.productId} /> },
             { label: "Quantity", value: `${line.qty} ${line.unit}`, mono: true },
             { label: "Net amount", value: money(line.lineAmount, order.currency), mono: true },
             { label: "Line status", value: <StatusBadge status={line.status} /> },

@@ -2,13 +2,22 @@ import { useMemo, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, Select, Textarea, type DataTableColumn } from "../../shell/ui";
 import { acknowledgeRFQAmendment, amendRFQ, describeProblem, editRFQ, newIdempotencyKey, type RankingRule, type RFQ, type RFQAmendment } from "./api/client";
 import { CriteriaEditor, criteriaInput, newCriterion, validateCriteria, type CriterionDraft } from "./RfqTypePages";
-import { formatInstant, rankingLabels, type Failure } from "./parts";
+import { Named, formatInstant, rankingLabels, useEntityText, type Failure } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
 /** An instant as a datetime-local value in the user's local time. */
+function AckButton({ vendorId, loading, onClick }: { vendorId: string; loading: boolean; onClick(): void }) {
+  const name = useEntityText("vendor", vendorId, "the vendor");
+  return (
+    <Button size="sm" variant="ghost" loading={loading} onClick={onClick}>
+      Record acknowledgement from {name}
+    </Button>
+  );
+}
+
 export function toLocalInput(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -183,7 +192,7 @@ export function AmendmentsPanel({ rfq, onChanged }: { rfq: RFQ; onChanged(rfq: R
       const { body } = await acknowledgeRFQAmendment(rfq.id, no, vendorId);
       // The version does not change, so keep the ETag-bearing copy the page already has.
       onChanged({ ...rfq, amendments: body.amendments });
-      setNotice(`Acknowledgement from vendor ${vendorId.slice(0, 8)} recorded.`);
+      setNotice("Acknowledgement recorded.");
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {
@@ -205,7 +214,7 @@ export function AmendmentsPanel({ rfq, onChanged }: { rfq: RFQ; onChanged(rfq: R
       header: "Late replies now on time",
       render: (a) => {
         const ids = a.lateClearedVendorIds ?? [];
-        return ids.length === 0 ? "None" : ids.map((id) => id.slice(0, 8)).join(", ");
+        return ids.length === 0 ? "None" : ids.map((id, n) => <span key={id}>{n > 0 ? ", " : ""}<Named entity="vendor" id={id} /></span>);
       },
     },
     { key: "criteriaChanged", header: "Criteria", render: (a) => (a.criteriaChanged ? "Replaced" : "Unchanged") },
@@ -222,15 +231,12 @@ export function AmendmentsPanel({ rfq, onChanged }: { rfq: RFQ; onChanged(rfq: R
               {done} of {a.acknowledgements.length}
             </span>
             {pending.map((p) => (
-              <Button
+              <AckButton
                 key={p.vendorId}
-                size="sm"
-                variant="ghost"
+                vendorId={p.vendorId}
                 loading={busy === `${a.amendmentNo}-${p.vendorId}`}
                 onClick={() => void acknowledge(a.amendmentNo, p.vendorId)}
-              >
-                Record acknowledgement from {p.vendorId.slice(0, 8)}
-              </Button>
+              />
             ))}
           </span>
         );

@@ -31,11 +31,11 @@ describe("open supply", () => {
     const { container } = renderAt("/purchasing/open-supply");
     const table = await findTable({ name: "Open order lines" });
     await waitFor(() => expect(within(table).getAllByRole("link", { name: "PO-00000007" })).toHaveLength(2));
-    expect(within(table).getAllByText("99999999")).toHaveLength(2);
+    expect(within(table).getAllByText("Warehouse 99999999")).toHaveLength(2);
     expect(within(table).getAllByText("6 EA")).toHaveLength(2);
     expect(within(table).getByText("2027-03-02")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText(/Warehouse/), { target: { value: WH } });
+    fireEvent.change(screen.getByRole("combobox", { name: /Warehouse/ }), { target: { value: WH } });
     fireEvent.change(screen.getByLabelText(/Due from/), { target: { value: "2027-03-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Show supply" }));
     await waitFor(() =>

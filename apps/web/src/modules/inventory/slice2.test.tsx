@@ -420,7 +420,7 @@ describe("Cycle counting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Post count" }));
     await waitFor(() => expect(screen.getByRole("table", { name: "Count lines" })).toHaveTextContent("-4"));
     expect(header(sent("POST")[0], "If-Match")).toBe('"3"');
-    expect(screen.getByRole("status")).toHaveTextContent("Variances went to count journal 0a1b2c3d");
+    expect(screen.getByText(/Variances went to count journal 0a1b2c3d/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the count journal" })).toHaveAttribute("href", `/inventory/journals/${JOURNAL_ID}`);
     expect(screen.queryByRole("button", { name: "Post count" })).not.toBeInTheDocument();
   });

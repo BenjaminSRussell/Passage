@@ -18,7 +18,7 @@ import {
   type Received,
 } from "./api/client";
 import styles from "./pages.module.css";
-import { ChooseWarehouse, DECIMAL, Detail, sentence, shortId, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
+import { ChooseWarehouse, DECIMAL, Detail, Named, sentence, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -342,7 +342,7 @@ export function ReceiptDetailPage() {
   const columns: DataTableColumn<ReceiptLine>[] = [
     { key: "lineNo", header: "Pallet", align: "end" },
     { key: "lpId", header: "License plate", mono: true },
-    { key: "itemId", header: "Item", mono: true },
+    { key: "itemId", header: "Item", render: (l) => <Named entity="product" id={l.itemId} fallback={l.itemId} /> },
     { key: "expectedQty", header: "ASN quantity", align: "end" },
     { key: "receivedQty", header: "Received", align: "end", render: (l) => (l.status === "RECEIVED" ? l.receivedQty : "—") },
     {
@@ -368,7 +368,7 @@ export function ReceiptDetailPage() {
       key: "work",
       header: "Put-away work",
       mono: true,
-      render: (l) => (l.workId ? <Link to={`/warehouse/work/${l.workId}`}>{shortId(l.workId)}</Link> : "—"),
+      render: (l) => (l.workId ? <Link to={`/warehouse/work/${l.workId}`}>Open put-away</Link> : "—"),
     },
     {
       key: "actions",
@@ -390,11 +390,8 @@ export function ReceiptDetailPage() {
       <PageHeader title={`ASN ${loaded.asnRef}`} meta={<Badge tone={RECEIPT_STATUS_TONES[loaded.status] ?? "neutral"}>{sentence(loaded.status)}</Badge>} />
       <Card>
         <dl className={styles.details}>
-          <Detail term="Receipt id" mono>
-            {loaded.id}
-          </Detail>
-          <Detail term="Warehouse" mono>
-            {shortId(loaded.warehouseId)}
+          <Detail term="Warehouse">
+            <Named entity="warehouse" id={loaded.warehouseId} />
           </Detail>
           <Detail term="Variance tolerance">±{loaded.tolerancePct}%</Detail>
           <Detail term="Pallets received">
@@ -448,7 +445,7 @@ function ReceivedNotice({ result }: { result: Received }) {
         <span key={w.code}>{w.detail}</span>
       ))}
       <span>
-        Put-away work <Link to={`/warehouse/work/${result.work.id}`}>{shortId(result.work.id)}</Link>{" "}
+        <Link to={`/warehouse/work/${result.work.id}`}>Put-away work</Link>{" "}
         <Badge tone={WORK_STATUS_TONES[result.work.status] ?? "neutral"}>{sentence(result.work.status)}</Badge>
         {blocked ? " — no directive could place the pallet (WMS-0101)." : "."}
       </span>

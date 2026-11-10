@@ -460,17 +460,19 @@ describe("Segmented reservations", () => {
   });
 });
 
+const OWNER_ID = "6c6c6c6c-0000-4000-8000-000000000009";
+
 describe("On-hand by owner and segment", () => {
   it("filters and groups by owner and segment", async () => {
     handler = () => json(200, { items: [], truncated: false });
     renderAt("/inventory/onhand");
     // The filter field comes first; the group-by checkbox shares its label.
     const [ownerFilter, ownerGroup] = await screen.findAllByLabelText("Owner (vendor)");
-    fireEvent.change(ownerFilter!, { target: { value: "V1" } });
+    fireEvent.change(ownerFilter!, { target: { value: OWNER_ID } });
     fireEvent.change(screen.getAllByLabelText("Segment")[0]!, { target: { value: "PROJECT:P1" } });
     fireEvent.click(ownerGroup!);
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("owner")).toBe("V1"));
+    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("owner")).toBe(OWNER_ID));
     const url = calls.at(-1)?.url;
     expect(url?.searchParams.get("segment")).toBe("PROJECT:P1");
     expect(url?.searchParams.get("groupBy")).toBe("product,site,owner");

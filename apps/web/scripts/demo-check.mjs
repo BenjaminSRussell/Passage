@@ -36,7 +36,8 @@ for (const path of paths) {
   await page.goto(`http://localhost:${port}${base}${path}`, { waitUntil: "networkidle" });
   await page.waitForTimeout(800);
   const misses = await page.evaluate(() => window.__passageDemoMisses ?? null);
-  const alerts = await page.locator('[role="alert"]').allInnerTexts();
+  // Hidden alerts (an empty form error summary, for one) are not on screen, so they are not reported.
+  const alerts = await page.locator('[role="alert"]:visible').allInnerTexts();
   const loading = await page.locator('[aria-busy="true"]').count();
   const h1 = (await page.locator("h1").first().innerText().catch(() => "")).trim();
   // Full UUIDs a viewer can see in the page body.
