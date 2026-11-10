@@ -41,7 +41,7 @@ func TestParseMT940_SplitsStatementsAndReadsEntries(t *testing.T) {
 		t.Fatalf("want 2 statements, got %d", len(stmts))
 	}
 	s := stmts[0]
-	if s.Format != FormatMT940 || s.StatementID != "STARTUMS/00001/001" || s.Sequence != 1 || s.Account != "DE89370400440532013000" || s.Currency != "EUR" {
+	if s.Format != FormatMT940 || s.StatementID != "STARTUMS/DE89370400440532013000/00001/001" || s.Sequence != 1 || s.Account != "DE89370400440532013000" || s.Currency != "EUR" {
 		t.Fatalf("header: %+v", s)
 	}
 	if s.OpeningDate != "2024-10-01" || s.ClosingDate != "2024-10-02" || !s.ClosingAmount.Equal(decimal.RequireFromString("900")) {
@@ -65,7 +65,7 @@ func TestParseMT940_SplitsStatementsAndReadsEntries(t *testing.T) {
 	// RC (reversal of a credit) is a debit; transaction type S is accepted; the
 	// :20: reused by the bank still gives a distinct statement id.
 	next := stmts[1]
-	if next.StatementID != "STARTUMS/00002/001" || next.Sequence != 2 || len(next.Lines) != 1 ||
+	if next.StatementID != "STARTUMS/DE89370400440532013000/00002/001" || next.Sequence != 2 || len(next.Lines) != 1 ||
 		!next.Lines[0].Amount.Equal(decimal.RequireFromString("-10")) || next.Lines[0].Reference != "" || next.Lines[0].EndToEndRef != "REV1" {
 		t.Fatalf("second statement: %+v", next)
 	}
@@ -84,8 +84,25 @@ func TestParseMT940_EntryDateCrossesYearEnd(t *testing.T) {
 	if l[0].BookingDate != "2025-01-02" || l[0].ValueDate != "2024-12-31" || l[1].BookingDate != "2024-12-31" || l[1].ValueDate != "2025-01-01" {
 		t.Fatalf("dates: %+v / %+v", l[0], l[1])
 	}
-	if stmts[0].Account != "12345678/0001" || stmts[0].StatementID != "S1" || stmts[0].Sequence != 0 {
+	if stmts[0].Account != "12345678/0001" || stmts[0].StatementID != "S1/12345678/0001/2024-12-31" || stmts[0].Sequence != 0 {
 		t.Fatalf("bank code/account in :25: is kept whole, no :28C: keeps :20:: %+v", stmts[0])
+	}
+}
+
+func TestParseMT940_ReusedReferenceWithoutStatementNumberStaysDistinctPerDayAndAccount(t *testing.T) {
+	day := func(account, date string) string {
+		return ":20:DAILY\n:25:" + account + "\n:60F:C" + date + "EUR1,00\n:62F:C" + date + "EUR1,00\n-\n"
+	}
+	stmts, err := ParseMT940([]byte(day("DE89370400440532013000", "241001") + day("DE89370400440532013000", "241002") + day("DE02120300000000202051", "241002")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, s := range stmts {
+		seen[s.StatementID] = true
+	}
+	if len(seen) != 3 || !seen["DAILY/DE89370400440532013000/2024-10-01"] || !seen["DAILY/DE89370400440532013000/2024-10-02"] || !seen["DAILY/DE02120300000000202051/2024-10-02"] {
+		t.Fatalf("statement ids = %v", seen)
 	}
 }
 

@@ -20,10 +20,12 @@ const testSubscriber = "0190b7a0-0000-7000-8000-0000000000a1"
 type fakeEBICS struct {
 	sub        ebics.Subscriber
 	confirmer  string
+	fetcher    string
 	unparker   string
 	created    store.NewEBICSSubscriber
 	confirmErr error
 	sendErr    error
+	dropReads  bool
 }
 
 func (f *fakeEBICS) CreateEBICSSubscriber(_ context.Context, in store.NewEBICSSubscriber) (ebics.Subscriber, error) {
@@ -33,7 +35,7 @@ func (f *fakeEBICS) CreateEBICSSubscriber(_ context.Context, in store.NewEBICSSu
 }
 
 func (f *fakeEBICS) GetSubscriber(_ context.Context, id string) (ebics.Subscriber, error) {
-	if id != testSubscriber {
+	if id != testSubscriber || f.dropReads {
 		return ebics.Subscriber{}, httpx.NewProblem(http.StatusNotFound, store.CodeSubscriberNotFound, "EBICS subscriber not found")
 	}
 	return f.sub, nil
@@ -56,7 +58,8 @@ func (f *fakeEBICS) Letter(_ context.Context, _, order string) (ebics.Letter, er
 	return ebics.Letter{Text: order + " letter", Hashes: map[string]string{}}, nil
 }
 
-func (f *fakeEBICS) FetchBankKeys(context.Context, string) (ebics.BankKeyHashes, error) {
+func (f *fakeEBICS) FetchBankKeys(_ context.Context, _, actor string) (ebics.BankKeyHashes, error) {
+	f.fetcher = actor
 	f.sub.State, f.sub.Version = ebics.StateKeysPending, f.sub.Version+1
 	return ebics.BankKeyHashes{X002: "11", E002: "22"}, nil
 }
@@ -84,6 +87,19 @@ func newEBICSServer(t *testing.T) (http.Handler, *fakeEBICS) {
 	return r, fe
 }
 
+func problemFields(t *testing.T, rec *httptest.ResponseRecorder) map[string]string {
+	t.Helper()
+	var p struct {
+		Code   string            `json:"code"`
+		Errors map[string]string `json:"errors"`
+	}
+	decodeEBICS(t, rec, &p)
+	if p.Code != "COM-0001" {
+		t.Fatalf("validation problem code %q, want COM-0001 (%s)", p.Code, rec.Body)
+	}
+	return p.Errors
+}
+
 func ebicsJSON(t *testing.T, v any) *bytes.Buffer {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -95,7 +111,7 @@ func ebicsJSON(t *testing.T, v any) *bytes.Buffer {
 
 func createSubscriberBody(t *testing.T) *bytes.Buffer {
 	return ebicsJSON(t, map[string]any{"legalEntityId": testLE, "bankAccountId": testMainAcct, "hostId": "BANKHOST", "partnerId": "PARTNER1", "userId": "USER1",
-		"url": "https://ebics.bank.example/ebics", "a006KeyName": "ebics-a006", "x002KeyName": "ebics-x002", "e002KvPath": "passage/ebics-e002"})
+		"url": "https://ebics.bank.example/ebics"})
 }
 
 func asUser(duties string) map[string]string {
@@ -117,8 +133,8 @@ func TestEBICS_OnboardingThroughTheRoutes(t *testing.T) {
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
-	if fe.created.A006Key != "ebics-a006" || fe.created.E002KVPath != "passage/ebics-e002" {
-		t.Fatalf("key names were not passed through: %+v", fe.created)
+	if fe.created.HostID != "BANKHOST" || fe.created.LegalEntityID != testLE {
+		t.Fatalf("create input: %+v", fe.created)
 	}
 	var created subscriberView
 	decodeEBICS(t, rec, &created)
@@ -130,16 +146,19 @@ func TestEBICS_OnboardingThroughTheRoutes(t *testing.T) {
 		rec = call(h, http.MethodPost, base+"/"+testSubscriber+step.path, nil, "", nil)
 		var out letterOrderResponse
 		decodeEBICS(t, rec, &out)
-		if rec.Code != http.StatusOK || out.Subscriber.State != step.state || out.Letter.Text != step.letter {
+		if rec.Code != http.StatusOK || out.Subscriber == nil || out.Subscriber.State != step.state || out.Letter.Text != step.letter {
 			t.Fatalf("%s: %d %s", step.path, rec.Code, rec.Body)
 		}
 	}
 
-	rec = call(h, http.MethodPost, base+"/"+testSubscriber+":fetch-bank-keys", nil, "", nil)
+	rec = call(h, http.MethodPost, base+"/"+testSubscriber+":fetch-bank-keys", nil, "", asUser("treasury.ebics.keys"))
 	var pending subscriberView
 	decodeEBICS(t, rec, &pending)
 	if rec.Code != http.StatusOK || pending.State != "BANK_KEYS_PENDING" || pending.KeysConfirmed {
 		t.Fatalf("fetch: %d %s", rec.Code, rec.Body)
+	}
+	if fe.fetcher != "treasurer-1" {
+		t.Fatalf("the person who fetched the bank keys must be recorded from the request's user, got %q", fe.fetcher)
 	}
 
 	body := ebicsJSON(t, map[string]any{"x002Hash": "11", "e002Hash": "22", "confirmedBy": "somebody-else"})
@@ -164,11 +183,34 @@ func TestEBICS_OnboardingThroughTheRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK || letter.Order != "HIA" || letter.Text != "HIA letter" {
 		t.Fatalf("letter: %d %s", rec.Code, rec.Body)
 	}
-	if rec = call(h, http.MethodGet, base+"/"+testSubscriber+"/letters/HPB", nil, "", nil); rec.Code != http.StatusBadRequest {
-		t.Fatalf("an order without a letter: %d", rec.Code)
+	if rec = call(h, http.MethodGet, base+"/"+testSubscriber+"/letters/HPB", nil, "", nil); rec.Code != http.StatusBadRequest || problemFields(t, rec)["order"] == "" {
+		t.Fatalf("an order without a letter: %d %s", rec.Code, rec.Body)
 	}
 	if rec = call(h, http.MethodPost, base+"/"+testSubscriber+":unpark", nil, "", asUser("treasury.ebics.approve")); rec.Code != http.StatusOK || fe.unparker != "treasurer-1" {
 		t.Fatalf("unpark: %d (actor %q)", rec.Code, fe.unparker)
+	}
+}
+
+func TestEBICS_KeyNamesAreNeverTakenFromTheCaller(t *testing.T) {
+	h, fe := newEBICSServer(t)
+	for _, field := range []string{"a006KeyName", "x002KeyName", "e002KvPath"} {
+		body := map[string]any{"legalEntityId": testLE, "bankAccountId": testMainAcct, "hostId": "BANKHOST", "partnerId": "PARTNER1", "userId": "USER1",
+			"url": "https://ebics.bank.example/ebics", field: "ebics-another-tenants-key"}
+		rec := call(h, http.MethodPost, "/v1/treasury/ebics-subscribers", ebicsJSON(t, body), "application/json", nil)
+		if rec.Code != http.StatusBadRequest || fe.created.HostID != "" {
+			t.Errorf("%s supplied by the caller: %d %s (created %+v); the server derives key names from the tenant, legal entity and subscriber id", field, rec.Code, rec.Body, fe.created)
+		}
+	}
+}
+
+func TestEBICS_LetterOrderStillAnswersWhenTheReadBackFails(t *testing.T) {
+	h, fe := newEBICSServer(t)
+	fe.dropReads = true
+	rec := call(h, http.MethodPost, "/v1/treasury/ebics-subscribers/"+testSubscriber+":send-ini", nil, "", nil)
+	var out letterOrderResponse
+	decodeEBICS(t, rec, &out)
+	if rec.Code != http.StatusOK || out.Letter.Text != "INI letter" || out.Subscriber != nil {
+		t.Fatalf("the order went to the bank, so the letter must be returned even if the subscriber cannot be re-read: %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -212,6 +254,7 @@ func TestEBICS_ConfirmationFailuresMapToProblems(t *testing.T) {
 	}{
 		{ebics.ErrKeyHashMismatch, http.StatusUnprocessableEntity, CodeEBICSHashMismatch},
 		{ebics.ErrBadState, http.StatusConflict, CodeEBICSState},
+		{ebics.ErrFourEyes, http.StatusForbidden, CodeEBICSFourEyes},
 		{ebics.ErrVersionConflict, http.StatusPreconditionFailed, store.CodeVersionConflict},
 	} {
 		fe.confirmErr = tc.err
@@ -221,8 +264,8 @@ func TestEBICS_ConfirmationFailuresMapToProblems(t *testing.T) {
 		}
 	}
 	rec := call(h, http.MethodPost, path, ebicsJSON(t, map[string]any{"x002Hash": "", "e002Hash": "22"}), "application/json", asUser("treasury.ebics.approve"))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("empty hash: %d", rec.Code)
+	if fields := problemFields(t, rec); rec.Code != http.StatusBadRequest || fields["x002Hash"] == "" || fields["e002Hash"] == "" {
+		t.Errorf("empty hash: %d %s", rec.Code, rec.Body)
 	}
 	noUser := map[string]string{tenant.HeaderDuties: "treasury.ebics.approve", tenant.HeaderUser: ""}
 	if rec = call(h, http.MethodPost, path, body(), "application/json", noUser); rec.Code != http.StatusForbidden {
@@ -247,11 +290,12 @@ func TestEBICS_BankRefusalIsABadGatewayWithTheBankCode(t *testing.T) {
 func TestEBICS_CreateValidationScopeAndDisabled(t *testing.T) {
 	h, _ := newEBICSServer(t)
 	rec := call(h, http.MethodPost, "/v1/treasury/ebics-subscribers", ebicsJSON(t, map[string]any{"legalEntityId": "x"}), "application/json", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("validation: %d", rec.Code)
+	fields := problemFields(t, rec)
+	if rec.Code != http.StatusBadRequest || fields["legalEntityId"] == "" || fields["bankAccountId"] == "" || fields["hostId"] == "" || fields["url"] == "" {
+		t.Fatalf("validation: %d %s", rec.Code, rec.Body)
 	}
 	other := ebicsJSON(t, map[string]any{"legalEntityId": "0190b7a0-0000-7000-8000-0000000000ff", "bankAccountId": testMainAcct, "hostId": "H", "partnerId": "P", "userId": "U",
-		"url": "https://x.example", "a006KeyName": "a", "x002KeyName": "b", "e002KvPath": "c"})
+		"url": "https://x.example"})
 	if rec = call(h, http.MethodPost, "/v1/treasury/ebics-subscribers", other, "application/json", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("a legal entity outside the caller's scope: %d", rec.Code)
 	}

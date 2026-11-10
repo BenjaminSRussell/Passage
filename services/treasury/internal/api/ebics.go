@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ const (
 	CodeEBICSParked       = "TRS-0500"
 	CodeEBICSBank         = "TRS-0501"
 	CodeEBICSOff          = "TRS-0502"
+	CodeEBICSFourEyes     = "TRS-0503"
 )
 
 // EBICS is the subscriber side the onboarding routes drive: the subscriber
@@ -40,7 +42,7 @@ type EBICS interface {
 	SendINI(ctx context.Context, id string) (ebics.Letter, error)
 	SendHIA(ctx context.Context, id string) (ebics.Letter, error)
 	Letter(ctx context.Context, id, order string) (ebics.Letter, error)
-	FetchBankKeys(ctx context.Context, id string) (ebics.BankKeyHashes, error)
+	FetchBankKeys(ctx context.Context, id, actor string) (ebics.BankKeyHashes, error)
 	ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, confirmedBy string) (ebics.Subscriber, error)
 	Unpark(ctx context.Context, id, actor string) (ebics.Subscriber, error)
 }
@@ -69,9 +71,6 @@ type createSubscriberRequest struct {
 	PartnerID     string `json:"partnerId"`
 	UserID        string `json:"userId"`
 	URL           string `json:"url"`
-	A006KeyName   string `json:"a006KeyName"`
-	X002KeyName   string `json:"x002KeyName"`
-	E002KVPath    string `json:"e002KvPath"`
 }
 
 type bankKeyHashesView struct {
@@ -104,8 +103,8 @@ type letterView struct {
 }
 
 type letterOrderResponse struct {
-	Subscriber subscriberView `json:"subscriber"`
-	Letter     letterView     `json:"letter"`
+	Subscriber *subscriberView `json:"subscriber,omitempty"`
+	Letter     letterView      `json:"letter"`
 }
 
 type confirmBankKeysRequest struct {
@@ -133,6 +132,8 @@ func ebicsProblem(err error) error {
 	switch {
 	case errors.Is(err, ebics.ErrBadState):
 		return httpx.NewProblem(http.StatusConflict, CodeEBICSState, err.Error())
+	case errors.Is(err, ebics.ErrFourEyes):
+		return httpx.NewProblem(http.StatusForbidden, CodeEBICSFourEyes, "the person who downloaded the bank keys cannot also confirm them; another person must compare the hashes")
 	case errors.Is(err, ebics.ErrKeyHashMismatch):
 		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeEBICSHashMismatch, "the hashes do not match the bank keys that were downloaded; do not activate")
 	case errors.Is(err, ebics.ErrParked):
@@ -181,8 +182,7 @@ func (a *API) createSubscriber(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.BankAccountID) {
 		fields["bankAccountId"] = "must be a UUID"
 	}
-	for name, v := range map[string]string{"hostId": req.HostID, "partnerId": req.PartnerID, "userId": req.UserID, "url": req.URL,
-		"a006KeyName": req.A006KeyName, "x002KeyName": req.X002KeyName, "e002KvPath": req.E002KVPath} {
+	for name, v := range map[string]string{"hostId": req.HostID, "partnerId": req.PartnerID, "userId": req.UserID, "url": req.URL} {
 		if strings.TrimSpace(v) == "" || len(v) > 512 {
 			fields[name] = "required, at most 512 characters"
 		}
@@ -195,7 +195,7 @@ func (a *API) createSubscriber(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sub, err := a.ebics.CreateEBICSSubscriber(r.Context(), store.NewEBICSSubscriber{LegalEntityID: req.LegalEntityID, BankAccountID: req.BankAccountID,
-		HostID: req.HostID, PartnerID: req.PartnerID, UserID: req.UserID, URL: req.URL, A006Key: req.A006KeyName, X002Key: req.X002KeyName, E002KVPath: req.E002KVPath})
+		HostID: req.HostID, PartnerID: req.PartnerID, UserID: req.UserID, URL: req.URL})
 	if err != nil {
 		httpx.Fail(w, r, ebicsProblem(err))
 		return
@@ -239,13 +239,15 @@ func (a *API) sendLetterOrder(order string) http.HandlerFunc {
 			httpx.Fail(w, r, ebicsProblem(err))
 			return
 		}
-		sub, err := a.ebics.GetSubscriber(r.Context(), id)
-		if err != nil {
-			httpx.Fail(w, r, ebicsProblem(err))
-			return
+		out := letterOrderResponse{Letter: letterOf(order, l)}
+		if sub, err := a.ebics.GetSubscriber(r.Context(), id); err == nil {
+			setETag(w, sub.Version)
+			v := viewOf(sub)
+			out.Subscriber = &v
+		} else {
+			slog.WarnContext(r.Context(), "ebics order sent but the subscriber could not be read back", "subscriber", id, "order", order, "err", err)
 		}
-		setETag(w, sub.Version)
-		httpx.JSON(w, http.StatusOK, letterOrderResponse{Subscriber: viewOf(sub), Letter: letterOf(order, l)})
+		httpx.JSON(w, http.StatusOK, out)
 	}
 }
 
@@ -257,7 +259,11 @@ func (a *API) fetchBankKeys(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := a.ebics.FetchBankKeys(r.Context(), id); err != nil {
+	user, ok := namedUser(w, r)
+	if !ok {
+		return
+	}
+	if _, err := a.ebics.FetchBankKeys(r.Context(), id, user); err != nil {
 		httpx.Fail(w, r, ebicsProblem(err))
 		return
 	}

@@ -36,8 +36,8 @@ type mt940Field struct {
 // and debit reversals (RD) are positive. The :86: block after a :61: is the
 // line's remittance reference (structured ?20-?29 subfields, or the whole
 // text) and, when structured, gives the counterparty (?32/?33). Banks reuse
-// :20: across statements, so the statement id is :20:/:28C: when :28C: is
-// present.
+// :20: across statements and days, so the statement id is :20:/:25:/:28C:, with
+// the :60F: opening date in place of :28C: when the bank sends none.
 func ParseMT940(data []byte) ([]Statement, error) {
 	fields, err := mt940Fields(data)
 	if err != nil {
@@ -45,7 +45,7 @@ func ParseMT940(data []byte) ([]Statement, error) {
 	}
 	var out []Statement
 	var cur *Statement
-	var ref string
+	var ref, number string
 	var refLine int
 	finish := func() error {
 		if cur == nil {
@@ -60,6 +60,11 @@ func ParseMT940(data []byte) ([]Statement, error) {
 		if err := CheckBalances(*cur); err != nil {
 			return err
 		}
+		discriminator := number
+		if discriminator == "" {
+			discriminator = cur.OpeningDate
+		}
+		cur.StatementID = ref + "/" + cur.Account + "/" + discriminator
 		out = append(out, *cur)
 		cur = nil
 		return nil
@@ -69,7 +74,7 @@ func ParseMT940(data []byte) ([]Statement, error) {
 			if err := finish(); err != nil {
 				return nil, err
 			}
-			ref, refLine = strings.TrimSpace(f.value), f.line
+			ref, refLine, number = strings.TrimSpace(f.value), f.line, ""
 			if ref == "" {
 				return nil, formatError(f.line, ":20: transaction reference is required")
 			}
@@ -78,6 +83,9 @@ func ParseMT940(data []byte) ([]Statement, error) {
 		}
 		if cur == nil {
 			return nil, formatError(f.line, ":"+f.tag+": appears before :20:")
+		}
+		if f.tag == "28C" || f.tag == "28" {
+			number = strings.TrimSpace(f.value)
 		}
 		if err := cur.applyMT940Field(f); err != nil {
 			return nil, err
@@ -127,7 +135,6 @@ func (st *Statement) applyMT940Field(f mt940Field) error {
 			return formatError(f.line, ":28C: statement number must be a non-negative integer")
 		}
 		st.Sequence = n
-		st.StatementID += "/" + strings.TrimSpace(f.value)
 	case "60F", "60M":
 		date, ccy, amt, err := mt940Balance(f.value)
 		if err != nil {

@@ -619,7 +619,7 @@ func TestImportStatement_DetectsBAI2AndMT940(t *testing.T) {
 		":61:2410011001C25,00NTRFINV-1//B1\n:86:INVOICE 1\n:62F:C241001EUR125,00\n"
 	for _, tc := range []struct{ name, file, format, statementID string }{
 		{"BAI2", bai2, domain.FormatBAI2, "123456789-2024-10-01"},
-		{"MT940", mt940, domain.FormatMT940, "REF1/00007/001"},
+		{"MT940", mt940, domain.FormatMT940, "REF1/DE89370400440532013000/00007/001"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _ := newTestServer(t)
