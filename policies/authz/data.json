@@ -1538,12 +1538,24 @@
     ]},
     "intercompany.plan": {"permissions": [{"resource": "/v1/interco/planning-groups:sequence", "methods": ["POST"]}]},
     "intercompany.post": {"permissions": [
+      {"resource": "/v1/interco/charges", "methods": ["POST"]},
       {"resource": "/v1/interco/charges:preview", "methods": ["POST"]},
+      {"resource": "/v1/interco/journals", "methods": ["POST"]},
       {"resource": "/v1/interco/journals:preview", "methods": ["POST"]}
     ]},
-    "intercompany.reconcile": {"permissions": [{"resource": "/v1/interco/reconciliations:classify", "methods": ["POST"]}]},
+    "intercompany.reconcile": {"permissions": [
+      {"resource": "/v1/interco/reconciliations/items/*/resolve", "methods": ["POST"]},
+      {"resource": "/v1/interco/reconciliations/run", "methods": ["POST"]},
+      {"resource": "/v1/interco/reconciliations:classify", "methods": ["POST"]}
+    ]},
     "intercompany.view": {"permissions": [
       {"resource": "/v1/interco/chains:preview", "methods": ["POST"]},
+      {"resource": "/v1/interco/charges", "methods": ["GET"]},
+      {"resource": "/v1/interco/charges/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/journals", "methods": ["GET"]},
+      {"resource": "/v1/interco/journals/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/reconciliations", "methods": ["GET"]},
+      {"resource": "/v1/interco/reconciliations/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*/changes:evaluate", "methods": ["POST"]},

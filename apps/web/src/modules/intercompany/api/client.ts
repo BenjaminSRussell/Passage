@@ -154,6 +154,12 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
   return (await (await send(path, body, "application/json", signal)).json()) as T;
 }
 
+/** Sends one request and returns its JSON with the HTTP status, so a caller can tell a 202 from a 201. */
+export async function callJson<T>(method: string, path: string, opts: RequestOptions = {}): Promise<{ status: number; data: T }> {
+  const res = await request(method, path, opts);
+  return { status: res.status, data: (await res.json()) as T };
+}
+
 /** Derive the due-to / due-from journal for one IC line (BR-40.4, AC-40.4). Nothing is posted. */
 export function previewJournal(req: JournalPreviewRequest, signal?: AbortSignal): Promise<JournalPreview> {
   return post<JournalPreview>("/journals:preview", req, signal);

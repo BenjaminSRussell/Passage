@@ -922,6 +922,29 @@ const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
 };
 
+/** Group consolidation and intercompany (wave 40): the codes a person can reach from the group and intercompany screens. */
+const groupFinance: Record<string, ProblemCatalogEntry> = {
+  "CNS-0904": { message: "The ownership shares of this unit would add up to more than 100 percent on that date.", action: "Lower the share, or end another holder's holding first." },
+  "CNS-0923": { message: "Consolidation groups need access to every legal entity, and your access is limited to some of them.", action: ASK_ADMIN },
+  "CNS-0924": { message: "We couldn't find that consolidation group or unit.", action: "Go back to the groups and open it again." },
+  "CNS-0925": { message: "A consolidation group with that code already exists.", action: "Choose another code, or open the existing group." },
+  "CNS-0926": { message: "That legal entity is already a unit of this group.", action: "Open the unit to change its ownership instead." },
+  "CNS-0927": { message: "The balances could not be collected: a unit needs a rate for its currency, or has no units to collect.", action: "Enter the average and closing rate of each foreign currency, and make sure the group has units." },
+  "CNS-0928": { message: "We couldn't find that collection.", action: "Go back to the group and open the collection from its list." },
+  "CNS-0929": { message: "A unit's ledger could not be read.", action: "Check the ledger code of the unit, then try again. If it keeps happening, contact support with the details below." },
+  "IC-0805": { message: "There is no accounting matrix row for that pair of entities, so the due-to and due-from accounts are unknown.", action: "Add the matrix row for the entity pair and try again." },
+  "IC-0821": { message: "No transfer price applies to this charge on its date.", action: "Add a transfer price for the category and role, then submit the charge again with the next version." },
+  "IC-0841": { message: "This request was already sent with different details.", action: "Reload the page and start again, or send the next version of the source." },
+  "IC-0844": { message: "We couldn't find that intercompany journal.", action: "Go back to the posted journals and open it again." },
+  "IC-0845": { message: "One entity's ledger refused its side of the journal, so the sides already posted were reversed and nothing is left half posted.", action: "Fix the reason the ledger gave, such as a closed period, then post again." },
+  "IC-0846": { message: "A ledger did not answer, so the journal is paused with only some entries posted.", action: "Post the same journal again to continue where it stopped." },
+  "IC-0847": { message: "That ledger doesn't belong to the legal entity you chose.", action: "Pick the entity's own ledger code and try again." },
+  "IC-0848": { message: "We couldn't find that intercompany charge.", action: "Go back to the charge log and open it again." },
+  "IC-0850": { message: "We couldn't find that reconciliation run.", action: "Go back to the runs and open it again." },
+  "IC-0851": { message: "We couldn't find that reconciliation pair.", action: "Reload the run and open the pair again." },
+  "IC-0852": { message: "This pair has nothing left to resolve.", action: "Reload the run to see its current state." },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -945,6 +968,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...p2pGaps,
   ...p2pMore,
   ...treasury,
+  ...groupFinance,
   ...shared,
 });
 

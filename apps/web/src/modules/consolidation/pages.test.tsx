@@ -53,6 +53,7 @@ describe("consolidation module", () => {
     expect(consolidation.routes.every((r) => r.element != null && r.path?.startsWith("/consolidation"))).toBe(true);
     expect(consolidation.nav.map((n) => n.to)).toEqual([
       "/consolidation",
+      "/consolidation/groups",
       "/consolidation/eliminations",
       "/consolidation/translation",
       "/consolidation/profit-in-inventory",
@@ -63,7 +64,7 @@ describe("consolidation module", () => {
       "/consolidation/reclassification",
       "/consolidation/group-journals",
     ]);
-    expect(consolidation.nav.map((n) => n.duty)).toEqual(["consolidation.view", ...Array(8).fill("consolidation.run"), "consolidation.journal.maintain"]);
+    expect(consolidation.nav.map((n) => n.duty)).toEqual(["consolidation.view", "consolidation.view", ...Array(8).fill("consolidation.run"), "consolidation.journal.maintain"]);
   });
 
   it("links the workspace to each tool", () => {

@@ -101,12 +101,13 @@ type TrialBalance struct {
 	Rows []TBRow
 	// Unmapped lists the main accounts, per unit, that have no consolidation account.
 	Unmapped []CollectLine
-	// Total is the sum of every mapped row; non-zero only by the translation
+	// Total is the sum of every translated balance, mapped or not. A balanced
+	// ledger nets to zero, so it is non-zero only by the translation
 	// difference, which the run books as CTA.
 	Total decimal.Decimal
-	// UnitDifference is each unit's translation difference: the sum of its
-	// translated mapped amounts (zero for a unit in the group currency whose
-	// ledger balances).
+	// UnitDifference is each unit's translation difference: the sum of all its
+	// translated balances (zero for a unit in the group currency whose ledger
+	// balances, mapped or not).
 	UnitDifference map[string]decimal.Decimal
 }
 
@@ -116,6 +117,8 @@ func BuildTrialBalance(lines []CollectLine) TrialBalance {
 	tb := TrialBalance{UnitDifference: map[string]decimal.Decimal{}, Total: decimal.Zero}
 	rows := map[string]*TBRow{}
 	for _, l := range lines {
+		tb.Total = tb.Total.Add(l.GroupAmount)
+		tb.UnitDifference[l.UnitID] = tb.UnitDifference[l.UnitID].Add(l.GroupAmount)
 		if !l.Mapped() {
 			tb.Unmapped = append(tb.Unmapped, l)
 			continue
@@ -127,8 +130,6 @@ func BuildTrialBalance(lines []CollectLine) TrialBalance {
 		}
 		r.Total = r.Total.Add(l.GroupAmount)
 		r.Units[l.UnitID] = r.Units[l.UnitID].Add(l.GroupAmount)
-		tb.Total = tb.Total.Add(l.GroupAmount)
-		tb.UnitDifference[l.UnitID] = tb.UnitDifference[l.UnitID].Add(l.GroupAmount)
 	}
 	for _, r := range rows {
 		tb.Rows = append(tb.Rows, *r)

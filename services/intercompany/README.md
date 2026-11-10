@@ -87,6 +87,21 @@ order change against a stored pairing, and the partner screens.
 Remaining deliverables and acceptance criteria are listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
+## Posting, charges and stored reconciliation (issue 40, subtasks 40-3 to 40-5)
+
+| Area | Code | Status |
+|---|---|---|
+| `POST /v1/interco/journals` (duty `intercompany.post`, `Idempotency-Key` required): derives the journal and posts one ledger entry per entity through `platform/ledgerclient`. A later side refused (4xx) reverses the earlier sides and stores the journal as compensated (422 IC-0845); an unreachable ledger leaves it pending (503 IC-0846) and the same key resumes it without posting twice | `internal/posting`, `internal/api/journals.go` | built, tests over Postgres with the ledger fake |
+| `GET /v1/interco/journals`, `GET /v1/interco/journals/{id}`; events `journal.posted.v1` and `journal.compensated.v1` | `internal/store/journals.go` | built |
+| `POST /v1/interco/charges`: stored per `sourceId` and `version`, priced by the transfer price in force on the date, posted through the same two-sided path; no applicable price is 202 with status suspense and nothing posted (BR-40.12). `GET /v1/interco/charges`, `GET /v1/interco/charges/{id}`; event `charge.posted.v1` | `internal/api/charges.go`, `internal/store/charges.go` | built, tests (AC-40.11 postings, suspense then repriced, compensation) |
+| `POST /v1/interco/reconciliations/run` (duty `intercompany.reconcile`, `Idempotency-Key` required), `GET /v1/interco/reconciliations`, `GET /v1/interco/reconciliations/{id}?status=`, `POST /v1/interco/reconciliations/items/{id}/resolve`; the run and items are immutable and an open item is resolved once with a note; event `reconciliation.flagged.v1` | `internal/api/recon.go`, `internal/store/recon.go`, migration `0004_reconciliation.sql` | built, tests incl. the planted-50 fixture `internal/api/testdata/ic-recon-planted-50.json` |
+| Web: posted journals, charge log, reconciliation runs, posting from the journal and charge previews, saving a classification as a run | `apps/web/src/modules/intercompany` | built, vitest, demo data |
+
+Posting needs `LEDGER_URL` and the service signing key (`PASSAGE_SERVICE_NAME=intercompany`); without
+them the posting routes answer 503 and everything else works. The Helm chart takes them from
+`ledgerUrl` and `serviceIdentity.signingKeySecret`. The service is granted `ledger.entry.post`,
+`ledger.journal.reverse` and `ledger.ledger.lookup` on the ledger.
+
 ## Run
 
 ```
@@ -133,6 +148,12 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | IC-0841 | 422 | The `Idempotency-Key` was used with a different request (not in the PRD catalog) |
 | IC-0842 | 404 | No pairing with this id in the tenant (not in the PRD catalog) |
 | IC-0843 | 412 / 428 | `If-Match` names a version the pairing no longer has, or is missing (not in the PRD catalog) |
+| IC-0844 / IC-0848 | 404 | No journal / no charge with this id (not in the PRD catalog) |
+| IC-0845 | 422 | A later side was refused by its ledger and the earlier sides were reversed (not in the PRD catalog) |
+| IC-0846 | 503 | A ledger did not answer; the journal is pending and the same `Idempotency-Key` resumes it (not in the PRD catalog) |
+| IC-0847 | 422 | The ledger does not belong to the legal entity named for the entity code (not in the PRD catalog) |
+| IC-0850 / IC-0851 | 404 | No reconciliation run / item with this id (not in the PRD catalog) |
+| IC-0852 | 409 | The item is matched or already resolved, so there is nothing to resolve (not in the PRD catalog) |
 | AUTH-0001 / AUTH-0003 | 401 / 403 | Missing tenant / missing duty |
 
 ## Dependencies

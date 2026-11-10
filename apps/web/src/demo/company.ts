@@ -24,6 +24,11 @@ export const TENANT_ID = "00000000-0000-0000-0000-000000000001";
 /** Same id the dev identity headers use, so any page that defaults to it lines up. */
 export const LEGAL_ENTITY = { id: "00000000-0000-0000-0000-0000000000e1", code: "CRP-US", name: "Cedar Ridge Pumps, Inc.", currency: "USD", country: "US" };
 
+/** The other legal entities of the demo group: a German and a Spanish subsidiary, both in euros. */
+export const LEGAL_ENTITY_DE = { id: "00000000-0000-0000-0000-0000000000e2", code: "CRP-DE", name: "Cedar Ridge Pumps Europe GmbH", currency: "EUR", country: "DE" };
+export const LEGAL_ENTITY_ES = { id: "00000000-0000-0000-0000-0000000000e3", code: "CRP-ES", name: "Cedar Ridge Pumps Iberia S.L.", currency: "EUR", country: "ES" };
+export const LEGAL_ENTITIES = [LEGAL_ENTITY, LEGAL_ENTITY_DE, LEGAL_ENTITY_ES];
+
 export const USER = { id: "dev", name: "Jordan Avery", email: "jordan.avery@cedarridgepumps.example" };
 
 export interface Site {

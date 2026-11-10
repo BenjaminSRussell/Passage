@@ -48,7 +48,7 @@ func TestCollect_NeedsARateForAForeignUnit(t *testing.T) {
 func TestBuildTrialBalance_AggregatesPerAccountAndKeepsUnitContributions(t *testing.T) {
 	units := []UnitLedger{
 		{UnitID: "us", Currency: "USD", Rows: []LedgerRow{{"1000", pct("500.00")}, {"2000", pct("-500.00")}}},
-		{UnitID: "de", Currency: "EUR", Rows: []LedgerRow{{"1000", pct("100.00")}, {"2000", pct("-100.00")}, {"9999", pct("7.00")}}},
+		{UnitID: "de", Currency: "EUR", Rows: []LedgerRow{{"1000", pct("93.00")}, {"2000", pct("-100.00")}, {"9999", pct("7.00")}}},
 	}
 	lines, err := Collect("USD", testMapping, units, map[string]CollectRate{"EUR": {Average: pct("1.08"), Closing: pct("1.10")}})
 	if err != nil {
@@ -58,11 +58,11 @@ func TestBuildTrialBalance_AggregatesPerAccountAndKeepsUnitContributions(t *test
 	if len(tb.Rows) != 2 || tb.Rows[0].Account != "CASH" || tb.Rows[1].Account != "PAYABLES" {
 		t.Fatalf("rows = %+v", tb.Rows)
 	}
-	if !tb.Rows[0].Total.Equal(pct("610.00")) || !tb.Rows[0].Units["de"].Equal(pct("110.00")) {
+	if !tb.Rows[0].Total.Equal(pct("602.30")) || !tb.Rows[0].Units["de"].Equal(pct("102.30")) {
 		t.Errorf("CASH total %s, de %s", tb.Rows[0].Total, tb.Rows[0].Units["de"])
 	}
-	if !tb.Total.IsZero() {
-		t.Errorf("a balanced ledger stays balanced when every account takes the closing rate, total %s", tb.Total)
+	if !tb.Total.IsZero() || !tb.UnitDifference["de"].IsZero() {
+		t.Errorf("balanced ledgers stay balanced when every account takes the closing rate, mapped or not: total %s, de %s", tb.Total, tb.UnitDifference["de"])
 	}
 	if len(tb.Unmapped) != 1 || tb.Unmapped[0].MainAccount != "9999" {
 		t.Errorf("unmapped = %+v", tb.Unmapped)

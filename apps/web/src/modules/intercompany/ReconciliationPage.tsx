@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -16,6 +17,7 @@ import {
 } from "../../shell/ui";
 import { classifyItems, describeProblem, type ClassifiedItem, type ClassifyResult, type Problem, type ReconItem, type ReconStatus } from "./api/client";
 import { amount, isCurrency, isDecimal, isNonZero, isSignedDecimal } from "./format";
+import { newKey, runReconciliation } from "./api/postings";
 import { RowGrid, type RowField } from "./RowGrid";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -151,13 +153,45 @@ const resultColumns: DataTableColumn<ClassifiedItem>[] = [
   },
 ];
 
-/** Classify intercompany balance pairs as Matched, Timing or Mismatch (FR-40.6, BR-40.5). Nothing is stored. */
+/** Classify intercompany balance pairs as Matched, Timing or Mismatch (FR-40.6, BR-40.5). Classifying alone stores nothing. */
 export function ReconciliationPage() {
   const [values, setValues] = useState<ReconValues>(sample);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ClassifyResult | null>(null);
+  const [saving, setSaving] = useState(false);
+  const navigate = useNavigate();
+  const key = useRef(newKey());
+
+  /** Store the same pairs as a run. A run has one period and currency, so every pair must share them. */
+  async function saveRun() {
+    const { errors: found, request } = validateRecon(values);
+    setErrors(found);
+    setFailure(null);
+    if (!request) return;
+    const { period, currency } = request.items[0];
+    const other = request.items.findIndex((it) => it.period !== period || it.currency !== currency);
+    if (other >= 0) {
+      setErrors({ [`items[${other}].period`]: "A run covers one period and currency. Use the same as the first pair." });
+      return;
+    }
+    setSaving(true);
+    try {
+      const run = await runReconciliation(
+        { period, currency, fxTolerancePct: request.fxTolerancePct, items: request.items.map(({ period: _p, currency: _c, ...rest }) => rest) },
+        key.current,
+      );
+      key.current = newKey();
+      navigate(`/intercompany/reconciliation-runs/${run.id}`);
+    } catch (err) {
+      const problem = describeProblem(err);
+      if (Object.keys(problem.fields).length > 0) setErrors(problem.fields);
+      setFailure(problem);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -182,7 +216,7 @@ export function ReconciliationPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Intercompany reconciliation"
-        description="A pair matches when both sides agree within 0.01, or within the FX tolerance when they were converted between currencies. It is a timing difference when the next period's bookings close it, and a mismatch otherwise. Stored runs and resolving items arrive with the next slice."
+        description="A pair matches when both sides agree within 0.01, or within the FX tolerance when they were converted between currencies. It is a timing difference when the next period's bookings close it, and a mismatch otherwise. Save the classification as a run to keep it and resolve the pairs that need action."
       />
       <Card title="Balance pairs" headingLevel={3}>
         <form className={styles.form} onSubmit={(e) => void submit(e)} noValidate>
@@ -223,6 +257,9 @@ export function ReconciliationPage() {
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={busy}>
               Classify pairs
+            </Button>
+            <Button loading={saving} onClick={() => void saveRun()}>
+              Classify and save as a run
             </Button>
           </div>
         </form>

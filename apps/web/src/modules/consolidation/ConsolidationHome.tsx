@@ -4,6 +4,13 @@ import styles from "./pages.module.css";
 
 const tools = [
   {
+    title: "Groups and trial balance",
+    to: "/consolidation/groups",
+    action: "Open the groups",
+    description:
+      "Set up a group's legal entities, their ownership and the account mapping, collect each unit's balances from its ledger and read the consolidated trial balance with each unit's share.",
+  },
+  {
     title: "Elimination entries",
     to: "/consolidation/eliminations",
     action: "Preview eliminations",
@@ -74,7 +81,7 @@ export function ConsolidationHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Consolidation workspace"
-        description="Check the translation, elimination, profit-in-inventory, investment, validation, reclassification and top-side journal arithmetic of a group consolidation. Group structures, versioned runs, the consolidated trial balance and the stored monitor arrive with the next slices."
+        description="Check the translation, elimination, profit-in-inventory, investment, validation, reclassification and top-side journal arithmetic of a group consolidation. Group structures and the consolidated trial balance are stored; versioned runs over collected balances and the stored monitor arrive with the next slices."
       />
       <CardGrid as="ul" label="Consolidation tools">
         {tools.map((tool) => (

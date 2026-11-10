@@ -6,6 +6,7 @@ import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey }
 import { RowGrid } from "./RowGrid";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { PostJournalPanel } from "./PostPanels";
 
 export interface JournalValues {
   entity: string;
@@ -91,6 +92,7 @@ export function JournalPreviewPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<JournalPreview | null>(null);
+  const [previewed, setPreviewed] = useState<JournalPreviewRequest | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -101,11 +103,13 @@ export function JournalPreviewPage() {
     setBusy(true);
     try {
       setPreview(await previewJournal(request));
+      setPreviewed(request);
     } catch (err) {
       const problem = describeProblem(err);
       if (Object.keys(problem.fields).length > 0) setErrors(problem.fields);
       setFailure(problem);
       setPreview(null);
+      setPreviewed(null);
     } finally {
       setBusy(false);
     }
@@ -115,7 +119,7 @@ export function JournalPreviewPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Intercompany journal"
-        description="The line posts in its entity against Due from the offset entity; the offset entity posts Due to against its own account, converted at the document rate. Accounts come from the intercompany accounting matrix. Posting arrives with the journal slice."
+        description="The line posts in its entity against Due from the offset entity; the offset entity posts Due to against its own account, converted at the document rate. Accounts come from the intercompany accounting matrix. After a preview you can post it: each entity gets one entry in its own ledger."
       />
       <Card title="Intercompany line" headingLevel={3}>
         <form className={styles.form} onSubmit={(e) => void submit(e)} noValidate>
@@ -180,6 +184,7 @@ export function JournalPreviewPage() {
             getRowKey={(l, i) => `${l.entity}-${l.account}-${i}`}
             empty={{ title: "No legs", description: "The service returned no journal legs." }}
           />
+          {previewed && preview.balanced ? <PostJournalPanel key={preview.pairId} request={previewed} /> : null}
         </>
       ) : (
         <Card>

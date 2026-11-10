@@ -8,6 +8,7 @@ import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { PostChargePanel } from "./PostPanels";
 
 type LineKey =
   | "lendingEntity"
@@ -155,16 +156,20 @@ export function ChargesPage() {
   const [values, setValues] = useState<ChargeValues>(ac4011);
   const { errors, failure, busy, result, run } = usePreview(previewCharge);
 
+  const [priced, setPriced] = useState<ChargePreviewRequest | null>(null);
+
   function submit(event: FormEvent) {
     event.preventDefault();
-    void run(validateCharge(values));
+    const checked = validateCharge(values);
+    setPriced(checked.request ?? null);
+    void run(checked);
   }
 
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Intercompany charges"
-        description="An expense, hour, item or fee whose cost belongs to another entity is priced by the transfer price effective on its date. The borrower books the price against Due to the lender; the lender books Due from the borrower against cost recovery and the IC margin. Submitting charges from expenses and timesheets, and Invoice settlement, arrive with the posting slice."
+        description="An expense, hour, item or fee whose cost belongs to another entity is priced by the transfer price effective on its date. The borrower books the price against Due to the lender; the lender books Due from the borrower against cost recovery and the IC margin. After pricing you can post the charge to both entities. Submitting charges from expenses and timesheets, and Invoice settlement, arrive with the integrations that raise them."
       />
       <Card title="Charge" headingLevel={3}>
         <form className={styles.form} onSubmit={submit} noValidate>
@@ -205,6 +210,14 @@ export function ChargesPage() {
           </div>
         </form>
       </Card>
+      {failure?.code === "IC-0821" && priced ? (
+        <>
+          <Alert tone="warning" title="No transfer price applies">
+            You can still submit the charge: it stays on suspense with nothing posted until you submit its next version with a price.
+          </Alert>
+          <PostChargePanel key="suspense" request={priced} />
+        </>
+      ) : null}
       {busy ? (
         <DataTable label="Charge legs" columns={legColumns} rows={[]} getRowKey={(_, i) => String(i)} loading />
       ) : result ? (
@@ -227,6 +240,7 @@ export function ChargesPage() {
             getRowKey={(l, i) => `${l.entity}-${l.account}-${i}`}
             empty={{ title: "No legs", description: "The service returned no charge legs." }}
           />
+          {priced && result.balanced ? <PostChargePanel key={result.pairId} request={priced} /> : null}
         </>
       ) : (
         <Card>
