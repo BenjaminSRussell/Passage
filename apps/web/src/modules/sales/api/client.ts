@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the sales service (services/sales/api/openapi.yaml).
 // Browser calls use /api/v1/sales/..., which the web BFF rewrites to /v1/sales/....
 
@@ -544,7 +545,7 @@ async function send(path: string, init: RequestInit = {}, signal?: AbortSignal):
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
