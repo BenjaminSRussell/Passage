@@ -549,6 +549,39 @@ class ArgoApplicationsTest(unittest.TestCase):
         self.assertEqual({"passage.budget.plan"}, {t for t in channels | writable if pattern.fullmatch(t)})
         self.assertLessEqual({t for t in channels if pattern.fullmatch(t)}, writable)
 
+    def test_outbox_billing_publishes_only_the_invoice_channel_the_debezium_user_may_write(self):
+        # Billing enqueues one aggregate type, so no Filter SMT is needed; the day a second one appears it would route to a
+        # topic without ACL or channel, which this test refuses until the connector filters it like outbox-budgeting.
+        docs = load_docs(DEPLOY / "kafka/connect.yaml")
+        (debezium,) = [d for d in docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "debezium"]
+        writable = {a["resource"]["name"] for a in debezium["spec"]["authorization"]["acls"]
+                    if a["resource"]["type"] == "topic" and a["resource"].get("patternType") == "literal"
+                    and "Write" in a["operations"]}
+        (cfg,) = [d["spec"]["config"] for d in docs if d["kind"] == "KafkaConnector" and d["metadata"]["name"] == "outbox-billing"]
+        self.assertEqual("aggregate_type", cfg["transforms.outbox.route.by.field"])
+        self.assertEqual("passage.billing", cfg["topic.prefix"])
+        self.assertEqual("passage.billing.${routedByValue}", cfg["transforms.outbox.route.topic.replacement"])
+        chain = cfg["transforms"].split(",")
+        self.assertEqual("outbox", chain[0])
+        self.assertEqual("enrich", chain[-1])
+        aggregates = set()
+        for f in (REPO / "services/billing/internal/store").glob("*.go"):
+            if not f.name.endswith("_test.go"):
+                aggregates |= set(re.findall(r'outbox\.Enqueue\(ctx, tx, "([^"]+)"', f.read_text()))
+        self.assertEqual({"invoice"}, aggregates, "a new billing aggregate type needs a channel, an ACL and a Filter in outbox-billing")
+        spec = yaml.safe_load((REPO / "services/billing/events/asyncapi.yaml").read_text())
+        channels = {c["address"] for c in spec["channels"].values()}
+        routed = {cfg["transforms.outbox.route.topic.replacement"].replace("${routedByValue}", a) for a in aggregates}
+        self.assertEqual(channels, routed)
+        self.assertLessEqual(routed, writable)
+        self.assertEqual({"passage.billing.invoice"}, {t for t in writable if t.startswith("passage.billing.")})
+        secrets = {d["metadata"]["name"] for f in manifests(DEPLOY / "envs/dev/kafka-secrets") for d in load_docs(f)
+                   if d["kind"] == "ExternalSecret"}
+        self.assertIn("debezium-cdc-billing", secrets)
+        (role,) = [d for f in manifests(DEPLOY / "envs/dev/kafka-secrets") for d in load_docs(f)
+                   if d["kind"] == "Role" and d["metadata"]["name"] == "passage-connect-read-debezium-cdc"]
+        self.assertIn("debezium-cdc-billing", role["rules"][0]["resourceNames"])
+
     @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
     def test_temporal_values_match_its_database(self):
         dev = self.dev_apps()
