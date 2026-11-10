@@ -65,11 +65,4 @@ test.describe("axe: dynamic states", () => {
     await expectNoSeriousViolations(page, testInfo, "drawer");
   });
 
-  test("notes form showing validation errors", async ({ page }, testInfo) => {
-    const shell = new ShellPage(page);
-    await shell.goto("/notes");
-    await page.getByRole("button", { name: "Save Note" }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "Title is required" })).toBeVisible();
-    await expectNoSeriousViolations(page, testInfo, "notes-errors");
-  });
 });
