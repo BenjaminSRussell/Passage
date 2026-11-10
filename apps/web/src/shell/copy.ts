@@ -1,8 +1,12 @@
+import { activeLocale } from "./i18n/locale";
+import { localizeCopy } from "./i18n/localize";
+
 const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform);
 
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
-export const copy = {
+/** The English source text. Other languages live in shell/i18n and are applied by localizeCopy below. */
+const english = {
   nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features" },
   workspaces: {
     switcherLabel: "Workspace",
@@ -151,6 +155,10 @@ export const copy = {
     description: "A preview of a form generated from entity metadata.",
     saved: (title: string) => `${title} saved`,
   },
+  format: {
+    today: "Today",
+    days: (count: number) => (count === 1 ? "1 day" : `${count} days`),
+  },
   help: {
     button: "Help for this page",
     panelLabel: "Help",
@@ -162,6 +170,8 @@ export const copy = {
     whatsNew: "What's new",
     announceOpened: "Help opened",
     shareUsage: "Share anonymous usage data",
+    language: "Language",
+    opensInNewTab: "(opens in a new tab)",
     shareUsageHint: "Which steps people finish and where forms fail, so we can make them easier. It holds no names or record details.",
   },
   whatsNew: {
@@ -188,3 +198,6 @@ export const copy = {
     badge: "Coming soon",
   },
 } as const;
+
+export const copyEnglish = english;
+export const copy = localizeCopy(english, activeLocale, { shortcut: shortcutHint });

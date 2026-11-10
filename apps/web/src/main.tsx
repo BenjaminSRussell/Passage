@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
 import { loadModules } from "./modules/registry";
+import { I18nProvider } from "./shell/i18n/I18nProvider";
 import { Shell } from "./shell/Shell";
 import { AuthRoot } from "./shell/auth/AuthRoot";
 import { bootstrapAuth } from "./shell/auth/auth";
@@ -47,10 +48,12 @@ function App({ duties, identity, banner }: { duties?: readonly string[]; identit
   );
   const client = useMemo(() => new QueryClient(), []);
   return (
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-      {banner}
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+        {banner}
+      </QueryClientProvider>
+    </I18nProvider>
   );
 }
 
