@@ -81,18 +81,24 @@ components:
         properties:
           productId: { type: string, format: uuid }
           productNumber: { type: string }
+          name: { type: string }
           subtype: { type: string }
           productType: { type: string }
           baseUom: { type: string }
+          lifecycleState: { type: string }
       x-passage-type: dev.passage.product.product.created.v1
     updated:
       name: updated
       title: Product master data updated
       payload:
         type: object
-        required: [productId, changedFields, version]
+        required: [productId, productNumber, name, productType, lifecycleState, changedFields, version]
         properties:
           productId: { type: string, format: uuid }
+          productNumber: { type: string }
+          name: { type: string }
+          productType: { type: string }
+          lifecycleState: { type: string }
           changedFields: { type: array, items: { type: string } }
           version: { type: integer }
       x-passage-type: dev.passage.product.product.updated.v1

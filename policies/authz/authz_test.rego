@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -1854,6 +1854,21 @@ test_mobile_service_routes if {
 	allowed("warehouse.offline-conflict.resolve", "GET", "/v1/mobile/offline/conflicts")
 	allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
 	not allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/flows")
+}
+
+test_global_search_route_is_open_to_each_source_read_duty_only if {
+	allowed("party.read", "GET", "/v1/search")
+	allowed("product.read", "GET", "/v1/search")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/search")
+	not allowed("party.read", "POST", "/v1/search")
+	not allowed("party.write", "GET", "/v1/search")
+	not allowed("inbox.read", "GET", "/v1/search")
+	not allowed("ledger.journal.read", "GET", "/v1/search")
+	not allowed("search.index.write", "GET", "/v1/search")
+	not principal_allowed("search-index", "GET", "/v1/search")
+	data.duties["search.index.write"].flag
+	count(data.duties["search.index.write"].permissions) == 0
+	data.service_principals["search-index"] == ["search.index.write"]
 }
 
 # Issue #495: the dev seed (deploy/local/seed.json) holds an admin and a clerk; admin routes are the admin's alone.

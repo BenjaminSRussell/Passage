@@ -350,6 +350,11 @@ func TestImportIDsAndNumbersAreScopedToTheTenantUnderRLS(t *testing.T) {
 		"dev.passage.product.product.updated.v1", testkit.TenantID(2)).Scan(&events, &fields); err != nil || events != 1 || fields != `["name"]` {
 		t.Fatalf("one product.updated event for tenant 2 naming the changed field, got %d %s %v", events, fields, err)
 	}
+	var indexed bool
+	if err := admin.QueryRow(context.Background(), `select payload->'data'->>'name' = 'Tenant two' and coalesce(payload->'data'->>'productNumber','') <> '' and coalesce(payload->'data'->>'lifecycleState','') <> '' from outbox where type=$1 and tenant_id=$2`,
+		"dev.passage.product.product.updated.v1", testkit.TenantID(2)).Scan(&indexed); err != nil || !indexed {
+		t.Fatalf("product.updated must carry name, number and lifecycle state for the search index: %v %v", indexed, err)
+	}
 	if _, err := s.UpdateProduct(tenant.With(context.Background(), principal(3)), id, domain.ProductPatch{Name: &name}, 1); !errors.As(err, &pr) || pr.Status != 404 {
 		t.Fatalf("update from a tenant without the product = %v, want 404", err)
 	}

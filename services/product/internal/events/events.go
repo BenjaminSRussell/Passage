@@ -12,17 +12,23 @@ const (
 )
 
 type ProductCreatedData struct {
-	ProductID     string `json:"productId"`
-	ProductNumber string `json:"productNumber"`
-	Subtype       string `json:"subtype"`
-	ProductType   string `json:"productType"`
-	BaseUOM       string `json:"baseUom"`
+	ProductID      string `json:"productId"`
+	ProductNumber  string `json:"productNumber"`
+	Name           string `json:"name"`
+	Subtype        string `json:"subtype"`
+	ProductType    string `json:"productType"`
+	BaseUOM        string `json:"baseUom"`
+	LifecycleState string `json:"lifecycleState"`
 }
 
 type ProductUpdatedData struct {
-	ProductID     string   `json:"productId"`
-	ChangedFields []string `json:"changedFields"`
-	Version       int      `json:"version"`
+	ProductID      string   `json:"productId"`
+	ProductNumber  string   `json:"productNumber"`
+	Name           string   `json:"name"`
+	ProductType    string   `json:"productType"`
+	LifecycleState string   `json:"lifecycleState"`
+	ChangedFields  []string `json:"changedFields"`
+	Version        int      `json:"version"`
 }
 
 type VariantCreatedData struct {

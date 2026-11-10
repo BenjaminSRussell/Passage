@@ -366,7 +366,7 @@ func confirmPending(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 func cancelOrder(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 	received, invoiced := decimal.Zero, decimal.Zero
 	var open []PurchaseOrderLine
-	data := purchasingevents.POCancelledData{POID: cur.ID, Number: cur.Number, VersionNo: cur.VersionNo,
+	data := purchasingevents.POCancelledData{POID: cur.ID, Number: cur.Number, LegalEntityID: cur.LegalEntityID, VersionNo: cur.VersionNo,
 		PriorStatus: cur.ApprovalStatus, Lines: []purchasingevents.POCancelledLine{}}
 	for _, l := range cur.Lines {
 		if l.Status == domain.POLineCancelled {
