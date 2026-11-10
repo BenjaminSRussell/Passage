@@ -39,6 +39,11 @@ orgList("sites", sites);
 orgList("warehouses", warehouses, (w, query) => !query.get("siteId") || w.siteId === query.get("siteId"));
 route("GET", `${ORG}/currencies`, () => ({ items: currencies }));
 
+// The setup checklist only asks whether each of these lists has a row; the demo company is fully set up.
+route("GET", `${ORG}/fiscal-calendars`, () => ({ items: [{ id: "fc-2026", code: "FY2026", name: "Fiscal year 2026", legalEntityId: LEGAL_ENTITY.id, status: "active" }] }));
+route("GET", "/api/v1/ledger/ledgers", () => ({ items: [{ id: "ledger-crp", legalEntityId: LEGAL_ENTITY.id, name: `${LEGAL_ENTITY.name} general ledger`, currency: LEGAL_ENTITY.currency }] }));
+route("GET", "/api/v1/numbering/sequences", () => ({ items: [{ code: "SO", name: "Sales orders", nextValue: "SO-024190" }, { code: "PO", name: "Purchase orders", nextValue: "PO-048214" }] }));
+
 // Customer and vendor roles share the party's id in the demo, so a role id resolves straight to its party.
 function role(p: Party, kind: "customer" | "vendor") {
   return { id: p.id, partyId: p.id, legalEntityId: LEGAL_ENTITY.id, accountNumber: p.number, name: p.name, paymentTerms: p.paymentTerms, kind };
@@ -94,3 +99,58 @@ const inbox: InboxPage = {
   truncated: [],
 };
 route("GET", "/api/v1/inbox", () => inbox);
+
+// Tenant settings the shell reads on every page: every feature on, onboarding finished, no workspace override.
+// The Features page can still toggle them for the length of the visit.
+const FEATURES = [
+  { key: "finance", name: "Finance", module: "ledger", description: "General ledger, journals and period close.", dependsOn: [] as string[] },
+  { key: "multi-currency", name: "Multiple currencies", module: "fx", description: "Post and report in more than one currency, with exchange rates.", dependsOn: ["finance"] },
+  { key: "sales", name: "Sales and orders", module: "sales", description: "Customers, quotes, sales orders and invoicing.", dependsOn: ["finance"] },
+  { key: "purchasing", name: "Purchasing", module: "purchasing", description: "Vendors, purchase orders and vendor invoices.", dependsOn: ["finance"] },
+  { key: "inventory", name: "Inventory", module: "inventory", description: "Items, stock levels, valuation and counts.", dependsOn: ["finance"] },
+  { key: "batch-tracking", name: "Batch tracking", module: "inventory", description: "Track stock by batch or lot, including expiry.", dependsOn: ["inventory"] },
+  { key: "catch-weight", name: "Catch weight", module: "inventory", description: "Sell and stock items whose weight varies from unit to unit.", dependsOn: ["inventory"] },
+  { key: "manufacturing", name: "Discrete manufacturing", module: "production", description: "Bills of material, routings and production orders.", dependsOn: ["inventory"] },
+  { key: "payroll", name: "Payroll", module: "payroll", description: "Pay runs, deductions and payslips.", dependsOn: ["finance"] },
+  { key: "edi", name: "Electronic data interchange", module: "edi", description: "Exchange orders and invoices with trading partners.", dependsOn: ["sales"] },
+];
+const featureOn: Record<string, boolean> = Object.fromEntries(FEATURES.map((f) => [f.key, true]));
+const TEMPLATES = [
+  { key: "distribution", name: "Distribution", description: "Buy, stock and sell goods. No manufacturing, payroll or EDI.", features: ["finance", "multi-currency", "sales", "purchasing", "inventory", "batch-tracking"] },
+  { key: "manufacturing", name: "Manufacturing", description: "Distribution plus discrete manufacturing.", features: ["finance", "multi-currency", "sales", "purchasing", "inventory", "batch-tracking", "manufacturing"] },
+];
+const featuresBody = () => ({ features: FEATURES.map((f) => ({ ...f, enabled: featureOn[f.key] })), templates: TEMPLATES });
+route("GET", "/api/v1/tenant/features", () => featuresBody());
+route("PUT", "/api/v1/tenant/features", ({ body }) => {
+  const req = (body ?? {}) as { template?: string; features?: Record<string, boolean> };
+  const template = TEMPLATES.find((t) => t.key === req.template);
+  if (template) for (const f of FEATURES) featureOn[f.key] = template.features.includes(f.key);
+  else Object.assign(featureOn, req.features ?? {});
+  return featuresBody();
+});
+
+const SETUP_STEPS = [
+  ["features", "What your company does", "Pick the industry template, then switch single features on or off."],
+  ["company", "Company and legal entity", "Name your company and its legal entity. The country sets the defaults."],
+  ["fiscal-calendar", "Fiscal calendar", "Define the fiscal year and its periods."],
+  ["chart-of-accounts", "Chart of accounts", "Start from a template for your industry and country."],
+  ["currencies", "Currencies", "Choose the currencies you trade in and their exchange rates."],
+  ["tax", "Tax", "Set up tax codes and rates."],
+  ["sites-warehouses", "Sites and warehouses", "Add the places where you make, store and ship goods."],
+  ["number-sequences", "Number sequences", "Check how orders, invoices and other documents are numbered."],
+  ["users-roles", "Users and roles", "Invite people and give them the workspace they need."],
+  ["import", "Import your first records", "Bring in vendors, customers and products from a spreadsheet."],
+];
+const setupStatus: Record<string, string> = Object.fromEntries(SETUP_STEPS.map(([key]) => [key, "done"]));
+const setupBody = () => {
+  const steps = SETUP_STEPS.map(([key, name, description]) => ({ key, name, description, status: setupStatus[key] }));
+  const finished = steps.filter((s) => s.status !== "todo").length;
+  return { steps, total: steps.length, finished, complete: finished === steps.length };
+};
+route("GET", "/api/v1/tenant/setup", () => setupBody());
+route("PUT", "/api/v1/tenant/setup/steps/{step}", ({ params, body }) => {
+  setupStatus[params.step] = ((body ?? {}) as { status?: string }).status ?? "todo";
+  return setupBody();
+});
+route("GET", "/api/v1/tenant/workspace-config", () => ({ config: null }));
+route("POST", "/api/v1/org/demo-company", () => ({ package: "demo-manufacturer", created: 0, present: 42 }));

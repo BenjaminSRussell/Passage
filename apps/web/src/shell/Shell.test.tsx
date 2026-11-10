@@ -502,7 +502,8 @@ describe("duty gating", () => {
     const cards = screen.getByRole("list", { name: "Workspaces" });
     expect(within(cards).queryByRole("link", { name: "Post a journal" })).not.toBeInTheDocument();
     expect(within(cards).queryByRole("link", { name: "Print and track checks" })).not.toBeInTheDocument();
-    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(2);
+    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(1);
+    expect(within(cards).getAllByRole("button", { name: /^Switch to / }).length).toBeGreaterThan(0);
   });
 
   it("shows gated entries to a principal holding the duty", () => {

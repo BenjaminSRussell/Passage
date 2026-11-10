@@ -1728,6 +1728,14 @@ test_reporting_balance_verification_routes if {
 	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
 }
 
+test_org_demo_company_manage_reaches_only_the_demo_load if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/import")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.read", "POST", "/v1/org/demo-company")
+}
+
 test_org_package_manage_reaches_only_export_and_import if {
 	allowed("org.package.manage", "POST", "/v1/org/export")
 	allowed("org.package.manage", "POST", "/v1/org/import")
@@ -2052,6 +2060,22 @@ test_tenant_features_are_not_reachable_through_other_identity_duties if {
 	not allowed("identity.security-role.maintain", "PUT", "/v1/tenant/features")
 	not allowed("identity.feature.maintain", "GET", "/v1/tenants")
 	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
+}
+
+test_tenant_setup_view_reads_only if {
+	allowed("identity.setup.view", "GET", "/v1/tenant/setup")
+	allowed("identity.setup.view", "GET", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/workspace-config")
+}
+
+test_tenant_setup_maintain_reads_and_writes_setup_only if {
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "DELETE", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.maintain", "GET", "/v1/tenants")
 }
 
 test_dev_seed_every_user_reads_features_but_cannot_change_them if {

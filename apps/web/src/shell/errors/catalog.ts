@@ -27,6 +27,7 @@ const common: Record<string, ProblemCatalogEntry> = {
   "COM-0002": { message: "The request was missing information the service needs to accept it safely.", action: "Reload the page and try again." },
   "COM-0400": { message: "The service couldn't read the request.", action: "Reload the page and try again. If it keeps happening, contact support with the details below." },
   "COM-0403": { message: "You don't have permission to do this.", action: ASK_ADMIN },
+  "FEAT-0001": { message: "This feature isn't turned on for your company.", action: "An administrator can turn it on under Company setup, then Features." },
   "COM-0404": { message: "We couldn't find that record. It may have been deleted, or the link is out of date.", action: "Go back to the list and open the record again." },
   "COM-0409": { message: "This request was already sent once with different details.", action: "Reload the page and start the action again." },
   "COM-0410": { message: "The same request is still being processed.", action: "Wait a moment, then reload the page to see the result." },
