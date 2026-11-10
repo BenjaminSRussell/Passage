@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
@@ -76,6 +77,7 @@ type receiptLineBody struct {
 	SerialTracked    bool     `json:"serialTracked"`
 	Qty              string   `json:"qty"`
 	Batch            string   `json:"batch"`
+	ExpiryDate       string   `json:"expiryDate,omitempty"`
 	Serials          []string `json:"serials"`
 	LocationID       string   `json:"locationId"`
 	InventoryStatus  string   `json:"inventoryStatus"`
@@ -138,7 +140,7 @@ func toReceiptBody(r store.Receipt) receiptBody {
 			OverDeliveryPct: l.OverDeliveryPct.String(), UnitPrice: l.UnitPrice.String(), Unit: l.Unit, BatchTracked: l.BatchTracked,
 			SerialTracked: l.SerialTracked, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials, LocationID: l.LocationID,
 			InventoryStatus: l.InventoryStatus, Amount: nullableString(l.Amount), AmountAcct: nullableString(l.AmountAcct),
-			SiteID: l.SiteID, WarehouseID: l.WarehouseID,
+			SiteID: l.SiteID, WarehouseID: l.WarehouseID, ExpiryDate: formatDate(l.ExpiryDate),
 		}
 		if l.CWQty > 0 {
 			body.CWQty = &l.CWQty
@@ -178,6 +180,9 @@ func buildArrival(req arrivalRequest) (store.Receipt, map[string]string) {
 	checkUUID(fields, "purchaseOrderId", req.PurchaseOrderID)
 	checkUUID(fields, "legalEntityId", req.LegalEntityID)
 	checkLength(fields, "packingSlip", req.PackingSlip, 1, maxPackingSlip)
+	if strings.HasPrefix(strings.ToUpper(req.PackingSlip), domain.AsnPackingPrefix) {
+		fields["packingSlip"] = "must not start with ASN-, which is reserved for receipts opened from an advance ship notice"
+	}
 	if utf8.RuneCountInString(req.Carrier) > maxCarrier {
 		fields["carrier"] = fmt.Sprintf("must be at most %d characters", maxCarrier)
 	}
