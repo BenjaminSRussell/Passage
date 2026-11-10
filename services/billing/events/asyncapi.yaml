@@ -71,6 +71,7 @@ components:
                 tax: { type: string, description: "Decimal string at the currency's minor unit." }
                 tax_code: { type: string }
                 revenue_account: { type: string }
+                order_id: { type: string, format: uuid, description: "Shipment and consolidated lines only: the sales order of the line (revrec opens one contract per order)." }
                 order_line_id: { type: string, format: uuid, description: "Shipment and consolidated lines only: the sales order line billed." }
                 product: { type: string, format: uuid, description: "Shipment and consolidated lines only." }
                 packing_slip_line_id: { type: string, format: uuid, description: "Shipment and consolidated lines only: the packing slip line now invoiced (AC-29.5)." }

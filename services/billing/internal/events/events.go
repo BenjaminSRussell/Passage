@@ -31,6 +31,7 @@ type InvoicePostedLine struct {
 	Tax               string `json:"tax"`
 	TaxCode           string `json:"tax_code"`
 	RevenueAccount    string `json:"revenue_account"`
+	OrderID           string `json:"order_id,omitempty"`
 	OrderLineID       string `json:"order_line_id,omitempty"`
 	Product           string `json:"product,omitempty"`
 	PackingSlipLineID string `json:"packing_slip_line_id,omitempty"`
