@@ -5,6 +5,7 @@ import { createProcessCategory, describeProblem, listProcessCategories, newKey, 
 import styles from "./pages.module.css";
 import { categoryLabel, DESTINATION_LABELS } from "./processLabels";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * The process message category master (FR-25.17): the destinations, limits and characteristic
@@ -98,12 +99,12 @@ export function ProcessCategoriesPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the category" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load process categories" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

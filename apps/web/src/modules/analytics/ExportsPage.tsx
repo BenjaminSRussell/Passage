@@ -29,6 +29,7 @@ import {
 import { count, DATE, dateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function ExportStatus({ job }: { job: ExportJob }) {
   switch (job.status) {
@@ -121,7 +122,7 @@ export function ExportsPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load exports" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -222,7 +223,7 @@ export function ExportPanel({ query }: { query: QueryInput }) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="The export was not started" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

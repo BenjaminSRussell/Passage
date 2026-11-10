@@ -933,8 +933,11 @@ func (c *claimScope) issue(ctx context.Context, h orderHead, journalID string, b
 	}
 	var claims []issueclaim.Claim
 	for item, qty := range byItem {
+		// Under the order item's ref: a warehouse pick of the item for this
+		// order carries the same ref, so consuming what was picked is not
+		// counted a second time.
 		claims = append(claims, issueclaim.Claim{LegalEntityID: h.legalEntityID, ProductID: item, Warehouse: h.warehouseID, Kind: issueclaim.Consume, Qty: qty,
-			Key: fmt.Sprintf("production-consume:%s:%s:%s", journalID, item, qty)})
+			Ref: issueclaim.ProductionItemRef(h.id, item), Key: fmt.Sprintf("production-consume:%s:%s:%s", journalID, item, qty)})
 	}
 	undo, err := issueclaim.ClaimAll(ctx, c.claimer, claims)
 	switch {

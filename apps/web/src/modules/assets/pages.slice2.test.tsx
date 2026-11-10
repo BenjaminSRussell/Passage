@@ -198,7 +198,7 @@ describe("depreciation runs", () => {
     let fail = true;
     handler = () => (fail ? { status: 503, body: { code: "COM-0500", detail: "internal error" } } : { status: 200, body: { items: [{ ...run, lines: undefined }] } });
     renderAt("/assets/depreciation-runs");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     const table = await findTable({ name: "Depreciation runs" });
@@ -272,7 +272,7 @@ describe("adjustments", () => {
     fireEvent.change(await screen.findByLabelText("Amount"), { target: { value: "99999" } });
     fireEvent.change(screen.getByLabelText("Transaction date"), { target: { value: "2026-06-30" } });
     fireEvent.click(screen.getByRole("button", { name: "Post adjustment" }));
-    expect(await findAlert()).toHaveTextContent("impairment would make NBV negative (AST-0014)");
+    expect(await findAlert()).toHaveTextContent("impairment would make NBV negative");
   });
 });
 
@@ -456,7 +456,7 @@ describe("capex requests", () => {
   it("reports an unknown request", async () => {
     handler = () => ({ status: 404, body: { code: "AST-0021", detail: "no capex request with id x" } });
     renderAt(`/assets/capex/${CAPEX}`);
-    expect(await findAlert()).toHaveTextContent("no capex request with id x (AST-0021)");
+    expect(await findAlert()).toHaveTextContent("no capex request with id x");
   });
 });
 

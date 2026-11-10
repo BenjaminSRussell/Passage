@@ -210,6 +210,7 @@ type lineOutDTO struct {
 	TaxCode        string `json:"taxCode"`
 	OriginalLineNo int    `json:"originalLineNo,omitempty"`
 	CreditedQty    string `json:"creditedQty,omitempty"`
+	CreditedTax    string `json:"creditedTax,omitempty"`
 	// Source references, set on shipment and consolidated invoice lines (FR-29.1).
 	PackingSlipID     string `json:"packingSlipId,omitempty"`
 	PackingSlipLineID string `json:"packingSlipLineId,omitempty"`
@@ -293,6 +294,7 @@ func toDTO(inv store.Invoice) invoiceDTO {
 			line.CreditedQty = decimal.Zero.String()
 			if c, ok := inv.Credited.Lines[l.No]; ok {
 				line.CreditedQty = c.Qty.String()
+				line.CreditedTax = fixed(c.Tax, exp)
 			}
 		}
 		out.Lines = append(out.Lines, line)

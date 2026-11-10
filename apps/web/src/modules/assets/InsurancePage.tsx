@@ -19,6 +19,7 @@ import {
 import { DATE, DECIMAL, money, parseYearLines, sentence, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PolicyValues {
   insurerPartyId: string;
@@ -118,7 +119,7 @@ export function NewPolicyPage() {
       <div className={styles.stack}>
         <PageHeader title="New insurance policy" />
         <Alert tone="danger" title="Could not load the asset" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -250,7 +251,7 @@ export function NewPolicyPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0025" ? "That policy number is taken" : "Could not record the policy"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -362,7 +363,7 @@ export function IndexSeriesPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the series" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -375,7 +376,7 @@ export function IndexSeriesPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load index series" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

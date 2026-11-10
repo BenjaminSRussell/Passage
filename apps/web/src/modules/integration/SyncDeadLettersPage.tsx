@@ -8,6 +8,7 @@ import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { DEAD_LETTER_REASONS, NOT_REPLAYABLE_CODES } from "./syncFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Dead letters: events the ERP (or the mapping) refused for good, with the answer kept, and a replay once the cause is fixed. */
 export function SyncDeadLettersPage() {
@@ -64,12 +65,12 @@ export function SyncDeadLettersPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not replay" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load dead letters" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

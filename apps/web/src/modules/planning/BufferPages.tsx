@@ -33,6 +33,7 @@ import { describeError, useLoad, type LoadError } from "./hooks";
 import { compareQty } from "./ItemCoveragePage";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const PROFILES = "/planning/buffer-profiles";
 export const BUFFERS = "/planning/ddmrp-buffers";
@@ -184,7 +185,7 @@ function newKey(): string {
 function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }
@@ -208,7 +209,7 @@ export function BufferProfilesPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Buffer profiles"
-        description="Lead-time and variability factors, order cycle, minimum order quantity, spike threshold and ADU window that size the DDMRP buffers (FR-22.16)."
+        description="Lead-time and variability factors, order cycle, minimum order quantity, spike threshold and ADU window that size the DDMRP buffers."
         actions={
           <>
             <Link className={buttonClassName("secondary")} to={BUFFERS}>
@@ -315,7 +316,7 @@ function BufferProfileForm({ profile, onSaved, onReload }: ProfileFormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
       </div>
       <FormField id="bp-code" label="Code" error={errors.code}>
@@ -538,11 +539,11 @@ function RecalculateCard({ profiles, initialProfile, onStored }: { profiles: Buf
     <Card title="Recalculate a buffer">
       <form className={styles.form} onSubmit={submit} noValidate aria-label="Recalculate a buffer">
         <p className={`${styles.summary} ${styles.wide}`}>
-          Sizes the zones from the profile and today's state (BR-22.11) and replaces the stored buffer of the item, site and warehouse. Needs Run master planning.
+          Sizes the zones from the profile and today's state and replaces the stored buffer of the item, site and warehouse. Needs Run master planning.
         </p>
         <div className={styles.wide}>
           <Alert tone="danger" title={failure ? "The buffer was not recalculated" : undefined} live="alert">
-            {failure ? `${failure.message} (${failure.code})` : null}
+            {failure ? <ProblemMessage problem={failure} /> : null}
           </Alert>
           <Alert tone="success" title={result ? "Buffer stored" : undefined} live="status">
             {result

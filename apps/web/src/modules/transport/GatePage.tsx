@@ -5,6 +5,7 @@ import { listGateVisits, VISIT_STATUSES, type GateVisit, type VisitStatus } from
 import { DATE, dash, formatDateTime, gateTone, statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<GateVisit>[] = [
   { key: "checkedInAt", header: "Checked in", render: (row) => formatDateTime(row.checkedInAt) },
@@ -80,7 +81,7 @@ export function GatePage() {
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load the gate log" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

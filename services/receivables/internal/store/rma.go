@@ -22,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 	rcvevents "github.com/BenjaminSRussell/passage/services/receivables/internal/events"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/taxclient"
 )
 
 const (
@@ -45,8 +46,14 @@ const (
 // customer, currency and ledger are never taken from the caller: they come
 // from the invoice's open item and the legal entity's configured ledger.
 type RMACredit struct {
-	RMAID, RMANumber, LegalEntityID, InvoiceNumber, PostingDate string
-	Gross, Restocking, Net                                      decimal.Decimal
+	RMAID, RMANumber, LegalEntityID, InvoiceNumber, InvoiceID, PostingDate string
+	Gross, Restocking, Net                                                 decimal.Decimal
+	TaxLines                                                               []RMATaxLine
+}
+
+type RMATaxLine struct {
+	Code   string          `json:"code"`
+	Amount decimal.Decimal `json:"amount"`
 }
 
 // RMACreditNote is the AR open item and journal produced from an RMA.
@@ -59,6 +66,7 @@ type RMACreditNote struct {
 	Gross            decimal.Decimal `json:"gross"`
 	Restocking       decimal.Decimal `json:"restocking"`
 	Net              decimal.Decimal `json:"net"`
+	Tax              decimal.Decimal `json:"tax"`
 }
 
 // RMACreditView is a stored RMA credit as the operator sees it (list, retry).
@@ -75,6 +83,7 @@ type RMACreditView struct {
 	Gross            decimal.Decimal `json:"gross"`
 	Restocking       decimal.Decimal `json:"restocking"`
 	Net              decimal.Decimal `json:"net"`
+	Tax              decimal.Decimal `json:"tax"`
 	Status           string          `json:"status"`
 	JournalPostingID *string         `json:"journalPostingId,omitempty"`
 	GLAttempts       int             `json:"glAttempts"`
@@ -101,10 +110,10 @@ type RMASweepResult struct {
 type rmaCreditRow struct {
 	id, legalEntityID, rmaID, rmaNumber, creditItemID, customerID, currency, postingDate, ledgerID, requestHash, status string
 	journal                                                                                                             *string
-	gross, restocking, net                                                                                              decimal.Decimal
+	gross, restocking, net, tax                                                                                         decimal.Decimal
 	attempts                                                                                                            int
 	nextAttempt                                                                                                         *time.Time
-	parked                                                                                                              bool
+	parked, taxRecorded                                                                                                 bool
 	createdAt                                                                                                           time.Time
 }
 
@@ -116,19 +125,19 @@ func (r rmaCreditRow) note() RMACreditNote {
 		journal = *r.journal
 	}
 	return RMACreditNote{OpenItemID: r.creditItemID, DocumentNumber: r.doc(), JournalPostingID: journal, CustomerID: r.customerID,
-		Currency: r.currency, Gross: r.gross, Restocking: r.restocking, Net: r.net}
+		Currency: r.currency, Gross: r.gross, Restocking: r.restocking, Net: r.net, Tax: r.tax}
 }
 
 func (r rmaCreditRow) view() RMACreditView {
 	return RMACreditView{ID: r.id, RMAID: r.rmaID, RMANumber: r.rmaNumber, LegalEntityID: r.legalEntityID, DocumentNumber: r.doc(),
 		CreditOpenItemID: r.creditItemID, CustomerID: r.customerID, Currency: r.currency, PostingDate: r.postingDate,
-		Gross: r.gross, Restocking: r.restocking, Net: r.net, Status: r.status, JournalPostingID: r.journal,
+		Gross: r.gross, Restocking: r.restocking, Net: r.net, Tax: r.tax, Status: r.status, JournalPostingID: r.journal,
 		GLAttempts: r.attempts, GLNextAttemptAt: r.nextAttempt, GLParked: r.parked, CreatedAt: r.createdAt}
 }
 
 const rmaCreditColumns = `id::text, legal_entity_id::text, rma_id::text, rma_number, credit_open_item_id::text, customer_id::text, currency::text,
-	posting_date::text, ledger_id::text, request_hash, status, journal_posting_id, gross::text, restocking::text, net::text, gl_attempts,
-	gl_next_attempt_at, gl_parked, created_at`
+	posting_date::text, ledger_id::text, request_hash, status, journal_posting_id, gross::text, restocking::text, net::text, tax::text, gl_attempts,
+	gl_next_attempt_at, gl_parked, created_at, tax_recorded`
 
 // WithLedger sets the journal poster used by RMA credits.
 func (s *Postgres) WithLedger(l ledgerclient.Ledger) *Postgres {
@@ -151,8 +160,15 @@ func rmaParked() error {
 }
 
 func rmaHash(in RMACredit) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s", in.RMAID, in.RMANumber, in.LegalEntityID, in.InvoiceNumber,
-		in.PostingDate, in.Gross, in.Restocking, in.Net)))
+	text := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s", in.RMAID, in.RMANumber, in.LegalEntityID, in.InvoiceNumber,
+		in.PostingDate, in.Gross, in.Restocking, in.Net)
+	for _, t := range in.TaxLines {
+		text += fmt.Sprintf("|%s=%s", t.Code, t.Amount)
+	}
+	if len(in.TaxLines) > 0 {
+		text += "|invoice=" + in.InvoiceID
+	}
+	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -169,6 +185,35 @@ func ValidateRMAAmounts(gross, restocking, net decimal.Decimal) error {
 	return nil
 }
 
+const MaxRMATaxLines = 20
+
+func ValidateRMATax(lines []RMATaxLine) error {
+	if len(lines) > MaxRMATaxLines {
+		return rmaInvalid(fmt.Sprintf("a credit reverses at most %d tax codes", MaxRMATaxLines))
+	}
+	seen := map[string]bool{}
+	for _, t := range lines {
+		switch {
+		case t.Code == "" || len(t.Code) > 20:
+			return rmaInvalid("a tax line needs a tax code of 1 to 20 characters")
+		case seen[t.Code]:
+			return rmaInvalid("tax code " + t.Code + " is listed twice")
+		case !t.Amount.IsPositive():
+			return rmaInvalid("the tax reversed under " + t.Code + " must be greater than 0")
+		}
+		seen[t.Code] = true
+	}
+	return nil
+}
+
+func taxTotal(lines []RMATaxLine) decimal.Decimal {
+	total := decimal.Zero
+	for _, t := range lines {
+		total = total.Add(t.Amount)
+	}
+	return total
+}
+
 // PostRMACredit records an RMA credit against the original invoice and posts Dr 4000 gross / Cr 4200 restocking /
 // Cr 1200 net (AC-30.5). The credit is stored PENDING first; the journal is posted after that commit under the key
 // rma-credit:<legal entity>:<document>, and the negative CREDIT_NOTE open item is created in the transaction that marks
@@ -182,15 +227,22 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 	if err := ValidateRMAAmounts(in.Gross, in.Restocking, in.Net); err != nil {
 		return RMACreditNote{}, err
 	}
+	if err := ValidateRMATax(in.TaxLines); err != nil {
+		return RMACreditNote{}, err
+	}
 	ledgerID := s.rmaLedgers[in.LegalEntityID]
 	if s.ledger == nil || ledgerID == "" {
 		return RMACreditNote{}, httpx.NewProblem(http.StatusServiceUnavailable, CodeRMAUnavailable, "the ledger or the legal entity's RMA ledger is not configured")
 	}
+	var err error
+	var taxAccounts map[string]string
+	var billed map[string]decimal.Decimal
+	tax := taxTotal(in.TaxLines)
 	p, _ := tenant.FromContext(ctx)
 	doc := "CN-" + in.RMANumber
 	hash := rmaHash(in)
 	var row rmaCreditRow
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID)
 		if err == nil {
@@ -200,6 +252,12 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if taxAccounts, err = s.rmaTaxAccountsFor(in); err != nil {
+			return err
+		}
+		if billed, err = s.billedTax(ctx, in); err != nil {
 			return err
 		}
 		invoice, err := scanOpenItem(tx.QueryRow(ctx, `select `+openItemColumns+` from open_item
@@ -213,15 +271,18 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		}
 		// The invoice row lock above serializes RMA credits of one invoice, so this sum sees every earlier credit.
 		var creditedText string
-		if err := tx.QueryRow(ctx, `select coalesce(sum(gross), 0)::text from rma_credit where tenant_id = $1 and invoice_open_item_id = $2`,
+		if err := tx.QueryRow(ctx, `select coalesce(sum(gross + tax), 0)::text from rma_credit where tenant_id = $1 and invoice_open_item_id = $2`,
 			p.TenantID, invoice.ID).Scan(&creditedText); err != nil {
 			return err
 		}
 		credited := decimal.RequireFromString(creditedText)
-		if left := invoice.Amount.Sub(credited); in.Gross.GreaterThan(left) {
+		if left, value := invoice.Amount.Sub(credited), in.Gross.Add(tax); value.GreaterThan(left) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRMAInvoice,
 				fmt.Sprintf("the return value %s exceeds what invoice %s still allows (amount %s, already returned by RMAs %s)",
-					in.Gross, invoice.DocumentNumber, invoice.Amount, credited))
+					value, invoice.DocumentNumber, invoice.Amount, credited))
+		}
+		if err := checkTaxAgainstInvoice(ctx, tx, p.TenantID, invoice.ID, billed, in.TaxLines); err != nil {
+			return err
 		}
 		var taken bool
 		if err := tx.QueryRow(ctx, `select exists (select 1 from open_item where tenant_id = $1 and legal_entity_id = $2 and document_number = $3)`,
@@ -233,11 +294,17 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		}
 		id := ids.New()
 		if _, err := tx.Exec(ctx, `insert into rma_credit (tenant_id, id, legal_entity_id, rma_id, rma_number, invoice_open_item_id, credit_open_item_id,
-			customer_id, currency, posting_date, gross, restocking, net, ledger_id, request_hash, status)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'PENDING')`,
+			customer_id, currency, posting_date, gross, restocking, net, tax, ledger_id, request_hash, status)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'PENDING')`,
 			p.TenantID, id, in.LegalEntityID, in.RMAID, in.RMANumber, invoice.ID, ids.New(), invoice.CustomerID, invoice.Currency,
-			in.PostingDate, in.Gross.String(), in.Restocking.String(), in.Net.String(), ledgerID, hash); err != nil {
+			in.PostingDate, in.Gross.String(), in.Restocking.String(), in.Net.String(), tax.String(), ledgerID, hash); err != nil {
 			return err
+		}
+		for _, t := range in.TaxLines {
+			if _, err := tx.Exec(ctx, `insert into rma_credit_tax (tenant_id, id, legal_entity_id, rma_credit_id, tax_code, tax_account, amount)
+				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, ids.New(), in.LegalEntityID, id, t.Code, taxAccounts[t.Code], t.Amount.String()); err != nil {
+				return err
+			}
 		}
 		row, err = loadRMACredit(ctx, tx, `id = $2`, p.TenantID, id)
 		return err
@@ -267,9 +334,21 @@ func (s *Postgres) postRMAJournal(ctx context.Context, tenantID string, row rmaC
 	if row.nextAttempt != nil && row.nextAttempt.After(now) {
 		return row, httpx.NewProblem(http.StatusServiceUnavailable, CodeRMAUnavailable, "the journal post is backing off after a failure; retry later")
 	}
-	journalID, err := s.ledgerPost(ctx, row)
+	taxLines, err := s.loadRMATax(ctx, tenantID, row)
 	if err != nil {
-		parked := ledgerclient.Rejected(err)
+		return row, err
+	}
+	var journalID string
+	if !row.taxRecorded {
+		if err = s.recordTax(ctx, row, taxLines); err == nil {
+			err = s.markTaxRecorded(ctx, tenantID, row.id)
+		}
+	}
+	if err == nil {
+		journalID, err = s.ledgerPost(ctx, row, taxLines)
+	}
+	if err != nil {
+		parked := ledgerclient.Rejected(err) || taxclient.Rejected(err)
 		next := now.Add(min(rmaGLBackoffBase<<min(row.attempts, 10), rmaGLBackoffMax))
 		slog.ErrorContext(ctx, "rma credit journal not posted", "rma", row.rmaNumber, "attempts", row.attempts+1, "parked", parked, "err", err, "correlationId", middleware.GetReqID(ctx))
 		if recErr := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -299,18 +378,23 @@ func (s *Postgres) postRMAJournal(ctx context.Context, tenantID string, row rmaC
 		if _, err := tx.Exec(ctx, `insert into open_item (tenant_id, id, legal_entity_id, customer_id, source_type, document_number,
 			document_date, due_date, currency, amount, open_amount, status)
 			values ($1, $2, $3, $4, 'CREDIT_NOTE', $5, $6, $6, $7, $8, $8, 'OPEN')`,
-			tenantID, row.creditItemID, row.legalEntityID, row.customerID, row.doc(), row.postingDate, row.currency, row.net.Neg().String()); err != nil {
+			tenantID, row.creditItemID, row.legalEntityID, row.customerID, row.doc(), row.postingDate, row.currency, row.net.Add(row.tax).Neg().String()); err != nil {
 			return err
 		}
 		postings := []domain.Posting{{Account: domain.AccountSalesReturns, Debit: row.gross}}
+		eventTax := make([]rcvevents.CreditNoteTax, 0, len(taxLines))
+		for _, t := range taxLines {
+			postings = append(postings, domain.Posting{Account: t.account, Debit: t.amount})
+			eventTax = append(eventTax, rcvevents.CreditNoteTax{Code: t.code, Account: t.account, Amount: t.amount})
+		}
 		if row.restocking.IsPositive() {
 			postings = append(postings, domain.Posting{Account: domain.AccountRestocking, Credit: row.restocking})
 		}
-		postings = append(postings, domain.Posting{Account: domain.AccountReceivable, Credit: row.net})
+		postings = append(postings, domain.Posting{Account: domain.AccountReceivable, Credit: row.net.Add(row.tax)})
 		if err := enqueue(ctx, tx, "creditnote", row.creditItemID, rcvevents.CreditNotePosted, tenantID, rcvevents.CreditNotePostedData{
 			OpenItemID: row.creditItemID, ReturnOrderID: row.rmaID, RMANumber: row.rmaNumber, LegalEntityID: row.legalEntityID,
 			CustomerID: row.customerID, DocumentNumber: row.doc(), Currency: row.currency, Gross: row.gross, Restocking: row.restocking,
-			Net: row.net, JournalPostingID: &journalID, Postings: postings,
+			Net: row.net, Tax: row.tax, TaxLines: eventTax, JournalPostingID: &journalID, Postings: postings,
 		}); err != nil {
 			return err
 		}
@@ -326,7 +410,7 @@ func (s *Postgres) postRMAJournal(ctx context.Context, tenantID string, row rmaC
 	return out, nil
 }
 
-func (s *Postgres) ledgerPost(ctx context.Context, row rmaCreditRow) (string, error) {
+func (s *Postgres) ledgerPost(ctx context.Context, row rmaCreditRow, taxLines []rmaTaxRow) (string, error) {
 	if s.ledger == nil {
 		return "", errors.New("ledger is not configured")
 	}
@@ -338,10 +422,13 @@ func (s *Postgres) ledgerPost(ctx context.Context, row rmaCreditRow) (string, er
 		return "", &ledgerclient.Error{Op: "ledger", Status: http.StatusUnprocessableEntity, Code: "ledger_legal_entity_mismatch"}
 	}
 	lines := []ledgerclient.Line{{Account: domain.AccountSalesReturns, Amount: row.gross}}
+	for _, t := range taxLines {
+		lines = append(lines, ledgerclient.Line{Account: t.account, Amount: t.amount, Text: "Tax reversal " + t.code})
+	}
 	if row.restocking.IsPositive() {
 		lines = append(lines, ledgerclient.Line{Account: domain.AccountRestocking, Credit: true, Amount: row.restocking, Text: "Restocking"})
 	}
-	lines = append(lines, ledgerclient.Line{Account: domain.AccountReceivable, Credit: true, Amount: row.net})
+	lines = append(lines, ledgerclient.Line{Account: domain.AccountReceivable, Credit: true, Amount: row.net.Add(row.tax)})
 	return s.ledger.Post(ctx, ledgerclient.Entry{LegalEntityID: row.legalEntityID, LedgerID: row.ledgerID, DocumentID: row.doc(),
 		PostingDate: row.postingDate, Currency: row.currency, IdempotencyKey: fmt.Sprintf("rma-credit:%s:%s", row.legalEntityID, row.doc()),
 		SourceType: "rma", Lines: lines})
@@ -492,11 +579,11 @@ func loadRMACredit(ctx context.Context, tx pgx.Tx, where string, args ...any) (r
 
 func scanRMACredit(row rowScanner) (rmaCreditRow, error) {
 	var r rmaCreditRow
-	var gross, restocking, net string
+	var gross, restocking, net, tax string
 	if err := row.Scan(&r.id, &r.legalEntityID, &r.rmaID, &r.rmaNumber, &r.creditItemID, &r.customerID, &r.currency, &r.postingDate, &r.ledgerID,
-		&r.requestHash, &r.status, &r.journal, &gross, &restocking, &net, &r.attempts, &r.nextAttempt, &r.parked, &r.createdAt); err != nil {
+		&r.requestHash, &r.status, &r.journal, &gross, &restocking, &net, &tax, &r.attempts, &r.nextAttempt, &r.parked, &r.createdAt, &r.taxRecorded); err != nil {
 		return rmaCreditRow{}, err
 	}
-	r.gross, r.restocking, r.net = decimal.RequireFromString(gross), decimal.RequireFromString(restocking), decimal.RequireFromString(net)
+	r.gross, r.restocking, r.net, r.tax = decimal.RequireFromString(gross), decimal.RequireFromString(restocking), decimal.RequireFromString(net), decimal.RequireFromString(tax)
 	return r, nil
 }

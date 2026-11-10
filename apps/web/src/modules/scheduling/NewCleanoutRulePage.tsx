@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { createCleanoutRule, describeProblem, newKey, type NewCleanoutRule, type Problem } from "./api/client";
 import { CODE, mapFields, optionalWhole, wholeNumber, WEEK_MINUTES } from "./forms";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface CleanoutValues {
   setupGroup: string;
@@ -137,7 +138,7 @@ export function NewCleanoutRulePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the rule" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

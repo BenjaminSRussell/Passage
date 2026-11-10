@@ -4,7 +4,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Skeleton } from "../../shell/ui";
 import {
   fetchReasonCode,
-  LedgerApiError,
   putReasonCode,
   REASON_CODE,
   REASON_MODULES,
@@ -13,6 +12,7 @@ import {
 } from "./api/client";
 import { moduleLabel } from "./ReasonCodesPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_NAME = 60;
 
@@ -65,7 +65,7 @@ function ReasonCodeForm({ initial, existing }: { initial: ReasonDraft; existing:
   const queryClient = useQueryClient();
   const [values, setValues] = useState<ReasonDraft>(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   const update = (patch: Partial<ReasonDraft>) => setValues((prev) => ({ ...prev, ...patch }));
@@ -84,7 +84,7 @@ function ReasonCodeForm({ initial, existing }: { initial: ReasonDraft; existing:
       await queryClient.invalidateQueries({ queryKey: ["ledger", "reason-codes"] });
       navigate("/ledger/reason-codes");
     } catch (error) {
-      setFailure(error instanceof LedgerApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      setFailure(error);
     } finally {
       setBusy(false);
     }
@@ -135,7 +135,7 @@ function ReasonCodeForm({ initial, existing }: { initial: ReasonDraft; existing:
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the reason code" live="alert">
-              {failure}
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

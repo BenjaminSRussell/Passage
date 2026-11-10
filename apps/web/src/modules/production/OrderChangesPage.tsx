@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Se
 import { CHANGE_STATUSES, describeProblem, listOrderChanges, type ChangePage, type ChangeQuery, type ChangeStatus, type OrderChange, type Problem } from "./api/client";
 import { changeStatusLabel, changeStatusTone, describeDelta } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface OrderChangesPageProps {
   /** Opens a change record from its row. */
@@ -133,7 +134,7 @@ export function OrderChangesPage({ onOpenChange }: OrderChangesPageProps) {
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The order changes are not available" live="alert">
           {state.error.status === 403
             ? "You need the View production orders duty to see the order changes."
-            : `${state.error.message} (${state.error.code})`}
+            : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>

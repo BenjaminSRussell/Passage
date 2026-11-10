@@ -201,7 +201,7 @@ describe("Order pegs", () => {
       return fail ? json(503, { code: "COM-0503", detail: "service unavailable" }) : json(200, { items: [] });
     };
     renderAt("/scheduling/order-pegs");
-    expect(await screen.findByText("service unavailable (COM-0503)")).toBeInTheDocument();
+    expect(await screen.findByText("service unavailable")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No order pegs yet")).toBeInTheDocument();

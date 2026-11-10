@@ -9,6 +9,7 @@ import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { WarrantyState, warrantySummary } from "./ServiceObjectsPage";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const childColumns: DataTableColumn<ServiceObject>[] = [
   { key: "serial", header: "Serial", mono: true },
@@ -35,7 +36,7 @@ export function ServiceObjectDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Service object" />
         <Alert tone="danger" title="Could not load the service object" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -96,7 +97,7 @@ export function ServiceObjectDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.code === "conflict_version" ? "Someone else changed this unit; it was reloaded" : "Could not record the installation"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Unit" headingLevel={3}>

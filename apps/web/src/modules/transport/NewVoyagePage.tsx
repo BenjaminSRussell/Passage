@@ -17,6 +17,7 @@ import {
 import { AMOUNT, CURRENCY } from "./format";
 import styles from "./pages.module.css";
 import { RowsEditor, type RowField } from "./RowsEditor";
+import { ProblemMessage } from "../../shell/errors";
 
 type Rows = Record<string, string>[];
 
@@ -211,7 +212,7 @@ export function NewVoyagePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the voyage" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -237,11 +237,15 @@ paths:
       summary: Deferred revenue roll-forward of one legal entity and currency, or of one contract, for a calendar month (FR-29.9).
       x-passage-duty: revrec.view (RevRecView)
       description: >
-        Opening + additions − recognized ± adjustments = closing. Additions are
-        the RATABLE and MILESTONE allocations of contracts dated in the month;
-        recognized are their lines recognized in it. Adjustments stay 0.00
-        until credit notes reverse schedules (BR-29.6, later slice). The tie to
-        GL 2400 needs the ledger (wave 11). Send legalEntityId and currency for
+        Opening + additions − recognized + reversed + adjustments = closing.
+        Additions are the RATABLE and MILESTONE allocations of contracts dated in
+        the month; recognized are their lines recognized in it. Adjustments are
+        the credit notes posted in the month (negative): the deferred part billing
+        debited to 2400 for the credited lines, which the credit-note consumer
+        took off the unrecognized schedule first; reversed is the recognized
+        revenue those credit notes reversed back through 2400 because they exceeded
+        what was still unrecognized (BR-29.6). The tie to GL 2400 is
+        GET /v1/revrec/gl-reconciliation. Send legalEntityId and currency for
         the entity roll-forward, or contractId alone for the drill-down to one
         contract, stated in the contract's currency (404 REV-0100 when the
         contract is unknown or outside the caller's scope). The contracts of an
@@ -277,9 +281,19 @@ paths:
         rejected, its lines are released and it is listed under `rejected`; it
         does not block the entity's other postings, and its lines are offered
         again only when the request sets `retryRejected`. The ledger comes from the
-        service configuration (REVREC_LEDGER_IDS), never from the request. 503
-        REV-0200 when LEDGER_URL is not set; 422 REV-0202 when the legal entity
-        has no configured ledger; 502 REV-0201 when the ledger does not answer.
+        service configuration (REVREC_LEDGER_IDS), never from the request, and is
+        pinned to the legal entity before anything is posted (the ledger's own
+        record of its entity; 422 REV-0203 when it belongs to another entity).
+        The same call books the recognized revenue that credit notes reversed
+        (`reversals`): one entry per credit-note line, Dr 4000 / Cr 2400 for the
+        stored reversed amount, dated the credit note's posting date and keyed
+        `revrec-reversal-<id>`. A reversal the ledger refuses is backed off
+        (5 minutes, doubling, at most a day) and parked after 5 refusals
+        (`failedReversals`, `parked`); `retryRejected` offers parked reversals
+        again; a reversal pinned to another ledger is listed under
+        `otherLedgerReversals`. 503 REV-0200 when LEDGER_URL is not set; 422
+        REV-0202 when the legal entity has no configured ledger; 502 REV-0201
+        when the ledger does not answer.
       requestBody:
         required: true
         content:
@@ -312,7 +326,13 @@ paths:
         closing difference. The roll-forward adds a contract on its `contractDate`, the
         ledger credits 2400 on the invoice's posting date, so an invoice posted in a later
         month than its contract date shows a timing difference until it posts.
-        `reconciled` needs both differences to be zero.
+        Credit notes: 2400 is also debited by billing's credit notes for their
+        deferred part, which the roll-forward carries as negative adjustments once
+        the credit-note consumer has reversed them (`creditNotes`, cumulative), so
+        `difference` compares the ledger's debits with recognized plus
+        `creditNotes`; recognized revenue the credit notes reversed (`reversed`)
+        is a credit to 2400 that revrec posts, and shows as a closing difference
+        until it is posted. `reconciled` needs both differences to be zero.
       parameters:
         - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
@@ -519,7 +539,7 @@ components:
         createdAt: { type: string, format: date-time }
     RollForward:
       type: object
-      required: [legalEntityId, currency, period, start, end, opening, additions, recognized, adjustments, closing]
+      required: [legalEntityId, currency, period, start, end, opening, additions, recognized, reversed, adjustments, closing]
       properties:
         legalEntityId: { type: string, format: uuid }
         contractId: { type: string, format: uuid, description: "Present on the drill-down to one contract." }
@@ -530,7 +550,8 @@ components:
         opening: { type: string }
         additions: { type: string }
         recognized: { type: string }
-        adjustments: { type: string }
+        reversed: { type: string, description: "Recognized revenue reversed by credit notes in the period (positive)." }
+        adjustments: { type: string, description: "Deferred revenue reduced by credit notes in the period (negative)." }
         closing: { type: string }
     JournalPostingRequest:
       type: object
@@ -539,11 +560,23 @@ components:
       properties:
         legalEntityId: { type: string, format: uuid }
         through: { type: string, format: date, description: "Last recognition date to post; default and upper bound the last completed month end." }
-        retryRejected: { type: boolean, description: "Offer the lines of ledger-rejected postings again; by default they are skipped." }
+        retryRejected: { type: boolean, description: "Offer the lines of ledger-rejected postings and the parked reversal postings again; by default they are skipped." }
     JournalPostings:
       type: object
-      required: [through, items, rejected, otherLedger]
+      required: [through, items, rejected, otherLedger, reversals, failedReversals, otherLedgerReversals]
       properties:
+        reversals:
+          type: array
+          description: Reversal postings (Dr 4000 / Cr 2400) the ledger accepted in this call.
+          items: { $ref: "#/components/schemas/ReversalPosting" }
+        failedReversals:
+          type: array
+          description: Reversal postings the ledger refused in this call, backed off; `parked` once the refusal limit is reached.
+          items: { $ref: "#/components/schemas/ReversalPosting" }
+        otherLedgerReversals:
+          type: array
+          description: Reversals pinned to a ledger other than the configured one; reported, never re-targeted.
+          items: { $ref: "#/components/schemas/ReversalPosting" }
         through: { type: string, format: date, description: "The last recognition date posted: the requested date clamped to the last completed month end." }
         otherLedger:
           type: array
@@ -580,9 +613,24 @@ components:
               amount: { type: string }
               lineCount: { type: integer }
               journalEntryId: { type: string }
+    ReversalPosting:
+      type: object
+      required: [id, contractId, creditNoteId, creditNoteNumber, currency, postingDate, amount]
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        creditNoteId: { type: string, format: uuid }
+        creditNoteNumber: { type: string }
+        currency: { type: string }
+        postingDate: { type: string, format: date, description: "The credit note's posting date." }
+        amount: { type: string, description: "Recognized revenue reversed, from the stored reversal." }
+        journalEntryId: { type: string }
+        ledgerCode: { type: string }
+        parked: { type: boolean }
+        ledgerId: { type: string, format: uuid }
     GLReconciliation:
       type: object
-      required: [legalEntityId, ledgerId, currency, period, account, recognized, glDebit, difference, deferred, glCredit, glClosing, closingDifference, reconciled]
+      required: [legalEntityId, ledgerId, currency, period, account, recognized, creditNotes, reversed, glDebit, difference, deferred, glCredit, glClosing, closingDifference, reconciled]
       properties:
         legalEntityId: { type: string, format: uuid }
         ledgerId: { type: string, format: uuid }
@@ -590,6 +638,8 @@ components:
         period: { type: string }
         account: { type: string }
         recognized: { type: string }
+        creditNotes: { type: string, description: "Cumulative deferred amounts of the credit notes revrec reversed (billing's debits to 2400)." }
+        reversed: { type: string, description: "Cumulative recognized revenue reversed by credit notes (revrec's credits to 2400)." }
         glDebit: { type: string }
         difference: { type: string }
         deferred: { type: string }

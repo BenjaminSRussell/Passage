@@ -3,6 +3,7 @@ import { Alert, Button, DataTable, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, type Page, type Problem } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PagedTableProps<T extends { id: string }> {
   /** Table name; also the noun in the error titles ("Could not load {label}"). */
@@ -49,7 +50,7 @@ export function PagedTable<T extends { id: string }>({ label, columns, load, loa
   if (state.error) {
     return (
       <Alert tone="danger" title={`Could not load ${noun}`} live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }
@@ -59,7 +60,7 @@ export function PagedTable<T extends { id: string }>({ label, columns, load, loa
       <DataTable label={label} columns={columns} rows={rows} getRowKey={(row) => row.id} loading={state.loading} empty={empty} onRowOpen={onRowOpen} />
       {moreError ? (
         <Alert tone="danger" title={`Could not load more ${noun}`} live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor ? (

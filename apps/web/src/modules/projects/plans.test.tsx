@@ -128,7 +128,7 @@ describe("project groups", () => {
   it("shows a load failure and retries", async () => {
     handler = () => problem(403, "AUTH-0003", "missing duty projects.inquire");
     renderAt("/projects/groups");
-    expect(await screen.findByText(/missing duty projects.inquire \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty projects.inquire/)).toBeInTheDocument();
     handler = () => ({ status: 200, body: { items: [group()] } });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "ENG" })).toBeInTheDocument();
@@ -248,7 +248,7 @@ describe("plan versions", () => {
     const actions = screen.getByRole("group", { name: "Plan actions" });
     expect(within(actions).getAllByRole("button").map((b) => b.textContent)).toEqual(["Save as baseline", "New simulation"]);
     fireEvent.click(within(actions).getByRole("button", { name: "Save as baseline" }));
-    expect(await screen.findByText(/already has a BASELINE plan version \(PROJ-PLAN-001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already has a BASELINE plan version/)).toBeInTheDocument();
     expect(writes()[0]!.body).toEqual({ kind: "BASELINE", copyFromVersionId: PLAN_W });
   });
 
@@ -330,7 +330,7 @@ describe("WBS page", () => {
     renderAt(`/projects/ES-1001/plans/${PLAN_W}`);
     fireEvent.change(await screen.findByLabelText("Name of task 2"), { target: { value: "Draft v2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save WBS" }));
-    expect(await screen.findByText(/creates a cycle \(PROJ-WBS-001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/creates a cycle/)).toBeInTheDocument();
 
     reply = problem(400, "COM-0001", "request failed validation", { "dependencies[0]": "must link tasks, not summary nodes" });
     fireEvent.click(screen.getByRole("button", { name: "Save WBS" }));

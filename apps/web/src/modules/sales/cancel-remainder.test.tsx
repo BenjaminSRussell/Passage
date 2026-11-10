@@ -126,7 +126,7 @@ describe("Cancel the remainder", () => {
     fireEvent.change(await screen.findByLabelText("Close"), { target: { value: "1" } });
     fireEvent.click(screen.getByLabelText("Cancel what is not yet delivered on line 1"));
     fireEvent.click(screen.getByRole("button", { name: "Cancel remainder" }));
-    expect(await screen.findByText(/nothing is left to cancel \(SLS-0025\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/nothing is left to cancel/)).toBeInTheDocument();
   });
 
   it("is hidden without the duty and on an order that is not partly shipped", async () => {

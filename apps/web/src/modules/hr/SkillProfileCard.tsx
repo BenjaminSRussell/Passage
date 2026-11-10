@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Row = Pick<SkillRequirement, "skillId" | "skillCode" | "skillName" | "scaleMax" | "minRating">;
 type Subject = { positionId: string; jobId?: undefined } | { jobId: string; positionId?: undefined };
@@ -100,12 +101,12 @@ export function SkillProfileCard(props: Subject) {
         </Alert>
         {failure ? (
           <Alert tone="danger" title="Could not change the skill profile" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {state.error ? (
           <Alert tone="danger" title="Could not load the skill profile" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : state.loading && !state.data ? (
           <Skeleton width="3/4" />
@@ -120,7 +121,7 @@ export function SkillProfileCard(props: Subject) {
         )}
         {catalog.error ? (
           <Alert tone="danger" title="Could not load the skill catalog" live="alert" action={<Button size="sm" onClick={catalog.reload}>Try again</Button>}>
-            {catalog.error.message} ({catalog.error.code})
+            <ProblemMessage problem={catalog.error} />
           </Alert>
         ) : (
           <form className={styles.form} onSubmit={submit} noValidate aria-label="Require a skill">

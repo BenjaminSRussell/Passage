@@ -251,7 +251,7 @@ describe("Load open orders page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run open_orders" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not load the orders");
-    expect(alert).toHaveTextContent(/already has an opening line.*\(MIG-0001\)/);
+    expect(alert).toHaveTextContent(/already has an opening line/);
     expect(screen.getByRole("button", { name: "Run open_orders" })).toBeInTheDocument();
   });
 });

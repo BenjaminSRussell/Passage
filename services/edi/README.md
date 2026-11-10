@@ -406,9 +406,17 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
 
 ## Wave 35 proof
 
-- **Partner simulator round trip** (`internal/api/partnersim_test.go`, AC-35.1): the demo
-  distributor's translator, written independently of `internal/domain`, exchanges 850/997,
-  855, 856 and 810 with the engine and answers with 997s (A, E, R, group-only).
+- **Partner simulator round trip** (`internal/api/partnersim_test.go`,
+  `partnersim_transport_test.go`, AC-35.1): the demo distributor's translator, with its own X12
+  and EDIFACT readers and writers (nothing from `internal/domain`), trades every set the
+  service maps or sends. Over the routes: 850/997, 855, 856 and 810 answered with 997s (A, E,
+  R, group-only). Over AS2: its 820 and 214 mapped and answered with 997s, a 204 rejected as
+  unsupported, our 820 and 214 read and answered with a 997 and with TA1 A and R, a duplicate
+  answered with TA1 R 025 and a broken IEA with TA1 R 001. Over SFTP: its ORDERS, DESADV and
+  INVOIC (UNA with a decimal comma, released service characters) answered with a CONTRL that
+  rejects a CNT mismatch (UCM 29), a duplicate answered with CONTRL UCI 4 26, and our DESADV,
+  INVOIC and ORDERS read (CPS tree, SSCCs, its own total check) and answered by an interchange
+  of CONTRLs that the service matches (ACKED, and FAILED for a UCM 4).
 - **peppol-invoices-50** (`testdata/peppol`, AC-35.2): 50 demo invoices and credit notes,
   reference amounts from `gen_peppol50.py`, the engine's XML, and `schematron-report.json`
   from `validate.py` (official Peppol BIS 3.0.21 schematron with Saxon-HE, UBL 2.1 XSD with

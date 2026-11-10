@@ -10,6 +10,7 @@ import { DUTY_RUN } from "./RunPages";
 import { LoadMore } from "./LoadMore";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 export const DUTY_SPEC_WRITE = "migration.spec.write";
 
@@ -134,7 +135,7 @@ export function SpecsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load mapping specs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -227,7 +228,7 @@ export function NewSpecPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not publish the spec" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
                 {failure.errors ? (
                   <ul>
                     {Object.entries(failure.errors).map(([name, reason]) => (
@@ -264,7 +265,7 @@ export function SpecDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Mapping spec" />
         <Alert tone="danger" title="Could not load this spec" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/specs">
           Back to specs

@@ -23,6 +23,7 @@ import { StatusBadge } from "./badges";
 import { amount, DATE, dash, parseYearLines, sentence, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const level: Record<string, string> = { PlantManager: "Plant manager", CFO: "CFO", Board: "Board" };
 
@@ -92,7 +93,7 @@ export function CapexListPage({ initialStatus = "" }: { initialStatus?: CapexSta
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load capex requests" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -107,7 +108,7 @@ export function CapexListPage({ initialStatus = "" }: { initialStatus?: CapexSta
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more requests" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (
@@ -275,7 +276,7 @@ export function NewCapexPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0023" ? "That request number is taken" : "Could not create the request"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -394,7 +395,7 @@ export function CapexDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Capex request" />
         <Alert tone="danger" title="Could not load the request" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets/capex">
           Back to requests
@@ -469,7 +470,7 @@ export function CapexDetailPage() {
         live="alert"
         action={failure.problem.code === "AST-0006" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}
       >
-        {failure.problem.message} ({failure.problem.code})
+        <ProblemMessage problem={failure.problem} />
       </Alert>
     </div>
   ) : null;

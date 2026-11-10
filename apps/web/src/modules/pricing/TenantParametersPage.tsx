@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { useLoad } from "./useLoad";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_ADMIN = "pricing.admin";
 
@@ -80,7 +81,7 @@ export function TenantParametersPage() {
       <PageHeader title="Tenant pricing parameters" description="Settings that apply to every legal entity of the tenant." />
       {load.error ? (
         <Alert tone="danger" title="Could not load the tenant parameters" live="alert">
-          {load.error.message} ({load.error.code})
+          <ProblemMessage problem={load.error} />
           <div className={styles.formActions}>
             <Button type="button" variant="secondary" onClick={load.reload}>
               Retry
@@ -90,7 +91,7 @@ export function TenantParametersPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not complete the request" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {load.loading && !current ? <Skeleton height="tile" /> : null}

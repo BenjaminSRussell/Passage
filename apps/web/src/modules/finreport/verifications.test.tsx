@@ -56,7 +56,7 @@ describe("VerificationsPage", () => {
     server.handler = () => problem(500, "COM-0500", "boom");
     renderAt("/finreport/verifications");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("boom (COM-0500)");
+    expect(alert).toHaveTextContent("boom");
   });
 
   it("refuses a ledger id that is not a UUID without calling the service", async () => {

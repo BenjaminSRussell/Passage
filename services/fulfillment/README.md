@@ -63,6 +63,9 @@ exits non-zero on an invalid value.
 | `RELEASE_REQUIRES_FULL_ATP` | no | `true` | `false` allows partial release |
 | `MIGRATE_ON_START` | no | `false` | dev only; stage and prod use the Argo PreSync migration Job |
 | `HTTP_ADDR` | no | `:8080` | listen address |
+| `SALES_URL` | no | | Sales base URL: posted packing slips are reported to its `:record-progress` (#496). Needs the service signing key. Unset, the reports queue (PENDING) and go out once it is set |
+| `SALES_REPORT_INTERVAL` | no | `30s` | How often the reporter looks for due reports (at least `1s`) |
+| `PASSAGE_SERVICE_SIGNING_KEY` / `_FILE`, `PASSAGE_SERVICE_NAME`, `PASSAGE_SERVICE_KEY_ID` | with `INVENTORY_URL`, `CARRIER_GATEWAY_URL` or `SALES_URL` | | fulfillment's Ed25519 service key; the callee must list its public key |
 
 ```
 cd services/fulfillment
@@ -277,6 +280,35 @@ Carrier errors: FUL-0071 means carrier-gateway refused (its code is in the detai
 field errors through). FUL-0072 means it refused the call (502) or is unavailable (503, retry). FUL-0073 means the
 shipment is cancelled, or there is no tracking number yet (409).
 
+## Reporting deliveries to sales (#496)
+
+A packing slip post queues one report per (slip, order) in its own transaction
+(`sales_delivery_report`, migration 0035). The reporter (`internal/salesreport`, in every API
+replica when `SALES_URL` is set) sends it to `POST /v1/sales/orders/{orderId}:record-progress`
+after the post commits, so a sales outage never blocks shipping:
+
+- Body: kind `DELIVERED`, `sourceRef` the slip number, one line per sales order line named by
+  `lineId` (fulfillment's `orderLineId`, sales' `line_id`; sales resolves it to the line number)
+  with the slip's `quantity`, the catch weight as `actualWeight`, and the slip's pick tracking as
+  `tracking` (`batch_no` as `batch`, `serial_no` as `serial`, `qty` as `quantity`; no location,
+  and one batch picked from two locations is one entry; a catch-weight line with one entry gives
+  it the line's weight). The body is frozen at post time.
+- `Idempotency-Key`: `fulfillment-packing-slip:{slipId}:{orderId}`, the same on every attempt.
+- Signed as fulfillment for the slip's legal entity with only `sales.order.record-delivery`,
+  acting as the service principal `service:fulfillment-sales-report`.
+- Each attempt leases the report (attempts + 1, next attempt pushed past a 2 minute lease;
+  `FOR UPDATE SKIP LOCKED`). 2xx: REPORTED. Transport failure, 5xx, 401, 403, 408, 429: retried
+  after 30 s doubling up to 1 h, PARKED after 20 attempts. Any other 4xx (validation, unknown
+  order or line, SLS-0058 nothing left to deliver, SLS-0060 the slip with other lines): PARKED at
+  once with sales' code and detail in `lastError`.
+- A cancelled slip: a report not yet sent is WITHDRAWN; one already reported stays REPORTED with
+  `cancelledAt`, because sales has no reversal of a delivery.
+
+| Method | Path | Duty | Notes |
+|---|---|---|---|
+| GET | `/v1/fulfillment/sales-delivery-reports` | fulfillment.warehouse.view | Newest first; filters `status` (PENDING, REPORTED, PARKED, WITHDRAWN), `packingSlipId`, `limit` |
+| POST | `/v1/fulfillment/sales-delivery-reports/{id}:retry` | fulfillment.packing-slip.post | Idempotency-Key; a PARKED report becomes PENDING, due now, attempts from 0, same body and key. FUL-0080 not found, FUL-0081 REPORTED or WITHDRAWN |
+
 The `short_pick_action` default is REMAINDER_BACKORDER (migration 0016); KEEP_OPEN and
 CANCEL_REMAINDER stay allowed.
 
@@ -323,6 +355,8 @@ Codes raised in this slice:
 | `FUL-0060` | Drop-ship not found (404) |
 | `FUL-0061` | The order line already has an active drop-ship (409) |
 | `FUL-0062` | The order line is on a warehouse shipment that is not cancelled, so it cannot be drop-shipped (409) |
+| `FUL-0080` | Sales delivery report not found (404) |
+| `FUL-0081` | Sales delivery report is REPORTED or WITHDRAWN, so it cannot be retried (409) |
 | `COM-0001` | Malformed JSON body (kernel code) |
 | `precondition_required` | `If-Match` (shipment version) missing (428) |
 | `conflict_version` | `If-Match` does not match the current version (412) |

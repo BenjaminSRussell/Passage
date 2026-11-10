@@ -33,6 +33,7 @@ import {
 } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export function NcrStatusBadge({ status }: { status: NcrStatus }) {
   const s = NCR_STATUS_LABELS[status] ?? { label: status, tone: "neutral" as const };
@@ -112,7 +113,7 @@ export function NonconformancesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load nonconformances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -278,7 +279,7 @@ export function NewNonconformancePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not raise the nonconformance" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -308,7 +309,7 @@ export function NonconformanceDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Nonconformance" />
         <Alert tone="danger" title="Could not load the nonconformance" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

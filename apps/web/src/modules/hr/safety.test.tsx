@@ -113,7 +113,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
 
     api.handler = routes({ "GET /api/v1/hr/checklist-templates": json(200, { items: [] }), [key]: problem(500, "COM-0500", "boom") });
     renderAt(path);
-    expect((await findAlert()).textContent).toContain("boom (COM-0500)");
+    expect((await findAlert()).textContent).toContain("boom");
     expect(screen.getAllByRole("button", { name: "Try again" }).length).toBeGreaterThan(0);
   });
 
@@ -153,7 +153,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     expect((await findStatus()).textContent).toBe("The incident is under review.");
     fireEvent.click(await screen.findByRole("button", { name: "Close incident" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Close incident" }));
-    expect((await findAlert()).textContent).toContain("Whoever reported an incident can't close it. Ask another incident administrator. (HCM-INC-SELF-CLOSE)");
+    expect((await findAlert()).textContent).toContain("Whoever reported an incident can't close it. Ask another incident administrator.");
   });
 
   it("explains a closed incident that cannot change status", async () => {
@@ -164,7 +164,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     renderAt(`/hr/incidents/${INCIDENT}`);
     fireEvent.click(await screen.findByRole("button", { name: "Close incident" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Close incident" }));
-    expect((await findAlert()).textContent).toContain("a CLOSED incident is immutable (HCM-INC-STATE)");
+    expect((await findAlert()).textContent).toContain("a CLOSED incident is immutable");
   });
 
   it("says a missing incident was not found and a forbidden one is off limits", async () => {
@@ -269,7 +269,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     });
     renderAt("/hr/loaned-items");
     fireEvent.click(await screen.findByRole("button", { name: "Record Dell laptop lost" }));
-    expect((await findAlert()).textContent).toContain("the item is already closed (HCM-LOAN-STATE)");
+    expect((await findAlert()).textContent).toContain("the item is already closed");
   });
 
   it("lends an item and sends the legal entity error to its field", async () => {
@@ -300,7 +300,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     });
     renderAt(`/hr/checklists/${CHECKLIST}`);
     fireEvent.click(await screen.findByRole("button", { name: "Mark done: Issue a badge" }));
-    expect((await findAlert()).textContent).toContain("evidenceRef is required for this task (HCM-CHK-EVIDENCE)");
+    expect((await findAlert()).textContent).toContain("evidenceRef is required for this task");
     fireEvent.change(screen.getByLabelText("Evidence for Issue a badge"), { target: { value: "ticket-42" } });
     fireEvent.click(screen.getByRole("button", { name: "Mark done: Issue a badge" }));
     expect((await findStatus()).textContent).toBe("Issue a badge is done.");
@@ -314,7 +314,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     });
     renderAt(`/hr/checklists/${CHECKLIST}`);
     fireEvent.click(await screen.findByRole("button", { name: "Complete checklist" }));
-    expect((await findAlert()).textContent).toContain("Items are still out on loan. Record them returned or lost first. (HCM-LOAN-001)");
+    expect((await findAlert()).textContent).toContain("Items are still out on loan. Record them returned or lost first.");
   });
 
   it("starts a checklist from a template, and falls back to an id when templates are off limits", async () => {

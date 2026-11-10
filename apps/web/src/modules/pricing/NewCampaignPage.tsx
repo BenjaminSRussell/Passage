@@ -5,6 +5,7 @@ import { createCampaign, describeProblem, newKey, type CampaignInput, type Probl
 import { DAY, DECIMAL, UUID } from "./format";
 import { CURRENCY } from "./fundFormat";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -121,7 +122,7 @@ export function NewCampaignPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the campaign" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

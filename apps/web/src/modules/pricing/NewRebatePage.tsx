@@ -14,6 +14,7 @@ import {
 import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { BASIS_LABELS, PARTY_LABELS, PERIOD_LABELS, VENDOR_BASIS_LABELS } from "./rebateFormat";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface TierDraft {
   from: string;
@@ -308,7 +309,7 @@ export function NewRebatePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the agreement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

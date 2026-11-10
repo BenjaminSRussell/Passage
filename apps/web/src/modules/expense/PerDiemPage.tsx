@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { computePerDiem, describeProblem, type PerDiemInput, type PerDiemLine, type PerDiemResult, type Problem } from "./api/client";
 import { CURRENCY, DAY, DECIMAL, MAX_TRIP_DAYS, daysBetween, splitProblem } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -163,7 +164,7 @@ export function PerDiemPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not compute the per diem" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -304,6 +304,28 @@ a fake legacy ERP on an allowlisted private address, `sales.order.confirmed` to
 `POST /api/salesorders`, duplicate event, 503 then 200 on the schedule, 422 dead-lettered
 and replayed, legacy key recorded, echo skipped, credentials never in logs or responses).
 
+## Wave 49: legacy coexistence adapters
+
+The migration factory owns the entity-by-entity coexistence flags (LEGACY: the legacy system
+masters the entity kind and its adapter brings the changes in; PASSAGE: cut over, the adapter's
+flow is suspended) and announces each change on `dev.passage.migration.coexistence.changed.v1`.
+A cutover rollback hands every cut-over kind of the plan's companies back to LEGACY and lists them
+on `dev.passage.cutover.plan.rolledback.v1` (AC-49.7: the adapters resume). `src/coexistence.ts`:
+
+- the consumer records the mode each adapter should be in from either event in
+  `hub_coexistence_adapter` (migration 0007, forced row-level security), taking a change only when
+  its flag version is newer, so a replayed or late event never undoes a later change;
+- `CoexistenceSweeper`, started by `src/main.ts` every `HUB_COEXISTENCE_INTERVAL_MS` (default 15 s),
+  finds due rows across tenants through `hub_coexistence_due` (definer rights, keys only, as the
+  retry poller does), claims each for a minute and calls the adapter: `suspend` for PASSAGE,
+  `resume` for LEGACY. A failure backs off (one minute doubling to an hour) and is parked after five
+  attempts; a `CoexistenceRefusedError`, or no adapter for the system (HUB-COEXIST-NO-ADAPTER),
+  parks at once. Other rows go on. `CoexistenceStore.retryParked` queues a tenant's parked rows again.
+
+The adapters themselves (AX OData/DMF, SAP IDoc/BAPI) implement `CoexistenceAdapter`; none is built
+yet, so a deployment parks every row until one is registered (NOT-IMPLEMENTED.md). Add
+`passage.cutover.plan` and `passage.migration.coexistence` to `HUB_TOPICS`.
+
 ## Run and test
 
 ```sh

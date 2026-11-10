@@ -134,9 +134,27 @@ func TrialBalanceFromDocuments(docs []ReplayDocument) []TBAccount {
 	return out
 }
 
+// DocumentCounts counts, per trial-balance tuple key (account, currency, period), the documents
+// that posted to the account: the tolerance of a per-document rule (RND-001, BR-49.7) scales with it.
+func DocumentCounts(docs []ReplayDocument, period string) map[string]int {
+	out := map[string]int{}
+	for _, d := range docs {
+		seen := map[string]bool{}
+		for _, l := range d.Lines {
+			k := TBKey(l.Account, d.Currency, period)
+			if !seen[k] {
+				seen[k] = true
+				out[k]++
+			}
+		}
+	}
+	return out
+}
+
 // TBLines turns a trial balance into the parallel run's TB tuples for one side ("legacy" or
-// "passage"). Accounts are summed per key, so a repeated account adds up.
-func TBLines(tb []TBAccount, period, side string) []Line {
+// "passage"). Accounts are summed per key, so a repeated account adds up. documents gives each
+// tuple's document count (DocumentCounts); nil leaves the counts out.
+func TBLines(tb []TBAccount, period, side string, documents map[string]int) []Line {
 	byKey := map[string]decimal.Decimal{}
 	for _, a := range tb {
 		k := TBKey(a.Account, a.Currency, period)
@@ -144,7 +162,7 @@ func TBLines(tb []TBAccount, period, side string) []Line {
 	}
 	out := make([]Line, 0, len(byKey))
 	for _, k := range sortedKeys(byKey) {
-		l := Line{Area: "TB", Key: k}
+		l := Line{Area: "TB", Key: k, Documents: documents[k]}
 		if side == "legacy" {
 			l.Legacy = byKey[k]
 		} else {

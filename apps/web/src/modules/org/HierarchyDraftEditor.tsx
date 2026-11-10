@@ -28,6 +28,7 @@ import {
 } from "./hierarchyTree";
 import { HierarchyTreeView, RemovedSection, type Label, type MoveCommand } from "./HierarchyTreeView";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface Candidate {
   id: string;
@@ -49,7 +50,7 @@ export function ProblemAlert({ title, problem, onReload }: { title: string; prob
       title={denied ? "You don't have permission to do this" : stale ? "This draft changed elsewhere" : title}
       action={stale && onReload ? <Button size="sm" onClick={onReload}>Reload draft</Button> : undefined}
     >
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }

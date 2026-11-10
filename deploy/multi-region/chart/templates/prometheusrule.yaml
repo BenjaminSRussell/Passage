@@ -52,6 +52,28 @@ spec:
           annotations:
             summary: "Replication slot retains more than 1 GB of WAL"
             runbook_url: https://docs.passage.dev/ops/runbooks/replication-slot-bloat
+    {{- if include "passage-mr.backsUp" . }}
+    - name: passage-multiregion.backup
+      rules:
+        - alert: PassageBackupStale
+          expr: >-
+            time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"}) > {{ mul .Values.backup.maxAgeHours 3600 }}
+            or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No Postgres base backup newer than {{ .Values.backup.maxAgeHours }} h on {{ .Values.region.id }}"
+            runbook_url: https://docs.passage.dev/ops/runbooks/backup-drill-failure
+        - alert: PassageWalArchiveFailing
+          expr: max(cnpg_pg_stat_archiver_last_failed_time{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"}) > max(cnpg_pg_stat_archiver_last_archived_time{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"})
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "WAL archiving to object storage is failing on {{ .Values.region.id }}; the RPO is at risk"
+            runbook_url: https://docs.passage.dev/ops/runbooks/backup-drill-failure
+    {{- end }}
     - name: passage-multiregion.failover
       rules:
         - alert: PassageFailoverInProgress

@@ -4,6 +4,7 @@ import { listTolerances, type Tolerance } from "./api/client";
 import { ANY_TOTAL, isExact, money } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Tolerance>[] = [
   { key: "pack", header: "Pack", mono: true },
@@ -42,7 +43,7 @@ export function TolerancesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the tolerances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

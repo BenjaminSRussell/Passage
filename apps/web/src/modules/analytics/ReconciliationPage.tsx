@@ -16,6 +16,7 @@ import { getReconciliation, type Reconciliation } from "./api/client";
 import { DATE, dayBefore, shortId, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const METRIC_ID = /^[a-z][a-z0-9_]{1,62}$/;
 
@@ -87,7 +88,7 @@ export function ReconciliationPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load reconciliation results" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

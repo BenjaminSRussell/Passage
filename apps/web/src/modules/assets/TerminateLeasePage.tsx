@@ -7,6 +7,7 @@ import { isExempt } from "./LeaseDetailPage";
 import { DECIMAL, money } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface TerminateValues {
   afterPeriod: string;
@@ -63,7 +64,7 @@ export function TerminateLeasePage() {
       <div className={styles.stack}>
         <PageHeader title="Terminate lease" />
         <Alert tone="danger" title="Could not load the lease" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets/leases">
           Back to leases
@@ -181,7 +182,7 @@ export function TerminateLeasePage() {
                 live="alert"
                 action={failure.code === "AST-0006" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}
               >
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

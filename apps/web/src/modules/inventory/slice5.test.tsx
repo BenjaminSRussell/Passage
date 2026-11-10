@@ -95,7 +95,7 @@ describe("Journal approval workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Validate" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The journal would not post");
-    expect(alert).toHaveTextContent("(INV-NEG-001)");
+    expect(alert).toHaveTextContent("INV-NEG-001");
   });
 
   it("submits a draft with its version, then offers approve and reject only", async () => {
@@ -343,7 +343,7 @@ describe("Consignment orders", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Book receipt" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The receipt was not booked");
-    expect(alert).toHaveTextContent("(INV-CNS-002)");
+    expect(alert).toHaveTextContent("INV-CNS-002");
   });
 
   it("explains an unknown order", async () => {

@@ -124,7 +124,7 @@ describe("edit forms", () => {
     await user.clear(within(form).getByLabelText("Name"));
     await user.type(within(form).getByLabelText("Name"), "Final assembly");
     await user.click(within(form).getByRole("button", { name: "Save operating unit CC100" }));
-    expect(await within(form).findByText(/your changes are kept.*current version is 6 \(ORG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await within(form).findByText(/your changes are kept.*current version is 6/)).toBeInTheDocument();
     await waitFor(() => expect(callsTo(fetchMock, "GET", "/operating-units/ou-1")).toHaveLength(1));
     expect(await within(table).findByText("Renamed elsewhere")).toBeInTheDocument();
     // The typed name survives the re-read; the default legal entity, which the user did not touch, now shows the other change.

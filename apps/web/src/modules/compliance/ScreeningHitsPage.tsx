@@ -5,6 +5,7 @@ import { HIT_STATES, listScreeningHits, SUBJECT_TYPES, type HitFilter, type HitS
 import { ageDays, formatDateTime, hitStateTone, scoreText, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ScreeningHit>[] = [
   { key: "subjectName", header: "Subject", render: (h) => <span title={h.subjectId}>{h.subjectName}</span> },
@@ -89,7 +90,7 @@ export function ScreeningHitsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load screening hits" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

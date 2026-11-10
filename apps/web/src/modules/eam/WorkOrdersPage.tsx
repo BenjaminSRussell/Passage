@@ -16,6 +16,7 @@ import { addMoney, CODE, CURRENCY, dayOf, typeLabel } from "./format";
 import { Failure, PagedTable, State, StatusFilter } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad, usePaged } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<WorkOrder>[] = [
   { key: "number", header: "Work order", mono: true },
@@ -206,7 +207,7 @@ export function NewWorkOrderPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not create the work order" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

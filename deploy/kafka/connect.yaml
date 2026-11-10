@@ -92,6 +92,8 @@ spec:
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.sales.returnorder, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.deliverytolerance, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.fulfillment.shipment, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.fulfillment.pick, patternType: literal}
@@ -119,6 +121,10 @@ spec:
       - resource: {type: topic, name: passage.fulfillment.returnablepackaging, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.fulfillment.exception, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.manifest, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.warehouseoperationrule, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]

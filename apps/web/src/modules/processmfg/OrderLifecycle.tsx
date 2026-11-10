@@ -19,6 +19,7 @@ import {
 } from "./api/client";
 import { PERCENT, QUANTITY, shortId } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const METHOD_LABELS: Record<AllocationMethod, string> = {
   tca: "Total cost allocation (standard cost x quantity)",
@@ -87,7 +88,7 @@ function Failure({ title, failure, onReload }: { title: string; failure: Problem
         ) : undefined
       }
     >
-      {failure.message} ({failure.code})
+      <ProblemMessage problem={failure} />
       {Object.keys(failure.fields).length > 0 ? (
         <ul className={styles.fieldErrors}>
           {Object.entries(failure.fields).map(([field, message]) => (

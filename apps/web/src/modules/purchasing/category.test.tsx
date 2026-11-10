@@ -112,7 +112,7 @@ describe("category vendor create", () => {
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "IT hardware" } });
     fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
     fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
-    expect(await screen.findByText(/already has an assignment.*PRC-CAT-011/)).toBeInTheDocument();
+    expect(await screen.findByText(/already has an assignment/)).toBeInTheDocument();
   });
 });
 
@@ -144,7 +144,7 @@ describe("category vendor detail", () => {
     renderAt(`/purchasing/category-vendors/${ID}`);
     await screen.findByText("IT hardware");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText(/Someone else changed this assignment.*PRC-CAT-013/)).toBeInTheDocument();
+    expect(await screen.findByText(/Someone else changed this assignment/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reload assignment" }));
     expect(await screen.findByText("3")).toBeInTheDocument();
     expect(screen.queryByText(/PRC-CAT-013/)).toBeNull();
@@ -212,7 +212,8 @@ describe("category managers", () => {
     fireEvent.change(document.getElementById("cm-category") as HTMLInputElement, { target: { value: "IT hardware" } });
     fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
     fireEvent.click(screen.getByRole("button", { name: "Add manager" }));
-    expect(await screen.findByText(/already manages.*PRC-CAT-012/)).toBeInTheDocument();
+    expect(await screen.findByText("the worker already manages this category")).toBeInTheDocument();
+    expect(screen.getByText("This worker already manages the category. Choose a different worker.")).toBeInTheDocument();
   });
 });
 
@@ -269,7 +270,7 @@ describe("category access on requisition submit and consolidation", () => {
     );
     renderAt(`/purchasing/requisitions/${REQ_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Submit for approval" }));
-    expect(await screen.findByText(/not assigned to category IT hardware.*PRC-CAT-002/)).toBeInTheDocument();
+    expect(await screen.findByText(/not assigned to category IT hardware/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Submit for approval" })).toBeInTheDocument();
   });
 

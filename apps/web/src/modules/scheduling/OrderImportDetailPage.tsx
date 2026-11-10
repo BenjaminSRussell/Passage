@@ -6,6 +6,7 @@ import { dash, formatDateTime, shortId } from "./format";
 import { ImportStatusBadge } from "./OrderImportsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const skippedColumns: DataTableColumn<OrderImportSkipped>[] = [
   { key: "operNumber", header: "Operation", align: "end" },
@@ -62,7 +63,7 @@ export function OrderImportDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Production order" />
         <Alert tone="danger" title="Could not load the production order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -160,7 +161,7 @@ export function OrderImportDetailPage() {
       )}
       {scheduleFailure && (
         <Alert tone="danger" title="Could not schedule the order" live="alert">
-          {scheduleFailure.message} ({scheduleFailure.code})
+          <ProblemMessage problem={scheduleFailure} />
         </Alert>
       )}
       {run && (
@@ -170,7 +171,7 @@ export function OrderImportDetailPage() {
       )}
       {failure && (
         <Alert tone="danger" title="Could not import the order again" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       )}
       <Alert tone="success" live="status">

@@ -19,6 +19,7 @@ import { downloadCsv } from "./download";
 import { describePercent } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Action = "validate" | "post" | "reverse";
 
@@ -73,7 +74,7 @@ export function JournalDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Price journal" />
         <Alert tone="danger" title="Could not load the journal" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -175,12 +176,12 @@ export function JournalDetailPage() {
       </Alert>
       {extractFailure ? (
         <Alert tone="danger" title="Could not download the audit extract" live="alert">
-          {extractFailure.message} ({extractFailure.code})
+          <ProblemMessage problem={extractFailure} />
         </Alert>
       ) : null}
       {failure ? (
         <Alert tone="danger" title={failure.code === "PRC-0005" ? "Nothing was posted" : "The action failed"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {journal.errorCount > 0 ? (

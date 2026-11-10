@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Alert, Button, Card, EmptyState, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { describeProblem, PAYEE_TYPES, TDS_SECTIONS, withholdTds, type PayeeType, type Problem, type TdsInput, type TdsResult, type TdsSection } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const sectionLabel: Record<TdsSection, string> = {
   "194C": "194C Contractors",
@@ -166,7 +167,7 @@ export function TdsPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "TDS could not be calculated" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {result ? reasonText[result.reason] : null}

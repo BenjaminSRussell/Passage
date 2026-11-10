@@ -864,10 +864,16 @@ paths:
       description: |
         Service-to-service call of warehouse (pick), fulfillment (packing-slip post) and production
         (consume). Under the row locks of the product's on-hand it refuses a claim that would reach
-        held stock: with any quantity held in the warehouse, only physical - held minus the claims of
-        the same kind already taken is free; a claim that names a batch must also fit within that
-        batch. BLOCKED and QUARANTINE rows are not counted. The Idempotency-Key names the claim; a
-        repeat is a replay.
+        held stock: with any quantity held in the warehouse, only physical - held - outstanding is
+        free, where outstanding counts the claims of every kind that inventory has not booked as an
+        issue. Claims that share an issueRef (the document line the units are issued for, such as
+        `SALES_LINE:<order line id>`) are successive steps of the same units, a pick and then the ship
+        of what was picked, and count once, as the largest per-kind total of the ref less what
+        inventory has since booked for it (the DELIVERED booking of that sales order line); claims
+        without one count in full. A claim that names a batch must also fit within that batch.
+        BLOCKED and QUARANTINE rows are not counted. Inventory's own issues (journals other than
+        counts, status steps, transfers, blockings) are weighed against the same claims. The
+        Idempotency-Key names the claim; a repeat is a replay.
       x-passage-duty: inventory.issue.claim
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -885,6 +891,7 @@ paths:
                 batch: { type: string, maxLength: 120 }
                 kind: { type: string, enum: [PICK, SHIP, CONSUME] }
                 qty: { $ref: '#/components/schemas/Decimal' }
+                issueRef: { type: string, maxLength: 255, description: 'Document line the units are issued for; empty counts the claim on its own' }
       responses:
         '200':
           description: Replay of a claim already taken

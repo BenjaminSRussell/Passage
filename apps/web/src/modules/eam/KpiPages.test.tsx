@@ -183,7 +183,7 @@ describe("KPI page", () => {
     expect(await screen.findByText("No completed work orders in this window")).toBeInTheDocument();
     expect(await screen.findByText("No open work orders")).toBeInTheDocument();
     expect(await screen.findByText("Nothing to regularize")).toBeInTheDocument();
-    expect(await findAlert()).toHaveTextContent("reports are down (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("reports are down");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No plan reviews due")).toBeInTheDocument();

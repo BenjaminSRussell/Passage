@@ -25,6 +25,7 @@ import { CancelRemainderCard, OrderProgressCard } from "./OrderProgressPages";
 import { OrderSchedule } from "./OrderSchedule";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const ruleTone = { PASS: "success", WARN: "warning", FAIL: "danger" } as const;
 
@@ -68,7 +69,7 @@ export function OrderDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Sales order" />
         <Alert tone="danger" title="Could not load the order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -271,7 +272,7 @@ export function OrderDetailPage() {
             ) : undefined
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {added.length > 0 ? (

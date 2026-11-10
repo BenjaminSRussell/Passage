@@ -107,7 +107,7 @@ describe("direct delivery chains page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview packing slip postings" }));
     await waitFor(() => expect(screen.getByText("The chain was not accepted")).toBeInTheDocument());
     expect((calls[0].body as { partner: { active: boolean } }).partner.active).toBe(false);
-    expect(screen.getByText("The chain was not accepted").closest("[role=alert]")).toHaveTextContent("no active IC partner policy between B and A (IC-0801)");
+    expect(screen.getByText("The chain was not accepted").closest("[role=alert]")).toHaveTextContent("no active IC partner policy between B and A");
     expect(screen.queryByRole("table", { name: "Packing slip postings" })).not.toBeInTheDocument();
   });
 
@@ -170,7 +170,7 @@ describe("transfer-pricing evidence page", () => {
     renderAt("/intercompany/transfer-pricing");
     fireEvent.click(screen.getByRole("button", { name: "Produce evidence file" }));
     expect(await screen.findByText("is required")).toBeInTheDocument();
-    expect(screen.getByText("The evidence file was not produced").closest("[role=alert]")).toHaveTextContent("(COM-0001)");
+    expect(screen.getByText("The evidence file was not produced").closest("[role=alert]")).toHaveTextContent("COM-0001");
     expect(screen.queryByRole("table", { name: "Evidence lines" })).not.toBeInTheDocument();
   });
 
@@ -234,7 +234,7 @@ describe("centralized payment reversal", () => {
     await screen.findByText("Balanced in each entity");
     fireEvent.click(screen.getByRole("button", { name: "Preview reversal" }));
     await waitFor(() => expect(screen.getByText("The reversal was not derived")).toBeInTheDocument());
-    expect(screen.getByText("The reversal was not derived").closest("[role=alert]")).toHaveTextContent("(IC-0805)");
+    expect(screen.getByText("The reversal was not derived").closest("[role=alert]")).toHaveTextContent("IC-0805");
     expect(screen.queryByRole("table", { name: "Reversal legs" })).not.toBeInTheDocument();
   });
 });

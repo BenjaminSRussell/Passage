@@ -255,6 +255,27 @@
    "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   }
  },
+ "demoReal": {
+  "partyRejectsByRecId": {
+   "5637145062": [
+    "MIG-MAP-COERCE"
+   ],
+   "5637145158": [
+    "MIG-MAP-REQUIRED"
+   ]
+  },
+  "unresolvedParty": {
+   "customer": {},
+   "vendor": {
+    "usmf|V000086": [
+     "MIG-REF-UNRESOLVED"
+    ],
+    "usmf|V000182": [
+     "MIG-REF-UNRESOLVED"
+    ]
+   }
+  }
+ },
  "scale": {
   "bom": {
    "extracted": 10000,

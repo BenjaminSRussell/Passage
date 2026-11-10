@@ -22,36 +22,53 @@ const RuleRND001 = "RND-001"
 type Area string
 
 // Line is a canonical tuple from either side of a parallel run. Key joins the dimension set,
-// currency and period so that the outer join matches like with like.
+// currency and period so that the outer join matches like with like. Documents is how many legacy
+// documents the tuple sums (a trial-balance tuple sums every document that posted to the account
+// in the period); 0 means the side does not say, and the tuple counts as one document.
 type Line struct {
-	Area    Area
-	Key     string
-	Legacy  decimal.Decimal
-	Passage decimal.Decimal
+	Area      Area
+	Key       string
+	Legacy    decimal.Decimal
+	Passage   decimal.Decimal
+	Documents int
 }
 
-// Rule is a variance_rule: EXPECTED when |delta| <= MaxAbs for lines in Area.
+// Rule is a variance_rule: EXPECTED when |delta| <= MaxAbs for lines in Area. A PerDocument rule
+// allows MaxAbs for every document the tuple sums (BR-49.7: 0.01 per document), so a month's
+// trial-balance tuple of n documents may differ by up to n x MaxAbs from per-document rounding.
 type Rule struct {
-	ID     string
-	Area   Area // empty = any area
-	MaxAbs decimal.Decimal
+	ID          string
+	Area        Area // empty = any area
+	MaxAbs      decimal.Decimal
+	PerDocument bool
 }
 
-// DefaultRules is the tenant default variance rule set (`migration.variance_rules` = RND-001).
+// Allowed is the largest |delta| the rule classifies EXPECTED for a tuple of the given documents.
+func (r Rule) Allowed(documents int) decimal.Decimal {
+	if !r.PerDocument || documents <= 1 {
+		return r.MaxAbs
+	}
+	return r.MaxAbs.Mul(decimal.NewFromInt(int64(documents)))
+}
+
+// DefaultRules is the tenant default variance rule set (`migration.variance_rules` = RND-001):
+// at most 0.01 per document (BR-49.7).
 func DefaultRules() []Rule {
-	return []Rule{{ID: RuleRND001, MaxAbs: decimal.RequireFromString("0.01")}}
+	return []Rule{{ID: RuleRND001, MaxAbs: decimal.RequireFromString("0.01"), PerDocument: true}}
 }
 
-// Variance is one classified difference.
+// Variance is one classified difference. Documents is the document count the tolerance of a
+// per-document rule was scaled by (0 when neither side gave one).
 type Variance struct {
-	Area    Area
-	Key     string
-	Legacy  decimal.Decimal
-	Passage decimal.Decimal
-	Delta   decimal.Decimal
-	Class   string
-	RuleID  string
-	Reason  string
+	Area      Area
+	Key       string
+	Legacy    decimal.Decimal
+	Passage   decimal.Decimal
+	Delta     decimal.Decimal
+	Documents int
+	Class     string
+	RuleID    string
+	Reason    string
 }
 
 // Explanations maps a variance (area, key) to the reason an operator attached (FR-49.5
@@ -71,15 +88,21 @@ func (e Explanations) Explain(area Area, key, reason string) error {
 }
 
 // Diff outer-joins the legacy and Passage tuples on (area, key), skips equal pairs and
-// classifies each remaining difference. Missing on one side counts as zero.
+// classifies each remaining difference. Missing on one side counts as zero. Repeated tuples of a
+// side add up, amounts and document counts alike; the two sides describe the same documents, so the
+// tuple's document count is the larger of the two.
 func Diff(legacy, passage []Line, rules []Rule, ex Explanations) []Variance {
-	type pair struct{ l, p decimal.Decimal }
+	type pair struct {
+		l, p   decimal.Decimal
+		ld, pd int
+	}
 	joined := make(map[string]pair)
 	areas := make(map[string]Area)
 	for _, l := range legacy {
 		k := explanationKey(l.Area, l.Key)
 		p := joined[k]
 		p.l = p.l.Add(l.Legacy)
+		p.ld += max(l.Documents, 0)
 		joined[k] = p
 		areas[k] = l.Area
 	}
@@ -87,6 +110,7 @@ func Diff(legacy, passage []Line, rules []Rule, ex Explanations) []Variance {
 		k := explanationKey(l.Area, l.Key)
 		p := joined[k]
 		p.p = p.p.Add(l.Passage)
+		p.pd += max(l.Documents, 0)
 		joined[k] = p
 		areas[k] = l.Area
 	}
@@ -103,15 +127,15 @@ func Diff(legacy, passage []Line, rules []Rule, ex Explanations) []Variance {
 		}
 		area := areas[k]
 		key := strings.SplitN(k, "|", 2)[1]
-		out = append(out, classify(area, key, p.l, p.p, rules, ex))
+		out = append(out, classify(area, key, p.l, p.p, max(p.ld, p.pd), rules, ex))
 	}
 	return out
 }
 
-func classify(area Area, key string, legacy, passage decimal.Decimal, rules []Rule, ex Explanations) Variance {
-	v := Variance{Area: area, Key: key, Legacy: legacy, Passage: passage, Delta: passage.Sub(legacy)}
+func classify(area Area, key string, legacy, passage decimal.Decimal, documents int, rules []Rule, ex Explanations) Variance {
+	v := Variance{Area: area, Key: key, Legacy: legacy, Passage: passage, Delta: passage.Sub(legacy), Documents: documents}
 	for _, r := range rules {
-		if (r.Area == "" || r.Area == area) && v.Delta.Abs().LessThanOrEqual(r.MaxAbs) {
+		if (r.Area == "" || r.Area == area) && v.Delta.Abs().LessThanOrEqual(r.Allowed(documents)) {
 			v.Class, v.RuleID = ClassExpected, r.ID
 			return v
 		}

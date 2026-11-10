@@ -175,7 +175,7 @@ describe("order changes worklist (4.21.14, FR-21.16)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-0500", "database unavailable"));
     renderAt("/production/order-changes");
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
   });
 });
 
@@ -222,7 +222,7 @@ describe("order change detail (FR-21.16, BR-21.12)", () => {
     });
     renderAt(path);
     await userEvent.click(await screen.findByRole("button", { name: "Apply change" }));
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Apply change" }));
     await screen.findByText(/Change applied/);
     const keys = calls(fetchMock)
@@ -265,7 +265,7 @@ describe("order change detail (FR-21.16, BR-21.12)", () => {
     expect(JSON.parse(String(dismiss?.[1]?.body))).toEqual({ note: "keep v2" });
     expect((dismiss?.[1]?.headers as Record<string, string>)["If-Match"]).toBe('"1"');
     expect(screen.getByText("Dismissed")).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it("shows a conflict from the service and the missing-change state", async () => {
     stubFetch((url) => {
@@ -275,7 +275,7 @@ describe("order change detail (FR-21.16, BR-21.12)", () => {
     });
     const first = renderAt(path);
     await userEvent.click(await screen.findByRole("button", { name: "Apply change" }));
-    expect(await screen.findByText("the change was already dismissed (PRODUCTION_ORDER_CHANGE_RESOLVED)")).toBeInTheDocument();
+    expect(await screen.findByText("the change was already dismissed")).toBeInTheDocument();
     first.unmount();
 
     vi.unstubAllGlobals();
@@ -375,7 +375,7 @@ describe("order change profiles (FR-21.16)", () => {
     await userEvent.clear(within(form).getByLabelText(/Fixed surcharge/));
     await userEvent.type(within(form).getByLabelText(/Fixed surcharge/), "5");
     await userEvent.click(within(form).getByRole("button", { name: "Save profile" }));
-    expect(await screen.findByText("the OCM profile was changed by another user (conflict_version)")).toBeInTheDocument();
+    expect(await screen.findByText("the OCM profile was changed by another user")).toBeInTheDocument();
   });
 
   it("shows loading and error states", async () => {

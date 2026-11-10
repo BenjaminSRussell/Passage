@@ -5,6 +5,7 @@ import { listRuns, type PackRun } from "./api/client";
 import { formatDateTime, PACKS, RUN_STATUSES, SOURCE_LABELS, type Pack, type RunStatus } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<PackRun>[] = [
   { key: "createdAt", header: "Started", render: (row) => formatDateTime(row.createdAt) },
@@ -82,7 +83,7 @@ export function PackRunsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load pack runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

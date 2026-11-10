@@ -5,6 +5,7 @@ import { listTrackingEvents, type TrackingEvent } from "./api/client";
 import { dash, formatDateTime, shortId, trackingCodeLabels, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<TrackingEvent>[] = [
   { key: "loadId", header: "Load", mono: true, render: (row) => <span title={row.loadId}>{shortId(row.loadId)}</span> },
@@ -55,7 +56,7 @@ export function TrackingPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load tracking events" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
