@@ -1109,8 +1109,44 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
-test_budget_check_converts_a_pre_encumbrance_and_view_cannot if {
-	allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
+test_treasury_cash_desk_writes_and_reads_are_separate if {
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:close")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/entries")
+	not allowed("treasury.cashdesk.write", "GET", "/v1/treasury/cash-desks")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days/2026-11-10/entries")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days")
+	not allowed("treasury.view", "POST", "/v1/treasury/cash-desks/d1/entries")
+	not allowed("treasury.cashdesk.write", "POST", "/v1/treasury/checks")
+}
+
+test_treasury_forecast_reads_open_items_only if {
+	data.duties["payables.forecast.read"].service_only
+	data.duties["receivables.forecast.read"].service_only
+	data.service_grants.treasury.payables == ["payables.forecast.read"]
+	data.service_grants.treasury.receivables == ["receivables.forecast.read"]
+	allowed("payables.forecast.read", "GET", "/v1/payables/open-items")
+	allowed("receivables.forecast.read", "GET", "/v1/receivables/open-items")
+	not allowed("payables.forecast.read", "POST", "/v1/payables/open-items/o1:hold")
+	not allowed("payables.forecast.read", "GET", "/v1/payables/payment-proposals")
+	not allowed("receivables.forecast.read", "POST", "/v1/receivables/payments")
+}
+
+test_budget_plan_generation_needs_the_maintain_duty if {
+	allowed("budget.plan.maintain", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+}
+
+test_budget_conversion_is_service_only_and_reaches_only_the_convert_routes if {
+	data.duties["budget.encumbrance.convert"].service_only
+	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert"]
+	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:convert")
+	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances:convert")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/checks")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:release")
+	not allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
 	not allowed("budget.view", "POST", "/v1/budget/encumbrances/e1:convert")
 }
 
@@ -1702,8 +1738,13 @@ test_treasury_bank_reconciliation_duties_are_distinct if {
 	not allowed("treasury.view", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
 }
 
-test_treasury_service_posts_to_the_ledger_only if {
-	data.service_grants.treasury == {"ledger": ["ledger.entry.post"]}
+# Treasury posts to the ledger and reads the open items of payables and receivables for the cash forecast, nothing else.
+test_treasury_service_grants_are_the_ledger_post_and_the_forecast_reads if {
+	data.service_grants.treasury == {
+		"ledger": ["ledger.entry.post"],
+		"payables": ["payables.forecast.read"],
+		"receivables": ["receivables.forecast.read"],
+	}
 }
 
 test_treasury_ebics_duties_split_ceremony_from_confirmation if {

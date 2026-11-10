@@ -2101,7 +2101,6 @@
     ]},
     "budget.check": {"permissions": [
       {"resource": "/v1/budget/checks", "methods": ["POST"]},
-      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:release", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:relieve", "methods": ["POST"]},
       {"resource": "/v1/budget/reservations/*:consume", "methods": ["POST"]}
@@ -2118,8 +2117,13 @@
       {"resource": "/v1/budget/plans/*/scenarios", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:generate", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
+    ]},
+    "budget.encumbrance.convert": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
+      {"resource": "/v1/budget/encumbrances:convert", "methods": ["POST"]}
     ]},
     "budget.plan.workflow": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
@@ -3510,6 +3514,12 @@
       {"resource": "/v1/treasury/reconciliation-rules/*:deactivate", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-runs", "methods": ["POST"]}
     ]},
+    "treasury.cashdesk.write": {"permissions": [
+      {"resource": "/v1/treasury/cash-desks", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/days/*:close", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]}
+    ]},
     "treasury.statement.import": {"permissions": [
       {"resource": "/v1/treasury/statements/import", "methods": ["POST"]},
       {"resource": "/v1/treasury/intraday-reports/import", "methods": ["POST"]}
@@ -3520,6 +3530,10 @@
       {"resource": "/v1/treasury/bank-accounts/*/statements", "methods": ["GET"]},
       {"resource": "/v1/treasury/cash-forecast", "methods": ["GET"]},
       {"resource": "/v1/treasury/cash-position", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks/*/days/*/entries", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/ebics-subscribers/*", "methods": ["GET"]},
@@ -3586,6 +3600,8 @@
     "procurement.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
     "party.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
     "ledger.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
+    "payables.forecast.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
+    "receivables.forecast.read": {"service_only": true, "permissions": [{"resource": "/v1/receivables/open-items", "methods": ["GET"]}]},
     "payables.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
@@ -3632,6 +3648,9 @@
       "party": ["party.inbox.read"],
       "ledger": ["ledger.inbox.read"],
       "payables": ["payables.inbox.read"]
+    },
+    "purchasing": {
+      "budgeting": ["budget.encumbrance.convert"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
@@ -3691,7 +3710,9 @@
       "ledger": ["ledger.entry.post"]
     },
     "treasury": {
-      "ledger": ["ledger.entry.post"]
+      "ledger": ["ledger.entry.post"],
+      "payables": ["payables.forecast.read"],
+      "receivables": ["receivables.forecast.read"]
     },
     "sales": {
       "product": ["product.configuration.read"],

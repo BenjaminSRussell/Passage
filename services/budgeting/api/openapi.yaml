@@ -200,7 +200,7 @@ paths:
   /v1/budget/encumbrances/{id}:convert:
     post:
       operationId: convertPreEncumbrance
-      x-passage-duty: budget.check
+      x-passage-duty: budget.encumbrance.convert
       description: >-
         A budget check of a Requisition reserves a pre-encumbrance (stage pre, in the balance's preEncumbrances). The confirmed
         purchase order converts it: the open amount moves from preEncumbrances to encumbrances and the line is re-keyed to the PO
@@ -213,6 +213,24 @@ paths:
       requestBody:
         required: true
         content: { application/json: { schema: { type: object, required: [purchaseOrderId, purchaseOrderLineId], additionalProperties: false, properties: { purchaseOrderId: { type: string, format: uuid }, purchaseOrderLineId: { type: string, format: uuid } } } } }
+      responses:
+        '200':
+          description: The amount that moved.
+          content: { application/json: { schema: { type: object, required: [encumbranceId, purchaseOrderId, purchaseOrderLineId, converted, status], properties: { encumbranceId: { type: string, format: uuid }, purchaseOrderId: { type: string, format: uuid }, purchaseOrderLineId: { type: string, format: uuid }, converted: { $ref: '#/components/schemas/Money' }, status: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/encumbrances:convert:
+    post:
+      operationId: convertPreEncumbranceByLine
+      x-passage-duty: budget.encumbrance.convert
+      description: >-
+        Service-only (purchasing). The same conversion, naming the pre-encumbrance by the requisition line it was checked for
+        (the line id of the Requisition check). BUD-0002 (404) when nothing was reserved for that line, which purchasing treats as
+        "nothing to convert".
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [requisitionLineId, purchaseOrderId, purchaseOrderLineId], additionalProperties: false, properties: { requisitionLineId: { type: string, format: uuid }, purchaseOrderId: { type: string, format: uuid }, purchaseOrderLineId: { type: string, format: uuid } } } } }
       responses:
         '200':
           description: The amount that moved.
@@ -442,6 +460,28 @@ paths:
         content: { application/json: { schema: { type: object, required: [account, total, method, costCenters], properties: { account: { type: string }, total: { type: string }, method: { type: string, enum: [even, prior-year-actuals, custom] }, periodWeights: { type: array, minItems: 12, maxItems: 12, items: { type: string }, description: 'The distribution key of method custom, and only with it: 12 weights, one per period (a seasonal curve); not negative, not all zero.' }, costCenters: { type: array, items: { type: object, required: [costCenter, weight], properties: { costCenter: { type: string }, weight: { type: string } } } } } } } }
       responses:
         '200': { description: Cells written and the scenario total. A spread by prior-year-actuals that found no actuals sets priorYearFallback., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/scenarios/{sid}:generate:
+    post:
+      operationId: generateBudgetPlanGrid
+      x-passage-duty: budget.plan.maintain
+      description: >-
+        Fills the scenario from another source (FR-38.14) and writes the cells like the grid PUT (If-Match required, Draft plan
+        only). source prior-plan copies the approved scenario of the previous fiscal year's plan on the same legal entity and rule
+        version into this plan's year, for the named accounts or all of them. source gl-actuals reads the previous fiscal year's posted
+        net debit per month of each named account from the ledger and shares it over the cost centers by weight; an account with
+        nothing posted adds no cells and the response says so with priorYearFallback. Every amount is scaled by adjustmentPct.
+        Nothing to copy is 422 BUD-0061, more than 5000 cells 422 BUD-0062, zero cost center weights 422 BUD-0060.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: sid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, description: The grid ETag read from the last GET or write (the scenario version)., schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [source], additionalProperties: false, properties: { source: { type: string, enum: [prior-plan, gl-actuals] }, adjustmentPct: { type: string, description: Above -100 and at most 1000, at most 4 decimal places. }, accounts: { type: array, maxItems: 50, items: { type: string } }, costCenters: { type: array, maxItems: 200, description: Only with gl-actuals., items: { type: object, required: [costCenter, weight], properties: { costCenter: { type: string }, weight: { type: string } } } } } } } }
+      responses:
+        '200': { description: Cells written and the scenario total., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/budget/plans/{id}:submit:
     post:

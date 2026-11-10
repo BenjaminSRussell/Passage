@@ -28,6 +28,19 @@ const LAYOUT_LABELS: Record<Layout, string> = {
   monthly: "Monthly, 12 months",
 };
 
+const SOURCE_NOTES: Record<string, Record<string, (n: number) => string>> = {
+  AP: {
+    ok: (n) => `Includes ${n} open vendor invoices from payables, on their due dates.`,
+    truncated: (n) => `Includes ${n} open vendor invoices from payables, but there are more; the outflows are understated.`,
+    unavailable: () => "Payables did not answer, so open vendor invoices are not included beyond the entries you added.",
+  },
+  AR: {
+    ok: (n) => `Includes ${n} open customer invoices from receivables, on their due dates.`,
+    truncated: (n) => `Includes ${n} open customer invoices from receivables, but there are more; the inflows are understated.`,
+    unavailable: () => "Receivables did not answer, so open customer invoices are not included beyond the entries you added.",
+  },
+};
+
 const bucketColumns: DataTableColumn<ForecastBucket>[] = [
   { key: "key", header: "Bucket starts", mono: true },
   { key: "currency", header: "Currency", mono: true },
@@ -222,6 +235,11 @@ export function CashForecastPage() {
                   loading={forecast.loading}
                   empty={{ title: "No expected cash flows", description: "Add a forecast entry below, or widen the horizon." }}
                 />
+                {data?.sources?.map((s) => (
+                  <p key={s.type} className={styles.note} role={s.status === "ok" ? undefined : "status"}>
+                    {SOURCE_NOTES[s.type]?.[s.status]?.(s.count) ?? `${s.type}: ${s.status}`}
+                  </p>
+                ))}
                 {data && data.outOfHorizon > 0 ? (
                   <p className={styles.note} role="status">
                     {`${data.outOfHorizon} entries fall after the last bucket and are not shown.`}
