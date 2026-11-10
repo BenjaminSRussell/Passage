@@ -19,6 +19,7 @@ type ProductCreatedData struct {
 	ProductType    string `json:"productType"`
 	BaseUOM        string `json:"baseUom"`
 	LifecycleState string `json:"lifecycleState"`
+	Version        int    `json:"version"`
 }
 
 type ProductUpdatedData struct {

@@ -119,6 +119,7 @@ components:
           party_type: { type: string, enum: [organization, person] }
           name: { type: string }
           status: { type: string, description: the party status at creation; read by the search index }
+          version: { type: integer }
       x-passage-type: dev.passage.party.party.created.v1
     partyUpdated:
       name: updated
@@ -156,6 +157,15 @@ components:
                 fromId: { type: string, format: uuid }
                 toId: { type: string, format: uuid }
           mergedAt: { type: string, format: date-time }
+          survivor:
+            type: object
+            description: the survivor after the merge fields resolved; read by the search index
+            properties:
+              partyNumber: { type: string }
+              partyType: { type: string }
+              name: { type: string }
+              status: { type: string }
+              version: { type: integer }
       x-passage-type: dev.passage.party.party.merged.v1
     customerCreated:
       name: created

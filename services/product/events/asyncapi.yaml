@@ -86,6 +86,7 @@ components:
           productType: { type: string }
           baseUom: { type: string }
           lifecycleState: { type: string }
+          version: { type: integer }
       x-passage-type: dev.passage.product.product.created.v1
     updated:
       name: updated

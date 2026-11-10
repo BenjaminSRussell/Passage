@@ -147,19 +147,19 @@ func TestACallerSeesOnlyTypesTheyHoldTheReadDutyFor(t *testing.T) {
 
 func TestResultsAreTypedAndLinked(t *testing.T) {
 	h := newHarness(t)
-	rs := h.results("q=alpha&types=party,purchase_order", entityA, dutyParty+","+dutyPO)
+	rs := h.results("q=alpha", entityA, dutyParty+","+dutyProduct+","+dutyPO)
 	links := map[string]string{}
 	for _, r := range rs {
 		links[r["type"]] = r["link"]
 	}
-	want := map[string]string{"party": "/party/" + h.partID, "purchase_order": "/purchasing/purchase-orders/" + h.poID[entityA]}
+	want := map[string]string{"party": "/party/" + h.partID, "product": "/product/SKU-ALPHA", "purchase_order": "/purchasing/purchase-orders/" + h.poID[entityA]}
 	for k, v := range want {
 		if links[k] != v {
 			t.Errorf("%s link %q, want %q", k, links[k], v)
 		}
 	}
-	if len(rs) != 2 {
-		t.Errorf("got %d results, want 2", len(rs))
+	if len(rs) != 3 {
+		t.Errorf("got %d results, want 3", len(rs))
 	}
 }
 

@@ -85,6 +85,7 @@ type PartyCreatedData struct {
 	PartyType   string `json:"party_type"`
 	Name        string `json:"name"`
 	Status      string `json:"status"`
+	Version     int    `json:"version"`
 }
 
 type PartyUpdatedData struct {

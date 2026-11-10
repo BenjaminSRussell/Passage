@@ -92,7 +92,7 @@ func TestCreateParty_WritesPartyAndOneCreatedEvent(t *testing.T) {
 		t.Fatalf("got %+v", created)
 	}
 	rows := outboxRows(t, ctx, app)
-	if len(rows) != 1 || rows[0].typ != "dev.passage.party.party.created.v1" || !strings.Contains(rows[0].payload, created.ID) {
+	if len(rows) != 1 || rows[0].typ != "dev.passage.party.party.created.v1" || !strings.Contains(rows[0].payload, created.ID) || !strings.Contains(rows[0].payload, `"version": 1`) {
 		t.Fatalf("got %+v", rows)
 	}
 }

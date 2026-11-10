@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,12 +38,13 @@ type source struct {
 	recordType string
 	duty       string
 	link       string
+	byNumber   bool
 }
 
 var sources = []source{
-	{store.TypeParty, "party.read", "/party/%s"},
-	{store.TypeProduct, "product.read", "/product/%s"},
-	{store.TypePurchaseOrder, "procurement.purchase-order.inquire", "/purchasing/purchase-orders/%s"},
+	{store.TypeParty, "party.read", "/party/%s", false},
+	{store.TypeProduct, "product.read", "/product/%s", true},
+	{store.TypePurchaseOrder, "procurement.purchase-order.inquire", "/purchasing/purchase-orders/%s", false},
 }
 
 type Searcher interface {
@@ -121,7 +123,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, h := range hits {
 			out = append(out, result{Type: h.Type, ID: h.ID, LegalEntityID: h.LegalEntityID, Number: h.Number, Title: h.Title,
-				Subtitle: h.Subtitle, Status: h.Status, Link: fmt.Sprintf(linkFor(h.Type), h.ID)})
+				Subtitle: h.Subtitle, Status: h.Status, Link: linkFor(h)})
 		}
 	}
 	if len(out) == 0 {
@@ -130,10 +132,14 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"results": out})
 }
 
-func linkFor(recordType string) string {
+func linkFor(h store.Hit) string {
 	for _, s := range sources {
-		if s.recordType == recordType {
-			return s.link
+		if s.recordType == h.Type {
+			key := h.ID
+			if s.byNumber {
+				key = url.PathEscape(h.Number)
+			}
+			return fmt.Sprintf(s.link, key)
 		}
 	}
 	return "/"

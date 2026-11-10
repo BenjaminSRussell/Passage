@@ -20,7 +20,7 @@ spec:
         operations: [Read, Describe]
       - resource: {type: topic, name: passage.product.product, patternType: literal}
         operations: [Read, Describe]
-      - resource: {type: topic, name: passage.procurement.po, patternType: literal}
+      - resource: {type: topic, name: passage.procurement.purchase_order, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: passage.search.index.dlq, patternType: literal}
         operations: [Write, Describe]

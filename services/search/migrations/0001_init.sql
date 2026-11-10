@@ -2,9 +2,9 @@
 -- search-index event consumer. search_record holds records of one legal entity
 -- (purchase orders) under tenant and legal-entity row-level security;
 -- search_record_tenant holds tenant-wide records (parties, products), which
--- have no legal entity, under tenant row-level security. source_at is the
--- time of the event that last wrote the row: an older event never overwrites a
--- newer one. removed rows are kept as tombstones so a late older event cannot
+-- have no legal entity, under tenant row-level security. source_version
+-- and source_at are the source version and time of the event that last wrote the
+-- row: an older event never overwrites a newer one. removed rows are kept as tombstones so a late older event cannot
 -- bring a removed record back.
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
@@ -19,13 +19,15 @@ create table search_record (
   subtitle text not null default '',
   status text not null default '',
   removed boolean not null default false,
+  source_version integer not null default 0,
   source_at timestamptz not null,
   indexed_at timestamptz not null default now(),
-  search_text text generated always as (lower(number || ' ' || title || ' ' || subtitle)) stored,
+  search_text text generated always as (lower(number || ' ' || title)) stored,
+  number_key text generated always as (lower(number)) stored,
   primary key (tenant_id, record_type, record_id)
 );
 create index search_record_trgm on search_record using gin (search_text public.gin_trgm_ops);
-create index search_record_number on search_record (tenant_id, record_type, lower(number) text_pattern_ops);
+create index search_record_number on search_record (tenant_id, record_type, number_key collate "C");
 
 alter table search_record enable row level security;
 alter table search_record force row level security;
@@ -45,13 +47,15 @@ create table search_record_tenant (
   subtitle text not null default '',
   status text not null default '',
   removed boolean not null default false,
+  source_version integer not null default 0,
   source_at timestamptz not null,
   indexed_at timestamptz not null default now(),
-  search_text text generated always as (lower(number || ' ' || title || ' ' || subtitle)) stored,
+  search_text text generated always as (lower(number || ' ' || title)) stored,
+  number_key text generated always as (lower(number)) stored,
   primary key (tenant_id, record_type, record_id)
 );
 create index search_record_tenant_trgm on search_record_tenant using gin (search_text public.gin_trgm_ops);
-create index search_record_tenant_number on search_record_tenant (tenant_id, record_type, lower(number) text_pattern_ops);
+create index search_record_tenant_number on search_record_tenant (tenant_id, record_type, number_key collate "C");
 
 alter table search_record_tenant enable row level security;
 alter table search_record_tenant force row level security;

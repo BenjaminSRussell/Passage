@@ -224,7 +224,7 @@ func (s *Postgres) CreateProduct(ctx context.Context, in domain.Product, idem st
 			}
 		}
 		return emit(ctx, tx, pevents.ProductCreated, "product", in.ID, pevents.ProductCreatedData{
-			ProductID: in.ID, ProductNumber: in.ProductNumber, Name: in.Name, Subtype: in.Subtype, ProductType: in.ProductType, BaseUOM: in.BaseUOM, LifecycleState: in.LifecycleState,
+			ProductID: in.ID, ProductNumber: in.ProductNumber, Name: in.Name, Subtype: in.Subtype, ProductType: in.ProductType, BaseUOM: in.BaseUOM, LifecycleState: in.LifecycleState, Version: 1,
 		})
 	})
 	var pgErr *pgconn.PgError

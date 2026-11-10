@@ -3,8 +3,12 @@ package store
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -21,12 +25,18 @@ var (
 
 func setup(t *testing.T) *Store {
 	t.Helper()
+	st, _ := setupWithAdmin(t)
+	return st
+}
+
+func setupWithAdmin(t *testing.T) (*Store, *pgxpool.Pool) {
+	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	testkit.AssertTenantRLS(t, admin)
-	return New(app)
+	return New(app), admin
 }
 
 func asScope(tenantID, scopes string, duties ...string) context.Context {
@@ -129,21 +139,20 @@ func TestSearchRanksExactNumberThenPrefixThenSimilarity(t *testing.T) {
 		po(entityA, "PO-1042", t0),
 		po(entityA, "PO-10420", t0),
 		po(entityA, "PO-2001", t0),
-		{Type: TypeParty, ID: ids.New(), Number: "P-9", Title: "Order PO-1042 supplies", Status: "active", At: t0},
 	} {
 		if _, err := st.Apply(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	hits, err := st.Search(ctx, Query{Text: "PO-1042", Types: []string{TypePurchaseOrder, TypeParty}, Limit: 10})
+	hits, err := st.Search(ctx, Query{Text: "PO-1042", Types: []string{TypePurchaseOrder}, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := numbers(hits), []string{"PO-1042", "PO-10420", "P-9"}; !slices.Equal(got, want) {
+	if got, want := numbers(hits), []string{"PO-1042", "PO-10420"}; !slices.Equal(got, want) {
 		t.Fatalf("ranking %v, want %v", got, want)
 	}
-	if hits[0].LegalEntityID != entityA || hits[2].LegalEntityID != "" {
-		t.Fatalf("legal entities %q / %q, want entity A for the order and none for the party", hits[0].LegalEntityID, hits[2].LegalEntityID)
+	if hits[0].LegalEntityID != entityA {
+		t.Fatalf("legal entity %q, want entity A", hits[0].LegalEntityID)
 	}
 }
 
@@ -171,7 +180,7 @@ func TestSearchTreatsLikeCharactersAsText(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for q, want := range map[string][]string{"%%": nil, "__": nil, `\\`: nil, "0%-": {"100%-DONE"}, "a_b": {`A_B\C`}} {
+	for q, want := range map[string][]string{"%%": nil, "__": nil, `\\`: nil, "100%": {"100%-DONE"}, "a_b": {`A_B\C`}} {
 		hits, err := st.Search(ctx, Query{Text: q, Types: []string{TypeProduct}, Limit: 10})
 		if err != nil || !slices.Equal(numbers(hits), want) {
 			t.Errorf("search %q: %v err %v, want %v", q, numbers(hits), err, want)
@@ -231,5 +240,115 @@ func TestSearchHonoursTheLimit(t *testing.T) {
 	hits, err := st.Search(ctx, Query{Text: "po-", Types: []string{TypePurchaseOrder}, Limit: 2})
 	if err != nil || !slices.Equal(numbers(hits), []string{"PO-1", "PO-2"}) {
 		t.Fatalf("hits %v err %v, want the first two by number", numbers(hits), err)
+	}
+}
+
+func TestHigherSourceVersionBeatsALaterClock(t *testing.T) {
+	st := setup(t)
+	ctx := asScope(testkit.TenantID(1), entityA)
+	id := ids.New()
+	rec := func(title string, version int, at time.Time) Record {
+		return Record{Type: TypeProduct, ID: id, Number: "SKU-1", Title: title, Version: version, At: at}
+	}
+	for i, tc := range []struct {
+		rec     Record
+		applied bool
+		title   string
+	}{
+		{rec("Version two", 2, t0), true, "Version two"},
+		{rec("Version one, later clock", 1, t0.Add(time.Hour)), false, "Version two"},
+		{rec("Version two again, later", 2, t0.Add(time.Minute)), true, "Version two again, later"},
+		{rec("Version three", 3, t0.Add(-time.Hour)), true, "Version three"},
+	} {
+		applied, err := st.Apply(ctx, tc.rec)
+		if err != nil || applied != tc.applied {
+			t.Fatalf("step %d: applied=%v err=%v", i, applied, err)
+		}
+		hits, err := st.Search(ctx, Query{Text: "sku-1", Types: []string{TypeProduct}, Limit: 5})
+		if err != nil || len(hits) != 1 || hits[0].Title != tc.title {
+			t.Fatalf("step %d: %+v %v, want %q", i, hits, err, tc.title)
+		}
+	}
+}
+
+func TestUpdateOnlyNeverCreatesARow(t *testing.T) {
+	st := setup(t)
+	ctx := asScope(testkit.TenantID(1), entityA)
+	draft := Record{Type: TypePurchaseOrder, ID: ids.New(), LegalEntityID: entityA, Number: "PO-DRAFT", Status: "CANCELLED", UpdateOnly: true, Version: 1, At: t0}
+	if applied, err := st.Apply(ctx, draft); err != nil || applied {
+		t.Fatalf("cancel of an unindexed order: applied=%v err=%v", applied, err)
+	}
+	if hits, err := st.Search(ctx, Query{Text: "po-draft", Types: []string{TypePurchaseOrder}, Limit: 5}); err != nil || len(hits) != 0 {
+		t.Fatalf("a never-confirmed order was indexed: %+v %v", hits, err)
+	}
+	confirmed := po(entityA, "PO-LIVE", t0)
+	if _, err := st.Apply(ctx, confirmed); err != nil {
+		t.Fatal(err)
+	}
+	cancel := Record{Type: TypePurchaseOrder, ID: confirmed.ID, Status: "CANCELLED", UpdateOnly: true, At: t0.Add(time.Minute)}
+	if applied, err := st.Apply(ctx, cancel); err != nil || !applied {
+		t.Fatalf("cancel of an indexed order: applied=%v err=%v", applied, err)
+	}
+	hits, err := st.Search(ctx, Query{Text: "po-live", Types: []string{TypePurchaseOrder}, Limit: 5})
+	if err != nil || len(hits) != 1 || hits[0].Status != "CANCELLED" || hits[0].Title != "PO-LIVE" {
+		t.Fatalf("hits %+v err %v, want the order kept as cancelled", hits, err)
+	}
+}
+
+func TestSubtitleIsNotSearchable(t *testing.T) {
+	st := setup(t)
+	ctx := asScope(testkit.TenantID(1), entityA)
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: ids.New(), Number: "P-1", Title: "Contoso", Subtitle: "organization", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if hits, err := st.Search(ctx, Query{Text: "organization", Types: []string{TypeParty}, Limit: 5}); err != nil || len(hits) != 0 {
+		t.Fatalf("subtitle matched: %+v %v", hits, err)
+	}
+}
+
+func TestIndexedQueriesAvoidSequentialScans(t *testing.T) {
+	st, admin := setupWithAdmin(t)
+	ctx := asScope(testkit.TenantID(1), entityA)
+	err := dbx.WithTenantTx(ctx, st.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into search_record_tenant (tenant_id, record_type, record_id, number, title, source_at)
+			select $1, 'party', gen_random_uuid(), 'P-' || g, 'Name ' || md5(g::text), now() from generate_series(1, 30000) g`, testkit.TenantID(1)); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `insert into search_record (tenant_id, legal_entity_id, record_type, record_id, number, title, source_at)
+			select $1, $2, 'purchase_order', gen_random_uuid(), 'PO-' || g, 'PO-' || g, now() from generate_series(1, 30000) g`, testkit.TenantID(1), entityA)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"search_record", "search_record_tenant"} {
+		if _, err := admin.Exec(context.Background(), "analyze "+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, text := range []string{"p-1234", "po-29999", "zq"} {
+		var lines []string
+		err := dbx.WithTenantTx(ctx, st.pool, func(tx pgx.Tx) error {
+			sql, arg := plan(text)
+			rows, err := tx.Query(ctx, "explain "+sql, testkit.TenantID(1), []string{TypeParty, TypePurchaseOrder}, text, arg, 20)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					return err
+				}
+				lines = append(lines, line)
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if joined := strings.Join(lines, "\n"); strings.Contains(joined, "Seq Scan on search_record") {
+			t.Errorf("query %q scans a whole table:\n%s", text, joined)
+		}
 	}
 }

@@ -16,6 +16,9 @@ spec:
       name: receiving
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
+      name: search
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
       name: workflows
   rateLimit:
     type: Global

@@ -9,3 +9,5 @@
 | Outbox connectors for `passage.party.party`, `passage.product.product` and `passage.procurement.po` | deploy | infra | `deploy/kafka/connect.yaml` does not publish these topics yet; `consumer.enabled` stays false until it does. |
 | Local dev stack wiring (`make dev`) | dev | infra | Run `search` against the dev database by hand. |
 | Search benchmarks and typo-tolerance tuning | #506 | later slice | Threshold 0.4 on `word_similarity` is untuned. |
+| Indexed name search under row-level security | #506 | later slice | pg_trgm operators are not leakproof, so the planner filters the name arm instead of using the GIN index. Upgrade path: leakproof wrappers created by a superuser, or a tenant-partitioned table. |
+| Substring match inside a number | #506 | later slice | A number-shaped query matches by prefix only (`1042` does not find `PO-1042`). |

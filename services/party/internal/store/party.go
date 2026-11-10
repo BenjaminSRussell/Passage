@@ -153,7 +153,7 @@ func (s *Postgres) createOnce(ctx context.Context, in NewParty, next func(contex
 			}
 		}
 		if err := enqueue(ctx, tx, caller.TenantID, party.ID, partyevents.PartyCreated, partyevents.PartyCreatedData{
-			PartyID: party.ID, PartyNumber: party.PartyNumber, PartyType: party.PartyType, Name: party.Name, Status: party.Status,
+			PartyID: party.ID, PartyNumber: party.PartyNumber, PartyType: party.PartyType, Name: party.Name, Status: party.Status, Version: party.Version,
 		}); err != nil {
 			return err
 		}

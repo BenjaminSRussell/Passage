@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,14 +74,16 @@ func TestIndexesEachRecordKindFromItsEvent(t *testing.T) {
 		want store.Record
 		le   string
 	}{
-		{"party created", event(t, PartyCreatedType, partySource, map[string]any{"party_id": recordID, "party_number": "P-1", "party_type": "organization", "name": "Contoso", "status": "active"}),
-			store.Record{Type: store.TypeParty, ID: recordID, Number: "P-1", Title: "Contoso", Subtitle: "organization", Status: "active", At: eventTime}, ""},
-		{"product updated", event(t, ProductUpdatedType, productSource, map[string]any{"productId": recordID, "productNumber": "SKU-9", "name": "Widget", "productType": "finished", "lifecycleState": "active"}),
-			store.Record{Type: store.TypeProduct, ID: recordID, Number: "SKU-9", Title: "Widget", Subtitle: "finished", Status: "active", At: eventTime}, ""},
-		{"po confirmed", event(t, PurchaseOrderConfirmed, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-5", "legal_entity_id": entityID, "currency": "USD", "total": "12.50"}),
-			store.Record{Type: store.TypePurchaseOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-5", Title: "PO-5", Subtitle: "USD 12.50", Status: "CONFIRMED", At: eventTime}, entityID},
-		{"po cancelled", event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-5", "legal_entity_id": entityID}),
-			store.Record{Type: store.TypePurchaseOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-5", Title: "PO-5", Status: "CANCELLED", At: eventTime}, entityID},
+		{"party created", event(t, PartyCreatedType, partySource, map[string]any{"party_id": recordID, "party_number": "P-1", "party_type": "organization", "name": "Contoso", "status": "active", "version": 3}),
+			store.Record{Type: store.TypeParty, ID: recordID, Number: "P-1", Title: "Contoso", Subtitle: "organization", Status: "active", Version: 3, At: eventTime}, ""},
+		{"product updated", event(t, ProductUpdatedType, productSource, map[string]any{"productId": recordID, "productNumber": "SKU-9", "name": "Widget", "productType": "finished", "lifecycleState": "active", "version": 4}),
+			store.Record{Type: store.TypeProduct, ID: recordID, Number: "SKU-9", Title: "Widget", Subtitle: "finished", Status: "active", Version: 4, At: eventTime}, ""},
+		{"po confirmed", event(t, PurchaseOrderConfirmed, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-5", "legal_entity_id": entityID, "currency": "USD", "total": "12.50", "version_no": 2}),
+			store.Record{Type: store.TypePurchaseOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-5", Title: "PO-5", Subtitle: "USD 12.50", Status: "CONFIRMED", Version: 2, At: eventTime}, entityID},
+		{"po cancelled", event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-5", "legal_entity_id": entityID, "version_no": 2, "prior_status": "CONFIRMED"}),
+			store.Record{Type: store.TypePurchaseOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-5", Title: "PO-5", Status: "CANCELLED", Version: 2, At: eventTime}, entityID},
+		{"po draft cancelled", event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-5", "legal_entity_id": entityID, "version_no": 1, "prior_status": "DRAFT"}),
+			store.Record{Type: store.TypePurchaseOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-5", Title: "PO-5", Status: "CANCELLED", Version: 1, UpdateOnly: true, At: eventTime}, entityID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeStore{}
@@ -95,18 +100,50 @@ func TestIndexesEachRecordKindFromItsEvent(t *testing.T) {
 	}
 }
 
-func TestMergeRemovesEveryMergedParty(t *testing.T) {
+const survivorID = "00000000-0000-0000-0000-0000000000c3"
+
+func mergeData(losers ...string) map[string]any {
+	return map[string]any{"survivorPartyId": survivorID, "mergedPartyIds": losers,
+		"survivor": map[string]any{"partyNumber": "P-1", "partyType": "organization", "name": "Contoso Group", "status": "active", "version": 5}}
+}
+
+func TestMergeRemovesLosersAndReindexesTheSurvivor(t *testing.T) {
 	f := &fakeStore{}
-	evt := event(t, PartyMergedType, partySource, map[string]any{"mergedPartyIds": []string{recordID, otherID}})
-	if err := handle(t, f, evt); err != nil {
+	if err := handle(t, f, event(t, PartyMergedType, partySource, mergeData(recordID, otherID))); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.got) != 2 {
-		t.Fatalf("applied %d records, want 2", len(f.got))
+	if len(f.got) != 3 {
+		t.Fatalf("applied %d records, want 2 removals and the survivor", len(f.got))
 	}
 	for i, id := range []string{recordID, otherID} {
 		if r := f.got[i].rec; r.ID != id || !r.Removed || r.Status != "MERGED" || r.At != eventTime {
 			t.Errorf("record %d = %+v", i, r)
+		}
+	}
+	want := store.Record{Type: store.TypeParty, ID: survivorID, Number: "P-1", Title: "Contoso Group", Subtitle: "organization", Status: "active", Version: 5, At: eventTime}
+	if f.got[2].rec != want {
+		t.Errorf("survivor = %+v, want %+v", f.got[2].rec, want)
+	}
+}
+
+func TestEverySubscribedTopicMatchesTheSourceOutboxAggregate(t *testing.T) {
+	for _, tc := range []struct{ topic, file, pattern string }{
+		{PartyTopic, "../../../party/internal/domain/merge.go", `AggregateParty\s*=\s*"([a-z_]+)"`},
+		{ProductTopic, "../../../product/internal/store/store.go", `emit\(ctx, tx, pevents\.ProductCreated, "([a-z_]+)"`},
+		{ProductTopic, "../../../product/internal/store/store.go", `emit\(ctx, tx, pevents\.ProductUpdated, "([a-z_]+)"`},
+		{PurchaseOrderTopic, "../../../purchasing/internal/store/po_lifecycle.go", `enqueue\(ctx, tx, "([a-z_]+)", po\.ID, purchasingevents\.POConfirmed`},
+		{PurchaseOrderTopic, "../../../purchasing/internal/store/po_lifecycle.go", `enqueue\(ctx, tx, "([a-z_]+)", cur\.ID, purchasingevents\.POCancelled`},
+	} {
+		src, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := regexp.MustCompile(tc.pattern).FindSubmatch(src)
+		if m == nil {
+			t.Fatalf("%s: no outbox call matches %s", tc.file, tc.pattern)
+		}
+		if got := string(m[1]); !strings.HasSuffix(tc.topic, "."+got) {
+			t.Errorf("topic %s does not end in the outbox aggregate type %q of %s", tc.topic, got, tc.file)
 		}
 	}
 }
@@ -122,8 +159,9 @@ func TestMalformedEventsAreDeadLettered(t *testing.T) {
 		"party no number":   event(t, PartyUpdatedType, partySource, map[string]any{"party_id": recordID}),
 		"party bad id":      event(t, PartyUpdatedType, partySource, map[string]any{"party_id": "x", "party_number": "P"}),
 		"product no number": event(t, ProductCreatedType, productSource, map[string]any{"productId": recordID}),
-		"merge empty":       event(t, PartyMergedType, partySource, map[string]any{"mergedPartyIds": []string{}}),
-		"merge bad id":      event(t, PartyMergedType, partySource, map[string]any{"mergedPartyIds": []string{"x"}}),
+		"merge empty":       event(t, PartyMergedType, partySource, mergeData()),
+		"merge no survivor": event(t, PartyMergedType, partySource, map[string]any{"mergedPartyIds": []string{recordID}}),
+		"merge bad id":      event(t, PartyMergedType, partySource, mergeData("x")),
 		"po no entity":      event(t, PurchaseOrderConfirmed, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-1"}),
 		"po no number":      event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "legal_entity_id": entityID}),
 	} {

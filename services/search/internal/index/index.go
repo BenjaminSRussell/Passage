@@ -20,7 +20,7 @@ const (
 
 	PartyTopic         = "passage.party.party"
 	ProductTopic       = "passage.product.product"
-	PurchaseOrderTopic = "passage.procurement.po"
+	PurchaseOrderTopic = "passage.procurement.purchase_order"
 
 	PartyCreatedType       = "dev.passage.party.party.created.v1"
 	PartyUpdatedType       = "dev.passage.party.party.updated.v1"
@@ -39,6 +39,8 @@ const (
 	maxMergedPartiesLen = 100
 )
 
+var confirmedBefore = map[string]bool{"CONFIRMED": true, "FINALIZED": true}
+
 type Applier interface {
 	Apply(ctx context.Context, r store.Record) (bool, error)
 }
@@ -49,10 +51,19 @@ type partyData struct {
 	PartyType   string `json:"party_type"`
 	Name        string `json:"name"`
 	Status      string `json:"status"`
+	Version     int    `json:"version"`
 }
 
 type partyMergedData struct {
-	MergedPartyIDs []string `json:"mergedPartyIds"`
+	SurvivorPartyID string   `json:"survivorPartyId"`
+	MergedPartyIDs  []string `json:"mergedPartyIds"`
+	Survivor        struct {
+		PartyNumber string `json:"partyNumber"`
+		PartyType   string `json:"partyType"`
+		Name        string `json:"name"`
+		Status      string `json:"status"`
+		Version     int    `json:"version"`
+	} `json:"survivor"`
 }
 
 type productData struct {
@@ -61,6 +72,7 @@ type productData struct {
 	Name           string `json:"name"`
 	ProductType    string `json:"productType"`
 	LifecycleState string `json:"lifecycleState"`
+	Version        int    `json:"version"`
 }
 
 type purchaseOrderData struct {
@@ -69,6 +81,8 @@ type purchaseOrderData struct {
 	LegalEntityID string `json:"legal_entity_id"`
 	Currency      string `json:"currency"`
 	Total         string `json:"total"`
+	VersionNo     int    `json:"version_no"`
+	PriorStatus   string `json:"prior_status"`
 }
 
 // Handlers indexes party, product and purchase order events. Register them
@@ -120,13 +134,16 @@ func indexParty(ctx context.Context, s Applier, evt events.Event) error {
 	if !ids.Valid(d.PartyID) || d.PartyNumber == "" {
 		return eventing.Permanent(fmt.Errorf("%s needs party_id and party_number", evt.Type))
 	}
-	return apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: d.PartyID, Number: d.PartyNumber, Title: d.Name, Subtitle: d.PartyType, Status: d.Status})
+	return apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: d.PartyID, Number: d.PartyNumber, Title: d.Name, Subtitle: d.PartyType, Status: d.Status, Version: d.Version})
 }
 
 func removeMergedParties(ctx context.Context, s Applier, evt events.Event) error {
 	var d partyMergedData
 	if err := decode(evt, partySource, &d); err != nil {
 		return err
+	}
+	if !ids.Valid(d.SurvivorPartyID) || d.Survivor.PartyNumber == "" {
+		return eventing.Permanent(fmt.Errorf("%s needs survivorPartyId and survivor.partyNumber", evt.Type))
 	}
 	if len(d.MergedPartyIDs) == 0 || len(d.MergedPartyIDs) > maxMergedPartiesLen {
 		return eventing.Permanent(fmt.Errorf("%s names %d merged parties", evt.Type, len(d.MergedPartyIDs)))
@@ -139,7 +156,8 @@ func removeMergedParties(ctx context.Context, s Applier, evt events.Event) error
 			return err
 		}
 	}
-	return nil
+	return apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: d.SurvivorPartyID, Number: d.Survivor.PartyNumber, Title: d.Survivor.Name,
+		Subtitle: d.Survivor.PartyType, Status: d.Survivor.Status, Version: d.Survivor.Version})
 }
 
 func indexProduct(ctx context.Context, s Applier, evt events.Event) error {
@@ -150,7 +168,7 @@ func indexProduct(ctx context.Context, s Applier, evt events.Event) error {
 	if !ids.Valid(d.ProductID) || d.ProductNumber == "" {
 		return eventing.Permanent(fmt.Errorf("%s needs productId and productNumber", evt.Type))
 	}
-	return apply(ctx, s, evt, store.Record{Type: store.TypeProduct, ID: d.ProductID, Number: d.ProductNumber, Title: d.Name, Subtitle: d.ProductType, Status: d.LifecycleState})
+	return apply(ctx, s, evt, store.Record{Type: store.TypeProduct, ID: d.ProductID, Number: d.ProductNumber, Title: d.Name, Subtitle: d.ProductType, Status: d.LifecycleState, Version: d.Version})
 }
 
 func indexPurchaseOrder(ctx context.Context, s Applier, evt events.Event) error {
@@ -165,9 +183,10 @@ func indexPurchaseOrder(ctx context.Context, s Applier, evt events.Event) error 
 	if err != nil {
 		return eventing.Permanent(err)
 	}
-	r := store.Record{Type: store.TypePurchaseOrder, ID: d.POID, LegalEntityID: d.LegalEntityID, Number: d.Number, Title: d.Number, Status: statusPOConfirmed}
+	r := store.Record{Type: store.TypePurchaseOrder, ID: d.POID, LegalEntityID: d.LegalEntityID, Number: d.Number, Title: d.Number, Status: statusPOConfirmed, Version: d.VersionNo}
 	if evt.Type == PurchaseOrderCancelled {
 		r.Status = statusPOCancelled
+		r.UpdateOnly = !confirmedBefore[d.PriorStatus]
 	} else if d.Currency != "" {
 		r.Subtitle = d.Currency + " " + d.Total
 	}
