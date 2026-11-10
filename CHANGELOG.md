@@ -19,6 +19,9 @@ release may change public APIs.
 
 ### Added
 
+- Receiving: `GET /v1/receiving/invoices` lists vendor invoices with their lines and ledger entry id, filtered by
+  vendor, receipt, purchase order or status, keyset-paged and scoped to the caller's legal entities
+  (`receiving.ap.inquire`); `GET /v1/receiving/receipts?purchaseOrderId=` already existed and now has an API test (#502).
 - Treasury EBICS wiring (#36): subscriber onboarding routes with split duties (`treasury.ebics.write|keys|approve`; the confirmer is the authenticated user), a statement poller (`TREASURY_EBICS_POLL_WORKERS`), the `ebics` bank channel behind `TREASURY_BANK_CHANNELS`, downloads acknowledged only after import with per-statement account routing, E002 private key wiped after use with its public key stored apart, A006 over the order without CR/LF/Ctrl-Z.
 - EBICS H004 bank connectivity in treasury (#36, FR-36.12): `internal/ebics` replaces the unencrypted upload subset. A
   subscriber moves NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY (migration 0009; bank key hashes must be confirmed by

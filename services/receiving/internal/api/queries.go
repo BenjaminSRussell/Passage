@@ -25,6 +25,8 @@ const (
 var (
 	receiptStates = []domain.ReceiptState{domain.Arrived, domain.Registered, domain.Posted, domain.Cancelled}
 	grirStatuses  = []string{"OPEN", "PARTIAL", "CLEARED", "WRITTEN_OFF"}
+
+	invoiceStatuses = []string{domain.InvoiceStatusPosted, domain.InvoiceStatusAuditBlocked, domain.InvoiceStatusAuditRejected}
 )
 
 type query struct {
@@ -114,6 +116,38 @@ func (a *API) listReceipts(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, rec := range rows {
 		page.Items = append(page.Items, toReceiptBody(rec))
+	}
+	httpx.JSON(w, http.StatusOK, page)
+}
+
+type invoicePage struct {
+	Items      []invoiceBody `json:"items"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+}
+
+func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
+	q := query{values: r.URL.Query(), fields: map[string]string{}}
+	f := store.InvoiceFilter{VendorID: q.uuid("vendorId"), ReceiptID: q.uuid("receiptId"), PurchaseOrderID: q.uuid("purchaseOrderId"), Status: q.values.Get("status"), Limit: q.limit()}
+	f.CursorCreatedAt, f.CursorID = q.cursor()
+	if f.Status != "" && !slices.Contains(invoiceStatuses, f.Status) {
+		q.fields["status"] = "must be POSTED, AUDIT_BLOCKED or AUDIT_REJECTED"
+	}
+	if len(q.fields) > 0 {
+		httpx.Fail(w, r, validationProblem(q.fields))
+		return
+	}
+	rows, err := a.store.ListInvoices(r.Context(), f)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	page := invoicePage{Items: make([]invoiceBody, 0, len(rows))}
+	if len(rows) > f.Limit {
+		rows = rows[:f.Limit]
+		page.NextCursor = encodeCursor(rows[len(rows)-1].CreatedAt, rows[len(rows)-1].ID)
+	}
+	for _, inv := range rows {
+		page.Items = append(page.Items, toInvoiceBody(inv))
 	}
 	httpx.JSON(w, http.StatusOK, page)
 }
