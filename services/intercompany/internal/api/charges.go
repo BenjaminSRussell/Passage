@@ -94,7 +94,7 @@ func (a *API) postCharge(w http.ResponseWriter, r *http.Request) {
 	}
 	date := f.date("postingDate", req.PostingDate)
 	targets := parseTargets(req.Entities, f)
-	if !validation(w, r, f) {
+	if !validation(w, r, f) || !targetsInScope(w, r, targets) {
 		return
 	}
 	hash, err := store.HashOf("charge", req)
