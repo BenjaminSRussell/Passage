@@ -145,3 +145,61 @@ export function approveProposal(id: string): Promise<Proposal> {
 export function cancelProposal(id: string): Promise<Proposal> {
   return send("POST", `/payment-proposals/${encodeURIComponent(id)}:cancel`, {});
 }
+
+export const RUN_STATUSES = ["RUNNING", "COMPLETED", "FAILED"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export interface RunPayment {
+  id?: string;
+  groupId: string;
+  vendorId: string;
+  currency: string;
+  paymentMethod: PaymentMethod;
+  endToEndId: string;
+  amount: string;
+  valuedAmount: string;
+}
+
+export interface PaymentRun {
+  id: string;
+  legalEntityId: string;
+  proposalId: string;
+  status: RunStatus;
+  requestedBy: string;
+  fileNumber?: string;
+  fileSha256?: string;
+  paymentCount?: number;
+  fileGeneratedAt?: string;
+  journalRequestedAt?: string;
+  journalEntryId?: string;
+  journalPostedAt?: string;
+  settledAt?: string;
+  failureReason?: string;
+  createdAt: string;
+  completedAt?: string;
+  payments: RunPayment[];
+}
+
+export function startRun(legalEntityId: string | undefined, proposalId: string): Promise<PaymentRun> {
+  return send("POST", "/payment-runs", { ...(legalEntityId ? { legalEntityId } : {}), proposalId });
+}
+
+export function getRun(id: string): Promise<PaymentRun> {
+  return send("GET", `/payment-runs/${encodeURIComponent(id)}`);
+}
+
+export type RunStep = "generate-file" | "post-journal" | "settle" | "complete";
+
+export function runStep(id: string, step: RunStep): Promise<PaymentRun> {
+  return send("POST", `/payment-runs/${encodeURIComponent(id)}:${step}`, {});
+}
+
+export function failRun(id: string, reason: string): Promise<PaymentRun> {
+  return send("POST", `/payment-runs/${encodeURIComponent(id)}:fail`, { reason });
+}
+
+export async function downloadRunFile(id: string): Promise<Blob> {
+  const res = await fetch(`${BASE}/payment-runs/${encodeURIComponent(id)}/file`, { headers: { Accept: "application/xml" } });
+  if (!res.ok) throw await readProblem(res);
+  return res.blob();
+}

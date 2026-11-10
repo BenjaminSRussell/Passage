@@ -184,7 +184,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "AP-OPB-002": { message: "This opening balance batch was already loaded with different content.", action: "Use a new batch name, or send exactly what was loaded before." },
   "AP-OPB-003": { message: "The opening balance rows don't add up to the total you gave for the batch.", action: "Check the rows and the total for each currency, then send the batch again." },
   "AP-OPB-004": { message: "Some of these opening balance items were already loaded in another batch.", action: "Remove the items listed, then send the batch again." },
-  "AP-PRP-001": { message: "This run id was already used for a different payment proposal.", action: "Use a new run id." },
+  "AP-PRP-001": { message: "The proposal changed: an invoice was paid, put on hold or changed, or the run id was already used.", action: "Create a new proposal." },
   "AP-PRP-002": { message: "Only a draft payment proposal can be changed.", action: "Create a new proposal." },
   "AP-PRP-003": { message: "A payment proposal must be approved by someone other than its creator.", action: "Ask another approver to approve it." },
   "AP-PRP-004": { message: "The run date has passed.", action: "Create a new proposal." },

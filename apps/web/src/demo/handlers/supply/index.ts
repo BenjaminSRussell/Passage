@@ -4,3 +4,4 @@ import "./purchasing";
 import "./warehouse";
 import "./inventory";
 import "./receiving";
+import "./payables";

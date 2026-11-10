@@ -12,5 +12,7 @@ export const TOUR: TourStop[] = [
   { area: "Supply chain", label: "On-hand inventory", to: "/inventory/onhand", blurb: "Stock by item and site with reservations and quarantine; the shortage items sit near or below safety stock." },
   { area: "Supply chain", label: "Inventory workspace", to: "/inventory/workspace", blurb: "Open journals, count sheets, reservations and transfer orders as tiles." },
   { area: "Supply chain", label: "Warehouse work", to: `/warehouse/work?warehouse=${WH_RAW.id}`, blurb: "Put-away, production picks and replenishment for the raw materials store; assign the next task to yourself." },
+  { area: "Supply chain", label: "Pay vendors", to: "/payables", blurb: "Payment proposals: approve a draft, start its payment run and step through the bank file, ledger posting and settlement." },
+  { area: "Supply chain", label: "Vendor open items", to: "/payables/open-items", blurb: "What is owed to each vendor, with payment holds and their reasons." },
   { area: "Supply chain", label: "Vendor record", to: `/party/${VENDORS[0].id}`, blurb: "Ironbridge Foundry's party record with its vendor role in Cedar Ridge Pumps." },
 ];

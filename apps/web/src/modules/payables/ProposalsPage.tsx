@@ -8,20 +8,20 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { listProposals, PROPOSAL_STATUSES, type ProposalStatus, type ProposalSummary } from "./api/client";
-import { formatAmount, METHOD_LABELS, PROPOSAL_LABELS } from "./format";
+import { formatAmount, METHOD_LABELS, personLabel, PROPOSAL_LABELS } from "./format";
 
-const columns: DataTableColumn<ProposalSummary>[] = [
+const baseColumns: DataTableColumn<ProposalSummary>[] = [
   { key: "runDate", header: "Payment date", mono: true },
   { key: "dueBy", header: "Invoices due by", mono: true },
   { key: "paymentMethod", header: "Method", render: (p) => METHOD_LABELS[p.paymentMethod] },
   { key: "status", header: "Status", render: (p) => <StatusPill status={PROPOSAL_LABELS[p.status]} /> },
   { key: "totalValued", header: "Total", align: "end", mono: true, render: (p) => formatAmount(p.totalValued, p.legalEntityCurrency) },
-  { key: "createdBy", header: "Created by" },
-];
+  ];
 
 export function ProposalsPage() {
   const navigate = useNavigate();
-  const { legalEntityId } = useWorkContext();
+  const { legalEntityId, identity } = useWorkContext();
+  const columns = [...baseColumns, { key: "createdBy", header: "Created by", render: (p: ProposalSummary) => personLabel(p.createdBy, identity) }];
   const canCreate = holdsDuty(usePrincipalDuties(), "payment-proposal.write");
   const [status, setStatus] = useState<ProposalStatus | "">("");
 
