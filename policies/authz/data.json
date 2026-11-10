@@ -50,6 +50,8 @@
     "platform.environment.rollback": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["POST"]}]},
     "identity.tenant.maintain": {"permissions": [{"resource": "/v1/tenants{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
+    "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
     "platform.saved-view.maintain": {"permissions": [{"resource": "/v1/saved-views{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "hello.ledger.maintain": {"permissions": [{"resource": "/v1/hello-ledger{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "product.product.view": {"permissions": [{"resource": "/v1/product{,/**}", "methods": ["GET"]}]},
@@ -1835,7 +1837,7 @@
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
       {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]},
       {"resource": "/v1/mobile/offline/conflicts", "methods": ["GET"]},
-      {"resource": "/v1/mobile/offline/conflicts/**:resolve", "methods": ["POST"]}
+      {"resource": "/v1/mobile/offline/conflicts/*:*:resolve", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.pack": {"permissions": [
       {"resource": "/v1/fulfillment/shipments/*/containers", "methods": ["POST"]},

@@ -185,6 +185,7 @@ func newRouter(pool *pgxpool.Pool, catalogue *identity.Catalogue, operatorTenant
 		admin.Use(tenant.Middleware)
 		identity.NewTenantsAPI(pool, operatorTenantID).Register(admin)
 		identity.NewLegalEntitiesAPI(pool).Register(admin)
+		identity.NewTenantFeaturesAPI(pool).Register(admin)
 		identity.NewRoleAssignmentsAPI(pool, catalogue, operatorTenantID).Register(admin)
 		identity.NewEffectivePermissionsAPI(pool, catalogue).Register(admin)
 		identity.NewUsersAPI(pool).Register(admin)

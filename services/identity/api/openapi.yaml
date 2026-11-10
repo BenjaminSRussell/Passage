@@ -319,6 +319,42 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/tenant/features:
+    get:
+      operationId: getTenantFeatures
+      x-passage-duty: identity.feature.view
+      description: >-
+        The feature catalog with the caller's tenant's on/off state, and the industry templates. A feature the tenant
+        never changed is on. The service itself needs only an authenticated tenant; the duty applies at the gateway.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }]
+      responses:
+        '200': { description: The catalog and the tenant's state., content: { application/json: { schema: { $ref: '#/components/schemas/TenantFeatures' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: updateTenantFeatures
+      x-passage-duty: identity.feature.maintain
+      description: >-
+        Turns features on or off, or applies a template (its features on, every other feature off). Send either
+        template or features. A feature cannot be turned on while one it depends on is off, nor off while another
+        feature that is on depends on it (422 IDN-FEATURE-DEPENDENCY, with a plain-words message per feature in
+        errors). Requires access to all legal entities and tenant.administer. A change is audited and emitted as
+        dev.passage.identity.tenantfeatures.updated.v1; a request that changes nothing writes nothing.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantFeatures' }
+      responses:
+        '200': { description: The catalog and the tenant's state after the change., content: { application/json: { schema: { $ref: '#/components/schemas/TenantFeatures' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/authz/assignments:
     post:
       operationId: assignRole
@@ -610,6 +646,37 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/LegalEntity' } }
         next: { type: string, format: uuid }
+    TenantFeature:
+      type: object
+      required: [key, name, description, module, dependsOn, enabled]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        module: { type: string }
+        dependsOn: { type: array, items: { type: string } }
+        enabled: { type: boolean }
+        changedBy: { type: string, description: Who last changed it; absent while the tenant never has. }
+        changedAt: { type: string, format: date-time }
+    FeatureTemplate:
+      type: object
+      required: [key, name, description, features]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        features: { type: array, items: { type: string }, description: The features the template turns on. }
+    TenantFeatures:
+      type: object
+      required: [features, templates]
+      properties:
+        features: { type: array, items: { $ref: '#/components/schemas/TenantFeature' } }
+        templates: { type: array, items: { $ref: '#/components/schemas/FeatureTemplate' } }
+    UpdateTenantFeatures:
+      type: object
+      properties:
+        template: { type: string, description: A template key; every feature it does not name is turned off. }
+        features: { type: object, additionalProperties: { type: boolean }, description: Feature key to the state wanted. }
     AssignRole:
       type: object
       required: [userId, role]

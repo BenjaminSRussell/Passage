@@ -1896,3 +1896,23 @@ test_dev_seed_clerk_keeps_its_own_routes if {
 test_dev_seed_unknown_user_is_denied_everything if {
 	not dev_seed_decision("stranger", "GET", "/v1/ledger/journal-lines").allow
 }
+
+test_tenant_features_view_reads_only if {
+	allowed("identity.feature.view", "GET", "/v1/tenant/features")
+	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.view", "POST", "/v1/tenant/features")
+}
+
+test_tenant_features_maintain_reads_and_replaces if {
+	allowed("identity.feature.maintain", "GET", "/v1/tenant/features")
+	allowed("identity.feature.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "DELETE", "/v1/tenant/features")
+}
+
+test_tenant_features_are_not_reachable_through_other_identity_duties if {
+	not allowed("identity.tenant.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.legal-entity.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.security-role.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "GET", "/v1/tenants")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
+}
