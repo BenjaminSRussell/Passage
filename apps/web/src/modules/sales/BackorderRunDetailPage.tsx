@@ -6,6 +6,7 @@ import { RunStatusBadge } from "./BackorderRunsPage";
 import { dash, formatDateTime, sentence, shortId, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "kept", "gains 20", "loses 20": what the run does to a line's promised quantity. */
 export function lineEffect(line: BackorderRunLine): string {
@@ -45,7 +46,7 @@ export function BackorderRunDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Backorder run" />
         <Alert tone="danger" title="Could not load the run" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -123,7 +124,7 @@ export function BackorderRunDetailPage() {
           </p>
           {failure ? (
             <Alert tone="danger" title={stale ? "An order changed since the preview" : "Could not commit the run"} live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
               {stale ? (
                 <>
                   {" "}

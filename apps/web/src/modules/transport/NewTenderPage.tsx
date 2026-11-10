@@ -20,6 +20,7 @@ import { CURRENCY, shortId, stateTone, statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
 import { RowsEditor, type RowField } from "./RowsEditor";
 import { useLoad, type LoadState } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface TenderValues {
   loadId: string;
@@ -70,7 +71,7 @@ function LoadStatusLine({ loadId, state, seen }: { loadId: string; state: LoadSt
   if (state.error) {
     return (
       <Alert tone="danger" title="Could not read the load" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }
@@ -206,7 +207,7 @@ export function NewTenderPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.action === "release" ? "Could not release the load" : "Could not start the tender"} live="alert">
-                {failure.problem.message} ({failure.problem.code})
+                <ProblemMessage problem={failure.problem} />
               </Alert>
             </div>
           ) : null}

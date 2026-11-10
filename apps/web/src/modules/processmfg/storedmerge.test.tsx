@@ -186,7 +186,7 @@ describe("merge stored batches (slice 13)", () => {
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/merge-stored");
     fill("Item id", ITEM);
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 

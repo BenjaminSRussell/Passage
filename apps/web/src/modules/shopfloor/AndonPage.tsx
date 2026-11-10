@@ -7,6 +7,7 @@ import { DUTY_CHECK_OVERRIDE, clearAndon, describeProblem, listAndon, newKey, ty
 import { dash, durationMinutes, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const SEVERITY: Record<Andon["severity"], { label: string; tone: BadgeTone }> = {
   info: { label: "Info", tone: "info" },
@@ -87,7 +88,7 @@ export function AndonPage() {
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load andon alerts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -165,7 +166,7 @@ function ClearForm({ alert, onCancel, onDone }: ClearFormProps) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not clear the alert" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

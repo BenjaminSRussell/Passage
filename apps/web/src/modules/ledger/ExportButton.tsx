@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Alert, Button } from "../../shell/ui";
-import { LedgerApiError, type CsvExport } from "./api/client";
+import { type CsvExport } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Hands a built CSV to the browser as a download. */
 export function saveCsv(file: CsvExport) {
@@ -22,7 +23,7 @@ export function saveCsv(file: CsvExport) {
  */
 export function ExportButton({ label = "Export CSV", run }: { label?: string; run: () => Promise<CsvExport> }) {
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [truncated, setTruncated] = useState(false);
 
   async function start() {
@@ -34,7 +35,7 @@ export function ExportButton({ label = "Export CSV", run }: { label?: string; ru
       setTruncated(file.truncated);
       saveCsv(file);
     } catch (error) {
-      setFailure(error instanceof LedgerApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      setFailure(error);
     } finally {
       setBusy(false);
     }
@@ -54,7 +55,7 @@ export function ExportButton({ label = "Export CSV", run }: { label?: string; ru
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not export" live="alert">
-          {failure}
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </div>

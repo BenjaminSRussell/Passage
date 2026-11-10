@@ -6,6 +6,7 @@ import { Details } from "./Details";
 import { dash, fixed, formatDateTime, money, stateTone, statusLabel, sumAmounts } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const legColumns: DataTableColumn<Leg>[] = [
   { key: "seq", header: "Leg", align: "end" },
@@ -87,7 +88,7 @@ export function VoyageDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Voyage" />
         <Alert tone="danger" title="Could not load the voyage" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/voyages">Back to voyages</Link>
       </div>
@@ -129,7 +130,7 @@ export function VoyageDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="Could not allocate the voyage" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card>

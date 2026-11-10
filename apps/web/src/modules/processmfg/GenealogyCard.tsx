@@ -4,6 +4,7 @@ import { getBatchGenealogy, type GenealogyLink, type ReworkOrder } from "./api/c
 import { dash } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<GenealogyLink>[] = [
   { key: "batchNumber", header: "Batch", mono: true, render: (l) => <Link to={`/processmfg/batches/${l.batchId}`}>{l.batchNumber}</Link> },
@@ -28,7 +29,7 @@ export function GenealogyCard({ batchId }: { batchId: string }) {
     return (
       <Card title="Genealogy">
         <Alert tone="danger" title="Could not load the genealogy" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </Card>
     );

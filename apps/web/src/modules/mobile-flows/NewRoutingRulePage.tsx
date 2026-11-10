@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { CODE, createRoutingRule, describeProblem, DOCUMENT_TYPES, newKey, type DocumentType, type NewRoutingRule, type Problem } from "./api/print";
 import { DOCUMENT_LABELS } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export type Scope = "default" | "userId" | "zone" | "warehouseId";
 
@@ -128,7 +129,7 @@ export function NewRoutingRulePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not add the rule" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

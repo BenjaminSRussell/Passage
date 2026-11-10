@@ -179,7 +179,7 @@ describe("cost components page", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Direct labor" } });
     fireEvent.change(screen.getByLabelText("Cost group type"), { target: { value: "DirectManufacturing" } });
     fireEvent.click(screen.getByRole("button", { name: "Add component" }));
-    expect(await findAlert()).toHaveTextContent("a cost component with code DL already exists (CST-0791)");
+    expect(await findAlert()).toHaveTextContent("a cost component with code DL already exists");
     fireEvent.click(screen.getByRole("button", { name: "Add component" }));
     await findStatus();
     expect(posts()).toHaveLength(2);
@@ -190,7 +190,7 @@ describe("cost components page", () => {
     handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty productcost.view" } });
     renderAt("/productcost/cost-components");
     expect(await findAlert()).toHaveTextContent("Could not load cost components");
-    expect(screen.getByRole("alert")).toHaveTextContent("missing duty productcost.view (AUTH-0003)");
+    expect(screen.getByRole("alert")).toHaveTextContent("missing duty productcost.view");
   });
 });
 
@@ -289,7 +289,7 @@ describe("costing versions page", () => {
     };
     renderAt("/productcost/versions");
     fireEvent.click(await screen.findByRole("button", { name: "Activate STD-2027" }));
-    expect(await findAlert()).toHaveTextContent("current version is 2 (CST-0714)");
+    expect(await findAlert()).toHaveTextContent("current version is 2");
     await waitFor(() => expect(screen.getByRole("row", { name: /STD-2027/ })).toHaveTextContent("Blocked"));
     expect(reads).toBe(2);
   });
@@ -331,6 +331,6 @@ describe("costing versions page", () => {
     handler = () => ({ status: 503, body: { code: "CST-0799", detail: "the costing store is not configured" } });
     renderAt("/productcost/versions");
     expect(await findAlert()).toHaveTextContent("Could not load costing versions");
-    expect(screen.getByRole("alert")).toHaveTextContent("(CST-0799)");
+    expect(screen.getByRole("alert")).toHaveTextContent("CST-0799");
   });
 });

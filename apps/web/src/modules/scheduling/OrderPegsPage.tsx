@@ -5,6 +5,7 @@ import { deletePeg, describeProblem, listPegs, type OrderPeg, type Problem } fro
 import { formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * Order pegs (FR-23.8): which order consumes which order's output. A move with
@@ -75,12 +76,12 @@ export function OrderPegsPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="The peg was not removed" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load order pegs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

@@ -7,6 +7,7 @@ import { dayOf, lastDay } from "./format";
 import styles from "./pages.module.css";
 import { SkillProfileCard } from "./SkillProfileCard";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const assignmentColumns: DataTableColumn<PositionAssignment>[] = [
   { key: "workerId", header: "Worker", mono: true, render: (row) => <Link to={`/hr/workers/${row.workerId}`}>{row.workerId.slice(0, 8)}</Link> },
@@ -51,7 +52,7 @@ export function PositionDetailPage() {
           </Card>
         ) : (
           <Alert tone="danger" title="Could not load the position" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>

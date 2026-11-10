@@ -17,6 +17,7 @@ import {
 } from "./api/client";
 import { QUANTITY } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const POTENCY_FIELDS: { name: keyof PotencyRequest; label: string; hint?: string }[] = [
   { name: "planned", label: "Planned active ingredient", hint: "Quantity at standard potency." },
@@ -73,7 +74,7 @@ export function PotencyPage({ consume = defaultConsume }: { consume?: (req: Pote
       </Card>
       {failure ? (
         <Alert tone="danger" title="Consumption refused" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {result ? (
@@ -236,7 +237,7 @@ export function AllocationPage({ allocate = defaultAllocate }: { allocate?: (req
       </form>
       {failure ? (
         <Alert tone="danger" title="Allocation refused" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {result ? (

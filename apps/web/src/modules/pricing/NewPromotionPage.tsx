@@ -5,6 +5,7 @@ import { createPromotion, describeProblem, newKey, type Problem, type PromotionI
 import { DECIMAL, UUID } from "./format";
 import { CURRENCY } from "./fundFormat";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The baseline window (FR-26.20): the 13 weeks before the promotion. */
 export const BASELINE_WEEKS = 13;
@@ -191,7 +192,7 @@ export function NewPromotionPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

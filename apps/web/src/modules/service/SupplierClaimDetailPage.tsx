@@ -23,6 +23,7 @@ import { Details } from "./Details";
 import { dash, DECIMAL, formatDateTime, money, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -94,7 +95,7 @@ export function SupplierClaimDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Supplier claim" />
         <Alert tone="danger" title="Could not load the claim" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -201,7 +202,7 @@ export function SupplierClaimDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title={failure.code === "conflict_version" ? "The claim changed; it was reloaded" : "The action was refused"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Claim" headingLevel={3}>

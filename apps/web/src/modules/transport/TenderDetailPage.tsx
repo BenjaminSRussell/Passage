@@ -6,6 +6,7 @@ import { Details } from "./Details";
 import { dash, formatDateTime, money, stateTone, statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const attemptColumns = (currency: string): DataTableColumn<TenderAttempt>[] => [
   { key: "rank", header: "Rank", align: "end" },
@@ -64,7 +65,7 @@ function RespondCard({ tender, onDone }: { tender: Tender; onDone(t: Tender): vo
         </div>
         {failure ? (
           <Alert tone="danger" title="The response was not accepted" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
       </div>
@@ -84,7 +85,7 @@ export function TenderDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Tender" />
         <Alert tone="danger" title="Could not load the tender" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/tenders">Back to tenders</Link>
       </div>

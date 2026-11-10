@@ -5,6 +5,7 @@ import { getPlanProjection, type PlanProjection, type ProjectionPeriod } from ".
 import { DEFAULT_PLAN_CODE, PLAN_CODE, useLoad } from "./hooks";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const DECIMAL = /^\d{1,12}(\.\d{1,6})?$/;
@@ -245,7 +246,7 @@ export function SupplySchedulePage() {
         </Card>
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the supply schedule" live="alert">
-          {`${state.error.message} (${state.error.code})`}
+          {<ProblemMessage problem={state.error} />}
         </Alert>
       ) : state.loading || !state.data ? (
         <Card>

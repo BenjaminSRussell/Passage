@@ -23,6 +23,7 @@ import {
 } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const assetColumns: DataTableColumn<LineageAsset>[] = [
   { key: "fqn", header: "Asset", mono: true },
@@ -55,7 +56,7 @@ function LineageResult({ asset, depth, version, onOpen }: { asset: string; depth
   if (state.error) {
     return (
       <Alert tone="danger" title="Could not load lineage" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }
@@ -125,7 +126,7 @@ function EdgeForm({ onAdded }: { onAdded(): void }) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="The edge was not recorded" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

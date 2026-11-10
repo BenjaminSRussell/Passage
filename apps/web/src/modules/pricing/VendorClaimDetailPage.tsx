@@ -6,6 +6,7 @@ import { ClaimStatusBadge } from "./claimColumns";
 import styles from "./pages.module.css";
 import { SETTLEMENT_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Detail({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -30,7 +31,7 @@ export function VendorClaimDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Vendor rebate claim" />
         <Alert tone="danger" title="Could not load the claim" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -87,7 +88,7 @@ export function VendorClaimDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not approve the claim" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Claim">

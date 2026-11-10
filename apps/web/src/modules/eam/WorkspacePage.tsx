@@ -3,6 +3,7 @@ import { Alert, Button, Card, CardGrid, PageHeader, Skeleton, StatGroup, StatTil
 import { getWorkspace } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const areas = [
   { to: "/eam/assets", title: "Assets", text: "Register equipment, add counters and condition rules, assess criticality and record warranties." },
@@ -25,7 +26,7 @@ export function WorkspacePage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the workspace" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : state.loading || !state.data ? (
         <div aria-busy="true">

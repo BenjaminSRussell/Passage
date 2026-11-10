@@ -147,7 +147,7 @@ describe("quality orders list", () => {
     let fail = true;
     handler = () => (fail ? json(500, { code: "COM-0500", detail: "database unavailable" }) : json(200, { items: [order] }));
     renderAt("/quality/orders");
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("link", { name: "Open order 0195f0a0" })).toBeInTheDocument();
@@ -214,7 +214,7 @@ describe("quality order detail", () => {
       url.pathname.endsWith("/results") ? json(422, { code: "QM-0102", detail: "Instrument CAL-01 is overdue for calibration since 2026-10-01." }) : prev(url, init))(handler);
     fireEvent.change(screen.getByLabelText("Sample"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Record results" }));
-    expect(await screen.findByText("Instrument CAL-01 is overdue for calibration since 2026-10-01. (QM-0102)")).toBeInTheDocument();
+    expect(await screen.findByText("Instrument CAL-01 is overdue for calibration since 2026-10-01.")).toBeInTheDocument();
   });
 
   it("posts a split usage decision with If-Match once results are complete", async () => {
@@ -269,7 +269,7 @@ describe("quality order detail", () => {
   it("shows a not-found order as an error with retry", async () => {
     handler = (url) => (url.pathname.includes("/quality-orders/") ? json(404, { code: "QM-0141", detail: "quality order not found" }) : json(200, { items: [] }));
     renderAt(`/quality/orders/${ORDER}`);
-    expect(await screen.findByText("quality order not found (QM-0141)")).toBeInTheDocument();
+    expect(await screen.findByText("quality order not found")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

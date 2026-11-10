@@ -6,6 +6,7 @@ import styles from "./pages.module.css";
 import { UUID } from "./format";
 import { basisLabel, describeProductScope, describeRebateCustomer, describeTiers, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type ScopeKind = "" | "product" | "group";
 
@@ -92,7 +93,7 @@ export function RebatesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the rebate agreements" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

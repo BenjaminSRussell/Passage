@@ -6,6 +6,7 @@ import { dash, formatDateTime, GROUP_LABELS, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { WaveStatusBadge } from "./WaveActions";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<WaveSummary>[] = [
   { key: "waveNumber", header: "Wave", mono: true },
@@ -76,7 +77,7 @@ export function WavesPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the waves" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

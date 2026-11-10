@@ -218,7 +218,7 @@ describe("batch order lifecycle", () => {
     fireEvent.change(screen.getByLabelText("Batch cost"), { target: { value: "10" } });
     fireEvent.change(screen.getByLabelText("By-product line 5: rate"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "End order and allocate cost" }));
-    expect(await findAlert()).toHaveTextContent("by-product burden 500.0000 exceeds batch cost 10.0000 (PMF-0021)");
+    expect(await findAlert()).toHaveTextContent("by-product burden 500.0000 exceeds batch cost 10.0000");
     expect(calls.find((c) => c.method === "POST")!.body).toMatchObject({ method: "quantity", main: {}, coProducts: [] });
   });
 

@@ -91,6 +91,12 @@ type CreateTransactionInput struct {
 	// line on each so LineBookings finds them all. Empty for any other
 	// registration; not reachable through transactions:apply.
 	LineSourceID string
+	// IssueRef names the document line an issue is booked for, in the form
+	// platform/issueclaim gives it (the postings consumer's DELIVERED booking
+	// of a sales order line): the issue settles the claims of the ref, which
+	// stood in for it until it was booked (guardClaimedStock). Not reachable
+	// through transactions:apply.
+	IssueRef string
 }
 
 // StatusStepInput is one status move of an inventory transaction (FR-16.2,
@@ -234,6 +240,13 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		if err := saveRow(ctx, tx, tp.TenantID, in.LegalEntityID, r, 1); err != nil {
 			return err
 		}
+		var settle *issueSettlement
+		if in.IssueRef != "" {
+			settle = &issueSettlement{ref: in.IssueRef, key: in.IdempotencyKey}
+		}
+		if err := guardClaimedStock(ctx, tx, tp.TenantID, in.LegalEntityID, []*row{r}, settle); err != nil {
+			return err
+		}
 		changeID := ids.New()
 		doc := document{legalEntityID: in.LegalEntityID, currency: in.Currency, date: date, sourceType: in.SourceType,
 			referenceID: strings.TrimSpace(in.Reference), statusChangeID: changeID, lineSourceID: strings.ToLower(in.LineSourceID)}
@@ -336,6 +349,9 @@ func (s *Postgres) ApplyStatusStep(ctx context.Context, in StatusStepInput) (Sta
 			return err
 		}
 		if err := saveRow(ctx, tx, tp.TenantID, t.legalEntityID, r, 1); err != nil {
+			return err
+		}
+		if err := guardClaimedStock(ctx, tx, tp.TenantID, t.legalEntityID, []*row{r}, nil); err != nil {
 			return err
 		}
 		r.seq++
@@ -618,6 +634,9 @@ func createRequestHash(in CreateTransactionInput) string {
 	if in.LineSourceID != "" {
 		parts = append(parts, "line", strings.ToLower(in.LineSourceID))
 	}
+	// IssueRef is left out: the consumer derives it from the line its origin
+	// (SourceID) already names, and a booking made before it was sent must
+	// still replay.
 	return fingerprint(append(parts, requestedDate(in.Date))...)
 }
 

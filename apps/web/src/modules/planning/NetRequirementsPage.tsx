@@ -16,6 +16,7 @@ import {
 import { listNetRequirements, listPlannedOrders, type NetRequirement, type PlannedOrder } from "./api/client";
 import { DEFAULT_PLAN_CODE, PLAN_CODE, useLoad, withPlan, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const dash = "—";
@@ -64,7 +65,7 @@ const orderColumns: DataTableColumn<PlannedOrder>[] = [
 function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }
@@ -199,7 +200,7 @@ export function NetRequirementsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Net requirements"
-        description={`Gross requirements, receipts and projected available balance per day of one item in the current version of plan ${plan}. A warehouse planned in its own scope is netted apart from the site (FR-22.18).`}
+        description={`Gross requirements, receipts and projected available balance per day of one item in the current version of plan ${plan}. A warehouse planned in its own scope is netted apart from the site.`}
       />
       <SelectionForm key={`${plan}/${item}/${warehouse}`} plan={plan} item={item} warehouse={warehouse} onSelect={select} />
       {item ? (

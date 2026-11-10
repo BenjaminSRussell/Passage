@@ -15,6 +15,7 @@ import { RollForwardTiles } from "./DeferredRevenuePage";
 import { BASIS_LABELS, CONTRACT_STATUS_LABELS, DAY, METHOD_LABELS, PERIOD, SCHEDULE_STATUS_LABELS, SSP_SOURCE_LABELS, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Detail({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -82,7 +83,7 @@ export function RevenueContractDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Revenue contract" />
         <Alert tone="danger" title="Could not load the revenue contract" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -169,7 +170,7 @@ export function RevenueContractDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {contract.warnings.map((w) => (
@@ -240,7 +241,7 @@ export function RevenueContractDetailPage() {
           </form>
           {rollForward.error ? (
             <Alert tone="danger" title="Could not load the contract's roll-forward" live="alert" action={<Button size="sm" onClick={rollForward.reload}>Try again</Button>}>
-              {rollForward.error.message} ({rollForward.error.code})
+              <ProblemMessage problem={rollForward.error} />
             </Alert>
           ) : rollForward.data && !rollForward.loading ? (
             <RollForwardTiles rf={rollForward.data} />

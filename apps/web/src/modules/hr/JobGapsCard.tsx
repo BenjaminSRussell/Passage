@@ -5,6 +5,7 @@ import { jobSkillGaps, type JobWorkerGap } from "./api/client";
 import { DATE, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<JobWorkerGap>[] = [
   { key: "personnelNumber", header: "Personnel number", mono: true, render: (row) => <Link to={`/hr/workers/${row.workerId}`}>{row.personnelNumber}</Link> },
@@ -36,7 +37,7 @@ export function JobGapsCard({ jobId }: { jobId: string }) {
         </FormField>
         {state.error ? (
           <Alert tone="danger" title="Could not load the gap report" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : valid ? (
           <>

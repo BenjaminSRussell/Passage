@@ -13,6 +13,7 @@ import { dash, dayOf } from "./format";
 import styles from "./pages.module.css";
 import { ProfileChangesCard } from "./ProfileChangesCard";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Entry({
   term,
@@ -60,7 +61,7 @@ export function MyProfilePage() {
               </Button>
             }
           >
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>

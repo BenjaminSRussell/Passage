@@ -5,6 +5,7 @@ import { describeProblem, etagOf, HOLD_TYPES, listHolds, rejectHold, releaseHold
 import { dash, formatDateTime, money, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const COMMENT_MAX = 500;
 
@@ -192,7 +193,7 @@ export function HoldQueuePage() {
       </form>
       {outcome?.tone === "danger" ? (
         <Alert tone="danger" title="Could not decide the hold" live="alert">
-          {outcome.problem.message} ({outcome.problem.code})
+          <ProblemMessage problem={outcome.problem} />
         </Alert>
       ) : null}
       <Alert tone={outcome?.tone === "warning" ? "warning" : "success"} live="status">
@@ -220,7 +221,7 @@ export function HoldQueuePage() {
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load the release queue" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

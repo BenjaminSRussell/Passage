@@ -7,6 +7,7 @@ import styles from "./pages.module.css";
 import { QuotationMaintenance } from "./QuotationMaintenance";
 import { isExpired, QuotationStatusBadge } from "./QuotationsPage";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const LOST_REASON_MAX = 200;
 const OVERRIDE_MAX = 500;
@@ -38,7 +39,7 @@ export function QuotationDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Sales quotation" />
         <Alert tone="danger" title="Could not load the quotation" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -207,7 +208,7 @@ export function QuotationDetailPage() {
             ) : undefined
           }
         >
-          {outcome.problem.message} ({outcome.problem.code})
+          <ProblemMessage problem={outcome.problem} />
         </Alert>
       ) : null}
       <Alert tone="success" live="status">

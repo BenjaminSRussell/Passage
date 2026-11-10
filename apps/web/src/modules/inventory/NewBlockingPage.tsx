@@ -5,6 +5,7 @@ import { BLOCK_REASONS, BLOCK_TARGETS, createBlocking, describeProblem, type Blo
 import { DECIMAL, sentence, today, UUID } from "./format";
 import { emptyDimensions, fieldErrorsOf, FORM_DIMENSIONS, type FormDimension } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BlockingValues {
   legalEntityId: string;
@@ -174,7 +175,7 @@ export function NewBlockingPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not block the stock" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

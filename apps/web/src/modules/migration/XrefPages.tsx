@@ -5,6 +5,7 @@ import { describeProblem, listXref, xrefSummary, type Problem, type XrefEntry, t
 import { formatDateTime } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 50;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -120,7 +121,7 @@ export function XrefPage() {
       </div>
       {first.error ? (
         <Alert tone="danger" title="Could not load the cross-reference" live="alert" action={<Button size="sm" onClick={first.reload}>Try again</Button>}>
-          {first.error.message} ({first.error.code})
+          <ProblemMessage problem={first.error} />
         </Alert>
       ) : (
         <DataTable
@@ -134,7 +135,7 @@ export function XrefPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more rows" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !first.error ? (

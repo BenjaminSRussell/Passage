@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { ACK_SLA, createPartner, describeProblem, ENVIRONMENTS, newKey, type Environment, type NewPartner, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   name: string;
@@ -122,7 +123,7 @@ export function NewPartnerPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the partner" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

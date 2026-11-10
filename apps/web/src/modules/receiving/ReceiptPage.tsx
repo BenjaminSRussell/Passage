@@ -16,6 +16,7 @@ import {
 import { DECIMAL, SIGNED_DECIMAL, UUID } from "../../shell/api/http";
 import { Detail, StateBadge, useAction } from "./parts";
 import styles from "../../shell/pageLayout.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -84,10 +85,10 @@ function ConfirmStep({ confirmLabel, keepLabel, variant = "primary", busy, onCon
   );
 }
 
-function FailureAlert({ title, failure, onReload }: { title: string; failure: { message: string; stale: boolean } | null; onReload: () => void }) {
+function FailureAlert({ title, failure, onReload }: { title: string; failure: { error: unknown; stale: boolean } | null; onReload: () => void }) {
   return failure ? (
     <Alert tone="danger" title={title} live="alert" action={failure.stale ? <Button size="sm" onClick={onReload}>Reload receipt</Button> : undefined}>
-      {failure.message}
+      <ProblemMessage problem={failure.error} />
     </Alert>
   ) : null;
 }

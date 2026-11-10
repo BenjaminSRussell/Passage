@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { describeProblem, resolvePrice, type FreeGoodsProposal, type Problem, type ResolvedLine, type ResolveRequest, type ResolveResponse, type TraceAccess, type TraceStep } from "./api/client";
 import { DAY, DECIMAL, today, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface LineDraft {
   productId: string;
@@ -186,7 +187,7 @@ export function SimulatePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The simulation failed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

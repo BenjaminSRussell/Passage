@@ -4,6 +4,7 @@ import { listPrinters, mediaLabel, printsOn, type Printer } from "./api/print";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DEVICE_LABELS: Record<string, string> = { ZPL_II: "ZPL II", PDF_IPP: "PDF over IPP", PCL_6: "PCL 6" };
 
@@ -36,7 +37,7 @@ export function PrintersPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load printers" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

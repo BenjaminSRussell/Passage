@@ -1,18 +1,27 @@
 package api
 
 // Wave 49 proof (issue #49) on a synthetic legacy year: an AX 2012 tenant (USMF, DEMF, GBSI) and an
-// SAP ECC tenant (1000, 2000, 3000), each with a full year (2026) of invoices, payments, credit
-// notes, payroll, accruals, depreciation and project transactions. The extracts and every expected
-// value come from testdata/synth/synth_reference.py, an independent Python reference (python3 -I,
-// standard library only) that simulates the year, derives the extracts and computes the FR-49.2
-// control totals, input hashes and re-keying files from its own reading of the rules; it never runs
-// this engine. Regenerate both with `python3 -I testdata/synth/synth_reference.py`.
+// SAP ECC tenant (1000, 2000, 3000), each with a full year (2026), migrated through all nine packs.
+// For open_items, gl_balances and project_wip the year (invoices, payments, credit notes, payroll,
+// accruals, depreciation and project transactions), the extracts and every expected value come from
+// testdata/synth/synth_reference.py, an independent Python reference (python3 -I, standard library
+// only) that simulates the year, derives the extracts and computes the FR-49.2 control totals,
+// input hashes and re-keying files from its own reading of the rules; it never runs this engine.
+// Regenerate both with `python3 -I testdata/synth/synth_reference.py`. For onhand, open_orders,
+// bank_balances, wip_prod, fixed_assets and payroll_ytd the year is simulated in synth_year_test.go
+// (goods movements, orders and deliveries, bank statement lines, production orders, monthly
+// depreciation runs and payroll runs), generated at test time rather than vendored, with the
+// expected totals summed there from the legacy state in integer minor units. PASSAGE_SYNTH_SCALE=full
+// runs the PRD fixture size (about 1.1M AX and 1.3M SAP legacy rows); the default is a 1/50 year.
 //
 // The test drives the generated cutover runbook through the API as a rehearsal: every pack load
 // runs in its runbook step, and the steps a machine performs here (extract, pack loads,
-// reconciliation) are timed; the other steps (meetings, master data owned by wave 48, opening user
-// access) are recorded at their planned duration, since nothing local can perform them. It then
-// rehearses the rollback of the same plan with the first postings after go-live.
+// reconciliation) are timed; the other steps (meetings, master data owned by wave 48) are recorded
+// at their planned duration, since nothing local can perform them. Opening user access cuts every
+// entity kind of the legacy companies over to Passage. It then rehearses the rollback of the same
+// plan with the first postings after go-live, which Passage booked in the ledger: the pack runs move
+// to ROLLED_BACK, the coexistence adapters resume, and the compensating journals net the go-live
+// postings to zero.
 
 import (
 	"bytes"
@@ -31,6 +40,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
+
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/coexist"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
 const synthDir = "testdata/synth"
@@ -182,16 +198,25 @@ func merged(ms ...map[string]string) map[string]string {
 	return out
 }
 
-// synthRuns are the run ids of one entity, kept across runbook steps.
-type synthRuns struct{ gl, openItems, project string }
+// synthRuns are the run ids of one entity, kept across runbook steps; staged holds the six
+// simulated packs' runs by pack.
+type synthRuns struct {
+	gl, openItems, project string
+	staged                 map[string]string
+}
 
 // rehearsal drives one system's dataset through its generated runbook.
 type rehearsal struct {
 	t       *testing.T
 	h       http.Handler
 	admin   *pgxpool.Pool
+	st      *store.Postgres
+	ledger  *ledgerclient.Fake
+	les     map[string]string // company -> legal entity id, each owning ledger L-<company>
+	adapter *fakeAdapter
 	ds      synthDataset
 	exp     synthExpected
+	year    synthYear
 	runs    map[string]*synthRuns
 	ty      *tally
 	machine time.Duration
@@ -233,6 +258,9 @@ func (r *rehearsal) extract() {
 		r.bodies[e.Company] = map[string]string{"open_items": mustJSON(r.t, oi), "gl_balances": mustJSON(r.t, gl), "project_wip": mustJSON(r.t, pw)}
 		r.reruns[e.Company] = mustJSON(r.t, merged2(oi, map[string]any{"parties": append(append([]string{}, e.Parties...), e.LateParties...)}))
 		r.records += len(e.OpenItems) + len(e.GLBalances)
+		for _, pk := range r.year.packs[e.Company] {
+			r.records += pk.records
+		}
 		for _, p := range e.Projects {
 			var pr struct{ Lines []json.RawMessage }
 			if err := json.Unmarshal(p, &pr); err != nil {
@@ -336,6 +364,24 @@ func (r *rehearsal) loadProjects() {
 	}
 }
 
+// loadSynth loads one of the six simulated packs for every entity in its runbook step: a clean
+// extract loads every record, and every control total is MATCH with the source the simulation
+// summed.
+func (r *rehearsal) loadSynth(pack string) func() {
+	return func() {
+		for _, e := range r.ds.Entities {
+			x := r.year.packs[e.Company][pack]
+			label := r.ds.System + " " + e.Company + " " + pack
+			run := r.post(synthPackPath(pack), x.body, http.StatusCreated)
+			if run.Status != "RECONCILED" || run.RecordsIn != x.records || run.RecordsLoaded != x.records || run.RecordsQuarantined != 0 {
+				r.t.Fatalf("%s: %+v (simulated %d records) %v", label, run.runDTO, x.records, run.Quarantined)
+			}
+			r.ty.checkTotals(r.t, label, run.ControlTotals, x.totals)
+			r.runs[e.Company].staged[pack] = run.RunID
+		}
+	}
+}
+
 // reconcile is the T+24h reconciliation: the GL extract runs again naming the open_items run, so
 // the open items per control account are compared with the migrated GL balance (BR-49.2); every
 // pack re-run loads nothing and reports the same totals (FR-49.10, AC-49.4); and the stored rows
@@ -365,8 +411,24 @@ func (r *rehearsal) reconcile() {
 			r.t.Fatalf("%s AC-49.4 project_wip re-run: %+v", label, pw.runDTO)
 		}
 		r.ty.checkTotals(r.t, label+" project_wip re-run", pw.ControlTotals, x.ProjectWIP.Totals)
+		stagedRecords := 0
+		var runIDs []string
+		for _, pack := range synthPackOrder {
+			sx := r.year.packs[e.Company][pack]
+			again := r.post(synthPackPath(pack), sx.body, http.StatusCreated)
+			if again.Status != "RECONCILED" || again.RecordsLoaded != 0 || again.AlreadyPresent != sx.records {
+				r.t.Fatalf("%s AC-49.4 %s re-run: %+v", label, pack, again.runDTO)
+			}
+			r.ty.checkTotals(r.t, label+" "+pack+" re-run", again.ControlTotals, sx.totals)
+			stagedRecords += sx.records
+			runIDs = append(runIDs, runs.staged[pack], again.RunID)
+		}
+		if n := count(r.t, r.admin, `select count(*) from control_total c join pack_run p using (tenant_id, run_id)
+			where c.status <> 'MATCH' and p.run_id = any($1::uuid[])`, runIDs); n != 0 {
+			r.t.Fatalf("%s: %d stored totals of the simulated packs are not MATCH", label, n)
+		}
 
-		want := x.OpenItems.Records + x.GLBalances.Records + x.ProjectWIP.Lines
+		want := x.OpenItems.Records + x.GLBalances.Records + x.ProjectWIP.Lines + stagedRecords
 		if n := count(r.t, r.admin, `select count(*) from legacy_xref where source_system = $1 and source_company = $2`, r.ds.System, e.Company); n != want {
 			r.t.Fatalf("%s: legacy_xref rows %d, want one per migrated record (%d)", label, n, want)
 		}
@@ -398,24 +460,42 @@ func stepPath(planID string, seq int, action string) string {
 // AC1 (issue #49 proof 1, AC-49.1, AC-49.2) for the packs built, AC3 (AC-49.6) and the factory side
 // of AC4 (AC-49.7) on the synthetic AX and SAP years.
 func TestWave49_SyntheticYearCutoverRehearsal(t *testing.T) {
-	h, admin := dbServer(t)
+	h, admin, st, fake, _ := ledgerServer(t)
+	scale := synthScaleFromEnv(t)
 	var exp map[string]synthExpected
 	readJSON(t, "expected.json", &exp)
 	ty := &tally{}
-	for _, system := range []string{"AX2012", "SAPECC"} {
+	for si, system := range []string{"AX2012", "SAPECC"} {
 		t.Run(system, func(t *testing.T) {
-			r := &rehearsal{t: t, h: h, admin: admin, exp: exp[system], runs: map[string]*synthRuns{}, ty: ty}
+			r := &rehearsal{t: t, h: h, admin: admin, st: st, ledger: fake, les: map[string]string{}, adapter: &fakeAdapter{suspended: map[string]bool{}},
+				exp: exp[system], runs: map[string]*synthRuns{}, ty: ty}
 			var head synthDataset
 			readJSON(t, strings.ToLower(system)+".json", &head)
 			entities := make([]string, 0, len(head.Entities))
 			for _, e := range head.Entities {
 				entities = append(entities, e.Company)
-				r.runs[e.Company] = &synthRuns{}
+				r.runs[e.Company] = &synthRuns{staged: map[string]string{}}
+				r.les[e.Company] = fmt.Sprintf("00000000-0000-7000-8000-0000%08d", 4900+10*si+len(r.les))
+				fake.AddLedger("L-"+e.Company, r.les[e.Company])
 			}
 			r.ds.System = system
+			// The simulated year of the six other packs; generating it is fixture work, outside the runbook.
+			began := time.Now()
+			r.year = genSynthYear(head, scale)
+			t.Logf("%s simulated year: %d legacy rows %v give %d extract records; generated in %.1fs",
+				system, r.year.rawRows, r.year.byPack, r.year.records, time.Since(began).Seconds())
+			if scale == 1 {
+				if min := map[string]int{"AX2012": 1_100_000, "SAPECC": 1_300_000}[system]; r.year.rawRows < min {
+					t.Fatalf("%s full-scale year has %d legacy rows, the PRD fixture %d", system, r.year.rawRows, min)
+				}
+			}
+			packs := make([]string, 0, len(domain.Packs))
+			for _, p := range domain.Packs {
+				packs = append(packs, string(p))
+			}
 
 			gen := do(t, h, request{method: "POST", path: "/api/v1/cutover/plans/generate", tenant: tenantA, duties: allDuties, user: "cutover-manager",
-				body: mustJSON(t, map[string]any{"t0": head.T0, "packs": []string{"gl_balances", "open_items", "project_wip"}, "entities": entities})})
+				body: mustJSON(t, map[string]any{"t0": head.T0, "packs": packs, "entities": entities})})
 			if gen.Code != http.StatusCreated {
 				t.Fatalf("generate: %d %s", gen.Code, gen.Body)
 			}
@@ -433,6 +513,9 @@ func TestWave49_SyntheticYearCutoverRehearsal(t *testing.T) {
 				"Load pack project_wip":       r.loadProjects,
 				"Reconciliation complete":     r.reconcile,
 			}
+			for _, pack := range synthPackOrder {
+				machine["Load pack "+pack] = r.loadSynth(pack)
+			}
 			measured := map[string]bool{}
 			for _, s := range plan.Steps {
 				if s.OffsetMin > openAccess {
@@ -446,6 +529,9 @@ func TestWave49_SyntheticYearCutoverRehearsal(t *testing.T) {
 					if f, ok := machine[s.Name]; ok {
 						actual = r.machineStep(f)
 						measured[s.Name] = true
+					}
+					if s.Name == domain.StepOpenAccess {
+						r.cutOver()
 					}
 				}
 				rec := do(t, h, request{method: "POST", path: stepPath(plan.PlanID, s.Seq, "complete"), tenant: tenantA, duties: allDuties, user: "step-owner",
@@ -483,25 +569,130 @@ func TestWave49_SyntheticYearCutoverRehearsal(t *testing.T) {
 			r.rollback(plan.PlanID)
 		})
 	}
-	t.Logf("control totals: %d of %d MATCH, every source equal to the independent reference", ty.match, ty.checked)
+	t.Logf("control totals: %d of %d MATCH across the nine packs, every source equal to the independent reference or the simulation", ty.match, ty.checked)
 	if ty.checked == 0 || ty.match != ty.checked {
 		t.Fatalf("reconciliation %d/%d", ty.match, ty.checked)
 	}
 }
 
-// rollback rehearses FR-49.9 on the rehearsal plan: the postings since T-0 come back as journal and
-// document files exactly as the reference lays them out, every journal balancing.
+// cutOver opens user access: every entity kind of the legacy companies is cut over to Passage
+// (FR-49.7), and the coexistence adapter stops bringing legacy changes in for it.
+func (r *rehearsal) cutOver() {
+	t := r.t
+	ctx := testkit.Ctx(tenantA)
+	for _, e := range r.ds.Entities {
+		for _, entity := range domain.CoexistEntities {
+			rec := do(t, r.h, request{method: "PUT", path: "/api/v1/migration/coexistence/" + r.ds.System + "/" + e.Company + "/" + entity, tenant: tenantA,
+				duties: "migration.cutover.manage", body: `{"mode":"PASSAGE","expectedVersion":0}`, user: "cutover-manager"})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("cut over %s %s: %d %s", e.Company, entity, rec.Code, rec.Body)
+			}
+			f, err := r.st.GetCoexistence(ctx, domain.SourceSystem(r.ds.System), e.Company, entity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.adapter.sys = domain.SourceSystem(r.ds.System)
+			if err := coexist.Apply(ctx, r.adapter, f); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if want := len(r.ds.Entities) * len(domain.CoexistEntities); len(r.adapter.suspended) != want {
+		t.Fatalf("adapters suspended at go-live: %d, want %d", len(r.adapter.suspended), want)
+	}
+}
+
+// rollback rehearses FR-49.9 and AC-49.7 on the rehearsal plan: the postings since T-0, which
+// Passage booked in each entity's ledger, come back as journal and document files exactly as the
+// reference lays them out, every journal balancing; the plan's pack runs move to ROLLED_BACK; every
+// entity kind goes back to the legacy system and its adapter resumes; and the compensating journals
+// take the go-live postings off the ledger.
 func (r *rehearsal) rollback(planID string) {
 	t := r.t
 	x := r.exp.Rekey
-	body := mustJSON(t, map[string]any{"postings": r.ds.RekeyPostings})
-	rec := rollbackBoth(t, r.h, "/api/v1/cutover/plans/"+planID+"/rollback", body, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rollback: %d %s", rec.Code, truncate(rec.Body.String()))
+	t0, err := time.Parse(time.RFC3339, r.ds.T0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	plan := decode[planDTO](t, rec)
+	var since []map[string]string
+	journals := map[string]bool{}
+	for _, raw := range r.ds.RekeyPostings {
+		var p map[string]string
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatal(err)
+		}
+		at, err := time.Parse(time.RFC3339, p["postedAt"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if at.Before(t0) {
+			continue
+		}
+		since = append(since, p)
+		if p["kind"] == "JOURNAL" {
+			journals[p["entity"]+"|"+p["documentRef"]+"|"+p["currency"]] = true
+		}
+	}
+	var ledgers []map[string]string
+	var scope []string
+	for _, e := range r.ds.Entities {
+		var mine []map[string]string
+		for _, p := range since {
+			if p["entity"] == e.Company {
+				mine = append(mine, p)
+			}
+		}
+		postGoLive(t, r.ledger, r.les[e.Company], "L-"+e.Company, mine)
+		ledgers = append(ledgers, map[string]string{"entity": e.Company, "legalEntityId": r.les[e.Company], "ledgerId": "L-" + e.Company})
+		scope = append(scope, r.les[e.Company])
+	}
+	companies := make([]string, 0, len(r.ds.Entities))
+	for _, e := range r.ds.Entities {
+		companies = append(companies, e.Company)
+	}
+	live := count(t, r.admin, `select count(*) from pack_run where source_system = $1 and source_company = any($2) and status in ('LOADED', 'RECONCILED')`, r.ds.System, companies)
+
+	plan := rollbackWithLedgers(t, r.h, planID, mustJSON(t, map[string]any{"postings": r.ds.RekeyPostings, "ledgers": ledgers}), strings.Join(scope, ","))
 	if !plan.RolledBack || plan.Rekeying == nil || plan.Rekeying.JournalLines != x.JournalLines || plan.Rekeying.DocumentLines != x.DocumentLines || plan.Rekeying.Excluded != x.Excluded {
 		t.Fatalf("rollback summary %+v, reference %d/%d/%d", plan.Rekeying, x.JournalLines, x.DocumentLines, x.Excluded)
+	}
+	out := plan.RollbackOutcome
+	flags := len(r.ds.Entities) * len(domain.CoexistEntities)
+	if out == nil || out.PackRunsRolledBack != live || out.CoexistenceResumed != flags || out.CompensationProblem != "" {
+		t.Fatalf("rollback outcome %+v, want %d runs and %d flags", out, live, flags)
+	}
+	if c := out.Compensations; c == nil || c.Posted != len(journals) || c.Pending != 0 || c.Parked != 0 || !c.Reconciled {
+		t.Fatalf("compensations %+v, want %d journals posted and reconciled", out.Compensations, len(journals))
+	}
+	if n := count(t, r.admin, `select count(*) from pack_run where source_system = $1 and source_company = any($2) and status <> 'ROLLED_BACK'`, r.ds.System, companies); n != 0 {
+		t.Fatalf("BR-49.1: %d runs of the plan's companies are not ROLLED_BACK", n)
+	}
+	// The coexistence adapters resume on the event, and the ledger nets to zero once compensated.
+	ctx := testkit.Ctx(tenantA)
+	evt := readRolledBackEvent(t, r.admin, planID)
+	if len(evt.Data.CoexistenceResumed) != flags || evt.Data.PackRunsRolledBack != live {
+		t.Fatalf("rolledback event %+v", evt.Data)
+	}
+	for _, c := range evt.Data.CoexistenceResumed {
+		f, err := r.st.GetCoexistence(ctx, domain.SourceSystem(c.SourceSystem), c.SourceCompany, c.Entity)
+		if err != nil || f.Mode != domain.CoexistLegacy || f.Version != c.Version {
+			t.Fatalf("flag %+v after the rollback: %+v %v", c, f, err)
+		}
+		if err := coexist.Apply(ctx, r.adapter, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(r.adapter.suspended) != 0 {
+		t.Fatalf("AC-49.7: adapters still suspended after the rollback: %v", r.adapter.suspended)
+	}
+	for k, v := range ledgerNet(r.ledger) {
+		if strings.HasPrefix(k, "L-") && !v.IsZero() {
+			for _, e := range r.ds.Entities {
+				if strings.HasPrefix(k, "L-"+e.Company+"|") {
+					t.Fatalf("ledger %s nets to %s after the compensations", k, v)
+				}
+			}
+		}
 	}
 	for _, f := range []struct {
 		name string
@@ -545,13 +736,13 @@ func (r *rehearsal) rollback(planID string) {
 	if err := r.admin.QueryRow(context.Background(), `select payload from outbox where type = 'dev.passage.cutover.plan.rolledback.v1' and aggregate_id = $1`, planID).Scan(&payload); err != nil {
 		t.Fatal(err)
 	}
-	var evt struct {
+	var counts struct {
 		Data struct {
 			Journal  int `json:"rekey_journal_lines"`
 			Document int `json:"rekey_document_lines"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(payload, &evt); err != nil || evt.Data.Journal != x.JournalLines || evt.Data.Document != x.DocumentLines {
+	if err := json.Unmarshal(payload, &counts); err != nil || counts.Data.Journal != x.JournalLines || counts.Data.Document != x.DocumentLines {
 		t.Fatalf("rolledback event for the coexistence adapters: %s (%v)", payload, err)
 	}
 }

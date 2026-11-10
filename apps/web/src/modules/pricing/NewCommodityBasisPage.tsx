@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { createCommodityBasis, describeProblem, newKey, type CommodityBasisInput, type Problem } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -87,7 +88,7 @@ export function NewCommodityBasisPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the cost basis type" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

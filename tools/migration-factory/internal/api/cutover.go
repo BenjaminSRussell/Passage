@@ -97,7 +97,11 @@ type planDTO struct {
 	PendingRollback *pendingRollbackDTO `json:"pendingRollback,omitempty"`
 	// Rekeying is set once the plan is rolled back: the lines exported for re-keying (FR-49.9).
 	Rekeying *rekeyingDTO `json:"rekeying,omitempty"`
-	Steps    []stepDTO    `json:"steps,omitempty"`
+	// RollbackOutcome is set once the plan is rolled back: the pack runs moved to ROLLED_BACK
+	// (BR-49.1), the coexistence flags handed back to the legacy system (FR-49.7) and, on the
+	// response of the executing request, the compensating journals posted with it.
+	RollbackOutcome *rollbackOutcomeDTO `json:"rollbackOutcome,omitempty"`
+	Steps           []stepDTO           `json:"steps,omitempty"`
 	// RollbackSteps is the generated rollback plan (FR-49.9); sent with the steps.
 	RollbackSteps []rollbackStepDTO `json:"rollbackSteps,omitempty"`
 }
@@ -129,6 +133,7 @@ func (s *Server) toPlanDTO(p domain.Plan, withSteps bool) planDTO {
 	out.StepsTotal = len(p.Steps)
 	if p.RolledBack {
 		out.Rekeying = &rekeyingDTO{JournalLines: p.Rekey.JournalLines, DocumentLines: p.Rekey.DocumentLines, Excluded: p.Rekey.Excluded}
+		out.RollbackOutcome = &rollbackOutcomeDTO{PackRunsRolledBack: p.RollbackPackRuns, CoexistenceResumed: p.RollbackCoexistence}
 	} else {
 		out.AbortDue, out.AbortWarning = p.AbortDue(int(s.now().Sub(p.T0).Minutes()))
 	}
@@ -338,6 +343,22 @@ func (s *Server) completeStep(w http.ResponseWriter, r *http.Request) {
 type rollbackRequest struct {
 	Postings []postingDTO `json:"postings"`
 	Version  int          `json:"version,omitempty"`
+	// Ledgers pins the ledger each entity's compensating journals are posted in (as on POST
+	// .../rollback/compensations); with them the executing request posts the compensations at once.
+	Ledgers []store.EntityLedger `json:"ledgers,omitempty"`
+}
+
+// rollbackOutcomeDTO is what a rollback did besides the re-keying export.
+type rollbackOutcomeDTO struct {
+	PackRunsRolledBack int `json:"packRunsRolledBack"`
+	CoexistenceResumed int `json:"coexistenceResumed"`
+	// Coexistence lists the flags handed back to LEGACY; sent on the executing request's response.
+	Coexistence []coexistDTO `json:"coexistence,omitempty"`
+	// Compensations is the compensating-journal run the executing request made with `ledgers`;
+	// CompensationProblem says why none was made or why it stopped (the rollback stands either way,
+	// and POST .../rollback/compensations takes over).
+	Compensations       *compensationReportDTO `json:"compensations,omitempty"`
+	CompensationProblem string                 `json:"compensationProblem,omitempty"`
 }
 
 // pendingRollbackDTO is the first approval of a rollback, waiting for a second migration.cutover.manage.
@@ -371,8 +392,13 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	ledgers, err := entityLedgers(p, req.Ledgers)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	res, replayed, err := s.store.Rollback(r.Context(), idem, store.RollbackRequest{PlanID: id, Postings: postings,
-		ExpectedVersion: req.Version, By: approverID(p)})
+		ExpectedVersion: req.Version, By: approverID(p), Now: s.now().UTC()})
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -381,5 +407,35 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 	if res.Pending != nil {
 		status = http.StatusAccepted
 	}
-	respond(w, status, replayed, s.toPlanDTO(res.Plan, true))
+	out := s.toPlanDTO(res.Plan, true)
+	if out.RollbackOutcome != nil {
+		for _, f := range res.Coexistence {
+			out.RollbackOutcome.Coexistence = append(out.RollbackOutcome.Coexistence, toCoexistDTO(f))
+		}
+		if res.Pending == nil && !replayed {
+			s.compensateAfterRollback(r, p.UserID, id, ledgers, out.RollbackOutcome)
+		}
+	}
+	respond(w, status, replayed, out)
+}
+
+// compensateAfterRollback posts the compensating journals of the plan just rolled back (BR-49.1,
+// FR-49.9) when the request pinned ledgers and the ledger is configured. The rollback has committed
+// by then: a failure here is reported on the outcome and leaves the compensations to POST
+// .../rollback/compensations, which backs off, parks and retries them.
+func (s *Server) compensateAfterRollback(r *http.Request, by, planID string, ledgers []store.EntityLedger, out *rollbackOutcomeDTO) {
+	if len(ledgers) == 0 {
+		return
+	}
+	if s.ledger == nil {
+		out.CompensationProblem = CodeLedgerNotConfigured + ": the general ledger is not configured for the migration factory (LEDGER_URL); post the compensations once it is"
+		return
+	}
+	rep, err := s.store.PostCompensations(r.Context(), s.ledger, store.CompensationRun{PlanID: planID, Ledgers: ledgers, By: by, Now: s.now().UTC()})
+	if err != nil {
+		out.CompensationProblem = err.Error()
+		return
+	}
+	dto := toCompensationReport(rep)
+	out.Compensations = &dto
 }

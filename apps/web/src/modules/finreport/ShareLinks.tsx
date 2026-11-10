@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The lifetime field as the service would read it: whole days from 1 to 90. */
 export function validateShareDays(raw: string): { days?: number; error?: string } {
@@ -105,7 +106,7 @@ export function ShareLinks({ libraryId }: { libraryId: string }) {
           </FormField>
           {failure ? (
             <Alert tone="danger" title="The link could not be created" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.formActions}>
@@ -128,12 +129,12 @@ export function ShareLinks({ libraryId }: { libraryId: string }) {
         ) : null}
         {revokeFailure ? (
           <Alert tone="danger" title="The link could not be revoked" live="alert">
-            {revokeFailure.message} ({revokeFailure.code})
+            <ProblemMessage problem={revokeFailure} />
           </Alert>
         ) : null}
         {links.error ? (
           <Alert tone="danger" title="Could not load the share links" live="alert" action={<Button size="sm" onClick={links.reload}>Try again</Button>}>
-            {links.error.message} ({links.error.code})
+            <ProblemMessage problem={links.error} />
           </Alert>
         ) : (
           <DataTable

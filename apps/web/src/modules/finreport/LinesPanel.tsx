@@ -5,6 +5,7 @@ import { describeProblem, drillLines, type DrillLine, type LinePage, type Proble
 import { displayAmount, httpUrl, sourceLink } from "./drill";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface LinesPanelProps {
   runId: string;
@@ -88,13 +89,13 @@ function failure(problem: Problem, retry: () => void) {
   if (problem.status === 403) {
     return (
       <Alert tone="danger" title="You cannot see journal lines" live="alert">
-        Drilling to journal lines needs the View ledger transactions duty. ({problem.code})
+        <ProblemMessage problem={problem} message="Drilling to journal lines needs the View ledger transactions duty." />
       </Alert>
     );
   }
   return (
     <Alert tone="danger" title="Journal lines are unavailable" live="alert" action={<Button size="sm" onClick={retry}>Try again</Button>}>
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }

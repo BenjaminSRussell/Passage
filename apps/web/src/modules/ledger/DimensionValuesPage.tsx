@@ -2,9 +2,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { fetchDimensionValues, fetchLedger, LedgerApiError, putDimensionValue, type DimensionValue, type DimensionValueInput } from "./api/client";
+import { fetchDimensionValues, fetchLedger, putDimensionValue, type DimensionValue, type DimensionValueInput } from "./api/client";
 import { LedgerPicker, ledgerQuery, useLedgerParam } from "./LedgerPicker";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const VALUE = /^[A-Za-z0-9._-]{1,20}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -67,7 +68,7 @@ function ValueForm({
 }) {
   const queryClient = useQueryClient();
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const update = (patch: Partial<ValueDraft>) => onDraft({ ...draft, ...patch });
@@ -92,7 +93,7 @@ function ValueForm({
       setSaved(`Saved ${v.attribute} ${v.value}.`);
       onDraft({ ...emptyValue, attribute: draft.attribute });
     } catch (error) {
-      setFailure(error instanceof LedgerApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      setFailure(error);
       // A stale or missing tag means the list is out of date: reload it so the next save sends the current tag.
       void queryClient.invalidateQueries({ queryKey: ["ledger", "dimension-values", ledgerId] });
     } finally {
@@ -137,7 +138,7 @@ function ValueForm({
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the dimension value" live="alert">
-              {failure}
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

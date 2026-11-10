@@ -4,6 +4,7 @@ import { listTimeProfiles, type ProfileDay, type TimeProfile } from "./api/clien
 import { dash } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DAY_LABEL = { weekday: "Weekday", saturday: "Saturday", sunday: "Sunday" } as const;
 
@@ -50,7 +51,7 @@ export function TimeProfilesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load time profiles" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

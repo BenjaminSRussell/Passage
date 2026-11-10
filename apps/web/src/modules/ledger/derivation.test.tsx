@@ -186,7 +186,7 @@ describe("lookup table form", () => {
     await screen.findByDisplayValue(table.name);
     server.handler = (_url, init) => ((init.method ?? "GET") === "PUT" ? json(412, { code: "LEDGER_VERSION_CONFLICT", detail: "the lookup table changed since it was read" }) : undefined);
     fireEvent.click(screen.getByRole("button", { name: "Save lookup table" }));
-    expect(await screen.findByText(/the lookup table changed since it was read \(LEDGER_VERSION_CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/the lookup table changed since it was read/)).toBeInTheDocument();
     expect(new Headers(server.calls.find((c) => c.method === "PUT")!.init.headers).get("If-Match")).toBe('"3"');
   });
 

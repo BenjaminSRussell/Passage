@@ -146,7 +146,7 @@ describe("trading partners", () => {
     renderAt("/integration/partners");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load partners");
-    expect(alert).toHaveTextContent("internal error (COM-0500)");
+    expect(alert).toHaveTextContent("internal error");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("ZZ/DISTRIBUTOR")).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe("trading partners", () => {
     handler = (url) =>
       url.pathname.startsWith("/api/v1/edi/partners/") ? json(404, { code: "EDI-0005", detail: "partner not found" }) : json(200, { items: [] });
     renderAt(`/integration/partners/${PARTNER_ID}`);
-    expect(await findAlert()).toHaveTextContent("partner not found (EDI-0005)");
+    expect(await findAlert()).toHaveTextContent("partner not found");
   });
 });
 
@@ -310,6 +310,6 @@ describe("map tester", () => {
     renderAt("/integration/edi/map-tester");
     fill("Raw X12 interchange", "garbage");
     fireEvent.click(screen.getByRole("button", { name: "Run map test" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("106-character ISA header (EDI-0003)"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("106-character ISA header"));
   });
 });

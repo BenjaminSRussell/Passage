@@ -73,7 +73,7 @@ describe("questionnaires", () => {
 
     api.handler = routes({ [key]: problem(500, "COM-0500", "boom") });
     renderAt(path);
-    expect((await findAlert()).textContent).toContain("boom (COM-0500)");
+    expect((await findAlert()).textContent).toContain("boom");
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 

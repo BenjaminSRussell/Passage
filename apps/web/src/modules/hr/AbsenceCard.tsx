@@ -19,6 +19,7 @@ import { RequestStatus } from "./AbsenceRequestsPage";
 import { absenceUnitLabel, addFixed2, DATE, todayIso, validDecimal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const balanceColumns: DataTableColumn<AbsenceBalance>[] = [
   { key: "planCode", header: "Plan", mono: true },
@@ -139,7 +140,7 @@ export function AbsenceRequestForm({
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not submit the request" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}
@@ -237,12 +238,12 @@ export function AbsenceCard({ workerId }: { workerId: string }) {
         </Alert>
         {failure ? (
           <Alert tone="danger" title="That didn't work" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {state.error ? (
           <Alert tone="danger" title="Could not load absence" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : !state.data ? (
           <div aria-busy="true">

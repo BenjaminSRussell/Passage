@@ -5,6 +5,7 @@ import { listSubjectRequests, PRIVACY_STATES, PRIVACY_TYPES, type PrivacyRequest
 import { daysUntil, formatDateTime, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const privacyStateTone: Record<PrivacyState, BadgeTone> = {
   RECEIVED: "neutral",
@@ -109,7 +110,7 @@ export function PrivacyRequestsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load privacy requests" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

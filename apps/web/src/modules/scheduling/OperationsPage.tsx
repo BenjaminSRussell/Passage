@@ -5,6 +5,7 @@ import { listNetworks, listOperations, listResources, OPERATION_STATUSES, type O
 import { dash, formatDateTime, formatMinutes, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const statusTone: Record<OperationStatus, BadgeTone> = { open: "neutral", scheduled: "success", unplaced: "warning" };
 
@@ -75,7 +76,7 @@ export function OperationsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load operations" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

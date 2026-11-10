@@ -18,6 +18,7 @@ import {
 import { commitmentText, dash, DECIMAL, money, PERCENT, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const PRICE = /^\d+(\.\d{1,4})?$/;
@@ -163,7 +164,7 @@ export function AgreementsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load sales agreements" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -278,7 +279,7 @@ export function NewAgreementPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the agreement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

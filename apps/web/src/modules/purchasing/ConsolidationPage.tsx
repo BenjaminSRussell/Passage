@@ -17,6 +17,7 @@ import {
 import { defaultDeadline } from "./RfqPages";
 import { LoadError, ShortId, money, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DEFAULT_WINDOW = "7";
 
@@ -346,7 +347,7 @@ export function ConsolidationPage() {
             ))}
           </ul>
         ) : failure ? (
-          `${failure.message} (${failure.code})`
+          <ProblemMessage problem={failure} />
         ) : null}
       </Alert>
       <div className={styles.actions}>

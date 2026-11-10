@@ -5,6 +5,7 @@ import { createJournalName, describeProblem, KEYED_JOURNAL_TYPES, type KeyedJour
 import { typeLabels, UUID } from "./format";
 import { fieldErrorsOf } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface JournalNameValues {
   legalEntityId: string;
@@ -123,7 +124,7 @@ export function NewJournalNamePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the journal name" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

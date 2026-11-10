@@ -115,7 +115,7 @@ describe("Deliveries and invoices list", () => {
     first.unmount();
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "down" } });
     renderAt("/sales/order-progress");
-    expect(await screen.findByText(/down \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/down/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -336,6 +336,6 @@ describe("Record delivery or invoice", () => {
     first.unmount();
     handler = () => ({ status: 404, body: { code: "SLS-0100", detail: "order not found" } });
     renderAt(`/sales/orders/${ORDER_ID}/progress/new`);
-    expect(await screen.findByText(/order not found \(SLS-0100\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/order not found/)).toBeInTheDocument();
   });
 });

@@ -153,7 +153,7 @@ describe("new webhook page", () => {
 
     handler = () => json(501, { code: "HUB-0501", detail: "webhook signing secrets cannot be stored until field encryption keys are configured" });
     fireEvent.click(screen.getByRole("button", { name: "Create webhook" }));
-    expect(await findAlert()).toHaveTextContent("(HUB-0501)");
+    expect(await findAlert()).toHaveTextContent("HUB-0501");
   });
 
   it("refuses a caller without the write duty", () => {
@@ -234,7 +234,7 @@ describe("webhook subscription detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rotate secret" }));
     expect((await screen.findByRole("alertdialog")).textContent).toContain("stops signing at once");
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Rotate secret" }));
-    expect(await findAlert()).toHaveTextContent("the subscription changed since it was read (HUB-0409)");
+    expect(await findAlert()).toHaveTextContent("the subscription changed since it was read");
   });
 
   it("does not offer rotation on a rest-push subscription", async () => {
@@ -286,7 +286,7 @@ describe("webhook subscription detail", () => {
     handler = (url) => (url.pathname === `/api/v1/hub/subscriptions/${SUB_ID}` ? (fail ? json(500, { code: "HUB-0500", detail: "unexpected error" }) : json(200, webhook())) : undefined);
     renderAt(`/integration/sync/${SUB_ID}`);
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("unexpected error (HUB-0500)");
+    expect(alert).toHaveTextContent("unexpected error");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Order hook" })).toBeInTheDocument();

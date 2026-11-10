@@ -129,11 +129,17 @@ export interface HandlerOptions {
   dlqTopic: string;
   clock?: () => number;
   metrics?: Metrics;
+  /**
+   * Records the legacy coexistence changes an event asks for (src/coexistence.ts): a migration-factory
+   * flag change or a cutover rollback. Runs before the webhook enqueue; it is idempotent by flag
+   * version, so a replayed message records nothing twice.
+   */
+  coexistence?: (tenantId: string, event: HubEvent, now: Date) => Promise<number>;
 }
 
 /** The per-message handler. Resolves when the message is safe to commit; throws when it must be retried. */
 export function createMessageHandler(options: HandlerOptions): (message: KafkaMessageInput) => Promise<void> {
-  const { store, deadLetter, dlqTopic, metrics } = options;
+  const { store, deadLetter, dlqTopic, metrics, coexistence } = options;
   const clock = options.clock ?? (() => Date.now() / 1000);
   return async (message) => {
     const parsed = parseEvent(message);
@@ -152,6 +158,9 @@ export function createMessageHandler(options: HandlerOptions): (message: KafkaMe
       metrics?.inc("hub_consumer_dead_lettered_total", "Malformed events sent to the DLQ topic");
       return;
     }
+    if (coexistence !== undefined) {
+      await coexistence(parsed.tenantId, parsed.event, new Date(clock() * 1000));
+    }
     const enqueued = await store.enqueueEvent(parsed.tenantId, parsed.event, matchesAny, clock());
     metrics?.inc("hub_consumer_events_total", "Events consumed", { matched: enqueued > 0 ? "yes" : "no" });
     metrics?.inc("hub_consumer_deliveries_enqueued_total", "Deliveries enqueued", {}, enqueued);
@@ -163,7 +172,12 @@ export interface RunningConsumer {
 }
 
 /** Connects to Kafka and feeds every message of the configured topics to the handler. */
-export async function startConsumer(config: ConsumerConfig, store: HubStore, metrics?: Metrics): Promise<RunningConsumer> {
+export async function startConsumer(
+  config: ConsumerConfig,
+  store: HubStore,
+  metrics?: Metrics,
+  coexistence?: HandlerOptions["coexistence"],
+): Promise<RunningConsumer> {
   const kafka = new Kafka({
     clientId: "integration-hub",
     brokers: config.brokers,
@@ -184,6 +198,7 @@ export async function startConsumer(config: ConsumerConfig, store: HubStore, met
     store,
     dlqTopic: config.dlqTopic,
     metrics,
+    ...(coexistence === undefined ? {} : { coexistence }),
     deadLetter: async (r) => {
       await producer.send({
         topic: r.topic,

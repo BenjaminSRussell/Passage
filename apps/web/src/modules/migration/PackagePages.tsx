@@ -18,6 +18,7 @@ import {
 import { formatDateTime, parsePackageInput } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 // Enforced by the service; not seeded in policies/authz/data.json yet (handoff for #313).
 export const DUTY_PACKAGE_APPLY = "migration.package.apply";
@@ -51,7 +52,7 @@ export function PackagesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load configuration packages" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -79,7 +80,7 @@ const diffColumns: DataTableColumn<PackageDiff["files"][number]>[] = [
 function ProblemAlert({ title, problem }: { title: string; problem: Problem }) {
   return (
     <Alert tone="danger" title={title} live="alert">
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }
@@ -234,7 +235,7 @@ export function PackageDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Configuration package" />
         <Alert tone="danger" title="Could not load this package" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/packages">
           Back to packages

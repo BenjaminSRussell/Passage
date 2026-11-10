@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -26,6 +27,8 @@ type ledgerRig struct {
 	ledger   *ledgerclient.Fake
 	ledgerID string
 	clock    *time.Time
+	st       *store.Postgres
+	admin    *pgxpool.Pool
 }
 
 func newLedgerRig(t *testing.T) *ledgerRig {
@@ -35,8 +38,9 @@ func newLedgerRig(t *testing.T) *ledgerRig {
 		t.Fatalf("migrate: %v", err)
 	}
 	st := store.New(app)
-	rig := &ledgerRig{ledger: ledgerclient.NewFake(), ledgerID: ids.New(), clock: new(time.Time)}
+	rig := &ledgerRig{ledger: ledgerclient.NewFake(), ledgerID: ids.New(), clock: new(time.Time), st: st, admin: admin}
 	*rig.clock = time.Date(2027, 4, 2, 9, 30, 0, 0, time.UTC)
+	rig.ledger.AddLedger(rig.ledgerID, entityID)
 	rig.api = New(st).WithLedger(rig.ledger, st, map[string]string{entityID: rig.ledgerID})
 	rig.api.now = func() time.Time { return *rig.clock }
 	r := httpx.NewRouter()
@@ -136,11 +140,13 @@ func TestJournalPostings_BookRecognizedRevenueAndReconcileGL2400(t *testing.T) {
 	}
 }
 
+// TestGLReconciliation_ClosingBalanceTiesInvoiceDeferralsToRecognition: the roll-forward ties to GL 2400 month by month, and
+// keeps tying through a partial and a full credit note (#29 P3).
 func TestGLReconciliation_ClosingBalanceTiesInvoiceDeferralsToRecognition(t *testing.T) {
 	g := newLedgerRig(t)
 	g.bill(t, "2000.00", "2027-03-10")
 	g.bill(t, "1600.00", "2027-03-10")
-	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	created := decodeContract(t, call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey}))
 	g.run(t, "2027-03-31")
 	g.post(t, http.StatusOK)
 
@@ -156,8 +162,11 @@ func TestGLReconciliation_ClosingBalanceTiesInvoiceDeferralsToRecognition(t *tes
 	g.post(t, http.StatusOK)
 	april := g.reconcile(t, "2027-04")
 	if !april.Reconciled || april.GLCredit != "3600.00" || april.GLClosing != april.Deferred || decimal.RequireFromString(april.Deferred).GreaterThanOrEqual(deferred) {
-		t.Errorf("April %+v, want the closing balance tied and below March's %s", april, rec.Deferred)
+		t.Fatalf("April %+v, want the closing balance tied and below March's %s", april, rec.Deferred)
 	}
+
+	// Then partial and full credit notes: the roll-forward keeps tying to GL 2400 through them (creditnotes_test.go).
+	g.creditNotesKeepTheRollForwardTied(t, created)
 }
 
 func billedBundle(t *testing.T) (gross, deferred decimal.Decimal) {
@@ -471,6 +480,7 @@ func TestJournalPostings_PendingOnAnotherLedgerIsReportedNotRetargeted(t *testin
 	g.ledger.FailPosts(nil)
 
 	other := ids.New()
+	g.ledger.AddLedger(other, entityID)
 	g.api.ledgerIDs = map[string]string{entityID: other}
 	got := g.postBody(t, `{"legalEntityId":"`+entityID+`"}`)
 	if len(got.Items) != 0 || len(got.OtherLedger) != 1 || got.OtherLedger[0].LedgerID != g.ledgerID || len(g.ledger.Entries()) != 0 {
@@ -496,6 +506,17 @@ func TestJournalPostings_LedgerComesFromConfiguration(t *testing.T) {
 	rec := call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
 	if p := decodeProblem(t, rec); rec.Code != http.StatusUnprocessableEntity || p.Code != CodeLedgerNotMapped {
 		t.Errorf("unmapped entity %d %s, want 422 %s", rec.Code, p.Code, CodeLedgerNotMapped)
+	}
+
+	// The configured ledger is pinned to the entity before anything is posted: another entity's ledger is refused.
+	foreign := ids.New()
+	g.ledger.AddLedger(foreign, ids.New())
+	g.api.ledgerIDs = map[string]string{entityID: foreign}
+	*g.clock = time.Date(2027, 5, 2, 9, 0, 0, 0, time.UTC)
+	g.run(t, "2027-04-30")
+	rec = call(t, g.handler, http.MethodPost, "/v1/revrec/journal-postings", `{"legalEntityId":"`+entityID+`"}`, nil)
+	if p := decodeProblem(t, rec); rec.Code != http.StatusUnprocessableEntity || p.Code != CodeLedgerMismatch || len(g.ledger.Entries()) != 1 {
+		t.Errorf("ledger of another entity %d %s with %d entries, want 422 %s and nothing posted", rec.Code, p.Code, len(g.ledger.Entries()), CodeLedgerMismatch)
 	}
 }
 

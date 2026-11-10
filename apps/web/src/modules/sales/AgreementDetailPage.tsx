@@ -16,6 +16,7 @@ import { AgreementLifecycle } from "./AgreementLifecycle";
 import { commitmentText, DECIMAL, formatDateTime, money, supplementaryNote, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -70,7 +71,7 @@ export function AgreementDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Sales agreement" />
         <Alert tone="danger" title="Could not load the agreement" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -192,7 +193,7 @@ export function AgreementDetailPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title={failure.code === "SLS-0008" ? "Not enough commitment left" : "Could not release the order"} live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { describeProblem, newKey, startProjectRun, type Problem, type ProjectRunRequest } from "./api/client";
 import { localToUtc, parseProjectExtract, SOURCE_LABELS, SOURCE_SYSTEMS, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ProjectRunValues {
   sourceSystem: SourceSystem;
@@ -149,7 +150,7 @@ export function NewProjectRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not load the balances" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

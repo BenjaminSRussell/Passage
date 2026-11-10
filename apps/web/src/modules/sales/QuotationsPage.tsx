@@ -18,6 +18,7 @@ import { emptyLine, validateLines, type LineValues } from "./lines";
 import { LinesEditor } from "./LinesEditor";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -141,7 +142,7 @@ export function QuotationsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load quotations" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -234,7 +235,7 @@ export function NewQuotationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the quotation" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

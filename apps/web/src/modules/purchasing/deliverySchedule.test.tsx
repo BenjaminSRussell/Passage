@@ -137,7 +137,7 @@ describe("delivery schedule page", () => {
     fireEvent.change(await screen.findByLabelText("Quantity (EA)"), { target: { value: "100" } });
     fireEvent.change(screen.getByLabelText("Delivery date"), { target: { value: "2027-02-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
-    expect(await screen.findByText("delivery schedule quantities add up to 90, not the line quantity 100 (PRC-DS-001)")).toBeInTheDocument();
+    expect(await screen.findByText("delivery schedule quantities add up to 90, not the line quantity 100")).toBeInTheDocument();
   });
 
   it("shows the deliveries and removes the schedule after confirmation", async () => {
