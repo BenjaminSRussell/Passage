@@ -472,6 +472,31 @@ paths:
         '403': { description: 'AUTH-0003 (missing duty) or PTY-LEGAL-ENTITY-OUT-OF-SCOPE.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PTY-PROTECTED-FIELDS-INVALID: fields missing or null, unknown field, or malformed legal entity id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/pending-changes:
+    get:
+      operationId: listPendingChanges
+      x-passage-duty: party.read
+      description: >-
+        The changes still awaiting approval in the caller's tenant and legal entity scope, newest first. Also readable with
+        party.inbox.read, the narrow duty the batch service's My work inbox signs; that duty reads this list and nothing else.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
+      responses:
+        '200':
+          description: One page; nextCursor is present when another page follows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PendingChange' } }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/party/pending-changes/{id}:
     parameters:
       - { name: id, in: path, required: true, description: Pending change id., schema: { type: string, format: uuid } }

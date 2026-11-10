@@ -773,6 +773,7 @@
     ]},
     "party.read": {"permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
+      {"resource": "/v1/party/pending-changes", "methods": ["GET"]},
       {"resource": "/v1/party/pending-changes/*", "methods": ["GET"]},
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["GET"]},
       {"resource": "/v1/party/parties/*/vendors", "methods": ["GET"]},

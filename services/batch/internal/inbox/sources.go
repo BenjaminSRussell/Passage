@@ -98,7 +98,7 @@ func NewSources(e Endpoints, signer *tenant.ServiceSigner, timeout time.Duration
 	}
 	return []Source{
 		build(SourcePurchasing, DutyRequisitionApprove, "purchasing", TokenDutyRequisitions, e.PurchasingURL, "/v1/procurement/requisition-approvals", nil, decodeRequisitions),
-		build(SourceParty, DutyPartyApprove, "party", TokenDutyPartyChanges, e.PartyURL, "/v1/party/pending-changes", url.Values{"status": {"pending"}}, decodePartyChanges),
+		build(SourceParty, DutyPartyApprove, "party", TokenDutyPartyChanges, e.PartyURL, "/v1/party/pending-changes", nil, decodePartyChanges),
 		build(SourceLedger, DutyJournalApprove, "ledger", TokenDutyJournals, e.LedgerURL, "/v1/ledger/journal-batches", url.Values{"status": {statusInApproval}}, decodeJournalBatches),
 		build(SourcePayables, DutyPaymentHold, "payables", TokenDutyHolds, e.PayablesURL, "/v1/payables/open-items", url.Values{"held": {"true"}}, decodeHolds),
 	}

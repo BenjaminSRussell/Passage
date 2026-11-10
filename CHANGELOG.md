@@ -12,7 +12,9 @@ release may change public APIs.
 
 - batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
   approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
-  source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor).
+  source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
+  gain the matching read paths: party `GET /v1/party/pending-changes`, payables `held=true` on `GET /v1/payables/open-items`, and
+  the narrow duties `procurement.inbox.read`, `ledger.inbox.read`, `party.inbox.read` and `payables.inbox.read`.
 
 ### Fixed
 
