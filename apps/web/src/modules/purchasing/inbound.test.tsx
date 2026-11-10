@@ -222,7 +222,7 @@ describe("changes from other services", () => {
     renderAt(`/purchasing/inbound-changes/${refused.id}`);
     await screen.findByText("Not applied (PRC-PO-007)");
     fireEvent.click(screen.getByRole("button", { name: "Retry the change" }));
-    expect(await screen.findByText(/acknowledged.*PRC-INB-008/)).toBeInTheDocument();
+    expect(await screen.findByText("this one is REFUSED and acknowledged")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload change" })).toBeInTheDocument();
   });
 

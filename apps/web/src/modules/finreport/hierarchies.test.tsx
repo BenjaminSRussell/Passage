@@ -176,7 +176,7 @@ describe("HierarchyEditorPage", () => {
     fireEvent.change(screen.getByLabelText("Members to classify"), { target: { value: "acct-400100, 400100" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
     expect(await screen.findByText("Some members match no leaf")).toBeInTheDocument();
-    expect(screen.getByText(/acct-400100\. \(REPORT-0013\)/)).toBeInTheDocument();
+    expect(screen.getByText(/acct-400100\./)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     expect(await screen.findByText("Someone else changed this draft")).toBeInTheDocument();

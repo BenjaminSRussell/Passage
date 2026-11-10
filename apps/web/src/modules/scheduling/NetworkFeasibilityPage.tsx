@@ -5,6 +5,7 @@ import { fetchNetworkFeasibility, listNetworks, type NetworkFinding } from "./ap
 import { dash, dayStart, formatDateTime, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * Operations the scheduler could not place because no resource transition of their network was allowed (SCHED-0009),
@@ -90,7 +91,7 @@ export function NetworkFeasibilityPage() {
       )}
       {state.error ? (
         <Alert tone="danger" title="Could not load network findings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

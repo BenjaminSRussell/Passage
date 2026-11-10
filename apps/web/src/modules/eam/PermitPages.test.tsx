@@ -208,7 +208,7 @@ describe("permit register", () => {
   it("shows the load error with a retry", async () => {
     handler = (url, init) => (isGet("/permits")(url, init) ? json(403, { code: "AUTH-0003", detail: "missing duty eam.inquire" }) : undefined);
     renderAt("/eam/permits");
-    expect(await findAlert()).toHaveTextContent("missing duty eam.inquire (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty eam.inquire");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -286,7 +286,7 @@ describe("permit detail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(await screen.findByText("Separation of duties")).toBeInTheDocument();
-    expect(await findAlert()).toHaveTextContent("approver must differ from requester (EAM-PMT-005)");
+    expect(await findAlert()).toHaveTextContent("approver must differ from requester");
     const [first] = sent("POST", "/transition");
     expect(first.body).toEqual({ to: "APPROVED" });
     expect(header(first, "If-Match")).toBe('"1"');

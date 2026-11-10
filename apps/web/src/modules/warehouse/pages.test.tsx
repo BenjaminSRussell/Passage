@@ -103,7 +103,7 @@ describe("DirectiveSimulatorPage", () => {
     render(<DirectiveSimulatorPage />);
     simulate();
     expect(await screen.findByText("The simulation failed")).toBeInTheDocument();
-    expect(screen.getByText("request failed validation (COM-0001)")).toBeInTheDocument();
+    expect(screen.getByText("request failed validation")).toBeInTheDocument();
     expect(screen.getByText("This is required.")).toBeInTheDocument();
     expect(screen.getByText("directives[0].lines[1].fromQty overlaps the quantity range of lines[0]")).toBeInTheDocument();
     expect(screen.getByLabelText("Item")).toHaveValue("BOLT-M8");
@@ -114,7 +114,7 @@ describe("DirectiveSimulatorPage", () => {
     reply = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty warehouse.setup.view" } });
     render(<DirectiveSimulatorPage />);
     simulate();
-    expect(await screen.findByText("missing duty warehouse.setup.view (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty warehouse.setup.view")).toBeInTheDocument();
   });
 
   it("shows a network failure and clears an earlier result", async () => {
@@ -124,7 +124,7 @@ describe("DirectiveSimulatorPage", () => {
     expect(await findTable({ name: "Rule trace" })).toBeInTheDocument();
     reply = () => Promise.reject(new TypeError("Failed to fetch"));
     simulate();
-    expect(await screen.findByText("Failed to fetch (NETWORK)")).toBeInTheDocument();
+    expect(await screen.findByText("Failed to fetch")).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Rule trace" })).not.toBeInTheDocument();
   });
 

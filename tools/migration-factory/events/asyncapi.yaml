@@ -42,6 +42,11 @@ channels:
     messages:
       toleranceConfigured:
         $ref: "#/components/messages/ToleranceConfigured"
+  migrationCoexistence:
+    address: passage.migration.coexistence
+    messages:
+      coexistenceChanged:
+        $ref: "#/components/messages/CoexistenceChanged"
 operations:
   publishPackReconciled:
     action: send
@@ -85,6 +90,12 @@ operations:
       $ref: "#/channels/migrationTolerance"
     messages:
       - $ref: "#/channels/migrationTolerance/messages/toleranceConfigured"
+  publishCoexistenceChanged:
+    action: send
+    channel:
+      $ref: "#/channels/migrationCoexistence"
+    messages:
+      - $ref: "#/channels/migrationCoexistence/messages/coexistenceChanged"
 components:
   messages:
     PackReconciled:
@@ -114,7 +125,7 @@ components:
     CutoverPlanRolledBack:
       name: dev.passage.cutover.plan.rolledback.v1
       title: Cutover plan rolled back
-      summary: A cutover plan's rollback was executed with two distinct approvers (FR-49.9). Coexistence adapters resume legacy write access on it.
+      summary: A cutover plan's rollback was executed with two distinct approvers (FR-49.9). It lists the coexistence flags the rollback handed back to LEGACY, and the integration hub resumes those coexistence adapters on it (AC-49.7).
       payload:
         $ref: "#/components/schemas/CutoverPlanRolledBackEnvelope"
     CutoverDecisionRecorded:
@@ -123,6 +134,12 @@ components:
       summary: A GO or NO_GO decision was recorded on a cutover plan with its approvers and the checklist items that were not met (none for a GO). Audit and platform-ops consume it.
       payload:
         $ref: "#/components/schemas/CutoverDecisionRecordedEnvelope"
+    CoexistenceChanged:
+      name: dev.passage.migration.coexistence.changed.v1
+      title: Coexistence flag changed
+      summary: An entity kind of a legacy company was cut over to Passage or handed back to the legacy system (FR-49.7, BR-49.10). The integration hub suspends the kind's coexistence adapter on PASSAGE and resumes it on LEGACY, in flag version order.
+      payload:
+        $ref: "#/components/schemas/CoexistenceChangedEnvelope"
     ToleranceConfigured:
       name: dev.passage.migration.tolerance.configured.v1
       title: Control-total tolerance configured
@@ -297,7 +314,7 @@ components:
               const: dev.passage.cutover.plan.rolledback.v1
             data:
               type: object
-              required: [plan_id, approvers, executed_by, rekey_journal_lines, rekey_document_lines]
+              required: [plan_id, approvers, executed_by, rekey_journal_lines, rekey_document_lines, pack_runs_rolled_back, coexistence_resumed]
               properties:
                 plan_id:
                   type: string
@@ -317,6 +334,15 @@ components:
                   type: integer
                   minimum: 0
                   description: Document lines posted since T-0 exported for re-keying. The files are served at /api/v1/cutover/plans/{id}/rekeying/{file}.
+                pack_runs_rolled_back:
+                  type: integer
+                  minimum: 0
+                  description: Loaded and reconciled pack runs of the plan's legacy companies and packs moved to ROLLED_BACK (BR-49.1).
+                coexistence_resumed:
+                  type: array
+                  description: The coexistence flags the rollback flipped back to LEGACY (one per legacy system, company and entity kind that Passage mastered); the hub resumes their adapters. Empty when nothing was cut over.
+                  items:
+                    $ref: "#/components/schemas/CoexistenceEntry"
     CutoverDecisionRecordedEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -400,3 +426,58 @@ components:
                 configured_by:
                   type: string
                   description: The user who made the change.
+    CoexistenceEntry:
+      type: object
+      required: [source_system, source_company, entity, mode, version]
+      properties:
+        source_system:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        source_company:
+          type: string
+        entity:
+          type: string
+          enum: [customer, vendor, product, open_items, open_orders, onhand, gl_journal, fixed_asset, worker]
+        mode:
+          type: string
+          enum: [LEGACY, PASSAGE]
+        version:
+          type: integer
+          minimum: 1
+          description: The flag's version after the change; a consumer applies a kind's changes in version order and ignores an older one.
+    CoexistenceChangedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            type:
+              const: dev.passage.migration.coexistence.changed.v1
+            subject:
+              description: source_system/source_company/entity.
+            data:
+              type: object
+              required: [source_system, source_company, entity, mode, version, cutover_at, changed_by]
+              properties:
+                source_system:
+                  type: string
+                  enum: [AX2012, D365FO, SAPECC, S4HANA]
+                source_company:
+                  type: string
+                entity:
+                  type: string
+                mode:
+                  type: string
+                  enum: [LEGACY, PASSAGE]
+                version:
+                  type: integer
+                  minimum: 1
+                cutover_at:
+                  type: [string, "null"]
+                  format: date-time
+                  description: When Passage took the kind over; null once it is back on LEGACY.
+                changed_by:
+                  type: string
+                plan_id:
+                  type: string
+                  format: uuid
+                  description: The cutover plan whose rollback flipped the flag back; absent for a change made on the coexistence endpoint.

@@ -14,6 +14,7 @@ import {
 import { CALC_LABELS } from "./freeGoodsFormat";
 import { addDays, DAY, DECIMAL, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Partial<Record<"everyQuantity" | "freeQuantity" | "minQuantity" | "validFrom" | "validTo" | "form", string>>;
 
@@ -164,7 +165,7 @@ export function FreeGoodsEditCard({ rule, onChange }: { rule: FreeGoodsRule; onC
         </Alert>
         {failure ? (
           <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <form className={styles.form} onSubmit={submit} noValidate>

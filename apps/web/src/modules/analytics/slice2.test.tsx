@@ -73,7 +73,7 @@ describe("data-quality scorecard", () => {
     };
     render("/analytics/data-quality");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty analytics.catalog.steward (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty analytics.catalog.steward");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     fireEvent.click(within(alert.closest("div") as HTMLElement).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("vendor_tax_id")).toBeInTheDocument();
@@ -212,7 +212,7 @@ describe("archive partitions", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty analytics.archive.admin" });
     render("/analytics/archive");
-    expect(await findAlert()).toHaveTextContent("missing duty analytics.archive.admin (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.archive.admin");
   });
 
   it("restores a dropped partition after confirmation", async () => {
@@ -243,7 +243,7 @@ describe("archive partitions", () => {
     render(`/analytics/archive/${PID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Restore for 30 days" }));
     fireEvent.click(screen.getByRole("button", { name: "Restore partition" }));
-    expect(await findAlert()).toHaveTextContent("(ANA-0111)");
+    expect(await findAlert()).toHaveTextContent("ANA-0111");
   });
 });
 
@@ -281,7 +281,7 @@ describe("report schedules", () => {
     first.unmount();
     server.handler = () => json(503, {});
     render("/analytics/schedules");
-    expect(await findAlert()).toHaveTextContent("(HTTP-503)");
+    expect(await findAlert()).toHaveTextContent("HTTP-503");
   });
 
   it("validates the destination like the service", () => {

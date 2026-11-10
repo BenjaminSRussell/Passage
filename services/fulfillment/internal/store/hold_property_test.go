@@ -227,3 +227,32 @@ func TestHoldProperty_ShipNeverMovesHeldUntilUsageDecision(t *testing.T) {
 		}
 	})
 }
+
+// The packing-slip post claims under the order line's ref, the ref a
+// warehouse pick for the line carries, so shipping what was picked counts
+// once; a shipment of another line adds up.
+func TestPostPackingSlip_ClaimsUnderTheOrderLinesRef(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	holds := &issueclaim.Fake{}
+	s.WithHolds(holds)
+	warehouse, entity, product := ids.New(), ids.New(), ids.New()
+	keepOpen(t, s, ctx, warehouse, entity)
+	holds.Set(product, qn(10), qn(6))
+	a, inA := packedIn(t, s, ctx, warehouse, entity, []string{product}, 4)
+	pick := issueclaim.Claim{LegalEntityID: entity, ProductID: product, Warehouse: warehouse, Kind: issueclaim.Pick, Qty: qn(4),
+		Ref: issueclaim.SalesLineRef(a.Shipment.Lines[0].OrderLineID), Key: "pick-" + ids.New()}
+	if err := holds.Claim(ctx, pick); err != nil {
+		t.Fatalf("warehouse pick of the free 4 for the line: %v", err)
+	}
+	if _, err := s.PostPackingSlip(ctx, a.Shipment.ID, a.Shipment.Version, inA, idem("a")); err != nil {
+		t.Fatalf("ship of the 4 the line picked: %v", err)
+	}
+	if got := holds.Outstanding(product); !got.Equal(qn(4)) {
+		t.Fatalf("pick and ship of one line stand for %s, want 4", got)
+	}
+	b, inB := packedIn(t, s, ctx, warehouse, entity, []string{product}, 1)
+	if _, err := s.PostPackingSlip(ctx, b.Shipment.ID, b.Shipment.Version, inB, idem("b")); problemCode(err) != store.CodeQualityHold {
+		t.Fatalf("ship of another line with nothing free: %v, want %s", err, store.CodeQualityHold)
+	}
+}

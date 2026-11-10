@@ -46,13 +46,15 @@ func (s *Postgres) CreatePlan(ctx context.Context, idem Idem, plan domain.Plan, 
 }
 
 const planColumns = `plan_id::text, t0, packs, entities, abort_offset_min, rolled_back, rollback_approvers,
-	rekey_journal_lines, rekey_document_lines, rekey_excluded, version, created_at, coalesce(rehearsal_plan_id::text, ''), rehearsal_carried`
+	rekey_journal_lines, rekey_document_lines, rekey_excluded, version, created_at, coalesce(rehearsal_plan_id::text, ''), rehearsal_carried,
+	rollback_pack_runs, rollback_coexistence`
 
 func scanPlan(row pgx.Row) (domain.Plan, error) {
 	var p domain.Plan
 	var packs []string
 	if err := row.Scan(&p.PlanID, &p.T0, &packs, &p.Entities, &p.AbortOffsetMin, &p.RolledBack, &p.Approvers,
-		&p.Rekey.JournalLines, &p.Rekey.DocumentLines, &p.Rekey.Excluded, &p.Version, &p.CreatedAt, &p.RehearsalPlanID, &p.RehearsalCarried); err != nil {
+		&p.Rekey.JournalLines, &p.Rekey.DocumentLines, &p.Rekey.Excluded, &p.Version, &p.CreatedAt, &p.RehearsalPlanID, &p.RehearsalCarried,
+		&p.RollbackPackRuns, &p.RollbackCoexistence); err != nil {
 		return domain.Plan{}, err
 	}
 	for _, pk := range packs {
@@ -306,19 +308,24 @@ type RollbackRequest struct {
 	Postings        []domain.RekeyPosting
 	ExpectedVersion int
 	By              string
+	Now             time.Time
 }
 
 // RollbackResult is the plan after the request and, for the first approval, the approval that
-// waits for a second approver (Pending set, plan not rolled back).
+// waits for a second approver (Pending set, plan not rolled back). The executing request also
+// returns the coexistence flags it handed back to the legacy system.
 type RollbackResult struct {
-	Plan    domain.Plan
-	Pending *domain.RollbackApproval `json:",omitempty"`
+	Plan        domain.Plan
+	Pending     *domain.RollbackApproval `json:",omitempty"`
+	Coexistence []domain.CoexistFlag     `json:",omitempty"`
 }
 
 // Rollback approves the rollback under the plan's row lock. The first approval is stored and moves
 // the plan's version; a second, different user's approval executes it: it stores the re-keying
-// lines built from the postings and writes cutover.plan.rolledback, all in one transaction, so a
-// posting the export rejects leaves the plan as it was.
+// lines built from the postings, moves the loaded and reconciled pack runs of the plan's entities
+// and packs to ROLLED_BACK (BR-49.1), flips the coexistence flags of the plan's entities back to
+// LEGACY so the adapters resume (FR-49.7), and writes cutover.plan.rolledback, all in one
+// transaction, so a posting the export rejects leaves the plan as it was.
 func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (RollbackResult, bool, error) {
 	var out RollbackResult
 	var replayed bool
@@ -366,19 +373,48 @@ func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (
 			if err := insertRekeyLines(ctx, tx, plan.PlanID, domain.KindDocument, export.Documents); err != nil {
 				return RollbackResult{}, err
 			}
+			now := r.Now
+			if now.IsZero() {
+				now = time.Now().UTC()
+			}
+			packs := make([]string, len(plan.Packs))
+			for i, pk := range plan.Packs {
+				packs[i] = string(pk)
+			}
+			// BR-49.1: LOADED/RECONCILED -> ROLLED_BACK for every run of the plan's legacy companies and packs.
+			tag, err := tx.Exec(ctx, `update pack_run set status = 'ROLLED_BACK', rolled_back_plan_id = $1, rolled_back_at = $4, version = version + 1
+				where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_company = any($2) and pack = any($3)
+				  and status in ('LOADED', 'RECONCILED')`, plan.PlanID, plan.Entities, packs, now)
+			if err != nil {
+				return RollbackResult{}, fmt.Errorf("roll back pack runs: %w", err)
+			}
+			plan.RollbackPackRuns = int(tag.RowsAffected())
+			flags, err := resumeLegacy(ctx, tx, plan, r.By, now)
+			if err != nil {
+				return RollbackResult{}, err
+			}
+			plan.RollbackCoexistence = len(flags)
 			if _, err := tx.Exec(ctx, `update cutover_plan set rolled_back = true, rollback_approvers = $2, rolled_back_by = $3,
-				rolled_back_at = now(), version = $4, rekey_journal_lines = $5, rekey_document_lines = $6, rekey_excluded = $7
+				rolled_back_at = $8, version = $4, rekey_journal_lines = $5, rekey_document_lines = $6, rekey_excluded = $7,
+				rollback_pack_runs = $9, rollback_coexistence = $10
 				where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1`,
-				plan.PlanID, plan.Approvers, r.By, plan.Version, plan.Rekey.JournalLines, plan.Rekey.DocumentLines, plan.Rekey.Excluded); err != nil {
+				plan.PlanID, plan.Approvers, r.By, plan.Version, plan.Rekey.JournalLines, plan.Rekey.DocumentLines, plan.Rekey.Excluded, now,
+				plan.RollbackPackRuns, plan.RollbackCoexistence); err != nil {
 				return RollbackResult{}, fmt.Errorf("update cutover_plan: %w", err)
+			}
+			resumed := make([]mfevents.CoexistenceEntry, 0, len(flags))
+			for _, f := range flags {
+				resumed = append(resumed, mfevents.CoexistenceEntry{SourceSystem: string(f.SourceSystem), SourceCompany: f.Company, Entity: f.Entity,
+					Mode: string(f.Mode), Version: f.Version})
 			}
 			if err := enqueue(ctx, tx, mfevents.CutoverPlanRolledBack, "cutover_plan", plan.PlanID, mfevents.CutoverPlanRolledBackData{
 				PlanID: plan.PlanID, Approvers: plan.Approvers, ExecutedBy: r.By,
 				RekeyJournalLines: plan.Rekey.JournalLines, RekeyDocumentLines: plan.Rekey.DocumentLines,
+				PackRunsRolledBack: plan.RollbackPackRuns, CoexistenceResumed: resumed,
 			}); err != nil {
 				return RollbackResult{}, fmt.Errorf("enqueue cutover.plan.rolledback: %w", err)
 			}
-			return RollbackResult{Plan: plan}, nil
+			return RollbackResult{Plan: plan, Coexistence: flags}, nil
 		})
 		return err
 	})

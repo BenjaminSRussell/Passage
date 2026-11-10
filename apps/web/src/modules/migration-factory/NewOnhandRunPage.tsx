@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { describeProblem, newKey, startOnhandRun, type OnhandRunRequest, type Problem } from "./api/client";
 import { localToUtc, parseOnhandLines, SOURCE_LABELS, SOURCE_SYSTEMS, splitList, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface OnhandRunValues {
   sourceSystem: SourceSystem;
@@ -41,7 +42,7 @@ export function validateOnhandRun(values: OnhandRunValues): { errors: Errors; in
   const inventoryAccount = values.inventoryAccount.trim();
   if (glRunId !== "" && !UUID.test(glRunId)) errors.glRunId = "Enter the id of a gl_balances run, or leave it blank.";
   if (glRunId === "" && inventoryAccount !== "") errors.glRunId = "Name the gl_balances run that holds the inventory account.";
-  if (glRunId !== "" && inventoryAccount === "") errors.inventoryAccount = "Enter the inventory GL account to compare (BR-49.3).";
+  if (glRunId !== "" && inventoryAccount === "") errors.inventoryAccount = "Enter the inventory GL account to compare.";
   const parsed = parseOnhandLines(values.lines);
   if (parsed.errors.length > 0) errors.lines = parsed.errors.slice(0, 3).join(" ");
   else if (parsed.records.length === 0) errors.lines = "Paste at least one line.";
@@ -138,7 +139,7 @@ export function NewOnhandRunPage() {
           {text(
             "glRunId",
             "GL balances run",
-            "A gl_balances run of this company. Its inventory account must equal the loaded stock value per currency (BR-49.3).",
+            "A gl_balances run of this company. Its inventory account must equal the loaded stock value per currency.",
             { spellCheck: false },
             true,
           )}
@@ -165,7 +166,7 @@ export function NewOnhandRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not load the stock" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

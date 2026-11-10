@@ -2,5 +2,5 @@ apiVersion: v2
 name: revrec
 description: Passage revenue recognition service for ASC 606 / IFRS 15 contracts, schedules and roll-forward (wave 29, PSG-29)
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "0.2.0"

@@ -81,7 +81,7 @@ describe("drop-ships list and create form", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Purchase order cost per unit"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Create drop-ship" }));
-    expect(await screen.findByText(/already has an active drop-ship/)).toBeInTheDocument();
+    expect(await screen.findByText("The order line already has an active drop-ship. Cancel the existing drop-ship first.")).toBeInTheDocument();
   });
 
   it("explains an order line that ships from stock", async () => {
@@ -97,7 +97,7 @@ describe("drop-ships list and create form", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Purchase order cost per unit"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Create drop-ship" }));
-    expect(await screen.findByText(/ships from stock/)).toBeInTheDocument();
+    expect(await screen.findByText("The order line is on a warehouse shipment. Cancel the shipment before drop-shipping the line.")).toBeInTheDocument();
   });
 
   it("hides the create form from a viewer", async () => {

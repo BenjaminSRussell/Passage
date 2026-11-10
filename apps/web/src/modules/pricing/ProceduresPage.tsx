@@ -4,6 +4,7 @@ import { listProcedures, type Procedure } from "./api/client";
 import { PROCEDURE_STATUSES, STEP_TYPE_LABELS } from "./campaignFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Procedure>[] = [
   { key: "name", header: "Procedure", mono: true },
@@ -38,7 +39,7 @@ export function ProceduresPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the procedures" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

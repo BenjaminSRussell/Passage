@@ -22,7 +22,9 @@ test.describe("duty gating", () => {
     await shell.goto("/inventory/onhand");
     await expect(shell.title).toHaveText("Page not available");
     await expect(page.getByRole("heading", { name: "This page isn't available to you" })).toBeVisible();
-    await expect(shell.workspaceNav.getByRole("link", { name: "On-hand" })).toHaveCount(0);
+    await expect(shell.workspaceNav.getByRole("link", { name: "Check stock on hand" })).toHaveCount(0);
+    await shell.goto("/features");
+    await expect(page.getByRole("main").getByRole("link", { name: /Check stock on hand/ })).toHaveCount(0);
   });
 });
 

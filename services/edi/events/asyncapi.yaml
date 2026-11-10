@@ -25,6 +25,11 @@ channels:
     messages:
       messageSent:
         $ref: '#/components/messages/MessageSent'
+  messagePosted:
+    address: passage.edi.message
+    messages:
+      messagePosted:
+        $ref: '#/components/messages/MessagePosted'
   deliveryFailed:
     address: passage.edi.delivery
     messages:
@@ -47,6 +52,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/messageSent' }
     summary: The partner's transport confirmed receipt of one outbound transaction (processed AS2 MDN or completed SFTP upload, FR-35.5)
+  publishMessagePosted:
+    action: send
+    channel: { $ref: '#/channels/messagePosted' }
+    summary: An inbound 850 or ORDERS became a sales order (FR-35.4, BR-35.1)
   publishDeliveryFailed:
     action: send
     channel: { $ref: '#/channels/deliveryFailed' }
@@ -126,6 +135,29 @@ components:
               st_control: { type: string }
               error: { type: string, description: catalog code and detail of the failing rule }
               reprocessed: { type: boolean, description: true when a reprocess produced this failure }
+    MessagePosted:
+      name: dev.passage.edi.message.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.message.posted.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: message id }
+          data:
+            type: object
+            required: [message_id, interchange_id, partner_id, transaction_set, control_number, st_control, sales_order_id]
+            properties:
+              message_id: { type: string, format: uuid }
+              interchange_id: { type: string, format: uuid }
+              partner_id: { type: string, format: uuid }
+              transaction_set: { type: string }
+              control_number: { type: string }
+              st_control: { type: string }
+              sales_order_id: { type: string, format: uuid, description: the sales order the message became }
     MessageSent:
       name: dev.passage.edi.message.sent.v1
       contentType: application/cloudevents+json

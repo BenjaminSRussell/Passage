@@ -30,6 +30,7 @@ import {
 import { describeError, useLoad, type LoadError } from "./hooks";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIST = "/planning/item-coverages";
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -57,10 +58,10 @@ const orderTypeLabel: Record<OrderType, string> = { purchase: "Purchase", produc
 /** Whole-number fields of an item coverage with their label, range and help. */
 const DAY_FIELDS = [
   { key: "safetyMarginReceiptDays", label: "Receipt margin (days)", min: 0, max: 365, hint: "Days added before a receipt is available.", optional: false },
-  { key: "safetyMarginIssueDays", label: "Issue margin (days)", min: 0, max: 365, hint: "Working days each demand is moved earlier (FR-22.5).", optional: false },
-  { key: "safetyMarginReorderDays", label: "Reorder margin (days)", min: 0, max: 365, hint: "Working days added to the lead time of planned orders (FR-22.5).", optional: false },
+  { key: "safetyMarginIssueDays", label: "Issue margin (days)", min: 0, max: 365, hint: "Working days each demand is moved earlier.", optional: false },
+  { key: "safetyMarginReorderDays", label: "Reorder margin (days)", min: 0, max: 365, hint: "Working days added to the lead time of planned orders.", optional: false },
   { key: "leadTimeDays", label: "Lead time override (days)", min: 0, max: 3650, hint: "Blank uses the item's lead time.", optional: true },
-  { key: "requiredShelfLifeDays", label: "Required shelf life (days)", min: 0, max: 3650, hint: "Remaining shelf life a demand needs (FR-22.20).", optional: false },
+  { key: "requiredShelfLifeDays", label: "Required shelf life (days)", min: 0, max: 3650, hint: "Remaining shelf life a demand needs.", optional: false },
 ] as const;
 
 type DayKey = (typeof DAY_FIELDS)[number]["key"];
@@ -238,7 +239,7 @@ const columns: DataTableColumn<ItemCoverage>[] = [
 function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }
@@ -379,10 +380,10 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <Alert tone="danger" title={groups.error ? "Could not load coverage groups" : undefined} live="alert">
-          {groups.error ? `${groups.error.message} (${groups.error.code})` : null}
+          {groups.error ? <ProblemMessage problem={groups.error} /> : null}
         </Alert>
         {!groups.loading && !groups.error && groupOptions.length === 0 ? (
           <Alert tone="info" title="No coverage groups yet" live="status">
@@ -453,7 +454,7 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
           </Select>
         )}
       </FormField>
-      <FormField id="ic-strategy" label="Planning strategy" hint="How forecast and sales demand interact (FR-22.19).">
+      <FormField id="ic-strategy" label="Planning strategy" hint="How forecast and sales demand interact.">
         {(a11y) => (
           <Select {...a11y} value={draft.planningStrategy} onChange={(e) => set("planningStrategy", e.target.value as PlanningStrategy)}>
             {(Object.keys(strategyLabel) as PlanningStrategy[]).map((s) => (
@@ -476,7 +477,7 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
         </FormField>
       ))}
       <fieldset className={`${styles.fieldset} ${styles.wide}`}>
-        <legend className={styles.legend}>DDMRP and priority (FR-22.16)</legend>
+        <legend className={styles.legend}>DDMRP and priority</legend>
         <div className={styles.checks}>
           <span className={styles.check}>
             <Input id="ic-decoupling" type="checkbox" checked={draft.decouplingPoint} onChange={(e) => set("decouplingPoint", e.target.checked)} />

@@ -20,6 +20,7 @@ import { LinesEditor } from "./LinesEditor";
 import { validateLines, type LineValues } from "./lines";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -202,7 +203,7 @@ export function ChangeOrderPage() {
       <div className={styles.stack}>
         <PageHeader title="Change sales order" />
         <Alert tone="danger" title="Could not load the order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -321,7 +322,7 @@ export function ChangeOrderPage() {
             ) : undefined
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
           {Object.keys(failure.fields).length > 0 ? ` ${Object.entries(failure.fields).map(([k, v]) => `${k}: ${v}`).join("; ")}` : null}
         </Alert>
       ) : null}

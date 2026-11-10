@@ -252,7 +252,7 @@ describe("supplier claim detail", () => {
     handler = detail(claim(), () => ({ status: 422, body: { code: "SVC-SWC-001", detail: "claim window for the vendor ended on 2026-11-19" } }));
     renderAt(`/service/supplier-claims/${CLAIM}`);
     fireEvent.click(await screen.findByRole("button", { name: "Submit claim" }));
-    expect(await findAlert()).toHaveTextContent("claim window for the vendor ended on 2026-11-19 (SVC-SWC-001)");
+    expect(await findAlert()).toHaveTextContent("claim window for the vendor ended on 2026-11-19");
   });
 
   it("records a partial acceptance (AC-45.13) with one amount per line", async () => {

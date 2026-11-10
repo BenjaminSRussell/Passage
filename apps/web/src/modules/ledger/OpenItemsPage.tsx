@@ -1,12 +1,11 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import {
   createClearing,
   fetchOpenItems,
   fetchToleranceGroups,
-  LedgerApiError,
   newKey,
   OPEN_ITEM_STATUSES,
   simulateClearing,
@@ -17,6 +16,7 @@ import {
 import { formatDimensions } from "./LedgerLinesPage";
 import { LedgerPicker, ledgerQuery, useLedgerParam } from "./LedgerPicker";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const ACCOUNT = /^[A-Za-z0-9._-]{1,20}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -33,9 +33,9 @@ export function ItemStatusBadge({ status }: { status: OpenItem["status"] }) {
   return <Badge tone={t.tone}>{t.label}</Badge>;
 }
 
-export function errorText(error: unknown): string {
-  if (error instanceof LedgerApiError) return `${error.message} (${error.code})`;
-  return (error as Error).message;
+/** A failed request, shown with its plain message and the code under Details. */
+export function errorText(error: unknown): ReactNode {
+  return <ProblemMessage problem={error} />;
 }
 
 /** What a preview means for the user, in plain words. */
@@ -64,7 +64,7 @@ function ClearPanel({ ledgerId, itemIds, onCleared }: { ledgerId: string; itemId
   const [group, setGroup] = useState("");
   const [residual, setResidual] = useState(false);
   const [preview, setPreview] = useState<ClearingPreview | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState<"preview" | "clear" | null>(null);
   const attempt = useRef<{ signature: string; key: string }>({ signature: "", key: "" });

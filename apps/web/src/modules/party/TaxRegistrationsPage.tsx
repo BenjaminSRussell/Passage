@@ -6,6 +6,7 @@ import { describeProblem, validateTaxRegistration, type Problem, type TaxType, t
 import { COUNTRY, DUTY_WRITE, taxTypeLabel } from "./format";
 import styles from "./pages.module.css";
 import { Entry, problemText } from "./parts";
+import { ProblemMessage } from "../../shell/errors";
 
 const TYPES: TaxType[] = ["VAT", "EIN", "GSTIN"];
 
@@ -136,7 +137,7 @@ export function TaxRegistrationsPage() {
       )}
       {failure ? (
         <Alert tone="danger" title="Could not validate the number" live="alert">
-          {problemText(failure)}
+          <ProblemMessage problem={failure} message={problemText(failure)} />
         </Alert>
       ) : null}
       <div role="status">

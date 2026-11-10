@@ -14,6 +14,7 @@ import {
 import { addDays, browserZone, dash, daysBetween, formatDateTime, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_DAYS = 31;
 
@@ -139,7 +140,7 @@ export function AutoClockOutsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not run the sweep" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -169,7 +170,7 @@ export function AutoClockOutsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the auto clock-outs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <Card title="Closed by the server">

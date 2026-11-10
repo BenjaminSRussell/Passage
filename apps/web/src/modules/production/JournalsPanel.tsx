@@ -22,6 +22,7 @@ import {
 } from "./api/client";
 import { addDecimals, amount, coProductTypeLabel, dash, describeFiring, isZero, jobTypeLabel, journalTypeLabel, proposalLabel, triggerFunctionLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 const hoursPattern = /^[0-9]{1,8}(\.[0-9]{1,2})?$/;
@@ -342,7 +343,7 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
         ) : null}
         {failure ? (
           <Alert tone="danger" live="alert" title="The journal was refused">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {triggerFailures.length > 0 ? (
@@ -353,7 +354,7 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
         ) : null}
         {journals.error ? (
           <Alert tone="danger" title="Could not load the journals">
-            {journals.error.message} ({journals.error.code})
+            <ProblemMessage problem={journals.error} />
           </Alert>
         ) : (
           <DataTable
@@ -549,7 +550,7 @@ export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelPr
                 {jobs.loading ? <p className={styles.hint}>Loading the jobs of the order.</p> : null}
                 {jobs.error ? (
                   <Alert tone="danger" title="Could not load the jobs">
-                    {jobs.error.message} ({jobs.error.code})
+                    <ProblemMessage problem={jobs.error} />
                   </Alert>
                 ) : null}
                 {!jobs.loading && !jobs.error && workJobs.length === 0 ? (

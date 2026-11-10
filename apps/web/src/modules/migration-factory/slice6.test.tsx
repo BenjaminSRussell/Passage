@@ -309,7 +309,7 @@ describe("Pack run: load into receivables", () => {
     };
     renderAt(`/migration-factory/runs/${RUN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Load into receivables" }));
-    const alert = await screen.findByText(/set RECEIVABLES_URL \(MIG-1520\)/);
+    const alert = await screen.findByText(/set RECEIVABLES_URL/);
     expect(alert).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load into receivables" })).toBeEnabled();
   });
@@ -321,7 +321,7 @@ describe("Pack run: load into receivables", () => {
       return undefined;
     };
     renderAt(`/migration-factory/runs/${RUN}`);
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });

@@ -5,6 +5,7 @@ import { CAMPAIGN_STATUSES, listCampaigns, listResources, SEQUENCE_RULE_LABELS, 
 import { formatDateTime, formatMinutes, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const campaignTone: Record<CampaignStatus, BadgeTone> = {
   proposed: "neutral",
@@ -72,7 +73,7 @@ export function CampaignsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load campaigns" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

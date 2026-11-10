@@ -103,7 +103,7 @@ describe("Transfer order edit form", () => {
     const first = renderAt(`/inventory/transfer-orders/${ORDER_ID}`);
     fireEvent.change(await screen.findByLabelText("Line 1: quantity (EA)"), { target: { value: "90" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await findAlert()).toHaveTextContent("(INV-TRF-006)");
+    expect(await findAlert()).toHaveTextContent("INV-TRF-006");
     first.unmount();
     handler = () => json(200, order({ status: "SHIPPED", lines: [line({ shippedQty: "100", inTransit: "100" })] }));
     renderAt(`/inventory/transfer-orders/${ORDER_ID}`);

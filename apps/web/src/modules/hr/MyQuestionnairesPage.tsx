@@ -7,6 +7,7 @@ import styles from "./pages.module.css";
 import { getMyProfile } from "./api/selfService";
 import { BackLink, CheckField, FormActions, ListPage, Loaded, SelectField, TextAreaField, TextField, useSubmit } from "./parts";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface OpenRow extends Schedule {
   name?: string;
@@ -203,7 +204,7 @@ export function AnswerQuestionnairePage() {
               </Card>
             ) : (
               <Alert tone="danger" title="Could not load your worker record" live="alert">
-                {me.error.message} ({me.error.code})
+                <ProblemMessage problem={me.error} />
               </Alert>
             )
           ) : me.data || me.error ? (

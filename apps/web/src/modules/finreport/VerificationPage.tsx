@@ -4,6 +4,7 @@ import { getVerification, type Verification, type VerificationDiff } from "./api
 import { VERIFICATION_LABELS, VERIFICATION_TONES } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const diffColumns: DataTableColumn<VerificationDiff>[] = [
   { key: "account", header: "Account", mono: true },
@@ -44,7 +45,7 @@ export function VerificationPage() {
           live="alert"
           action={missing ? undefined : <Button size="sm" onClick={state.reload}>Try again</Button>}
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/finreport/verifications">Back to ledger verification</Link>
       </div>

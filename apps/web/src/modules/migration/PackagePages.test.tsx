@@ -98,7 +98,7 @@ describe("configuration packages", () => {
     second.unmount();
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/migration/packages");
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     handler = () => json(200, { items: [pkg] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Configuration packages" })).toHaveTextContent("1.2.0");

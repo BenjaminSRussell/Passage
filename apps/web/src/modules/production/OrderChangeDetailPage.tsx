@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { changeStatusLabel, changeStatusTone, dash, describeDelta } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface OrderChangeDetailPageProps {
   changeId: string;
@@ -169,7 +170,7 @@ export function OrderChangeDetailPage({ changeId, onBack, onOpenOrder }: OrderCh
       </Alert>
       {failure ? (
         <Alert tone="danger" live="alert" title="The change was not saved">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Change record">
@@ -207,7 +208,7 @@ export function OrderChangeDetailPage({ changeId, onBack, onOpenOrder }: OrderCh
         <Alert tone={previewError.status === 403 ? "info" : "danger"} title="No preview of this change" live="status">
           {previewError.status === 403
             ? "You need the Apply order change duty to preview, apply or dismiss order changes."
-            : `${previewError.message} (${previewError.code})`}
+            : <ProblemMessage problem={previewError} />}
         </Alert>
       ) : null}
       {preview ? (

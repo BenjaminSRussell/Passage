@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { checkRequisition, describeProblem, type Problem, type RequisitionCheckInput, type RequisitionCheckResult } from "./api/client";
 import { DAY, splitProblem, splitList, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -117,7 +118,7 @@ export function RequisitionCheckPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not check the requisition" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

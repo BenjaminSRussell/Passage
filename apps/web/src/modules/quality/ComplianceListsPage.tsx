@@ -5,6 +5,7 @@ import { createComplianceList, describeProblem, listComplianceLists, newKey, typ
 import { CODE, DECIMAL, qty, REGION, validCAS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const KIND_LABELS: Record<ListKind, string> = { RESTRICTED: "Restricted", REPORTING: "Reporting" };
 
@@ -50,7 +51,7 @@ export function ComplianceListsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load compliance lists" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -210,7 +211,7 @@ export function NewComplianceListPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the list" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

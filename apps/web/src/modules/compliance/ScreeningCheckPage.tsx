@@ -4,6 +4,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { describeProblem, screenSubject, SUBJECT_TYPES, type ListEntry, type Problem, type ScreeningHit, type ScreeningResult, type ScreeningSubject, type SubjectType } from "./api/client";
 import { hitStateTone, scoreText, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const COUNTRY = /^[A-Za-z]{2}$/;
 
@@ -169,7 +170,7 @@ export function ScreeningCheckPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The screening check failed" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone={result?.blocked ? "warning" : "success"} live="status">
         {summary}

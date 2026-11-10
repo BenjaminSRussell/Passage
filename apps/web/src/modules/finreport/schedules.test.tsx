@@ -160,7 +160,7 @@ describe("SchedulesPage", () => {
     };
     renderAt("/finreport/schedules");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("You need the schedule duty. (AUTH-0003)");
+    expect(alert).toHaveTextContent("You need the schedule duty.");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "NIGHTLY" })).toBeInTheDocument();

@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, PageHeader, Textarea } from "../../shell/ui";
 import { createRealignment, newKey, type RealignmentInput, type RealignmentMapping } from "./api/client";
@@ -83,7 +83,7 @@ function RealignmentForm({ ledgerId }: { ledgerId: string }) {
   const [values, setValues] = useState(emptyRealignment);
   const [key] = useState(newKey);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState(false);
   const update = (patch: Partial<RealignmentDraft>) => setValues((prev) => ({ ...prev, ...patch }));
 

@@ -30,8 +30,8 @@ func TestIssueClaim_RepeatedClaimsNeverEatHeldStock(t *testing.T) {
 	if _, err := s.ClaimIssue(ctx, claimOf(ctx, product, "c2", "CONSUME", "2")); problemCode(err) != domain.CodeQualityHold {
 		t.Fatalf("second claim of the same free quantity: %v, want %s", err, domain.CodeQualityHold)
 	}
-	if _, err := s.ClaimIssue(ctx, claimOf(ctx, product, "c3", "SHIP", "2")); err != nil {
-		t.Fatalf("another kind has its own tally: %v", err)
+	if _, err := s.ClaimIssue(ctx, claimOf(ctx, product, "c3", "SHIP", "2")); problemCode(err) != domain.CodeQualityHold {
+		t.Fatalf("a ship of the free quantity a consume took: %v, want %s", err, domain.CodeQualityHold)
 	}
 	if err := s.ReleaseIssueClaim(ctx, "c1"); err != nil {
 		t.Fatal(err)

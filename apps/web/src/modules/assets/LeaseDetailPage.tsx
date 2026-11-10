@@ -20,6 +20,7 @@ import { StatusBadge } from "./badges";
 import { DECIMAL, isZero, money, percent } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Detail({ term, children }: { term: string; children: ReactNode }) {
   return (
@@ -74,7 +75,7 @@ function LedgerCard({ lease }: { lease: Lease }) {
     return (
       <Card title="Ledger postings" actions={action}>
         <Alert tone="danger" title="Could not load the ledger postings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </Card>
     );
@@ -144,7 +145,7 @@ export function LeaseDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Lease" />
         <Alert tone="danger" title="Could not load the lease" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets/leases">
           Back to leases
@@ -296,7 +297,7 @@ export function ModifyLeasePage() {
       <div className={styles.stack}>
         <PageHeader title="Modify lease" />
         <Alert tone="danger" title="Could not load the lease" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets/leases">
           Back to leases
@@ -424,7 +425,7 @@ export function ModifyLeasePage() {
                 live="alert"
                 action={failure.code === "AST-0006" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}
               >
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

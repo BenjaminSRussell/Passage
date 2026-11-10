@@ -5,6 +5,7 @@ import { listCorrections, type Correction } from "./api/client";
 import { addDays, browserZone, dash, daysBetween, formatDateTime, formatHours, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_DAYS = 31;
 
@@ -43,7 +44,7 @@ export function CorrectionsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the corrections" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <Card title="Corrections">

@@ -23,6 +23,7 @@ import { TreeUnitsEditor } from "./TreeEditor";
 import { TreeRevisionsCard } from "./TreeRevisions";
 import { cleanColumn, cleanRow } from "./DefinitionEditorPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** What differs between the row set and the column set editor. */
 interface PartKind<T extends { code: string; name: string }> {
@@ -151,7 +152,7 @@ function PartEditor<T extends { code: string; name: string; description?: string
           live="alert"
           action={missing ? undefined : <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}
         >
-          {loadError.message} ({loadError.code})
+          <ProblemMessage problem={loadError} />
         </Alert>
         <Link to={kind.listPath}>Back to the {kind.noun}s</Link>
       </div>
@@ -245,7 +246,7 @@ function PartEditor<T extends { code: string; name: string; description?: string
             ) : undefined
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </div>

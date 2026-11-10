@@ -18,6 +18,7 @@ import { DispositionBadge } from "./BatchRecordPages";
 import { dash, QUANTITY, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that merges batches; enforced by the service (FR-24.16). */
 export const MERGE_DUTY = "production.batch.merge";
@@ -222,7 +223,7 @@ export function StoredMergePage({ merge = (req, key) => defaultMerge(req, key), 
           <Card title="Batches of the item">
             {batches.error ? (
               <Alert tone="danger" title="Could not load batches" live="alert" action={<Button size="sm" onClick={batches.reload}>Try again</Button>}>
-                {batches.error.message} ({batches.error.code})
+                <ProblemMessage problem={batches.error} />
               </Alert>
             ) : (
               <DataTable
@@ -251,7 +252,7 @@ export function StoredMergePage({ merge = (req, key) => defaultMerge(req, key), 
           live="alert"
           action={failure.code === "PMF-0104" ? <Button size="sm" onClick={batches.reload}>Reload batches</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {result ? (

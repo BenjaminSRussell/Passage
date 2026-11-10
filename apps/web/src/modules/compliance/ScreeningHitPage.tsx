@@ -5,6 +5,7 @@ import { decideScreeningHit, describeProblem, getScreeningHit, newKey, type HitD
 import { dash, formatDateTime, hitStateTone, scoreText, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const decisionLabel: Record<HitDecision, string> = {
   CLEAR_FALSE_POSITIVE: "Clear as false positive",
@@ -45,7 +46,7 @@ export function ScreeningHitPage() {
       <div className={styles.stack}>
         <PageHeader title="Screening hit" />
         <Alert tone="danger" title="Could not load the hit" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/compliance/screening/hits">Back to screening hits</Link>
       </div>
@@ -136,7 +137,7 @@ export function ScreeningHitPage() {
         </dl>
       </Card>
       <Alert tone="danger" title={failure ? "Could not record the decision" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {done}

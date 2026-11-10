@@ -23,6 +23,7 @@ import { ArticleSuggestions } from "./KnowledgePage";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const orderColumns: DataTableColumn<WorkOrder>[] = [
   { key: "number", header: "Work order", mono: true },
@@ -84,7 +85,7 @@ export function CaseDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Service case" />
         <Alert tone="danger" title="Could not load the case" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -154,7 +155,7 @@ export function CaseDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.code === "conflict_version" ? "Someone else changed this case; it was reloaded" : "The status change failed"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="SLA clocks" headingLevel={3}>

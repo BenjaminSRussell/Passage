@@ -19,6 +19,7 @@ import {
 import { DECIMAL, dash, shortId, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -210,7 +211,7 @@ function CheckCard() {
       </form>
       {failure ? (
         <Alert tone="danger" title="Could not check the alternatives" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <p role="status" className={styles.muted}>
@@ -319,7 +320,7 @@ export function AlternativeItemsPage() {
       </form>
       {failure ? (
         <Alert tone="danger" title="Could not remove the rule" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Alert tone="success" live="status">
@@ -327,7 +328,7 @@ export function AlternativeItemsPage() {
       </Alert>
       {state.error ? (
         <Alert tone="danger" title="Could not load alternative item rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -401,7 +402,7 @@ export function NewAlternativeRulePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0055" ? "This rule already exists" : "Could not save the rule"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

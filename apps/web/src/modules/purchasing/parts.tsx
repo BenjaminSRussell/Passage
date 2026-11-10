@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Alert, Badge, Button, type BadgeTone } from "../../shell/ui";
 import { describeProblem, type RankingRule } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const dash = "—";
 
@@ -122,7 +123,7 @@ export function LoadError({ what, error, onRetry }: { what: string; error: Failu
         ) : undefined
       }
     >
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }

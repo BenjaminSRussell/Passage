@@ -17,6 +17,7 @@ import { dash } from "./format";
 import { ProblemAlert } from "./shared";
 import { isUuid, useIdempotencyKey } from "./stored";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Every lifecycle move a user can request; the service decides whether it is allowed (BR-39.2). */
 export type Move = "block" | "unblock" | "activate" | "close";
@@ -255,7 +256,7 @@ export function VersionsPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="version-fallback" label="Fallback principle" hint="Where a missing price comes from (BR-39.4).">
+          <FormField id="version-fallback" label="Fallback principle" hint="Where a missing price comes from.">
             {(control) => (
               <Select
                 {...control}
@@ -334,7 +335,7 @@ export function VersionsPage() {
           </div>
           {list.error ? (
             <Alert tone="danger" title="Could not load costing versions" live="alert">
-              {list.error.message} ({list.error.code})
+              <ProblemMessage problem={list.error} />
             </Alert>
           ) : null}
           <DataTable

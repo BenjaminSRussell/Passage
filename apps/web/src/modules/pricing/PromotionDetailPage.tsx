@@ -6,6 +6,7 @@ import { DECIMAL } from "./format";
 import { describeScope, signedPct } from "./fundFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -63,7 +64,7 @@ export function PromotionDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Promotion" />
         <Alert tone="danger" title="Could not load the promotion" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -130,7 +131,7 @@ export function PromotionDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="Could not record the actuals" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Plan">

@@ -11,6 +11,10 @@ apiDeprecationMonths: 12
 usageRetentionDays: 90
 # How often the hub re-seals stored secrets after a master key rotation, removes rotated signing secrets past their grace period and purges old usage.
 maintenanceIntervalMs: 300000
+# How often the legacy coexistence sweep suspends or resumes the adapters the migration factory's
+# coexistence and rollback events asked for (wave 49); add passage.cutover.plan and
+# passage.migration.coexistence to kafka.topics to receive them.
+coexistenceIntervalMs: 15000
 # Webhook signing secrets are sealed at rest (fieldcrypt envelope v1). Secret with the key
 # "keys" (comma- or newline-separated id=base64 32-byte master keys) and the id to seal with.
 # Empty: creating a subscription answers 501 and nothing can be signed.

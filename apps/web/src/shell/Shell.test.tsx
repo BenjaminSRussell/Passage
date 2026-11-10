@@ -36,7 +36,7 @@ function renderShell(path = "/") {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route element={<Shell modules={modules} />}>
-          <Route path="/" element={<HomePage modules={modules} />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/admin/audit" element={<p>Audit page</p>} />
           <Route path="*" element={<NotFoundPage />} />
@@ -89,11 +89,12 @@ describe("shell a11y and keyboard", () => {
 });
 
 describe("pages and navigation", () => {
-  it("lists a card and a link per nav entry on home, and keeps the note form on /notes", () => {
+  it("lists a workspace card with its top tasks on home, and keeps the note form on /notes", () => {
     const home = renderShell();
     const main = within(screen.getByRole("main"));
-    expect(main.getByRole("heading", { level: 3, name: "Admin" })).toBeInTheDocument();
-    expect(main.getByRole("link", { name: /Audit/ })).toHaveAttribute("href", "/admin/audit");
+    expect(main.getByRole("heading", { level: 3, name: "Administration" })).toBeInTheDocument();
+    expect(main.getByRole("link", { name: /Audit log/ })).toHaveAttribute("href", "/admin/audit");
+    expect(main.getByRole("link", { name: "See all features" })).toHaveAttribute("href", "/features");
     expect(screen.queryByRole("button", { name: "Save Note" })).not.toBeInTheDocument();
     home.unmount();
 
@@ -106,7 +107,7 @@ describe("pages and navigation", () => {
     renderShell("/admin/audit");
     expect(screen.getByRole("heading", { level: 1, name: "Audit" })).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Admin" })).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole("link", { name: "Audit" })).toHaveAttribute(
+    expect(within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole("link", { name: "Audit log" })).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -119,15 +120,12 @@ describe("pages and navigation", () => {
     expect(screen.getByRole("link", { name: "Go to home" })).toHaveAttribute("href", "/");
   });
 
-  it("collapses and expands a workspace group", async () => {
-    const user = userEvent.setup();
+  it("shows the active workspace's entries under its name, plus an All features link", () => {
     renderShell();
     const nav = within(screen.getByRole("navigation", { name: "Workspaces" }));
-    const header = nav.getByRole("button", { name: "Admin" });
-    expect(header).toHaveAttribute("aria-expanded", "true");
-    await user.click(header);
-    expect(header).toHaveAttribute("aria-expanded", "false");
-    expect(nav.queryByRole("link", { name: "Audit" })).not.toBeInTheDocument();
+    expect(nav.getByRole("list", { name: "Administration" })).toBeInTheDocument();
+    expect(nav.getByRole("link", { name: "Audit log" })).toHaveAttribute("href", "/admin/audit");
+    expect(nav.getByRole("link", { name: "All features" })).toHaveAttribute("href", "/features");
   });
 
   it("sets aria-pressed and data-density when compact view is toggled", async () => {
@@ -147,8 +145,8 @@ describe("command palette", () => {
     renderShell();
     await user.keyboard("{Control>}k{/Control}");
     await user.keyboard("{ArrowDown}");
-    const input = screen.getByRole("combobox");
-    const second = screen.getAllByRole("option")[1];
+    const input = screen.getByRole("combobox", { name: "Find a page" });
+    const second = within(screen.getByRole("dialog", { name: "Search" })).getAllByRole("option")[1];
     expect(input).toHaveAttribute("aria-activedescendant", second.id);
     expect(second).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Enter}");
@@ -161,7 +159,7 @@ describe("command palette", () => {
     renderShell();
     await user.keyboard("{Control>}k{/Control}");
     await user.keyboard("{ArrowUp}");
-    const options = screen.getAllByRole("option");
+    const options = within(screen.getByRole("dialog", { name: "Search" })).getAllByRole("option");
     expect(options[options.length - 1]).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{ArrowDown}");
     expect(options[0]).toHaveAttribute("aria-selected", "true");
@@ -171,10 +169,10 @@ describe("command palette", () => {
     const user = userEvent.setup();
     renderShell();
     await user.keyboard("{Control>}k{/Control}");
-    expect(within(screen.getByRole("group", { name: "Admin" })).getByRole("option", { name: /Audit/ })).toBeInTheDocument();
-    await user.type(screen.getByRole("combobox"), "zzz");
+    expect(within(screen.getByRole("group", { name: "Admin" })).getByRole("option", { name: /Audit log/ })).toBeInTheDocument();
+    await user.type(screen.getByRole("combobox", { name: "Find a page" }), "zzz");
     expect(screen.getByText(/No pages match/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("combobox", { name: "Find a page" })).toHaveAttribute("aria-expanded", "false");
     await user.keyboard("{Enter}");
     expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
@@ -203,12 +201,12 @@ describe("command palette", () => {
     const user = userEvent.setup();
     renderShell();
     await user.keyboard("{Control>}k{/Control}");
-    expect(screen.getByRole("option", { name: "Audit, Admin" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Audit log, Admin" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Home, General" })).toBeInTheDocument();
-    await user.type(screen.getByRole("combobox"), "zzz");
+    await user.type(screen.getByRole("combobox", { name: "Find a page" }), "zzz");
     const listbox = document.getElementById("palette-listbox");
     expect(listbox).toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toHaveAttribute("aria-controls", "palette-listbox");
+    expect(screen.getByRole("combobox", { name: "Find a page" })).toHaveAttribute("aria-controls", "palette-listbox");
     expect(listbox).toBeEmptyDOMElement();
     expect(listbox?.contains(screen.getByText(/No pages match/))).toBe(false);
   });
@@ -333,7 +331,7 @@ describe("notes page", () => {
     await user.click(screen.getByRole("button", { name: "Save Note" }));
     expect(within(screen.getByRole("table", { name: "Note list" })).getByRole("button", { name: "Kickoff" })).toBeInTheDocument();
     expect(screen.getAllByRole("status").some((node) => node.textContent === "Note saved")).toBe(true);
-    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+    expect(within(screen.getByRole("main")).getAllByRole("heading", { level: 2 })).toHaveLength(1);
   });
 });
 
@@ -462,7 +460,7 @@ describe("duty gating", () => {
       description: "Journals and balances.",
       routes: [],
       nav: [
-        { label: "Journals", to: "/ledger/journals", duty: "ledger.journal.read" },
+        { label: "Journal batches", to: "/ledger/journal-batches", duty: "ledger.journal.read" },
         { label: "Open items", to: "/ledger/open-items" },
       ],
     },
@@ -471,7 +469,7 @@ describe("duty gating", () => {
       title: "Treasury",
       description: "Cash and loans.",
       routes: [],
-      nav: [{ label: "Loans", to: "/treasury/loans", duty: "treasury.view" }],
+      nav: [{ label: "Checks", to: "/treasury/checks", duty: "treasury.view" }],
     },
   ];
 
@@ -480,9 +478,9 @@ describe("duty gating", () => {
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route element={<Shell modules={gated} duties={duties} />}>
-            <Route path="/" element={<HomePage modules={gated} />} />
-            <Route path="/ledger/journals" element={<p>Journals page</p>} />
-            <Route path="/ledger/journals/:id" element={<p>Journal detail page</p>} />
+            <Route path="/" element={<HomePage />} />
+            <Route path="/ledger/journal-batches" element={<p>Journals page</p>} />
+            <Route path="/ledger/journal-batches/:id" element={<p>Journal detail page</p>} />
             <Route path="/ledger/open-items" element={<p>Open items page</p>} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
@@ -494,20 +492,20 @@ describe("duty gating", () => {
   it("hides gated entries and empty workspaces from the sidebar and home cards, keeping ungated entries", () => {
     renderGated("/", []);
     const nav = screen.getByRole("navigation", { name: "Workspaces" });
-    expect(within(nav).queryByRole("link", { name: "Journals" })).not.toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "Open items" })).toBeInTheDocument();
-    expect(within(nav).queryByRole("button", { name: /Treasury/ })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Post a journal" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Review open items" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Print and track checks" })).not.toBeInTheDocument();
     const cards = screen.getByRole("list", { name: "Workspaces" });
-    expect(within(cards).queryByText("Treasury")).not.toBeInTheDocument();
-    expect(within(cards).queryByRole("link", { name: "Journals" })).not.toBeInTheDocument();
-    expect(within(cards).getByRole("link", { name: "Open items" })).toBeInTheDocument();
+    expect(within(cards).queryByRole("link", { name: "Post a journal" })).not.toBeInTheDocument();
+    expect(within(cards).queryByRole("link", { name: "Print and track checks" })).not.toBeInTheDocument();
+    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(2);
   });
 
   it("shows gated entries to a principal holding the duty", () => {
     renderGated("/", ["ledger.journal.read", "treasury.view"]);
     const nav = screen.getByRole("navigation", { name: "Workspaces" });
-    expect(within(nav).getByRole("link", { name: "Journals" })).toBeInTheDocument();
-    expect(within(nav).getByRole("button", { name: /Treasury/ })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Post a journal" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Print and track checks" })).toBeInTheDocument();
   });
 
   it("leaves hidden entries out of search", async () => {
@@ -515,24 +513,24 @@ describe("duty gating", () => {
     renderGated("/", []);
     await user.click(screen.getByRole("button", { name: "Search" }));
     const dialog = screen.getByRole("dialog", { name: "Search" });
-    expect(within(dialog).queryByText("Journals")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("Open items")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Post a journal")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Review open items")).toBeInTheDocument();
   });
 
   it("renders the not-available page, not the route, for a direct URL to a gated page or its detail route", () => {
-    const first = renderGated("/ledger/journals", []);
+    const first = renderGated("/ledger/journal-batches", []);
     expect(screen.getByRole("heading", { name: "This page isn't available to you" })).toBeInTheDocument();
     expect(screen.queryByText("Journals page")).not.toBeInTheDocument();
     expect(document.title).toBe("Page not available · Passage");
     expect(pageViolations(first.container)).toEqual([]);
     first.unmount();
-    renderGated("/ledger/journals/42", []);
+    renderGated("/ledger/journal-batches/42", []);
     expect(screen.getByRole("heading", { name: "This page isn't available to you" })).toBeInTheDocument();
     expect(screen.queryByText("Journal detail page")).not.toBeInTheDocument();
   });
 
   it("serves the gated route to a principal holding the duty and ungated routes to everyone", () => {
-    const first = renderGated("/ledger/journals/42", ["ledger.journal.read"]);
+    const first = renderGated("/ledger/journal-batches/42", ["ledger.journal.read"]);
     expect(screen.getByText("Journal detail page")).toBeInTheDocument();
     first.unmount();
     renderGated("/ledger/open-items", []);

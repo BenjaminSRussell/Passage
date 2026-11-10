@@ -4,6 +4,7 @@ import type { Problem } from "./api/client";
 import { sentence, statusTone } from "./format";
 import styles from "./pages.module.css";
 import type { PagedState } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** A status as a toned badge with sentence-case text. */
 export function State({ value }: { value: string }) {
@@ -23,7 +24,7 @@ export function Entry({ term, children, mono }: { term: string; children: ReactN
 export function Failure({ title, problem, retry }: { title: string; problem: Problem; retry?: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={retry ? <Button size="sm" onClick={retry}>Try again</Button> : undefined}>
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }

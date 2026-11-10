@@ -37,6 +37,7 @@ import {
 import { elapsedSince, formatDateTime, formatMinutes, formatOffset, overrunTone, parsePostings, toneLabel, type Tone } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const EXPORT_FILES: { file: ExportFile; label: string }[] = [
   { file: "runbook.csv", label: "Download runbook (CSV)" },
@@ -277,19 +278,19 @@ export function CutoverPlanDetailPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the plan" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       {failure ? (
         <Alert tone="danger" title="The change was not saved" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {plan ? (
         <>
           {plan.abortDue ? (
             <Alert tone="danger" title="Abort deadline passed">
-              Go/no-go items are still open after T+{plan.abortOffsetMin / 60}h. Confirm the rollback below (BR-49.9).
+              Go/no-go items are still open after T+{plan.abortOffsetMin / 60}h. Confirm the rollback below.
             </Alert>
           ) : plan.abortWarning ? (
             <Alert tone="warning" title="Abort deadline approaching">
@@ -390,7 +391,7 @@ export function CutoverPlanDetailPage() {
         <Card title="Rollback plan">
           <div className={styles.stack}>
             <p className={styles.note}>
-              Generated for this cutover (FR-49.9). If go/no-go items are still open at the abort deadline ({formatOffset(plan.abortOffsetMin)}), the
+              Generated for this cutover. If go/no-go items are still open at the abort deadline ({formatOffset(plan.abortOffsetMin)}), the
               cutover manager decides on the rollback and these steps follow.
             </p>
             <DataTable label="Rollback plan" columns={rollbackColumns} rows={plan.rollbackSteps} getRowKey={(row) => String(row.seq)} />

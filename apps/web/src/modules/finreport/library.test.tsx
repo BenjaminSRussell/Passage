@@ -101,7 +101,7 @@ describe("LibraryPage", () => {
     };
     renderAt("/finreport/library");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("You need the view duty. (AUTH-0003)");
+    expect(alert).toHaveTextContent("You need the view duty.");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("BS-STD v2")).toBeInTheDocument();

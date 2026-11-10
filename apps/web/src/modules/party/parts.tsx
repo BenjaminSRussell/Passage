@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Alert, Button } from "../../shell/ui";
 import type { Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { lookupProblem, ProblemMessage } from "../../shell/errors";
 
 const KNOWN: Record<string, string> = {
   "PTY-PARTY-NOT-FOUND": "No party exists with that id in this tenant.",
@@ -21,9 +22,12 @@ const KNOWN: Record<string, string> = {
   "AUTH-0003": "You don't have access to do this.",
 };
 
+/** Plain wording for a problem; `ProblemMessage` keeps its code under Details. */
 export function problemText(problem: Problem): string {
   const known = KNOWN[problem.code];
-  if (known) return `${known} (${problem.code})`;
+  if (known) return known;
+  const entry = lookupProblem(problem.code);
+  if (entry) return `${entry.message} ${entry.action}`;
   const lead =
     problem.status === 403
       ? "You don't have access to do this. "
@@ -32,7 +36,7 @@ export function problemText(problem: Problem): string {
         : problem.status === 409
           ? "This conflicts with the current state of the record; reload and try again. "
           : "";
-  return `${lead}${problem.message} (${problem.code})`;
+  return `${lead}${problem.message}`;
 }
 
 export function ProblemAlert({ problem, title, retry }: { problem: Problem; title: string; retry?: () => void }) {
@@ -49,7 +53,7 @@ export function ProblemAlert({ problem, title, retry }: { problem: Problem; titl
         ) : undefined
       }
     >
-      {problemText(problem)}
+      <ProblemMessage problem={problem} message={problemText(problem)} />
     </Alert>
   );
 }

@@ -5,6 +5,7 @@ import { listLoads, LOAD_STATUSES, type Load, type LoadStatus } from "./api/clie
 import { fixed, formatDateTime, shortId, stateTone, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "12,400 / 20,000 kg": used against the load's capacity. */
 const used = (value: string, max: string, unit: string) => `${fixed(value, 0)} / ${fixed(max, 0)} ${unit}`;
@@ -54,7 +55,7 @@ export function LoadsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load loads" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

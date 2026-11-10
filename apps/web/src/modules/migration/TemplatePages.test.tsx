@@ -113,7 +113,7 @@ describe("data templates list", () => {
   it("shows the error state and retries", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
     renderAt("/migration/templates");
-    expect(await screen.findByText(/missing duty \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty/)).toBeInTheDocument();
     handler = () => json(200, { items: [template] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Data templates" })).toHaveTextContent("Retail defaults");
@@ -147,7 +147,7 @@ describe("publish data template", () => {
     renderAt("/migration/templates/new");
     fill();
     fireEvent.click(screen.getByRole("button", { name: "Publish template" }));
-    expect(await screen.findByText(/publish a higher version \(MIG-TEMPLATE-VERSION-EXISTS\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/publish a higher version/)).toBeInTheDocument();
   });
 });
 
@@ -163,7 +163,7 @@ describe("data template detail", () => {
   it("shows a not-found error", async () => {
     handler = () => json(404, { code: "AUTH-0404", detail: "data template not found" });
     renderAt(`/migration/templates/${TEMPLATE}`);
-    expect(await screen.findByText(/data template not found \(AUTH-0404\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/data template not found/)).toBeInTheDocument();
   });
 });
 
@@ -242,7 +242,7 @@ describe("runs with templates", () => {
   it("shows a lineage error and the empty state", async () => {
     handler = (url) => (url.pathname.endsWith("/ledger") ? json(500, { code: "COM-0500", detail: "boom" }) : json(200, run));
     renderAt(`/migration/runs/${RUN}`);
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
     handler = (url) => (url.pathname.endsWith("/ledger") ? json(200, { items: [] }) : json(200, run));
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No rows used a template default")).toBeInTheDocument();
