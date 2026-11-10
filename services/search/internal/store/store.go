@@ -27,6 +27,8 @@ const (
 	TypeSalesOrder      = "sales_order"
 	TypePackingSlip     = "packing_slip"
 	TypeCustomerInvoice = "customer_invoice"
+	TypeProductionOrder = "production_order"
+	TypeWorker          = "worker"
 
 	wordSimilarityThreshold = "0.4"
 )
@@ -34,9 +36,9 @@ const (
 var errNoPrincipal = errors.New("search: no principal in context")
 
 // LegalEntityScoped reports whether records of the type belong to one legal
-// entity (every type except party and product).
+// entity (every type except the tenant-wide party, product and worker).
 func LegalEntityScoped(recordType string) bool {
-	return recordType != TypeParty && recordType != TypeProduct
+	return recordType != TypeParty && recordType != TypeProduct && recordType != TypeWorker
 }
 
 type Record struct {

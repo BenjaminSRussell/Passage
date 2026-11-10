@@ -186,13 +186,40 @@ func TestStore_CreateAndIdempotency(t *testing.T) {
 		TenantID string `json:"tenantid"`
 		Actor    string `json:"actor"`
 		Data     struct {
-			OrderNumber string `json:"orderNumber"`
-			Quantity    string `json:"quantity"`
+			OrderNumber   string `json:"orderNumber"`
+			LegalEntityID string `json:"legalEntityId"`
+			Status        string `json:"status"`
+			Quantity      string `json:"quantity"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(payload, &evt); err != nil || evt.TenantID != testkit.TenantID(21) || evt.Actor != "planner-1" ||
-		evt.Data.OrderNumber != "PO-000001" || evt.Data.Quantity != "100" {
+		evt.Data.OrderNumber != "PO-000001" || evt.Data.Quantity != "100" || evt.Data.LegalEntityID != in.LegalEntityID || evt.Data.Status != string(domain.Created) {
 		t.Fatalf("event payload: %s", payload)
+	}
+}
+
+// The search index (#506) keeps a production order's status from
+// order.statuschanged, so every status event names the order and its legal entity.
+func TestStore_StatusChangedNamesTheOrderAndItsLegalEntity(t *testing.T) {
+	pool, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(21))
+	in := sampleOrder(t, "key-status-search", ids.New())
+	allProfile(t, s, ctx, in.LegalEntityID)
+	o, _, err := s.CreateOrder(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &stepper{t: t, s: s, ctx: ctx, orderID: o.ID, version: o.Version}
+	st.must(domain.CmdEstimate, nil)
+	var payload json.RawMessage
+	if err := pool.QueryRow(context.Background(), `select payload from outbox where aggregate_id = $1 and type = $2`, o.ID, prodevents.OrderStatusChanged).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var evt struct {
+		Data prodevents.OrderStatusChangedData `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &evt); err != nil || evt.Data.OrderNumber != o.OrderNumber || evt.Data.LegalEntityID != in.LegalEntityID || evt.Data.To != string(domain.Estimated) {
+		t.Fatalf("statuschanged payload: %s", payload)
 	}
 }
 

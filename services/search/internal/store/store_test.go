@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -371,7 +373,7 @@ func TestIndexedQueriesAvoidSequentialScans(t *testing.T) {
 func TestDocumentTypesAreScopedToTheCallersLegalEntities(t *testing.T) {
 	st := setup(t)
 	tid := testkit.TenantID(1)
-	types := []string{TypeReceipt, TypeVendorInvoice, TypeSalesOrder, TypePackingSlip, TypeCustomerInvoice}
+	types := []string{TypeReceipt, TypeVendorInvoice, TypeSalesOrder, TypePackingSlip, TypeCustomerInvoice, TypeProductionOrder}
 	for i, typ := range types {
 		for _, le := range []string{entityA, entityB} {
 			r := Record{Type: typ, ID: ids.New(), LegalEntityID: le, Number: fmt.Sprintf("DOC-%d-%s", i, le[len(le)-1:]), Title: "doc", Status: "POSTED", At: t0}
@@ -387,6 +389,65 @@ func TestDocumentTypesAreScopedToTheCallersLegalEntities(t *testing.T) {
 	for _, h := range hits {
 		if h.LegalEntityID != entityA {
 			t.Errorf("entity A sees %s of %s", h.Number, h.LegalEntityID)
+		}
+	}
+}
+
+// A worker is tenant-wide like HR's worker list: every legal entity of the
+// tenant finds it, another tenant does not.
+func TestWorkersAreTenantWide(t *testing.T) {
+	st := setup(t)
+	if LegalEntityScoped(TypeWorker) {
+		t.Fatal("workers must be tenant-wide")
+	}
+	r := Record{Type: TypeWorker, ID: ids.New(), Number: "WRK-000012", Title: "WRK-000012", Subtitle: "employee", At: t0}
+	if _, err := st.Apply(asScope(testkit.TenantID(1), ""), r); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want int
+	}{
+		"entity A":     {asScope(testkit.TenantID(1), entityA), 1},
+		"entity B":     {asScope(testkit.TenantID(1), entityB), 1},
+		"other tenant": {asScope(testkit.TenantID(2), entityA), 0},
+	} {
+		hits, err := st.Search(tc.ctx, Query{Text: "wrk-0000", Types: []string{TypeWorker}, Limit: 5})
+		if err != nil || len(hits) != tc.want {
+			t.Errorf("%s: %v err %v, want %d", name, numbers(hits), err, tc.want)
+		}
+	}
+}
+
+// testdata/matching.json is the shared statement of what a query finds. The
+// web app's browser-side matcher (apps/web/src/shell/search/match.ts), which
+// lists use to filter loaded rows, runs the same cases, so the palette and a
+// list agree on a query.
+func TestSearchMatchesTheSharedCases(t *testing.T) {
+	raw, err := os.ReadFile("testdata/matching.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Query, Number, Title, Why string
+		Match                     bool
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
+		t.Fatalf("matching.json: %d cases, err %v", len(cases), err)
+	}
+	st := setup(t)
+	for i, tc := range cases {
+		// One tenant per case, so each query sees its own record only.
+		ctx := asScope(testkit.TenantID(100+i), entityA)
+		if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: ids.New(), Number: tc.Number, Title: tc.Title, At: t0}); err != nil {
+			t.Fatal(err)
+		}
+		hits, err := st.Search(ctx, Query{Text: tc.Query, Types: []string{TypeParty}, Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(hits) == 1; got != tc.Match {
+			t.Errorf("%q against %q %q: found %v, want %v (%s)", tc.Query, tc.Number, tc.Title, got, tc.Match, tc.Why)
 		}
 	}
 }

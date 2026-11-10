@@ -3,6 +3,7 @@
 // area file that serves one of these paths more specifically wins.
 import type { InboxPage } from "../../shell/inbox/inbox";
 import { CUSTOMERS, ITEMS, LEGAL_ENTITY, SITES, VENDORS, WAREHOUSES, WORKERS, type Item, type Party } from "../company";
+import { rankBySearch } from "../../shell/search/match";
 import { reply, route } from "../backend";
 import { at, day } from "../store";
 
@@ -170,6 +171,8 @@ route("POST", "/api/v1/org/demo-company:reset", () => ({ package: "demo-manufact
 
 // Record search (GET /api/v1/search): customers, vendors and products from the company data, and the documents
 // the other areas hold, read back through their own list routes so the numbers always agree with those screens.
+// Matching and order are the search service's own (shell/search/match.ts): a number by its start, a name by what it
+// holds or a near miss. Workers are left out: the demo has no sample data for the worker page a result would open.
 interface SearchHit {
   type: string;
   id: string;
@@ -193,12 +196,13 @@ async function listed(path: string): Promise<Record<string, unknown>[]> {
 const str = (row: Record<string, unknown>, key: string): string => (typeof row[key] === "string" ? (row[key] as string) : "");
 
 async function documents(): Promise<SearchHit[]> {
-  const [pos, receipts, orders, slips, invoices] = await Promise.all([
+  const [pos, receipts, orders, slips, invoices, production] = await Promise.all([
     listed("/api/v1/procurement/purchase-orders"),
     listed("/api/v1/receiving/receipts"),
     listed("/api/v1/sales/orders"),
     listed("/api/v1/fulfillment/packing-slips"),
     listed("/api/v1/billing/invoices"),
+    listed("/api/v1/production/orders"),
   ]);
   const doc = (type: string, row: Record<string, unknown>, number: string, link: string, status: string, subtitle = ""): SearchHit => ({
     type,
@@ -215,6 +219,8 @@ async function documents(): Promise<SearchHit[]> {
     ...orders.map((r) => doc("sales_order", r, str(r, "orderNumber"), "/sales/orders", str(r, "status"))),
     ...slips.map((r) => doc("packing_slip", r, str(r, "packingSlipNumber"), "/fulfillment/packing-slips", str(r, "status"), str(r, "postingDate"))),
     ...invoices.map((r) => doc("customer_invoice", r, str(r, "number"), "/billing/invoices", str(r, "status"))),
+    // Production statuses are CamelCase (ReportedAsFinished); the service indexes them as REPORTED_AS_FINISHED.
+    ...production.map((r) => doc("production_order", r, str(r, "orderNumber"), "/production", str(r, "status").replace(/(?!^)([A-Z])/g, "_$1").toUpperCase())),
   ].filter((h) => h.number !== "" && h.id !== "");
 }
 
@@ -227,9 +233,5 @@ route("GET", "/api/v1/search", async ({ query }) => {
     ...ITEMS.map((i) => ({ type: "product", id: i.id, number: i.number, title: i.name, status: "active", link: `/product/${encodeURIComponent(i.number)}` })),
   ];
   const all = [...masters, ...(await documents())].filter((h) => wanted.size === 0 || wanted.has(h.type));
-  const rank = (h: SearchHit) => (h.number.toLowerCase() === needle ? 0 : h.number.toLowerCase().startsWith(needle) ? 1 : 2);
-  const results = all
-    .filter((h) => h.number.toLowerCase().includes(needle) || h.title.toLowerCase().includes(needle))
-    .sort((a, b) => rank(a) - rank(b) || a.number.localeCompare(b.number));
-  return { results: limit(results, query) };
+  return { results: limit(rankBySearch(all, needle, (h) => ({ number: h.number, name: h.title })), query) };
 });
