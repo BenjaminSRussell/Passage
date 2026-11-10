@@ -1,4 +1,4 @@
-import styles from "./demo.module.css";
+import styles from "./DemoBanner.module.css";
 
 /** Fixed notice on every page of the Pages demo build. */
 export function DemoBanner() {
