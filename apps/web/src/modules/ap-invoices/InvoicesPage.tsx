@@ -1,35 +1,63 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ProblemMessage } from "../../shell/errors";
-import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { EntityName } from "../../shell/lookup/EntityName";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, entityText, FormField, ListPage, Select, type DataTableColumn, type ListColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { ApiError, CAPTURE_STATUSES, fetchCaptures, fetchInvoices, INVOICE_STATUSES, type Capture, type CaptureStatus, type Invoice, type InvoiceStatus } from "./api/client";
 import { captureStatusLabel, captureStatusTone, invoiceStatusLabel, invoiceStatusTone, reviewReasonLabel } from "./parts";
-import { dueDateText, useOpenItemsForInvoices, type OpenItemLookup } from "./payment";
+import { dueDateText, useOpenItemsForInvoices } from "./payment";
 
-type StatusFilter = InvoiceStatus | CaptureStatus | "";
+type InvoiceRow = Invoice & { dueText: string };
 
-interface Filters {
-  vendorId: string;
-  status: StatusFilter;
-}
+const columns: ListColumn<InvoiceRow>[] = [
+  { key: "invoiceNumber", header: "Invoice", render: (i) => <Link to={`/ap-invoices/${encodeURIComponent(i.id)}`}>{i.invoiceNumber}</Link> },
+  {
+    key: "vendorId",
+    header: "Vendor",
+    sortable: false,
+    render: (i) => <EntityName entity="vendor" id={i.vendorId} fallback="Unknown vendor" />,
+    csv: (i) => entityText("vendor", i.vendorId),
+  },
+  { key: "invoiceDate", header: "Invoice date" },
+  { key: "dueText", header: "Due date", render: (i) => i.dueText, csv: (i) => i.dueText },
+  { key: "total", header: "Amount", align: "end", render: (i) => `${i.total} ${i.currency}`, csv: (i) => i.total, csvWith: "currency" },
+  { key: "currency", header: "Currency", defaultHidden: true },
+  {
+    key: "status",
+    header: "Status",
+    render: (i) => <Badge tone={invoiceStatusTone[i.status]}>{invoiceStatusLabel[i.status]}</Badge>,
+    sortValue: (i) => invoiceStatusLabel[i.status],
+    csv: (i) => invoiceStatusLabel[i.status],
+  },
+];
 
-const isCaptureStatus = (s: StatusFilter): s is CaptureStatus => (CAPTURE_STATUSES as readonly string[]).includes(s);
-const isInvoiceStatus = (s: StatusFilter): s is InvoiceStatus => (INVOICE_STATUSES as readonly string[]).includes(s);
-const statusLabel = (s: InvoiceStatus | CaptureStatus) => (isCaptureStatus(s) ? captureStatusLabel[s] : invoiceStatusLabel[s]);
+const filters: ListFilterDef[] = [
+  { kind: "entity", key: "vendorId", label: "Vendor", entity: "vendor" },
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: INVOICE_STATUSES.map((s) => ({ value: s, label: invoiceStatusLabel[s] })) },
+];
 
-function invoiceColumns(lookup: OpenItemLookup): DataTableColumn<Invoice>[] {
-  return [
-    { key: "invoiceNumber", header: "Invoice", render: (i) => <Link to={`/ap-invoices/${encodeURIComponent(i.id)}`}>{i.invoiceNumber}</Link> },
-    { key: "vendorId", header: "Vendor", render: (i) => <EntityName entity="vendor" id={i.vendorId} fallback="Unknown vendor" /> },
-    { key: "invoiceDate", header: "Invoice date" },
-    { key: "dueDate", header: "Due date", render: (i) => dueDateText(i, lookup) },
-    { key: "total", header: "Amount", align: "end", render: (i) => `${i.total} ${i.currency}` },
-    { key: "status", header: "Status", render: (i) => <Badge tone={invoiceStatusTone[i.status]}>{invoiceStatusLabel[i.status]}</Badge> },
-  ];
+function useInvoiceRows(query: ListQuery): ListData<InvoiceRow> {
+  const { vendorId, status } = query.filters;
+  const result = useInfiniteQuery({
+    queryKey: ["ap-invoices", "invoices", { vendorId: vendorId ?? "", status: status ?? "" }],
+    queryFn: ({ pageParam }) => fetchInvoices({ vendorId: vendorId || undefined, status: (status as InvoiceStatus | undefined) || undefined, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+  });
+  const items = result.data?.pages.flatMap((p) => p.items) ?? [];
+  const lookup = useOpenItemsForInvoices(items);
+  return {
+    rows: items.map((i) => ({ ...i, dueText: dueDateText(i, lookup) })),
+    loading: result.isPending,
+    loadingMore: result.isFetchingNextPage,
+    error: result.isError ? result.error : undefined,
+    forbidden: result.error instanceof ApiError && result.error.status === 403,
+    hasMore: Boolean(result.hasNextPage),
+    loadMore: () => void result.fetchNextPage(),
+    retry: () => void result.refetch(),
+  };
 }
 
 const captureColumns: DataTableColumn<Capture>[] = [
@@ -50,135 +78,79 @@ const captureColumns: DataTableColumn<Capture>[] = [
   },
 ];
 
-export function InvoicesPage() {
-  const [draft, setDraft] = useState<Filters>({ vendorId: "", status: "" });
-  const [applied, setApplied] = useState<Filters>(draft);
-  const showInvoices = applied.status === "" || isInvoiceStatus(applied.status);
-  const showCaptures = applied.vendorId === "" && (applied.status === "" || isCaptureStatus(applied.status));
-
+function CapturedDocuments() {
+  const [status, setStatus] = useState<CaptureStatus | "">("");
   const result = useInfiniteQuery({
-    queryKey: ["ap-invoices", "invoices", applied],
-    queryFn: ({ pageParam }) => fetchInvoices({ vendorId: applied.vendorId || undefined, status: isInvoiceStatus(applied.status) ? applied.status : undefined, cursor: pageParam }),
+    queryKey: ["ap-invoices", "captures", status],
+    queryFn: ({ pageParam }) => fetchCaptures({ status: status || undefined, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor,
-    enabled: showInvoices,
   });
-  const captures = useInfiniteQuery({
-    queryKey: ["ap-invoices", "captures", applied.status],
-    queryFn: ({ pageParam }) => fetchCaptures({ status: isCaptureStatus(applied.status) ? applied.status : undefined, cursor: pageParam }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor,
-    enabled: showCaptures,
-  });
-  const items = result.data?.pages.flatMap((p) => p.items) ?? [];
-  const captured = captures.data?.pages.flatMap((p) => p.items) ?? [];
-  const lookup = useOpenItemsForInvoices(items);
+  const captured = result.data?.pages.flatMap((p) => p.items) ?? [];
   const forbidden = result.error instanceof ApiError && result.error.status === 403;
-  const capturesForbidden = captures.error instanceof ApiError && captures.error.status === 403;
+  if (forbidden || result.isPending || (!result.isError && status === "" && captured.length === 0)) return null;
+  return (
+    <Card title="Captured, not yet posted">
+      <p>These documents were read but posted nothing. Check them, then post them as vendor invoices.</p>
+      <FormField id="captured-status" label="Show captured documents" optional>
+        {(c) => (
+          <Select {...c} value={status} onChange={(e) => setStatus(e.target.value as CaptureStatus | "")}>
+            <option value="">All captured documents</option>
+            {CAPTURE_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {captureStatusLabel[s]}
+              </option>
+            ))}
+          </Select>
+        )}
+      </FormField>
+      {result.isError ? (
+        <Alert tone="warning" title="Could not load the captured invoices" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try loading captured invoices again</Button>}>
+          <ProblemMessage problem={result.error} />
+        </Alert>
+      ) : captured.length === 0 ? (
+        <EmptyState title="No captured invoices match this filter" description="Try a different status." action={<Button onClick={() => setStatus("")}>Show all captured documents</Button>} />
+      ) : (
+        <DataTable label="Captured vendor invoices" columns={captureColumns} rows={captured} getRowKey={(c) => c.id} />
+      )}
+      {result.hasNextPage ? (
+        <Button loading={result.isFetchingNextPage} onClick={() => void result.fetchNextPage()}>
+          Load more captured invoices
+        </Button>
+      ) : null}
+    </Card>
+  );
+}
 
-  const filtered = applied.vendorId !== "" || applied.status !== "";
-  const clearFilters = () => {
-    const none: Filters = { vendorId: "", status: "" };
-    setDraft(none);
-    setApplied(none);
-  };
-
-  function apply(event: FormEvent) {
-    event.preventDefault();
-    setApplied(draft);
-  }
-
+export function InvoicesPage() {
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="ap-invoices"
         title="Vendor invoices"
-        description="Vendor invoices that have been posted, held for audit or rejected after audit, and documents captured but not yet posted."
+        description="Vendor invoices that have been posted, held for audit or rejected after audit."
+        noun="vendor invoices"
+        singular="vendor invoice"
         actions={
           <Link className={buttonClassName("primary")} to="/ap-invoices/post">
             Post vendor invoice
           </Link>
         }
+        columns={columns}
+        filters={filters}
+        useRows={useInvoiceRows}
+        getRowKey={(i) => i.id}
+        empty={{
+          title: "No vendor invoices",
+          description: "Invoices appear here once they are posted against goods you have received.",
+          action: (
+            <Link className={buttonClassName("primary")} to="/ap-invoices/grir">
+              See goods waiting for an invoice
+            </Link>
+          ),
+        }}
       />
-      <form className={styles.filters} onSubmit={apply} noValidate aria-label="Filter vendor invoices">
-        <FormField id="invoices-vendor" label="Vendor" optional>
-          {(c) => <EntityLookup entity="vendor" {...c} value={draft.vendorId} onChange={(e) => setDraft({ ...draft, vendorId: e.target.value })} />}
-        </FormField>
-        <FormField id="invoices-status" label="Status" optional>
-          {(c) => (
-            <Select {...c} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as StatusFilter })}>
-              <option value="">All statuses</option>
-              {[...INVOICE_STATUSES, ...CAPTURE_STATUSES].map((s) => (
-                <option key={s} value={s}>
-                  {statusLabel(s)}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <Button type="submit">Apply filters</Button>
-      </form>
-      {!showInvoices ? null : result.isError ? (
-        <Alert
-          tone="danger"
-          title={forbidden ? "You can't view vendor invoices" : "Could not load the vendor invoices"}
-          live="alert"
-          action={forbidden ? undefined : <Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}
-        >
-          <ProblemMessage problem={result.error} />
-        </Alert>
-      ) : !result.isPending && items.length === 0 ? (
-        showCaptures && captured.length > 0 ? null : (
-          <EmptyState
-            title={filtered ? "No vendor invoices match these filters" : "No vendor invoices"}
-            description={filtered ? "Try a different vendor or status." : "Invoices appear here once they are posted against goods you have received."}
-            action={
-              filtered ? (
-                <Button onClick={clearFilters}>Clear filters</Button>
-              ) : (
-                <Link className={buttonClassName("primary")} to="/ap-invoices/grir">
-                  See goods waiting for an invoice
-                </Link>
-              )
-            }
-          />
-        )
-      ) : (
-        <DataTable label="Vendor invoices" columns={invoiceColumns(lookup)} rows={items} getRowKey={(i) => i.id} loading={result.isPending} />
-      )}
-      {showInvoices && result.hasNextPage ? (
-        <div className={styles.filters}>
-          <Button loading={result.isFetchingNextPage} onClick={() => void result.fetchNextPage()}>
-            Load more invoices
-          </Button>
-        </div>
-      ) : null}
-      {showCaptures && captures.isError && !capturesForbidden ? (
-        <Alert
-          tone="warning"
-          title="Could not load the captured invoices"
-          live="alert"
-          action={<Button size="sm" onClick={() => void captures.refetch()}>Try loading captured invoices again</Button>}
-        >
-          <ProblemMessage problem={captures.error} />
-        </Alert>
-      ) : null}
-      {showCaptures && captured.length > 0 ? (
-        <Card title="Captured, not yet posted">
-          <p>These documents were read but posted nothing. Check them, then post them as vendor invoices.</p>
-          <DataTable label="Captured vendor invoices" columns={captureColumns} rows={captured} getRowKey={(c) => c.id} />
-          {captures.hasNextPage ? (
-            <Button loading={captures.isFetchingNextPage} onClick={() => void captures.fetchNextPage()}>
-              Load more captured invoices
-            </Button>
-          ) : null}
-        </Card>
-      ) : null}
-      {!showInvoices && !showCaptures ? (
-        <EmptyState title="Captured invoices have no vendor yet" description="A captured document is not tied to a vendor until it is posted. Clear the vendor filter to see it." action={<Button onClick={clearFilters}>Clear filters</Button>} />
-      ) : null}
-      {!showInvoices && showCaptures && !captures.isPending && !captures.isError && captured.length === 0 ? (
-        <EmptyState title="No captured invoices match this filter" description="Try a different status." action={<Button onClick={clearFilters}>Clear filters</Button>} />
-      ) : null}
+      <CapturedDocuments />
     </div>
   );
 }

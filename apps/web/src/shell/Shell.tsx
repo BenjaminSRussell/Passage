@@ -5,12 +5,11 @@ import { CommandPalette, type PaletteEntry } from "./CommandPalette";
 import { copy } from "./copy";
 import { holdsDuty, requiredDuty, visibleModules } from "./dutyGate";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
-import { demoNote } from "./metadata";
 import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
 import { WorkContextProvider } from "./lookup/workContext";
 import { devDuties, devIdentity, PrincipalProvider } from "./principal";
-import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
+import { readDensity, writeDensity, type Density } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
 import { shellNav } from "./shellNav";
@@ -57,8 +56,8 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [toast, setToast] = useState("");
-  const [density, setDensity] = useState<Density>("comfortable");
-  const [personalization, setPersonalization] = useState<Personalization>({ views: [] });
+  const userId = identity ?? devIdentity();
+  const [density, setDensity] = useState<Density>(() => readDensity(userId));
   const searchRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -239,21 +238,15 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
     menuRef.current?.focus();
   }
 
-  function applySavedView() {
-    const view: SavedView = {
-      id: "default",
-      name: "Default",
-      entity: demoNote.id,
-      columns: demoNote.fields.map((f) => f.name),
-      density,
-    };
-    setPersonalization(applyView(saveView(personalization, view), view.id));
-    announce(copy.announce.savedViewApplied, true);
+  function toggleDensity() {
+    const next: Density = density === "compact" ? "comfortable" : "compact";
+    setDensity(next);
+    writeDensity(userId, next);
   }
 
   return (
     <PrincipalProvider duties={principalDuties}>
-      <WorkContextProvider identity={identity ?? devIdentity()} enabled={principalDuties.includes("org.read")}>
+      <WorkContextProvider identity={userId} enabled={principalDuties.includes("org.read")}>
       <WorkspaceNavProvider entries={navEntries} config={config}>
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
@@ -278,8 +271,7 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
               compact={density === "compact"}
               showContext={principalDuties.includes("org.read")}
               onOpenDrawer={() => setDrawerOpen(true)}
-              onApplyView={applySavedView}
-              onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+              onToggleCompact={toggleDensity}
             />
             {online ? null : (
               <div className={styles.banner}>

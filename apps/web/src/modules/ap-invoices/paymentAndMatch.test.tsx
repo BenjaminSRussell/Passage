@@ -159,37 +159,27 @@ describe("captured invoices on the list", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("filters to needs review and hides the posted invoices", async () => {
+  it("filters the captured documents on their own without touching the invoice list", async () => {
     backend({ captures: [capture(), capture({ id: "66666666-6666-4666-8666-666666666666", status: "CAPTURED", invoiceNumber: "CAP-8", reviewReasons: [] })] });
     renderAt("/ap-invoices", DUTIES);
     await screen.findByRole("table", { name: "Captured vendor invoices" });
 
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "NEEDS_REVIEW" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    fireEvent.change(screen.getByLabelText("Show captured documents"), { target: { value: "NEEDS_REVIEW" } });
 
-    await waitFor(() => expect(screen.queryByRole("table", { name: "Vendor invoices" })).toBeNull());
     const table = await screen.findByRole("table", { name: "Captured vendor invoices" });
     await waitFor(() => expect(within(table).queryByText("CAP-8")).toBeNull());
     expect(within(table).getByText("CAP-7")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Vendor invoices" })).toBeInTheDocument();
   });
 
-  it("says nothing matches when the captured filter finds none", async () => {
-    backend({ captures: [] });
-    renderAt("/ap-invoices", DUTIES);
-    await screen.findByRole("link", { name: "INV-1" });
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "CAPTURED" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("No captured invoices match this filter")).toBeInTheDocument();
-  });
-
-  it("shows an empty state, not a blank page, for a vendor with a captured status", async () => {
+  it("says nothing matches when the captured filter finds none and offers all documents again", async () => {
     backend({ captures: [capture()] });
     renderAt("/ap-invoices", DUTIES);
-    await screen.findByRole("link", { name: "INV-1" });
-    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "NEEDS_REVIEW" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Captured invoices have no vendor yet")).toBeInTheDocument();
+    await screen.findByRole("table", { name: "Captured vendor invoices" });
+    fireEvent.change(screen.getByLabelText("Show captured documents"), { target: { value: "CAPTURED" } });
+    expect(await screen.findByText("No captured invoices match this filter")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all captured documents" }));
+    expect(await screen.findByRole("table", { name: "Captured vendor invoices" })).toBeInTheDocument();
   });
 
   it("omits the section when there are none", async () => {

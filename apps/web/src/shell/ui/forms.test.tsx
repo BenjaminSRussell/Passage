@@ -116,7 +116,20 @@ function Baseline() {
   }, []);
   return (
     <>
-      <input aria-label="Field" value={value} onChange={(e) => setValue(e.target.value)} />
+      <button type="button">Sidebar</button>
+      <input aria-label="Outside" />
+      <form>
+        <input aria-label="Field" value={value} onChange={(e) => setValue(e.target.value)} />
+        <ul>
+          <li role="option" aria-selected="false" onClick={() => setValue("picked")}>
+            Pick me
+          </li>
+        </ul>
+        <button type="button" onClick={() => setValue("")}>
+          Remove line
+        </button>
+        <div role="combobox" aria-label="Lookup" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setValue("keyboard pick")} />
+      </form>
       <output>{dirty ? "dirty" : "clean"}</output>
     </>
   );
@@ -128,6 +141,44 @@ describe("form baseline", () => {
     await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
     expect(screen.getByRole("status")).toHaveTextContent("clean");
     fireEvent.change(screen.getByLabelText("Field"), { target: { value: "mine" } });
+    expect(screen.getByRole("status")).toHaveTextContent("dirty");
+  });
+
+  it("is not frozen by a key press, a click or typing outside the form before a late prefill", async () => {
+    const user = userEvent.setup();
+    render(<Baseline />);
+    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Sidebar" }));
+    await user.type(screen.getByLabelText("Outside"), "search");
+    await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
+    expect(screen.getByRole("status")).toHaveTextContent("clean");
+  });
+
+  it("counts a pick from a list inside the form as an edit", async () => {
+    const user = userEvent.setup();
+    render(<Baseline />);
+    await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
+    await user.click(screen.getByRole("option", { name: "Pick me" }));
+    expect(screen.getByRole("status")).toHaveTextContent("dirty");
+  });
+
+  it("counts removing a line with a button inside the form as an edit", async () => {
+    const user = userEvent.setup();
+    render(<Baseline />);
+    await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
+    await user.click(screen.getByRole("button", { name: "Remove line" }));
+    expect(screen.getByRole("status")).toHaveTextContent("dirty");
+  });
+
+  it("counts a keyboard pick as an edit but not Tab", async () => {
+    const user = userEvent.setup();
+    render(<Baseline />);
+    await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
+    screen.getByRole("combobox", { name: "Lookup" }).focus();
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("status")).toHaveTextContent("clean");
+    screen.getByRole("combobox", { name: "Lookup" }).focus();
+    await user.keyboard("{Enter}");
     expect(screen.getByRole("status")).toHaveTextContent("dirty");
   });
 });

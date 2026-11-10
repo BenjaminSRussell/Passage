@@ -366,6 +366,35 @@ describe("purchase orders", () => {
     expect(await screen.findByRole("heading", { name: "No purchase orders yet" })).toBeInTheDocument();
   });
 
+  it("drops loaded pages and the cursor when the filter changes, then when it is cleared", async () => {
+    const summary = (id: string, number: string) => ({
+      id, number, legalEntityId: LE, vendorId: VENDOR, currency: "USD", approvalStatus: "DRAFT", documentStatus: "OPEN", total: "10.00", lineCount: 1, rowVersion: 1, createdAt: "2026-10-26T10:00:00Z",
+    });
+    const fetchMock = stubFetch((url) => {
+      if (url.includes("approvalStatus=APPROVED")) return json({ items: [summary("c", "PO-C")] });
+      if (url.includes("cursor=next")) return json({ items: [summary("b", "PO-B")] });
+      return json({ items: [summary("a", "PO-A")], nextCursor: "next" });
+    });
+    renderAt("/purchasing/purchase-orders");
+    expect(await screen.findByText("PO-A")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more purchase orders" }));
+    expect(await screen.findByText("PO-B")).toBeInTheDocument();
+    expect(screen.getByText("PO-A")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Approval status"), { target: { value: "APPROVED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("PO-C")).toBeInTheDocument();
+    expect(screen.queryByText("PO-A")).toBeNull();
+    expect(screen.queryByText("PO-B")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load more purchase orders" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all filters" }));
+    expect(await screen.findByText("PO-A")).toBeInTheDocument();
+    expect(screen.queryByText("PO-B")).toBeNull();
+    expect(screen.queryByText("PO-C")).toBeNull();
+    expect(screen.getByRole("button", { name: "Load more purchase orders" })).toBeInTheDocument();
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls[urls.length - 1]).not.toContain("cursor=");
+  });
+
   it("creates an order with a trade-agreement-priced line and a charge", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(purchaseOrder, 201) : json(purchaseOrder)));
     const { router } = renderAt("/purchasing/purchase-orders/new");
