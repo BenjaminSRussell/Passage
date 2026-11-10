@@ -1252,10 +1252,18 @@ test_integration_hub_reaches_only_render_and_xref_record if {
 }
 
 test_migration_factory_grant_reaches_only_the_receivables_import if {
-	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
+	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
 	allowed("receivables.view", "GET", "/v1/receivables/open-item-imports")
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
+}
+
+test_opening_item_duties_are_service_only_and_cover_only_their_route if {
+	allowed("opening-item.import", "POST", "/v1/payables/opening-batches")
+	not allowed("opening-item.import", "GET", "/v1/payables/opening-batches")
+	allowed("opening-item.import.read", "GET", "/v1/payables/opening-batches")
+	not allowed("opening-item.import.read", "POST", "/v1/payables/opening-batches")
+	not allowed("opening-item.import", "POST", "/v1/payables/payment-proposals")
 }
 
 test_migration_loader_principal_holds_only_the_import_duties if {

@@ -95,7 +95,7 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},
 		"tax":    {"tax.withholding.calculate"},
-		"party":  {"party.vendor-bank.reveal"},
+		"party":  {"party.vendor-bank.reveal", "party.import.read"},
 	},
 	"close": {
 		"ledger": {"ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"},
@@ -203,6 +203,7 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"migration-factory": {
 		"receivables": {"receivables.import.write", "receivables.view"},
+		"payables":    {"opening-item.import", "opening-item.import.read"},
 		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
