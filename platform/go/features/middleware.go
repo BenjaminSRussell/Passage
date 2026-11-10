@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	CodeDisabled = "FEAT-0001"
-	DefaultTTL   = 30 * time.Second
-	maxTenants   = 10_000
+	CodeDisabled   = "FEAT-0001"
+	DefaultTTL     = 30 * time.Second
+	DefaultBackoff = 5 * time.Second
+	MaxTenants     = 10_000
 )
 
 type Source interface {
@@ -25,19 +26,28 @@ type Source interface {
 
 type cacheEntry struct {
 	state   map[string]bool
+	err     error
 	expires time.Time
 }
 
+type lookup struct {
+	done  chan struct{}
+	state map[string]bool
+	err   error
+}
+
 type Cache struct {
-	source  Source
-	ttl     time.Duration
-	now     func() time.Time
-	mu      sync.Mutex
-	entries map[string]cacheEntry
+	source   Source
+	ttl      time.Duration
+	backoff  time.Duration
+	now      func() time.Time
+	mu       sync.Mutex
+	entries  map[string]cacheEntry
+	inflight map[string]*lookup
 }
 
 func NewCache(source Source, ttl time.Duration) *Cache {
-	return &Cache{source: source, ttl: ttl, now: time.Now, entries: map[string]cacheEntry{}}
+	return &Cache{source: source, ttl: ttl, backoff: DefaultBackoff, now: time.Now, entries: map[string]cacheEntry{}, inflight: map[string]*lookup{}}
 }
 
 func (c *Cache) WithClock(now func() time.Time) *Cache {
@@ -45,28 +55,62 @@ func (c *Cache) WithClock(now func() time.Time) *Cache {
 	return c
 }
 
+func (c *Cache) WithBackoff(d time.Duration) *Cache {
+	c.backoff = d
+	return c
+}
+
 func (c *Cache) Enabled(ctx context.Context, tenantID string) (map[string]bool, error) {
 	c.mu.Lock()
-	entry, ok := c.entries[tenantID]
-	c.mu.Unlock()
-	if ok && c.now().Before(entry.expires) {
-		return entry.state, nil
+	entry, cached := c.entries[tenantID]
+	if cached && c.now().Before(entry.expires) {
+		c.mu.Unlock()
+		return entry.state, entry.err
 	}
-	state, err := c.source.Enabled(ctx, tenantID)
-	if err != nil {
-		if ok {
-			slog.WarnContext(ctx, "feature lookup failed; using the last known state", "err", err)
-			return entry.state, nil
+	if l, running := c.inflight[tenantID]; running {
+		c.mu.Unlock()
+		select {
+		case <-l.done:
+			return l.state, l.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-		return nil, err
 	}
-	c.mu.Lock()
-	if len(c.entries) >= maxTenants {
-		c.entries = map[string]cacheEntry{}
-	}
-	c.entries[tenantID] = cacheEntry{state: state, expires: c.now().Add(c.ttl)}
+	l := &lookup{done: make(chan struct{})}
+	c.inflight[tenantID] = l
 	c.mu.Unlock()
-	return state, nil
+
+	state, err := c.source.Enabled(context.WithoutCancel(ctx), tenantID)
+
+	c.mu.Lock()
+	switch {
+	case err == nil:
+		c.store(tenantID, cacheEntry{state: state, expires: c.now().Add(c.ttl)})
+	case cached && entry.state != nil:
+		slog.WarnContext(ctx, "feature lookup failed; using the last known state", "err", err)
+		state, err = entry.state, nil
+		c.store(tenantID, cacheEntry{state: state, expires: c.now().Add(c.backoff)})
+	default:
+		c.store(tenantID, cacheEntry{err: err, expires: c.now().Add(c.backoff)})
+	}
+	delete(c.inflight, tenantID)
+	l.state, l.err = state, err
+	c.mu.Unlock()
+	close(l.done)
+	return state, err
+}
+
+func (c *Cache) store(tenantID string, e cacheEntry) {
+	if _, present := c.entries[tenantID]; !present && len(c.entries) >= MaxTenants {
+		oldest, first := "", true
+		for k, v := range c.entries {
+			if first || v.expires.Before(c.entries[oldest].expires) {
+				oldest, first = k, false
+			}
+		}
+		delete(c.entries, oldest)
+	}
+	c.entries[tenantID] = e
 }
 
 func Require(source Source, key string) func(http.Handler) http.Handler {

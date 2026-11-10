@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -82,6 +83,15 @@ func (a *API) WithReauth(r Reauthenticator) *API {
 	return a
 }
 
+type dutyFirstRouter struct {
+	chi.Router
+	gate func(http.Handler) http.Handler
+}
+
+func (g dutyFirstRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
+	return g.Router.With(append(slices.Clone(middlewares), g.gate)...)
+}
+
 func (a *API) WithFeatureGate(gate func(http.Handler) http.Handler) *API {
 	a.gate = gate
 	return a
@@ -95,11 +105,11 @@ func (a *API) WithClock(now func() time.Time) *API {
 
 // Register mounts every route on r. /healthz comes from httpx.NewRouter.
 func (a *API) Register(r chi.Router) {
+	r.Get("/readyz", a.ready)
 	if a.gate != nil {
-		r = r.With(a.gate)
+		r = dutyFirstRouter{Router: r, gate: a.gate}
 	}
 	read := authz.RequireDuty(DutyRead)
-	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(DutyFormulaWrite)).Post("/v1/production/formulas", a.createFormula)
 	r.With(read).Get("/v1/production/formulas", a.listFormulas)
 	r.With(read).Get("/v1/production/formulas/{id}", a.getFormula)

@@ -3,13 +3,12 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
@@ -20,16 +19,24 @@ const (
 	featuresPath      = "/v1/tenant/features"
 )
 
+const (
+	identityAudience = "identity"
+	DutyView         = "identity.feature.view"
+)
+
+var ErrUnsigned = errors.New("features: reading a tenant's features needs a service signing key")
+
 type HTTPSource struct {
 	baseURL string
 	client  *http.Client
+	signer  *tenant.ServiceSigner
 }
 
-func NewHTTPSource(baseURL string, client *http.Client) *HTTPSource {
+func NewHTTPSource(baseURL string, client *http.Client, signer *tenant.ServiceSigner) *HTTPSource {
 	if client == nil {
 		client = &http.Client{Timeout: httpSourceTimeout}
 	}
-	return &HTTPSource{baseURL: strings.TrimRight(baseURL, "/"), client: client}
+	return &HTTPSource{baseURL: strings.TrimRight(baseURL, "/"), client: client, signer: signer}
 }
 
 func (s *HTTPSource) Enabled(ctx context.Context, tenantID string) (map[string]bool, error) {
@@ -37,12 +44,16 @@ func (s *HTTPSource) Enabled(ctx context.Context, tenantID string) (map[string]b
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set(tenant.HeaderTenant, tenantID)
-	if p, ok := tenant.FromContext(ctx); ok && p.UserID != "" {
-		req.Header.Set(tenant.HeaderUser, p.UserID)
+	p, ok := tenant.FromContext(ctx)
+	if !ok || p.TenantID != tenantID {
+		return nil, errors.New("features: no principal for the tenant being read")
 	}
-	if id := middleware.GetReqID(ctx); id != "" {
-		req.Header.Set(middleware.RequestIDHeader, id)
+	signed, err := s.signer.ApplyDuties(req, p, identityAudience, "", []string{DutyView})
+	if err != nil {
+		return nil, err
+	}
+	if !signed {
+		return nil, ErrUnsigned
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {

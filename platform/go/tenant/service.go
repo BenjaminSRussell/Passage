@@ -213,6 +213,9 @@ var serviceGrants = map[string]map[string][]string{
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},
 	},
+	"processmfg": {
+		"identity": {"identity.feature.view"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.
@@ -233,7 +236,11 @@ func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
 // (a party merge moves roles in every entity). A token carrying one names no
 // legal entity and carries no other duty, and every other token names one
 // entity, so a tenant-level duty never rides in an entity-scoped token (#450).
-var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}}
+var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}}
+
+// tenantReadDuties are tenant-level duties that only read tenant settings, so any signed-in user's service call may
+// carry them; the rest of tenantLevelDuties need a tenant administrator.
+var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}}
 
 func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
 	n := 0
@@ -243,6 +250,10 @@ func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
 		}
 	}
 	return n > 0 && n == len(duties), n > 0 && n < len(duties)
+}
+
+func onlyTenantReads(duties []string) bool {
+	return !slices.ContainsFunc(duties, func(d string) bool { _, ok := tenantReadDuties[d]; return !ok })
 }
 
 // ServiceClaims is the signed payload: iss calls aud for tenant tid in legal
@@ -346,8 +357,8 @@ func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, 
 	if tenantLevel, mixed := tenantLevelToken(duties); mixed {
 		return "", fmt.Errorf("%w: %s -> %s mixes tenant-level and legal-entity duties; restrict it with MintDuties", ErrNoServiceGrant, s.name, aud)
 	} else if tenantLevel {
-		// A tenant-level token is minted only for a tenant administrator with no legal-entity claim, and names no entity.
-		le, ok = "", legalEntity == "" && IsTenantAdmin(p)
+		// A tenant-level token names no entity and is minted only for a tenant administrator with no legal-entity claim, or for tenant reads alone.
+		le, ok = "", legalEntity == "" && (IsTenantAdmin(p) || onlyTenantReads(duties))
 	}
 	tid, tok := canonicalUUID(p.TenantID)
 	if !ok || !tok || tid == ids.Nil {

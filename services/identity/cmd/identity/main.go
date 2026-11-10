@@ -296,6 +296,9 @@ func warnIfOperatorMismatch(ctx context.Context, pool *pgxpool.Pool, operatorTen
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	cfg, err := configFrom(getenv)
 	if err != nil {
 		return err
@@ -314,6 +317,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
+	}
 	warnIfOperatorMismatch(ctx, pool, cfg.operatorTenantID)
 	scim, err := newSCIM(pool, cfg)
 	if err != nil {

@@ -72,3 +72,10 @@ func TestWithoutAFeatureGateRoutesBehaveAsBefore(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 }
+
+func TestFeatureGateRunsAfterTheDutyCheck(t *testing.T) {
+	rec := call{method: "GET", path: "/v1/production/formulas", duties: ""}.do(gatedRouter(stubFeatures{state: map[string]bool{"process-manufacturing": false}}))
+	if rec.Code != http.StatusForbidden || problemOf(t, rec).Code == features.CodeDisabled {
+		t.Fatalf("a caller without the duty must get the duty refusal, got %d: %s", rec.Code, rec.Body)
+	}
+}

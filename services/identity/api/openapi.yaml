@@ -325,12 +325,13 @@ paths:
       x-passage-duty: identity.feature.view
       description: >-
         The feature catalog with the caller's tenant's on/off state, and the industry templates. A feature the tenant
-        never changed is on. The service itself needs only an authenticated tenant; the duty applies at the gateway.
+        never changed is on. The service itself needs only an authenticated tenant; the duty applies at the gateway, and a service token carrying identity.feature.view (granted to processmfg) is accepted without a legal entity. 403 comes from the gateway or from a service token without that duty.
       security: [{ gatewayHeaders: [] }]
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }]
       responses:
         '200': { description: The catalog and the tenant's state., content: { application/json: { schema: { $ref: '#/components/schemas/TenantFeatures' } } } }
         '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
     put:
       operationId: updateTenantFeatures

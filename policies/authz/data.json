@@ -3583,6 +3583,9 @@
     },
     "fieldservice": {
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
+    },
+    "processmfg": {
+      "identity": ["identity.feature.view"]
     }
   },
   "service_principals": {
