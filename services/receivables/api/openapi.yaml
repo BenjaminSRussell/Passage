@@ -63,6 +63,88 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/open-items:
+    get:
+      operationId: customerPortalOpenItems
+      summary: The signed-in customer's own open items (customer portal)
+      description: |
+        For the customer portal only (#30). The customer is the signed `cus` claim of the customer-portal service token; a
+        `customer` query parameter is ignored. The answer is the customer's view: no dunning state, import keys or internal ids.
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+      responses:
+        "200":
+          description: The customer's open items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalOpenItem" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/open-items/{id}:
+    get:
+      operationId: customerPortalOpenItem
+      summary: One of the signed-in customer's open items (customer portal)
+      description: An item of another customer is 404 AR-OPEN-ITEM-NOT-FOUND, the same answer as an unknown id.
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The open item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortalOpenItem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/payments:
+    get:
+      operationId: customerPortalPayments
+      summary: The signed-in customer's own payments (customer portal)
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+      responses:
+        "200":
+          description: The customer's payments; payments not yet identified with a customer are not listed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalPayment" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/statement:
+    get:
+      operationId: customerPortalStatement
+      summary: The signed-in customer's account statement (customer portal)
+      description: The customer and the legal entity are the token's; a `customer` or `legalEntityId` parameter is ignored.
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: asOf, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: The statement by currency
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asOf, sections]
+                properties:
+                  asOf: { type: string, format: date }
+                  sections: { type: array, items: { type: object } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/receivables/aging:
     get:
       operationId: agingSnapshot
@@ -2164,6 +2246,32 @@ components:
           items: { $ref: "#/components/schemas/RemittanceLine" }
         status: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] }
         version: { type: integer }
+    PortalOpenItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        documentNumber: { type: string }
+        documentDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        currency: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        openAmount: { $ref: "#/components/schemas/Money" }
+        side: { type: string, enum: [DEBIT, CREDIT] }
+        status: { type: string }
+        sourceType: { type: string }
+        cashDiscountDate: { type: string, format: date }
+        cashDiscountAmount: { $ref: "#/components/schemas/Money" }
+    PortalPayment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        paymentMode: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        unappliedAmount: { $ref: "#/components/schemas/Money" }
+        currency: { type: string }
+        receivedDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        status: { type: string }
     OpenItem:
       type: object
       properties:

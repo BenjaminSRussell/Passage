@@ -243,6 +243,8 @@ type OrderFilter struct {
 	HoldType   string
 	Before     string
 	Limit      int
+	// ExcludeDraft leaves out orders still in DRAFT, which are internal until committed (the customer portal reads this way).
+	ExcludeDraft bool
 }
 
 // OrderPage is one page of orders, newest first. NextCursor is set when more
@@ -1349,8 +1351,9 @@ func (s *Postgres) ListOrders(ctx context.Context, f OrderFilter) (OrderPage, er
 				and ($4 = '' or exists (select 1 from order_hold h where h.tenant_id = o.tenant_id and h.order_id = o.id
 					and h.status = 'ACTIVE' and h.hold_type = $4))
 				and ($5 = '' or (o.created_at, o.id) < (select c.created_at, c.id from sales_order c where c.tenant_id = $1 and c.id::text = $5))
+				and (not $7::bool or o.status <> 'DRAFT')
 			order by o.created_at desc, o.id desc
-			limit $6`, p.TenantID, f.Status, f.CustomerID, f.HoldType, f.Before, f.Limit+1)
+			limit $6`, p.TenantID, f.Status, f.CustomerID, f.HoldType, f.Before, f.Limit+1, f.ExcludeDraft)
 		if err != nil {
 			return err
 		}

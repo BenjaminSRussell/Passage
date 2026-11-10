@@ -81,6 +81,11 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 			continue
 		}
 		method, route, _ := strings.Cut(op, " ")
+		if strings.Contains(route, "/customer-portal/") {
+			// Service-only routes for a verified customer-portal token; a header principal is refused whatever its duties.
+			// customer_portal_test.go covers them with signed service tokens.
+			continue
+		}
 		target := strings.ReplaceAll(route, "{id}", "018f0000-0000-7000-8000-0000000000ff")
 		for _, duties := range []string{"", duty} {
 			req := httptest.NewRequest(method, target, strings.NewReader("{}"))
