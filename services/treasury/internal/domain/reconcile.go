@@ -42,6 +42,25 @@ func (s ReconciliationState) CanTransition(to ReconciliationState) bool {
 	}
 }
 
+// Kinds of bank transaction a statement line can be turned into.
+const (
+	LineBankFee        = "bank_fee"
+	LineInterest       = "interest"
+	LineUnknownReceipt = "unknown_receipt"
+)
+
+func LineKindFits(kind string, amount decimal.Decimal) bool {
+	switch kind {
+	case LineBankFee:
+		return amount.IsNegative()
+	case LineUnknownReceipt:
+		return amount.IsPositive()
+	case LineInterest:
+		return !amount.IsZero()
+	}
+	return false
+}
+
 // Difference is the close test of FR-36.5: bank closing − (book balance +
 // outstanding items). Zero means the reconciliation can close.
 func Difference(bankClosing, bookBalance, outstanding decimal.Decimal) decimal.Decimal {

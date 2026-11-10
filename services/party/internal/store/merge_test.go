@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -130,6 +131,11 @@ func TestMerge_RewritesAtomicallyAndAuditIsClean(t *testing.T) {
 	}
 	if got := scalar(t, f, `select (merged_at = $1)::text from party_merge`, payload.MergedAt); got != "true" {
 		t.Errorf("event mergedAt %v differs from party_merge.merged_at", payload.MergedAt)
+	}
+	wantSurvivor := scalar(t, f, `select party_number || '|' || party_type || '|' || name || '|' || status || '|' || version from party where id = $1`, f.winner)
+	gotSurvivor := fmt.Sprintf("%s|%s|%s|%s|%d", payload.Survivor.PartyNumber, payload.Survivor.PartyType, payload.Survivor.Name, payload.Survivor.Status, payload.Survivor.Version)
+	if gotSurvivor != wantSurvivor {
+		t.Errorf("event survivor = %q, want the merged row %q", gotSurvivor, wantSurvivor)
 	}
 }
 

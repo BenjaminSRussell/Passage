@@ -216,7 +216,10 @@ func (s *Postgres) MarkGLBooked(ctx context.Context, id, entryID string, shares 
 		if !done {
 			return err
 		}
-		return enqueueCreditNoteBooked(ctx, tx, id, entryID, shares)
+		if err := enqueueCreditNoteBooked(ctx, tx, id, entryID, shares); err != nil {
+			return err
+		}
+		return queueTaxReport(ctx, tx, id)
 	})
 	return done, err
 }

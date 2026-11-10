@@ -62,6 +62,8 @@ def quantity_bytes(q):
 CLIENT_SUPPLIED = {"X-Passage-LegalEntity-Scope"}
 
 
+BACKEND_OF_ROUTE = {"inbox": "batch"}
+
 class GatewayManifests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -171,7 +173,7 @@ class GatewayManifests(unittest.TestCase):
             self.assertRegex(rewrite["replacePrefixMatch"], DOWNSTREAM_ROUTE_RE)
             self.assertNotIn("filters", by_prefix[f"/v1/{name}"])
             for rule in route["spec"]["rules"]:
-                self.assertEqual(rule["backendRefs"][0]["name"], name)
+                self.assertEqual(rule["backendRefs"][0]["name"], BACKEND_OF_ROUTE.get(name, name))
 
     def test_jwks_configmap_referenced_by_provider_exists(self):
         (sp,) = of_kind(self.docs, "SecurityPolicy")

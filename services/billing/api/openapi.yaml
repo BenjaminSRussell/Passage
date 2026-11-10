@@ -348,6 +348,59 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
+  /v1/billing/tax-reports:
+    get:
+      operationId: listTaxReports
+      summary: List the reports of booked invoices and credit notes to the tax service (#29), newest first.
+      x-passage-duty: billing.invoice.view (InvoiceView)
+      description: >
+        Booking a document to the GL queues one report; a leased reporter records its output tax per tax code with the tax
+        service (`POST /v1/tax/transactions`), negative on a credit note. A PARKED report carries the reason in `lastError`
+        (the tax service refused it, or the attempts ran out). At most 200 items.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, REPORTED, PARKED] }
+      responses:
+        "200":
+          description: The reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TaxReport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/tax-reports/{id}:retry:
+    post:
+      operationId: retryTaxReport
+      summary: Put a PARKED tax report back in the queue.
+      x-passage-duty: billing.invoice.post (InvoicePost)
+      description: >
+        A PARKED report becomes PENDING again, due now, with its attempts counted from zero; a PENDING one is returned as it is.
+        The body does not change, so the tax service answers a transaction it already holds as a duplicate. A REPORTED report is
+        refused with 409 BIL-0121; an unknown one is 404 BIL-0120.
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxReport"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
   /v1/billing/gl-postings:
     post:
       operationId: postGL
@@ -843,6 +896,14 @@ components:
       schema:
         type: string
         format: uuid
+    ReportId:
+      name: id
+      in: path
+      required: true
+      description: The report id.
+      schema:
+        type: string
+        format: uuid
     InvoiceId:
       name: id
       in: path
@@ -871,6 +932,23 @@ components:
         attempts: { type: integer }
         nextAttemptAt: { type: string, format: date-time }
         lastStatus: { type: integer, description: What sales answered; absent when it did not answer. }
+        lastError: { type: string }
+        reportedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    TaxReport:
+      type: object
+      required: [id, legalEntityId, invoiceId, kind, sourceRef, status, attempts, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        invoiceId: { type: string, format: uuid, description: The invoice or credit note the report records. }
+        originalInvoiceId: { type: string, format: uuid, description: The invoice a credit note credits. }
+        kind: { type: string, enum: [INVOICE, CREDIT_NOTE] }
+        sourceRef: { type: string, description: The document number. }
+        status: { type: string, enum: [PENDING, REPORTED, PARKED] }
+        attempts: { type: integer }
+        nextAttemptAt: { type: string, format: date-time }
+        lastStatus: { type: integer, description: What the tax service answered; absent when it did not answer. }
         lastError: { type: string }
         reportedAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
