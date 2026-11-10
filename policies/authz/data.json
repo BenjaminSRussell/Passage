@@ -1107,7 +1107,10 @@
       {"resource": "/edi/v1/partners", "methods": ["GET", "POST"]},
       {"resource": "/edi/v1/partners/*", "methods": ["GET", "PATCH"]},
       {"resource": "/edi/v1/partners/*/trade-profile", "methods": ["PUT"]},
-      {"resource": "/edi/v1/partners/*/transport", "methods": ["GET", "PUT"]}
+      {"resource": "/edi/v1/partners/*/transport", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/item-xrefs", "methods": ["GET", "POST"]},
+      {"resource": "/edi/v1/partners/*/item-xrefs/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/edi/v1/partners/*/sales-defaults", "methods": ["GET", "PUT"]}
     ]},
     "edi.operate": {"permissions": [
       {"resource": "/edi/v1/inbound/edifact", "methods": ["POST"]},
@@ -1120,6 +1123,7 @@
       {"resource": "/edi/v1/interchanges:reprocess", "methods": ["POST"]},
       {"resource": "/edi/v1/messages", "methods": ["GET"]},
       {"resource": "/edi/v1/messages/*", "methods": ["GET"]},
+      {"resource": "/edi/v1/messages/*:post", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound:from-source", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/sla", "methods": ["GET"]}
@@ -3495,10 +3499,11 @@
     "edi": {
       "fulfillment": ["fulfillment.shipment.read"],
       "billing": ["billing.invoice.read"],
-      "sales": ["sales.order.lookup"]
+      "sales": ["sales.order.lookup", "sales.channel.intake"]
     }
   },
   "service_principals": {
+    "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],
     "pricing-cache": ["pricing.cache.invalidate"],
     "purchasing-inbound": ["purchasing.inbound.apply"],

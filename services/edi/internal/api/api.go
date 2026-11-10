@@ -81,6 +81,9 @@ type API struct {
 	Sender        domain.Party
 	EdifactSender domain.EdifactParty
 	Sources       Sources
+	// Intake places inbound orders with sales (POST /messages/{id}:post); nil
+	// refuses the route with 503.
+	Intake Intake
 	// AllowBodyOutbound mounts POST /partners/{id}/outbound, which takes the
 	// canonical document from the request body. Tests and development only.
 	AllowBodyOutbound bool
@@ -120,6 +123,12 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/trade-profile", a.putTradeProfile)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/transport", a.putTransport)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/transport", a.getTransport)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/item-xrefs", a.listXrefs)
+		r.With(authz.RequireDuty("edi.admin")).Post("/partners/{id}/item-xrefs", a.createXref)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/item-xrefs/{xrefId}", a.putXref)
+		r.With(authz.RequireDuty("edi.admin")).Delete("/partners/{id}/item-xrefs/{xrefId}", a.deleteXref)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/sales-defaults", a.getSalesDefaults)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/sales-defaults", a.putSalesDefaults)
 		r.With(authz.RequireDuty("edi.operate")).Post("/partners/{id}/outbound:from-source", a.outboundFromSource)
 		if a.AllowBodyOutbound {
 			r.With(authz.RequireDuty("edi.operate")).Post("/partners/{id}/outbound", a.createOutbound)
@@ -135,6 +144,7 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.operate")).Post("/interchanges:reprocess", a.bulkReprocess)
 		r.With(authz.RequireDuty("edi.operate")).Get("/messages", a.listMessages)
 		r.With(authz.RequireDuty("edi.operate")).Get("/messages/{id}", a.getMessage)
+		r.With(authz.RequireDuty("edi.operate")).Post("/messages/{id}:post", a.postMessage)
 		r.With(authz.RequireDuty("edi.operate")).Get("/partners/sla", a.partnerSLA)
 		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/returns:parse", a.punchoutParse)
 		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Post("/self-billing:match", a.selfBillingMatch)

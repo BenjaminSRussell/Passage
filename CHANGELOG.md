@@ -19,6 +19,17 @@ release may change public APIs.
 
 ### Added
 
+- EDI: an inbound 850 or ORDERS becomes a sales order (#35 P4a). Partner item cross-references (BP, VP, UP or EN to product,
+  site and warehouse) and partner sales defaults under `edi.admin` with legal-entity RLS (migration 0010);
+  `POST /edi/v1/messages/{id}:post` places the order with sales under the new service grant `edi` -> `sales`
+  `sales.channel.intake` (key = message id, externalRef = partner id and PO number), records the sales order on the
+  message (POSTED, `message.posted`), and parks what it cannot map or sales refuses (FAILED with a park code in the
+  message monitor).
+  The edi background poster posts MAPPED orders of partners that have not turned `autoPost` off, as the new service
+  principal `edi-sales` (only `sales.channel.intake`; `platform/go/tenant` and `policies/authz/data.json`), with back-off;
+  reprocess skips parked orders; units of measure are mapped per partner (`unitMap`; none passes units through, EDI-0024 parks a unit missing from an existing map);
+  a retry sends the body pinned at the first attempt; `MarkPosted` errors when no row matches; unknown partner is 404
+  on the xref list and sales defaults (migration 0011).
 - Role-based workspaces and navigation in the web app (#498): the sidebar shows one of ten persona workspaces (AP clerk,
   AR and collections clerk, buyer, receiving and warehouse worker, sales rep or order desk, production planner,
   shop-floor supervisor, accountant or controller, HR or payroll admin, tenant admin) with 17 to 20 entries each in

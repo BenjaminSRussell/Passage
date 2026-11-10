@@ -594,9 +594,9 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],
 		"billing": ["billing.invoice.read"],
-		"sales": ["sales.order.lookup"],
+		"sales": ["sales.order.lookup", "sales.channel.intake"],
 	}
-	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup"] {
+	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
 	}
 	allowed("fulfillment.shipment.read", "GET", "/v1/fulfillment/shipments/s1")
@@ -610,6 +610,20 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 	allowed("edi.operate", "POST", "/edi/v1/partners/p1/outbound:from-source")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/trade-profile")
 	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/trade-profile")
+}
+
+test_edi_item_xref_and_order_posting_routes if {
+	allowed("edi.admin", "POST", "/edi/v1/partners/p1/item-xrefs")
+	allowed("edi.admin", "GET", "/edi/v1/partners/p1/item-xrefs")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/item-xrefs/x1")
+	allowed("edi.admin", "DELETE", "/edi/v1/partners/p1/item-xrefs/x1")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/sales-defaults")
+	not allowed("edi.operate", "POST", "/edi/v1/partners/p1/item-xrefs")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/sales-defaults")
+	allowed("edi.operate", "POST", "/edi/v1/messages/m1:post")
+	not allowed("edi.admin", "POST", "/edi/v1/messages/m1:post")
+	allowed("sales.channel.intake", "POST", "/v1/sales/orders")
+	not allowed("sales.channel.intake", "GET", "/v1/sales/orders/o1")
 }
 
 test_edi_transport_routes if {
@@ -757,7 +771,6 @@ awaiting_service_caller := {
 	"shopfloor.machine.ingest",
 	"transport.tracking-event.ingest",
 	"shopfloor.time.autoclockout",
-	"sales.channel.intake",
 	"inventory.transaction.apply",
 	"pricing.contract.accrue",
 	"hub.client.consume",

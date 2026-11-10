@@ -18,6 +18,7 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // duties listed. policies/authz/data.json "service_principals" mirrors it and a
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
+	"edi-sales":          {"sales.channel.intake"},
 	"finreport-ledger":   {"ledger.entry.lookup"},
 	"purchasing-inbound": {"purchasing.inbound.apply"},
 	"fulfillment-order":  {"fulfillment.order.sync"},
@@ -43,6 +44,7 @@ var servicePrincipals = map[string][]string{
 // as any registered principal (iss "integration-hub" with act
 // "service:migration-loader"), borrowing duties its own grant lacks.
 var servicePrincipalIssuers = map[string][]string{
+	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},
 	"purchasing-inbound":       {"purchasing"},
 	"fulfillment-order":        {"fulfillment"},

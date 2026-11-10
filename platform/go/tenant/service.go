@@ -201,7 +201,7 @@ var serviceGrants = map[string]map[string][]string{
 	"edi": {
 		"fulfillment": {"fulfillment.shipment.read"},
 		"billing":     {"billing.invoice.read"},
-		"sales":       {"sales.order.lookup"},
+		"sales":       {"sales.order.lookup", "sales.channel.intake"},
 	},
 }
 
