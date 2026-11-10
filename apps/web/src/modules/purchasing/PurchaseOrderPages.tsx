@@ -13,7 +13,13 @@ import {
   PageHeader,
   Select,
   buttonClassName,
+  entityText,
+  ListPage,
   type DataTableColumn,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   actOnPurchaseOrder,
@@ -28,6 +34,7 @@ import {
   listPurchaseOrders,
   listServiceSpecs,
   newIdempotencyKey,
+  ProcurementApiError,
   type ApprovalStatus,
   type ChargeCalc,
   type DeliverySchedule,
@@ -68,82 +75,87 @@ const CALCS: { value: ChargeCalc; label: string }[] = [
   { value: "PERCENT", label: "Percent of net lines" },
 ];
 
-const listColumns: DataTableColumn<PurchaseOrderSummary>[] = [
+const listColumns: ListColumn<PurchaseOrderSummary>[] = [
   { key: "number", header: "Number", mono: true },
-  { key: "approvalStatus", header: "Approval", render: (row) => <StatusBadge status={row.approvalStatus} /> },
-  { key: "vendorId", header: "Vendor", render: (row) => <ShortId id={row.vendorId} /> },
+  {
+    key: "approvalStatus",
+    header: "Approval",
+    render: (row) => <StatusBadge status={row.approvalStatus} />,
+    sortValue: (row) => statusLabel(row.approvalStatus),
+    csv: (row) => statusLabel(row.approvalStatus),
+  },
+  {
+    key: "vendorId",
+    header: "Vendor",
+    sortable: false,
+    render: (row) => <ShortId id={row.vendorId} />,
+    csv: (row) => entityText("vendor", row.vendorId),
+  },
   { key: "lineCount", header: "Lines", align: "end" },
-  { key: "total", header: "Total", align: "end", render: (row) => money(row.total, row.currency) },
-  { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10) },
+  { key: "total", header: "Total", align: "end", render: (row) => money(row.total, row.currency), csv: (row) => row.total },
+  { key: "currency", header: "Currency", defaultHidden: true },
+  { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10), csv: (row) => row.createdAt.slice(0, 10) },
 ];
 
-/** Purchase order list with approval-status filter and load-more paging. */
-export function PurchaseOrdersPage() {
-  const navigate = useNavigate();
-  const [status, setStatus] = useState<ApprovalStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
+const listFilters: ListFilterDef[] = [
+  { kind: "select", key: "approvalStatus", label: "Approval status", anyLabel: "All statuses", options: APPROVAL_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+  { kind: "entity", key: "vendorId", label: "Vendor", entity: "vendor" },
+];
+
+function usePurchaseOrderRows(query: ListQuery): ListData<PurchaseOrderSummary> {
+  const status = (query.filters.approvalStatus ?? "") as ApprovalStatus | "";
+  const vendorId = query.filters.vendorId ?? "";
+  const key = `${status}|${vendorId}`;
+  const [paging, setPaging] = useState<{ key: string; cursor?: string }>({ key });
+  const cursor = paging.key === key ? paging.cursor : undefined;
   const [rows, setRows] = useState<PurchaseOrderSummary[]>([]);
+  const [forbidden, setForbidden] = useState(false);
   const page = useResource(
     async (signal) => {
-      const result = await listPurchaseOrders({ approvalStatus: status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
+      try {
+        const result = await listPurchaseOrders({ approvalStatus: status, vendorId: vendorId || undefined }, { cursor, signal });
+        setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
+        setForbidden(false);
+        return result;
+      } catch (error) {
+        setForbidden(error instanceof ProcurementApiError && error.problem.status === 403);
+        throw error;
+      }
     },
-    [status, cursor],
+    [status, vendorId, cursor],
   );
+  return {
+    rows: page.error ? [] : rows,
+    loading: page.loading && rows.length === 0,
+    loadingMore: page.loading && rows.length > 0,
+    error: page.error ?? undefined,
+    forbidden,
+    hasMore: Boolean(page.data?.nextCursor) && !page.error,
+    loadMore: () => setPaging({ key, cursor: page.data?.nextCursor }),
+    retry: page.reload,
+  };
+}
 
+export function PurchaseOrdersPage() {
+  const navigate = useNavigate();
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Purchase orders"
-        description="Orders to vendors with lines, charges and totals that always balance to the cent."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/purchase-orders/new">
-            New purchase order
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="po-status-filter" label="Approval status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as ApprovalStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {APPROVAL_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="purchase orders" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Purchase orders"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(row) => row.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No purchase orders yet", description: "Create one here, or consolidate approved requisition lines." }}
-        onRowOpen={(row) => navigate(`/purchasing/purchase-orders/${row.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-purchase-orders"
+      title="Purchase orders"
+      description="Orders to vendors with lines, charges and totals that always balance to the cent."
+      noun="purchase orders"
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/purchase-orders/new">
+          New purchase order
+        </Link>
+      }
+      columns={listColumns}
+      filters={listFilters}
+      useRows={usePurchaseOrderRows}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/purchasing/purchase-orders/${row.id}`)}
+      empty={{ title: "No purchase orders yet", description: "Create one here, or consolidate approved requisition lines." }}
+    />
   );
 }
 

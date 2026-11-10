@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- Web list standard (#505): shared `ListPage` on `DataTable` with a filter bar (text, select, date range, entity lookup) and chips, sortable columns, column chooser, saved views per user (named, default, versioned, kept behind a storage interface), CSV export of the loaded rows (quoted, formula-safe, says when more rows exist) and the standard loading, empty, filtered-empty, error and no-access states; applied to Purchase orders and Vendor invoices and documented in `apps/web/docs/lists.md`. The density toggle is now remembered per user, the demo "Apply saved view" button is gone, and the unsaved-changes baseline no longer freezes on a Tab press or a click outside the form.
 - batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
   approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
   source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners

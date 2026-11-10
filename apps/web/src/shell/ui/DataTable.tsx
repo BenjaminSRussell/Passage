@@ -2,13 +2,17 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cx } from "./cx";
 import styles from "./DataTable.module.css";
 import { EmptyState } from "./EmptyState";
+import { Icon } from "./Icon";
 import { Skeleton } from "./Skeleton";
+
+export type SortDirection = "ascending" | "descending";
 
 export interface DataTableColumn<T> {
   key: string;
   header: string;
   align?: "start" | "end";
   mono?: boolean;
+  sortable?: boolean;
   render?(row: T): ReactNode;
 }
 
@@ -20,6 +24,8 @@ export interface DataTableProps<T> {
   loading?: boolean;
   empty?: { title: string; description?: string };
   onRowOpen?(row: T): void;
+  sort?: { key: string; direction: SortDirection } | null;
+  onSortChange?(key: string): void;
 }
 
 const SKELETON_ROWS = 5;
@@ -32,7 +38,7 @@ function cellValue<T>(column: DataTableColumn<T>, row: T): ReactNode {
   return value === undefined || value === null ? "" : (value as ReactNode);
 }
 
-export function DataTable<T>({ label, columns, rows, getRowKey, loading = false, empty, onRowOpen }: DataTableProps<T>) {
+export function DataTable<T>({ label, columns, rows, getRowKey, loading = false, empty, onRowOpen, sort, onSortChange }: DataTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
 
@@ -65,11 +71,29 @@ export function DataTable<T>({ label, columns, rows, getRowKey, loading = false,
       <table className={styles.table} aria-label={label} aria-busy={loading || undefined}>
         <thead>
           <tr>
-            {columns.map((column) => (
-              <th key={column.key} scope="col" className={cx(styles.head, column.align === "end" && styles.end)}>
-                {column.header}
-              </th>
-            ))}
+            {columns.map((column) => {
+              const sortable = Boolean(column.sortable && onSortChange);
+              const direction = sort?.key === column.key ? sort.direction : undefined;
+              return (
+                <th
+                  key={column.key}
+                  scope="col"
+                  className={cx(styles.head, column.align === "end" && styles.end)}
+                  aria-sort={sortable ? (direction ?? "none") : undefined}
+                >
+                  {sortable ? (
+                    <button type="button" className={styles.sortButton} onClick={() => onSortChange?.(column.key)}>
+                      {column.header}
+                      <span className={cx(styles.sortMark, direction === "ascending" && styles.ascending, direction && styles.sorted)} aria-hidden="true">
+                        <Icon name="chevronDown" />
+                      </span>
+                    </button>
+                  ) : (
+                    column.header
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
