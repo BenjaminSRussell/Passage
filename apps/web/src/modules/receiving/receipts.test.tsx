@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Receipt, ReceiptLine } from "./api/client";
 import { emptyArrival, pickPOLine, toArrivalInput, validateArrival } from "./NewArrivalPage";
@@ -58,6 +58,11 @@ function receipt(patch: Partial<Receipt> = {}): Receipt {
 const method = (init: RequestInit) => init.method ?? "GET";
 const header = (call: { init: RequestInit }, name: string) => new Headers(call.init.headers).get(name);
 const commandCalls = () => server.calls.filter((c) => c.method === "POST");
+const receiptCalls = () => server.calls.filter((c) => c.url.pathname === "/api/v1/receiving/receipts");
+
+/** The vendor's confirmed orders, which the arrival form offers once a vendor is chosen. */
+const ordersFor = (inner?: typeof server.handler): typeof server.handler => (url, init) =>
+  url.pathname === "/api/v1/procurement/purchase-orders" ? json(200, { items: [{ id: UUID_B, number: "PO-1" }] }) : inner?.(url, init);
 
 function serve(current: Receipt, onCommand?: (url: URL, init: RequestInit) => ReturnType<typeof json>) {
   server.handler = (url, init) => {
@@ -125,11 +130,11 @@ describe("receipts list", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Load more receipts" }));
     expect(await screen.findByRole("button", { name: "RCV-00000002" })).toBeInTheDocument();
-    expect(server.calls.at(-1)?.url.searchParams.get("cursor")).toBe("next");
+    expect(receiptCalls().at(-1)?.url.searchParams.get("cursor")).toBe("next");
     expect(screen.queryByRole("button", { name: "Load more receipts" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("State"), { target: { value: "POSTED" } });
-    await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("state")).toBe("POSTED"));
+    await waitFor(() => expect(receiptCalls().at(-1)?.url.searchParams.get("state")).toBe("POSTED"));
   });
 
   it("opens a receipt from its number", async () => {
@@ -161,18 +166,19 @@ describe("record arrival", () => {
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
 
-  function fillHeader() {
-    fill("Vendor ID", UUID_A);
-    fill("Purchase order ID", UUID_B);
-    fill("Legal entity ID", UUID_A);
+  async function fillHeader() {
+    fill("Vendor", UUID_A);
+    await screen.findByRole("option", { name: "PO-1" });
+    fill("Purchase order", UUID_B);
+    fill("Legal entity", UUID_A);
     fill("Packing slip", "PS-1");
     fill("Receipt date", "2026-10-25");
   }
 
-  function fillValid() {
-    fillHeader();
+  async function fillValid() {
+    await fillHeader();
     fill("Line 1 PO line", "1");
-    fill("Line 1 product ID", UUID_D);
+    fill("Line 1 product", UUID_D);
     fill("Line 1 unit", "EA");
   }
 
@@ -186,7 +192,7 @@ describe("record arrival", () => {
     const { container } = renderAt("/receiving/receipts/new");
     fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
     expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
-    expect(screen.getByLabelText("Vendor ID")).toBeInvalid();
+    expect(screen.getByLabelText("Vendor")).toBeInvalid();
     expect(screen.getByLabelText("Line 1 unit")).toBeInvalid();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
@@ -194,8 +200,9 @@ describe("record arrival", () => {
 
   it("posts poLineNo with an Idempotency-Key and opens the new receipt", async () => {
     serve(receipt(), () => json(201, receipt()));
+    server.handler = ordersFor(server.handler);
     renderAt("/receiving/receipts/new");
-    fillValid();
+    await fillValid();
     expect(await screen.findByText("Could not read the purchase order's lines; enter the line number.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
 
@@ -208,20 +215,20 @@ describe("record arrival", () => {
   });
 
   it("picks the line from the purchase order and fills its product and unit", async () => {
-    server.handler = (url, init) => {
+    server.handler = ordersFor((url, init) => {
       if (method(init) === "POST") return json(201, receipt());
       if (url.pathname === poPath) return json(200, { id: UUID_B, number: "PO-1", lines: poLines });
       if (url.pathname === `/api/v1/receiving/receipts/${ID}`) return json(200, receipt());
       return undefined;
-    };
+    });
     const { container } = renderAt("/receiving/receipts/new");
-    fillHeader();
+    await fillHeader();
     const select = await screen.findByRole("combobox", { name: "Line 1 PO line" });
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose a line", "2: Bolts (10 BOX)"]);
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose a line", "2: Bolts (10 BOX)"]);
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(select, { target: { value: "2" } });
-    expect(screen.getByLabelText("Line 1 product ID")).toHaveValue(UUID_D);
+    expect(screen.getByLabelText("Line 1 product")).toHaveAttribute("data-value", UUID_D);
     expect(screen.getByLabelText("Line 1 unit")).toHaveValue("BOX");
     fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
 
@@ -231,9 +238,9 @@ describe("record arrival", () => {
   });
 
   it("requires a PO line before sending", async () => {
-    server.handler = (url) => (url.pathname === poPath ? json(200, { id: UUID_B, lines: poLines }) : undefined);
+    server.handler = ordersFor((url) => (url.pathname === poPath ? json(200, { id: UUID_B, number: "PO-1", lines: poLines }) : undefined));
     renderAt("/receiving/receipts/new");
-    fillHeader();
+    await fillHeader();
     await screen.findByRole("combobox", { name: "Line 1 PO line" });
     fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
     expect(await screen.findByText("Choose the purchase order line.")).toBeInTheDocument();
@@ -243,8 +250,9 @@ describe("record arrival", () => {
 
   it("shows the service's field error and keeps what was typed", async () => {
     serve(receipt(), () => json(409, { code: "RCV-DUP-001", detail: "Packing slip already used on receipt RCV-00000009", errors: { packingSlip: "already received" } }));
+    server.handler = ordersFor(server.handler);
     renderAt("/receiving/receipts/new");
-    fillValid();
+    await fillValid();
     fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
 
     expect(await screen.findByText(/Packing slip already used on receipt RCV-00000009/)).toBeInTheDocument();
@@ -265,15 +273,19 @@ describe("record arrival", () => {
 describe("receipt page", () => {
   it("registers an arrived receipt with the row version and a key", async () => {
     serve(receipt(), () => json(200, receipt({ state: "REGISTERED", version: 2 })));
+    const inner = server.handler;
+    server.handler = (url, init) => (url.pathname === "/api/v1/warehouse/locations" ? json(200, { items: [{ id: UUID_A, name: "RM-A-01", zone: "Motors" }] }) : inner?.(url, init));
     const { container } = renderAt(`/receiving/receipts/${ID}`);
     expect(await screen.findByRole("heading", { name: "Receipt RCV-00000001" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Register receipt" }));
-    expect(await screen.findByText("Enter a location UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose where the goods go.")).toBeInTheDocument();
     expect(commandCalls()).toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText("Line 1 location ID"), { target: { value: UUID_A } });
+    fireEvent.change(screen.getByLabelText("Line 1 warehouse"), { target: { value: UUID_C } });
+    await screen.findByRole("option", { name: "RM-A-01 · Motors" });
+    fireEvent.change(screen.getByLabelText("Line 1 location"), { target: { value: UUID_A } });
     fireEvent.change(screen.getByLabelText("Line 1 quantity received"), { target: { value: "8" } });
     fireEvent.click(screen.getByRole("button", { name: "Register receipt" }));
 
@@ -294,7 +306,7 @@ describe("receipt page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm post" }));
 
     expect(await screen.findByRole("form", { name: "Correct receipt" })).toBeInTheDocument();
-    expect(screen.getByText("je-1")).toBeInTheDocument();
+    expect(screen.getByText("Posted to the general ledger")).toBeInTheDocument();
     const [call] = commandCalls();
     expect(call.url.pathname).toBe(`/api/v1/receiving/receipts/${ID}:post`);
     expect(header(call, "If-Match")).toBe('"2"');

@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
   cancelReceipt,
   correctReceipt,
+  fetchLocations,
   fetchReceipt,
   INVENTORY_STATUSES,
   postReceipt,
@@ -14,7 +15,8 @@ import {
   type RegisterLineInput,
 } from "./api/client";
 import { DECIMAL, SIGNED_DECIMAL, UUID } from "../../shell/api/http";
-import { Detail, StateBadge, useAction } from "./parts";
+import { Named, Detail, PurchaseOrderRef, StateBadge, useAction } from "./parts";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import styles from "../../shell/pageLayout.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -22,7 +24,7 @@ type Errors = Record<string, string>;
 
 const lineColumns: DataTableColumn<ReceiptLine>[] = [
   { key: "lineNo", header: "Line", align: "end" },
-  { key: "productId", header: "Product", mono: true },
+  { key: "productId", header: "Product", render: (l) => <Named entity="product" id={l.productId} /> },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
   { key: "unitPrice", header: "Unit price", align: "end" },
   { key: "amount", header: "Amount", align: "end", render: (l) => l.amount ?? "" },
@@ -36,6 +38,8 @@ export interface RegisterDraft {
   batch: string;
   serials: string;
   locationId: string;
+  /** Only narrows the location choices; the service takes the location. */
+  warehouseId?: string;
   inventoryStatus: string;
 }
 
@@ -45,7 +49,7 @@ export function validateRegister(receipt: Receipt, drafts: RegisterDraft[]): Err
     const d = drafts[i];
     const at = (field: string) => `lines[${i}].${field}`;
     if (!DECIMAL.test(d.qty) || Number(d.qty) <= 0) errors[at("qty")] = "Enter a quantity above zero.";
-    if (!UUID.test(d.locationId)) errors[at("locationId")] = "Enter a location UUID.";
+    if (!UUID.test(d.locationId)) errors[at("locationId")] = "Choose where the goods go.";
     if (line.batchTracked && d.batch.trim() === "") errors[at("batch")] = "Enter the batch.";
     if (line.serialTracked) {
       const serials = splitSerials(d.serials);
@@ -93,6 +97,31 @@ function FailureAlert({ title, failure, onReload }: { title: string; failure: { 
   ) : null;
 }
 
+/** A warehouse, then one of its bin locations by name. */
+function LocationPicker({ n, i, draft, update, error }: { n: number; i: number; draft: RegisterDraft; update: (patch: Partial<RegisterDraft>) => void; error?: string }) {
+  const warehouseId = draft.warehouseId ?? "";
+  const locations = useQuery({ queryKey: ["receiving", "locations", warehouseId], queryFn: () => fetchLocations(warehouseId), enabled: warehouseId !== "" });
+  return (
+    <>
+      <FormField id={`reg-${i}-warehouse`} label={`Line ${n} warehouse`} hint="Where the goods are put away.">
+        {(c) => <EntityLookup entity="warehouse" {...c} value={warehouseId} onChange={(e) => update({ warehouseId: e.target.value, locationId: "" })} />}
+      </FormField>
+      <FormField id={`reg-${i}-location`} label={`Line ${n} location`} error={error} hint={warehouseId === "" ? "Choose a warehouse first." : locations.isError ? "Could not load the locations." : undefined}>
+        {(c) => (
+          <Select {...c} value={draft.locationId} disabled={warehouseId === ""} onChange={(e) => update({ locationId: e.target.value })} invalid={Boolean(error)}>
+            <option value="">Choose a location</option>
+            {(locations.data ?? []).map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.zone ? `${l.name} · ${l.zone}` : l.name}
+              </option>
+            ))}
+          </Select>
+        )}
+      </FormField>
+    </>
+  );
+}
+
 function RegisterForm({ receipt, reload }: { receipt: Receipt; reload: () => void }) {
   const action = useAction(receipt.id);
   const [drafts, setDrafts] = useState<RegisterDraft[]>(() =>
@@ -122,9 +151,7 @@ function RegisterForm({ receipt, reload }: { receipt: Receipt; reload: () => voi
               <FormField id={`reg-${i}-qty`} label={`Line ${n} quantity received`} error={shown[at("qty")]}>
                 {(c) => <Input {...c} inputMode="decimal" value={drafts[i].qty} onChange={(e) => update(i, { qty: e.target.value })} invalid={Boolean(shown[at("qty")])} />}
               </FormField>
-              <FormField id={`reg-${i}-location`} label={`Line ${n} location ID`} error={shown[at("locationId")]}>
-                {(c) => <Input {...c} className={styles.mono} value={drafts[i].locationId} onChange={(e) => update(i, { locationId: e.target.value })} invalid={Boolean(shown[at("locationId")])} />}
-              </FormField>
+              <LocationPicker n={n} i={i} draft={drafts[i]} update={(patch) => update(i, patch)} error={shown[at("locationId")]} />
               <FormField id={`reg-${i}-status`} label={`Line ${n} inventory status`}>
                 {(c) => (
                   <Select {...c} value={drafts[i].inventoryStatus} onChange={(e) => update(i, { inventoryStatus: e.target.value })}>
@@ -375,13 +402,14 @@ export function ReceiptPage() {
           <Card title="Details">
             <dl className={styles.details}>
               <Detail term="Packing slip">{result.data.packingSlip}</Detail>
-              <Detail term="Vendor" mono>{result.data.vendorId}</Detail>
-              <Detail term="Purchase order" mono>{result.data.purchaseOrderId}</Detail>
+              <Detail term="Vendor"><Named entity="vendor" id={result.data.vendorId} /></Detail>
+              <Detail term="Purchase order"><PurchaseOrderRef id={result.data.purchaseOrderId} /></Detail>
+              <Detail term="Legal entity"><Named entity="legalEntity" id={result.data.legalEntityId} /></Detail>
               <Detail term="Receipt date">{result.data.receiptDate}</Detail>
               <Detail term="Currency">{`${result.data.currency} at ${result.data.exchangeRate}`}</Detail>
               {result.data.carrier ? <Detail term="Carrier">{result.data.carrier}</Detail> : null}
               {result.data.postingDate ? <Detail term="Posting date">{result.data.postingDate}</Detail> : null}
-              {result.data.ledgerEntryId ? <Detail term="Ledger entry" mono>{result.data.ledgerEntryId}</Detail> : null}
+              {result.data.ledgerEntryId ? <Detail term="Ledger entry">Posted to the general ledger</Detail> : null}
             </dl>
           </Card>
           <DataTable label="Receipt lines" columns={lineColumns} rows={result.data.lines} getRowKey={(l) => String(l.lineNo)} />

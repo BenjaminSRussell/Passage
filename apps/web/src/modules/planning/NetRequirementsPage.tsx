@@ -17,6 +17,7 @@ import { listNetRequirements, listPlannedOrders, type NetRequirement, type Plann
 import { DEFAULT_PLAN_CODE, PLAN_CODE, useLoad, withPlan, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const dash = "—";
@@ -54,7 +55,7 @@ const columns: DataTableColumn<NetRequirement>[] = [
 
 const orderColumns: DataTableColumn<PlannedOrder>[] = [
   { key: "number", header: "Number", mono: true },
-  { key: "warehouseId", header: "Scope", mono: true, render: (o) => (o.warehouseId ? `Warehouse ${o.warehouseId}` : "Site") },
+  { key: "warehouseId", header: "Scope", render: (o) => (o.warehouseId ? <>Warehouse <EntityName entity="warehouse" id={o.warehouseId} fallback={o.warehouseId} /></> : "Site") },
   { key: "qty", header: "Quantity", align: "end", render: (o) => trimQty(o.qty) },
   { key: "orderDate", header: "Order date" },
   { key: "deliveryDate", header: "Delivery date" },

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Typed client for the treasury service (services/treasury/api/openapi.yaml).
 // Browser calls use /api/v1/treasury/..., which the web BFF rewrites to /v1/treasury/....
 // Money stays a decimal string end to end; nothing here converts to a float.
@@ -167,7 +168,7 @@ async function request(path: string, init: RequestInit = {}, signal?: AbortSigna
   headers.set("Accept", "application/json");
   // A FormData body sets its own multipart boundary.
   if (init.body !== undefined && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return res;
 }

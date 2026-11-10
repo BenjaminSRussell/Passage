@@ -8,6 +8,7 @@ import { QuotationMaintenance } from "./QuotationMaintenance";
 import { isExpired, QuotationStatusBadge } from "./QuotationsPage";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const LOST_REASON_MAX = 200;
 const OVERRIDE_MAX = 500;
@@ -145,7 +146,7 @@ export function QuotationDetailPage() {
         ]
       : []),
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "productId", header: "Product", mono: true },
+    { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
     { key: "quantity", header: "Quantity", align: "end", render: (l) => `${l.quantity} ${l.unit}` },
     { key: "unitPrice", header: "Unit price", align: "end", render: (l) => money(l.unitPrice, quotation.currency) },
     { key: "discPct", header: "Discount", align: "end", render: (l) => `${l.discPct}%` },
@@ -159,9 +160,9 @@ export function QuotationDetailPage() {
   ];
 
   const facts: [string, ReactNode][] = [
-    ["Customer", quotation.customerId],
-    ["Invoice account", quotation.invoiceAccountId],
-    ["Legal entity", quotation.legalEntityId],
+    ["Customer", <EntityName entity="customer" id={quotation.customerId} />],
+    ["Invoice account", <EntityName entity="customer" id={quotation.invoiceAccountId} />],
+    ["Legal entity", <EntityName entity="legalEntity" id={quotation.legalEntityId} />],
     ["Net total", money(quotation.netTotal, quotation.currency)],
     ["Valid until", quotation.validUntil],
     ["Win probability", `${quotation.probabilityPct}%`],
@@ -174,7 +175,7 @@ export function QuotationDetailPage() {
       ? ([["Listing overrides", quotation.listingOverrides.map((o) => `Line ${o.lineNo}: ${o.reason} (${o.actor})`).join("; ")]] as [string, ReactNode][])
       : []),
   ];
-  const mono = new Set(["Customer", "Invoice account", "Legal entity"]);
+  const mono = new Set<string>();
 
   return (
     <div className={styles.stack}>

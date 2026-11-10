@@ -8,7 +8,6 @@ import { FormRenderer } from "./forms";
 import { demoNote } from "./metadata";
 import { pageViolations } from "./testing/fakeServer";
 import { HomePage } from "./pages/HomePage";
-import { NotesPage } from "./pages/NotesPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { usePrincipalDuties } from "./principal";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
@@ -41,7 +40,6 @@ function renderShell(path = "/", identity?: string) {
       <Routes>
         <Route element={<Shell modules={modules} identity={identity} />}>
           <Route path="/" element={<HomePage />} />
-          <Route path="/notes" element={<NotesPage />} />
           <Route path="/admin/audit" element={<p>Audit page</p>} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
@@ -91,18 +89,13 @@ describe("shell a11y and keyboard", () => {
 });
 
 describe("pages and navigation", () => {
-  it("lists a workspace card with its top tasks on home, and keeps the note form on /notes", () => {
+  it("lists a workspace card with its top tasks on home", () => {
     const home = renderShell();
     const main = within(screen.getByRole("main"));
     expect(main.getByRole("heading", { level: 3, name: "Administration" })).toBeInTheDocument();
     expect(main.getByRole("link", { name: /Audit log/ })).toHaveAttribute("href", "/admin/audit");
     expect(main.getByRole("link", { name: "See all features" })).toHaveAttribute("href", "/features");
-    expect(screen.queryByRole("button", { name: "Save Note" })).not.toBeInTheDocument();
-    home.unmount();
-
-    const notes = renderShell("/notes");
-    expect(screen.getByRole("button", { name: "Save Note" })).toBeInTheDocument();
-    expect(checkAxeAA(notes.container)).toEqual([]);
+    expect(checkAxeAA(home.container)).toEqual([]);
   });
 
   it("shows the page title as the only h1, a breadcrumb and the current nav item", () => {
@@ -167,8 +160,8 @@ describe("command palette", () => {
     expect(input).toHaveAttribute("aria-activedescendant", second.id);
     expect(second).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("heading", { level: 1, name: "Notes" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Notes" })).toHaveFocus();
+    expect(screen.getByRole("heading", { level: 1, name: "All features" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "All features" })).toHaveFocus();
   });
 
   it("wraps the active option at both ends", async () => {
@@ -343,18 +336,6 @@ describe("generated form keyboard and validation", () => {
   });
 });
 
-describe("notes page", () => {
-  it("saves a valid note into the list and confirms it", async () => {
-    const user = userEvent.setup();
-    renderShell("/notes");
-    await user.type(screen.getByLabelText("Title"), "Kickoff");
-    await user.click(screen.getByRole("button", { name: "Save Note" }));
-    expect(within(screen.getByRole("table", { name: "Note list" })).getByRole("button", { name: "Kickoff" })).toBeInTheDocument();
-    expect(screen.getAllByRole("status").some((node) => node.textContent === "Note saved")).toBe(true);
-    expect(within(screen.getByRole("main")).getAllByRole("heading", { level: 2 })).toHaveLength(1);
-  });
-});
-
 describe("shell feedback", () => {
   it("shows a toast that hides itself, without changing the density", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -521,7 +502,8 @@ describe("duty gating", () => {
     const cards = screen.getByRole("list", { name: "Workspaces" });
     expect(within(cards).queryByRole("link", { name: "Post a journal" })).not.toBeInTheDocument();
     expect(within(cards).queryByRole("link", { name: "Print and track checks" })).not.toBeInTheDocument();
-    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(2);
+    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(1);
+    expect(within(cards).getAllByRole("button", { name: /^Switch to / }).length).toBeGreaterThan(0);
   });
 
   it("shows gated entries to a principal holding the duty", () => {

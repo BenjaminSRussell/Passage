@@ -6,6 +6,7 @@ import { formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../mfg-shared/orders";
 
 /**
  * Order pegs (FR-23.8): which order consumes which order's output. A move with
@@ -35,8 +36,8 @@ export function OrderPegsPage() {
   }
 
   const columns: DataTableColumn<OrderPeg>[] = [
-    { key: "parentOrderId", header: "Parent order", mono: true, render: (p) => <span title={p.parentOrderId}>{shortId(p.parentOrderId)}</span> },
-    { key: "dependentOrderId", header: "Dependent order", mono: true, render: (p) => <span title={p.dependentOrderId}>{shortId(p.dependentOrderId)}</span> },
+    { key: "parentOrderId", header: "Parent order", mono: true, render: (p) => <OrderNumber id={p.parentOrderId} /> },
+    { key: "dependentOrderId", header: "Dependent order", mono: true, render: (p) => <OrderNumber id={p.dependentOrderId} /> },
     { key: "createdAt", header: "Pegged", render: (p) => formatDateTime(p.createdAt) },
     {
       key: "actions",

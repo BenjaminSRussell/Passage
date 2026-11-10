@@ -221,7 +221,7 @@ describe("ReceiptDetailPage", () => {
     const rows = within(screen.getByRole("table", { name: "Pallets" })).getAllByRole("row");
     expect(rows[2]).toHaveTextContent("-5 (-5.00%)");
     expect(rows[2]).toHaveTextContent("Discrepancy");
-    expect(within(rows[2]).getByRole("link", { name: "0190f0a0" })).toHaveAttribute("href", `/warehouse/work/${WORK}`);
+    expect(within(rows[2]).getByRole("link", { name: "Open put-away" })).toHaveAttribute("href", `/warehouse/work/${WORK}`);
     expect(screen.getByRole("button", { name: "Receive pallet 1" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Receive pallet 2" })).toBeNull();
   });

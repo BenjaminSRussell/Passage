@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Typed client for the financial reporting service (services/finreport/api/openapi.yaml).
 // Amounts stay decimal strings end to end; nothing here turns money into a float.
 
@@ -330,7 +331,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
@@ -931,7 +932,7 @@ export function listAuditTrail(q: AuditQuery, cursor?: string, signal?: AbortSig
 
 /** Exports every matching entry as CSV. The service records the export and sends the file's SHA-256. */
 export async function exportAuditTrail(q: AuditQuery): Promise<AuditExport> {
-  const res = await fetch(`${base}/audit-trail:export?${auditParams(q).toString()}`, {
+  const res = await apiFetch(`${base}/audit-trail:export?${auditParams(q).toString()}`, {
     headers: { Accept: "text/csv" },
     credentials: "same-origin",
   });

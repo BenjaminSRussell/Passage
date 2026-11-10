@@ -43,13 +43,13 @@ import {
   DOWN_PAYMENT_TONES,
   KIND_LABELS,
   money,
-  shortId,
   today,
   UUID,
 } from "./format";
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 const ACCOUNT: Record<DownPaymentKind, string> = { DOWN_PAYMENT: "2190", SECURITY_DEPOSIT: "2195" };
@@ -60,7 +60,7 @@ function statusBadge(status: DownPaymentStatus) {
 
 const columns: DataTableColumn<DownPayment>[] = [
   { key: "kind", header: "Kind", render: (row) => KIND_LABELS[row.kind] ?? row.kind },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "amount", header: "Amount", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
   { key: "remaining", header: "Remaining", mono: true, align: "end", render: (row) => money(row.remaining, row.currency) },
   { key: "receivedDate", header: "Received", mono: true, render: (row) => row.receivedDate ?? "Not yet" },

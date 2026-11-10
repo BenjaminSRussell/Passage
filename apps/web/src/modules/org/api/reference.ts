@@ -1,4 +1,5 @@
 import { base, toError } from "./client";
+import { apiFetch } from "../../../shell/api/http";
 
 export type ReferenceStatus = "active" | "inactive";
 export type ReferenceKind = "countries" | "currencies" | "regions" | "languages";
@@ -96,7 +97,7 @@ export async function referenceFetch<T>(path: string, init: RequestInit = {}): P
   if ((init.method ?? "GET").toUpperCase() === "POST") {
     headers.set("Idempotency-Key", crypto.randomUUID());
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers });
   if (!res.ok) {
     throw await toError(res);
   }

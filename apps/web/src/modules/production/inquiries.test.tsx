@@ -2,20 +2,24 @@ import { findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { getJournalInquiry, getOperationsOverview, type JournalInquiryRow, type OperationOverviewRow } from "./api/client";
 import { validateJournalFilter } from "./JournalInquiryPage";
 import production from "./module";
 import { validateOperationsFilter } from "./OperationsOverviewPage";
+import { resetResourceCache } from "../mfg-shared/resources";
 import { json, order, orderId, problem } from "./testData";
 
+beforeEach(() => resetResourceCache());
 afterEach(() => vi.unstubAllGlobals());
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
 
 function stubFetch(handler: Handler) {
-  const mock = vi.fn(async (url: string, init?: RequestInit) => handler(url, init));
+  const mock = vi.fn(async (url: string, init?: RequestInit) =>
+    url.includes("/engineering/resources") ? json({ items: [{ id: resource, code: "CNC-1", name: "CNC mill" }] }) : handler(url, init),
+  );
   vi.stubGlobal("fetch", mock);
   return mock;
 }
@@ -122,8 +126,8 @@ describe("filter checks", () => {
     const base = { status: "" as const, orderStatus: "" as const, resourceId: "", siteId: "", dueFrom: "", dueTo: "" };
     expect(validateOperationsFilter(base)).toEqual({});
     expect(validateOperationsFilter({ ...base, resourceId: "x", siteId: "Plant 1", dueFrom: "2026-12-01", dueTo: "2026-11-01" })).toEqual({
-      resourceId: "Enter the resource's id (a UUID), or leave it empty.",
-      siteId: "Enter the site's id (a UUID), or leave it empty.",
+      resourceId: "Choose a resource, or leave it empty.",
+      siteId: "Choose a site, or leave it empty.",
       dueTo: "The end of the due range must not be before its start.",
     });
     const journals = { type: "" as const, posted: "" as const, orderNumber: "" };
@@ -146,12 +150,12 @@ describe("operations overview page (4.21.14)", () => {
     );
     const { container, location } = renderAt(page);
     const table = await findTable({ name: "Operations" });
-    await waitFor(() => expect(within(table).getByText(`${resource} (vendor)`)).toBeInTheDocument());
+    await waitFor(() => expect(within(table).getByText("(vendor)")).toBeInTheDocument());
     expect(within(table).getByText("50.00")).toBeInTheDocument();
     expect(within(table).getByText("20.00")).toBeInTheDocument();
     expect(within(table).getAllByText("2026-11-30")).toHaveLength(2);
     expect(screen.getByRole("list", { name: "Operation totals" })).toHaveTextContent("Reported hours 20.00");
-    expect(calls(fetchMock)[0][0]).toBe("/api/v1/production/operations?limit=50");
+    expect(calls(fetchMock).some(([url]) => url === "/api/v1/production/operations?limit=50")).toBe(true);
     expect(checkAxeAA(container)).toEqual([]);
 
     await userEvent.click(within(table).getAllByText("PO-000001")[0]);
@@ -169,8 +173,9 @@ describe("operations overview page (4.21.14)", () => {
     const form = screen.getByRole("form", { name: "Filter the operations" });
     await userEvent.selectOptions(within(form).getByLabelText("Operation status"), "started");
     await userEvent.selectOptions(within(form).getByLabelText("Order status"), "Started");
-    await userEvent.type(within(form).getByLabelText(/Resource/), resource);
-    await userEvent.type(within(form).getByLabelText(/Site/), site);
+    await within(form).findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(within(form).getByLabelText(/Resource/), resource);
+    fireEvent.change(within(form).getByLabelText(/Site/), { target: { value: site } });
     fireEvent.change(within(form).getByLabelText(/Due from/), { target: { value: "2026-11-01" } });
     await userEvent.click(within(form).getByRole("button", { name: "Show" }));
     const filtered = `/api/v1/production/operations?status=started&orderStatus=Started&resourceId=${resource}&siteId=${site}&dueFrom=2026-11-01&limit=50`;
@@ -198,10 +203,11 @@ describe("operations overview page (4.21.14)", () => {
     renderAt(page);
     await findTable({ name: "Operations" });
     const form = screen.getByRole("form", { name: "Filter the operations" });
-    await userEvent.type(within(form).getByLabelText(/Resource/), "ACME");
+    fireEvent.change(within(form).getByLabelText(/Due from/), { target: { value: "2026-12-01" } });
+    fireEvent.change(within(form).getByLabelText(/Due to/), { target: { value: "2026-11-01" } });
     await userEvent.click(within(form).getByRole("button", { name: "Show" }));
-    expect(await screen.findByText("Enter the resource's id (a UUID), or leave it empty.")).toBeInTheDocument();
-    expect(calls(fetchMock)).toHaveLength(1);
+    expect(await screen.findByText("The end of the due range must not be before its start.")).toBeInTheDocument();
+    expect(calls(fetchMock).filter(([url]) => url.includes("/operations?"))).toHaveLength(1);
   });
 
   it("shows loading, empty and error states", async () => {

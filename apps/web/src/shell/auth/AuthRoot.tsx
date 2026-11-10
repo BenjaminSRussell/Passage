@@ -1,9 +1,18 @@
 import type { ReactNode } from "react";
 import type { Auth } from "./auth";
+import { AccountProvider } from "./account";
 import { AuthGate } from "./AuthGate";
 
 export function AuthRoot({ auth, requireAuth, children }: { auth: Auth | null; requireAuth: boolean; children: (duties?: readonly string[], identity?: string) => ReactNode }) {
-  if (auth !== null) return <AuthGate auth={auth}>{(session) => children(session.duties, session.tenantId && session.subject ? `${session.tenantId}.${session.subject}` : undefined)}</AuthGate>;
+  if (auth !== null) return (
+      <AuthGate auth={auth}>
+        {(session) => (
+          <AccountProvider auth={auth} session={session}>
+            {children(session.duties, session.tenantId && session.subject ? `${session.tenantId}.${session.subject}` : undefined)}
+          </AccountProvider>
+        )}
+      </AuthGate>
+    );
   if (!requireAuth) return <>{children()}</>;
   return (
     <main>

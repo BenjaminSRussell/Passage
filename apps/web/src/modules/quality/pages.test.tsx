@@ -132,15 +132,17 @@ describe("quality orders list", () => {
     expect(calls.at(-1)?.url.search).toBe("?status=PENDING_DECISION");
   });
 
-  it("refuses a malformed site filter without calling the service", async () => {
+  it("ignores typed text that is not a site id and applies a pasted site id", async () => {
     handler = () => json(200, { items: [] });
     renderAt("/quality/orders");
     await screen.findByText("No quality orders yet");
     const before = calls.length;
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: "plant 1" } });
     fireEvent.click(screen.getByRole("button", { name: "Show orders" }));
-    expect(await screen.findByText("Enter the site id (a UUID), or leave it empty for every site.")).toBeInTheDocument();
     expect(calls.length).toBe(before);
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
+    fireEvent.click(screen.getByRole("button", { name: "Show orders" }));
+    await waitFor(() => expect(calls.at(-1)?.url.search).toBe(`?siteId=${SITE}`));
   });
 
   it("shows the error with a retry", async () => {
@@ -283,10 +285,10 @@ describe("new quality order", () => {
     };
     const { container } = renderAt("/quality/orders/new");
     await screen.findByRole("option", { name: "INCOMING-STEEL v2 (2 tests)" });
-    fireEvent.change(screen.getByLabelText("Source id"), { target: { value: ITEM } });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: SITE } });
-    fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: WH } });
+    expect(screen.queryByLabelText("Source document")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: WH } });
     fireEvent.change(screen.getByLabelText("Lot quantity"), { target: { value: "51" } });
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });
     expect(pageViolations(container)).toEqual([]);
@@ -295,7 +297,7 @@ describe("new quality order", () => {
     const post = calls.find((c) => c.method === "POST");
     expect(post?.body).toEqual({
       trigger: "MANUAL",
-      sourceRef: { type: "manual", id: ITEM },
+      sourceRef: { type: "manual", id: expect.stringMatching(/^[0-9a-f-]{36}$/) },
       itemId: ITEM,
       siteId: SITE,
       warehouseId: WH,
@@ -319,7 +321,7 @@ describe("new quality order", () => {
 
     fireEvent.change(screen.getByLabelText("Trigger"), { target: { value: "PURCHASE_RECEIPT" } });
     expect(screen.queryByLabelText("Test group")).toBeNull();
-    for (const label of ["Source id", "Item id", "Site id", "Warehouse id"]) fireEvent.change(screen.getByLabelText(label), { target: { value: ITEM } });
+    for (const label of ["Source document", "Item", "Site", "Warehouse"]) fireEvent.change(screen.getByLabelText(label), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Lot quantity"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Create quality order" }));
     expect(await screen.findByText(/No quality association matches this trigger, item, party and site/)).toBeInTheDocument();

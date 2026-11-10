@@ -167,7 +167,7 @@ describe("Quota arrangement list", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`itemId=${ITEM}`) && String(url).includes("validOn=2026-11-15"))).toBe(true),
     );
-    fireEvent.click(within(await findTable({ name: "Quota arrangements" })).getAllByRole("button", { name: ITEM })[0]);
+    fireEvent.click(within(await findTable({ name: "Quota arrangements" })).getAllByRole("button", { name: new RegExp(ITEM) })[0]);
     expect(screen.getByTestId("location")).toHaveTextContent(`/planning/quota-arrangements/${arrangement.id}`);
   });
 

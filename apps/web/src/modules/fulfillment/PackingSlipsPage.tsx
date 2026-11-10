@@ -7,12 +7,13 @@ import { formatDate, formatMoney, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<PackingSlipSummary>[] = [
   { key: "packingSlipNumber", header: "Packing slip", mono: true },
   { key: "status", header: "Status", render: (row) => <SlipStatusBadge status={row.status} reversal={row.reversalOfId !== null} /> },
   { key: "postingDate", header: "Posting date", render: (row) => formatDate(row.postingDate) },
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
   { key: "shipmentId", header: "Shipment", mono: true, render: (row) => shortId(row.shipmentId) },
   { key: "totalCost", header: "Cost", align: "end", render: (row) => formatMoney(row.totalCost, row.currency) },
 ];

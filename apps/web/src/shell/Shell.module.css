@@ -177,6 +177,18 @@
   background: var(--color-accent);
 }
 
+.badge {
+  margin-inline-start: auto;
+  min-inline-size: 1.25rem;
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-sm-leading);
+  text-align: center;
+}
+
 .switcher {
   flex: none;
   display: flex;

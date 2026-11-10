@@ -1,9 +1,9 @@
 // Planning service (/api/v1/planning) for the demo: the MAIN plan's planned orders and action messages.
-// Item ids are item numbers because the planning screens show ids raw. Demand references are the sales orders
+// Items, vendors and warehouses carry the real ids of company.ts. Demand references are the sales orders
 // of the order-to-cash demo (SO-0241xx), and the supply references are purchase and production orders.
 import type { FirmBatch, Message, PegNode, PlanVersion, PlannedOrder, PlannedOrderPatch } from "../../../modules/planning/api/client";
 import { reply, route } from "../../backend";
-import { USER, PLANT, VENDORS } from "../../company";
+import { ITEMS, USER, PLANT, VENDORS, WH_DAL, itemByNumber } from "../../company";
 import { at, day, dec, table, uid } from "../../store";
 import { newOrder } from "./orders";
 import { orders as productionOrders } from "./production";
@@ -14,16 +14,17 @@ const KIND_MSG = 211;
 const KIND_VERSION = 212;
 const VERSION_ID = uid(KIND_VERSION, 3);
 
-const vendor = (i: number) => VENDORS[i].number;
+const vendor = (i: number) => VENDORS[i].id;
+const itemId = (number: string) => itemByNumber(number).id;
 
 let seq = 0;
-function planned(number: number, itemId: string, orderType: PlannedOrder["orderType"], qty: number, orderIn: number, deliverIn: number, rest: Partial<PlannedOrder> = {}): PlannedOrder {
+function planned(number: number, item: string, orderType: PlannedOrder["orderType"], qty: number, orderIn: number, deliverIn: number, rest: Partial<PlannedOrder> = {}): PlannedOrder {
   seq += 1;
   return {
     id: uid(KIND_ORDER, seq),
     versionId: VERSION_ID,
     number: `PL-${number}`,
-    itemId,
+    itemId: itemId(item),
     orderType,
     qty: dec(qty, 0),
     orderDate: day(orderIn),
@@ -45,7 +46,7 @@ const plannedOrders = table<PlannedOrder>([
   planned(30416, "MTR-15HP-TEFC", "purchase", 12, -3, 25, { vendorId: vendor(1), lotRule: "multiple of 6" }),
   planned(30417, "CST-VOL-04", "purchase", 40, 4, 39, { vendorId: vendor(0) }),
   planned(30418, "SEAL-MK-125", "purchase", 200, 6, 16, { vendorId: vendor(2), lotRule: "multiple of 50" }),
-  planned(30419, "CP-200", "transfer", 20, 2, 4, { warehouseId: "DAL-FG" }),
+  planned(30419, "CP-200", "transfer", 20, 2, 4, { warehouseId: WH_DAL.id }),
   planned(30420, "MTR-5HP-TEFC", "purchase", 30, 9, 30, { vendorId: vendor(1), status: "approved", version: 2 }),
   planned(30421, "CST-IMP-06", "purchase", 80, -12, 18, { vendorId: vendor(0), status: "firmed", version: 3, delayDays: 0, firmedTargetType: "purchase-order", firmedTargetId: "PO-52340" }),
   planned(30422, "CP-200", "production", 30, -3, 9, { status: "firmed", version: 3, delayDays: 0, firmedTargetType: "production-order", firmedTargetId: "MO-24621" }),
@@ -72,9 +73,9 @@ const versions: PlanVersion[] = [
 ];
 
 let mseq = 0;
-function msg(action: Message["action"], itemId: string, qty: number, rest: Partial<Message>): Message {
+function msg(action: Message["action"], item: string, qty: number, rest: Partial<Message>): Message {
   mseq += 1;
-  return { id: uid(KIND_MSG, mseq), status: "open", version: 1, action, itemId, delayDays: 0, qty: dec(qty, 0), ...rest };
+  return { id: uid(KIND_MSG, mseq), status: "open", version: 1, action, itemId: itemId(item), delayDays: 0, qty: dec(qty, 0), ...rest };
 }
 
 const messages = table<Message>([
@@ -130,6 +131,7 @@ const messages = table<Message>([
   msg("cancel", "FST-KIT-A", 100, { status: "dismissed", version: 2, decidedBy: "Priya Natarajan", decidedAt: at(-2), decisionNote: "Kits are reserved for the Dallas build.", supplyRef: "PO-52284", code: "PLAN-M04", text: "PO-52284 is not needed against current demand." }),
 ]);
 
+const findNumber = (id: string) => ITEMS.find((i) => i.id === id)?.number ?? id;
 const norm = (s: string | null) => (s ? s : undefined);
 
 route("GET", `${BASE}/planned-orders`, (req) => {
@@ -160,7 +162,7 @@ route("POST", `${BASE}/planned-orders:firm`, (req) => {
     }
     const targetType = o.orderType === "production" ? "production-order" : o.orderType === "purchase" ? "purchase-order" : "transfer-order";
     plannedOrders.update(id, { status: "firmed", version: o.version + 1, firmedTargetType: targetType, firmedTargetId: targetId });
-    groups.push({ targetType, targetId, orderType: o.orderType, siteId: PLANT.code, vendorId: o.vendorId, deliveryDate: o.deliveryDate, qty: o.qty, plannedOrderIds: [id] });
+    groups.push({ targetType, targetId, orderType: o.orderType, siteId: PLANT.id, vendorId: o.vendorId, deliveryDate: o.deliveryDate, qty: o.qty, plannedOrderIds: [id] });
   }
   return reply.created({ id: crypto.randomUUID(), grouping, firmed: plannedOrderIds.length, groups });
 });
@@ -176,7 +178,8 @@ route("GET", `${BASE}/planned-orders/{id}/pegging`, (req) => {
     "CST-IMP-06": ["MO-24618", "MO-24630"],
     "MTR-15HP-TEFC": ["MO-24615", "SO-024184"],
   };
-  const refs = demands[o.itemId] ?? ["SAFETY-" + o.itemId];
+  const number = itemByNumber(findNumber(o.itemId)).number;
+  const refs = demands[number] ?? ["SAFETY-" + number];
   const parts = refs.map((_, i) => Math.round(i === refs.length - 1 ? qty - Math.round((qty * 0.6) * (refs.length - 1)) : qty * 0.6));
   const children: PegNode[] = refs.map((ref, i) => ({ ref, refType: ref.startsWith("SO-") ? "sales-order" : ref.startsWith("MO-") ? "production-order" : "safety-stock", qty: dec(Math.max(parts[i], 1), 0), children: [] }));
   const covered = children.reduce((n, c) => n + Number(c.qty), 0);

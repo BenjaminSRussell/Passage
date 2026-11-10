@@ -2,21 +2,25 @@ import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { getJobs, getOrderJobs, type ProductionJob } from "./api/client";
 import { initialValues, toInput, validateOrder } from "./CreateOrderPage";
 import { validateJobsFilter } from "./JobsPage";
 import production from "./module";
 import { validateSchedule } from "./SchedulePanel";
+import { resetResourceCache } from "../mfg-shared/resources";
 import { json, order, orderId, problem } from "./testData";
 
+beforeEach(() => resetResourceCache());
 afterEach(() => vi.unstubAllGlobals());
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
 
 function stubFetch(handler: Handler) {
-  const mock = vi.fn(async (url: string, init?: RequestInit) => handler(url, init));
+  const mock = vi.fn(async (url: string, init?: RequestInit) =>
+    url.includes("/engineering/resources") ? json({ items: [{ id: uuid(9), code: "CNC-1", name: "CNC mill" }] }) : handler(url, init),
+  );
   vi.stubGlobal("fetch", mock);
   return mock;
 }
@@ -198,7 +202,7 @@ describe("Scheduled jobs page", () => {
     expect(within(table).getByText("Setup")).toBeInTheDocument();
     expect(within(table).getAllByText("PO-000001")).toHaveLength(2);
     expect(screen.getByRole("list", { name: "Job totals" })).toHaveTextContent("11");
-    expect(calls(fetchMock)[0][0]).toBe("/api/v1/production/jobs?limit=50");
+    expect(calls(fetchMock).some(([url]) => url === "/api/v1/production/jobs?limit=50")).toBe(true);
     expect(checkAxeAA(container)).toEqual([]);
   });
 
@@ -206,7 +210,8 @@ describe("Scheduled jobs page", () => {
     const fetchMock = stubFetch(() => json({ items: [], total: 0, plannedHours: "0" }));
     renderAt("/production/jobs");
     expect(await screen.findByRole("heading", { name: "No jobs" })).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText(/^Resource/), uuid(9));
+    await screen.findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(screen.getByLabelText(/^Resource/), uuid(9));
     await userEvent.selectOptions(screen.getByLabelText("Job"), "setup");
     fireEvent.change(screen.getByLabelText(/^From/), { target: { value: "2026-11-02T08:00" } });
     await userEvent.click(screen.getByRole("button", { name: "Show" }));
@@ -220,11 +225,15 @@ describe("Scheduled jobs page", () => {
     const fetchMock = stubFetch(() => json({ items: [], total: 0, plannedHours: "0" }));
     renderAt("/production/jobs");
     await screen.findByRole("heading", { name: "No jobs" });
-    await userEvent.type(screen.getByLabelText(/^Resource/), "not-an-id");
+    fireEvent.change(screen.getByLabelText(/^From/), { target: { value: "2026-11-03T08:00" } });
+    fireEvent.change(screen.getByLabelText(/^To/), { target: { value: "2026-11-02T08:00" } });
     await userEvent.click(screen.getByRole("button", { name: "Show" }));
-    expect(screen.getByText("Enter the resource's id (a UUID), or leave it empty.")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(validateJobsFilter({ resourceId: "", siteId: "x", jobType: "", orderStatus: "", from: "", to: "" }).siteId).toMatch(/UUID/);
+    expect(screen.getByText("The end of the window must be after its start.")).toBeInTheDocument();
+    expect(calls(fetchMock).filter(([url]) => url.includes("/jobs"))).toHaveLength(1);
+    expect(validateJobsFilter({ resourceId: "x", siteId: "x", jobType: "", orderStatus: "", from: "", to: "" })).toMatchObject({
+      resourceId: "Choose a resource, or leave it empty.",
+      siteId: "Choose a site, or leave it empty.",
+    });
     expect(validateJobsFilter({ resourceId: "", siteId: "", jobType: "", orderStatus: "", from: "2026-11-03T08:00", to: "2026-11-02T08:00" }).to).toMatch(/after its start/);
   });
 

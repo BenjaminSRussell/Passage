@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
 import { buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listAbcRuns, type AbcRun } from "./api/client";
-import { formatDateTime, shortId } from "./format";
+import { formatDateTime } from "./format";
 import { ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -14,7 +15,7 @@ const columns: DataTableColumn<AbcRun>[] = [
     header: "Run",
     render: (row) => <Link to={`/inventory/abc-runs/${row.id}`}>{formatDateTime(row.createdAt)}</Link>,
   },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => shortId(row.legalEntityId) },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <Named entity="legalEntity" id={row.legalEntityId} /> },
   { key: "thresholds", header: "Thresholds A / B / C", mono: true, render: (row) => `${row.thresholds.a} / ${row.thresholds.b} / ${row.thresholds.c}` },
   { key: "a", header: "A", align: "end", mono: true, render: (row) => count(row, "A") },
   { key: "b", header: "B", align: "end", mono: true, render: (row) => count(row, "B") },

@@ -196,21 +196,18 @@ describe("WIP balance report (4.21.14)", () => {
     expect(calls(fetchMock).at(-1)?.[0]).toContain(`cursor=${orderId}`);
   });
 
-  it("refuses a malformed site without calling the service", async () => {
+  it("does not take a typed site as a filter, only a chosen or pasted one", async () => {
     const fetchMock = stubFetch(() =>
       json({ asOf: "2026-10-26", items: [], totals: [] }),
     );
     renderAt("/production/wip-balances");
     await findTable({ name: /WIP balance/ });
     const form = screen.getByRole("form", { name: "Filter the WIP balance" });
-    await userEvent.type(within(form).getByLabelText(/Site/), "plant 1");
+    const site = within(form).getByLabelText(/Site/);
+    await userEvent.type(site, "plant 1");
+    expect(site).toHaveAttribute("data-value", "");
     await userEvent.click(within(form).getByRole("button", { name: "Show" }));
-    expect(
-      await screen.findByText(
-        "Enter the site's id (a UUID), or leave it empty.",
-      ),
-    ).toBeInTheDocument();
-    expect(calls(fetchMock)).toHaveLength(1);
+    expect(calls(fetchMock).every(([url]) => !String(url).includes("siteId"))).toBe(true);
   });
 
   it("shows loading, empty and error states", async () => {

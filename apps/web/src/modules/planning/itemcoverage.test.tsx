@@ -188,7 +188,7 @@ describe("Item coverage list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show coverage" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`itemId=${ITEM}`))).toBe(true));
 
-    fireEvent.click(within(await findTable({ name: "Item coverage" })).getAllByRole("button", { name: ITEM })[0]);
+    fireEvent.click(within(await findTable({ name: "Item coverage" })).getAllByRole("button", { name: new RegExp(ITEM) })[0]);
     expect(screen.getByTestId("location")).toHaveTextContent(`/planning/item-coverages/${siteCoverage.id}`);
   });
 

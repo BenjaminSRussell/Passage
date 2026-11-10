@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { apiFetch } from "../../../shell/api/http";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
+const defaultFetch: FetchLike = (input, init) => apiFetch(input, init);
 
 export const CURRENCY = /^[A-Z]{3}$/;
 export const DECIMAL = /^-?\d+(\.\d+)?$/;

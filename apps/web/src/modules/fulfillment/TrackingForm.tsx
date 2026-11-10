@@ -4,7 +4,7 @@
 import { useState, type FormEvent } from "react";
 import { Button, Card, FormField, Input, Select } from "../../shell/ui";
 import { captureTracking, describeProblem, type Problem, type Shipment, type ShipmentLine, type TrackingEntry, type TrackingEntryInput } from "./api/client";
-import { compareDecimal, DECIMAL, shortId, subtractDecimal, sumDecimals } from "./format";
+import { compareDecimal, DECIMAL, subtractDecimal, sumDecimals } from "./format";
 import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 
@@ -132,7 +132,7 @@ export function TrackingForm({ shipment, onDone }: { shipment: Shipment; onDone(
             <Select {...control} value={line.id} onChange={(event) => choose(event.target.value)}>
               {lines.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {`Line ${shortId(l.orderLineId)} (${l.unit}), picked ${l.qtyPicked}${l.trackingRequired ? ", tracking required" : ""}`}
+                  {`Line ${lines.indexOf(l) + 1} (${l.unit}), picked ${l.qtyPicked}${l.trackingRequired ? ", tracking required" : ""}`}
                 </option>
               ))}
             </Select>

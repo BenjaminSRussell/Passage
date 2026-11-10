@@ -31,7 +31,7 @@ describe("EcoImpactPanel", () => {
     expect(table).toHaveTextContent("All sites");
     expect(screen.getByText(/2 affected products \(1 top-level product\) across 1 site\./)).toBeInTheDocument();
     expect(await findTable({ name: "Line changes for BIKE" })).toHaveTextContent("WHEEL");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/ecos/e1/impact");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/ecos/e1/impact", expect.anything());
   });
 
   it("shows the empty state", async () => {

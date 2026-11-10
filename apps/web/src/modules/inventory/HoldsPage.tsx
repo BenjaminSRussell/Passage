@@ -4,6 +4,7 @@ import { Alert, Badge, Button, buttonClassName, DataTable, FormField, Input, Pag
 import { describeProblem, HOLD_STATES, listHolds, releaseHold, type Hold, type HoldState, type Problem } from "./api/client";
 import { dash, DECIMAL, describeDimensions, sentence, shortId } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -66,7 +67,7 @@ export function HoldsPage() {
   const [notice, setNotice] = useState("");
 
   const columns: DataTableColumn<Hold>[] = [
-    { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+    { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
     {
       key: "dimensions",
       header: "Dimensions",
