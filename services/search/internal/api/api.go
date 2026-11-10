@@ -32,6 +32,10 @@ const (
 
 	codeValidation = "COM-0001"
 	codeTenant     = "AUTH-0001"
+
+	DutyPartyRead         = "party.read"
+	DutyProductRead       = "product.read"
+	DutyPurchaseOrderRead = "procurement.purchase-order.inquire"
 )
 
 type source struct {
@@ -42,9 +46,9 @@ type source struct {
 }
 
 var sources = []source{
-	{store.TypeParty, "party.read", "/party/%s", false},
-	{store.TypeProduct, "product.read", "/product/%s", true},
-	{store.TypePurchaseOrder, "procurement.purchase-order.inquire", "/purchasing/purchase-orders/%s", false},
+	{store.TypeParty, DutyPartyRead, "/party/%s", false},
+	{store.TypeProduct, DutyProductRead, "/product/%s", true},
+	{store.TypePurchaseOrder, DutyPurchaseOrderRead, "/purchasing/purchase-orders/%s", false},
 }
 
 type Searcher interface {

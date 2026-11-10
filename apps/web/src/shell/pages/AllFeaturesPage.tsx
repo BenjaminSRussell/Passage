@@ -11,9 +11,9 @@ function EntryList({ entries }: { entries: NavEntry[] }) {
     <ul className={styles.links}>
       {entries.map((e) => (
         <li key={e.to}>
-          <Link to={e.to} className={styles.link} aria-label={`${e.label} — ${e.moduleTitle}`}>
+          <Link to={e.to} className={styles.link}>
             <span>
-              {e.label}
+              {e.label} <span className="visually-hidden">—</span>{" "}
               <span className={styles.moduleHint}>{e.moduleTitle}</span>
             </span>
           </Link>
