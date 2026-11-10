@@ -24,6 +24,12 @@
       ],
       "react/*": [
         "./node_modules/@types/react/*"
+      ],
+      "zod": [
+        "./node_modules/zod"
+      ],
+      "zod/*": [
+        "./node_modules/zod/*"
       ]
     }
   },
