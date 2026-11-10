@@ -5,4 +5,5 @@ import "./o2c";
 import "./treasury";
 import "./budgeting";
 import "./documents";
+import "./ledger";
 import "./shell";
