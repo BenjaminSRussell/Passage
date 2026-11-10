@@ -59,7 +59,8 @@ Wave 3 metadata and wave 4 Temporal/Kafka are not imported. Explosion runs in-pr
 | PRD-ATTR-REQUIRED / PRD-ATTR-RANGE | 422 | missing or out-of-range attribute at activate |
 | PRD-LC-BLOCKED / PRD-LC-WARN | 422 / 200 | process policy |
 | PRD-REL-SELF | 422 | self-relation |
-| PRD-SVC-STOCKED | 422 | storage/tracking or stocked model group on a service, or a batch, serial or catch weight flag on one |
+| PRD-SVC-STOCKED | 422 | storage/tracking or stocked model group on a service |
+| PRD-SVC-TRACKED | 422 | batch, serial or catch weight flag on a service |
 | PRD-GRPCHG-ONHAND | 200 (item) | group-change skipped because on-hand > 0 |
 
 Metrics: `product_created_total`, `product_exploded_total`, `product_released_total`, `product_failed_total`.

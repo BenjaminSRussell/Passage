@@ -61,7 +61,7 @@ paths:
         '200': { description: Updated product with its new version. }
         '400': { description: 'Invalid field value, or itemGroupId is not an item group of the tenant (errors.itemGroupId).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Product not found., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PRD-LC-ILLEGAL (transition outside BR-8.1), PRD-ATTR-REQUIRED / PRD-ATTR-RANGE (activation with missing or invalid required attributes) or PRD-SVC-STOCKED (a service with a tracking flag); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRD-LC-ILLEGAL (transition outside BR-8.1), PRD-ATTR-REQUIRED / PRD-ATTR-RANGE (activation with missing or invalid required attributes) or PRD-SVC-TRACKED (a service with a tracking flag); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: The product changed since it was read (PRD-VERSION-CONFLICT)., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match missing (PRD-VERSION-REQUIRED)., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/products/{id}/variants:explode:

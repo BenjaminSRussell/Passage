@@ -212,6 +212,9 @@ function ProductForm({ initial, creating, id, version, submitLabel, onReload }: 
             {(control) => (
               <Select {...control} value={values.itemGroupId} onChange={(event) => set("itemGroupId", event.target.value)}>
                 <option value="">None</option>
+                {values.itemGroupId !== "" && !itemGroups.groups.some((group) => group.id === values.itemGroupId) ? (
+                  <option value={values.itemGroupId}>Current item group</option>
+                ) : null}
                 {itemGroups.groups.map((group) => (
                   <option key={group.id} value={group.id}>
                     {group.name} ({group.code})

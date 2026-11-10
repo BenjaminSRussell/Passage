@@ -14,6 +14,10 @@ export interface LookupOption {
   name: string;
   number?: string;
   unit?: string;
+  itemGroup?: string;
+  batchTracked?: boolean;
+  serialTracked?: boolean;
+  catchWeight?: boolean;
 }
 
 export interface LookupScope {
@@ -207,10 +211,60 @@ function partyRole(
   };
 }
 
-const productOption = (row: Raw): LookupOption | null => {
+let itemGroupNames: Promise<Map<string, string>> | null = null;
+
+function loadItemGroupNames(): Promise<Map<string, string>> {
+  itemGroupNames ??= getJson("/api/v1/product/setup/item-groups").then(
+    (body) => new Map(items(body).map((row): [string, string] => [text(row, "id", "ID") ?? "", text(row, "name", "Name") ?? ""])),
+    () => {
+      itemGroupNames = null;
+      return new Map<string, string>();
+    },
+  );
+  return itemGroupNames;
+}
+
+const flag = (row: Raw, ...keys: string[]) => keys.some((key) => row[key] === true);
+
+async function productOption(row: Raw): Promise<LookupOption | null> {
   const found = option(row, ["name", "Name"], ["productNumber", "ProductNumber"]);
-  return found && { ...found, unit: text(row, "baseUom", "BaseUOM") };
-};
+  if (!found) {
+    return null;
+  }
+  const groupId = text(row, "itemGroupId", "ItemGroupID");
+  return {
+    ...found,
+    unit: text(row, "baseUom", "BaseUOM"),
+    itemGroup: groupId ? (await loadItemGroupNames()).get(groupId) : undefined,
+    batchTracked: flag(row, "batchTracked", "BatchTracked"),
+    serialTracked: flag(row, "serialTracked", "SerialTracked"),
+    catchWeight: flag(row, "catchWeight", "CatchWeight"),
+  };
+}
+
+export function productHint(entry: LookupOption | null): string {
+  if (!entry) {
+    return "";
+  }
+  return [
+    entry.itemGroup ? `Item group: ${entry.itemGroup}.` : "",
+    entry.batchTracked ? "Batch tracked: the batch is recorded at receipt." : "",
+    entry.serialTracked ? "Serial tracked: serial numbers are recorded at receipt." : "",
+    entry.catchWeight ? "Catch weight: the actual weight is recorded at receipt." : "",
+  ]
+    .filter((part) => part !== "")
+    .join(" ");
+}
+
+export interface PickedLine {
+  unit: string;
+  autoUnit?: string;
+}
+
+export function pickProductPatch(line: PickedLine, entry: LookupOption | null, keepUnit = false, defaultUnit = "EA") {
+  const fillUnit = Boolean(entry?.unit) && !keepUnit && (line.unit.trim() === "" || line.unit === defaultUnit || line.unit === line.autoUnit);
+  return { productHint: productHint(entry), ...(fillUnit ? { unit: entry?.unit ?? "", autoUnit: entry?.unit } : {}) };
+}
 
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
   legalEntity: orgEntity("legal entity", "legal-entities", () => ({})),
@@ -251,12 +305,14 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
     createHref: "/product/items/new",
     search: async (q, _scope, signal) =>
       present(
-        items(
-          await getJson(
-            `/api/v1/product/products:search${query({ q })}`,
-            signal,
-          ),
-        ).map(productOption),
+        await Promise.all(
+          items(
+            await getJson(
+              `/api/v1/product/products:search${query({ q })}`,
+              signal,
+            ),
+          ).map(productOption),
+        ),
       ),
     resolve: async (id, signal) =>
       productOption(
@@ -350,4 +406,5 @@ export function rememberOption(
 
 export function clearResolvedOptions(): void {
   resolved.clear();
+  itemGroupNames = null;
 }

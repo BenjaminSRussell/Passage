@@ -430,6 +430,20 @@ describe("purchase orders", () => {
     expect(body.lines[0]).toMatchObject({ productId: PRODUCT, unit: "BOX" });
   });
 
+  it("keeps a typed unit when a product is picked, and explains tracking under the product", async () => {
+    setLookupFetcher(async (url) =>
+      json(url.includes("item-groups") ? { items: [{ id: "g1", name: "Raw material" }] } : { items: [{ id: PRODUCT, productNumber: "BOLT", name: "Hex bolt", baseUom: "KG", itemGroupId: "g1", serialTracked: true }] }),
+    );
+    stubFetch(() => json({}));
+    renderAt("/purchasing/purchase-orders/new");
+    fireEvent.change(await screen.findByLabelText("Unit"), { target: { value: "BOX" } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
+    const note = await screen.findByText("Item group: Raw material. Serial tracked: serial numbers are recorded at receipt.");
+    expect(screen.getByLabelText("Product").getAttribute("aria-describedby")).toContain(note.id);
+  });
+
   it("keeps the typed unit when the product is pasted by id", async () => {
     stubFetch(() => json({}));
     renderAt("/purchasing/purchase-orders/new");

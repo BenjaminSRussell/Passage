@@ -705,6 +705,7 @@ const product: Record<string, ProblemCatalogEntry> = {
   "PRD-RELEASE-DRAFT": { message: "A draft product can't be released.", action: "Finish and approve the product first." },
   "PRD-RELEASE-SITE-INVALID": { message: "The site you chose doesn't exist or belongs to another legal entity.", action: "Choose a site from the list." },
   "PRD-RELEASE-WAREHOUSE-INVALID": { message: "The warehouse you chose doesn't exist, belongs to another legal entity, or isn't in the chosen site.", action: "Choose a warehouse from the list." },
+  "PRD-SVC-TRACKED": { message: "A service can't be tracked by batch, serial number or catch weight.", action: "Turn off the tracking options, or choose a stocked item type." },
   "PRD-SVC-STOCKED": { message: "A service product can't be kept in stock.", action: "Turn off stocking, or choose a stocked product type." },
   "PRD-UOM-UNDERFLOW": { message: "The quantity can't be converted between those units: there is no conversion, or it rounds to zero.", action: "Add a unit conversion, or use a larger quantity." },
   "PRD-VAR-CAP": { message: "That would create more variants than the limit allows.", action: "Choose fewer dimension values." },

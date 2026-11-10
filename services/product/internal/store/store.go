@@ -548,9 +548,10 @@ func (s *Postgres) ExplodeVariants(ctx context.Context, masterID string, selecte
 		for i, v := range result.Created {
 			id := ids.New()
 			dv, _ := json.Marshal(v.DimensionValues)
-			if _, err := tx.Exec(ctx, `insert into product (tenant_id, id, product_number, subtype, master_id, product_type, name, search_name, base_uom, dimension_group_id, lifecycle_state, dimension_values, variant_hash)
-				values ($1,$2,$3,'variant',$4,$5,$6,$6,$7,$8,$9,$10,$11)`,
-				p.TenantID, id, v.ProductNumber, masterID, master.ProductType, master.Name+" "+v.ProductNumber, master.BaseUOM, master.DimensionGroupID, domain.StateDraft, dv, v.VariantHash); err != nil {
+			if _, err := tx.Exec(ctx, `insert into product (tenant_id, id, product_number, subtype, master_id, product_type, name, search_name, base_uom, dimension_group_id, lifecycle_state, dimension_values, variant_hash, item_group_id, batch_tracked, serial_tracked, catch_weight)
+				values ($1,$2,$3,'variant',$4,$5,$6,$6,$7,$8,$9,$10,$11,nullif($12,'')::uuid,$13,$14,$15)`,
+				p.TenantID, id, v.ProductNumber, masterID, master.ProductType, master.Name+" "+v.ProductNumber, master.BaseUOM, master.DimensionGroupID, domain.StateDraft, dv, v.VariantHash,
+				master.ItemGroupID, master.BatchTracked, master.SerialTracked, master.CatchWeight); err != nil {
 				return err
 			}
 			idsCreated = append(idsCreated, id)

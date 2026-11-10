@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { pickProductPatch } from "../../shell/lookup/entities";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -176,6 +177,8 @@ interface LineDraft {
   /** Set on an edit for a line already on the order; blank price keeps its price. */
   lineNo?: number;
   productId: string;
+  productHint?: string;
+  autoUnit?: string;
   description: string;
   /** Procurement category (FR-17.20); read-only on a line already on the order. */
   category: string;
@@ -376,13 +379,13 @@ function LinesCard({
               ) : null}
             </div>
             <div className={styles.grid}>
-              <FormField id={id("product")} label="Product" optional error={err("productId")}>
+              <FormField id={id("product")} label="Product" optional hint={line.productHint || undefined} error={err("productId")}>
                 {(c) => (
                   <EntityLookup
                     entity="product"
                     {...c}
                     value={line.productId}
-                    onChange={(e) => update(i, { productId: e.target.value, ...(e.option?.unit && !fromRequisition ? { unit: e.option.unit } : {}) })}
+                    onChange={(e) => update(i, { productId: e.target.value, ...pickProductPatch(line, e.option, fromRequisition) })}
                   />
                 )}
               </FormField>

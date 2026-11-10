@@ -350,6 +350,14 @@ describe("edit product", () => {
     });
   });
 
+  it("keeps showing the current item group when the groups can't be loaded", async () => {
+    handler = (call) => (isGroups(call) ? json(503, { code: "COM-0503", detail: "down" }) : json(200, row({ ItemGroupID: GROUP })));
+    renderAt(`/product/${ID}/edit`);
+    await screen.findByText("Item groups could not be loaded. Try again later.");
+    expect(screen.getByLabelText(/Item group/)).toHaveValue(GROUP);
+    expect(screen.getByRole("option", { name: "Current item group" })).toBeInTheDocument();
+  });
+
   it("shows the item group and flags already set, and saves a change to them", async () => {
     handler = (call) => {
       if (isGroups(call)) return json(200, groupList);

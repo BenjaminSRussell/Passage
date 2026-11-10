@@ -58,7 +58,7 @@ func AssertServiceNotStocked(p Product, model ItemModelGroup, storageGroupID, tr
 // AssertServiceNotTracked rejects batch, serial or catch weight tracking on a service (BR-8.17).
 func AssertServiceNotTracked(p Product) error {
 	if p.ProductType == TypeService && (p.BatchTracked || p.SerialTracked || p.CatchWeight) {
-		return errf(CodeSvcStocked, "service products cannot be tracked by batch, serial number or catch weight")
+		return errf(CodeSvcTracked, "service products cannot be tracked by batch, serial number or catch weight")
 	}
 	return nil
 }

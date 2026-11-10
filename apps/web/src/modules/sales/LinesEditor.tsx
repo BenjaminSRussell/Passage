@@ -1,4 +1,5 @@
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { pickProductPatch } from "../../shell/lookup/entities";
 import { Button, FormField, Input, Select } from "../../shell/ui";
 import { DELIVERY_DATE_CONTROLS, type DeliveryDateControl } from "./api/client";
 import { sentence } from "./format";
@@ -35,14 +36,15 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
           {lineFields.map((f) => {
             const path = `lines[${i}].${f.name}`;
             return (
-              <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} error={errors[path]}>
+              <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} hint={f.name === "productId" ? line.productHint || undefined : undefined} error={errors[path]}>
                 {(control) =>
                   f.name === "productId" ? (
                     <EntityLookup
                       entity="product"
                       {...control}
                       value={line.productId}
-                      onChange={(e) => updateLine(i, { productId: e.target.value, ...(e.option?.unit ? { unit: e.option.unit } : {}) })}
+                      onChange={(e) => updateLine(i, { productId: e.target.value, ...pickProductPatch(line, e.option) })}
+                      invalid={Boolean(errors[path])}
                     />
                   ) : (
                     <Input

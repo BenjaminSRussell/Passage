@@ -5,6 +5,8 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface LineValues {
   productId: string;
+  productHint?: string;
+  autoUnit?: string;
   quantity: string;
   unit: string;
   siteId: string;

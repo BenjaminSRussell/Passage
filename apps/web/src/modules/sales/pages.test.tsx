@@ -13,6 +13,7 @@ const LE = "11111111-0000-4000-8000-000000000001";
 const CUSTOMER = "22222222-0000-4000-8000-000000000002";
 const PRODUCT = "33333333-0000-4000-8000-000000000003";
 const SITE = "44444444-0000-4000-8000-000000000004";
+const GROUP = "88888888-0000-4000-8000-000000000008";
 const WAREHOUSE = "55555555-0000-4000-8000-000000000005";
 const ORDER_ID = "66666666-0000-4000-8000-000000000006";
 const HOLD_ID = "77777777-0000-4000-8000-000000000007";
@@ -254,6 +255,44 @@ describe("New sales order", () => {
     expect(screen.getByLabelText("Unit")).toHaveValue("KG");
     fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "BOX" } });
     expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
+  });
+
+  it("explains tracking and the item group under the product, tied to the field", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async (url) =>
+      new Response(
+        JSON.stringify(
+          url.includes("item-groups")
+            ? { items: [{ ID: GROUP, Name: "Raw material" }] }
+            : { items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG", ItemGroupID: GROUP, BatchTracked: true, CatchWeight: true }] },
+        ),
+        { status: 200 },
+      ),
+    );
+    renderAt("/sales/orders/new");
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    const hint = "Item group: Raw material. Batch tracked: the batch is recorded at receipt. Catch weight: the actual weight is recorded at receipt.";
+    const note = await screen.findByText(hint);
+    expect(screen.getByLabelText("Product").getAttribute("aria-describedby")).toContain(note.id);
+  });
+
+  it("keeps a unit the person typed when a product is picked", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG" }] }), { status: 200 }));
+    renderAt("/sales/orders/new");
+    fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "BOX" } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
+  });
+
+  it("marks the product invalid when none is chosen", async () => {
+    handler = () => ({ status: 500, body: {} });
+    renderAt("/sales/orders/new");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
+    await screen.findByText("Choose a product.");
+    expect(screen.getByLabelText("Product")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("asks for a product in plain words when none is chosen", async () => {
