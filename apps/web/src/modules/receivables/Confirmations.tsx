@@ -13,6 +13,7 @@ import {
   Input,
   PageHeader,
   Select,
+  type FormFieldControlProps,
   Skeleton,
   StatGroup,
   StatTile,
@@ -38,6 +39,23 @@ import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { PlainName } from "../sales/OrderNumber";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { useNames } from "../mfg-shared/names";
+
+/** The customers still to reply, by name: an option label is plain text, so names are resolved here. */
+function WaitingCustomers({ control, waiting, value, onChange }: { control: FormFieldControlProps; waiting: Confirmation[]; value: string; onChange(id: string): void }) {
+  const names = useNames("customer", waiting.map((w) => w.customerId));
+  return (
+    <Select {...control} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Choose a customer</option>
+      {waiting.map((w) => (
+        <option key={w.id} value={w.id}>
+          {`${names[w.customerId] ?? shortId(w.customerId)} · ${money(w.ourBalance, w.currency)}`}
+        </option>
+      ))}
+    </Select>
+  );
+}
 
 const SIGNED = /^-?\d+(\.\d{1,6})?$/;
 
@@ -371,7 +389,7 @@ export function ConfirmationRunDetailPage() {
           <Detail term="Sample" mono>{run.sampleSize ?? "Everyone at or above the threshold"}</Detail>
           <Detail term="Zero balances">{run.includeZeroBalances ? "Included" : "Left out"}</Detail>
           <Detail term="Reminder after" mono>{`${run.reminderDays} days`}</Detail>
-          <Detail term="Legal entity" mono>{run.legalEntityId}</Detail>
+          <Detail term="Legal entity"><EntityName entity="legalEntity" id={run.legalEntityId} /></Detail>
         </dl>
       </Card>
       {done ? (
@@ -384,16 +402,7 @@ export function ConfirmationRunDetailPage() {
         <Card title="Record a reply" headingLevel={3}>
           <form className={styles.form} onSubmit={submit} noValidate>
             <FormField id="rp-customer" label="Customer" error={errors.confirmationId}>
-              {(c) => (
-                <Select {...c} value={draft.confirmationId} onChange={(e) => update({ confirmationId: e.target.value })}>
-                  <option value="">Choose a customer</option>
-                  {waiting.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {`${shortId(w.customerId)} · ${money(w.ourBalance, w.currency)}`}
-                    </option>
-                  ))}
-                </Select>
-              )}
+              {(c) => <WaitingCustomers control={c} waiting={waiting} value={draft.confirmationId} onChange={(confirmationId) => update({ confirmationId })} />}
             </FormField>
             <FormField id="rp-reply" label="Reply">
               {(c) => (

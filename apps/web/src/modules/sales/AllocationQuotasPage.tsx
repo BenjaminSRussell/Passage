@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { PlainName } from "./OrderNumber";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import {
@@ -11,7 +12,7 @@ import {
   type AllocationQuotaInput,
   type Problem,
 } from "./api/client";
-import { DECIMAL, shortId, UUID } from "./format";
+import { DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -62,7 +63,7 @@ function usedShare(q: AllocationQuota): string {
 }
 
 const columns: DataTableColumn<AllocationQuota>[] = [
-  { key: "productId", header: "Product", mono: true, render: (q) => <Link to={`/sales/allocation-quotas/${q.id}`}>{shortId(q.productId)}</Link> },
+  { key: "productId", header: "Product", render: (q) => <Link to={`/sales/allocation-quotas/${q.id}`}><PlainName short entity="product" id={q.productId} /></Link> },
   { key: "customerId", header: "Customer", render: (q) => (q.customerId ? <EntityName entity="customer" id={q.customerId} /> : "Every customer") },
   { key: "period", header: "Period", render: (q) => `${q.periodStart} to ${q.periodEnd}` },
   { key: "quotaQty", header: "Quota", align: "end" },
