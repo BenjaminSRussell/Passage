@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -34,7 +35,7 @@ func invoiceDoc(t *testing.T, id, number string, installments ...domain.BillingI
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	return BillingDocument{SourceType: "INVOICE", ID: id, LegalEntityID: legalEntity, CustomerID: billCustomer, Currency: "USD",
+	return BillingDocument{SourceType: "INVOICE", ID: id, Number: number, LegalEntityID: legalEntity, CustomerID: billCustomer, Currency: "USD",
 		DocumentDate: "2027-03-31", Items: items}
 }
 
@@ -44,7 +45,7 @@ func creditDoc(t *testing.T, id, original, number string) BillingDocument {
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	return BillingDocument{SourceType: "CREDIT_NOTE", ID: id, OriginalID: original, LegalEntityID: legalEntity, CustomerID: billCustomer,
+	return BillingDocument{SourceType: "CREDIT_NOTE", ID: id, Number: number, OriginalID: original, LegalEntityID: legalEntity, CustomerID: billCustomer,
 		Currency: "USD", DocumentDate: "2027-04-10", Items: []domain.PlannedItem{item}}
 }
 
@@ -161,14 +162,31 @@ func TestApplyBillingDocument_CreditNoteOpensALinkedCreditItemOnce(t *testing.T)
 	}
 }
 
-func TestApplyBillingDocument_CreditNoteBeforeItsInvoiceStillOpensAndLinks(t *testing.T) {
+func TestApplyBillingDocument_CreditNoteWaitsForItsInvoiceInTheSameLegalEntity(t *testing.T) {
 	s := setup(t)
 	ctx := scopedCtx(43, legalEntity)
-	if created, err := s.ApplyBillingDocument(ctx, creditDoc(t, creditDocID, invoiceDocID, "CN-2027-0000002")); err != nil || created != 1 {
-		t.Fatalf("apply: created %d err %v", created, err)
+	cn := creditDoc(t, creditDocID, invoiceDocID, "CN-2027-0000002")
+	if _, err := s.ApplyBillingDocument(ctx, cn); !errors.Is(err, ErrOriginalInvoiceNotFound) {
+		t.Fatalf("credit note before its invoice: %v", err)
 	}
-	if got := itemsOf(t, s, ctx); len(got) != 1 || got[0].original == nil || *got[0].original != invoiceDocID {
-		t.Fatalf("items %+v", got)
+	other := invoiceDoc(t, invoiceDocID, "INV-2027-0000020")
+	other.LegalEntityID = otherLegalEntity
+	if _, err := s.ApplyBillingDocument(scopedCtx(43, otherLegalEntity), other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyBillingDocument(ctx, cn); !errors.Is(err, ErrOriginalInvoiceNotFound) {
+		t.Fatalf("credit note whose invoice is in another legal entity: %v", err)
+	}
+	if got := itemsOf(t, s, ctx); len(got) != 0 {
+		t.Fatalf("a credit note without its invoice opened %+v", got)
+	}
+	third := invoiceDoc(t, "00000000-0000-0000-0000-00000000b0f1", "INV-2027-0000021")
+	if _, err := s.ApplyBillingDocument(ctx, third); err != nil {
+		t.Fatal(err)
+	}
+	cn.OriginalID = "00000000-0000-0000-0000-00000000b0f1"
+	if created, err := s.ApplyBillingDocument(ctx, cn); err != nil || created != 1 {
+		t.Fatalf("retry once the invoice is here: created %d err %v", created, err)
 	}
 }
 
@@ -241,6 +259,93 @@ func TestApplyBillingDocument_PartialFailureRollsBackAndRetryOpensTheWholeSet(t 
 	execAdmin(t, s, `delete from open_item where document_number = 'INV-2027-0000007/3'`)
 	if created, err := s.ApplyBillingDocument(ctx, doc); err != nil || created != 3 {
 		t.Fatalf("retry: created %d err %v", created, err)
+	}
+}
+
+func TestApplyBillingDocument_AnImportedItemWithTheInvoiceNumberBlocksItsInstallments(t *testing.T) {
+	s := setup(t)
+	ctx := scopedCtx(50, legalEntity)
+	if _, err := s.CreateOpenItem(tenantCtx(50), OpenItem{LegalEntityID: legalEntity, CustomerID: billCustomer, SourceType: "INVOICE",
+		DocumentNumber: "INV-2027-0000030", DocumentDate: "2027-03-31", DueDate: "2027-04-30", Currency: "USD",
+		Amount: amt("1000.00"), OpenAmount: amt("1000.00")}); err != nil {
+		t.Fatal(err)
+	}
+	doc := invoiceDoc(t, invoiceDocID, "INV-2027-0000030",
+		domain.BillingInstallment{No: 1, Amount: amt("600.00"), DueDate: "2027-04-30"},
+		domain.BillingInstallment{No: 2, Amount: amt("400.00"), DueDate: "2027-05-30"})
+	if _, err := s.ApplyBillingDocument(ctx, doc); problemCode(err) != CodeBillingNumberTaken {
+		t.Fatalf("installments beside an imported whole invoice: %v", err)
+	}
+	if got := itemsOf(t, s, ctx); len(got) != 1 {
+		t.Fatalf("the receivable was doubled: %+v", got)
+	}
+}
+
+func TestApplyBillingDocument_NumberCheckTreatsLikeWildcardsAsText(t *testing.T) {
+	s := setup(t)
+	ctx := scopedCtx(51, legalEntity)
+	execAdminTenant(t, s, 51, legalEntity, "INVX0001/1")
+	execAdminTenant(t, s, 51, legalEntity, "INV%0002/1")
+	if created, err := s.ApplyBillingDocument(ctx, invoiceDoc(t, invoiceDocID, "INV_0001")); err != nil || created != 1 {
+		t.Fatalf("a number with _ matched another number: created %d err %v", created, err)
+	}
+	if created, err := s.ApplyBillingDocument(ctx, invoiceDoc(t, "00000000-0000-0000-0000-00000000b0f2", "INV%")); err != nil || created != 1 {
+		t.Fatalf("a number with %% matched other numbers: created %d err %v", created, err)
+	}
+}
+
+func TestApplyBillingDocument_SameDocumentIdWithOtherContentIsAMismatchNotARepeat(t *testing.T) {
+	s := setup(t)
+	a := scopedCtx(52, legalEntity)
+	doc := invoiceDoc(t, invoiceDocID, "INV-2027-0000040")
+	if _, err := s.ApplyBillingDocument(a, doc); err != nil {
+		t.Fatal(err)
+	}
+	cheaper := doc
+	cheaper.Items = []domain.PlannedItem{{DocumentNumber: "INV-2027-0000040", Amount: amt("999.99"), DueDate: "2027-04-30", InstallmentNo: 1}}
+	eur := doc
+	eur.Currency = "EUR"
+	otherCustomer := doc
+	otherCustomer.CustomerID = "00000000-0000-0000-0000-0000000000c2"
+	for name, changed := range map[string]BillingDocument{"amount": cheaper, "currency": eur, "customer": otherCustomer} {
+		if _, err := s.ApplyBillingDocument(a, changed); problemCode(err) != CodeBillingMismatch {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	elsewhere := doc
+	elsewhere.LegalEntityID = otherLegalEntity
+	if _, err := s.ApplyBillingDocument(scopedCtx(52, otherLegalEntity), elsewhere); problemCode(err) != CodeBillingMismatch {
+		t.Fatalf("same id in another legal entity: %v", err)
+	}
+	if got := itemsOf(t, s, a); len(got) != 1 || got[0].amount != "1000.000000" {
+		t.Fatalf("items %+v", got)
+	}
+	if created, err := s.ApplyBillingDocument(a, doc); err != nil || created != 0 {
+		t.Fatalf("the true repeat: created %d err %v", created, err)
+	}
+}
+
+func TestPostRMACredit_FindsAnInstallmentInvoiceByBillingIdAndBoundsItBySumOfInstallments(t *testing.T) {
+	s, _, _ := rmaSetup(t)
+	doc := invoiceDoc(t, invoiceDocID, "INV-2027-0000050",
+		domain.BillingInstallment{No: 1, Amount: amt("600.00"), DueDate: "2027-04-30"},
+		domain.BillingInstallment{No: 2, Amount: amt("400.00"), DueDate: "2027-05-30"})
+	if _, err := s.ApplyBillingDocument(scopedCtx(53, legalEntity), doc); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenantCtx(53)
+	in := rmaIn("INV-2027-0000050")
+	in.InvoiceID = invoiceDocID
+	in.Gross, in.Restocking, in.Net = amt("900.00"), amt("0"), amt("900.00")
+	note, err := s.PostRMACredit(ctx, in)
+	if err != nil || note.CustomerID != billCustomer || !note.Net.Equal(amt("900.00")) {
+		t.Fatalf("900.00 against a 1000.00 invoice of two installments: %+v %v", note, err)
+	}
+	second := rmaIn("INV-2027-0000050")
+	second.RMANumber, second.InvoiceID = "RMA-0000051", invoiceDocID
+	second.Gross, second.Restocking, second.Net = amt("200.00"), amt("0"), amt("200.00")
+	if _, err := s.PostRMACredit(ctx, second); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("200.00 more than the 100.00 left across the installments: %v", err)
 	}
 }
 

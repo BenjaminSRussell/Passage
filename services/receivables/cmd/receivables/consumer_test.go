@@ -64,6 +64,7 @@ func (f *fakeSource) Commit(_ context.Context, r eventing.Record) error {
 type deadLetters struct {
 	mu      sync.Mutex
 	offsets map[int64]string
+	details map[int64]string
 }
 
 func (d *deadLetters) Send(_ context.Context, topic string, r eventing.Record, reason string) error {
@@ -73,6 +74,7 @@ func (d *deadLetters) Send(_ context.Context, topic string, r eventing.Record, r
 		return errors.New("dead-lettered to " + topic)
 	}
 	d.offsets[r.Offset] = reason
+	d.details[r.Offset] = r.Headers[eventing.HeaderDeadLetterDetail]
 	return nil
 }
 
@@ -86,6 +88,25 @@ func (f *flakyStore) ApplyBillingDocument(ctx context.Context, d store.BillingDo
 		return 0, errors.New("connection reset")
 	}
 	return f.inner.ApplyBillingDocument(ctx, d)
+}
+
+type lateInvoice struct {
+	inner   *store.Postgres
+	invoice eventing.Record
+	calls   atomic.Int32
+}
+
+func (l *lateInvoice) ApplyBillingDocument(ctx context.Context, d store.BillingDocument) (int, error) {
+	if l.calls.Add(1) == 3 {
+		evt, err := eventing.Decode(l.invoice)
+		if err != nil {
+			return 0, err
+		}
+		if err := api.BillingConsumerHandlers(l.inner)[api.InvoicePostedType].Handle(ctx, nil, evt); err != nil {
+			return 0, err
+		}
+	}
+	return l.inner.ApplyBillingDocument(ctx, d)
 }
 
 func record(t *testing.T, offset int64, source, eventType, id string, data any) eventing.Record {
@@ -146,7 +167,7 @@ func openRows(t *testing.T, st *store.Postgres, le string) []openRow {
 func runConsumer(t *testing.T, st api.BillingStore, inbox eventing.Inbox, records ...eventing.Record) (*deadLetters, *eventing.Consumer) {
 	t.Helper()
 	src := &fakeSource{pending: records, done: make(chan struct{}, len(records))}
-	dlq := &deadLetters{offsets: map[int64]string{}}
+	dlq := &deadLetters{offsets: map[int64]string{}, details: map[int64]string{}}
 	cfg := billingConfig(st)
 	cfg.Backoff = func(int) time.Duration { return time.Millisecond }
 	c, err := eventing.NewConsumer(src, dlq, inbox, cfg)
@@ -275,6 +296,40 @@ func TestBillingConsumer_AnEventItCannotApplyIsParkedAndOpensNothing(t *testing.
 	got := openRows(t, st, legalEntityA)
 	if len(got) != 1 || got[0].number != "INV-2027-0000009" {
 		t.Fatalf("a parked event left open items: %+v", got)
+	}
+	if d := dlq.details[6]; !strings.Contains(d, "AR-BILLING-NUMBER-TAKEN") || !strings.Contains(d, "INV-2027-0000009") {
+		t.Fatalf("the dead-letter record does not say why: %q", d)
+	}
+	if d := dlq.details[1]; !strings.Contains(d, "add up") {
+		t.Fatalf("detail of the short installments: %q", d)
+	}
+}
+
+func TestBillingConsumer_ACreditNoteWithoutItsInvoiceIsRetriedThenParkedWithTheReason(t *testing.T) {
+	st, inbox := setupStore(t)
+	dlq, c := runConsumer(t, st, inbox, record(t, 1, "billing", api.CreditNotePostedType, creditID, creditData(legalEntityA, "CN-2027-0000005")))
+	if dlq.offsets[1] != "retries_exhausted" || !strings.Contains(dlq.details[1], "original invoice not found") {
+		t.Fatalf("parked %v %v", dlq.offsets, dlq.details)
+	}
+	if got := openRows(t, st, legalEntityA); len(got) != 0 {
+		t.Fatalf("a credit note without its invoice opened %+v", got)
+	}
+	var metrics countingWriter
+	c.Metrics().Write(&metrics, api.BillingConsumerName)
+	if !metrics.has(`event_consumer_dead_lettered_total{consumer="receivables-billing"} 1`) {
+		t.Fatalf("metrics:\n%s", metrics.String())
+	}
+}
+
+func TestBillingConsumer_ACreditNoteThatArrivesAfterItsInvoiceInTheRetryWindowOpens(t *testing.T) {
+	st, inbox := setupStore(t)
+	late := &lateInvoice{inner: st, invoice: record(t, 0, "billing", api.InvoicePostedType, invoiceID, invoiceData(legalEntityA, "INV-2027-0000006", "500.00"))}
+	dlq, _ := runConsumer(t, late, inbox, record(t, 1, "billing", api.CreditNotePostedType, creditID, creditData(legalEntityA, "CN-2027-0000006")))
+	if len(dlq.offsets) != 0 {
+		t.Fatalf("parked %v", dlq.offsets)
+	}
+	if got := openRows(t, st, legalEntityA); len(got) != 2 {
+		t.Fatalf("open items %+v", got)
 	}
 }
 

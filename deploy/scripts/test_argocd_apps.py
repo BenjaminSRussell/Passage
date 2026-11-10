@@ -518,6 +518,21 @@ class ArgoApplicationsTest(unittest.TestCase):
                                                     ("group", group): {"Read", "Describe"}})
         self.assertIn(dlq, topics)
 
+    @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
+    def test_receivables_consumer_runs_non_root_with_a_locked_down_container(self):
+        out = subprocess.run(
+            ["helm", "template", "r", str(REPO / "services/receivables/charts/receivables"), "--set", "consumer.enabled=true",
+             "--set", "consumer.kafka.secret=k", "--set", "consumer.kafka.brokers=b:9092"],
+            capture_output=True, text=True, check=True).stdout
+        (consumer,) = [d for d in yaml.safe_load_all(out) if d and d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-consumer")]
+        pod = consumer["spec"]["template"]["spec"]
+        self.assertTrue(pod["securityContext"]["runAsNonRoot"])
+        self.assertEqual(pod["securityContext"]["seccompProfile"], {"type": "RuntimeDefault"})
+        container = pod["containers"][0]["securityContext"]
+        self.assertFalse(container["allowPrivilegeEscalation"])
+        self.assertTrue(container["readOnlyRootFilesystem"])
+        self.assertEqual(container["capabilities"], {"drop": ["ALL"]})
+
     def test_type_routed_outbox_connectors_match_their_asyncapi_channels(self):
         # outbox-sales and outbox-fulfillment route by the event type's entity, not aggregate_type (#480): every
         # message the service's AsyncAPI declares under its own topic prefix routes to that message's channel, the

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -23,10 +25,12 @@ const (
 )
 
 // BillingDocument is a posted billing invoice or credit note and the open items it opens (see domain.PlanInvoiceItems and
-// PlanCreditItem). SourceType is INVOICE or CREDIT_NOTE, OriginalID the invoice a credit note credits.
+// PlanCreditItem). SourceType is INVOICE or CREDIT_NOTE, Number the document number its items are numbered from, OriginalID the
+// invoice a credit note credits.
 type BillingDocument struct {
 	SourceType    string
 	ID            string
+	Number        string
 	OriginalID    string
 	LegalEntityID string
 	CustomerID    string
@@ -35,34 +39,51 @@ type BillingDocument struct {
 	Items         []domain.PlannedItem
 }
 
+// ErrOriginalInvoiceNotFound is a credit note whose invoice has no open items in its legal entity (yet). The caller retries,
+// the invoice may still be on its way, and parks the note when the retries run out.
+var ErrOriginalInvoiceNotFound = errors.New("original invoice not found in this legal entity")
+
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 // ApplyBillingDocument opens the document's items in one transaction and reports how many it created. A document already
-// applied creates nothing (0, nil), whether it comes again or races itself: (source type, document id, installment) is
-// unique. A document number already taken by an item that does not come from this document (entered by hand, imported, opened
-// for an RMA credit) is refused, 409 AR-BILLING-NUMBER-TAKEN, and a credit note whose customer, legal entity or currency
-// differs from its original invoice's items is refused, 422 AR-BILLING-MISMATCH; the caller parks both.
+// applied with the same content creates nothing (0, nil), whether it comes again or races itself: (source type, document id,
+// installment) is unique. Refused, so the caller parks the event: a document id already opened with other content or in
+// another legal entity (422 AR-BILLING-MISMATCH, as is a credit note whose customer or currency differs from its invoice's), and
+// a document number, or an installment number "<number>/<n>", already taken by an item that does not come from this document
+// (entered by hand, imported, opened for an RMA credit): 409 AR-BILLING-NUMBER-TAKEN. A credit note whose invoice has no items
+// in the legal entity returns ErrOriginalInvoiceNotFound.
 func (s *Postgres) ApplyBillingDocument(ctx context.Context, d BillingDocument) (int, error) {
 	p, _ := tenant.FromContext(ctx)
 	created := 0
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		created = 0
-		var existing int
-		if err := tx.QueryRow(ctx, `select count(*) from open_item where source_type = $1 and source_doc_id = $2`, d.SourceType, d.ID).Scan(&existing); err != nil {
+		opened, err := openedWithSameContent(ctx, tx, d)
+		if err != nil || opened {
 			return err
 		}
-		if existing > 0 {
-			return nil
-		}
 		if d.OriginalID != "" {
-			var customer, currency, entity string
-			err := tx.QueryRow(ctx, `select customer_id::text, currency, legal_entity_id::text from open_item
-				where source_type = 'INVOICE' and source_doc_id = $1 limit 1`, d.OriginalID).Scan(&customer, &currency, &entity)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			var customer, currency string
+			err := tx.QueryRow(ctx, `select customer_id::text, currency from open_item
+				where source_type = 'INVOICE' and source_doc_id = $1 limit 1`, d.OriginalID).Scan(&customer, &currency)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrOriginalInvoiceNotFound
+			}
+			if err != nil {
 				return err
 			}
-			if err == nil && (customer != d.CustomerID || currency != d.Currency || entity != d.LegalEntityID) {
+			if customer != d.CustomerID || currency != d.Currency {
 				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeBillingMismatch,
-					"the credit note's customer, legal entity or currency differs from the invoice it credits")
+					"the credit note's customer or currency differs from the invoice it credits")
 			}
+		}
+		var taken bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from open_item
+			where (document_number = $1 or document_number like $2 escape '\') and source_doc_id is distinct from $3::uuid)`,
+			d.Number, likeEscaper.Replace(d.Number)+"/%", d.ID).Scan(&taken); err != nil {
+			return err
+		}
+		if taken {
+			return numberTaken()
 		}
 		for _, it := range d.Items {
 			var original any
@@ -84,16 +105,98 @@ func (s *Postgres) ApplyBillingDocument(ctx context.Context, d BillingDocument) 
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		switch pgErr.ConstraintName {
 		case sourceKeyIndex:
-			return 0, nil
+			if s.billingDocumentApplied(ctx, d) {
+				return 0, nil
+			}
+			return 0, httpx.NewProblem(http.StatusUnprocessableEntity, CodeBillingMismatch,
+				"this billing document id was already opened in another legal entity")
 		case documentNumberKey:
 			if s.billingDocumentApplied(ctx, d) {
 				return 0, nil
 			}
-			return 0, httpx.NewProblem(http.StatusConflict, CodeBillingNumberTaken,
-				"an open item with this document number already exists and does not come from this billing document")
+			return 0, numberTaken()
 		}
 	}
 	return created, err
+}
+
+func numberTaken() error {
+	return httpx.NewProblem(http.StatusConflict, CodeBillingNumberTaken,
+		"an open item with this document number (or its installment numbers) already exists and does not come from this billing document")
+}
+
+// openedWithSameContent tells a document already opened here, whose items match the event's, from one not opened yet; a document
+// id opened with other items, customer or currency is a conflict, not a repeat.
+func openedWithSameContent(ctx context.Context, tx pgx.Tx, d BillingDocument) (bool, error) {
+	rows, err := tx.Query(ctx, `select document_number, installment_no, customer_id::text, currency, amount::text from open_item
+		where source_type = $1 and source_doc_id = $2 order by installment_no`, d.SourceType, d.ID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	n := 0
+	same := true
+	for rows.Next() {
+		var number, customer, currency, amount string
+		var installment int
+		if err := rows.Scan(&number, &installment, &customer, &currency, &amount); err != nil {
+			return false, err
+		}
+		if n >= len(d.Items) {
+			same = false
+		} else if it := d.Items[n]; it.DocumentNumber != number || it.InstallmentNo != installment || customer != d.CustomerID ||
+			currency != d.Currency || !decimal.RequireFromString(amount).Equal(it.Amount) {
+			same = false
+		}
+		n++
+	}
+	if err := rows.Err(); err != nil || n == 0 {
+		return false, err
+	}
+	if !same || n != len(d.Items) {
+		return false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeBillingMismatch,
+			"this billing document id was already opened with different items, customer or currency")
+	}
+	return true, nil
+}
+
+// lockInvoiceItems locks and returns the open items of the invoice an RMA credit returns against: the items of the billing
+// invoice id (one per installment), else the single item with the invoice number that carries no source id (entered by hand or
+// imported). The first item anchors the credit; the amount is the sum of the installments.
+func lockInvoiceItems(ctx context.Context, tx pgx.Tx, tenantID string, in RMACredit) (OpenItem, []string, decimal.Decimal, error) {
+	billingID := ""
+	if c, ok := ids.Canonical(in.InvoiceID); ok {
+		billingID = c
+	}
+	rows, err := tx.Query(ctx, `select `+openItemColumns+` from open_item
+		where tenant_id = $1 and legal_entity_id = $2 and source_type = 'INVOICE'
+		and (source_doc_id = nullif($3, '')::uuid or (source_doc_id is null and document_number = $4))
+		order by installment_no nulls first, document_number for update`, tenantID, in.LegalEntityID, billingID, in.InvoiceNumber)
+	if err != nil {
+		return OpenItem{}, nil, decimal.Zero, err
+	}
+	defer rows.Close()
+	var anchor OpenItem
+	var itemIDs []string
+	total := decimal.Zero
+	for rows.Next() {
+		it, err := scanOpenItem(rows)
+		if err != nil {
+			return OpenItem{}, nil, decimal.Zero, err
+		}
+		if len(itemIDs) == 0 {
+			anchor = it
+		}
+		itemIDs = append(itemIDs, it.ID)
+		total = total.Add(it.Amount)
+	}
+	if err := rows.Err(); err != nil {
+		return OpenItem{}, nil, decimal.Zero, err
+	}
+	if len(itemIDs) == 0 {
+		return OpenItem{}, nil, decimal.Zero, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRMAInvoice, "the original invoice is not an open item of this legal entity")
+	}
+	return anchor, itemIDs, total, nil
 }
 
 // billingDocumentApplied tells a document that raced itself (the other delivery committed first, so the unique number is its

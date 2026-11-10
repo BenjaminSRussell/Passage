@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/eventing"
@@ -24,13 +25,14 @@ import (
 // to the invoice it credits. Each document is keyed by (source type, billing document id, installment) in the store, so a
 // replay, a redelivery or a second event for the same document creates nothing. An event the store or the plan refuses (a bad
 // amount, installments that do not add up to the gross, a number already taken by an item entered by hand or imported, a
-// credit note for another customer or currency than its invoice) is parked on the dead-letter topic with the reason logged,
-// never dropped and never half-applied; a database failure is retried with back-off first.
+// credit note for another customer or currency than its invoice) is parked on the dead-letter topic with the error text in
+// x-dlq-detail, never dropped and never half-applied; see failure for which errors are retried. A credit note whose invoice has
+// no items in its legal entity yet is retried and parked when the invoice does not come.
 //
-// An RMA credit and a billing credit note for the same return do not both open a credit item: the RMA credit reserves the
-// returned invoice lines in billing before it opens its item (billing's credit-reservation counts against the invoice exactly
-// like a posted credit note), so billing refuses a credit note for the room an RMA credit holds, and no credit note event
-// exists for that return. Only credit notes billing posted reach this consumer.
+// Credits never exceed the invoice: the RMA credit reserves the returned invoice lines in billing before it opens its item, and
+// a reservation counts against the invoice exactly like a posted credit note, so billing refuses a credit note for room a
+// reservation holds. That does not stop one partial return from being credited both ways (an RMA credit and a credit note) while
+// the two together stay within the invoice; billing has no per-return control, and it is not built (NOT-IMPLEMENTED row 3).
 const (
 	// BillingConsumerName is the consumer (and Kafka group) and the service principal it runs as, service:receivables-billing.
 	BillingConsumerName = "receivables-billing"
@@ -55,15 +57,16 @@ type billingTotals struct {
 }
 
 type invoicePostedData struct {
-	InvoiceID     string        `json:"invoice_id"`
-	Number        string        `json:"number"`
-	LegalEntityID string        `json:"legal_entity_id"`
-	Customer      string        `json:"customer"`
-	Currency      string        `json:"currency"`
-	InvoiceDate   string        `json:"invoice_date"`
-	DueDate       string        `json:"due_date"`
-	Totals        billingTotals `json:"totals"`
-	Installments  []struct {
+	InvoiceID      string        `json:"invoice_id"`
+	Number         string        `json:"number"`
+	LegalEntityID  string        `json:"legal_entity_id"`
+	Customer       string        `json:"customer"`
+	InvoiceAccount string        `json:"invoice_account"`
+	Currency       string        `json:"currency"`
+	InvoiceDate    string        `json:"invoice_date"`
+	DueDate        string        `json:"due_date"`
+	Totals         billingTotals `json:"totals"`
+	Installments   []struct {
 		No      int    `json:"no"`
 		Amount  string `json:"amount"`
 		DueDate string `json:"due_date"`
@@ -76,6 +79,7 @@ type creditNotePostedData struct {
 	OriginalInvoiceID string        `json:"original_invoice_id"`
 	LegalEntityID     string        `json:"legal_entity_id"`
 	Customer          string        `json:"customer"`
+	InvoiceAccount    string        `json:"invoice_account"`
 	Currency          string        `json:"currency"`
 	CreditDate        string        `json:"credit_date"`
 	PostingDate       string        `json:"posting_date"`
@@ -125,6 +129,13 @@ func canonicalIDs(evt events.Event, named map[string]string) (map[string]string,
 	return out, nil
 }
 
+func logBillToDiffers(ctx context.Context, evt events.Event, number, customer, billTo string) {
+	if canonical, _ := ids.Canonical(billTo); billTo != "" && canonical != customer && billTo != customer {
+		slog.WarnContext(ctx, "bill-to account differs from the customer; the item is opened for the customer", "type", evt.Type,
+			"document", number, "customer", customer, "invoiceAccount", billTo)
+	}
+}
+
 func openInvoice(ctx context.Context, s BillingStore, evt events.Event) error {
 	var d invoicePostedData
 	if err := json.Unmarshal(evt.Data, &d); err != nil {
@@ -138,6 +149,7 @@ func openInvoice(ctx context.Context, s BillingStore, evt events.Event) error {
 	if err != nil {
 		return err
 	}
+	logBillToDiffers(ctx, evt, d.Number, c["customer"], d.InvoiceAccount)
 	gross, err := decimal.NewFromString(d.Totals.Gross)
 	if err != nil {
 		return eventing.Permanent(fmt.Errorf("invoice.posted %s: gross %q is not an amount", d.Number, d.Totals.Gross))
@@ -154,7 +166,7 @@ func openInvoice(ctx context.Context, s BillingStore, evt events.Event) error {
 	if err != nil {
 		return eventing.Permanent(fmt.Errorf("invoice.posted %s: %w", d.Number, err))
 	}
-	return apply(ctx, s, evt, store.BillingDocument{SourceType: "INVOICE", ID: c["invoice_id"], LegalEntityID: c["legal_entity_id"],
+	return apply(ctx, s, evt, store.BillingDocument{SourceType: "INVOICE", ID: c["invoice_id"], Number: d.Number, LegalEntityID: c["legal_entity_id"],
 		CustomerID: c["customer"], Currency: d.Currency, DocumentDate: d.InvoiceDate, Items: items}, d.Number)
 }
 
@@ -175,6 +187,7 @@ func openCreditNote(ctx context.Context, s BillingStore, evt events.Event) error
 	if err != nil {
 		return err
 	}
+	logBillToDiffers(ctx, evt, d.Number, c["customer"], d.InvoiceAccount)
 	gross, err := decimal.NewFromString(d.Totals.Gross)
 	if err != nil {
 		return eventing.Permanent(fmt.Errorf("creditnote.posted %s: gross %q is not an amount", d.Number, d.Totals.Gross))
@@ -183,7 +196,7 @@ func openCreditNote(ctx context.Context, s BillingStore, evt events.Event) error
 	if err != nil {
 		return eventing.Permanent(fmt.Errorf("creditnote.posted %s: %w", d.Number, err))
 	}
-	return apply(ctx, s, evt, store.BillingDocument{SourceType: "CREDIT_NOTE", ID: c["credit_note_id"], OriginalID: c["original_invoice_id"],
+	return apply(ctx, s, evt, store.BillingDocument{SourceType: "CREDIT_NOTE", ID: c["credit_note_id"], Number: d.Number, OriginalID: c["original_invoice_id"],
 		LegalEntityID: c["legal_entity_id"], CustomerID: c["customer"], Currency: d.Currency, DocumentDate: d.CreditDate,
 		Items: []domain.PlannedItem{item}}, d.Number)
 }
@@ -193,14 +206,35 @@ func apply(ctx context.Context, s BillingStore, evt events.Event, doc store.Bill
 		return eventing.Permanent(fmt.Errorf("%s %s: the document date %q is not a date", evt.Type, number, doc.DocumentDate))
 	}
 	created, err := s.ApplyBillingDocument(ctx, doc)
+	if err != nil {
+		return failure(evt, number, err)
+	}
+	slog.InfoContext(ctx, "billing document opened in receivables", "type", evt.Type, "document", number, "documentId", doc.ID,
+		"legalEntityId", doc.LegalEntityID, "openItems", created, "replay", created == 0)
+	return nil
+}
+
+// failure sorts a store error by what retrying can do: a refusal (4xx) or a data error (pg class 22, 23) never heals, so it is
+// parked at once; a lost or overloaded database or network (pg class 08, 53, 57, or an error that is not the database's own)
+// heals, so it is retried without limit; anything else, an invoice that has not arrived yet included, is retried a bounded
+// number of times and then parked.
+func failure(evt events.Event, number string, err error) error {
+	err = fmt.Errorf("%s %s: %w", evt.Type, number, err)
 	var p *httpx.Problem
+	var pg *pgconn.PgError
 	switch {
-	case err == nil:
-		slog.InfoContext(ctx, "billing document opened in receivables", "type", evt.Type, "document", number, "documentId", doc.ID,
-			"legalEntityId", doc.LegalEntityID, "openItems", created, "replay", created == 0)
-		return nil
 	case errors.As(err, &p) && p.Status >= 400 && p.Status < 500:
 		return eventing.Permanent(fmt.Errorf("%s %s: %s %s", evt.Type, number, p.Code, p.Detail))
+	case errors.Is(err, store.ErrOriginalInvoiceNotFound):
+		return err
+	case errors.As(err, &pg):
+		switch pg.Code[:2] {
+		case "22", "23":
+			return eventing.Permanent(err)
+		case "08", "53", "57":
+			return eventing.Transient(err)
+		}
+		return err
 	}
-	return fmt.Errorf("%s %s: %w", evt.Type, number, err)
+	return eventing.Transient(err)
 }
