@@ -19,7 +19,7 @@ release may change public APIs.
 
 ### Added
 
-- Billing credit reservations (#513): `POST /v1/billing/invoices/{id}/credit-reservations` (idempotent per RMA, line-level qty/net/tax) and `POST /v1/billing/credit-reservations/{id}:release` hold part of a posted invoice for a credit issued outside billing; reservations count with posted credit notes under the invoice's row lock, so the total credited can no longer exceed the invoiced amount (`BIL-0005`); the invoice read shows `credited.reserved` and `reservedQty`; receivables is granted `billing.credit-reservation.write` (receivables wiring follows).
+- Billing credit reservations (#513): `POST /v1/billing/invoices/{id}/credit-reservations` (idempotent per RMA, line-level qty/net/tax) plus `POST /v1/billing/credit-reservations/{id}:commit` and `:release` (service duty `billing.credit-reservation.write` only; a released key can be retried under the bound) hold part of a posted invoice for a credit issued outside billing; reservations count with posted credit notes under the invoice's row lock, so the total credited can no longer exceed the invoiced amount (`BIL-0005`); the invoice read shows `credited.reserved` and `reservedQty`; receivables is granted `billing.credit-reservation.write` (receivables wiring follows).
 - Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
   seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
   `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web

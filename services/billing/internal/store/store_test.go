@@ -491,18 +491,18 @@ func TestCreditReservation_CountsAgainstCreditNotesBothWays(t *testing.T) {
 		t.Fatalf("reserve after the credit note took the last part: %v, want 422 %s", err, domain.CodeCreditExceeded)
 	}
 
-	freed, err := s.ReleaseCredit(tctx, res.ID)
-	if err != nil || freed.Status != StatusReleased || freed.ReleasedAt.IsZero() {
+	freed, changed, err := s.ReleaseCredit(tctx, res.ID)
+	if err != nil || !changed || freed.Status != StatusReleased || freed.ReleasedAt.IsZero() {
 		t.Fatalf("release: %+v %v", freed, err)
 	}
-	if again, err := s.ReleaseCredit(tctx, res.ID); err != nil || again.Status != StatusReleased {
+	if again, changed, err := s.ReleaseCredit(tctx, res.ID); err != nil || changed || again.Status != StatusReleased {
 		t.Fatalf("second release: %+v %v", again, err)
 	}
 	if _, _, err := reserve(s, tctx, orig.ID, "rma-2", 2, 2); err != nil {
 		t.Fatalf("the released parts reserve again: %v", err)
 	}
 	var p *httpx.Problem
-	if _, err := s.ReleaseCredit(tctx, ids.New()); !errors.As(err, &p) || p.Status != http.StatusNotFound {
+	if _, _, err := s.ReleaseCredit(tctx, ids.New()); !errors.As(err, &p) || p.Status != http.StatusNotFound {
 		t.Fatalf("release unknown: %v, want 404", err)
 	}
 }
@@ -643,5 +643,159 @@ func TestCreditReservation_ConcurrentRetriesWithOneKeyReserveOnce(t *testing.T) 
 	}
 	if created != 1 || !read.Credited.Lines[2].ReservedQty.Equal(decimal.NewFromInt(2)) {
 		t.Fatalf("%d retries created a reservation, reserved quantity %s; want 1 and 2", created, read.Credited.Lines[2].ReservedQty)
+	}
+}
+
+func isConflict(err error) bool {
+	var p *httpx.Problem
+	return errors.As(err, &p) && p.Status == http.StatusConflict && p.Code == CodeReservationState
+}
+
+func TestCreditReservation_ReleasedKeyRetriesUnderTheBound(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	orig := postedOriginal(t, s, tctx, ids.New())
+
+	first, _, err := reserve(s, tctx, orig.ID, "rma-1", 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ReleaseCredit(tctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	again, replayed, err := reserve(s, tctx, orig.ID, "rma-1", 2, 2)
+	if err != nil || !replayed || again.ID != first.ID || again.Status != StatusReserved || !again.ReleasedAt.IsZero() || len(again.Lines) != 1 {
+		t.Fatalf("retry after release: %+v replayed %v err %v, want %s RESERVED again", again, replayed, err, first.ID)
+	}
+	read, err := s.GetInvoice(tctx, orig.ID)
+	if err != nil || !read.Credited.Lines[2].ReservedQty.Equal(decimal.NewFromInt(2)) {
+		t.Fatalf("usage after re-reserve: %+v %v, want 2 reserved parts counted once", read.Credited, err)
+	}
+
+	if _, _, err := s.ReleaseCredit(tctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	taken, err := creditNote(t, s, tctx, orig.ID, []domain.CreditQty{{LineNo: 2, Qty: decimal.NewFromInt(2)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PostCreditNote(tctx, taken.ID, time.Date(2027, 3, 21, 0, 0, 0, 0, time.UTC), 0); err != nil {
+		t.Fatalf("the released room posts: %v", err)
+	}
+	if _, _, err := reserve(s, tctx, orig.ID, "rma-1", 2, 2); !isCreditExceeded(err) {
+		t.Fatalf("retry after a credit note used the room: %v, want 422 %s", err, domain.CodeCreditExceeded)
+	}
+	stored, _, err := s.ReleaseCredit(tctx, first.ID)
+	if err != nil || stored.Status != StatusReleased {
+		t.Fatalf("a refused retry must leave the reservation released: %+v %v", stored, err)
+	}
+}
+
+func TestCreditReservation_CommitIsFinalAndKeyReplays(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	orig := postedOriginal(t, s, tctx, ids.New())
+
+	res, _, err := reserve(s, tctx, orig.ID, "rma-1", 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := s.CommitCredit(tctx, res.ID)
+	if err != nil || done.Status != StatusConsumed {
+		t.Fatalf("commit: %+v %v", done, err)
+	}
+	if again, err := s.CommitCredit(tctx, res.ID); err != nil || again.Status != StatusConsumed {
+		t.Fatalf("second commit: %+v %v", again, err)
+	}
+	if _, changed, err := s.ReleaseCredit(tctx, res.ID); !isConflict(err) || changed {
+		t.Fatalf("release of a consumed reservation: %v, want 409 %s", err, CodeReservationState)
+	}
+	replay, replayed, err := reserve(s, tctx, orig.ID, "rma-1", 2, 3)
+	if err != nil || !replayed || replay.Status != StatusConsumed {
+		t.Fatalf("key on a consumed reservation: %+v replayed %v err %v, want the stored result", replay, replayed, err)
+	}
+	if _, _, err := reserve(s, tctx, orig.ID, "rma-2", 2, 1); !isCreditExceeded(err) {
+		t.Fatalf("a consumed reservation keeps counting: %v, want 422 %s", err, domain.CodeCreditExceeded)
+	}
+
+	other, _, err := reserve(s, tctx, orig.ID, "rma-3", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ReleaseCredit(tctx, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CommitCredit(tctx, other.ID); !isConflict(err) {
+		t.Fatalf("commit of a released reservation: %v, want 409", err)
+	}
+	if _, err := s.CommitCredit(tctx, ids.New()); err == nil {
+		t.Fatal("commit of an unknown reservation must fail")
+	}
+}
+
+func TestCreditReservation_KeyOnAnotherInvoiceOrEntityIsReuse(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	leA, leB := ids.New(), ids.New()
+	a := postedOriginal(t, s, tctx, leA)
+	b := postedOriginal(t, s, tctx, leB)
+	if _, _, err := reserve(s, tctx, a.ID, "rma-1", 2, 1); err != nil {
+		t.Fatal(err)
+	}
+	var p *httpx.Problem
+	if _, _, err := reserve(s, tctx, b.ID, "rma-1", 2, 1); !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity || p.Code != CodeKeyReuse {
+		t.Fatalf("key on another invoice: %v, want 422 %s", err, CodeKeyReuse)
+	}
+	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: leB, UserID: "u", Duties: testkit.ScopeDuties(leB)})
+	if _, _, err := reserve(s, scoped, b.ID, "rma-1", 2, 1); !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity || p.Code != CodeKeyReuse {
+		t.Fatalf("a key held in an entity the caller cannot see: %v, want the same 422 %s", err, CodeKeyReuse)
+	}
+}
+
+func TestCreditReservation_ConcurrentCommitAndReleaseEndInOneState(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	orig := postedOriginal(t, s, tctx, ids.New())
+	for round := 0; round < 3; round++ {
+		res, _, err := reserve(s, tctx, orig.ID, fmt.Sprintf("rma-%d", round), 2, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		var commitErr, releaseErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, commitErr = s.CommitCredit(tctx, res.ID)
+		}()
+		go func() {
+			defer wg.Done()
+			_, _, releaseErr = s.ReleaseCredit(tctx, res.ID)
+		}()
+		wg.Wait()
+		var status string
+		if err := admin.QueryRow(context.Background(), `select status from credit_reservation where id = $1`, res.ID).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		wonCommit, wonRelease := commitErr == nil, releaseErr == nil
+		if wonCommit == wonRelease || (wonCommit && status != StatusConsumed) || (wonRelease && status != StatusReleased) || (!wonCommit && !isConflict(commitErr)) || (!wonRelease && !isConflict(releaseErr)) {
+			t.Fatalf("round %d: commit %v release %v final %s; exactly one must win and the other get 409", round, commitErr, releaseErr, status)
+		}
 	}
 }

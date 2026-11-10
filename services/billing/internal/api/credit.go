@@ -297,11 +297,30 @@ func (a *API) releaseCreditReservation(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "credit reservation not found"))
 		return
 	}
-	released, err := a.store.ReleaseCredit(r.Context(), id)
+	released, changed, err := a.store.ReleaseCredit(r.Context(), id)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	a.reservationsFreed.Add(1)
+	if changed {
+		a.reservationsFreed.Add(1)
+	}
 	httpx.JSON(w, http.StatusOK, toReservationDTO(released))
+}
+
+// commitCreditReservation marks a reservation consumed once the credit it held
+// has been issued. A consumed reservation keeps counting against the invoice and
+// can no longer be released.
+func (a *API) commitCreditReservation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "credit reservation not found"))
+		return
+	}
+	committed, err := a.store.CommitCredit(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, toReservationDTO(committed))
 }

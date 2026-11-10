@@ -590,6 +590,20 @@ test_inventory_issue_claim_is_service_only_and_opens_only_its_routes if {
 	not allowed("inventory.read", "POST", "/v1/inventory/issue-claims")
 }
 
+test_credit_reservation_routes_are_service_only if {
+	data.duties["billing.credit-reservation.write"].service_only
+	data.service_grants.receivables.billing == ["billing.invoice.read", "billing.credit-reservation.write"]
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/invoices/i1/credit-reservations")
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-reservations/r1:commit")
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-reservations/r1:release")
+	not allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-notes")
+	every duty in ["billing.invoice.maintain", "billing.invoice.post", "billing.creditnote.post", "billing.invoice.view"] {
+		not allowed(duty, "POST", "/v1/billing/invoices/i1/credit-reservations")
+		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:commit")
+		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:release")
+	}
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],

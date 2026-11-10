@@ -86,7 +86,8 @@ type Store interface {
 	PostProposal(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
 	PostCreditNote(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
 	ReserveCredit(ctx context.Context, res store.CreditReservation, req []domain.CreditQty, charges *decimal.Decimal) (store.CreditReservation, bool, error)
-	ReleaseCredit(ctx context.Context, id string) (store.CreditReservation, error)
+	CommitCredit(ctx context.Context, id string) (store.CreditReservation, error)
+	ReleaseCredit(ctx context.Context, id string) (store.CreditReservation, bool, error)
 }
 
 // API holds the dependencies of the handlers and their counters.
@@ -133,8 +134,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/gl-postings", a.postGL)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)
 	r.With(authz.RequireDuty(dutyCreditPost)).Post("/v1/billing/credit-notes/{id}:post", a.postCreditNote)
-	r.With(authz.RequireAnyDuty(dutyMaintain, dutyReserve)).Post("/v1/billing/invoices/{id}/credit-reservations", a.createCreditReservation)
-	r.With(authz.RequireAnyDuty(dutyMaintain, dutyReserve)).Post("/v1/billing/credit-reservations/{id}:release", a.releaseCreditReservation)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/invoices/{id}/credit-reservations", a.createCreditReservation)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/credit-reservations/{id}:commit", a.commitCreditReservation)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/credit-reservations/{id}:release", a.releaseCreditReservation)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions", a.createSubscription)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/subscriptions/{id}", a.getSubscription)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:change-plan", a.changePlan)

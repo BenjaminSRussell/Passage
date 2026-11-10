@@ -93,7 +93,7 @@ func (f *fakeStore) usage(id string) domain.CreditUsage {
 		u.Gross = u.Gross.Add(cn.Totals.Gross)
 	}
 	for _, r := range f.reservations {
-		if r.InvoiceID != id || r.Status != store.StatusReserved {
+		if r.InvoiceID != id || r.Status == store.StatusReleased {
 			continue
 		}
 		for _, l := range r.Lines {
@@ -116,14 +116,20 @@ func ruleProblem(err error) error {
 }
 
 func (f *fakeStore) ReserveCredit(_ context.Context, res store.CreditReservation, req []domain.CreditQty, charges *decimal.Decimal) (store.CreditReservation, bool, error) {
+	replay := false
 	for _, r := range f.reservations {
 		if r.IdempotencyKey != res.IdempotencyKey {
 			continue
 		}
-		if r.RequestHash != res.RequestHash {
+		if r.RequestHash != res.RequestHash || r.InvoiceID != res.InvoiceID {
 			return store.CreditReservation{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeKeyReuse, "key reuse")
 		}
-		return r, true, nil
+		if r.Status != store.StatusReleased {
+			return r, true, nil
+		}
+		res.ID = r.ID
+		replay = true
+		break
 	}
 	orig, ok := f.invoices[res.InvoiceID]
 	if !ok {
@@ -142,18 +148,35 @@ func (f *fakeStore) ReserveCredit(_ context.Context, res store.CreditReservation
 	}
 	res.Currency, res.Status, res.Totals, res.Lines, res.CreatedAt = orig.Currency, store.StatusReserved, totals, planned, time.Date(2027, 3, 21, 0, 0, 0, 0, time.UTC)
 	f.reservations[res.ID] = res
-	return res, false, nil
+	return res, replay, nil
 }
 
-func (f *fakeStore) ReleaseCredit(_ context.Context, id string) (store.CreditReservation, error) {
+func (f *fakeStore) ReleaseCredit(_ context.Context, id string) (store.CreditReservation, bool, error) {
+	r, ok := f.reservations[id]
+	if !ok {
+		return store.CreditReservation{}, false, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "credit reservation not found")
+	}
+	if r.Status == store.StatusConsumed {
+		return store.CreditReservation{}, false, httpx.NewProblem(http.StatusConflict, store.CodeReservationState, "consumed")
+	}
+	changed := r.Status == store.StatusReserved
+	if changed {
+		r.Status, r.ReleasedAt = store.StatusReleased, time.Date(2027, 3, 22, 0, 0, 0, 0, time.UTC)
+		f.reservations[id] = r
+	}
+	return r, changed, nil
+}
+
+func (f *fakeStore) CommitCredit(_ context.Context, id string) (store.CreditReservation, error) {
 	r, ok := f.reservations[id]
 	if !ok {
 		return store.CreditReservation{}, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "credit reservation not found")
 	}
-	if r.Status == store.StatusReserved {
-		r.Status, r.ReleasedAt = store.StatusReleased, time.Date(2027, 3, 22, 0, 0, 0, 0, time.UTC)
-		f.reservations[id] = r
+	if r.Status == store.StatusReleased {
+		return store.CreditReservation{}, httpx.NewProblem(http.StatusConflict, store.CodeReservationState, "released")
 	}
+	r.Status = store.StatusConsumed
+	f.reservations[id] = r
 	return r, nil
 }
 
@@ -241,17 +264,23 @@ func (f *fakeTax) Quote(_ context.Context, _ string, lines []domain.Line) ([]dec
 	return out, nil
 }
 
-const allDuties = "billing.invoice.view,billing.invoice.maintain,billing.invoice.post,billing.creditnote.post"
+const allDuties = "billing.invoice.view,billing.invoice.maintain,billing.invoice.post,billing.creditnote.post,billing.credit-reservation.write"
 
 // setup mounts the routes on the platform router, so tenant and duty headers
 // go through the same middleware as in production.
 func setup(t *testing.T, s *fakeStore, tax TaxEngine) http.Handler {
 	t.Helper()
+	_, h := setupAPI(t, s, tax)
+	return h
+}
+
+func setupAPI(t *testing.T, s *fakeStore, tax TaxEngine) (*API, http.Handler) {
+	t.Helper()
 	a := New(s, tax, 2000)
 	a.now = func() time.Time { return time.Date(2027, 3, 12, 15, 4, 0, 0, time.UTC) }
 	r := httpx.NewRouter()
 	a.Register(r)
-	return r
+	return a, r
 }
 
 func do(h http.Handler, method, path, idemKey, body string) *httptest.ResponseRecorder {

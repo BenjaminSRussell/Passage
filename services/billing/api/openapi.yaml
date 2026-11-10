@@ -468,12 +468,15 @@ paths:
         exceed what was invoiced. Net and tax are planned like a credit note:
         the original's tax pro rata, the last quantity of a line taking exactly
         what is left. A reservation counts against the invoice until it is
-        released; `credited.reserved` and `reservedQty` on the invoice read show
-        it. Beyond what the invoice still allows, or on an invoice that is not
+        released or consumed; `credited.reserved` and `reservedQty` on the invoice
+        read show it. Reserving again with the key of a released reservation
+        re-runs the bound under the same lock: it succeeds (200, RESERVED again)
+        or is refused 422 BIL-0005; the key of a consumed reservation replays it.
+        Beyond what the invoice still allows, or on an invoice that is not
         posted, it is refused with 422 BIL-0005. The Idempotency-Key is stable
         per RMA: the same key and body return the stored reservation (200),
         the same key with another body is 422.
-      x-passage-duty: billing.invoice.maintain (InvoiceMaintain, or the service duty billing.credit-reservation.write)
+      x-passage-duty: billing.credit-reservation.write (service only)
       parameters:
         - $ref: "#/components/parameters/InvoiceId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -527,10 +530,13 @@ paths:
     post:
       operationId: releaseCreditReservation
       summary: Release a credit reservation so its amount can be credited again.
-      description: Releasing a released reservation returns it unchanged.
-      x-passage-duty: billing.invoice.maintain (InvoiceMaintain, or the service duty billing.credit-reservation.write)
+      description: >
+        Releasing a released reservation returns it unchanged. A consumed
+        reservation cannot be released (409 reservation_state). Reservations do
+        not expire; the caller releases or commits them.
+      x-passage-duty: billing.credit-reservation.write (service only)
       parameters:
-        - $ref: "#/components/parameters/InvoiceId"
+        - $ref: "#/components/parameters/ReservationId"
       responses:
         "200":
           description: The released reservation.
@@ -544,6 +550,47 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           description: The reservation does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The reservation is consumed (reservation_state).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/credit-reservations/{id}:commit:
+    post:
+      operationId: commitCreditReservation
+      summary: Mark a reservation consumed once the credit it held was issued.
+      description: >
+        RESERVED becomes CONSUMED; a consumed reservation keeps counting against
+        the invoice and can no longer be released. Committing a consumed
+        reservation returns it unchanged; a released one is refused (409
+        reservation_state).
+      x-passage-duty: billing.credit-reservation.write (service only)
+      parameters:
+        - $ref: "#/components/parameters/ReservationId"
+      responses:
+        "200":
+          description: The consumed reservation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The reservation does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The reservation is released (reservation_state).
           content:
             application/problem+json:
               schema:
@@ -733,6 +780,14 @@ components:
         type: string
         minLength: 1
         maxLength: 255
+    ReservationId:
+      name: id
+      in: path
+      required: true
+      description: The credit reservation.
+      schema:
+        type: string
+        format: uuid
     InvoiceId:
       name: id
       in: path
@@ -997,7 +1052,7 @@ components:
         id: { type: string, format: uuid }
         invoiceId: { type: string, format: uuid }
         reference: { type: string }
-        status: { type: string, enum: [RESERVED, RELEASED] }
+        status: { type: string, enum: [RESERVED, CONSUMED, RELEASED] }
         currency: { type: string }
         createdAt: { type: string, format: date-time }
         releasedAt: { type: string, format: date-time }

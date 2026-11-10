@@ -1,7 +1,8 @@
 -- Credit reservations (#513): a credit that does not come from a billing credit
 -- note (an RMA credit in receivables) takes its share of the original invoice
 -- here first, under the invoice's row lock, so credit notes plus reservations
--- never exceed what was invoiced. Amounts are positive magnitudes.
+-- never exceed what was invoiced. RESERVED and CONSUMED reservations count; a
+-- CONSUMED one (the credit was issued) is never released. Amounts are positive magnitudes.
 
 CREATE TABLE IF NOT EXISTS credit_reservation (
   tenant_id uuid NOT NULL,
@@ -9,7 +10,7 @@ CREATE TABLE IF NOT EXISTS credit_reservation (
   legal_entity_id uuid NOT NULL,
   invoice_id uuid NOT NULL,
   reference text NOT NULL CHECK (length(reference) BETWEEN 1 AND 255),
-  status text NOT NULL DEFAULT 'RESERVED' CHECK (status IN ('RESERVED', 'RELEASED')),
+  status text NOT NULL DEFAULT 'RESERVED' CHECK (status IN ('RESERVED', 'CONSUMED', 'RELEASED')),
   net_amount numeric(20,6) NOT NULL CHECK (net_amount >= 0),
   charge_amount numeric(20,6) NOT NULL CHECK (charge_amount >= 0),
   tax_amount numeric(20,6) NOT NULL CHECK (tax_amount >= 0),
@@ -67,7 +68,7 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON credit_reservation TO passage_app';
-    EXECUTE 'GRANT SELECT, INSERT ON credit_reservation_line TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON credit_reservation_line TO passage_app';
   END IF;
 END
 $$;
