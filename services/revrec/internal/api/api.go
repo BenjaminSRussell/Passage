@@ -58,6 +58,7 @@ type API struct {
 	milestonesSatisfied atomic.Int64
 	linesRecognized     atomic.Int64
 	journalPostings     atomic.Int64
+	reversalPostings    atomic.Int64
 }
 
 // New returns the handlers backed by s. The preview never touches the store.
@@ -90,6 +91,7 @@ func (a *API) Metrics() http.Handler {
 		counter("revrec_milestones_satisfied_total", "Milestone obligations satisfied; replays are not counted.", a.milestonesSatisfied.Load())
 		counter("revrec_schedule_lines_recognized_total", "Ratable schedule lines recognized by recognition runs.", a.linesRecognized.Load())
 		counter("revrec_journal_postings_total", "Ledger entries (Dr 2400, Cr 4000) posted for recognized revenue.", a.journalPostings.Load())
+		counter("revrec_reversal_postings_total", "Ledger entries (Dr 4000, Cr 2400) posted for recognized revenue that credit notes reversed.", a.reversalPostings.Load())
 	})
 }
 

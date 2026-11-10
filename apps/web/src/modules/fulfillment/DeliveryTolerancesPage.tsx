@@ -7,6 +7,7 @@ import { dash, formatDateTime, PERCENT, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Saving a tolerance needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
 const DUTY_SAVE = "fulfillment.packing-rule.maintain";
@@ -109,7 +110,7 @@ export function DeliveryTolerancesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the tolerances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

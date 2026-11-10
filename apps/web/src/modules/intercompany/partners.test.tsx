@@ -162,7 +162,7 @@ describe("trading partners list", () => {
     };
     renderAt("/intercompany/partners");
     expect(await screen.findByText("We couldn't load the trading partners")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("internal error (COM-0500)");
+    expect(screen.getByRole("alert")).toHaveTextContent("internal error");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     const table = await findTable({ name: "Trading partners" });
@@ -228,7 +228,7 @@ describe("new trading partner", () => {
     }
     fireEvent.click(screen.getByRole("button", { name: "Save pairing" }));
     expect(await screen.findByText("The pairing was not saved")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("already exists; deactivate it first (IC-0840)");
+    expect(screen.getByRole("alert")).toHaveTextContent("already exists; deactivate it first");
     expect(screen.getByLabelText("Seller entity")).toHaveValue("P");
   });
 });
@@ -334,7 +334,7 @@ describe("trading partner detail", () => {
     expect(screen.getByRole("heading", { level: 4, name: "Transfer prices" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Price line" }));
     expect(await screen.findByText("The line was not priced")).toBeInTheDocument();
-    expect(screen.getByText(/no transfer price for Item \/ PUMP-100 on 2026-11-02 \(IC-0821\)/)).toBeInTheDocument();
+    expect(screen.getByText(/no transfer price for Item \/ PUMP-100 on 2026-11-02/)).toBeInTheDocument();
     expect(calls.find((c) => c.url.pathname.endsWith("/lines:price"))!.body).toMatchObject({
       transferPrices: [{ item: "PUMP-100", method: "Table", unitPrice: "66.00", effectiveFrom: "2026-01-01" }],
     });

@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { describeProblem, newKey, startPackRun, type PackRunRequest, type Problem } from "./api/client";
 import { localToUtc, parseCustomerMap, parseRecords, SOURCE_LABELS, SOURCE_SYSTEMS, splitList, TARGET_COLUMNS, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PackRunValues {
   sourceSystem: SourceSystem;
@@ -196,7 +197,7 @@ export function NewPackRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not run the pack" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

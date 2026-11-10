@@ -6,6 +6,7 @@ import { amount, isCount, isCurrency, isDecimal, isPositive } from "./format";
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type HeadKey =
   | "periodKey"
@@ -148,7 +149,7 @@ export function GroupJournalPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The journal was not accepted" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

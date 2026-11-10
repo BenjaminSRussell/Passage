@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { describeProblem, importPriceJournalCsv, newKey, type Problem } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The service's limit on one upload (maxJournalCSVBytes). */
 export const MAX_CSV_BYTES = 32 * 1024 * 1024;
@@ -155,7 +156,7 @@ export function ImportJournalPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not import the journal" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

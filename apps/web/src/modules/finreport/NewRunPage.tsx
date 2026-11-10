@@ -5,6 +5,7 @@ import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, listHierar
 import { CURRENCY_TYPE_LABELS, fiscalCalendar, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RunValues {
   definition: string;
@@ -200,7 +201,7 @@ export function NewRunPage() {
       />
       {definitions.error ? (
         <Alert tone="danger" title="Could not load the definitions" live="alert" action={<Button size="sm" onClick={definitions.reload}>Try again</Button>}>
-          {definitions.error.message} ({definitions.error.code})
+          <ProblemMessage problem={definitions.error} />
         </Alert>
       ) : null}
       <Card>
@@ -362,11 +363,11 @@ export function NewRunPage() {
             </Button>
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : failure ? (
         <Alert tone="danger" title="The statement did not run" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </div>

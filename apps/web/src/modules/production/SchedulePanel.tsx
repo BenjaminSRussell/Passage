@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { dash, directionLabel, instant, jobTypeLabel, scheduleBasisLabel, schedulingMethodLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface SchedulePanelProps {
   order: ProductionOrder;
@@ -160,7 +161,7 @@ export function SchedulePanel({ order, onSchedule, busy = false }: SchedulePanel
         ) : null}
         {jobs.error ? (
           <Alert tone={jobs.error.status === 403 ? "info" : "danger"} title="The jobs could not be loaded" live="alert">
-            {`${jobs.error.message} (${jobs.error.code})`}
+            {<ProblemMessage problem={jobs.error} />}
           </Alert>
         ) : (
           <DataTable

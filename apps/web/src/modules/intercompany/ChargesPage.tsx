@@ -7,6 +7,7 @@ import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey }
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type LineKey =
   | "lendingEntity"
@@ -193,7 +194,7 @@ export function ChargesPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The charge was not priced" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -233,7 +234,7 @@ export function ChargesPage() {
             icon="receipt"
             headingLevel={3}
             title="No charge priced yet"
-            description="The form holds acceptance example AC-40.11. Price it, or enter your own charge, transfer prices and matrix row."
+            description="The form is filled in with an example. Price it, or enter your own charge, transfer prices and matrix row."
           />
         </Card>
       )}

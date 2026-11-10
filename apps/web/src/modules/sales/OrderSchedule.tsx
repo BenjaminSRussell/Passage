@@ -4,6 +4,7 @@ import { listScheduleLines, type Order, type ScheduleLine } from "./api/client";
 import { sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const scheduleColumns: DataTableColumn<ScheduleLine>[] = [
   { key: "lineNo", header: "Line", align: "end" },
@@ -45,7 +46,7 @@ export function OrderSchedule({ order }: { order: Order }) {
     >
       {state.error ? (
         <Alert tone="danger" title="Could not load the schedule lines" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.loading && lines.length === 0 ? (
         <EmptyState compact headingLevel={3} title="No schedule lines" description="Confirming the order creates one schedule line per line." />

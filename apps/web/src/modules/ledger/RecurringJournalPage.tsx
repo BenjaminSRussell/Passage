@@ -21,6 +21,7 @@ import { parseDimensions } from "./BatchLinesEditor";
 import { dayLabel, RecurringStatusBadge } from "./RecurringJournalsPage";
 import { UUID } from "./pages";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const ACCOUNT = /^[A-Za-z0-9._-]{1,20}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -188,12 +189,14 @@ export function draftFromBatch(b: JournalBatch): RecurringDraft {
   };
 }
 
-function failureText(error: unknown): string {
-  if (error instanceof LedgerApiError) {
-    const fields = Object.entries(error.fields).map(([f, m]) => `${f}: ${m}`);
-    return [`${error.message} (${error.code})`, ...fields].join(" ");
-  }
-  return (error as Error).message;
+function failureText(error: unknown): ReactNode {
+  const fields = error instanceof LedgerApiError ? Object.entries(error.fields).map(([f, m]) => `${f}: ${m}`) : [];
+  return (
+    <>
+      <ProblemMessage problem={error} />
+      {fields.length > 0 ? <div>{fields.join(" ")}</div> : null}
+    </>
+  );
 }
 
 function RecurringForm({ initial, existing }: { initial: RecurringDraft; existing?: RecurringJournal }) {
@@ -201,7 +204,7 @@ function RecurringForm({ initial, existing }: { initial: RecurringDraft; existin
   const queryClient = useQueryClient();
   const [values, setValues] = useState<RecurringDraft>(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState(false);
   const update = (patch: Partial<RecurringDraft>) => setValues((prev) => ({ ...prev, ...patch }));
   const updateLine = (key: string, patch: Partial<RecurringLineDraft>) => update({ lines: values.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
@@ -426,7 +429,7 @@ function Actions({ journal, onChanged }: { journal: RecurringJournal; onChanged(
   const [dateError, setDateError] = useState<string | null>(null);
   const [base, setBase] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ tone: "success" | "danger"; text: ReactNode } | null>(null);
 
   async function run(work: () => Promise<string>) {
     setBusy(true);

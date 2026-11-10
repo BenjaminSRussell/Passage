@@ -2291,13 +2291,34 @@ components:
         rmaNumber: { type: string, minLength: 1, maxLength: 40 }
         legalEntityId: { type: string, format: uuid }
         invoiceNumber: { type: string, minLength: 1, description: The original invoice; its open item decides the customer and currency }
+        invoiceId:
+          type: string
+          format: uuid
+          description: |
+            The billing invoice id; required with taxLines. Receivables reads that invoice from billing (duty billing.invoice.read,
+            BILLING_URL) and refuses a tax code the invoice never billed, or more tax per code than the invoice billed less
+            billing credit notes and earlier RMA credits (422 AR-RMA-INVOICE).
         postingDate: { type: string, format: date }
         gross: { $ref: "#/components/schemas/Money" }
         restocking: { $ref: "#/components/schemas/Money" }
         net: { $ref: "#/components/schemas/Money" }
+        taxLines:
+          type: array
+          maxItems: 20
+          description: |
+            The tax of the original invoice this credit reverses, one entry per tax code, derived by sales from the
+            invoice's stored line tax (pro rata, never re-quoted). Debits the legal entity's GL tax account for the code
+            (RECEIVABLES_RMA_TAX_ACCOUNTS) and is recorded with the tax service as a negative output transaction. The AR credit is net + tax.
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, amount]
+            properties:
+              code: { type: string, minLength: 1, maxLength: 20 }
+              amount: { $ref: "#/components/schemas/Money" }
     RMACreditView:
       type: object
-      required: [id, rmaId, rmaNumber, legalEntityId, documentNumber, creditOpenItemId, customerId, currency, postingDate, gross, restocking, net, status, glAttempts, glParked, createdAt]
+      required: [id, rmaId, rmaNumber, legalEntityId, documentNumber, creditOpenItemId, customerId, currency, postingDate, gross, restocking, net, tax, status, glAttempts, glParked, createdAt]
       properties:
         id: { type: string, format: uuid }
         rmaId: { type: string, format: uuid }
@@ -2311,6 +2332,7 @@ components:
         gross: { $ref: "#/components/schemas/Money" }
         restocking: { $ref: "#/components/schemas/Money" }
         net: { $ref: "#/components/schemas/Money" }
+        tax: { $ref: "#/components/schemas/Money" }
         status: { type: string, enum: [PENDING, POSTED] }
         journalPostingId: { type: string }
         glAttempts: { type: integer }
@@ -2319,7 +2341,7 @@ components:
         createdAt: { type: string, format: date-time }
     RMACreditNote:
       type: object
-      required: [openItemId, documentNumber, journalPostingId, customerId, currency, gross, restocking, net]
+      required: [openItemId, documentNumber, journalPostingId, customerId, currency, gross, restocking, net, tax]
       properties:
         openItemId: { type: string, format: uuid }
         documentNumber: { type: string }
@@ -2329,3 +2351,4 @@ components:
         gross: { $ref: "#/components/schemas/Money" }
         restocking: { $ref: "#/components/schemas/Money" }
         net: { $ref: "#/components/schemas/Money" }
+        tax: { $ref: "#/components/schemas/Money" }

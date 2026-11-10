@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { applyFiniteDates, canApplyFiniteDates, describeProblem, type FiniteWindow, type Problem, type ProductionOrder } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface FiniteDatesPanelProps {
   order: ProductionOrder;
@@ -148,7 +149,7 @@ export function FiniteDatesPanel({ order, onApplied }: FiniteDatesPanelProps) {
         </FormField>
         {failure ? (
           <Alert tone="danger" live="alert" title="The dates were refused">
-            {`${failure.message} (${failure.code})`}
+            {<ProblemMessage problem={failure} />}
           </Alert>
         ) : null}
         <div className={styles.actions}>

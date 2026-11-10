@@ -224,6 +224,13 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 			return err
 		}
 	}
+	// A count records what is there rather than moving it, so it is not
+	// weighed against the claims (it may find claimed units already gone).
+	if j.Type != domain.JournalCount {
+		if err := guardClaimedStock(ctx, tx, tenantID, j.LegalEntityID, orderedRows(rows, order), nil); err != nil {
+			return err
+		}
+	}
 	if err := checkSerials(ctx, tx, tenantID, j.LegalEntityID, serials); err != nil {
 		return err
 	}

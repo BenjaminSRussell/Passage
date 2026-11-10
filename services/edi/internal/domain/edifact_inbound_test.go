@@ -340,3 +340,68 @@ func TestReadRefusedX12_TrailerErrorsBecome997Codes(t *testing.T) {
 		t.Fatal("997 groups are never answered")
 	}
 }
+
+// A partner writing a decimal comma (UNA3 ",") gets the same canonical charge
+// amount as one writing a point; an amount that is not a number is placed
+// for the CONTRL instead of passing through as text.
+func TestMapORDERS_ChargeAmountTakesTheDecimalPoint(t *testing.T) {
+	ic, err := ParseEdifact(edifactFixture(t, "orders-inbound.edi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withMOA := func(amount string) EdifactMessage {
+		m := ic.Messages[0]
+		m.Segments = append([]EdifactSegment(nil), m.Segments...)
+		for i, s := range m.Segments {
+			if s.Tag == "MOA" {
+				m.Segments[i] = Seg("MOA", "23:"+amount)
+			}
+		}
+		return m
+	}
+	for amount, want := range map[string]string{"12,50": "12.50", "12.5": "12.50", "12,505": "12.505"} {
+		o, issues := MapORDERS(withMOA(amount))
+		if len(issues) != 0 || len(o.Charges) != 1 || o.Charges[0].Amount != want {
+			t.Errorf("MOA %s: %+v %+v", amount, o.Charges, issues)
+		}
+	}
+	// MOA is the tenth segment (UNH is 1).
+	_, issues := MapORDERS(withMOA("twelve"))
+	if len(issues) != 1 || issues[0].Code != CodeMalformed || issues[0].Contrl != (ContrlPlace{ContrlErrInvalidValue, 10, 1, 2}) {
+		t.Fatalf("MOA twelve: %+v", issues)
+	}
+}
+
+// EANCOM puts the GTIN in LIN 03 (C212, 7143 SRV); MapDESADV reads it like
+// MapORDERS and MapINVOIC do, so a DESADV identifying its items there alone
+// is not refused for want of an item reference.
+func TestMapDESADV_ItemReferenceInLIN(t *testing.T) {
+	m, err := BuildDESADV(asnFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var segs []EdifactSegment
+	for _, s := range m.Segments {
+		switch s.Tag {
+		case "LIN":
+			s = Seg("LIN", s.El(0, 0), "", "00012345678905:SRV")
+		case "PIA":
+			continue
+		}
+		segs = append(segs, s)
+	}
+	m.Segments = segs
+	a, err := MapDESADV(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range a.Orders {
+		for _, p := range o.Packs {
+			for _, it := range p.Items {
+				if len(it.ItemRefs) != 1 || it.ItemRefs[0] != (ItemRef{Qualifier: "EN", Value: "00012345678905"}) {
+					t.Fatalf("item %s refs %+v", it.LineNo, it.ItemRefs)
+				}
+			}
+		}
+	}
+}

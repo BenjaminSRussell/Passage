@@ -8,6 +8,7 @@ import { compareDecimal, CURRENCY, dash, DECIMAL, formatDate, formatMoney, short
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_CREATE = "fulfillment.warehouse.release";
 
@@ -87,13 +88,7 @@ export function DropShipsPage() {
       state.reload();
     } catch (error) {
       const problem = describeProblem(error);
-      setFailure(
-        problem.code === "FUL-0061"
-          ? { ...problem, message: "This order line already has an active drop-ship. Cancel it before creating another." }
-          : problem.code === "FUL-0062"
-            ? { ...problem, message: "This order line is on a warehouse shipment, so it ships from stock. Cancel the shipment before drop-shipping it." }
-            : problem,
-      );
+      setFailure(problem);
       if (problem.code === "idempotency_key_reuse") key.renew();
     } finally {
       setBusy(false);
@@ -122,7 +117,7 @@ export function DropShipsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the drop-ships" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

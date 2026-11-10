@@ -6,6 +6,7 @@ import { shortId, UUID } from "./format";
 import { mapFields } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PegValues {
   parentOrderId: string;
@@ -89,7 +90,7 @@ export function NewOrderPegPage() {
   if (orders.error) {
     body = (
       <Alert tone="danger" title="Could not load orders" live="alert" action={<Button size="sm" onClick={orders.reload}>Try again</Button>}>
-        {orders.error.message} ({orders.error.code})
+        <ProblemMessage problem={orders.error} />
       </Alert>
     );
   } else if (!orders.data) {
@@ -125,7 +126,7 @@ export function NewOrderPegPage() {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not create the peg" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -143,7 +144,7 @@ export function NewOrderPegPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New order peg" description="Pegs are entered here until master planning (wave 22) publishes them." />
+      <PageHeader title="New order peg" description="Enter pegs here until master planning publishes them." />
       <Card>{body}</Card>
     </div>
   );

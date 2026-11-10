@@ -6,6 +6,7 @@ import { dash, formatDateTime, formatMinutes, shortId } from "./format";
 import styles from "./pages.module.css";
 import { scopeLabels } from "./RunsPage";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function signed(minutes: number): string {
   if (minutes === 0) return "0 min";
@@ -93,7 +94,7 @@ export function RunComparePage() {
       <Card title="Runs">
         {runs.error ? (
           <Alert tone="danger" title="Could not load runs" live="alert" action={<Button size="sm" onClick={runs.reload}>Try again</Button>}>
-            {runs.error.message} ({runs.error.code})
+            <ProblemMessage problem={runs.error} />
           </Alert>
         ) : !runs.data ? (
           <div aria-busy="true">
@@ -141,7 +142,7 @@ export function RunComparePage() {
       </Card>
       {!to ? null : result.error ? (
         <Alert tone="danger" title="Could not compare the runs" live="alert" action={<Button size="sm" onClick={result.reload}>Try again</Button>}>
-          {result.error.message} ({result.error.code})
+          <ProblemMessage problem={result.error} />
         </Alert>
       ) : !cmp || result.loading ? (
         <div aria-busy="true">

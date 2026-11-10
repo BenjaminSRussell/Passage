@@ -18,6 +18,7 @@ import {
 import { dash, formatRate, formatUtc, UUID, utcFromLocalInput, validityLabel, validRate } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Entry({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -165,7 +166,7 @@ function SessionForm({ course, onCreated, onCancel }: { course: Course; onCreate
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not schedule the session" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}
@@ -208,7 +209,7 @@ export function CourseDetailPage() {
           </Card>
         ) : (
           <Alert tone="danger" title="Could not load the course" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>
@@ -276,7 +277,7 @@ export function CourseDetailPage() {
           ) : null}
           {sessions.error ? (
             <Alert tone="danger" title="Could not load the sessions" live="alert" action={<Button size="sm" onClick={sessions.reload}>Try again</Button>}>
-              {sessions.error.message} ({sessions.error.code})
+              <ProblemMessage problem={sessions.error} />
             </Alert>
           ) : (
             <DataTable

@@ -184,7 +184,7 @@ describe("Planning calculators page", () => {
 
     answer = () => problem(422, "PLAN-0009", "the quota arrangement has no usable source for this quantity");
     fireEvent.click(within(form).getByRole("button", { name: "Allocate" }));
-    await waitFor(() => expect(screen.getByText(/no usable source for this quantity \(PLAN-0009\)/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/no usable source for this quantity/)).toBeTruthy());
     expect(screen.queryByRole("table", { name: "Quota assignments" })).toBeNull();
   });
 
@@ -265,6 +265,7 @@ describe("Planning calculators page", () => {
     render(<CalculatorsPage />);
     fireEvent.click(within(formNamed("Shelf-life check")).getByRole("button", { name: "Check batches" }));
     expect(await screen.findByText("The shelf-life check failed")).toBeTruthy();
-    expect(screen.getByText(/could not be reached.*\(PLAN-UNKNOWN\)/)).toBeTruthy();
+    expect(screen.getByText(/could not be reached/)).toBeTruthy();
+    expect(screen.getByText("PLAN-UNKNOWN")).toBeTruthy();
   });
 });

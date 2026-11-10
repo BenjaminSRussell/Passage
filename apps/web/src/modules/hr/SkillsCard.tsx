@@ -18,6 +18,7 @@ import { listJobs } from "./api/personnel";
 import { DATE, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RatingValues {
   skillCode: string;
@@ -123,7 +124,7 @@ function RateForm({ workerId, skills, onDone, onCancel }: { workerId: string; sk
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not save the rating" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}
@@ -158,7 +159,7 @@ function GapSection({ workerId, kind }: { workerId: string; kind: "position" | "
   if (options.error) {
     return (
       <Alert tone="danger" title={`Could not load ${kind}s to compare with`} live="alert" action={<Button size="sm" onClick={options.reload}>Try again</Button>}>
-        {options.error.message} ({options.error.code})
+        <ProblemMessage problem={options.error} />
       </Alert>
     );
   }
@@ -178,7 +179,7 @@ function GapSection({ workerId, kind }: { workerId: string; kind: "position" | "
       </FormField>
       {!targetId ? null : gap.error ? (
         <Alert tone="danger" title="Could not compare" live="alert" action={<Button size="sm" onClick={gap.reload}>Try again</Button>}>
-          {gap.error.message} ({gap.error.code})
+          <ProblemMessage problem={gap.error} />
         </Alert>
       ) : (
         <>
@@ -228,7 +229,7 @@ export function SkillsCard({ workerId }: { workerId: string }) {
         </Alert>
         {catalog.error ? (
           <Alert tone="danger" title="Could not load the skill catalog" live="alert" action={<Button size="sm" onClick={catalog.reload}>Try again</Button>}>
-            {catalog.error.message} ({catalog.error.code})
+            <ProblemMessage problem={catalog.error} />
           </Alert>
         ) : null}
         {!catalog.loading && !catalog.error && skills.length === 0 ? <p className={styles.note}>The skill catalog is empty. Add skills before rating workers.</p> : null}
@@ -246,7 +247,7 @@ export function SkillsCard({ workerId }: { workerId: string }) {
         ) : null}
         {profile.error ? (
           <Alert tone="danger" title="Could not load the skill profile" live="alert" action={<Button size="sm" onClick={profile.reload}>Try again</Button>}>
-            {profile.error.message} ({profile.error.code})
+            <ProblemMessage problem={profile.error} />
           </Alert>
         ) : profile.loading && !profile.data ? (
           <Skeleton width="3/4" />

@@ -15,6 +15,7 @@ import {
 import { describeProblem, previewTranslation, type Problem, type TranslationPreview, type TranslationRequest } from "./api/client";
 import { amount, isCurrency, isPositive, isSignedDecimal } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Key = "currency" | "ownershipPct" | "opening" | "average" | "closing" | "openingNetAssets" | "netIncome" | "closingNetAssets";
 export type TranslationValues = Record<Key, string>;
@@ -143,7 +144,7 @@ export function TranslationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The unit was not translated" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -171,7 +172,7 @@ export function TranslationPage() {
             icon="percent"
             headingLevel={3}
             title="No translation yet"
-            description="The form holds acceptance example AC-40.6. Translate it, or enter your own unit's net assets, net income and rates."
+            description="The form is filled in with an example. Translate it, or enter your own unit's net assets, net income and rates."
           />
         </Card>
       )}

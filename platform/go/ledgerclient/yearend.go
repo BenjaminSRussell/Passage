@@ -31,6 +31,7 @@ type Info struct {
 }
 
 type ChartAccount struct {
+	Name     string
 	Type     string
 	Postable bool
 }
@@ -103,6 +104,7 @@ func (c *Client) Accounts(ctx context.Context, legalEntityID, chart string) (map
 		var page struct {
 			Items []struct {
 				AccountNumber string `json:"accountNumber"`
+				Name          string `json:"name"`
 				AccountType   string `json:"accountType"`
 				IsPostable    bool   `json:"isPostable"`
 			} `json:"items"`
@@ -112,7 +114,7 @@ func (c *Client) Accounts(ctx context.Context, legalEntityID, chart string) (map
 			return nil, fmt.Errorf("ledger accounts: %w", err)
 		}
 		for _, a := range page.Items {
-			out[a.AccountNumber] = ChartAccount{Type: a.AccountType, Postable: a.IsPostable}
+			out[a.AccountNumber] = ChartAccount{Name: a.Name, Type: a.AccountType, Postable: a.IsPostable}
 		}
 		if page.NextAfter == "" || page.NextAfter == after {
 			return out, nil

@@ -217,7 +217,7 @@ describe("Who is clocked in", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [] }));
     renderAt("/shopfloor/clocked-in");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Nobody is clocked in")).toBeInTheDocument();

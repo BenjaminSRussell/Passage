@@ -118,7 +118,7 @@ describe("splitting rule form", () => {
     await screen.findByDisplayValue("vendor_invoice");
     server.handler = (_url, init) => ((init.method ?? "GET") === "PUT" ? json(412, { code: "LEDGER_VERSION_CONFLICT", detail: "the splitting rule changed since it was read" }) : undefined);
     fireEvent.click(screen.getByRole("button", { name: "Save splitting rule" }));
-    expect(await screen.findByText(/the splitting rule changed since it was read \(LEDGER_VERSION_CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/the splitting rule changed since it was read/)).toBeInTheDocument();
     expect(new Headers(server.calls.find((c) => c.method === "PUT")!.init.headers).get("If-Match")).toBe('"3"');
   });
 

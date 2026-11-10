@@ -20,6 +20,7 @@ import { jobsOf } from "./gantt";
 import { GANTT_DAYS, GanttView, type GanttDays } from "./GanttView";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Board {
   resources: Resource[];
@@ -282,12 +283,12 @@ export function WorkspacePage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="The schedule was not changed" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {board.error ? (
         <Alert tone="danger" title="Could not load the schedule" live="alert" action={<Button size="sm" onClick={board.reload}>Try again</Button>}>
-          {board.error.message} ({board.error.code})
+          <ProblemMessage problem={board.error} />
         </Alert>
       ) : board.loading && !board.data ? (
         <div className={styles.loading} aria-busy="true">

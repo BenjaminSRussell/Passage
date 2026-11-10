@@ -107,6 +107,9 @@ func (r *Returns) ReadInvoice(ctx context.Context, legalEntityID, invoiceID stri
 			PackingSlip  string `json:"packingSlipId"`
 			CreditedQty  string `json:"creditedQty"`
 			OriginalLine int    `json:"originalLineNo"`
+			TaxCode      string `json:"taxCode"`
+			Tax          string `json:"tax"`
+			CreditedTax  string `json:"creditedTax"`
 		} `json:"lines"`
 	}
 	err := r.call(ctx, r.billingURL, billingAudience, http.MethodGet, "/v1/billing/invoices/"+url.PathEscape(invoiceID), dutyInvoiceRead, legalEntityID, "", nil, &body)
@@ -122,15 +125,14 @@ func (r *Returns) ReadInvoice(ctx context.Context, legalEntityID, invoiceID stri
 	for _, l := range body.Lines {
 		qty, qerr := decimal.NewFromString(l.Qty)
 		net, nerr := decimal.NewFromString(l.Net)
-		credited, cerr := decimal.Zero, error(nil)
-		if l.CreditedQty != "" {
-			credited, cerr = decimal.NewFromString(l.CreditedQty)
-		}
-		if err := errors.Join(qerr, nerr, cerr); err != nil {
+		credited, cerr := optionalDecimal(l.CreditedQty)
+		tax, terr := optionalDecimal(l.Tax)
+		creditedTax, ctErr := optionalDecimal(l.CreditedTax)
+		if err := errors.Join(qerr, nerr, cerr, terr, ctErr); err != nil {
 			return store.Invoice{}, fmt.Errorf("billing invoice line %d: %w", l.LineNo, err)
 		}
 		out.Lines = append(out.Lines, store.InvoiceLine{LineNo: l.LineNo, ProductID: l.ProductID, OrderLineID: l.OrderLineID, PackingSlipID: l.PackingSlip,
-			Qty: qty, Net: net, CreditedQty: credited})
+			Qty: qty, Net: net, CreditedQty: credited, TaxCode: l.TaxCode, Tax: tax, CreditedTax: creditedTax})
 	}
 	return out, nil
 }
@@ -262,8 +264,12 @@ func (r *Returns) ReceiveReturn(ctx context.Context, in store.ReturnReceipt) (st
 }
 
 func (r *Returns) PostRMACredit(ctx context.Context, in store.ARCredit) (store.CreditNote, error) {
-	body := map[string]string{"rmaId": in.RMAID, "rmaNumber": in.RMANumber, "legalEntityId": in.LegalEntityID, "invoiceNumber": in.InvoiceNumber,
-		"postingDate": in.PostingDate, "gross": in.Gross.StringFixed(2), "restocking": in.Restocking.StringFixed(2), "net": in.Net.StringFixed(2)}
+	taxLines := make([]map[string]string, 0, len(in.TaxLines))
+	for _, t := range in.TaxLines {
+		taxLines = append(taxLines, map[string]string{"code": t.Code, "amount": t.Amount.StringFixed(2)})
+	}
+	body := map[string]any{"rmaId": in.RMAID, "rmaNumber": in.RMANumber, "legalEntityId": in.LegalEntityID, "invoiceNumber": in.InvoiceNumber, "invoiceId": in.InvoiceID,
+		"postingDate": in.PostingDate, "gross": in.Gross.StringFixed(2), "restocking": in.Restocking.StringFixed(2), "net": in.Net.StringFixed(2), "taxLines": taxLines}
 	var out struct {
 		OpenItemID       string `json:"openItemId"`
 		DocumentNumber   string `json:"documentNumber"`
@@ -273,6 +279,13 @@ func (r *Returns) PostRMACredit(ctx context.Context, in store.ARCredit) (store.C
 		return store.CreditNote{}, err
 	}
 	return store.CreditNote{OpenItemID: out.OpenItemID, DocumentNumber: out.DocumentNumber, JournalPostingID: out.JournalPostingID}, nil
+}
+
+func optionalDecimal(s string) (decimal.Decimal, error) {
+	if s == "" {
+		return decimal.Zero, nil
+	}
+	return decimal.NewFromString(s)
 }
 
 func contains(list []string, s string) bool {

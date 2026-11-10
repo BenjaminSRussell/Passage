@@ -229,7 +229,7 @@ describe("saving", () => {
     const { fetchMock, user } = await dirtyDraft({ "PUT /hierarchy-versions/v3/nodes": () => json({ code: "ORG-VERSION-CONFLICT", detail: "Stale version" }, 409) });
     await user.click(screen.getByRole("button", { name: "Save draft" }));
     expect(await screen.findByText("This draft changed elsewhere")).toBeInTheDocument();
-    expect(screen.getByText(/Stale version \(ORG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Stale version/)).toBeInTheDocument();
     expect(order()).toEqual(["1Passage Inc", "2Beta", "3Gamma", "2Alpha"]);
     await user.click(screen.getByRole("button", { name: "Reload draft" }));
     await waitFor(() => expect(callsTo(fetchMock, "/hierarchy-versions/v3", "GET")).toHaveLength(2));
@@ -241,7 +241,7 @@ describe("saving", () => {
     const { user } = await dirtyDraft({ "PUT /hierarchy-versions/v3/nodes": () => json({ code: "AUTH-0003", detail: "Missing duty org.hierarchy.write" }, 403) });
     await user.click(screen.getByRole("button", { name: "Save draft" }));
     expect(await screen.findByText("You don't have permission to do this")).toBeInTheDocument();
-    expect(screen.getByText(/Missing duty org.hierarchy.write \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Missing duty org.hierarchy.write/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
   });
 
@@ -336,7 +336,8 @@ describe("publishing", () => {
     setDate("2099-01-01");
     await user.click(screen.getByRole("button", { name: "Publish version 3" }));
     expect(await screen.findByText(title)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`${detail.replace(/\./g, "\\.")} \\(${code}\\)`))).toBeInTheDocument();
+    expect(screen.getByText(detail)).toBeInTheDocument();
+    expect(screen.getByText(code)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish version 3" })).toBeEnabled();
     expect(screen.getByRole("tree")).toBeInTheDocument();
   });
@@ -369,7 +370,8 @@ describe("creating a draft", () => {
     await screen.findByRole("tree");
     await user.click(screen.getByRole("button", { name: "Create draft" }));
     expect(await screen.findByText(title)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`${detail} \\(${code}\\)`))).toBeInTheDocument();
+    expect(screen.getByText(detail)).toBeInTheDocument();
+    expect(screen.getByText(code)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create draft" })).toBeEnabled();
   });
 
@@ -875,7 +877,7 @@ describe("operating units fail to load while editing", () => {
   it("warns that names fall back to ids", async () => {
     await openDraft({ "GET /operating-units": () => json({ code: "COM-0002", detail: "Down" }, 500) }, () => screen.findByRole("treeitem", { name: "ou-c" }));
     expect(await screen.findByText("Operating units did not load")).toBeInTheDocument();
-    expect(screen.getByText(/Down \(COM-0002\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Down/)).toBeInTheDocument();
   });
 });
 

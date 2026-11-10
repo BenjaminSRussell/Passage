@@ -28,6 +28,7 @@ import {
 } from "./hierarchyTree";
 import styles from "./pages.module.css";
 import { downloadCsv } from "./periodSchedule";
+import { ProblemMessage } from "../../shell/errors";
 
 interface LoadState<T> {
   key: string;
@@ -294,7 +295,7 @@ export function HierarchyDesignerPage() {
       <PageHeader title="Hierarchies" description="Browse hierarchy versions as of a date, then edit the draft and publish it." />
       {types.error ? (
         <Alert tone="danger" title="Could not load hierarchy types" live="alert">
-          {types.error.message} ({types.error.code})
+          <ProblemMessage problem={types.error} />
         </Alert>
       ) : null}
       <div className={styles.filters}>
@@ -326,7 +327,7 @@ export function HierarchyDesignerPage() {
       </div>
       {typeId === "" ? null : versionsLoad.error ? (
         <Alert tone="danger" title="Could not load versions" live="alert">
-          {versionsLoad.error.message} ({versionsLoad.error.code})
+          <ProblemMessage problem={versionsLoad.error} />
         </Alert>
       ) : versionsLoad.loading && versionsLoad.data === null ? (
         <Skeleton height="tile" />
@@ -399,7 +400,7 @@ export function HierarchyDesignerPage() {
                 <>
                   {comparison.error ? (
                     <Alert tone="danger" title="Could not load changes" live="alert">
-                      {comparison.error.message} ({comparison.error.code})
+                      <ProblemMessage problem={comparison.error} />
                     </Alert>
                   ) : null}
                   {displayed.status === "draft" && !canWriteHierarchy ? (
@@ -414,7 +415,7 @@ export function HierarchyDesignerPage() {
                   ) : null}
                   {detail.error ? (
                     <Alert tone="danger" title="Could not load version" live="alert">
-                      {detail.error.message} ({detail.error.code})
+                      <ProblemMessage problem={detail.error} />
                     </Alert>
                   ) : detailData === null ? (
                     <Skeleton height="tile" />

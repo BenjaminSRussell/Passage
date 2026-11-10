@@ -21,6 +21,7 @@ import {
 } from "./api/client";
 import { amount, bulkCommandLabel, dash, statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ProductionOrdersPageProps {
   /** Opens an order's detail page. */
@@ -322,7 +323,7 @@ export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageP
           </Alert>
           {actionError ? (
             <Alert tone="danger" live="alert" title="The request was refused">
-              {actionError.message} ({actionError.code})
+              <ProblemMessage problem={actionError} />
             </Alert>
           ) : null}
         </div>
@@ -349,7 +350,7 @@ export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageP
 
       {state.error ? (
         <Alert tone="danger" title="Could not load production orders" live="alert">
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       <DataTable

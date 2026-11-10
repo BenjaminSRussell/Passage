@@ -5,6 +5,7 @@ import { listOrderImports, type OrderImport } from "./api/client";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const IMPORT_STATUS_LABELS: Record<OrderImport["status"], string> = { imported: "Imported", partial: "Partly imported", rejected: "Rejected", withdrawn: "Withdrawn" };
 const STATUS_TONES = { imported: "success", partial: "warning", rejected: "danger", withdrawn: "neutral" } as const;
@@ -33,7 +34,7 @@ export function OrderImportsPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Production orders received"
-        description="Each production order that was dated in wave 21 arrives here, and its route operations become operations to schedule. Orders with operations that could not be registered are listed with the reason; run the schedule after an order changes."
+        description="Each dated production order arrives here, and its route operations become operations to schedule. Orders with operations that could not be registered are listed with the reason; run the schedule after an order changes."
         actions={
           <Link className={buttonClassName("secondary")} to="/scheduling/operations">
             Operations
@@ -55,7 +56,7 @@ export function OrderImportsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load production orders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

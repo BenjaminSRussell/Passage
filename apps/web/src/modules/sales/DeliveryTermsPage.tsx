@@ -18,6 +18,7 @@ import {
 import { dash, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Changing delivery terms needs this duty (enforced by the service; the route rows are seeded under #313). */
 export const DUTY_DELIVERY_TERMS_MAINTAIN = "sales.parameter.maintain";
@@ -154,7 +155,7 @@ export function DeliveryTermsListPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load delivery terms" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -221,7 +222,7 @@ export function NewDeliveryTermsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0056" ? "This customer already has delivery terms" : "Could not save the delivery terms"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -261,7 +262,7 @@ export function DeliveryTermsDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Delivery terms" />
         <Alert tone="danger" title="Could not load the delivery terms" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -336,7 +337,7 @@ export function DeliveryTermsDetailPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0006" ? "Someone else changed these terms" : "Could not change the delivery terms"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

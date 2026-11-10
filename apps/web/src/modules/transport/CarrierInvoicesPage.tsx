@@ -5,6 +5,7 @@ import { INVOICE_STATUSES, listCarrierInvoices, type CarrierInvoice, type Invoic
 import { dash, formatDateTime, matchTone, money, shortId, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<CarrierInvoice>[] = [
   { key: "invoiceNo", header: "Invoice", mono: true },
@@ -54,7 +55,7 @@ export function CarrierInvoicesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load carrier invoices" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

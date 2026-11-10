@@ -4,6 +4,7 @@ import { describeProblem, exportRebateStatement, getRebateStatement, type Proble
 import { downloadCsv } from "./download";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The period key an agreement accrues by, with the words the field shows. */
 const PERIOD_FORMS: Record<RebateAgreement["period"], { pattern: RegExp; example: string; noun: string }> = {
@@ -85,7 +86,7 @@ export function RebateStatementCard({ agreement }: { agreement: RebateAgreement 
           <p className={styles.note}>Choose a period to see what the agreement accrued, what was settled and what is still open.</p>
         ) : state.error ? (
           <Alert tone="danger" title="Could not load the statement" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <>
@@ -125,7 +126,7 @@ export function RebateStatementCard({ agreement }: { agreement: RebateAgreement 
             </Alert>
             {exportFailure ? (
               <Alert tone="danger" title="Could not download the statement" live="alert">
-                {exportFailure.message} ({exportFailure.code})
+                <ProblemMessage problem={exportFailure} />
               </Alert>
             ) : null}
           </>

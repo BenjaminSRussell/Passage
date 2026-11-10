@@ -5,6 +5,7 @@ import { describeProblem, updateScheduling, type Problem, type SchedulingInput, 
 import { Details } from "./Details";
 import { dash, duration, formatDateTime, shortId, utcInstant, utcLocal } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface SchedulingValues {
   skills: string;
@@ -145,7 +146,7 @@ export function SchedulingPanel({ workOrder: wo, etag, onSaved, onConflict }: Pr
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the scheduling data" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

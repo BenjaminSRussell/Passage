@@ -1,6 +1,7 @@
 package sources
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -65,6 +66,85 @@ func (c *Client) Invoice(ctx context.Context, legalEntityID, id string) (domain.
 func (c *Client) Order(ctx context.Context, legalEntityID, id string) (domain.SourceOrder, error) {
 	var out domain.SourceOrder
 	return out, c.get(ctx, &out, audSales, DutyOrderRead, c.sales, legalEntityID, "/v1/sales/orders/"+url.PathEscape(id))
+}
+
+const DutyOrderIntake = "sales.channel.intake"
+
+// RefusedError is sales refusing an intake order for a reason in the order
+// itself (validation, a duplicate with another body, a listing): retrying the
+// same order fails the same way, so the message is parked.
+type RefusedError struct {
+	Status int
+	Code   string
+	Detail string
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("sales refused the order (%d %s): %s", e.Status, e.Code, e.Detail)
+}
+
+// PlaceOrder posts an EDI-channel order to sales under the narrow intake duty.
+// key is the Idempotency-Key, the edi message id, so a retry returns the order
+// already stored.
+func (c *Client) PlaceOrder(ctx context.Context, legalEntityID, key string, order domain.SalesOrderRequest) (domain.SalesOrderRef, error) {
+	const path = "/v1/sales/orders"
+	var out domain.SalesOrderRef
+	principal, ok := tenant.FromContext(ctx)
+	if !ok {
+		return out, errors.New("sales intake: no principal in context")
+	}
+	if c.sales == "" || c.signer == nil {
+		return out, fmt.Errorf("sales intake %s: sales is not configured", path)
+	}
+	body, err := json.Marshal(order)
+	if err != nil {
+		return out, fmt.Errorf("sales intake %s: %w", path, err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.sales+path, bytes.NewReader(body))
+	if err != nil {
+		return out, fmt.Errorf("sales intake %s: %w", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", key)
+	if _, err := c.signer.ApplyDuties(req, principal, audSales, legalEntityID, []string{DutyOrderIntake}); err != nil {
+		return out, fmt.Errorf("sales intake %s: %w: %v", path, ErrForbidden, err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "sales intake transport failed", "err", err, "path", path, "correlationId", middleware.GetReqID(ctx))
+		return out, fmt.Errorf("sales intake %s: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	if err != nil {
+		slog.ErrorContext(ctx, "sales intake read failed", "err", err, "path", path, "correlationId", middleware.GetReqID(ctx))
+		return out, fmt.Errorf("sales intake %s: %w", path, err)
+	}
+	switch {
+	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
+		if err := json.Unmarshal(raw, &out); err != nil || out.ID == "" {
+			slog.ErrorContext(ctx, "sales intake answer unusable", "err", err, "path", path, "correlationId", middleware.GetReqID(ctx))
+			return domain.SalesOrderRef{}, fmt.Errorf("sales intake %s: response is not an order", path)
+		}
+		return out, nil
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return out, fmt.Errorf("sales intake %s: %w", path, ErrForbidden)
+	case resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests:
+		var p struct {
+			Code   string            `json:"code"`
+			Detail string            `json:"detail"`
+			Errors map[string]string `json:"errors"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		detail := p.Detail
+		for field, msg := range p.Errors {
+			detail += "; " + field + " " + msg
+		}
+		return out, &RefusedError{Status: resp.StatusCode, Code: p.Code, Detail: detail}
+	}
+	err = fmt.Errorf("sales intake %s: unexpected status %d", path, resp.StatusCode)
+	slog.ErrorContext(ctx, "sales intake rejected", "err", err, "status", resp.StatusCode, "correlationId", middleware.GetReqID(ctx))
+	return out, err
 }
 
 func (c *Client) get(ctx context.Context, into any, aud, duty, base, legalEntityID, path string) error {

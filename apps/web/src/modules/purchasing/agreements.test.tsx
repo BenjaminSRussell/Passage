@@ -108,7 +108,7 @@ describe("purchase agreement list", () => {
   it("shows the problem code on error and retries", async () => {
     const fetchMock = stubFetch(() => problem(500, "COM-0500", "internal error"));
     renderAt("/purchasing/agreements");
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });

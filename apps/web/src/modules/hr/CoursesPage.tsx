@@ -5,6 +5,7 @@ import { describeProblem, listCourses, type Course, type Problem } from "./api/c
 import { dash, validityLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Course>[] = [
   { key: "code", header: "Code", mono: true, render: (row) => <Link to={`/hr/courses/${row.id}`}>{row.code}</Link> },
@@ -64,7 +65,7 @@ export function CoursesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load courses" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -78,7 +79,7 @@ export function CoursesPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more courses" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {!state.error && !state.loading && cursor ? (

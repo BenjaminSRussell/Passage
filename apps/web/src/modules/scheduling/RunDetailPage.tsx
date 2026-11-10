@@ -6,6 +6,7 @@ import { dash, formatDateTime, formatMinutes, sentence, shortId } from "./format
 import styles from "./pages.module.css";
 import { scopeLabels } from "./RunsPage";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const skipLabels: Record<string, string> = {
   firmed: "firmed, so it stays where it is",
@@ -58,7 +59,7 @@ function RollbackCard({ runId }: { runId: string }) {
         </p>
         {failure ? (
           <Alert tone="danger" title={rollbackFailures[failure.code] ?? "The rollback failed"} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
             {Object.keys(failure.fields).length > 0 ? (
               <ul className={styles.messages} aria-label="Jobs that block the rollback">
                 {Object.entries(failure.fields).map(([job, why]) => (
@@ -122,7 +123,7 @@ export function RunDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Schedule run" />
         <Alert tone="danger" title="Could not load the run" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -205,7 +206,7 @@ export function RunDetailPage() {
       <Card title="Plan measures">
         {kpis.error ? (
           <Alert tone="danger" title="Could not load the plan measures" live="alert" action={<Button size="sm" onClick={kpis.reload}>Try again</Button>}>
-            {kpis.error.message} ({kpis.error.code})
+            <ProblemMessage problem={kpis.error} />
           </Alert>
         ) : kpis.loading || !k ? (
           <div aria-busy="true">

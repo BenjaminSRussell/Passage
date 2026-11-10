@@ -5,6 +5,7 @@ import { ENVIRONMENTS, listPartners, type Environment, type Partner } from "./ap
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Partner>[] = [
   { key: "name", header: "Partner" },
@@ -47,7 +48,7 @@ export function PartnersPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load partners" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

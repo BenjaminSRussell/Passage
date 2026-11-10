@@ -53,6 +53,7 @@ import {
   type Failure,
 } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -371,7 +372,7 @@ export function SchedulingAgreementCreatePage() {
           ))}
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -530,7 +531,7 @@ function ScheduleEditor({ agreement, onSaved, onCancel }: { agreement: Schedulin
         })}
       </Card>
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <div className={styles.actions}>
         <Button type="submit" variant="primary" loading={busy}>
@@ -600,7 +601,7 @@ function ReleaseRun({ agreement, onReleased }: { agreement: SchedulingAgreement;
           <label htmlFor="rel-reset">Record a cumulative reset (new agreement year): cumulative released may go below the last release</label>
         </div>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>

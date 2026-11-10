@@ -125,7 +125,7 @@ describe("outbound sync subscriptions", () => {
     renderAt("/integration/sync");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load subscriptions");
-    expect(alert).toHaveTextContent("unexpected error (HUB-0500)");
+    expect(alert).toHaveTextContent("unexpected error");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Legacy ERP orders")).toBeInTheDocument();
@@ -196,7 +196,7 @@ describe("new REST push", () => {
 
     handler = () => json(501, { code: "HUB-0502", detail: "rest-push is not configured on this hub" });
     fireEvent.click(screen.getByRole("button", { name: "Create subscription" }));
-    expect(await findAlert()).toHaveTextContent("rest-push is not configured on this hub (HUB-0502)");
+    expect(await findAlert()).toHaveTextContent("rest-push is not configured on this hub");
   });
 
   it("switches the credential fields with the authentication type", () => {
@@ -275,7 +275,7 @@ describe("subscription detail and test send", () => {
   it("shows the problem when the subscription is not found", async () => {
     handler = () => json(404, { code: "HUB-0404", detail: "no such subscription" });
     renderAt(`/integration/sync/${SUB_ID}`);
-    expect(await findAlert()).toHaveTextContent("no such subscription (HUB-0404)");
+    expect(await findAlert()).toHaveTextContent("no such subscription");
   });
 });
 
@@ -330,7 +330,7 @@ describe("delivery monitor", () => {
     handler = () => (fail ? json(403, { code: "HUB-0403", detail: "you do not hold duty hub.delivery.read" }) : json(200, { items: [delivery()], nextCursor: null }));
     renderAt("/integration/sync/deliveries");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("you do not hold duty hub.delivery.read (HUB-0403)");
+    expect(alert).toHaveTextContent("you do not hold duty hub.delivery.read");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("SO-1001")).toBeInTheDocument();
@@ -368,7 +368,7 @@ describe("dead letters", () => {
       init.method === "POST" ? json(409, { code: "HUB-0409", detail: "only a dead-lettered delivery can be replayed" }) : url.pathname === "/api/v1/hub/dead-letters" ? json(200, { items: [dead], nextCursor: null }) : undefined;
     renderAt("/integration/sync/dead-letters");
     fireEvent.click(await screen.findByRole("button", { name: /^Replay / }));
-    expect(await findAlert()).toHaveTextContent("only a dead-lettered delivery can be replayed (HUB-0409)");
+    expect(await findAlert()).toHaveTextContent("only a dead-lettered delivery can be replayed");
   });
 
   it("offers no Replay for a pushed record whose legacy key conflicts (HUB-0118)", async () => {

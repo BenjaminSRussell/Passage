@@ -18,6 +18,7 @@ import { KIND_LABELS } from "./ComplianceListsPage";
 import { DECIMAL, qty, REGION, shortId, UUID, validCAS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Looks an item up by id and opens its composition and compliance. */
 export function ItemLookupPage() {
@@ -204,7 +205,7 @@ function CompositionForm({ itemId, current, onSaved }: { itemId: string; current
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the composition" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -281,7 +282,7 @@ function EvaluationPanel({ itemId }: { itemId: string }) {
         </form>
         {failure ? (
           <Alert tone="danger" title="Could not evaluate the item" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {result ? (
@@ -346,7 +347,7 @@ export function ItemCompliancePage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the composition" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : state.loading && !current ? (
         <div className={styles.stack} aria-busy="true">

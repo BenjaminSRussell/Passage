@@ -84,7 +84,7 @@ describe("Reservations against expected receipts", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "25" } });
     fireEvent.change(screen.getByLabelText("Demand reference"), { target: { value: "SO-7" } });
     fireEvent.click(screen.getByRole("button", { name: "Reserve" }));
-    expect(await findAlert()).toHaveTextContent("only 5 expected to arrive and unreserved, 25 requested (INV-RES-001)");
+    expect(await findAlert()).toHaveTextContent("only 5 expected to arrive and unreserved, 25 requested");
     expect(bodyOf(calls.find((c) => c.method === "POST"))).not.toHaveProperty("against");
   });
 

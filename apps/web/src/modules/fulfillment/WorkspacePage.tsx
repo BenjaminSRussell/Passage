@@ -3,6 +3,7 @@ import { Alert, Button, Card, CardGrid, PageHeader, Skeleton, StatGroup, StatTil
 import { listShipments, type ShipmentSummary } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** How many shipments the workspace reads to count its tiles. */
 export const WORKSPACE_SAMPLE = 500;
@@ -34,7 +35,7 @@ export function WorkspacePage() {
       <PageHeader title="Fulfillment" description="Release orders to the warehouse, pick, pack and ship them, and post packing slips." />
       {state.error ? (
         <Alert tone="danger" title="Could not load shipment counts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : state.loading && !state.data ? (
         <div aria-busy="true">

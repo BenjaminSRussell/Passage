@@ -227,7 +227,7 @@ describe("travel requisition check page", () => {
     type("Approved from", "2026-03-10");
     type("Approved to", "2026-03-14");
     fireEvent.click(screen.getByRole("button", { name: "Check requisition" }));
-    expect(await findAlert()).toHaveTextContent("Check your connection and try again. (NETWORK)");
+    expect(await findAlert()).toHaveTextContent("Check your connection and try again.");
   });
 });
 
@@ -287,6 +287,6 @@ describe("card feed preview page", () => {
     render(<CardFeedPage />);
     type("Statement content", "x");
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }));
-    expect(await findAlert()).toHaveTextContent("missing duty expense.card.import (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty expense.card.import");
   });
 });

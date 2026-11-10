@@ -182,7 +182,7 @@ func reprocessOne(ctx context.Context, tx pgx.Tx, tid, id string, dryRun bool, p
 		return ReprocessResult{}, ErrNotInbound
 	}
 	rows, err := tx.Query(ctx, `select id::text, transaction_set, st_control, status, coalesce(error, '')
-		from message where interchange_id = $1 and status = 'FAILED' and transaction_set not in ('997', 'CONTRL', 'TA1')
+		from message where interchange_id = $1 and status = 'FAILED' and park_code is null and transaction_set not in ('997', 'CONTRL', 'TA1')
 		order by created_at, st_control, id for update`, id)
 	if err != nil {
 		return ReprocessResult{}, err

@@ -210,6 +210,14 @@ func (s *Postgres) ClaimTargetLoad(ctx context.Context, runID, startedBy string,
 		if load.Status == domain.LoadLoading && leaseUntil != nil && leaseUntil.After(time.Now()) {
 			return ErrLoadBusy
 		}
+		// A run a cutover rollback moved to ROLLED_BACK (BR-49.1) is not loaded into the target any more.
+		var runStatus string
+		if err := tx.QueryRow(ctx, `select status from pack_run where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1`, runID).Scan(&runStatus); err != nil {
+			return err
+		}
+		if domain.RunStatus(runStatus) == domain.StatusRolledBack {
+			return fmt.Errorf("%w: run %s was rolled back with its cutover plan and is not loaded", domain.ErrTransition, runID)
+		}
 		if err := lockImportSource(ctx, tx, load.ImportSource); err != nil {
 			return err
 		}

@@ -29,6 +29,7 @@ import { ExportPanel } from "./ExportsPage";
 import { DATE, dimensionLabel, grainLabel, monthStart, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Partial<Record<"measures" | "dimensions" | "from" | "to", string>>;
 
@@ -174,7 +175,7 @@ export function ExplorerPage() {
       />
       {catalog.error ? (
         <Alert tone="danger" title="Could not load the metric catalog" live="alert" action={<Button size="sm" onClick={catalog.reload}>Try again</Button>}>
-          {catalog.error.message} ({catalog.error.code})
+          <ProblemMessage problem={catalog.error} />
         </Alert>
       ) : catalog.loading ? (
         <Card>
@@ -247,7 +248,7 @@ export function ExplorerPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="The query was not accepted" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

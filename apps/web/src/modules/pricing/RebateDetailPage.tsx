@@ -38,6 +38,7 @@ import { useLoad } from "./useLoad";
 import { RebateLifecycleCard } from "./RebateLifecycleCard";
 import { RebateStatementCard } from "./RebateStatementCard";
 import { VendorClaimsCard } from "./VendorClaimsCard";
+import { ProblemMessage } from "../../shell/errors";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
 
@@ -116,7 +117,7 @@ export function RebateDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Rebate agreement" />
         <Alert tone="danger" title="Could not load the rebate agreement" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -220,7 +221,7 @@ export function RebateDetailPage() {
           </form>
           {accruals.error ? (
             <Alert tone="danger" title="Could not load the accruals" live="alert" action={<Button size="sm" onClick={accruals.reload}>Try again</Button>}>
-              {accruals.error.message} ({accruals.error.code})
+              <ProblemMessage problem={accruals.error} />
             </Alert>
           ) : (
             <>
@@ -267,7 +268,7 @@ export function RebateDetailPage() {
           {retroFailure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not recompute the agreement" live="alert">
-                {retroFailure.message} ({retroFailure.code})
+                <ProblemMessage problem={retroFailure} />
               </Alert>
             </div>
           ) : null}

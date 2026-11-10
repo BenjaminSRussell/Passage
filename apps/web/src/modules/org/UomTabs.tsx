@@ -17,6 +17,7 @@ import {
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { FilterSelect, StatusTable, statusOptions, useRows, type RowsState, type StatusFilterValue } from "./referenceParts";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const unitCodePattern = /^[A-Za-z0-9/%]{1,10}$/;
 const precisionPattern = /^[0-6]$/;
@@ -83,7 +84,8 @@ export function validateQuantity(quantity: string): string | undefined {
   return quantityPattern.test(quantity) ? undefined : "Enter a decimal number such as 12.5.";
 }
 
-const formatProblem = ({ message, code }: Problem) => `${message} (${code})`;
+/** Plain wording for a problem; `ProblemMessage` keeps its code under Details. */
+const formatProblem = (problem: Problem) => problemSummary(problem);
 
 function AddUnitForm({ onCreated }: { onCreated(): void }) {
   const [values, setValues] = useState<UnitValues>({ code: "", name: "", decimalPrecision: "2" });
@@ -147,7 +149,7 @@ function AddUnitForm({ onCreated }: { onCreated(): void }) {
         </FormField>
         {failure ? (
           <Alert tone="danger" title="Could not add the unit" live="alert">
-            {formatProblem(failure)}
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div>
@@ -330,7 +332,7 @@ function TestConversionPanel({ units }: { units: Unit[] }) {
       </div>
       {failure ? (
         <Alert tone="danger" title="Could not convert" live="alert">
-          {formatProblem(failure)}
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </Card>
@@ -368,7 +370,7 @@ export function ConversionsTab() {
     <>
       {units.error ? (
         <Alert tone="danger" title="Could not load units" live="alert">
-          {formatProblem(units.error)}
+          <ProblemMessage problem={units.error} />
         </Alert>
       ) : null}
       {canWriteReference ? <AddConversionForm units={units.rows} onCreated={state.reload} /> : null}

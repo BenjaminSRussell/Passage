@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -594,9 +594,9 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],
 		"billing": ["billing.invoice.read"],
-		"sales": ["sales.order.lookup"],
+		"sales": ["sales.order.lookup", "sales.channel.intake"],
 	}
-	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup"] {
+	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
 	}
 	allowed("fulfillment.shipment.read", "GET", "/v1/fulfillment/shipments/s1")
@@ -610,6 +610,20 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 	allowed("edi.operate", "POST", "/edi/v1/partners/p1/outbound:from-source")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/trade-profile")
 	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/trade-profile")
+}
+
+test_edi_item_xref_and_order_posting_routes if {
+	allowed("edi.admin", "POST", "/edi/v1/partners/p1/item-xrefs")
+	allowed("edi.admin", "GET", "/edi/v1/partners/p1/item-xrefs")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/item-xrefs/x1")
+	allowed("edi.admin", "DELETE", "/edi/v1/partners/p1/item-xrefs/x1")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/sales-defaults")
+	not allowed("edi.operate", "POST", "/edi/v1/partners/p1/item-xrefs")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/sales-defaults")
+	allowed("edi.operate", "POST", "/edi/v1/messages/m1:post")
+	not allowed("edi.admin", "POST", "/edi/v1/messages/m1:post")
+	allowed("sales.channel.intake", "POST", "/v1/sales/orders")
+	not allowed("sales.channel.intake", "GET", "/v1/sales/orders/o1")
 }
 
 test_edi_transport_routes if {
@@ -715,6 +729,13 @@ test_service_grants_allow_only_their_declared_routes if {
 	data.service_grants.payables.ledger == ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"]
 	data.service_grants.party.numbering == ["numbering.sequence.allocate"]
 	data.service_grants.hr.numbering == ["numbering.sequence.allocate"]
+	data.service_grants.fieldservice.dispatch == ["dispatch.run.create", "dispatch.run.read"]
+	allowed("dispatch.run.create", "POST", "/v1/dispatch/runs")
+	allowed("dispatch.run.read", "GET", "/v1/dispatch/runs/r1")
+	not allowed("dispatch.run.create", "GET", "/v1/dispatch/runs/r1")
+	not allowed("dispatch.run.read", "POST", "/v1/dispatch/runs")
+	allowed("fieldservice.technician.dispatch", "POST", "/v1/service/dispatch/optimizations/o1:accept")
+	not allowed("fieldservice.inquire", "POST", "/v1/service/dispatch/optimizations")
 	data.service_grants.productcost.ledger == ["ledger.entry.post", "ledger.journal.reverse"]
 	data.service_grants.productcost.inventory == ["inventory.read"]
 	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {
@@ -757,7 +778,6 @@ awaiting_service_caller := {
 	"shopfloor.machine.ingest",
 	"transport.tracking-event.ingest",
 	"shopfloor.time.autoclockout",
-	"sales.channel.intake",
 	"inventory.transaction.apply",
 	"pricing.contract.accrue",
 	"hub.client.consume",
@@ -1283,7 +1303,7 @@ test_tax_duties_reach_only_their_routes if {
 	not allowed("tax.transaction.record", "POST", "/v1/tax/settlements:run")
 	not allowed("tax.recommit.run", "POST", "/v1/tax/settlements:run")
 	not allowed("tax.tax.calculate", "POST", "/v1/tax/settlements:run")
-	data.service_grants.tax.ledger == ["ledger.balance.read"]
+	data.service_grants.tax.ledger == ["ledger.balance.read", "ledger.entry.lookup", "ledger.ledger.lookup", "ledger.account.lookup"]
 	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")
 }
 
@@ -1464,6 +1484,10 @@ test_hub_client_routes_split_write_consume_and_read if {
 	allowed("hub.client.write", "POST", "/v1/hub/clients/c1:revoke")
 	not allowed("hub.client.write", "POST", "/v1/hub/clients:consume")
 	not allowed("hub.client.write", "GET", "/v1/hub/clients")
+	allowed("hub.coexistence.operate", "POST", "/v1/hub/coexistence:retry-parked")
+	not allowed("hub.subscription.write", "POST", "/v1/hub/coexistence:retry-parked")
+	not allowed("hub.coexistence.operate", "GET", "/v1/hub/coexistence")
+	allowed("hub.delivery.read", "GET", "/v1/hub/coexistence")
 	allowed("hub.client.consume", "POST", "/v1/hub/clients:consume")
 	not allowed("hub.client.consume", "POST", "/v1/hub/clients")
 	data.duties["hub.client.consume"].service_only
@@ -1746,4 +1770,47 @@ test_mobile_service_routes if {
 	allowed("warehouse.offline-conflict.resolve", "GET", "/v1/mobile/offline/conflicts")
 	allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
 	not allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/flows")
+}
+
+# Issue #495: the dev seed (deploy/local/seed.json) holds an admin and a clerk; admin routes are the admin's alone.
+dev_seed_assignments := {"tenant-1": {
+	"admin": [
+		"audit.read", "numbering.read", "numbering.sequence.maintain", "numbering.write",
+		"identity.user.maintain", "identity.security-role.maintain",
+	],
+	"clerk": ["receiving.receipt.maintain", "ledger.journal.read", "party.read"],
+}}
+
+dev_seed_decision(user, action, resource) := decision if {
+	decision := data.authz.decision with input as {
+		"subject": {"tenant_id": "tenant-1", "user_id": user},
+		"action": action,
+		"resource": resource,
+	}
+		with data.assignments as dev_seed_assignments
+}
+
+test_dev_seed_admin_reaches_admin_routes if {
+	dev_seed_decision("admin", "POST", "/v1/numbering/sequences").allow
+	dev_seed_decision("admin", "GET", "/v1/numbering/sequences/PARTY").allow
+	dev_seed_decision("admin", "POST", "/v1/identity/users").allow
+}
+
+test_dev_seed_clerk_is_denied_admin_routes_with_a_missing_duty if {
+	numbering := dev_seed_decision("clerk", "POST", "/v1/numbering/sequences")
+	not numbering.allow
+	numbering.duty_missing in {"numbering.write", "numbering.sequence.maintain"}
+	users := dev_seed_decision("clerk", "POST", "/v1/identity/users")
+	not users.allow
+	users.duty_missing != ""
+	not dev_seed_decision("clerk", "GET", "/v1/numbering/sequences/PARTY").allow
+}
+
+test_dev_seed_clerk_keeps_its_own_routes if {
+	dev_seed_decision("clerk", "GET", "/v1/ledger/journal-lines").allow
+	dev_seed_decision("clerk", "GET", "/v1/party/parties/p-1").allow
+}
+
+test_dev_seed_unknown_user_is_denied_everything if {
+	not dev_seed_decision("stranger", "GET", "/v1/ledger/journal-lines").allow
 }

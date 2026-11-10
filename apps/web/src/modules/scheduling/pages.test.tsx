@@ -253,7 +253,7 @@ describe("Scheduling workspace", () => {
 
     handler = workspace((url) => (url.pathname.endsWith(":firm") ? json(404, { code: "SCHED-0105", detail: "scheduled job not found" }) : undefined));
     fireEvent.click(within(table).getByRole("button", { name: "Unfirm order b1000000 operation 20" }));
-    expect(await screen.findByText("scheduled job not found (SCHED-0105)")).toBeInTheDocument();
+    expect(await screen.findByText("scheduled job not found")).toBeInTheDocument();
   });
 
   it("tells a new tenant to add a resource first", async () => {
@@ -267,7 +267,7 @@ describe("Scheduling workspace", () => {
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/scheduling");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("internal error (COM-0500)");
+    expect(alert).toHaveTextContent("internal error");
     handler = workspace();
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Jobs in window" })).toBeInTheDocument();
@@ -305,7 +305,7 @@ describe("Capacity load", () => {
     first.unmount();
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty scheduling.read" });
     renderAt("/scheduling/load");
-    expect(await findAlert()).toHaveTextContent("missing duty scheduling.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty scheduling.read");
   });
 });
 
@@ -352,7 +352,7 @@ describe("Schedule runs", () => {
   it("shows a missing run as an error", async () => {
     handler = () => json(404, { code: "SCHED-0104", detail: "schedule run not found" });
     renderAt(`/scheduling/runs/${RUN}`);
-    expect(await findAlert()).toHaveTextContent("schedule run not found (SCHED-0104)");
+    expect(await findAlert()).toHaveTextContent("schedule run not found");
   });
 
   it("validates a selection run before calling the service", () => {

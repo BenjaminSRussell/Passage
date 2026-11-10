@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type R
 import { Alert, Button } from "../../shell/ui";
 import { describeProblem, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export type EditErrors<K extends string> = Partial<Record<K, string>>;
 
@@ -149,10 +150,10 @@ export function EditAction<V, K extends string>({ subject, initial, validate, sa
       {fields({ values, errors, text })}
       {failure ? (
         <Alert tone="danger" title={`Could not save ${subject}`} live="alert">
-          {failure.code === VERSION_CONFLICT
-            ? "Someone else changed this row; it has been reloaded and your changes are kept. Check them and save again. "
-            : null}
-          {failure.message} ({failure.code})
+          <ProblemMessage
+            problem={failure}
+            lead={failure.code === VERSION_CONFLICT ? "Someone else changed this row; it has been reloaded and your changes are kept. Check them and save again. " : null}
+          />
         </Alert>
       ) : null}
       <div className={styles.rowActions}>

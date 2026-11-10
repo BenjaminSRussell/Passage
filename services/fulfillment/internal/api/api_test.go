@@ -53,6 +53,7 @@ type fakeStore struct {
 	resolved        string
 	resolvedVersion int
 	heldOrders      map[string]bool
+	salesReports    salesReportCalls
 }
 
 func (f *fakeStore) RunRelease(_ context.Context, warehouseID string, groups []domain.ReleaseGroup, idem store.Idem) (store.ReleaseResult, error) {

@@ -154,7 +154,7 @@ describe("Pack catalog", () => {
     let fail = true;
     handler = () => (fail ? json(403, { code: "AUTH-0003", detail: "missing duty migration.factory.view" }) : json(200, { items: catalog }));
     renderAt("/migration-factory/packs");
-    expect(await screen.findByText(/missing duty migration.factory.view \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty migration.factory.view/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("link", { name: "Start open_items run" })).toBeInTheDocument();

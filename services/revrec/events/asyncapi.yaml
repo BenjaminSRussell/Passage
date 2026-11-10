@@ -7,8 +7,9 @@ info:
     written to the outbox in the transaction that makes the change and relayed
     by Debezium; the Kafka key is the contract id (aggregate revenue_contract),
     so a contract's events stay ordered within each topic. The allocation preview publishes
-    nothing. Revrec consumes no events yet: the invoice.posted consumer that
-    creates contracts from billing arrives in a later slice.
+    nothing. Revrec consumes billing's creditnote.booked (the credit-note
+    consumer, #29); the invoice.posted consumer that creates contracts from
+    billing arrives in a later slice.
 defaultContentType: application/cloudevents+json
 channels:
   revenueContract:
@@ -23,7 +24,28 @@ channels:
     messages:
       scheduleRecognized:
         $ref: "#/components/messages/ScheduleRecognized"
+  # Consumed by the credit-note consumer (#29, `revrec consume`, group and service principal revrec-creditnotes, dead-letter
+  # topic passage.revrec.creditnotes.dlq). The payload is billing's (services/billing/events/asyncapi.yaml); the other
+  # billing types on the topic are skipped.
+  billingInvoice:
+    address: passage.billing.invoice
+    messages:
+      creditNoteBooked:
+        $ref: "#/components/messages/CreditNoteBookedConsumed"
 operations:
+  receiveCreditNoteBooked:
+    action: receive
+    channel:
+      $ref: "#/channels/billingInvoice"
+    summary: >
+      The credit-note consumer reverses the schedules of every credited line with
+      a deferred amount (BR-29.6): the unrecognized schedule of the line's
+      obligations first, then recognized revenue, posted later as Dr 4000 /
+      Cr 2400 by POST /v1/revrec/journal-postings. Idempotent per (credit note,
+      line); a rule failure (REV-0300 to REV-0304) parks the event on the
+      dead-letter topic, anything else is retried with back-off.
+    messages:
+      - $ref: "#/channels/billingInvoice/messages/creditNoteBooked"
   publishContractAllocated:
     action: send
     channel:
@@ -40,6 +62,36 @@ operations:
       because the invoice already credited that revenue to 4000.
 components:
   messages:
+    CreditNoteBookedConsumed:
+      name: dev.passage.billing.creditnote.booked.v1
+      title: Credit note booked (consumed)
+      summary: >-
+        Billing booked a credit note's journal. Read: credit_note_id, number,
+        legal_entity_id, currency, posting_date and per line line_no,
+        original_line_no, order_id, product and deferred (the part debited to
+        2400). The contract is the live one of (legal_entity_id, order_id); a line
+        with deferred 0.00 is skipped.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [credit_note_id, number, legal_entity_id, currency, posting_date, lines]
+        properties:
+          credit_note_id: { type: string, format: uuid }
+          number: { type: string }
+          legal_entity_id: { type: string, format: uuid }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          posting_date: { type: string, format: date }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [line_no, deferred]
+              properties:
+                line_no: { type: integer }
+                original_line_no: { type: integer }
+                order_id: { type: string, format: uuid }
+                product: { type: string, format: uuid }
+                deferred: { type: string }
     ContractAllocated:
       name: dev.passage.revrec.contract.allocated.v1
       contentType: application/cloudevents+json

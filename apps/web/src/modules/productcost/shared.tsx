@@ -2,6 +2,7 @@ import { Alert, Badge, DataTable, FormField, Select, Textarea, type DataTableCol
 import type { CostItem, Diagnostic, ExplosionMode, JournalLine, Problem, Split } from "./api/client";
 import { amount, dash } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Explosion modes as the selects offer them (FR-39.4 step 3). */
 export const explosionModes: { value: ExplosionMode; label: string }[] = [
@@ -80,7 +81,7 @@ export function ProblemAlert({ title, problem }: { title: string; problem: Probl
   return (
     <div className={styles.formActions}>
       <Alert tone="danger" title={title} live="alert">
-        {problem.message} ({problem.code})
+        <ProblemMessage problem={problem} />
         {fields.length > 0 ? (
           <ul className={styles.fieldErrors}>
             {fields.map(([field, message]) => (

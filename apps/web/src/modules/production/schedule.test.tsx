@@ -141,7 +141,7 @@ describe("Schedule panel on the order page", () => {
     renderAt(`/production/${orderId}`);
     await userEvent.click(await screen.findByRole("button", { name: "Schedule order" }));
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("the order has no operations to schedule (PRODUCTION_SCHEDULE_INPUT)");
+    expect(alert).toHaveTextContent("the order has no operations to schedule");
   });
 
   it("lists the jobs and the operation windows of a scheduled order, and warns when it ends late", async () => {
@@ -360,7 +360,7 @@ describe("Finite-capacity dates panel", () => {
     const form = await screen.findByRole("form", { name: "Apply finite dates" });
     fireEvent.change(within(form).getByLabelText("Operation 10 end"), { target: { value: "2026-11-04T10:00" } });
     await userEvent.click(within(form).getByRole("button", { name: "Apply finite dates" }));
-    expect(await screen.findByText("operation 10 has feedback and cannot move (PRODUCTION_FINITE_LOCKED)")).toBeInTheDocument();
+    expect(await screen.findByText("operation 10 has feedback and cannot move")).toBeInTheDocument();
   });
 
   it("locks an operation with feedback and is absent before the order is scheduled", async () => {

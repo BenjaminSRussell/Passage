@@ -437,8 +437,12 @@ func (s *Store) claimPick(ctx context.Context, w domain.Work, line domain.WorkLi
 	if !ok || !ids.Valid(p.LegalEntityID) {
 		return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a pick of held-checked stock needs a principal scoped to a legal entity")
 	}
+	// The line's issueRef attribute (issueclaim.RefAttribute, set by whoever
+	// created the work: the sales order line or production order item the pick
+	// serves) is the claim's ref, so the ship or consumption of what was picked
+	// is not counted a second time. A pick without one counts on its own.
 	claim := issueclaim.Claim{LegalEntityID: p.LegalEntityID, ProductID: line.ItemID, Warehouse: w.WarehouseID, Batch: line.Attributes["batch"], Kind: issueclaim.Pick,
-		Qty: line.ConfirmedQty, Key: fmt.Sprintf("warehouse-pick:%s:%d:%s", w.ID, line.LineNo, line.ConfirmedQty)}
+		Qty: line.ConfirmedQty, Ref: line.Attributes[issueclaim.RefAttribute], Key: fmt.Sprintf("warehouse-pick:%s:%d:%s", w.ID, line.LineNo, line.ConfirmedQty)}
 	undo, err := issueclaim.ClaimAll(ctx, s.holds, []issueclaim.Claim{claim})
 	switch {
 	case err == nil:

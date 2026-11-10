@@ -33,6 +33,7 @@ import {
 import { dash, riskKindLabel, riskScoreTone, riskStatusLabel, riskStatusTone } from "./labels";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RiskValues {
   kind: RiskKind;
@@ -376,7 +377,7 @@ export function RisksPage() {
             </Button>
           }
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -403,7 +404,7 @@ export function RisksPage() {
           />
           {failure ? (
             <Alert tone="danger" title={failureTitle[failure.code] ?? "Could not save the entry"} live="alert">
-              {failure.code === "conflict_version" ? "Cancel and edit the entry again to see the latest version." : `${failure.message} (${failure.code})`}
+              {failure.code === "conflict_version" ? "Cancel and edit the entry again to see the latest version." : <ProblemMessage problem={failure} />}
             </Alert>
           ) : null}
           <div className={styles.actions}>

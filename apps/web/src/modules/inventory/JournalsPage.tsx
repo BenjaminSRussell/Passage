@@ -15,6 +15,7 @@ import {
 import { dash, formatDateTime, sentence, shortId, statusTone, typeLabels } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<JournalSummary>[] = [
   { key: "id", header: "Journal", mono: true, render: (row) => shortId(row.id) },
@@ -95,7 +96,7 @@ export function JournalsPage() {
       </div>
       {failure ? (
         <Alert tone="danger" title="Could not load journals" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? null : (

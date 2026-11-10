@@ -6,6 +6,7 @@ import { CODE, dayOf, UUID } from "./format";
 import { PagedTable, State, StatusFilter } from "./parts";
 import styles from "./pages.module.css";
 import { usePaged } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Asset>[] = [
   { key: "assetNumber", header: "Asset", mono: true },
@@ -143,7 +144,7 @@ export function NewAssetPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the asset" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

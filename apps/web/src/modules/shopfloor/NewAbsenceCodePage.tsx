@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createAbsenceCode, describeProblem, newKey, type NewAbsenceCode, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   code: string;
@@ -98,7 +99,7 @@ export function NewAbsenceCodePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the absence code" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

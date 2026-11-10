@@ -3,8 +3,9 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createArrival, fetchPurchaseOrderLines, newKey, type ArrivalInput, type PurchaseOrderLine } from "./api/client";
-import { DECIMAL, describeFailure, fieldErrors, UUID } from "../../shell/api/http";
+import { DECIMAL, fieldErrors, UUID } from "../../shell/api/http";
 import styles from "../../shell/pageLayout.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_LINES = 500;
 const LINE_NO = /^[1-9]\d*$/;
@@ -112,7 +113,7 @@ export function NewArrivalPage() {
   const key = useRef(newKey());
   const [values, setValues] = useState<ArrivalDraft>(emptyArrival);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const purchaseOrder = useQuery({
     queryKey: ["receiving", "purchase-order-lines", values.purchaseOrderId],
@@ -139,7 +140,7 @@ export function NewArrivalPage() {
       navigate(`/receiving/receipts/${encodeURIComponent(receipt.id)}`);
     } catch (error) {
       setErrors(fieldErrors(error));
-      setFailure(describeFailure(error));
+      setFailure(error);
     } finally {
       setBusy(false);
     }
@@ -230,7 +231,7 @@ export function NewArrivalPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the arrival" live="alert">
-                {failure}
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

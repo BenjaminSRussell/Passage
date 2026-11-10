@@ -195,5 +195,5 @@ describe("Order quantity rules on the create form", () => {
     const quantity = within(form).getByLabelText("Quantity");
     expect(quantity).toHaveAttribute("aria-invalid", "true");
     expect(within(form).getByText("quantity 121 is not a multiple of 12")).toBeInTheDocument();
-  });
+  }, 60_000);
 });

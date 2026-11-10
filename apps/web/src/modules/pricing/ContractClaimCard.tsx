@@ -18,6 +18,7 @@ import {
 import { ClaimStatusBadge } from "./claimColumns";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
 
@@ -136,7 +137,7 @@ export function ContractClaimCard({ kind, contractId, closed }: { kind: Contract
         </form>
         {failure ? (
           <Alert tone="danger" title={failure.title} live="alert">
-            {failure.problem.message} ({failure.problem.code})
+            <ProblemMessage problem={failure.problem} />
           </Alert>
         ) : null}
         {closeResult ? (
@@ -173,7 +174,7 @@ export function ContractClaimCard({ kind, contractId, closed }: { kind: Contract
         ) : null}
         {claims.error ? (
           <Alert tone="danger" title="Could not load the claims" live="alert" action={<Button size="sm" onClick={claims.reload}>Try again</Button>}>
-            {claims.error.message} ({claims.error.code})
+            <ProblemMessage problem={claims.error} />
           </Alert>
         ) : (
           <DataTable

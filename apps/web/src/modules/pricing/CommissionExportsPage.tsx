@@ -6,6 +6,7 @@ import { TARGET_LABELS } from "./CommissionSettlementPage";
 import styles from "./pages.module.css";
 import { describeTotals, ExportStatusBadge } from "./settlementFile";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<SettlementExportRecord>[] = [
   { key: "period", header: "Invoice dates", mono: true, render: (r) => `${r.from} to ${r.to}` },
@@ -63,7 +64,7 @@ export function CommissionExportsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the exports" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

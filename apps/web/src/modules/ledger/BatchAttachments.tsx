@@ -14,6 +14,7 @@ import {
   type BatchAttachmentInput,
 } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The limits of FR-11.11 / FR-11.18, checked here so the user is told before the service says it. */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -96,9 +97,9 @@ export function toAttachmentInput(d: AttachmentDraft): BatchAttachmentInput {
   };
 }
 
-function problemText(title: string, error: unknown): { title: string; lines: string[] } {
-  if (!(error instanceof LedgerApiError)) return { title, lines: [(error as Error).message] };
-  return { title, lines: [`${error.message} (${error.code})`, ...error.violations.map((v) => `${v.message} (${v.code})`)] };
+function problemText(title: string, error: unknown): { title: string; error: unknown; lines: string[] } {
+  if (!(error instanceof LedgerApiError)) return { title, error, lines: [] };
+  return { title, error, lines: error.violations.map((v) => `${v.message} (${v.code})`) };
 }
 
 function formatSize(bytes: number | undefined): string {
@@ -150,7 +151,7 @@ export function BatchAttachmentsCard({ batchId, status }: { batchId: string; sta
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<AttachmentDraft>(emptyAttachmentDraft);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [problem, setProblem] = useState<{ title: string; lines: string[] } | null>(null);
+  const [problem, setProblem] = useState<{ title: string; error: unknown; lines: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   // One id per user-intended add: pressing Add again after a timeout repeats the same request.
@@ -213,11 +214,14 @@ export function BatchAttachmentsCard({ batchId, status }: { batchId: string; sta
     <Card title="Attachments and notes">
       {problem ? (
         <Alert tone="danger" title={problem.title} live="alert">
-          <ul className={styles.problems}>
-            {problem.lines.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
+          <ProblemMessage problem={problem.error} />
+          {problem.lines.length > 0 ? (
+            <ul className={styles.problems}>
+              {problem.lines.map((l) => (
+                <li key={l}>{l}</li>
+              ))}
+            </ul>
+          ) : null}
         </Alert>
       ) : null}
       {result.isError ? (
