@@ -1,4 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, resolvePrice, type FreeGoodsProposal, type Problem, type ResolvedLine, type ResolveRequest, type ResolveResponse, type TraceAccess, type TraceStep } from "./api/client";
 import { DAY, DECIMAL, today, TYPE_LABELS, UUID } from "./format";
@@ -29,14 +32,14 @@ const blankLine: LineDraft = { productId: "", productGroupId: "", unit: "EA", qu
 /** Client checks that mirror the resolve validation (PRD §5.26.5). */
 export function validateSimulation(h: HeaderDraft, lines: LineDraft[]): Errors {
   const errors: Errors = {};
-  if (!UUID.test(h.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (h.customerId.trim() === "") errors.customerId = "Enter the customer.";
+  if (!UUID.test(h.legalEntityId.trim())) errors.legalEntityId = "Choose the legal entity.";
+  if (h.customerId.trim() === "") errors.customerId = "Choose the customer.";
   if (!/^[A-Z]{3}$/.test(h.currency)) errors.currency = "Use a three-letter ISO 4217 code, such as USD.";
   if (!DAY.test(h.pricingDate)) errors.pricingDate = "Enter the pricing date.";
   if (!/^([A-Z0-9][A-Z0-9_-]{0,31})?$/.test(h.salesChannel.trim())) errors.salesChannel = "Use upper-case letters, digits, '_' or '-', such as WEB.";
   if (!/^([A-Z0-9][A-Z0-9_-]*)?$/.test(h.procedure.trim())) errors.procedure = "Use upper-case letters, digits, '_' or '-', such as AX_STANDARD.";
   lines.forEach((l, i) => {
-    if (l.productId.trim() === "") errors[`lines[${i}].productId`] = "Enter the product.";
+    if (l.productId.trim() === "") errors[`lines[${i}].productId`] = "Choose the product.";
     if (l.unit.trim() === "") errors[`lines[${i}].unit`] = "Enter the unit.";
     if (!DECIMAL.test(l.quantity) || Number(l.quantity) <= 0) errors[`lines[${i}].quantity`] = "Enter a quantity above 0.";
   });
@@ -74,7 +77,7 @@ const lineColumns: DataTableColumn<ResolvedLine>[] = [
 
 const freeGoodsColumns: DataTableColumn<FreeGoodsProposal>[] = [
   { key: "lineNo", header: "Line", align: "end" },
-  { key: "productId", header: "Product", mono: true },
+  { key: "productId", header: "Product", render: (p) => <EntityName entity="product" id={p.productId} fallback="Product" /> },
   { key: "kind", header: "Variant", render: (p) => (p.kind === "INCLUSIVE" ? "Inclusive" : "Exclusive") },
   { key: "orderedQuantity", header: "Ordered", mono: true, align: "end", render: (p) => `${p.orderedQuantity} ${p.unit}` },
   { key: "pricedQuantity", header: "Charged", mono: true, align: "end", render: (p) => `${p.pricedQuantity} ${p.unit}` },
@@ -136,9 +139,15 @@ export function SimulatePage() {
     }
   }
 
-  const headerField = (id: string, name: keyof HeaderDraft, label: string, extra: { optional?: boolean; type?: string; hint?: string } = {}) => (
+  const headerField = (id: string, name: keyof HeaderDraft, label: string, extra: { optional?: boolean; type?: string; hint?: string; lookup?: LookupEntityKey } = {}) => (
     <FormField id={id} label={label} optional={extra.optional} hint={extra.hint} error={errors[name]}>
-      {(c) => <Input {...c} type={extra.type ?? "text"} value={header[name]} onChange={(e) => setH({ [name]: e.target.value })} invalid={Boolean(errors[name])} />}
+      {(c) =>
+        extra.lookup ? (
+          <EntityLookup entity={extra.lookup} {...c} scope={{ legalEntityId: header.legalEntityId || undefined }} value={header[name]} onChange={(e) => setH({ [name]: e.target.value })} invalid={Boolean(errors[name])} />
+        ) : (
+          <Input {...c} type={extra.type ?? "text"} value={header[name]} onChange={(e) => setH({ [name]: e.target.value })} invalid={Boolean(errors[name])} />
+        )
+      }
     </FormField>
   );
 
@@ -147,8 +156,8 @@ export function SimulatePage() {
       <PageHeader title="Price simulation" description="Enter a customer, date and lines, then read which agreements produced each net price." />
       <Card>
         <form className={styles.form} onSubmit={run} noValidate>
-          {headerField("sim-legal-entity", "legalEntityId", "Legal entity id")}
-          {headerField("sim-customer", "customerId", "Customer")}
+          {headerField("sim-legal-entity", "legalEntityId", "Legal entity", { lookup: "legalEntity" })}
+          {headerField("sim-customer", "customerId", "Customer", { lookup: "customer" })}
           {headerField("sim-customer-group", "customerGroupId", "Customer group", { optional: true })}
           {headerField("sim-currency", "currency", "Currency")}
           {headerField("sim-date", "pricingDate", "Pricing date", { type: "date", hint: "Usually the requested ship date." })}
@@ -158,7 +167,7 @@ export function SimulatePage() {
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Line ${i + 1}`}</legend>
               <FormField id={`sim-product-${i}`} label="Product" error={errors[`lines[${i}].productId`]}>
-                {(c) => <Input {...c} value={l.productId} onChange={(e) => setLine(i, { productId: e.target.value })} invalid={Boolean(errors[`lines[${i}].productId`])} />}
+                {(c) => <EntityLookup entity="product" {...c} value={l.productId} onChange={(e) => setLine(i, { productId: e.target.value })} invalid={Boolean(errors[`lines[${i}].productId`])} />}
               </FormField>
               <FormField id={`sim-group-${i}`} label="Product group" optional>
                 {(c) => <Input {...c} value={l.productGroupId} onChange={(e) => setLine(i, { productGroupId: e.target.value })} />}

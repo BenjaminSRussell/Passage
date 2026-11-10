@@ -498,18 +498,6 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/pricing/PriceListPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
-    "modules/pricing/SimulatePage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
     "modules/processmfg/CustomerRequirementPages.tsx": {
       "labels": [
         "Customer group id"

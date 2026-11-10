@@ -4,19 +4,21 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { cancelManifest, describeProblem, getManifest, type Manifest, type ManifestParcel, type Problem } from "./api/client";
-import { dash, formatDate, formatDateTime, shortId } from "./format";
+import { dash, formatDate, formatDateTime } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import { ManifestStatusBadge } from "./ManifestsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../sales/OrderNumber";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const DUTY_SHIP = "fulfillment.warehouse.ship";
 
 const parcelColumns: DataTableColumn<ManifestParcel>[] = [
   { key: "shipmentNumber", header: "Shipment", mono: true },
   { key: "trackingNumber", header: "Tracking number", mono: true },
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
   { key: "active", header: "On the manifest", render: (row) => (row.active ? "Yes" : "No, withdrawn") },
 ];
 
@@ -110,17 +112,17 @@ export function ManifestDetailPage() {
         <dl className={styles.details}>
           {[
             ["Carrier", m.carrier],
-            ["Warehouse", m.warehouseId],
-            ["Legal entity", m.legalEntityId],
+            ["Warehouse", <EntityName entity="warehouse" id={m.warehouseId} />],
+            ["Legal entity", <EntityName entity="legalEntity" id={m.legalEntityId} />],
             ["Pickup date", formatDate(m.pickupDate)],
             ["Carrier manifest reference", m.providerManifestId ?? dash],
             ["Closed", formatDateTime(m.createdAt)],
             ["Cancelled", m.cancelledAt ? formatDateTime(m.cancelledAt) : dash],
             ["Version", String(m.version)],
           ].map(([term, value]) => (
-            <div key={term} className={styles.entry}>
+            <div key={String(term)} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={`${styles.value} ${styles.mono}`}>{value}</dd>
+              <dd className={styles.value}>{value}</dd>
             </div>
           ))}
         </dl>

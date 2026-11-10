@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
 import {
   describeProblem,
@@ -103,8 +104,8 @@ const exposureAmounts = ["openAr", "unapplied", "deliveredNotInvoiced", "openOrd
 /** Checks that mirror the service (api/credit.go buildCreditProfile). Keys are the service's field paths. */
 export function validateProfile(v: ProfileValues): { errors: Errors; input?: CreditProfileInput } {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity's UUID.";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer's UUID.";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose the legal entity.";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose the customer.";
   if (!DECIMAL.test(v.limit)) errors.limit = "Enter a limit of 0 or more.";
   if (!/^[A-Z]{3}$/.test(v.currency)) errors.currency = "Enter a three-letter ISO currency code, such as USD.";
   if (!DECIMAL.test(v.tolerancePct) || Number(v.tolerancePct) > 100) errors.tolerancePct = "Enter a percentage from 0 to 100.";
@@ -210,12 +211,28 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
     </FormField>
   );
 
+  const pick = (name: "legalEntityId" | "customerId", entity: "legalEntity" | "customer", label: string) => (
+    <FormField id={`profile-${name}`} label={label} error={errors[name]}>
+      {(control) => (
+        <EntityLookup
+          entity={entity}
+          {...control}
+          scope={{ legalEntityId: values.legalEntityId || undefined }}
+          value={values[name]}
+          readOnly={existing}
+          onChange={(e) => update({ [name]: e.target.value })}
+          invalid={Boolean(errors[name])}
+        />
+      )}
+    </FormField>
+  );
+
   return (
     <form className={styles.stack} onSubmit={submit} noValidate aria-label="Credit profile">
       <Card title="Customer and limit">
         <div className={styles.form}>
-          {text("legalEntityId", "Legal entity", { mono: true, readOnly: existing })}
-          {text("customerId", "Customer", { mono: true, readOnly: existing })}
+          {pick("legalEntityId", "legalEntity", "Legal entity")}
+          {pick("customerId", "customer", "Customer")}
           {text("limit", "Credit limit", { decimal: true })}
           {text("currency", "Currency")}
           <FormField id="profile-limitType" label="Limit type" hint="What counts as exposure." error={errors.limitType}>

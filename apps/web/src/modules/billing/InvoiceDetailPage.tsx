@@ -17,6 +17,7 @@ import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const baseColumns: DataTableColumn<InvoiceLine>[] = [
   { key: "lineNo", header: "Line", mono: true, align: "end" },
@@ -259,14 +260,14 @@ export function InvoiceDetailPage() {
           <Detail term="Posting date" mono>
             {invoice.postingDate ?? "Not posted"}
           </Detail>
-          <Detail term="Customer" mono>
-            {invoice.customerId}
+          <Detail term="Customer">
+            <EntityName entity="customer" id={invoice.customerId} />
           </Detail>
-          <Detail term="Invoice account" mono>
-            {invoice.invoiceAccountId}
+          <Detail term="Invoice account">
+            <EntityName entity="customer" id={invoice.invoiceAccountId} />
           </Detail>
-          <Detail term="Legal entity" mono>
-            {invoice.legalEntityId}
+          <Detail term="Legal entity">
+            <EntityName entity="legalEntity" id={invoice.legalEntityId} />
           </Detail>
         </dl>
       </Card>

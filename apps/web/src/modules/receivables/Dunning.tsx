@@ -21,6 +21,8 @@ import { dateTime, DAY, EXCLUSION_LABELS, money, RUN_LABELS, RUN_TONES, shortId,
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { PlainName } from "../sales/OrderNumber";
 
 function runBadge(status: RunStatus) {
   return <Badge tone={RUN_TONES[status] ?? "neutral"}>{RUN_LABELS[status] ?? status}</Badge>;
@@ -28,7 +30,7 @@ function runBadge(status: RunStatus) {
 
 const runColumns: DataTableColumn<DunningRunSummary>[] = [
   { key: "runDate", header: "Run date", mono: true },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => <span title={row.legalEntityId}>{shortId(row.legalEntityId)}</span> },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
   { key: "graceDays", header: "Grace days", mono: true, align: "end" },
   { key: "letterCount", header: "Letters", mono: true, align: "end" },
   { key: "issuedAt", header: "Issued", mono: true, render: (row) => (row.issuedAt ? dateTime(row.issuedAt) : "Not yet") },
@@ -174,7 +176,7 @@ export function NewDunningRunPage() {
 }
 
 const letterColumns: DataTableColumn<DunningLetter>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "level", header: "Level", mono: true, align: "end", render: (row) => (row.priorLevel > 0 ? `${row.priorLevel} → ${row.level}` : String(row.level)) },
   { key: "items", header: "Items", mono: true, render: (row) => row.items.map((i) => `${i.documentNumber} (${i.daysOverdue} d)`).join(", ") },
   { key: "amount", header: "Amount dunned", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
@@ -183,8 +185,8 @@ const letterColumns: DataTableColumn<DunningLetter>[] = [
 ];
 
 const exclusionColumns: DataTableColumn<Exclusion>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
-  { key: "openItemId", header: "Open item", mono: true, render: (row) => <span title={row.openItemId}>{shortId(row.openItemId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
+  { key: "openItemId", header: "Open item", mono: true, render: (row) => shortId(row.openItemId) },
   { key: "reason", header: "Why it was left out", render: (row) => EXCLUSION_LABELS[row.reason] ?? row.reason },
 ];
 

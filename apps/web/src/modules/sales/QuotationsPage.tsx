@@ -13,7 +13,9 @@ import {
   type QuotationFilter,
   type QuotationStatus,
 } from "./api/client";
-import { formatDateTime, money, sentence, shortId, today, UUID } from "./format";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { formatDateTime, money, sentence, today, UUID } from "./format";
 import { emptyLine, validateLines, type LineValues } from "./lines";
 import { LinesEditor } from "./LinesEditor";
 import styles from "./pages.module.css";
@@ -53,10 +55,10 @@ export interface QuotationValues {
 /** Checks that mirror the service (api/quotations.go buildQuotation). Keys are the service's field paths. */
 export function validateQuotation(values: QuotationValues, on: string = today()): { errors: Errors; input?: NewQuotation } {
   const errors: Errors = {};
-  if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity's UUID.";
-  if (!UUID.test(values.customerId.trim())) errors.customerId = "Enter the customer's UUID.";
+  if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Choose the selling legal entity.";
+  if (!UUID.test(values.customerId.trim())) errors.customerId = "Choose the customer.";
   const invoice = values.invoiceAccountId.trim();
-  if (invoice && !UUID.test(invoice)) errors.invoiceAccountId = "Enter the invoice account's UUID, or leave it empty to invoice the customer.";
+  if (invoice && !UUID.test(invoice)) errors.invoiceAccountId = "Choose the invoice account, or leave it empty to invoice the customer.";
   if (!/^[A-Z]{3}$/.test(values.currency)) errors.currency = "Enter a three-letter ISO currency code, such as USD.";
   if (values.validUntil && !DATE.test(values.validUntil)) errors.validUntil = "Choose a date.";
   else if (values.validUntil && values.validUntil < on) errors.validUntil = "The quotation must be valid at least until today.";
@@ -83,7 +85,7 @@ export function validateQuotation(values: QuotationValues, on: string = today())
 
 const columns: DataTableColumn<Quotation>[] = [
   { key: "quotationNumber", header: "Quotation", mono: true },
-  { key: "customerId", header: "Customer", mono: true, render: (q) => shortId(q.customerId) },
+  { key: "customerId", header: "Customer", render: (q) => <EntityName entity="customer" id={q.customerId} fallback="Customer" /> },
   { key: "status", header: "Status", render: (q) => <QuotationStatusBadge quotation={q} /> },
   { key: "validUntil", header: "Valid until" },
   { key: "probabilityPct", header: "Probability", align: "end", render: (q) => `${q.probabilityPct}%` },
@@ -121,10 +123,10 @@ export function QuotationsPage() {
         }}
       >
         <FormField id="quotations-le" label="Legal entity" error={invalid.legalEntityId} optional>
-          {(control) => <Input {...control} className={styles.mono} value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid.legalEntityId)} />}
+          {(control) => <EntityLookup entity="legalEntity" {...control} prefill={false} placeholder="All legal entities" value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid.legalEntityId)} />}
         </FormField>
         <FormField id="quotations-customer" label="Customer" error={invalid.customerId} optional>
-          {(control) => <Input {...control} className={styles.mono} value={draft.customerId} onChange={(e) => setDraft({ ...draft, customerId: e.target.value })} invalid={Boolean(invalid.customerId)} />}
+          {(control) => <EntityLookup entity="customer" {...control} placeholder="All customers" value={draft.customerId} onChange={(e) => setDraft({ ...draft, customerId: e.target.value })} invalid={Boolean(invalid.customerId)} />}
         </FormField>
         <FormField id="quotations-status" label="Status">
           {(control) => (
@@ -219,19 +221,34 @@ export function NewQuotationPage() {
     </FormField>
   );
 
+  const lookup = (name: "legalEntityId" | "customerId" | "invoiceAccountId", entity: "legalEntity" | "customer", label: string, hint: string, optional = false) => (
+    <FormField id={`quotation-${name}`} label={label} hint={hint} error={errors[name]} optional={optional}>
+      {(control) => (
+        <EntityLookup
+          entity={entity}
+          {...control}
+          scope={{ legalEntityId: values.legalEntityId || undefined }}
+          value={values[name]}
+          onChange={(e) => update({ [name]: e.target.value })}
+          invalid={Boolean(errors[name])}
+        />
+      )}
+    </FormField>
+  );
+
   return (
     <div className={styles.stack}>
       <PageHeader title="New sales quotation" description="The quotation is saved as a draft. Send it from the quotation page, then convert it into an order." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales quotation">
-          {header("legalEntityId", "Legal entity", "UUID of the selling legal entity.", { mono: true })}
-          {header("customerId", "Customer", "UUID of the customer party.", { mono: true })}
-          {header("invoiceAccountId", "Invoice account", "Leave empty to invoice the customer.", { mono: true, optional: true })}
+          {lookup("legalEntityId", "legalEntity", "Legal entity", "The selling legal entity.")}
+          {lookup("customerId", "customer", "Customer", "Search by name or account number.")}
+          {lookup("invoiceAccountId", "customer", "Invoice account", "Leave empty to invoice the customer.", true)}
           {header("currency", "Currency")}
           {header("validUntil", "Valid until", "Leave empty for the legal entity's quotation expiry (30 days unless changed in Sales parameters).", { type: "date", optional: true })}
           {header("probabilityPct", "Win probability %", "Leave empty for the legal entity's default (50% unless changed in Sales parameters).", { optional: true, numeric: true })}
           {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
-          <LinesEditor lines={values.lines} errors={errors} newLineDate={start} onChange={(lines) => update({ lines })} />
+          <LinesEditor lines={values.lines} errors={errors} legalEntityId={values.legalEntityId} newLineDate={start} onChange={(lines) => update({ lines })} />
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the quotation" live="alert">

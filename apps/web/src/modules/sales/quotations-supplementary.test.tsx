@@ -229,7 +229,7 @@ describe("New sales quotation", () => {
     handler = () => ({ status: 200, body: {} });
     renderAt("/sales/quotations/new");
     fireEvent.click(screen.getByRole("button", { name: "Save draft quotation" }));
-    expect(await screen.findByText("Enter the legal entity's UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the selling legal entity.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
   });
 });
