@@ -912,8 +912,9 @@ paths:
       operationId: createEbicsSubscriber
       summary: Register an EBICS user at a bank for one bank account
       description: >-
-        Only the names of the Vault keys are given; no key material passes through the API. The subscriber starts in NEW.
-        TRS-0496 when host, partner and user exist already, TRS-0497 for an unacceptable id or URL, 503 TRS-0502 when EBICS is not enabled.
+        The Vault key names are derived by the service from the tenant, legal entity and subscriber id and cannot be chosen by the caller;
+        no key material passes through the API. The subscriber starts in NEW.
+        TRS-0496 when host, partner and user exist already or the bank account has a subscriber, TRS-0497 for an unacceptable id or URL, 503 TRS-0502 when EBICS is not enabled.
       x-passage-duty: treasury.ebics.write
       requestBody:
         required: true
@@ -999,7 +1000,8 @@ paths:
       summary: Download the bank's keys (HPB) and store them unconfirmed
       description: >-
         Allowed in HIA_SENT or BANK_KEYS_PENDING. The keys are not used for anything until they are confirmed. The response carries
-        the hashes of the downloaded keys, to compare with the hashes on the bank's own letter.
+        the hashes of the downloaded keys, to compare with the hashes on the bank's own letter. The caller is recorded as the person
+        who downloaded them and cannot confirm them (403 TRS-0503 on confirmation).
       x-passage-duty: treasury.ebics.keys
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1023,7 +1025,7 @@ paths:
       description: >-
         The hashes the bank printed must equal the hashes of the downloaded keys (422 TRS-0499 otherwise, and nothing is activated).
         The confirmer recorded is the authenticated user, never a value from the body. BANK_KEYS_PENDING to READY. Needs a duty other
-        than the one that runs the key ceremony.
+        than the one that runs the key ceremony, and a different person than the one who downloaded the keys (403 TRS-0503).
       x-passage-duty: treasury.ebics.approve
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1558,7 +1560,7 @@ components:
           additionalProperties: {type: string}
     CreateEbicsSubscriberRequest:
       type: object
-      required: [legalEntityId, bankAccountId, hostId, partnerId, userId, url, a006KeyName, x002KeyName, e002KvPath]
+      required: [legalEntityId, bankAccountId, hostId, partnerId, userId, url]
       additionalProperties: false
       properties:
         legalEntityId: {type: string, format: uuid}
@@ -1567,9 +1569,6 @@ components:
         partnerId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
         userId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
         url: {type: string, description: HTTPS URL of the bank's EBICS server}
-        a006KeyName: {type: string, description: Name of the Vault transit key that signs orders (A006)}
-        x002KeyName: {type: string, description: Name of the Vault transit key that signs requests (X002)}
-        e002KvPath: {type: string, description: "Vault KV path of the E002 private key; the public key is read from the same path with -pub appended"}
     EbicsSubscriber:
       type: object
       required: [id, legalEntityId, bankAccountId, hostId, partnerId, userId, url, state, keysConfirmed, version]
@@ -1604,7 +1603,7 @@ components:
           additionalProperties: {type: string}
     EbicsLetterResult:
       type: object
-      required: [subscriber, letter]
+      required: [letter]
       properties:
         subscriber: {$ref: "#/components/schemas/EbicsSubscriber"}
         letter: {$ref: "#/components/schemas/EbicsLetter"}
