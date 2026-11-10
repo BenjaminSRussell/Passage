@@ -14,7 +14,10 @@ const PROPOSAL_DUTY = "payment-proposal.read";
 
 export const NO_ACCESS_TEXT = "Payment status is not available to you";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+};
 
 export interface OpenItemLookup {
   allowed: boolean;
@@ -65,6 +68,7 @@ export function dueDateText(invoice: Pick<Invoice, "id" | "status">, lookup: Ope
   if (item) return item.dueDateSource === "DEFAULTED" ? `${item.dueDate} (no payment terms yet)` : item.dueDate;
   if (lookup.pending) return "Loading…";
   if (lookup.failed) return "Could not load";
+  if (invoice.status === "AUDIT_REJECTED") return "Will not be paid";
   return invoice.status === "POSTED" ? "Not scheduled yet" : "None yet";
 }
 
@@ -77,6 +81,7 @@ export function paymentState(item: OpenItem, day: string): PaymentState {
   if (item.status === "SETTLED") return { label: "Paid", tone: "success" };
   if (item.status === "REVERSED") return { label: "Payment reversed", tone: "neutral" };
   if (item.paymentHold) return { label: "On hold", tone: "warning" };
+  if (item.status === "PARTIALLY_SETTLED") return { label: "Partly paid", tone: "info" };
   if (item.proposalId) return { label: "In a payment proposal", tone: "info" };
   return item.dueDate <= day ? { label: "Due", tone: "warning" } : { label: "Not due yet", tone: "neutral" };
 }

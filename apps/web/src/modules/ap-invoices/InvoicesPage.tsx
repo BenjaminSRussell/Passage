@@ -173,6 +173,9 @@ export function InvoicesPage() {
           ) : null}
         </Card>
       ) : null}
+      {!showInvoices && !showCaptures ? (
+        <EmptyState title="Captured invoices have no vendor yet" description="A captured document is not tied to a vendor until it is posted. Clear the vendor filter to see it." action={<Button onClick={clearFilters}>Clear filters</Button>} />
+      ) : null}
       {!showInvoices && showCaptures && !captures.isPending && !captures.isError && captured.length === 0 ? (
         <EmptyState title="No captured invoices match this filter" description="Try a different status." action={<Button onClick={clearFilters}>Clear filters</Button>} />
       ) : null}

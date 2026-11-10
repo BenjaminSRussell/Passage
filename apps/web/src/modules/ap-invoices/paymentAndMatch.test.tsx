@@ -182,6 +182,16 @@ describe("captured invoices on the list", () => {
     expect(await screen.findByText("No captured invoices match this filter")).toBeInTheDocument();
   });
 
+  it("shows an empty state, not a blank page, for a vendor with a captured status", async () => {
+    backend({ captures: [capture()] });
+    renderAt("/ap-invoices", DUTIES);
+    await screen.findByRole("link", { name: "INV-1" });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "NEEDS_REVIEW" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("Captured invoices have no vendor yet")).toBeInTheDocument();
+  });
+
   it("omits the section when there are none", async () => {
     backend({ captures: [] });
     renderAt("/ap-invoices", DUTIES);
@@ -240,6 +250,14 @@ describe("match on the invoice detail", () => {
   });
 });
 
+describe("rejected invoices on the list", () => {
+  it("says a rejected invoice will not be paid", async () => {
+    backend({ invoices: [invoice({ status: "AUDIT_REJECTED" })], openItems: [] });
+    renderAt("/ap-invoices", DUTIES);
+    expect(await screen.findByText("Will not be paid")).toBeInTheDocument();
+  });
+});
+
 describe("payment status on the invoice detail", () => {
   const paymentCard = async () => (await screen.findByRole("heading", { name: "Payment status" })).parentElement!.parentElement!;
 
@@ -261,6 +279,12 @@ describe("payment status on the invoice detail", () => {
     backend({ openItems: [openItem({ status: "SETTLED", openAmount: "0.00" })] });
     renderAt(`/ap-invoices/${INVOICE}`, DUTIES);
     expect(await screen.findByText("Paid")).toBeInTheDocument();
+  });
+
+  it("says partly paid for a partly settled item", async () => {
+    backend({ openItems: [openItem({ status: "PARTIALLY_SETTLED", openAmount: "5.00" })] });
+    renderAt(`/ap-invoices/${INVOICE}`, DUTIES);
+    expect(await screen.findByText("Partly paid")).toBeInTheDocument();
   });
 
   it("says on hold and gives the reason", async () => {

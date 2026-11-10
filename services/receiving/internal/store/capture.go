@@ -121,8 +121,10 @@ func (s *Postgres) ListCaptures(ctx context.Context, f CaptureFilter) ([]Capture
 	}
 	var out []Capture
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+captureColumns+` FROM receiving_invoice_capture
+		rows, err := tx.Query(ctx, `SELECT `+captureColumns+` FROM receiving_invoice_capture c
 			WHERE tenant_id = $1 AND ($2 = '' OR status = $2)
+			AND NOT EXISTS (SELECT 1 FROM receiving_vendor_invoice i WHERE i.tenant_id = c.tenant_id AND i.legal_entity_id = c.legal_entity_id
+				AND lower(i.invoice_number) = lower(c.invoice_number) AND i.invoice_date = c.invoice_date AND i.currency = c.currency)
 			AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::uuid))
 			ORDER BY created_at DESC, id DESC LIMIT $5`, tenantID, f.Status, nullTime(f.CursorCreatedAt), cursorID, limit+1)
 		if err != nil {

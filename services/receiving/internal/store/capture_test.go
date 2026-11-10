@@ -100,3 +100,29 @@ func TestCapture_ListIsNewestFirstFilteredPagedAndIsolated(t *testing.T) {
 		}
 	}
 }
+
+func TestCapture_ListLeavesOutADocumentOnceItsInvoiceIsPosted(t *testing.T) {
+	db := seedInvoice(t)
+	seedOpenGrir(t, db)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	posted := sampleCapture(payeeOne, db.one.LegalEntityID, "aaa")
+	posted.Invoice.InvoiceNumber, posted.Invoice.InvoiceDate, posted.Invoice.Currency = "inv-77", postDay(), "USD"
+	waiting := sampleCapture(payeeOther, db.one.LegalEntityID, "bbb")
+	for _, c := range []store.Capture{posted, waiting} {
+		if _, _, err := st.CreateCapture(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := st.ListCaptures(ctx, store.CaptureFilter{}); err != nil || len(got) != 2 {
+		t.Fatalf("before posting %d %v", len(got), err)
+	}
+	in := fullInvoice(db, "00000000-0000-0000-0000-00000000c911", "INV-77", domain.InvoiceSourceManual)
+	if _, err := st.PostInvoice(ctx, in, holdFunc(t, db, in, false)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ListCaptures(ctx, store.CaptureFilter{})
+	if err != nil || len(got) != 1 || got[0].ID != payeeOther {
+		t.Fatalf("after posting %+v %v, want only the capture without an invoice", got, err)
+	}
+}

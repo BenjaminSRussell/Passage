@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { readProblem } from "./http";
 
 const BASE = "/api/v1/payables";
@@ -5,23 +6,24 @@ const BASE = "/api/v1/payables";
 export const OPEN_ITEM_STATUSES = ["OPEN", "PARTIALLY_SETTLED", "SETTLED", "REVERSED"] as const;
 export type OpenItemStatus = (typeof OPEN_ITEM_STATUSES)[number];
 
-export interface OpenItem {
-  id: string;
-  legalEntityId: string;
-  vendorId: string;
-  sourceInvoiceId?: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-  dueDate: string;
-  dueDateSource?: "EVENT" | "DEFAULTED";
-  currency: string;
-  amount: string;
-  openAmount: string;
-  status: OpenItemStatus;
-  paymentHold: boolean;
-  paymentHoldReason?: string;
-  proposalId?: string;
-}
+const openItemSchema = z.object({
+  id: z.string(),
+  legalEntityId: z.string(),
+  vendorId: z.string(),
+  sourceInvoiceId: z.string().optional(),
+  invoiceNumber: z.string(),
+  invoiceDate: z.string(),
+  dueDate: z.string(),
+  dueDateSource: z.enum(["EVENT", "DEFAULTED"]).optional(),
+  currency: z.string(),
+  amount: z.string(),
+  openAmount: z.string(),
+  status: z.enum(OPEN_ITEM_STATUSES),
+  paymentHold: z.boolean(),
+  paymentHoldReason: z.string().optional(),
+  proposalId: z.string().optional(),
+});
+export type OpenItem = z.infer<typeof openItemSchema>;
 
 export const OPEN_ITEMS_BY_INVOICE_LIMIT = 50;
 
@@ -30,5 +32,5 @@ export async function fetchOpenItemsForInvoices(legalEntityId: string, invoiceId
   const params = new URLSearchParams({ legal_entity: legalEntityId, source_invoices: invoiceIds.join(","), limit: String(OPEN_ITEMS_BY_INVOICE_LIMIT) });
   const res = await fetch(`${BASE}/open-items?${params}`, { headers: { Accept: "application/json" } });
   if (!res.ok) throw await readProblem(res);
-  return ((await res.json()) as { items: OpenItem[] }).items;
+  return z.object({ items: z.array(openItemSchema) }).parse(await res.json()).items;
 }

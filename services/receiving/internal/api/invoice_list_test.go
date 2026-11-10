@@ -1,12 +1,18 @@
 package api_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
 const (
@@ -194,5 +200,37 @@ func TestListReceipts_FiltersByPurchaseOrder(t *testing.T) {
 	}](t, rg.call(http.MethodGet, receiptsPath+"?purchaseOrderId="+otherPOID, "", rg.maintain()), http.StatusOK)
 	if len(none.Items) != 0 {
 		t.Fatalf("other purchase order %+v, want none", none)
+	}
+}
+
+type receiptReadFails struct {
+	*memstore.Store
+	failing bool
+}
+
+func (r *receiptReadFails) GetReceipt(ctx context.Context, id string) (store.Receipt, error) {
+	if r.failing {
+		return store.Receipt{}, errors.New("receipt store unavailable")
+	}
+	return r.Store.GetReceipt(ctx, id)
+}
+
+func TestGetInvoice_OmitsTheMatchWhenAReceiptCannotBeReadInsteadOfFailing(t *testing.T) {
+	mem := memstore.New()
+	flaky := &receiptReadFails{Store: mem}
+	rg := &rig{st: mem, ledger: &domain.FakeLedger{}}
+	a := api.New(flaky, api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: rg.ledger,
+		Profile: domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+	})
+	router := httpx.NewRouter()
+	a.Register(router)
+	rg.h, rg.api = router, a
+	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
+	flaky.failing = true
+	rec := rg.call(http.MethodGet, listInvoicesPath+"/"+inv.ID, "", rg.inquirer())
+	got := decode[invoiceJSON](t, rec, http.StatusOK)
+	if got.ID != inv.ID || strings.Contains(rec.Body.String(), `"match"`) {
+		t.Fatalf("got %s, want the invoice without a match", rec.Body)
 	}
 }

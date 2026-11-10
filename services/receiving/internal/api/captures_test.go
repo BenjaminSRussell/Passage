@@ -239,3 +239,20 @@ func TestInvoiceCaptureList_RefusesBadFiltersAndMissingDuty(t *testing.T) {
 		t.Fatalf("without a tenant got %d", rec.Code)
 	}
 }
+
+func TestInvoiceCaptureList_DropsADocumentOnceItsInvoiceIsPosted(t *testing.T) {
+	extracted := scannedInvoice("0.95")
+	extracted.InvoiceNumber, extracted.InvoiceDate, extracted.Currency = "INV-1", time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), "USD"
+	rg := newCaptureRig(&domain.FakeExtractor{Result: extracted})
+	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", "%PDF-1.7 scan"), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
+	type page struct {
+		Items []captureJSON `json:"items"`
+	}
+	if before := decode[page](t, rg.call(http.MethodGet, capturesPath, "", rg.inquirer()), http.StatusOK); len(before.Items) != 1 {
+		t.Fatalf("before posting %+v", before)
+	}
+	rg.invoiced(t, "PS-1", "inv-1", 40, "2.5", "")
+	if after := decode[page](t, rg.call(http.MethodGet, capturesPath, "", rg.inquirer()), http.StatusOK); len(after.Items) != 0 {
+		t.Fatalf("after posting %+v, want the captured document gone", after)
+	}
+}

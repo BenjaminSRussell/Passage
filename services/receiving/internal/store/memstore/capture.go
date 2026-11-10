@@ -64,7 +64,7 @@ func (s *Store) ListCaptures(ctx context.Context, f store.CaptureFilter) (out []
 	principal, _ := tenant.FromContext(ctx)
 	err = s.with(ctx, func(t *tenantData) error {
 		for _, c := range t.captures {
-			if !tenant.InLegalEntityScope(principal, c.LegalEntityID) || (f.Status != "" && c.Status != f.Status) || skipForCursor(c.CreatedAt, c.ID, f.CursorCreatedAt, f.CursorID) {
+			if !tenant.InLegalEntityScope(principal, c.LegalEntityID) || (f.Status != "" && c.Status != f.Status) || skipForCursor(c.CreatedAt, c.ID, f.CursorCreatedAt, f.CursorID) || t.captureIsPosted(c) {
 				continue
 			}
 			out = append(out, cloneCapture(c))
@@ -76,4 +76,13 @@ func (s *Store) ListCaptures(ctx context.Context, f store.CaptureFilter) (out []
 		return nil
 	})
 	return out, err
+}
+
+func (t *tenantData) captureIsPosted(c store.Capture) bool {
+	for _, inv := range t.invoiceDocs {
+		if inv.LegalEntityID == c.LegalEntityID && strings.EqualFold(inv.InvoiceNumber, c.Invoice.InvoiceNumber) && inv.InvoiceDate.Equal(c.Invoice.InvoiceDate) && inv.Currency == c.Invoice.Currency {
+			return true
+		}
+	}
+	return false
 }
