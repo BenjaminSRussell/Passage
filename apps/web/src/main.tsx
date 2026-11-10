@@ -45,7 +45,7 @@ function App({ duties, identity, banner }: { duties?: readonly string[]; identit
       ),
     [duties, identity],
   );
-  const client = useMemo(() => new QueryClient(), []);
+  const client = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: 1 } } }), []);
   return (
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
