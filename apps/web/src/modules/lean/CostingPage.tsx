@@ -35,6 +35,7 @@ import {
 import { AMOUNT, CURRENCY, dash, formatDateTime, variance } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function amount(value: string | null, currency: string): string {
   return value === null ? dash : `${value} ${currency}`;
@@ -111,7 +112,7 @@ function OpenPeriodForm({ flowId, onOpened }: { flowId: string; onOpened(p: Cost
         </div>
         {failure ? (
           <Alert tone="danger" title="Could not open the period" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -205,7 +206,7 @@ function SettleForm({
         <p className={styles.muted}>{`Variance ${preview === null ? dash : `${preview} ${period.currency}`}`}</p>
         {failure ? (
           <Alert tone="danger" title={failureTitle} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -278,7 +279,7 @@ function BackflushCard({ flowId, period, onUse }: { flowId: string; period: Cost
         </p>
         {flow.error ? (
           <Alert tone="danger" title="Could not load the flow's activities" live="alert" action={<Button size="sm" onClick={flow.reload}>Try again</Button>}>
-            {flow.error.message} ({flow.error.code})
+            <ProblemMessage problem={flow.error} />
           </Alert>
         ) : !flow.data ? (
           <div aria-busy="true">
@@ -307,7 +308,7 @@ function BackflushCard({ flowId, period, onUse }: { flowId: string; period: Cost
         )}
         {failure ? (
           <Alert tone="danger" title="Could not preview the backflush" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {result ? (
@@ -367,7 +368,7 @@ function ExportPeriods({ flowId }: { flowId: string }) {
       </div>
       {failure ? (
         <Alert tone="danger" title="Could not export the periods" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </div>
@@ -434,7 +435,7 @@ export function CostingPage() {
       </div>
       {flows.error ? (
         <Alert tone="danger" title="Could not load production flows" live="alert" action={<Button size="sm" onClick={flows.reload}>Try again</Button>}>
-          {flows.error.message} ({flows.error.code})
+          <ProblemMessage problem={flows.error} />
         </Alert>
       ) : null}
       {notice ? <Alert tone="success" title={notice} live="status" /> : null}
@@ -442,7 +443,7 @@ export function CostingPage() {
         <EmptyState title="Choose a production flow" description="Its costing periods, open and settled, appear here." />
       ) : periods.error ? (
         <Alert tone="danger" title="Could not load costing periods" live="alert" action={<Button size="sm" onClick={periods.reload}>Try again</Button>}>
-          {periods.error.message} ({periods.error.code})
+          <ProblemMessage problem={periods.error} />
         </Alert>
       ) : (
         <>

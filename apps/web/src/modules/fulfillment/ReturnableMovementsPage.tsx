@@ -17,6 +17,7 @@ import { CONTAINER_CODE, dash, formatDateTime, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Most movements one view shows, newest first. */
 export const MOVEMENT_LIMIT = 200;
@@ -217,7 +218,7 @@ export function ReturnableMovementsPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the movements" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

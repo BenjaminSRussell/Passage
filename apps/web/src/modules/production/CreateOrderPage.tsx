@@ -16,6 +16,7 @@ import {
 } from "./api/client";
 import { coProductTypeLabel, flushingLabel, reworkRefLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimalPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -378,7 +379,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
       <Alert tone="danger" live="alert" title={failure ? "The order was not created" : undefined}>
         {failure ? (
           <>
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
             {failure.errors ? (
               <ul>
                 {Object.entries(failure.errors).map(([field, message]) => (
@@ -431,7 +432,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
 
         <Card title="Order">
           <div className={styles.fields}>
-            {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "Released product id (wave 8).", readOnly: !!intake })}
+            {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "The id of the released product.", readOnly: !!intake })}
             {text("po-quantity", "Quantity", values.quantity, (v) => set({ quantity: v }), { inputMode: "decimal", readOnly: !!intake })}
             {text("po-currency", "Currency", values.currency, (v) => set({ currency: v.toUpperCase() }))}
             {text("po-deliveryDate", "Delivery date", values.deliveryDate, (v) => set({ deliveryDate: v }), { optional: true, type: "date", readOnly: !!intake })}

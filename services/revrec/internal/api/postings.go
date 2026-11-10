@@ -20,15 +20,24 @@ const (
 	CodeLedgerUnavailable = "REV-0200"
 	CodeLedgerRefused     = "REV-0201"
 	CodeLedgerNotMapped   = "REV-0202"
+	// CodeLedgerMismatch: the ledger configured for the legal entity belongs to another legal entity (the ledger is pinned to
+	// the entity before anything is posted).
+	CodeLedgerMismatch = "REV-0203"
+	// CodeReversalRefused is recorded on a reversal posting the ledger refused without a problem code.
+	CodeReversalRefused = "REV-0204"
 
-	journalSourceType = "revenue_recognition"
-	allTime           = "1970-01-01"
+	journalSourceType  = "revenue_recognition"
+	reversalSourceType = "revenue_reversal"
+	allTime            = "1970-01-01"
 )
 
 type PostingStore interface {
 	ClaimPostings(ctx context.Context, legalEntityID, ledgerID string, through time.Time, retryRejected bool) ([]store.Posting, []store.Posting, error)
 	CompletePosting(ctx context.Context, postingID, entryID string) (store.Completion, error)
 	RejectPosting(ctx context.Context, postingID, code string) error
+	DueReversals(ctx context.Context, legalEntityID, ledgerID string, now time.Time, retryParked bool) ([]store.ReversalPosting, []store.ReversalPosting, error)
+	CompleteReversal(ctx context.Context, id, entryID string) error
+	RecordReversalFailure(ctx context.Context, id, code string, now time.Time, refused bool) (bool, error)
 }
 
 func (a *API) WithLedger(ledger ledgerclient.Ledger, postings PostingStore, ledgerIDs map[string]string) *API {
@@ -74,6 +83,25 @@ type otherLedgerOut struct {
 	PostingDate string `json:"postingDate"`
 	Currency    string `json:"currency"`
 	Amount      string `json:"amount"`
+}
+
+type reversalOut struct {
+	ID               string `json:"id"`
+	ContractID       string `json:"contractId"`
+	CreditNoteID     string `json:"creditNoteId"`
+	CreditNoteNumber string `json:"creditNoteNumber"`
+	Currency         string `json:"currency"`
+	PostingDate      string `json:"postingDate"`
+	Amount           string `json:"amount"`
+	JournalEntryID   string `json:"journalEntryId,omitempty"`
+	LedgerCode       string `json:"ledgerCode,omitempty"`
+	Parked           bool   `json:"parked,omitempty"`
+	LedgerID         string `json:"ledgerId,omitempty"`
+}
+
+func toReversalOut(rp store.ReversalPosting) reversalOut {
+	return reversalOut{ID: rp.ID, ContractID: rp.ContractID, CreditNoteID: rp.CreditNoteID, CreditNoteNumber: rp.CreditNoteNumber,
+		Currency: rp.Currency, PostingDate: rp.PostingDate.Format(dateLayout), Amount: fixed(rp.Amount, rp.Currency)}
 }
 
 type postingOut struct {
@@ -146,7 +174,7 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ledgerID, ok := a.ledgerFor(w, r, req.LegalEntityID)
-	if !ok {
+	if !ok || !a.ledgerPinned(w, r, req.LegalEntityID, ledgerID) {
 		return
 	}
 	pending, otherLedger, err := a.postings.ClaimPostings(r.Context(), req.LegalEntityID, ledgerID, through, req.RetryRejected)
@@ -197,7 +225,100 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 		out = append(out, postingOut{ID: p.ID, Currency: p.Currency, PostingDate: p.PostingDate.Format(dateLayout),
 			Amount: fixed(p.Amount, p.Currency), LineCount: p.LineCount, JournalEntryID: entryID})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"through": through.Format(dateLayout), "items": out, "rejected": rejected, "otherLedger": elsewhere})
+	reversals, ok := a.postReversals(w, r, req.LegalEntityID, ledgerID, req.RetryRejected)
+	if !ok {
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"through": through.Format(dateLayout), "items": out, "rejected": rejected, "otherLedger": elsewhere,
+		"reversals": reversals.posted, "failedReversals": reversals.failed, "otherLedgerReversals": reversals.elsewhere})
+}
+
+// ledgerPinned confirms with the ledger that the ledger configured for the entity belongs to it before anything is posted, so
+// a wrong REVREC_LEDGER_IDS entry never books one entity's revenue into another's ledger.
+func (a *API) ledgerPinned(w http.ResponseWriter, r *http.Request, legalEntityID, ledgerID string) bool {
+	owner, err := a.ledger.LegalEntity(r.Context(), legalEntityID, ledgerID)
+	if err != nil {
+		httpx.Fail(w, r, ledgerProblem(r.Context(), "ledger", err))
+		return false
+	}
+	if owner != legalEntityID {
+		slog.ErrorContext(r.Context(), "configured ledger belongs to another legal entity", "legalEntityId", legalEntityID, "ledgerId", ledgerID,
+			"ledgerLegalEntityId", owner, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerMismatch, "the configured ledger belongs to another legal entity"))
+		return false
+	}
+	return true
+}
+
+type reversalResult struct {
+	posted, failed, elsewhere []reversalOut
+}
+
+// postReversals books the recognized revenue that credit notes reversed (store.ApplyCreditLine): one entry per reversal,
+// Dr 4000 / Cr 2400 for the stored revenue_reversed, dated the credit note's posting date, keyed revrec-reversal-<id> so a
+// retry after a lost answer returns the same entry. A refusal is recorded with a backed-off next attempt and parks the row after
+// store.MaxReversalRefusals refusals, so it never holds up the rows behind it; an outage is recorded without counting toward
+// parking and ends the call with 502. Amounts, accounts and ledger come from the stored row and the configuration, never the
+// request, and only this subledger's reversals are posted: no amount is derived from a GL balance.
+func (a *API) postReversals(w http.ResponseWriter, r *http.Request, legalEntityID, ledgerID string, retryParked bool) (reversalResult, bool) {
+	ctx, cid := r.Context(), middleware.GetReqID(r.Context())
+	now := a.now().UTC()
+	out := reversalResult{posted: []reversalOut{}, failed: []reversalOut{}, elsewhere: []reversalOut{}}
+	due, otherLedger, err := a.postings.DueReversals(ctx, legalEntityID, ledgerID, now, retryParked)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return out, false
+	}
+	for _, rp := range otherLedger {
+		slog.ErrorContext(ctx, "revenue reversal is pinned to another ledger than the configured one", "reversalId", rp.ID, "reversalLedgerId", rp.LedgerID,
+			"configuredLedgerId", ledgerID, "correlationId", cid)
+		o := toReversalOut(rp)
+		o.LedgerID = rp.LedgerID
+		out.elsewhere = append(out.elsewhere, o)
+	}
+	for _, rp := range due {
+		text := "Revenue reversed by credit note " + rp.CreditNoteNumber
+		entryID, err := a.ledger.Post(ctx, ledgerclient.Entry{
+			LegalEntityID: rp.LegalEntityID, LedgerID: rp.LedgerID, DocumentID: rp.ID, PostingDate: rp.PostingDate.Format(dateLayout),
+			Currency: rp.Currency, IdempotencyKey: "revrec-reversal-" + rp.ID, SourceType: reversalSourceType,
+			Lines: []ledgerclient.Line{
+				{Account: store.RevenueAccount, Amount: rp.Amount, Text: text},
+				{Account: store.DeferredAccount, Credit: true, Amount: rp.Amount, Text: text},
+			},
+		})
+		if ledgerclient.Rejected(err) {
+			code := ledgerclient.CodeOf(err)
+			if code == "" {
+				code = CodeReversalRefused
+			}
+			parked, rerr := a.postings.RecordReversalFailure(ctx, rp.ID, code, now, true)
+			if rerr != nil {
+				httpx.Fail(w, r, rerr)
+				return out, false
+			}
+			slog.WarnContext(ctx, "general ledger refused a revenue reversal", "reversalId", rp.ID, "ledgerCode", code, "parked", parked, "err", err, "correlationId", cid)
+			o := toReversalOut(rp)
+			o.LedgerCode, o.Parked = code, parked
+			out.failed = append(out.failed, o)
+			continue
+		}
+		if err != nil {
+			if _, rerr := a.postings.RecordReversalFailure(ctx, rp.ID, CodeLedgerRefused, now, false); rerr != nil {
+				slog.ErrorContext(ctx, "revenue reversal failure not recorded", "reversalId", rp.ID, "err", rerr, "correlationId", cid)
+			}
+			httpx.Fail(w, r, ledgerProblem(ctx, "post", err))
+			return out, false
+		}
+		if err := a.postings.CompleteReversal(ctx, rp.ID, entryID); err != nil {
+			httpx.Fail(w, r, err)
+			return out, false
+		}
+		a.reversalPostings.Add(1)
+		o := toReversalOut(rp)
+		o.JournalEntryID = entryID
+		out.posted = append(out.posted, o)
+	}
+	return out, true
 }
 
 type glReconciliationOut struct {
@@ -209,6 +330,8 @@ type glReconciliationOut struct {
 	Recognized    string `json:"recognized"`
 	GLDebit       string `json:"glDebit"`
 	Difference    string `json:"difference"`
+	CreditNotes   string `json:"creditNotes"`
+	Reversed      string `json:"reversed"`
 	Deferred      string `json:"deferred"`
 	GLCredit      string `json:"glCredit"`
 	GLClosing     string `json:"glClosing"`
@@ -261,12 +384,16 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeLedgerRefused, "the ledger reports "+bal.Currency+", not "+cur))
 		return
 	}
-	diff := rf.Recognized.Sub(bal.Debit)
+	// 2400 is debited by revrec's recognition postings and by billing's credit notes for their deferred part, which revrec
+	// mirrors as negative adjustments when it consumes creditnote.booked; a credit note revrec has not reversed shows here.
+	creditNotes := rf.Adjustments.Neg()
+	diff := rf.Recognized.Add(creditNotes).Sub(bal.Debit)
 	glClosing := bal.Credit.Sub(bal.Debit)
 	closingDiff := rf.Closing.Sub(glClosing)
 	httpx.JSON(w, http.StatusOK, glReconciliationOut{
 		LegalEntityID: le, LedgerID: ledgerID, Currency: cur, Period: period, Account: store.DeferredAccount,
-		Recognized: fixed(rf.Recognized, cur), GLDebit: fixed(bal.Debit, cur), Difference: fixed(diff, cur),
+		Recognized: fixed(rf.Recognized, cur), CreditNotes: fixed(creditNotes, cur), Reversed: fixed(rf.Reversed, cur),
+		GLDebit: fixed(bal.Debit, cur), Difference: fixed(diff, cur),
 		Deferred: fixed(rf.Closing, cur), GLCredit: fixed(bal.Credit, cur), GLClosing: fixed(glClosing, cur), ClosingDiff: fixed(closingDiff, cur),
 		Reconciled: diff.IsZero() && closingDiff.IsZero(),
 	})

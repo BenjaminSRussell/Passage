@@ -111,7 +111,7 @@ describe("bank balance release", () => {
     renderAt(`/migration-factory/runs/${RUN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Release record BK-9" }));
     fireEvent.click(screen.getByRole("button", { name: "Release record" }));
-    expect(await screen.findByText(/REFERENTIAL rule still fails: .* \(MIG-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/REFERENTIAL rule still fails: .*/)).toBeInTheDocument();
     expect(posts("/release")[0].body).toEqual({ version: 1 });
     expect(screen.getByLabelText("Bank account")).toBeInTheDocument();
   });
@@ -122,7 +122,7 @@ describe("bank balance release", () => {
     renderAt(`/migration-factory/runs/${RUN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Release record BK-9" }));
     fireEvent.click(screen.getByRole("button", { name: "Release record" }));
-    expect(await screen.findByText(/re-extract and run the pack again \(MIG-0004\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/re-extract and run the pack again/)).toBeInTheDocument();
   });
 });
 

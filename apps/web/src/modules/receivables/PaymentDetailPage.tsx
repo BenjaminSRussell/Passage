@@ -20,6 +20,7 @@ import {
 import { compareDecimals, DECIMAL, DECISION_LABELS, MODE_LABELS, money, STATUS_LABELS, STATUS_TONES, subtract, sumDecimals } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const APPLIABLE = new Set(["RECEIVED", "SUGGESTED", "ON_ACCOUNT"]);
 
@@ -109,7 +110,7 @@ export function PaymentDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Payment" />
         <Alert tone="danger" title="Could not load the payment" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -246,7 +247,7 @@ export function PaymentDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title={failure.title} live="alert">
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       {appliable ? (

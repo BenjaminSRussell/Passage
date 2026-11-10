@@ -123,7 +123,7 @@ describe("Edge fleet list", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [node] }));
     renderAt("/shopfloor/edge-nodes");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Plant 1 gateway")).toBeInTheDocument();
@@ -215,7 +215,7 @@ describe("Edge node detail", () => {
   it("shows a load error", async () => {
     handler = () => json(404, { code: "SF-0150", detail: "edge node not found" });
     renderAt(`/shopfloor/edge-nodes/${EDGE}`);
-    expect(await screen.findByText(/edge node not found \(SF-0150\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/edge node not found/)).toBeInTheDocument();
   });
 
   it("changes the ring and identity with the node version as If-Match, keeping the site", async () => {

@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { describeProblem, recordTrackingEvent, TRACKING_CODES, TRACKING_SOURCES, type NewTrackingEvent, type Problem, type TrackingCode, type TrackingSource } from "./api/client";
 import { trackingCodeLabels, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface TrackingValues {
   loadId: string;
@@ -116,7 +117,7 @@ export function NewTrackingEventPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the status" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

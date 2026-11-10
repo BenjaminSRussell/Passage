@@ -30,13 +30,14 @@ import {
 import { dash, linePropertyLabel, typeLabel } from "./labels";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const GROUP_ID = /^[A-Z0-9][A-Z0-9-]{0,9}$/;
 
 function LoadFailure({ title, problem, retry }: { title: string; problem: Problem; retry(): void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={retry}>Try again</Button>}>
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }
@@ -46,7 +47,7 @@ function SaveFailure({ problem, what }: { problem: Problem; what: string }) {
   const stale = problem.code === "conflict_version";
   return (
     <Alert tone="danger" title={stale ? `Someone else changed this ${what}` : `Could not save the ${what}`} live="alert">
-      {stale ? "The list now shows the latest version. Open the row again and repeat your change." : `${problem.message} (${problem.code})`}
+      {stale ? "The list now shows the latest version. Open the row again and repeat your change." : <ProblemMessage problem={problem} />}
     </Alert>
   );
 }
@@ -518,7 +519,7 @@ function ProfileLookup() {
           </Alert>
           {failure ? (
             <Alert tone="danger" title={failure.code === "PROJ-POST-001" ? "No posting profile applies" : "Could not look up the accounts"} live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
         </div>

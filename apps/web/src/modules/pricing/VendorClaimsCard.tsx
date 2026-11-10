@@ -17,6 +17,7 @@ import { claimColumns } from "./claimColumns";
 import styles from "./pages.module.css";
 import { SETTLEMENT_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
 
@@ -97,7 +98,7 @@ export function VendorClaimsCard({ agreement }: { agreement: RebateAgreement }) 
         </form>
         {failure ? (
           <Alert tone="danger" title={failure.title} live="alert">
-            {failure.problem.message} ({failure.problem.code})
+            <ProblemMessage problem={failure.problem} />
           </Alert>
         ) : null}
         {created ? (
@@ -138,7 +139,7 @@ export function VendorClaimsCard({ agreement }: { agreement: RebateAgreement }) 
         ) : null}
         {claims.error ? (
           <Alert tone="danger" title="Could not load the claims" live="alert" action={<Button size="sm" onClick={claims.reload}>Try again</Button>}>
-            {claims.error.message} ({claims.error.code})
+            <ProblemMessage problem={claims.error} />
           </Alert>
         ) : (
           <DataTable

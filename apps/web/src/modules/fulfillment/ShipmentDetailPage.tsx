@@ -12,6 +12,7 @@ import type { PostedRemainder } from "./PackingSlipDetailPage";
 import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, canUnpack, LabelButton, LabelPanel, TrackingCard, UnpackButton } from "./ShipmentTracking";
 import { TrackingForm, trackableLines, trackingCover } from "./TrackingForm";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Detail {
   shipment: Shipment;
@@ -89,7 +90,7 @@ export function ShipmentDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Shipment" />
         <Alert tone="danger" title="Could not load the shipment" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

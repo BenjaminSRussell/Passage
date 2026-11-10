@@ -118,6 +118,9 @@ func (in ParallelInput) Validate() error {
 			if strings.TrimSpace(l.Key) == "" {
 				return fmt.Errorf("%w: %s tuple has a blank key", ErrInvalid, l.Area)
 			}
+			if l.Documents < 0 {
+				return fmt.Errorf("%w: %s tuple %s has a negative document count", ErrInvalid, l.Area, l.Key)
+			}
 		}
 	}
 	return nil
@@ -127,11 +130,18 @@ func (in ParallelInput) Validate() error {
 // the same. A repeated start for (period, system) with another hash is a different run.
 func (in ParallelInput) Hash() string {
 	lines := make([]string, 0, len(in.Legacy)+len(in.Passage))
+	// A document count is hashed only when given, so a run stored before tuples carried one keeps its hash.
+	docs := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		return fmt.Sprintf("|n=%d", n)
+	}
 	for _, l := range in.Legacy {
-		lines = append(lines, "L|"+string(l.Area)+"|"+l.Key+"|"+l.Legacy.StringFixed(6))
+		lines = append(lines, "L|"+string(l.Area)+"|"+l.Key+"|"+l.Legacy.StringFixed(6)+docs(l.Documents))
 	}
 	for _, l := range in.Passage {
-		lines = append(lines, "P|"+string(l.Area)+"|"+l.Key+"|"+l.Passage.StringFixed(6))
+		lines = append(lines, "P|"+string(l.Area)+"|"+l.Key+"|"+l.Passage.StringFixed(6)+docs(l.Documents))
 	}
 	sort.Strings(lines)
 	head := fmt.Sprintf("%s|%s|%d|%s|%s", in.Period, in.SourceSystem, in.DocumentsReplayed, in.Revenue.StringFixed(6), in.ExplainedMaxPct.StringFixed(6))

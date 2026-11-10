@@ -19,6 +19,7 @@ import {
 import { DECIMAL, formatDateTime, sentence, utcInstant, utcLocal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The duty the service enforces on the action log (PRD 8.45.17). */
 export const DUTY_TECHNICIAN = "fieldservice.work-order.execute";
@@ -155,7 +156,7 @@ export function ActionLogPanel({ workOrder: wo, onSynced }: Props) {
     <Card title="Technician actions" headingLevel={3}>
       {log.error && !log.data ? (
         <Alert tone="danger" title="Could not load the action log" live="alert" action={<Button size="sm" onClick={log.reload}>Try again</Button>}>
-          {log.error.message} ({log.error.code})
+          <ProblemMessage problem={log.error} />
         </Alert>
       ) : !log.data ? (
         <div aria-busy="true">
@@ -216,7 +217,7 @@ export function ActionLogPanel({ workOrder: wo, onSynced }: Props) {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the action" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -149,7 +149,7 @@ describe("Audit rule run", () => {
     fireEvent.change(screen.getByLabelText("Policy id"), { target: { value: POLICY } });
     fireEvent.change(screen.getByLabelText("Rule"), { target: { value: "WEEKEND_HOLIDAY" } });
     fireEvent.click(screen.getByRole("button", { name: "Run rule" }));
-    expect((await findAlert()).textContent).toContain("must be positive (AUD-0712)");
+    expect((await findAlert()).textContent).toContain("must be positive");
     expect(screen.queryByRole("table")).toBeNull();
   });
 });
@@ -229,7 +229,7 @@ describe("Audit cases", () => {
     fireEvent.change(screen.getByLabelText("Current status"), { target: { value: "CLOSED" } });
     fireEvent.change(screen.getByLabelText("Closed on (UTC)"), { target: { value: "2026-10-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Check action" }));
-    expect((await findAlert()).textContent).toContain("365 days after closing (AUD-0715)");
+    expect((await findAlert()).textContent).toContain("365 days after closing");
     expect(calls[0].body).toEqual({ status: "CLOSED", action: "ARCHIVE", closedAt: "2026-10-01T00:00:00.000Z" });
   });
 });
@@ -289,7 +289,7 @@ describe("Break-glass access", () => {
     fireEvent.change(screen.getByLabelText("Roles"), { target: { value: "compliance.security.admin" } });
     fireEvent.change(screen.getByLabelText("Ticket reference"), { target: { value: "INC-4411" } });
     fireEvent.click(screen.getByRole("button", { name: "Plan session" }));
-    expect((await findAlert()).textContent).toContain("cannot grant compliance.security.admin to yourself (SEC-0707)");
+    expect((await findAlert()).textContent).toContain("cannot grant compliance.security.admin to yourself");
     expect(screen.getByText("No session planned")).toBeInTheDocument();
   });
 

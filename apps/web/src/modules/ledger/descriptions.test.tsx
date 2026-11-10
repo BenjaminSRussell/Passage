@@ -174,7 +174,7 @@ describe("description template form", () => {
     fireEvent.change(screen.getByLabelText("Template"), { target: { value: "Manual journal" } });
     fireEvent.click(screen.getByRole("button", { name: "Save template" }));
     expect(
-      await screen.findByText("a template already exists for this scope, legal entity, source type and language (LEDGER_DESCRIPTION_TEMPLATE_DUPLICATE)"),
+      await screen.findByText("a template already exists for this scope, legal entity, source type and language"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("location").textContent).toBe("/ledger/description-templates/new");
   });

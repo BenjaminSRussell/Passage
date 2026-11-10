@@ -102,7 +102,7 @@ describe("tolerances list", () => {
   it("shows a failure with a way to retry", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty migration.factory.view" });
     renderAt("/migration-factory/tolerances");
-    expect(await screen.findByText(/missing duty migration.factory.view \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty migration.factory.view/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -155,6 +155,6 @@ describe("set tolerance form", () => {
     await screen.findByText(/Currently/);
     fireEvent.change(screen.getByLabelText("Tolerance"), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Save tolerance" }));
-    expect(await screen.findByText(/is at version 4, request expected 2 \(MIG-0006\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/is at version 4, request expected 2/)).toBeInTheDocument();
   });
 });

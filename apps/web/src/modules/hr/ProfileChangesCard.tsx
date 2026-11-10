@@ -23,6 +23,7 @@ import {
 import { dayOf } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const changeKindLabel: Record<ProfileChangeKind, string> = {
   PREFERRED_NAME: "Preferred name",
@@ -137,7 +138,7 @@ function ChangeForm({ kind, onDone, onCancel }: { kind: ProfileChangeKind; onDon
       ) : null}
       {failure ? (
         <Alert tone="danger" title="That didn't work" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.rowActions}>
@@ -210,7 +211,7 @@ export function ProfileChangesCard({ onApplied }: { onApplied(): void }) {
         </Alert>
         {failure ? (
           <Alert tone="danger" title="That didn't work" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {editing ? (
@@ -227,7 +228,7 @@ export function ProfileChangesCard({ onApplied }: { onApplied(): void }) {
         <p className={styles.note}>A preferred name changes at once. Your manager or HR approves an address; HR approves a bank account.</p>
         {state.error ? (
           <Alert tone="danger" title="Could not load your changes" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : !state.data ? (
           <Skeleton width="3/4" />

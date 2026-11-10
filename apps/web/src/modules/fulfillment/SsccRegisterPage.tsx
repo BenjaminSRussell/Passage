@@ -6,6 +6,7 @@ import { ContainerStatusBadge } from "./badges";
 import { formatDate, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Rows per page of the register. */
 export const SSCC_PAGE = 100;
@@ -101,7 +102,7 @@ export function SsccRegisterPage() {
     <div className={styles.stack}>
       <PageHeader
         title="SSCC register"
-        description="Every SSCC issued to a container, in SSCC order. An SSCC is never issued twice; the no-reuse date is 12 months after issue (BR-28.5)."
+        description="Every SSCC issued to a container, in SSCC order. An SSCC is never issued twice; the no-reuse date is 12 months after issue."
       />
       <Card title="Filter">
         <form className={styles.form} onSubmit={apply} noValidate>
@@ -131,7 +132,7 @@ export function SsccRegisterPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the SSCC register" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

@@ -188,7 +188,7 @@ describe("operations overview page (4.21.14)", () => {
     const table = await findTable({ name: "Operations" });
     await waitFor(() => expect(within(table).getByText("PO-000001")).toBeInTheDocument());
     await userEvent.click(await screen.findByRole("button", { name: "Load more operations" }));
-    expect(await screen.findByText("database unavailable (COM-0503)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Operations" })).getByText("PO-000001")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Operation totals" })).toBeInTheDocument();
   });
@@ -225,7 +225,7 @@ describe("operations overview page (4.21.14)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-0500", "database unavailable"));
     renderAt(page);
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
   });
 });
 
@@ -296,7 +296,7 @@ describe("production journals page (4.21.14)", () => {
     const table = await findTable({ name: "Production journals" });
     await waitFor(() => expect(within(table).getByText("PJ-000001")).toBeInTheDocument());
     await userEvent.click(await screen.findByRole("button", { name: "Load more journals" }));
-    expect(await screen.findByText("database unavailable (COM-0503)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Production journals" })).getByText("PJ-000001")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load more journals" })).toBeInTheDocument();
   });
@@ -334,6 +334,6 @@ describe("production journals page (4.21.14)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-0500", "database unavailable"));
     renderAt(page);
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
   });
 });

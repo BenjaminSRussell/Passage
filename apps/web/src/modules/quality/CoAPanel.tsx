@@ -4,6 +4,7 @@ import { describeProblem, generateCoA, listCoAs, newKey, type CoA, type CoALine,
 import { dash, formatDateTime, pickFields, qty, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** True when the order's decision released quantity, so a CoA can be issued (FR-33.9). */
 export function coaReleasable(order: OrderView): boolean {
@@ -127,7 +128,7 @@ export function CoAPanel({ order }: { order: OrderView }) {
         </p>
         {state.error ? (
           <Alert tone="danger" title="Could not load the certificates of analysis" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable
@@ -215,7 +216,7 @@ function IssueCoAForm({ order, existing, onIssued }: { order: OrderView; existin
         <div className={styles.formActions}>
           {failure ? (
             <Alert tone="danger" title="Could not issue the certificate" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           {notice ? (

@@ -6,6 +6,7 @@ import { formatDateTime, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ReturnableBalance>[] = [
   { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
@@ -95,7 +96,7 @@ export function ReturnablePackagingPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load returnable balances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

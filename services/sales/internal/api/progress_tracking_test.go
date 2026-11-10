@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -33,6 +34,29 @@ func TestRecordProgress_Tracking(t *testing.T) {
 	if rec := serveBody(t, s, http.MethodPost, path, weighed, principal(dutyRecordDelivery), map[string]string{idempotencyKey: "k3"}); rec.Code != http.StatusCreated ||
 		s.got.Lines[0].Tracking[1].ActualWeight == nil || s.got.Lines[0].Tracking[1].ActualWeight.String() != "30.5" {
 		t.Fatalf("weighed entries: %d %s %+v", rec.Code, rec.Body, s.got.Lines)
+	}
+}
+
+// Fulfillment's packing slip report (#496) is accepted as fulfillment sends it:
+// the shared fixture, which fulfillment's body test builds member for member,
+// names the lines by id and carries serials, batches and catch weights.
+func TestRecordProgress_FulfillmentReportContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../fulfillment/testdata/sales-progress/record-progress-delivered.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := orders + "/" + ids.New() + ":record-progress"
+	s := &progressStore{created: true}
+	rec := serveBody(t, s, http.MethodPost, path, string(raw), principal(dutyRecordDelivery), map[string]string{idempotencyKey: "fulfillment-packing-slip:x"})
+	if rec.Code != http.StatusCreated || s.got.SourceRef != "PS-0000042" || len(s.got.Lines) != 4 {
+		t.Fatalf("record: %d %s %+v", rec.Code, rec.Body, s.got)
+	}
+	l := s.got.Lines
+	if l[0].LineID != "5a1c0000-0000-4000-8000-000000000001" || l[0].LineNo != 0 || len(l[0].Tracking) != 3 || l[0].Tracking[2].Batch != "LOT-S" || l[0].Tracking[2].Serial != "SN-3" ||
+		len(l[1].Tracking) != 2 || l[1].Tracking[0].Quantity.String() != "8" ||
+		l[2].ActualWeight == nil || l[2].ActualWeight.String() != "51.5" || l[2].Tracking[0].ActualWeight == nil ||
+		l[3].Quantity.String() != "6.5" || l[3].Tracking != nil {
+		t.Fatalf("lines %+v", l)
 	}
 }
 

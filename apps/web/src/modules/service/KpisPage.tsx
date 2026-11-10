@@ -4,6 +4,7 @@ import { getKpis, type Decimal, type KpiQuery } from "./api/client";
 import { DATE, dash, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The service accepts windows of at most 366 days (api/lifecycle.go maxKPIWindow). */
 const MAX_DAYS = 366;
@@ -85,7 +86,7 @@ export function KpisPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the service KPIs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !k ? (
         <div className={styles.loading} aria-busy="true">

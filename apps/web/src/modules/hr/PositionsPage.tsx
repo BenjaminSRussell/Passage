@@ -5,6 +5,7 @@ import { describeProblem, listPositions, type Position, type Problem } from "./a
 import { dayOf, lastDay } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Columns for the positions list; the reports-to number comes from the loaded rows. */
 function columns(byId: Map<string, Position>): DataTableColumn<Position>[] {
@@ -62,7 +63,7 @@ export function PositionsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load positions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -77,7 +78,7 @@ export function PositionsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more positions" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {!state.error && !state.loading && cursor ? (

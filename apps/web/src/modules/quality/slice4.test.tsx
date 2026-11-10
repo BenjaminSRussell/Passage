@@ -213,7 +213,7 @@ describe("incoming certificates on the order", () => {
     handler = (url, init) => (url.pathname.endsWith("/certificates") ? json(503, { code: "COM-0503", detail: "quality is unavailable" }) : prev(url, init));
     renderAt(`/quality/orders/${ORDER}`);
     expect(await screen.findByText("Could not load the certificates")).toBeInTheDocument();
-    expect(screen.getByText("quality is unavailable (COM-0503)")).toBeInTheDocument();
+    expect(screen.getByText("quality is unavailable")).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Record a certificate" })).toBeNull();
     expect(screen.getByRole("button", { name: "Record a certificate" })).toBeInTheDocument();
   });

@@ -226,7 +226,7 @@ describe("SoD conflict detail", () => {
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "r" } });
     fireEvent.change(screen.getByLabelText("Expires on"), { target: { value: "2099-01-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Approve mitigation" }));
-    expect((await findAlert()).textContent).toContain("You cannot approve a mitigation for your own conflict. (SOD-1102)");
+    expect((await findAlert()).textContent).toContain("You cannot approve a mitigation for your own conflict.");
     expect(screen.getByLabelText("Compensating control")).toHaveValue("CTL");
   });
 
@@ -248,7 +248,7 @@ describe("SoD conflict detail", () => {
   it("shows a load failure with a way back", async () => {
     handler = () => problem(404, "SOD-1108", "no SoD conflict with that id");
     renderAt(`/compliance/sod/conflicts/${CONFLICT}`);
-    expect((await findAlert()).textContent).toContain("no SoD conflict with that id (SOD-1108)");
+    expect((await findAlert()).textContent).toContain("no SoD conflict with that id");
     expect(screen.getByRole("link", { name: "Back to conflicts" })).toHaveAttribute("href", "/compliance/sod/conflicts");
   });
 });
@@ -329,7 +329,7 @@ describe("Country packs", () => {
   it("shows a load failure", async () => {
     handler = () => problem(403, "AUTH-0003", "missing duty localization.admin");
     renderAt("/compliance/packs");
-    expect((await findAlert()).textContent).toContain("missing duty localization.admin (AUTH-0003)");
+    expect((await findAlert()).textContent).toContain("missing duty localization.admin");
   });
 
   it("shows a pack's contents and runs the install and tax-id checks", async () => {
@@ -346,7 +346,8 @@ describe("Country packs", () => {
 
     fireEvent.change(screen.getByLabelText("Legal entity country"), { target: { value: "fr" } });
     fireEvent.click(screen.getByRole("button", { name: "Check install" }));
-    expect((await findAlert()).textContent).toBe("pack UK localizes GB, the legal entity is in FR (LOC-0503)");
+    expect((await findAlert()).textContent).toContain("pack UK localizes GB, the legal entity is in FR");
+    expect((await findAlert()).textContent).toContain("LOC-0503");
     const install = calls.find((c) => c.url.pathname.endsWith("/install:check"));
     expect(install?.body).toEqual({ entityCountry: "FR", primaryInstalled: 0, calendarOpenPeriodsOk: true });
 
@@ -414,7 +415,7 @@ describe("Breach notification clocks", () => {
     fireEvent.click(screen.getByLabelText("UK GDPR"));
     fireEvent.click(screen.getByLabelText("Personal data is confirmed to be affected"));
     fireEvent.click(screen.getByRole("button", { name: "Compute clocks" }));
-    expect((await findAlert()).textContent).toContain("breach clocks start only for a confirmed personal-data breach (INC-1303)");
+    expect((await findAlert()).textContent).toContain("breach clocks start only for a confirmed personal-data breach");
     expect(calls[0].body).toMatchObject({ personalDataBreach: false, regimes: ["UK_GDPR"] });
     expect(screen.queryByRole("table")).toBeNull();
   });
@@ -464,7 +465,7 @@ describe("India TDS calculator", () => {
     fireEvent.change(screen.getByLabelText("Payee type"), { target: { value: "INDIVIDUAL_HUF" } });
     fireEvent.change(screen.getByLabelText("Payment amount (INR)"), { target: { value: "40000" } });
     fireEvent.click(screen.getByRole("button", { name: "Calculate TDS" }));
-    expect((await findAlert()).textContent).toContain("(LOC-0510)");
+    expect((await findAlert()).textContent).toContain("LOC-0510");
     expect(calls[0].body).toEqual({ section: "194C", payeeType: "INDIVIDUAL_HUF", amount: "40000", panPresent: true });
   });
 

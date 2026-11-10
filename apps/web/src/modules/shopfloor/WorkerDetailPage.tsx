@@ -34,6 +34,7 @@ import { WorkerCostRates } from "./WorkerCostRates";
 import { WorkerHomeResource } from "./WorkerHomeResource";
 import { WorkerMaintenance } from "./WorkerMaintenance";
 import { WorkerPaySetup } from "./WorkerPaySetup";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Longest range GET registrations accepts, in days. */
 const MAX_LIST_DAYS = 31;
@@ -136,7 +137,7 @@ export function WorkerDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Worker" />
         <Alert tone="danger" title="Could not load the worker" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -212,7 +213,7 @@ export function WorkerDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not calculate pay" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Worker-days">

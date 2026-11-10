@@ -431,7 +431,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
     for (const l of open) {
       const c = costs[l.id] ?? { unitCost: "", costSnapshotId: "" };
       if (!DECIMAL.test(c.unitCost.trim())) found[`${l.id}-cost`] = "Enter the unit cost, 0 or more, with at most 6 decimals.";
-      if (c.costSnapshotId.trim() === "" || c.costSnapshotId.trim().length > 128) found[`${l.id}-snapshot`] = "Enter the cost snapshot id (wave 20).";
+      if (c.costSnapshotId.trim() === "" || c.costSnapshotId.trim().length > 128) found[`${l.id}-snapshot`] = "Enter the cost snapshot id.";
     }
     setErrors(found);
     setFailure(null);
@@ -497,7 +497,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
               ? "Cost of goods sold posts at shipment (Dr 5000), the legal entity's policy."
               : "The slip posts to delivered not invoiced (Dr 1405), the legal entity's policy."}
         </p>
-        <FormField id="post-asn" label="Send an advance ship notice (ASN)" hint="Publishes the containers, SSCCs and quantities of this slip for EDI (FR-28.9). Preset from the legal entity setting.">
+        <FormField id="post-asn" label="Send an advance ship notice (ASN)" hint="Publishes the containers, SSCCs and quantities of this slip for EDI. Preset from the legal entity setting.">
           {(control) => <Input {...control} type="checkbox" checked={asnEnabled} onChange={(event) => { asnTouched.current = true; setAsnEnabled(event.target.checked); key.renew(); }} />}
         </FormField>
         {open.map((l) => (

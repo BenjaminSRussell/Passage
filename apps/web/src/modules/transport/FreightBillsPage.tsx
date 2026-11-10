@@ -5,6 +5,7 @@ import { BILL_STATUSES, listFreightBills, type BillStatus, type FreightBill } fr
 import { formatDateTime, matchTone, money, shortId, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<FreightBill>[] = [
   { key: "id", header: "Freight bill", mono: true, render: (row) => shortId(row.id) },
@@ -48,7 +49,7 @@ export function FreightBillsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load freight bills" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

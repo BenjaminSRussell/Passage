@@ -21,6 +21,7 @@ import { dayOf } from "./format";
 import styles from "./pages.module.css";
 import { ChangeStatus, changeKindLabel } from "./ProfileChangesCard";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUSES: (ProfileChangeStatus | "")[] = ["PENDING", "APPROVED", "REJECTED", "CANCELED", "APPLIED", ""];
 
@@ -112,12 +113,12 @@ export function ProfileChangesPage({ queue }: { queue: ChangeQueue }) {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="That didn't work" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load changes" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

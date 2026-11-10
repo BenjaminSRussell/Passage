@@ -15,6 +15,7 @@ import {
 import { DATE, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PostValues {
   legalEntityId: string;
@@ -114,7 +115,7 @@ export function LeasePostingPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not post to the ledger" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -242,7 +243,7 @@ function ProfileForm({ entity, loaded, reload }: { entity: string; loaded: Versi
                 live="alert"
                 action={failure.code === "AST-0006" ? <Button size="sm" onClick={reload}>Reload</Button> : undefined}
               >
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -269,7 +270,7 @@ function ProfileLoader({ entity }: { entity: string }) {
   if (state.error) {
     return (
       <Alert tone="danger" title="Could not load the lease accounts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }

@@ -241,7 +241,7 @@ describe("Copy journal", () => {
     expect(sent("POST")).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Posting date"), { target: { value: "2026-10-05" } });
     fireEvent.click(screen.getByRole("button", { name: "Create copy" }));
-    expect(await findAlert()).toHaveTextContent("a reversal cannot be copied (INV-JNL-003)");
+    expect(await findAlert()).toHaveTextContent("a reversal cannot be copied");
   });
 
   it("retries a failed copy under the same key and a new date under a new one", async () => {

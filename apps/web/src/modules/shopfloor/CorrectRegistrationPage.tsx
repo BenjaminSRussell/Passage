@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Tex
 import { correctRegistration, describeProblem, newKey, type Correction, type CorrectionInput, type Problem, type Registration } from "./api/client";
 import { dash, formatDateTime, formatHours, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface Values {
   /** datetime-local value in UTC, e.g. 2026-10-26T08:00. Empty keeps the stored time. */
@@ -184,7 +185,7 @@ export function CorrectRegistrationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not correct the registration" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

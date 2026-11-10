@@ -60,8 +60,12 @@ type Plan struct {
 	RolledBack     bool
 	Approvers      []string
 	// Rekey counts the re-keying lines the rollback exported (FR-49.9); zero until rolled back.
-	Rekey   RekeySummary
-	Version int
+	Rekey RekeySummary
+	// RollbackPackRuns counts the pack runs the rollback moved to ROLLED_BACK (BR-49.1) and
+	// RollbackCoexistence the coexistence flags it handed back to the legacy system (FR-49.7).
+	RollbackPackRuns    int
+	RollbackCoexistence int
+	Version             int
 	// LatestDecision is the most recent go/no-go decision (nil until one is recorded); the full
 	// history is read with the readiness view.
 	LatestDecision *Decision

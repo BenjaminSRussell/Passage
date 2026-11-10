@@ -5,6 +5,7 @@ import { describeProblem, runReconciliation, type Problem } from "./api/client";
 import { DECIMAL, UUID } from "./format";
 import { fieldErrorsOf } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ReconcileValues {
   legalEntityId: string;
@@ -86,7 +87,7 @@ export function NewReconciliationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not run the reconciliation" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

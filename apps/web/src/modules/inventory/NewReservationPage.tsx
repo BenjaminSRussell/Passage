@@ -20,6 +20,7 @@ import {
 import { DECIMAL, describeDimensions, sentence, today, UUID } from "./format";
 import { ALL_DIMENSIONS, emptyDimensions, fieldErrorsOf, FORM_DIMENSIONS, type FormDimension } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ReservationValues {
   legalEntityId: string;
@@ -383,7 +384,7 @@ export function NewReservationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not reserve" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -412,7 +413,7 @@ export function NewReservationPage() {
           </div>
           {stock.state === "error" ? (
             <Alert tone="danger" title="Could not load the stock" live="alert">
-              {stock.problem.message} ({stock.problem.code})
+              <ProblemMessage problem={stock.problem} />
             </Alert>
           ) : null}
           {stock.state === "ready" && stock.scope !== stockScope(values) ? (

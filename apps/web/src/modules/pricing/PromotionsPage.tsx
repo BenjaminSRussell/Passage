@@ -4,6 +4,7 @@ import { listPromotions, type Promotion } from "./api/client";
 import { signedPct } from "./fundFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Promotion>[] = [
   { key: "name", header: "Promotion" },
@@ -39,7 +40,7 @@ export function PromotionsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the promotions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

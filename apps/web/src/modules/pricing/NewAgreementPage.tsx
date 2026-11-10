@@ -15,6 +15,7 @@ import {
 } from "./api/client";
 import { amountLabel, DAY, DECIMAL, isOrderLevel, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Values = ConditionRecordInput;
 type Field = keyof Values | "validity";
@@ -265,7 +266,7 @@ export function NewAgreementPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the agreement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

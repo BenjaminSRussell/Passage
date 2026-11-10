@@ -153,7 +153,7 @@ describe("order cost snapshots page (4.21.16)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-9999", "database unavailable"));
     renderPage();
-    expect(await screen.findByText(/database unavailable \(COM-9999\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/database unavailable/)).toBeInTheDocument();
   });
 
   it("is registered in the module with the cost duty", () => {

@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { createTransfer, describeProblem, type Problem } from "./api/client";
 import { DECIMAL, sentence, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Source dimensions a transfer line can name; the warehouse comes from the header. */
 const LINE_DIMS = ["site", "location", "batch", "serial"] as const;
@@ -302,7 +303,7 @@ export function NewTransferPage() {
         ) : null}
         {failure ? (
           <Alert tone="danger" title="Could not create the transfer order" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>

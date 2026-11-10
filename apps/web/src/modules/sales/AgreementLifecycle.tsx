@@ -18,6 +18,7 @@ import { diffColumns } from "./ChangeOrderPage";
 import { commitmentText, DECIMAL, formatDateTime, money, PERCENT, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Revising and closing an agreement needs this duty; the service enforces it. */
 export const DUTY_AGREEMENT_MAINTAIN = "sales.agreement.maintain";
@@ -306,13 +307,13 @@ export function AgreementLifecycle({ agreement, etag, onChanged }: Props) {
       ) : null}
       {failure ? (
         <Alert tone="danger" title={problemTitle[failure.code] ?? "Could not save the change"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="History">
         {history.error ? (
           <Alert tone="danger" title="Could not load the history" live="alert" action={<Button size="sm" onClick={history.reload}>Try again</Button>}>
-            {history.error.message} ({history.error.code})
+            <ProblemMessage problem={history.error} />
           </Alert>
         ) : !history.loading && versions.length === 0 ? (
           <EmptyState compact headingLevel={3} title="No changes yet" description="Revisions, the close, and quantity returned or drawn by order changes are recorded here." />

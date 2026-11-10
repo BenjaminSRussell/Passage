@@ -66,7 +66,7 @@ describe("expense module", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ code: "COM-0500", detail: "internal error" }), { status: 500 })));
     render(createElement(MemoryRouter, null, expense.routes[0].element));
     fireEvent.click(screen.getByRole("button", { name: "Check line" }));
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
     expect(screen.queryByRole("table", { name: "Policy results" })).not.toBeInTheDocument();
   });
 

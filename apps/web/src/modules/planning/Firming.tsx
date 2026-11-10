@@ -10,6 +10,7 @@ import {
 } from "./api/client";
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const dash = "—";
 
@@ -180,7 +181,7 @@ export function FirmCard({ selected, openCount, onSelectAllOpen, onClear, onFirm
           ticked; press <kbd>F</kbd> to firm the selection.
         </p>
         <Alert tone="danger" title={failure ? "The orders were not firmed" : undefined} live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <Alert
           tone="success"

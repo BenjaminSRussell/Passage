@@ -15,6 +15,7 @@ import type {
 } from "./api/client";
 import { ACK_LABELS, ACK_TYPES, AK_CODES, dash, formatEdiDate, MESSAGE_LABELS, PURPOSES } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export function AckPill({ status }: { status: AckStatus }) {
   const { label, tone } = ACK_LABELS[status] ?? { label: status, tone: "neutral" as const };
@@ -49,7 +50,7 @@ export function ProblemAlert({ problem, title }: { problem: Problem | null; titl
     <Alert tone="danger" title={problem ? title : undefined} live="alert">
       {problem ? (
         <>
-          {`${problem.message} (${problem.code})`}
+          <ProblemMessage problem={problem} />
           {fields.length > 0 ? (
             <ul className={styles.plainList} aria-label="Rejected fields">
               {fields.map(([field, message]) => (

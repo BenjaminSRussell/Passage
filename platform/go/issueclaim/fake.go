@@ -10,10 +10,11 @@ import (
 )
 
 // Fake is an in-memory Claimer that applies inventory's rule: with any
-// quantity held, a claim may take only physical - held - (claims of its kind
-// already taken). Physical stays where Set put it, as it does in inventory
-// while these movements are not journals there. Release of a hold (a usage
-// decision) is Set with held = 0.
+// quantity held, what the product's claims stand for together with the new
+// one (Outstanding: claims of every kind, those sharing a ref counted once)
+// may not exceed physical - held. Physical stays where Set put it, as it
+// does in inventory while these movements are not journals there. Release of
+// a hold (a usage decision) is Set with held = 0.
 type Fake struct {
 	mu     sync.Mutex
 	stock  map[string]stock
@@ -41,13 +42,7 @@ func (f *Fake) Claim(_ context.Context, c Claim) error {
 		return nil
 	}
 	st := f.stock[c.ProductID]
-	claimed := decimal.Zero
-	for _, other := range f.claims {
-		if other.ProductID == c.ProductID && other.Kind == c.Kind {
-			claimed = claimed.Add(other.Qty)
-		}
-	}
-	if st.held.IsPositive() && c.Qty.GreaterThan(st.physical.Sub(st.held).Sub(claimed)) {
+	if st.held.IsPositive() && Outstanding(append(f.productClaims(c.ProductID), c)).GreaterThan(st.physical.Sub(st.held)) {
 		return ErrHeld
 	}
 	if f.claims == nil {
@@ -55,6 +50,16 @@ func (f *Fake) Claim(_ context.Context, c Claim) error {
 	}
 	f.claims[c.Key] = c
 	return nil
+}
+
+func (f *Fake) productClaims(product string) []Claim {
+	var out []Claim
+	for _, c := range f.claims {
+		if c.ProductID == product {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (f *Fake) Release(_ context.Context, c Claim) {
@@ -74,4 +79,11 @@ func (f *Fake) Claimed(product string, kind Kind) decimal.Decimal {
 		}
 	}
 	return total
+}
+
+// Outstanding is what the product's claims stand for together.
+func (f *Fake) Outstanding(product string) decimal.Decimal {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return Outstanding(f.productClaims(product))
 }

@@ -22,6 +22,8 @@ type tupleDTO struct {
 	Area   string `json:"area"`
 	Key    string `json:"key"`
 	Amount string `json:"amount"`
+	// Documents is how many legacy documents the tuple sums; RND-001 allows 0.01 for each (BR-49.7).
+	Documents int `json:"documents,omitempty"`
 }
 
 type parallelRequest struct {
@@ -41,6 +43,7 @@ type varianceDTO struct {
 	Legacy      string     `json:"legacy"`
 	Passage     string     `json:"passage"`
 	Delta       string     `json:"delta"`
+	Documents   int        `json:"documents,omitempty"`
 	Class       string     `json:"class"`
 	RuleID      string     `json:"ruleId,omitempty"`
 	Reason      string     `json:"reason,omitempty"`
@@ -93,14 +96,14 @@ func toParallelDTO(p domain.ParallelRun, withVariances bool) parallelDTO {
 		out.Variances = make([]varianceDTO, 0, len(p.Variances))
 		for _, v := range p.Variances {
 			out.Variances = append(out.Variances, varianceDTO{VarianceID: v.ID, Area: string(v.Area), Key: v.Key,
-				Legacy: v.Legacy.StringFixed(6), Passage: v.Passage.StringFixed(6), Delta: v.Delta.StringFixed(6), Class: v.Class,
+				Legacy: v.Legacy.StringFixed(6), Passage: v.Passage.StringFixed(6), Delta: v.Delta.StringFixed(6), Documents: v.Documents, Class: v.Class,
 				RuleID: v.RuleID, Reason: v.Reason, ExplainedBy: v.ExplainedBy, ExplainedAt: v.ExplainedAt})
 		}
 	}
 	return out
 }
 
-func toLines(in []tupleDTO, side string) ([]domain.Line, error) {
+func toLines(in []tupleDTO, side string, documentsReplayed int) ([]domain.Line, error) {
 	out := make([]domain.Line, 0, len(in))
 	for i, t := range in {
 		area, err := domain.ParseArea(strings.TrimSpace(t.Area))
@@ -111,7 +114,14 @@ func toLines(in []tupleDTO, side string) ([]domain.Line, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s tuple %d amount %q %s", domain.ErrInvalid, side, i+1, t.Amount, err)
 		}
-		line := domain.Line{Area: area, Key: strings.TrimSpace(t.Key)}
+		if t.Documents < 0 {
+			return nil, fmt.Errorf("%w: %s tuple %d documents %d must be >= 0", domain.ErrInvalid, side, i+1, t.Documents)
+		}
+		if t.Documents > documentsReplayed {
+			return nil, fmt.Errorf("%w: %s tuple %d sums %d documents but the run replayed %d; RND-001 scales with documents that exist",
+				domain.ErrInvalid, side, i+1, t.Documents, documentsReplayed)
+		}
+		line := domain.Line{Area: area, Key: strings.TrimSpace(t.Key), Documents: t.Documents}
 		if side == "legacy" {
 			line.Legacy = amt
 		} else {
@@ -152,12 +162,12 @@ func (s *Server) startParallelRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	legacy, err := toLines(req.Legacy, "legacy")
+	legacy, err := toLines(req.Legacy, "legacy", req.DocumentsReplayed)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	passage, err := toLines(req.Passage, "passage")
+	passage, err := toLines(req.Passage, "passage", req.DocumentsReplayed)
 	if err != nil {
 		fail(w, r, err)
 		return

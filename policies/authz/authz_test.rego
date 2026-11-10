@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -1283,7 +1283,7 @@ test_tax_duties_reach_only_their_routes if {
 	not allowed("tax.transaction.record", "POST", "/v1/tax/settlements:run")
 	not allowed("tax.recommit.run", "POST", "/v1/tax/settlements:run")
 	not allowed("tax.tax.calculate", "POST", "/v1/tax/settlements:run")
-	data.service_grants.tax.ledger == ["ledger.balance.read"]
+	data.service_grants.tax.ledger == ["ledger.balance.read", "ledger.entry.lookup", "ledger.ledger.lookup", "ledger.account.lookup"]
 	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")
 }
 
@@ -1464,6 +1464,10 @@ test_hub_client_routes_split_write_consume_and_read if {
 	allowed("hub.client.write", "POST", "/v1/hub/clients/c1:revoke")
 	not allowed("hub.client.write", "POST", "/v1/hub/clients:consume")
 	not allowed("hub.client.write", "GET", "/v1/hub/clients")
+	allowed("hub.coexistence.operate", "POST", "/v1/hub/coexistence:retry-parked")
+	not allowed("hub.subscription.write", "POST", "/v1/hub/coexistence:retry-parked")
+	not allowed("hub.coexistence.operate", "GET", "/v1/hub/coexistence")
+	allowed("hub.delivery.read", "GET", "/v1/hub/coexistence")
 	allowed("hub.client.consume", "POST", "/v1/hub/clients:consume")
 	not allowed("hub.client.consume", "POST", "/v1/hub/clients")
 	data.duties["hub.client.consume"].service_only

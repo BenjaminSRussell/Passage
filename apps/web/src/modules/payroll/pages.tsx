@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { calculatePayroll, PayrollProblem, type FilingStatus, type Statement } from "./api/client";
+import { ProblemMessage } from "../../shell/errors";
 
 const filingStatuses: { value: FilingStatus; label: string }[] = [
   { value: "SINGLE", label: "Single" },
@@ -15,7 +16,7 @@ export function PayrollHome() {
   const [filingStatus, setFilingStatus] = useState<FilingStatus>("SINGLE");
   const [multipleJobs, setMultipleJobs] = useState(false);
   const [statement, setStatement] = useState<Statement | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PayrollProblem | string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: FormEvent) {
@@ -39,7 +40,7 @@ export function PayrollHome() {
       );
     } catch (err) {
       setStatement(null);
-      setError(err instanceof PayrollProblem ? `${err.code}: ${err.message}` : "The preview could not be calculated.");
+      setError(err instanceof PayrollProblem ? err : "The preview could not be calculated.");
     } finally {
       setBusy(false);
     }
@@ -76,7 +77,11 @@ export function PayrollHome() {
           Calculate
         </button>
       </form>
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <div role="alert">
+          <ProblemMessage problem={error} />
+        </div>
+      )}
       {statement && (
         <div>
           <p>

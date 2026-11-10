@@ -7,6 +7,7 @@ import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey }
 import { RowGrid } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Key = "payingEntity" | "owningEntity" | "paymentMethod" | "direction" | "amount" | "currency" | "bankAccount" | "owningAccount";
 
@@ -128,7 +129,7 @@ export function CentralPaymentsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The payment postings were not derived" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -156,11 +157,11 @@ export function CentralPaymentsPage() {
           <Card title="Bank return" headingLevel={3}>
             <div className={styles.cardBody}>
               <p className={styles.note}>
-                When the bank returns the payment, both entities reverse their postings in one saga under the same pair id (BR-40.11).
+                When the bank returns the payment, both entities reverse their postings together, under the same pair id.
               </p>
               {reversal.failure ? (
                 <Alert tone="danger" title="The reversal was not derived" live="alert">
-                  {reversal.failure.message} ({reversal.failure.code})
+                  <ProblemMessage problem={reversal.failure} />
                 </Alert>
               ) : null}
               <div>
@@ -188,7 +189,7 @@ export function CentralPaymentsPage() {
             icon="receipt"
             headingLevel={3}
             title="No payment postings yet"
-            description="The form holds acceptance example AC-40.10. Preview it, or enter your own payment and matrix rows."
+            description="The form is filled in with an example. Preview it, or enter your own payment and matrix rows."
           />
         </Card>
       )}

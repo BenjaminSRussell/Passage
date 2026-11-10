@@ -148,7 +148,7 @@ describe("mileage page", () => {
     type("Distance", "100");
     type("Rate per unit", "0.70");
     fireEvent.click(screen.getByRole("button", { name: "Compute mileage" }));
-    expect(await findAlert()).toHaveTextContent("(NETWORK)");
+    expect(await findAlert()).toHaveTextContent("NETWORK");
     expect(screen.queryByRole("list", { name: "Mileage claim" })).not.toBeInTheDocument();
   });
 });
@@ -208,6 +208,6 @@ describe("card matching page", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     type("Card transactions", cards);
     fireEvent.click(screen.getByRole("button", { name: "Match" }));
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
   });
 });

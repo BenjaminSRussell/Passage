@@ -34,6 +34,7 @@ type simTx struct {
 type simDoc struct {
 	isa []string
 	el  string
+	ta1 []simSeg // TA1 segments between ISA and the first GS
 	txs []simTx
 }
 
@@ -81,6 +82,11 @@ func simParse(t *testing.T, raw string) simDoc {
 			if segs[i][1] != strconv.Itoa(groups) || segs[i][2] != isa[13] || i != len(segs)-1 {
 				t.Fatalf("sim: IEA %v does not close ISA13 %s with %d groups", segs[i], isa[13], groups)
 			}
+		case "TA1":
+			if groups > 0 || len(segs[i]) != 6 {
+				t.Fatalf("sim: TA1 %v after a group or without five elements", segs[i])
+			}
+			d.ta1 = append(d.ta1, segs[i])
 		default:
 			t.Fatalf("sim: unexpected %s outside a group", segs[i][0])
 		}
@@ -144,6 +150,262 @@ func simFind(body []simSeg, id string) []simSeg {
 	return out
 }
 
+// simGS1Complete completes a GTIN or SSCC base with its GS1 check digit.
+func simGS1Complete(base string) string {
+	for d := byte('0'); d <= '9'; d++ {
+		if simGS1(base + string(d)) {
+			return base + string(d)
+		}
+	}
+	panic("sim: no check digit")
+}
+
+// simGroup is one functional group the distributor writes: GS01, GS06 and
+// its transaction sets, each a set id, ST02 and body segments in the
+// distributor's delimiters (| and ^, component :).
+type simGroup struct {
+	fid, control string
+	sets         []simSet
+}
+
+type simSet struct {
+	id, control string
+	body        []string
+}
+
+// simX12 writes one of the distributor's 00501 interchanges from
+// DISTRIBUTOR to PASSAGE: optional TA1 segments, then the groups, with
+// every SE, GE and IEA count computed by the distributor, segments ended by
+// ~ and CRLF.
+func simX12(isa13 string, ta1 []string, groups ...simGroup) string {
+	lines := []string{fmt.Sprintf("ISA|00|%10s|00|%10s|ZZ|%-15s|ZZ|%-15s|261106|0800|^|00501|%09s|0|T|:", "", "", "DISTRIBUTOR", "PASSAGE", isa13)}
+	lines = append(lines, ta1...)
+	for _, g := range groups {
+		lines = append(lines, "GS|"+g.fid+"|DISTRIBUTOR|PASSAGE|20261106|0800|"+g.control+"|X|005010")
+		for _, s := range g.sets {
+			lines = append(lines, "ST|"+s.id+"|"+s.control)
+			lines = append(lines, s.body...)
+			lines = append(lines, fmt.Sprintf("SE|%d|%s", len(s.body)+2, s.control))
+		}
+		lines = append(lines, fmt.Sprintf("GE|%d|%s", len(g.sets), g.control))
+	}
+	lines = append(lines, fmt.Sprintf("IEA|%d|%09s", len(groups), isa13))
+	return strings.Join(lines, "~\r\n") + "~\r\n"
+}
+
+// simAckSet is the distributor's 997 transaction answering one of our
+// groups, for simX12.
+func simAckSet(fid, group string, answers []simAnswer, ak9 string) simSet {
+	body := []string{"AK1|" + fid + "|" + group}
+	accepted := 0
+	for _, a := range answers {
+		body = append(body, "AK2|"+a.set+"|"+a.control, "AK5|"+a.code)
+		if a.code != "R" {
+			accepted++
+		}
+	}
+	body = append(body, fmt.Sprintf("AK9|%s|%d|%d|%d", ak9, len(answers), len(answers), accepted))
+	return simSet{id: "997", control: "0001", body: body}
+}
+
+// The distributor's EDIFACT translator: its own reader and writer of ISO 9735
+// syntax 3, sharing nothing with internal/domain. It writes UNA :+,? ' (a
+// decimal comma) with CRLF after every segment, as UNOC from its GLN
+// 4012345000009:14 to PASSAGE:ZZZ, and reads whatever service characters the
+// other side declares.
+
+// simEdiSeg is one EDIFACT segment: [0][0] is the tag, then the data
+// elements, each a list of components.
+type simEdiSeg [][]string
+
+func (s simEdiSeg) tag() string { return s[0][0] }
+
+// v returns component c of data element e, both counted from 1 as a CONTRL
+// UCD names them; "" when absent.
+func (s simEdiSeg) v(e, c int) string {
+	if e < len(s) && c-1 < len(s[e]) {
+		return s[e][c-1]
+	}
+	return ""
+}
+
+// String writes the segment unescaped with + and :, trailing empty
+// components and elements dropped, for comparisons.
+func (s simEdiSeg) String() string {
+	var els []string
+	for _, e := range s {
+		comps := append([]string(nil), e...)
+		for len(comps) > 0 && comps[len(comps)-1] == "" {
+			comps = comps[:len(comps)-1]
+		}
+		els = append(els, strings.Join(comps, ":"))
+	}
+	for len(els) > 0 && els[len(els)-1] == "" {
+		els = els[:len(els)-1]
+	}
+	return strings.Join(els, "+")
+}
+
+type simEdiMsg struct {
+	ref, typ string // UNH 0062 and S009 (type:version:release:agency[:association])
+	body     []simEdiSeg
+}
+
+type simEdiDoc struct {
+	una  string // the six service characters, "" without a UNA
+	unb  simEdiSeg
+	msgs []simEdiMsg
+}
+
+func simEdiFind(body []simEdiSeg, tag string) []simEdiSeg {
+	var out []simEdiSeg
+	for _, s := range body {
+		if s.tag() == tag {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// simEdiParse reads an interchange the way the distributor's translator does:
+// UNA (or the defaults), the release character, and every UNT and UNZ count
+// and reference checked by the distributor itself. Functional groups are not
+// part of the distributor's agreement.
+func simEdiParse(t *testing.T, raw string) simEdiDoc {
+	t.Helper()
+	comp, elem, rel, term := byte(':'), byte('+'), byte('?'), byte('\'')
+	var d simEdiDoc
+	if strings.HasPrefix(raw, "UNA") {
+		if len(raw) < 9 {
+			t.Fatalf("sim: short UNA %q", raw)
+		}
+		d.una = raw[3:9]
+		comp, elem, rel, term = raw[3], raw[4], raw[6], raw[8]
+		raw = raw[9:]
+	}
+	var (
+		segs []simEdiSeg
+		seg  simEdiSeg
+		el   []string
+		cur  []byte
+	)
+	for i := 0; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case (c == '\r' || c == '\n') && len(cur) == 0 && el == nil && seg == nil:
+			// line break between segments
+		case c == rel:
+			i++
+			if i == len(raw) {
+				t.Fatal("sim: release character at the end")
+			}
+			cur = append(cur, raw[i])
+		case c == comp:
+			el, cur = append(el, string(cur)), nil
+		case c == elem:
+			seg, el, cur = append(seg, append(el, string(cur))), nil, nil
+		case c == term:
+			seg = append(seg, append(el, string(cur)))
+			segs, seg, el, cur = append(segs, seg), nil, nil, nil
+		default:
+			cur = append(cur, c)
+		}
+	}
+	if len(cur) > 0 || el != nil || seg != nil {
+		t.Fatalf("sim: interchange does not end with a segment terminator: %q", raw)
+	}
+	if len(segs) < 2 || segs[0].tag() != "UNB" || segs[len(segs)-1].tag() != "UNZ" {
+		t.Fatalf("sim: not a UNB..UNZ interchange: %q", raw)
+	}
+	d.unb = segs[0]
+	var open *simEdiMsg
+	start := 0
+	for i, s := range segs[1 : len(segs)-1] {
+		switch s.tag() {
+		case "UNH":
+			if open != nil {
+				t.Fatalf("sim: UNH inside message %s", open.ref)
+			}
+			open, start = &simEdiMsg{ref: s.v(1, 1), typ: strings.Join(s[2], ":")}, i
+		case "UNT":
+			if open == nil || s.v(1, 1) != strconv.Itoa(i-start+1) || s.v(2, 1) != open.ref {
+				t.Fatalf("sim: %v does not close the message opened %d segments earlier", s, i-start+1)
+			}
+			d.msgs, open = append(d.msgs, *open), nil
+		case "UNG", "UNE":
+			t.Fatalf("sim: functional groups are not agreed")
+		default:
+			if open == nil {
+				t.Fatalf("sim: %s outside a message", s.tag())
+			}
+			open.body = append(open.body, s)
+		}
+	}
+	if unz := segs[len(segs)-1]; open != nil || unz.v(1, 1) != strconv.Itoa(len(d.msgs)) || unz.v(2, 1) != d.unb.v(5, 1) {
+		t.Fatalf("sim: UNZ %v does not close UNB %s with %d messages", unz, d.unb.v(5, 1), len(d.msgs))
+	}
+	return d
+}
+
+// simEsc escapes a value for the distributor's service characters.
+func simEsc(v string) string {
+	var b strings.Builder
+	for _, c := range v {
+		if strings.ContainsRune(":+?'", c) {
+			b.WriteByte('?')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+// simMsg is one message the distributor writes: its UNH reference, S009 and
+// body segments in its own syntax (values already escaped, decimal comma).
+type simMsg struct {
+	ref, typ string
+	body     []string
+}
+
+const simGLN = "4012345000009"
+
+// simEdifact writes one of the distributor's interchanges to PASSAGE:ZZZ,
+// UNH..UNT and UNZ counted by the distributor; ackRequest sets UNB 0031 and
+// the test indicator 0035 is always set (the agreement is in test).
+func simEdifact(ref string, ackRequest bool, msgs ...simMsg) string {
+	ack := ""
+	if ackRequest {
+		ack = "1"
+	}
+	lines := []string{"UNA:+,? '", "UNB+UNOC:3+" + simGLN + ":14+PASSAGE:ZZZ+261106:0800+" + ref + "++++" + ack + "++1'"}
+	for _, m := range msgs {
+		lines = append(lines, "UNH+"+m.ref+"+"+m.typ+"'")
+		for _, s := range m.body {
+			lines = append(lines, s+"'")
+		}
+		lines = append(lines, fmt.Sprintf("UNT+%d+%s'", len(m.body)+2, m.ref))
+	}
+	lines = append(lines, fmt.Sprintf("UNZ+%d+%s'", len(msgs), ref))
+	return strings.Join(lines, "\r\n") + "\r\n"
+}
+
+// simContrlFor is the distributor's CONTRL (syntax 3, CONTRL:2:2:UN)
+// answering one of our interchanges: UCI 7 when it accepts at least one
+// message, 4 otherwise, and a UCM 4 with the error code for each rejected
+// message (rejected maps UNH reference to 0085 code).
+func simContrlFor(ref string, ours simEdiDoc, rejected map[string]string) simMsg {
+	action := "4"
+	var ucm []string
+	for _, m := range ours.msgs {
+		if code, ok := rejected[m.ref]; ok {
+			ucm = append(ucm, "UCM+"+m.ref+"+"+m.typ+"+4+"+code)
+		} else {
+			action = "7"
+		}
+	}
+	unb := ours.unb
+	uci := "UCI+" + simEsc(unb.v(5, 1)) + "+" + unb.v(2, 1) + ":" + unb.v(2, 2) + "+" + unb.v(3, 1) + ":" + unb.v(3, 2) + "+" + action
+	return simMsg{ref: ref, typ: "CONTRL:2:2:UN", body: append([]string{uci}, ucm...)}
+}
+
 // The distributor's two purchase orders in one group: PO-88001 is clean,
 // PO-88002 states CTT 3 for one line (BR-35.1 reject). Segment counts by hand:
 // 0001 has 7 body segments (SE 9), 0002 has 3 (SE 5).
@@ -167,6 +429,24 @@ var simPurchaseOrders = strings.Join([]string{
 	"GE|2|101",
 	"IEA|1|000000101",
 }, "~\r\n") + "~\r\n"
+
+// simASNDocument is the manufacturer's ship notice for PO-88001: one order,
+// two pallets.
+const simASNDocument = `{"shipmentId":"SHIP-88001","shipDate":"20261023","shipTime":"0700","scac":"DHLD","grossWeight":"412.4","weightUnit":"KG",
+"shipFrom":{"name":"Plant Köln","gln":"4006403333338"},"shipTo":{"name":"Distributor DC","gln":"4000001234561"},
+"orders":[{"poNumber":"PO-88001","poDate":"20261021","packs":[
+{"sscc":"040064030000001015","items":[{"lineNo":"1","quantity":"40","uom":"EA","itemRefs":[{"qualifier":"BP","value":"PUMP-200"}]}]},
+{"sscc":"040064030000001022","items":[{"lineNo":"2","quantity":"200","uom":"EA","itemRefs":[{"qualifier":"VP","value":"BRK-7"}]}]}]}]}`
+
+// simInvoiceDocument is the manufacturer's invoice for PO-88001: 40 x 12.50
+// + 200 x 0.84 = 668.00, VAT 19% 126.92, freight 25.00, total 819.92.
+func simInvoiceDocument(number string) string {
+	return `{"number":"` + number + `","date":"20261024","poNumber":"PO-88001","poDate":"20261021","terms":{"discountPct":"0"},
+"remitTo":{"name":"Demo Manufacturer","gln":"4006403333338"},"billTo":{"name":"Demo Distributor","gln":"4000001234561"},"shipTo":{"name":"DC","gln":"4000001234561"},
+"lines":[{"lineNo":"1","quantity":"40","uom":"EA","unitPrice":"12.50","itemRefs":[{"qualifier":"BP","value":"PUMP-200"}]},
+{"lineNo":"2","quantity":"200","uom":"EA","unitPrice":"0.84","itemRefs":[{"qualifier":"VP","value":"BRK-7"}]}],
+"taxes":[{"type":"ST","amount":"126.92","percent":"19"}],"charges":[{"indicator":"C","code":"D240","amount":"25.00"}],"total":"819.92"}`
+}
 
 // AC-35.1 and the phase-6 flow: the demo distributor and the demo
 // manufacturer exchange PO (850) and 997, PO acknowledgment (855), ship notice
@@ -272,11 +552,7 @@ func TestPartnerSim_DistributorPOToASNToInvoiceRoundTrip(t *testing.T) {
 	}
 
 	// 3. 856: one order, two pallets; the distributor accepts with errors.
-	asn := send("856", "asn-1", `{"shipmentId":"SHIP-88001","shipDate":"20261023","shipTime":"0700","scac":"DHLD","grossWeight":"412.4","weightUnit":"KG",
-		"shipFrom":{"name":"Plant Köln","gln":"4006403333338"},"shipTo":{"name":"Distributor DC","gln":"4000001234561"},
-		"orders":[{"poNumber":"PO-88001","poDate":"20261021","packs":[
-		{"sscc":"040064030000001015","items":[{"lineNo":"1","quantity":"40","uom":"EA","itemRefs":[{"qualifier":"BP","value":"PUMP-200"}]}]},
-		{"sscc":"040064030000001022","items":[{"lineNo":"2","quantity":"200","uom":"EA","itemRefs":[{"qualifier":"VP","value":"BRK-7"}]}]}]}]}`)
+	asn := send("856", "asn-1", simASNDocument)
 	tx = checkEnvelope(asn, "856", "SH", "3")
 	// The distributor rebuilds the hierarchy from HL01/HL02/HL03.
 	level := map[string]string{}
@@ -300,15 +576,8 @@ func TestPartnerSim_DistributorPOToASNToInvoiceRoundTrip(t *testing.T) {
 	// 4. 810: 40 x 12.50 + 200 x 0.84 = 668.00, VAT 19% 126.92, freight 25.00,
 	// total 819.92. The distributor rejects the first one and accepts the
 	// re-issued one with a group-only 997.
-	invoice := func(number string) string {
-		return `{"number":"` + number + `","date":"20261024","poNumber":"PO-88001","poDate":"20261021","terms":{"discountPct":"0"},
-		"remitTo":{"name":"Demo Manufacturer","gln":"4006403333338"},"billTo":{"name":"Demo Distributor","gln":"4000001234561"},"shipTo":{"name":"DC","gln":"4000001234561"},
-		"lines":[{"lineNo":"1","quantity":"40","uom":"EA","unitPrice":"12.50","itemRefs":[{"qualifier":"BP","value":"PUMP-200"}]},
-		{"lineNo":"2","quantity":"200","uom":"EA","unitPrice":"0.84","itemRefs":[{"qualifier":"VP","value":"BRK-7"}]}],
-		"taxes":[{"type":"ST","amount":"126.92","percent":"19"}],"charges":[{"indicator":"C","code":"D240","amount":"25.00"}],"total":"819.92"}`
-	}
 	for i, number := range []string{"INV-7001", "INV-7001A"} {
-		inv := send("810", "inv-"+number, invoice(number))
+		inv := send("810", "inv-"+number, simInvoiceDocument(number))
 		control := strconv.Itoa(4 + i)
 		tx = checkEnvelope(inv, "810", "IN", control)
 		// The distributor's own total check: lines (each rounded to the cent) + TXI + charges - allowances.

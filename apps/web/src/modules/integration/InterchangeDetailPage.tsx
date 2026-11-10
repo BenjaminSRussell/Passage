@@ -8,6 +8,7 @@ import styles from "./pages.module.css";
 import { RawPayloadCard } from "./RawPayloadCard";
 import { ReprocessCard } from "./ReprocessCard";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One interchange: envelope, each transaction with its canonical document, the 997 either way and the masked raw payload. */
 export function InterchangeDetailPage() {
@@ -21,7 +22,7 @@ export function InterchangeDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Interchange" />
         <Alert tone="danger" title="Could not load the interchange" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

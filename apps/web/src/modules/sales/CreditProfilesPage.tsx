@@ -5,6 +5,7 @@ import { listCreditProfiles, type CreditProfile } from "./api/client";
 import { dash, money, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<CreditProfile>[] = [
   { key: "customerId", header: "Customer", mono: true },
@@ -59,7 +60,7 @@ export function CreditProfilesPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load credit profiles" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

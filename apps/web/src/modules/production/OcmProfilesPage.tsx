@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, t
 import { OCM_MODES, describeProblem, listOCMProfiles, saveOCMProfile, type OCMMode, type OCMProfile, type OCMProfileInput, type Problem } from "./api/client";
 import { ocmModeLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimalPattern = /^\d{1,12}(\.\d{1,4})?$/;
@@ -133,7 +134,7 @@ export function OcmProfilesPage() {
       </Alert>
       {state.error ? (
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="Could not load the profiles" live="alert">
-          {state.error.status === 403 ? "You need the View production setup duty to see the profiles." : `${state.error.message} (${state.error.code})`}
+          {state.error.status === 403 ? "You need the View production setup duty to see the profiles." : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <DataTable
@@ -150,7 +151,7 @@ export function OcmProfilesPage() {
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Order change profile">
           {failure ? (
             <Alert tone="danger" live="alert" title="The profile was not saved">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.fields}>

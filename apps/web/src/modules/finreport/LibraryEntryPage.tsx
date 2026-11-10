@@ -7,6 +7,7 @@ import { CURRENCY_TYPE_LABELS, formatBytes, periodLabel } from "./format";
 import styles from "./pages.module.css";
 import { ShareLinks } from "./ShareLinks";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One stored statement file (FR-15.8): what it is, its SHA-256 and retention, and the download. */
 export function LibraryEntryPage() {
@@ -25,7 +26,7 @@ export function LibraryEntryPage() {
           live="alert"
           action={missing ? undefined : <Button size="sm" onClick={state.reload}>Try again</Button>}
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/finreport/library">Back to the library</Link>
       </div>

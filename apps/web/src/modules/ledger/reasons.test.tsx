@@ -145,7 +145,7 @@ describe("reason code form", () => {
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "ERR01" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Input error" } });
     fireEvent.click(screen.getByRole("button", { name: "Save reason code" }));
-    expect(await screen.findByText("validation failed (COM-0001)")).toBeInTheDocument();
+    expect(await screen.findByText("validation failed")).toBeInTheDocument();
     expect(screen.getByTestId("location").textContent).toBe("/ledger/reason-codes/new");
   });
 
@@ -230,7 +230,7 @@ describe("entry screen and reversal", () => {
     );
     renderAt(`/ledger/entries/${ENTRY}`);
     fireEvent.click(await screen.findByRole("button", { name: "Reverse entry" }));
-    expect(await screen.findByText("entry GL-000001 was already reversed by GL-000002 (LEDGER_REVERSAL_ALREADY_REVERSED)")).toBeInTheDocument();
+    expect(await screen.findByText("entry GL-000001 was already reversed by GL-000002")).toBeInTheDocument();
   });
 
   it("checks comment and date rules of the chosen code before calling the service", () => {

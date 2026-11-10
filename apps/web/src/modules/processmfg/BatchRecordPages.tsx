@@ -46,6 +46,7 @@ import { GenealogyCard } from "./GenealogyCard";
 import { dash, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that changes a batch's disposition; enforced by the service (AC-24.10). */
 export const DISPOSITION_DUTY = "production.batch-disposition.write";
@@ -77,7 +78,7 @@ export function DispositionBadge({ disposition }: { disposition: Disposition }) 
 function LoadError({ title, error, reload }: { title: string; error: Problem; reload: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }
@@ -207,7 +208,7 @@ export function NewBatchPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the batch" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -363,7 +364,7 @@ function RecordCard({
             live="alert"
             action={failure.code === "PMF-0104" ? <Button size="sm" onClick={reload}>Reload batch</Button> : undefined}
           >
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -442,7 +443,7 @@ function DispositionCard({ batch, reload, onChanged }: { batch: Batch; reload: (
             live="alert"
             action={failure.code === "PMF-0104" ? <Button size="sm" onClick={reload}>Reload batch</Button> : undefined}
           >
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -691,7 +692,7 @@ export function AttributeDefinitionsPage() {
           {done ? <Alert tone="success" title={done} live="status" /> : null}
           {failure ? (
             <Alert tone="danger" title="Could not define the attribute" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.formActions}>

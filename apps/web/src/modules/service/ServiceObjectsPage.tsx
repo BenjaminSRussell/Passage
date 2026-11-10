@@ -21,6 +21,7 @@ import {
 import { dash, DATE, sentence, shortId, today, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -203,7 +204,7 @@ function FormFailure({ failure, title }: { failure: Problem | null; title: strin
   return (
     <div className={styles.formActions}>
       <Alert tone="danger" title={title} live="alert">
-        {failure.message} ({failure.code})
+        <ProblemMessage problem={failure} />
       </Alert>
     </div>
   );

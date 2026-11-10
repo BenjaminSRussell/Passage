@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type Data
 import { checkScheduleRelease, describeProblem, type Problem, type ReleaseBucket, type ReleaseCheckInput, type ReleaseCheckResult } from "./api/client";
 import { DECIMAL } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -126,7 +127,7 @@ export function ScheduleReleasePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not check the release" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

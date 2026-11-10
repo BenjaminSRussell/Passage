@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, Skeleton, type DataTableColumn }
 import { getRunTree, getTreeRevision, listTreeRevisions, type Tree, type TreeRevision, type TreeUnit } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The unit and every unit below it. */
 export function unitAndBelow(tree: Tree, unit: string): Set<string> {
@@ -81,7 +82,7 @@ export function TreeRevisionsCard({ code }: { code: string }) {
         <Card title={`Units at revision ${open}`}>
           {shown.error ? (
             <Alert tone="danger" title="This revision is unavailable" live="alert">
-              {shown.error.message} ({shown.error.code})
+              <ProblemMessage problem={shown.error} />
             </Alert>
           ) : shown.data ? (
             <UnitsTable tree={shown.data} />
@@ -108,7 +109,7 @@ export function RunTreeCard({ runId }: { runId: string }) {
           <p className={styles.note}>The tree revision this run used was not kept, so its units cannot be shown.</p>
         ) : (
           <Alert tone="danger" title="The tree is unavailable" live="alert" action={<Button size="sm" onClick={view.reload}>Try again</Button>}>
-            {view.error.message} ({view.error.code})
+            <ProblemMessage problem={view.error} />
           </Alert>
         )}
       </Card>

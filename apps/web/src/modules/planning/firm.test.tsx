@@ -167,7 +167,7 @@ describe("Firming planned orders (FR-22.10)", () => {
     fireEvent.click(within(table).getByRole("checkbox", { name: "Select PLN-000002 for firming" }));
     fireEvent.click(screen.getByRole("button", { name: "Firm selected" }));
     expect(await screen.findByText("The orders were not firmed")).toBeInTheDocument();
-    expect(screen.getByText(/is already firmed\. \(PLAN-0002\)/)).toBeInTheDocument();
+    expect(screen.getByText(/is already firmed\./)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Firm selected" }));
     await waitFor(() => expect(posts(fetchMock)).toHaveLength(2));

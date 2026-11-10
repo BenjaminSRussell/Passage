@@ -5,6 +5,7 @@ import { CHANGE_STATUSES, listChangeRequests, type ChangeRequest, type ChangeReq
 import { formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const tone: Record<ChangeStatus, BadgeTone> = { PENDING: "warning", APPROVED: "success", REJECTED: "danger", WITHDRAWN: "neutral" };
 
@@ -77,7 +78,7 @@ export function ChangeRequestsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the change requests" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

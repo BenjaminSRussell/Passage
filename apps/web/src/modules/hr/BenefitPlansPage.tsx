@@ -5,6 +5,7 @@ import { describeProblem, listBenefitPlans, type BenefitPlan, type Problem } fro
 import { planTypeLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<BenefitPlan>[] = [
   { key: "code", header: "Plan", mono: true },
@@ -54,7 +55,7 @@ export function BenefitPlansPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load benefit plans" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -69,7 +70,7 @@ export function BenefitPlansPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more plans" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {!state.error && !state.loading && cursor ? (
