@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- Payables: cutover import of open vendor items (`POST /v1/payables/opening-batches`, service-only) with idempotent batches, per-row errors, control totals and a read-back of counts and totals; nothing posts to the ledger (#49).
 - Receivables opens an item for every invoice and credit note billing posts (#30): a new consumer (`receivables consume`, group
   and service principal `receivables-billing`, flag duty `receivables.openitem.from-billing`, dead-letter topic
   `passage.receivables.invoices.dlq`, `deploy/kafka/receivables-consumer.yaml`, off by default in the chart) reads
