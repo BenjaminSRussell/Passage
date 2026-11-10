@@ -97,7 +97,10 @@ def operations(doc: dict[str, Any]) -> list[Operation]:
 
 
 def _duty(o: Operation) -> str:
-    return str(o.op.get("x-passage-duty") or "").strip()
+    """The guarding duty; a route marked `x-passage-public: true` (no session, such as an enrollment token redeemed
+    by the edge connector) is guarded by its own credential and reads as `public`."""
+    duty = str(o.op.get("x-passage-duty") or "").strip()
+    return duty or ("public" if o.op.get("x-passage-public") is True else "")
 
 
 def _params(o: Operation, doc: dict[str, Any]) -> list[dict[str, Any]]:

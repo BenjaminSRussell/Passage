@@ -3093,7 +3093,6 @@ paths:
   /v1/shopfloor/edge-nodes/{id}:enroll:
     post:
       operationId: enrollEdgeNode
-      x-passage-duty: public
       summary: Redeem an enrollment token for a client certificate
       description: |
         The connector's first call. It carries no session: the token is the credential and names its
