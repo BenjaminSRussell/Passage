@@ -504,6 +504,27 @@ class ArgoApplicationsTest(unittest.TestCase):
                 routed |= channels
         self.assertLessEqual({"passage.sales.orderprogress", "passage.fulfillment.packingslip"}, routed)
 
+    def test_outbox_budgeting_publishes_only_topics_the_debezium_user_may_write(self):
+        docs = load_docs(DEPLOY / "kafka/connect.yaml")
+        (debezium,) = [d for d in docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "debezium"]
+        writable = {a["resource"]["name"] for a in debezium["spec"]["authorization"]["acls"]
+                    if a["resource"]["type"] == "topic" and a["resource"].get("patternType") == "literal"
+                    and "Write" in a["operations"]}
+        (cfg,) = [d["spec"]["config"] for d in docs if d["kind"] == "KafkaConnector" and d["metadata"]["name"] == "outbox-budgeting"]
+        chain = cfg["transforms"].split(",")
+        self.assertLess(chain.index("outbox"), chain.index("onlyPlan"), "the filter must see the routed topic")
+        self.assertLess(chain.index("onlyPlan"), chain.index("enrich"))
+        self.assertEqual("org.apache.kafka.connect.transforms.Filter", cfg["transforms.onlyPlan.type"])
+        self.assertIs(True, cfg["transforms.onlyPlan.negate"])
+        predicate = cfg["transforms.onlyPlan.predicate"]
+        self.assertIn(predicate, cfg["predicates"].split(","))
+        self.assertEqual("org.apache.kafka.connect.transforms.predicates.TopicNameMatches", cfg[f"predicates.{predicate}.type"])
+        pattern = re.compile(cfg[f"predicates.{predicate}.pattern"])
+        spec = yaml.safe_load((REPO / "services/budgeting/events/asyncapi.yaml").read_text())
+        channels = {c["address"] for c in spec["channels"].values()}
+        self.assertEqual({"passage.budget.plan"}, {t for t in channels | writable if pattern.fullmatch(t)})
+        self.assertLessEqual({t for t in channels if pattern.fullmatch(t)}, writable)
+
     @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
     def test_temporal_values_match_its_database(self):
         dev = self.dev_apps()

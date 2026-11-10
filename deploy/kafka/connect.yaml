@@ -543,9 +543,12 @@ spec:
     producer.override.acks: all
     producer.override.enable.idempotence: true
 ---
-# Budgeting writes aggregate_type plan to its outbox (plan.submitted, plan.approved, plan.rejected); the route below makes it
-# passage.budget.plan, the AsyncAPI channel in services/budgeting/events/asyncapi.yaml. workflow-ts reads it to start
-# budgetPlanWorkflow (deploy/kafka/workflow-ts-consumer.yaml). The ACL above is literal per aggregate_type (a new one needs an entry).
+# Budgeting's outbox carries six aggregate types (register, budgetcheck, encumbrance, budgetreservation, investment_program, plan) but
+# only plan is published (plan.submitted, plan.approved, plan.rejected): it routes to passage.budget.plan, the AsyncAPI channel in
+# services/budgeting/events/asyncapi.yaml, which workflow-ts reads to start budgetPlanWorkflow (deploy/kafka/workflow-ts-consumer.yaml).
+# The stock Kafka Filter SMT with the TopicNameMatches predicate (both in Kafka 4.0 connect-transforms, no scripting) drops every
+# routed record whose topic is not passage.budget.plan, so the others never reach a topic the debezium user has no ACL for.
+# Adding a published aggregate type means widening the predicate pattern and adding its literal ACL (deploy/scripts/test_argocd_apps.py).
 # snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
 # debezium_cdc_budgeting has REPLICATION; the budgeting database and that role are provisioned with the service's database.
 apiVersion: kafka.strimzi.io/v1beta2
@@ -576,7 +579,7 @@ spec:
     topic.creation.default.partitions: 12
     topic.creation.default.cleanup.policy: delete
     topic.creation.default.retention.ms: 604800000
-    transforms: outbox,enrich
+    transforms: outbox,onlyPlan,enrich
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
     transforms.outbox.table.field.event.key: aggregate_id
@@ -585,6 +588,12 @@ spec:
     transforms.outbox.route.topic.replacement: passage.budget.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.onlyPlan.type: org.apache.kafka.connect.transforms.Filter
+    transforms.onlyPlan.predicate: isPlanTopic
+    transforms.onlyPlan.negate: true
+    predicates: isPlanTopic
+    predicates.isPlanTopic.type: org.apache.kafka.connect.transforms.predicates.TopicNameMatches
+    predicates.isPlanTopic.pattern: 'passage\.budget\.plan'
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
     transforms.enrich.source.default: passage
     transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
