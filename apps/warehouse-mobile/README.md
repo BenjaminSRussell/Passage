@@ -24,6 +24,15 @@ release.
   production builds. It caches the shell, its build assets and the manifest at install so the
   app starts offline, and never caches writes or `/api/`, `/mobile/`, `/print/`, `/rfid/` and
   `/wms/` requests. The policy and its tests are `shellCache.ts` in the web module.
+- Service session and replay (FR-32.1): with a warehouse provisioned (`localStorage["passage.warehouseId"]`)
+  the app starts a mobile service session, beats it, and signs out on close; replay sends the
+  user who queued each entry, the session and an RFC 3339 capture time (`sessionKeeper.ts`,
+  `replayApply.ts`).
+- Label on receive (FR-32.7): after a put-away of an SSCC plate the worker scans the item label and the
+  LP label prints through the routing rules (`ReceiveLabelPanel.tsx`, `receiveLabel.ts`).
+- RFID and voice (FR-32.9): `passage:rfid` rounds from the shell are decoded (`epc.ts`, `rfid.ts`) into the
+  GS1 scans the runner takes; a `VoiceAdapter` passed as `voice` speaks prompts and answers steps from
+  spoken digits and commands (`voice.ts`).
 - Scanner intents (FR-32.10): the native shell forwards each decoded scan as a
   `passage:scan` event (`scanBridge.ts`). A scan that arrives while a confirm, display or
   other non-scan step has focus is ignored and logged on the device (AC-32.7).
