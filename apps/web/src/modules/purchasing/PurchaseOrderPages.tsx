@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { DownloadPdfButton } from "../../shell/documents/pdfDocument";
 import { purchaseOrderDocument } from "./purchaseOrderDocument";
+import { PurchaseFlowPanel } from "../receiving/documentFlow";
 import { pickProductPatch } from "../../shell/lookup/entities";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -1210,6 +1211,7 @@ export function PurchaseOrderDetailPage() {
           )
         }
       />
+      <PurchaseFlowPanel anchor={{ kind: "po", id: po.id }} refreshKey={`${po.approvalStatus}:${po.rowVersion}`} />
       {confirmCancel ? (
         <Alert
           tone="warning"

@@ -459,6 +459,7 @@
     {"to": "/projects/posting-profiles", "module": "projects", "label": "Posting profiles", "area": "projects-service", "decision": "advanced"},
     {"to": "/projects/categories", "module": "projects", "label": "Project categories", "area": "projects-service", "decision": "advanced"},
     {"to": "/purchasing", "module": "purchasing", "label": "Overview", "area": "procurement", "decision": "keep", "taskLabel": "Procurement overview"},
+    {"to": "/purchasing/procure-to-pay", "module": "purchasing", "label": "Procure to pay", "area": "procurement", "decision": "keep", "taskLabel": "Follow a purchase to payment"},
     {"to": "/purchasing/requisitions", "module": "purchasing", "label": "Requisitions", "area": "procurement", "decision": "keep", "taskLabel": "Purchase requests"},
     {"to": "/purchasing/approvals", "module": "purchasing", "label": "Requisition approvals", "area": "procurement", "decision": "keep", "taskLabel": "Approve purchase requests"},
     {"to": "/purchasing/consolidation", "module": "purchasing", "label": "Consolidation", "area": "procurement", "decision": "keep"},
