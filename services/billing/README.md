@@ -203,4 +203,8 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
   the journal debited (the deferred part is the Dr 2400). `creditnote.posted` cannot carry them: it is published at the post,
   before the journal exists, and a credit note's share is its original's booked share apportioned to the credited net. Revrec's
   credit-note consumer reverses its schedules by exactly these amounts, so its roll-forward keeps tying to GL 2400.
+- Receivables consumes `invoice.posted` and `creditnote.posted` from `passage.billing.invoice` (30-1, consumer group
+  `receivables-billing`): one INVOICE open item per installment (`<number>/<n>`, or `<number>` for the whole gross), one
+  CREDIT_NOTE item of minus the gross linked to the original invoice. Billing's number is the open item's document number, so
+  the receivables key (legal entity, document number) is shared with items entered by hand. Nothing is added to the events.
 - Dependencies: pgx, chi, shopspring/decimal, rapid (all in the platform module set).

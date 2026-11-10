@@ -50,7 +50,7 @@ npm run dev        # http://localhost:5173
 
 The shell, navigation and screens render. API convention: the browser calls `/api/v1/<svc>/...`, services serve `/v1/<svc>/...`, and the edge strips `/api`. In dev the Vite proxy ([src/shell/devProxy.ts](apps/web/src/shell/devProxy.ts)) does that: it forwards `/api/v1/<svc>/...` to `http://localhost:8080/v1/<svc>/...` and adds the identity headers the gateway would set.
 
-Every service listens on :8080 by default, so run one at a time or give each its own `HTTP_ADDR` and point the proxy at it with `PASSAGE_SVC_<NAME>_URL` (`<NAME>` is the path segment upper-cased, `-` as `_`; `PASSAGE_SVC_DEFAULT_URL` replaces the :8080 fallback). Set these in the shell or in `apps/web/.env.local`:
+Every service listens on :8080 by default, so run one at a time or give each its own `HTTP_ADDR` and point the proxy at it with `PASSAGE_SVC_<NAME>_URL` (`<NAME>` is the path segment upper-cased, `-` as `_`; `PASSAGE_SVC_DEFAULT_URL` replaces the :8080 fallback). `PASSAGE_SVC_INBOX_URL` must point at the batch service, which serves `/v1/inbox` (My work). Set these in the shell or in `apps/web/.env.local`:
 
 ```sh
 PASSAGE_SVC_LEDGER_URL=http://localhost:8081   # ledger started with HTTP_ADDR=:8081
@@ -119,6 +119,7 @@ make test-go
 ## Learn more
 
 - [docs/PRD.md](docs/PRD.md): what Passage does and why
+- [docs/user/README.md](docs/user/README.md): task-based guides for the people who use the app
 - [docs/architecture.md](docs/architecture.md): how it fits together
 - [docs/engineering/CONVENTIONS.md](docs/engineering/CONVENTIONS.md): coding rules for services
 - [apps/web/docs/design-system.md](apps/web/docs/design-system.md): UI design system
