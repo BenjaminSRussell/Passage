@@ -35,6 +35,14 @@ DATABASE_URL=postgres://... go run ./cmd/tax
 
 When an external provider fails or times out, the internal engine answers with `fallback: true` and TAX-0007, the request is queued in `tax_recommit_queue` and `dev.passage.tax.provider.fallback.v1` goes through the outbox in the same transaction. A queue failure is logged and counted (`tax_recommit_queue_failures_total`) and never fails the calculation. A request without a single legal entity cannot be queued (the queue is row-level secured per legal entity). `POST /v1/tax/recommit:run?limit=` (duty `tax.recommit.run`, default 20, at most 50) re-calculates the oldest pending entries on their provider: an answer marks the entry done and keeps the result, a provider still down leaves it pending with the attempt counted, and after 5 attempts the entry is marked `failed` and is not taken again; entries with fewer attempts are taken first, so one stuck entry cannot block newer ones. The scheduler calls it per legal entity; it holds the batch's row locks while it calls the providers, so keep the limit small.
 
+### Tax configuration, VAT return, EU sales list and Intrastat
+
+Configuration is stored per tenant (migration `0003`): a jurisdiction tree (`/v1/tax/jurisdictions`, parent by code, cycles and depth over 8 refused), tax codes with effective-dated rates (`/v1/tax/codes`), and party and item tax groups that select the codes they apply (`/v1/tax/groups/{party|item}`). `GET /v1/tax/config` assembles them into the engine's config, and `POST /v1/tax/calculate` takes `"stored_config": true` instead of an inline `config`. Deleting a jurisdiction, code or group that something still uses is TAX-0013. Reads need `tax.config.read`, writes `tax.config.manage`.
+
+`/v1/tax/entity-settings` holds the legal entity's country and VAT number. `/v1/tax/vat-boxes` holds the return boxes: a `base` or `tax` box sums the mapped code and direction pairs, a `payable` box is output and use tax less input tax. `GET /v1/tax/vat-return?period_from&period_to` (duty `tax.vatreturn.read`) computes the boxes from recorded tax transactions and reports `missing_base` and `unmapped` counts. `POST /v1/tax/transactions` accepts the optional `base_amount`, `counterparty_country`, `counterparty_vat_id` and `supply_kind` (goods, services, triangular). `GET /v1/tax/esl` lists output transactions to other EU member states grouped by country, VAT number and kind (indicator L, S or T); sales without a VAT number are counted in `missing_vat_id`, not listed.
+
+Intrastat master data is one row per kind (`commodity`, `transaction_code`, `transport_mode`, `port`, `country`, `delivery_terms`) at `/v1/tax/intrastat/master/{kind}`. A journal is one flow (arrival or dispatch) and month: `transfer` adds source lines idempotently by `source_ref` (the caller supplies them; no shipping or receiving feed is wired), `validate` checks every line against the master data and the entity country and stores plain-language problems on the lines, `compress` merges lines that agree on partner, commodity, transaction, transport, terms, port and origin, and lines can be edited or removed while the journal is a draft. `export` returns a CSV only for a validated journal and locks it; `correct` opens a new draft copying an exported journal's lines, and its export marks every row `A`. Duties: `tax.intrastat.read`, `tax.intrastat.manage`, `tax.intrastatmaster.manage`, `tax.intrastat.export`.
+
 ### SAF-T
 
 `GET /v1/tax/saft?period_from=&period_to=&company_name=&registration_number=&country=&currency=` (duty `tax.saft.export`) returns an `urn:OECD:StandardAuditFile-Tax:2.00` document with the header and a tax table of per-code period totals. It validates against the schema in `testdata/saft/`, which is a documented subset and not the official OECD XSD (see `testdata/saft/SOURCE.md`); the test shells out to `xmllint` and skips when it is not installed.
@@ -59,6 +67,8 @@ Naming: the PRD calls the chart `passage-tax`; existing charts are named after t
 | TAX-0007 | 422 | named provider is not configured; warning when the internal engine replaced a failed provider |
 | TAX-0008 | 422 | settlement differs from the GL tax account movement |
 | TAX-0009 | 422 | no open tax transaction in the settlement period |
+| TAX-0013 | 422 | a jurisdiction, tax code or group is still used and cannot be deleted |
+| COM-0404 | 404 | no such configuration row or journal |
 | COM-0502 | 502 | the general ledger could not be read |
 | COM-0503 | 503 | the store or the ledger is not configured |
 | COM-0001 | 400 | malformed body, unknown field, wrong JSON type or invalid field |

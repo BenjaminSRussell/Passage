@@ -692,6 +692,7 @@ const tax: Record<string, ProblemCatalogEntry> = {
   "TAX-0009": { message: "There is no unsettled tax in this period.", action: "Choose a different period." },
   "TAX-0011": { message: "The currency doesn't match the ledger's accounting currency.", action: "Use the ledger's accounting currency." },
   "TAX-0012": { message: "The ledger data can't be turned into a valid tax audit file.", action: TRY_LATER },
+  "TAX-0013": { message: "This tax setup item is still used by something else, so it can't be deleted.", action: "Remove it from the jurisdictions, tax groups or return boxes that use it, then try again." },
 };
 
 const product: Record<string, ProblemCatalogEntry> = {

@@ -39,6 +39,7 @@ type API struct {
 	providers       map[string]domain.TaxProvider
 	providerTimeout time.Duration
 	store           Store
+	config          ConfigStore
 	ledger          ledgerclient.Ledger
 	calculations    atomic.Int64
 	failures        atomic.Int64
@@ -53,6 +54,8 @@ type calculateRequest struct {
 	domain.Document
 	Config   domain.Config `json:"config"`
 	Provider string        `json:"provider"`
+	// StoredConfig asks for the persisted tax configuration instead of an inline config.
+	StoredConfig bool `json:"stored_config"`
 }
 
 type problemBody struct {
@@ -95,6 +98,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyLedgerConfig)).Put("/v1/tax/ledger-config", a.setLedgerConfig)
 	r.With(authz.RequireDuty(dutyRecommit)).Post("/v1/tax/recommit:run", a.recommit)
 	r.With(authz.RequireDuty(dutySAFT)).Get("/v1/tax/saft", a.saft)
+	a.registerConfig(r)
 }
 
 func (a *API) withholding(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +139,12 @@ func (a *API) calculate(w http.ResponseWriter, r *http.Request) {
 		a.reject(w, r, err)
 		return
 	}
+	if req.StoredConfig {
+		if err := a.useStoredConfig(r.Context(), &req); err != nil {
+			a.reject(w, r, err)
+			return
+		}
+	}
 	res, notice, err := a.compute(r.Context(), req)
 	if err != nil {
 		a.reject(w, r, err)
@@ -147,6 +157,21 @@ func (a *API) calculate(w http.ResponseWriter, r *http.Request) {
 	}
 	a.calculations.Add(1)
 	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (a *API) useStoredConfig(ctx context.Context, req *calculateRequest) error {
+	if len(req.Config.Codes) > 0 || len(req.Config.Groups) > 0 || len(req.Config.ItemGroups) > 0 {
+		return invalid("stored_config", "send either stored_config or an inline config, not both")
+	}
+	if a.config == nil {
+		return httpx.NewProblem(http.StatusServiceUnavailable, codeNotConfigured, "the tax configuration store is not configured for this service")
+	}
+	cfg, err := a.config.LoadConfig(ctx)
+	if err != nil {
+		return err
+	}
+	req.Config, req.StoredConfig = cfg, false
+	return nil
 }
 
 func (a *API) compute(ctx context.Context, req calculateRequest) (domain.Result, *domain.FallbackNotice, error) {
@@ -187,6 +212,10 @@ func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
 		err = httpx.NewProblem(http.StatusBadGateway, codeLedgerUnavailable, "the general ledger could not be read")
 	case errors.Is(err, store.ErrNoLegalEntity):
 		err = httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "this operation needs a single legal entity in the request scope")
+	case errors.Is(err, store.ErrNotFound):
+		err = httpx.NewProblem(http.StatusNotFound, codeNotFound, "no such record")
+	case errors.Is(err, store.ErrNoEntitySettings):
+		err = httpx.NewProblem(http.StatusUnprocessableEntity, codeNotConfigured, "the legal entity has no tax settings yet; set its country first")
 	case errors.Is(err, store.ErrNoLedgerConfig):
 		err = httpx.NewProblem(http.StatusUnprocessableEntity, codeNotConfigured, "no ledger configuration is set for this legal entity")
 	}
