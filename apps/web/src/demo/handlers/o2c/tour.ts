@@ -11,5 +11,6 @@ export const TOUR: TourStop[] = [
   { area: "Order to cash", label: "Credit exposure", to: "/sales/credit-exposure", blurb: "Each customer's open AR, goods delivered but not invoiced and open orders against their limit." },
   { area: "Order to cash", label: "Trade agreements", to: "/pricing/agreements", blurb: "List prices, quantity breaks, customer contracts and discounts that price every order line." },
   { area: "Order to cash", label: "Shipments", to: "/fulfillment/shipments", blurb: "Shipments from release to delivered, matching the shipped sales orders; open one for lines, pallets and tracking." },
+  { area: "Order to cash", label: "Order to cash", to: "/sales/order-to-cash", blurb: "The five steps from order to payment with what waits at each, then open an order to see its document flow and next step." },
   { area: "Order to cash", label: "Invoices", to: "/billing", blurb: "Posted, part-paid and settled invoices for the shipped orders, plus a proposal ready to post." },
 ];

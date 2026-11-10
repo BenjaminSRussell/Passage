@@ -214,6 +214,15 @@ func (f *fakeStore) PostCreditNote(_ context.Context, id string, postingDate tim
 	return cn, nil
 }
 
+func hasLine(inv store.Invoice, match func(domain.Source) bool) bool {
+	for _, l := range inv.Lines {
+		if match(l.Source) {
+			return true
+		}
+	}
+	return false
+}
+
 // ListInvoices filters like the store and pages newest first; invoice ids are
 // UUIDv7, so descending id order stands in for (created_at, id).
 func (f *fakeStore) ListInvoices(_ context.Context, filter store.ListFilter) (store.InvoicePage, error) {
@@ -222,6 +231,8 @@ func (f *fakeStore) ListInvoices(_ context.Context, filter store.ListFilter) (st
 	for _, inv := range f.invoices {
 		if (filter.Status == "" || inv.Status == filter.Status) && (filter.Type == "" || inv.Type == filter.Type) &&
 			(filter.OriginalInvoiceID == "" || inv.OriginalInvoiceID == filter.OriginalInvoiceID) &&
+			(filter.OrderID == "" || hasLine(inv, func(s domain.Source) bool { return s.OrderID == filter.OrderID })) &&
+			(filter.PackingSlipID == "" || hasLine(inv, func(s domain.Source) bool { return s.PackingSlipID == filter.PackingSlipID })) &&
 			(filter.After == "" || inv.ID < filter.After) {
 			out = append(out, inv)
 		}
@@ -685,5 +696,32 @@ func TestMetricsAndReady(t *testing.T) {
 	}
 	if ready := req(http.MethodGet, "/readyz", ""); ready.Code != http.StatusOK {
 		t.Errorf("readyz status %d", ready.Code)
+	}
+}
+
+// TestListInvoices_ByOrderAndPackingSlip is the document flow query (issue #534): the invoices
+// billed from one sales order or one packing slip.
+func TestListInvoices_ByOrderAndPackingSlip(t *testing.T) {
+	const order, slip, other = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
+	s := newFakeStore()
+	billed := func(id string, src domain.Source) {
+		s.invoices[id] = store.Invoice{ID: id, Type: domain.TypeShipment, Status: domain.StatusPosted, Lines: []store.Line{{Source: src}}}
+	}
+	billed("0195f0a0-0000-7000-8000-000000000001", domain.Source{OrderID: order, PackingSlipID: slip})
+	billed("0195f0a0-0000-7000-8000-000000000002", domain.Source{OrderID: other, PackingSlipID: other})
+	h := setup(t, s, &fakeTax{perLine: "0"})
+	for _, query := range []string{"orderId=" + order, "packingSlipId=" + slip} {
+		var got struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+		}
+		decode(t, do(h, http.MethodGet, "/v1/billing/invoices?"+query, "", ""), &got)
+		if len(got.Items) != 1 || got.Items[0].ID != "0195f0a0-0000-7000-8000-000000000001" {
+			t.Errorf("%s: got %+v, want only the invoice billed from it", query, got.Items)
+		}
+	}
+	if bad := do(h, http.MethodGet, "/v1/billing/invoices?orderId=x&packingSlipId=y", "", ""); bad.Code != http.StatusBadRequest {
+		t.Errorf("malformed ids: status %d, want 400", bad.Code)
 	}
 }

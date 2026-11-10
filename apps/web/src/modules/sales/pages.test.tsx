@@ -221,8 +221,11 @@ describe("Sales order detail", () => {
     renderAt(`/sales/orders/${ORDER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Confirm order" }));
     expect(await screen.findByText("Someone else changed this order")).toBeInTheDocument();
+    // The document flow panel reads the order too, so count the reads before and after the click.
+    const reads = () => calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/sales/orders/${ORDER_ID}`).length;
+    const before = reads();
     fireEvent.click(screen.getByRole("button", { name: "Reload order" }));
-    await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/sales/orders/${ORDER_ID}`)).toHaveLength(2));
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 
   it("shows the error when the order cannot be loaded", async () => {

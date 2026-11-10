@@ -277,6 +277,9 @@ export interface InvoiceFilter {
   type?: InvoiceType | "";
   customerId?: string;
   originalInvoiceId?: string;
+  /** Only invoices with a line billed from this sales order or packing slip (the document flow). */
+  orderId?: string;
+  packingSlipId?: string;
   limit?: number;
   /** The nextCursor of the previous page. */
   cursor?: string;

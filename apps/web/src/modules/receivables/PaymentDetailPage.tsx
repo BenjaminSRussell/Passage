@@ -19,6 +19,7 @@ import {
 } from "./api/client";
 import { compareDecimals, DECIMAL, DECISION_LABELS, MODE_LABELS, money, STATUS_LABELS, STATUS_TONES, subtract, sumDecimals } from "./format";
 import styles from "./pages.module.css";
+import { OrderFlowPanel } from "../sales/documentFlow";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -225,6 +226,7 @@ export function PaymentDetailPage() {
           </Link>
         }
       />
+      <OrderFlowPanel anchor={{ kind: "payment", id: payment.id }} refreshKey={`${payment.status}:${payment.version}`} />
       <Card title="Payment" headingLevel={3}>
         <dl className={styles.details}>
           <Detail term="Amount" mono>{money(payment.amount, payment.currency)}</Detail>

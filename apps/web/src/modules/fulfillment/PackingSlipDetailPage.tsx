@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { DownloadPdfButton } from "../../shell/documents/pdfDocument";
 import { packingSlipDocument } from "./packingSlipDocument";
+import { OrderFlowPanel } from "../sales/documentFlow";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { cancelPackingSlip, describeProblem, getPackingSlip, newKey, type JournalEntry, type PackagingFeeLine, type PackingSlip, type Problem } from "./api/client";
@@ -144,6 +145,7 @@ export function PackingSlipDetailPage() {
           <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
+      <OrderFlowPanel anchor={{ kind: "slip", id: slip.id }} refreshKey={slip.status} />
       <Card>
         <dl className={styles.details}>
           {[
