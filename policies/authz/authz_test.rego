@@ -924,6 +924,57 @@ test_party_vendor_requests_are_decided_by_their_own_duty if {
 	not allowed("party.read", "POST", "/v1/party/vendor-questionnaires")
 }
 
+# The customer portal service (#30) acts for one customer, holds only read-only service-only customer-portal duties, and each
+# duty opens only its own customer-portal routes: no staff route, no other service's route, and no write.
+test_customer_portal_holds_only_service_only_read_duties if {
+	every _, duties in data.service_grants["customer-portal"] {
+		every duty in duties {
+			data.duties[duty].service_only
+			contains(duty, "customer-portal")
+			every perm in data.duties[duty].permissions {
+				perm.methods == ["GET"]
+			}
+		}
+	}
+	data.service_grants["customer-portal"].receivables == ["receivables.customer-portal.read"]
+	data.service_grants["customer-portal"].billing == ["billing.customer-portal.read"]
+	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read"]
+}
+
+test_receivables_customer_portal_duty_opens_only_customer_routes if {
+	allowed("receivables.customer-portal.read", "GET", "/v1/receivables/customer-portal/open-items")
+	allowed("receivables.customer-portal.read", "GET", "/v1/receivables/customer-portal/open-items/i1")
+	allowed("receivables.customer-portal.read", "GET", "/v1/receivables/customer-portal/payments")
+	allowed("receivables.customer-portal.read", "GET", "/v1/receivables/customer-portal/statement")
+	not allowed("receivables.customer-portal.read", "GET", "/v1/receivables/open-items")
+	not allowed("receivables.customer-portal.read", "GET", "/v1/receivables/payments")
+	not allowed("receivables.customer-portal.read", "GET", "/v1/receivables/statements")
+	not allowed("receivables.customer-portal.read", "GET", "/v1/receivables/aging")
+	not allowed("receivables.customer-portal.read", "POST", "/v1/receivables/payments")
+	not allowed("receivables.customer-portal.read", "GET", "/v1/billing/customer-portal/invoices")
+	not allowed("receivables.view", "GET", "/v1/receivables/customer-portal/open-items")
+}
+
+test_billing_customer_portal_duty_opens_only_customer_invoices if {
+	allowed("billing.customer-portal.read", "GET", "/v1/billing/customer-portal/invoices")
+	allowed("billing.customer-portal.read", "GET", "/v1/billing/customer-portal/invoices/i1")
+	not allowed("billing.customer-portal.read", "GET", "/v1/billing/invoices")
+	not allowed("billing.customer-portal.read", "GET", "/v1/billing/invoices/i1")
+	not allowed("billing.customer-portal.read", "POST", "/v1/billing/invoices/i1:post")
+	not allowed("billing.invoice.read", "GET", "/v1/billing/customer-portal/invoices")
+}
+
+test_sales_customer_portal_duty_opens_only_customer_orders_and_returns if {
+	allowed("sales.customer-portal.read", "GET", "/v1/sales/customer-portal/orders")
+	allowed("sales.customer-portal.read", "GET", "/v1/sales/customer-portal/orders/o1")
+	allowed("sales.customer-portal.read", "GET", "/v1/sales/customer-portal/returns")
+	allowed("sales.customer-portal.read", "GET", "/v1/sales/customer-portal/returns/r1")
+	not allowed("sales.customer-portal.read", "GET", "/v1/sales/orders")
+	not allowed("sales.customer-portal.read", "GET", "/v1/sales/orders/o1")
+	not allowed("sales.customer-portal.read", "GET", "/v1/sales/return-orders")
+	not allowed("sales.customer-portal.read", "POST", "/v1/sales/orders")
+}
+
 test_buyer_acknowledgement_routes if {
 	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/acknowledgements")
 	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/acknowledgements/awaiting")
