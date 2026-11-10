@@ -37,7 +37,8 @@ type mt940Field struct {
 // line's remittance reference (structured ?20-?29 subfields, or the whole
 // text) and, when structured, gives the counterparty (?32/?33). Banks reuse
 // :20: across statements and days, so the statement id is :20:/:25:/:28C:, with
-// the :60F: opening date in place of :28C: when the bank sends none.
+// the :60F: opening date in place of :28C: when the bank sends none. LegacyID is
+// the earlier :20:[/:28C:] id, which stored statements may still carry.
 func ParseMT940(data []byte) ([]Statement, error) {
 	fields, err := mt940Fields(data)
 	if err != nil {
@@ -65,6 +66,10 @@ func ParseMT940(data []byte) ([]Statement, error) {
 			discriminator = cur.OpeningDate
 		}
 		cur.StatementID = ref + "/" + cur.Account + "/" + discriminator
+		cur.LegacyID = ref
+		if number != "" {
+			cur.LegacyID += "/" + number
+		}
 		out = append(out, *cur)
 		cur = nil
 		return nil

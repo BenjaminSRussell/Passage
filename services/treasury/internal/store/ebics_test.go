@@ -340,3 +340,51 @@ func TestImportStatementFile_MT940WithoutStatementNumberImportsEveryDay(t *testi
 		t.Fatalf("statements = %d, %v; want one per day", len(list), err)
 	}
 }
+
+func TestImportStatementFile_MT940StoredUnderTheLegacyIDIsNotImportedTwice(t *testing.T) {
+	for name, tc := range map[string]struct{ file, legacyID string }{
+		"with :28C:":    {":20:STARTUMS\n:25:" + testIBAN + "\n:28C:00007/001\n:60F:C261021EUR1000,00\n:62F:C261021EUR1000,00\n", "STARTUMS/00007/001"},
+		"without :28C:": {":20:DAILY\n:25:" + testIBAN + "\n:60F:C261021EUR1000,00\n:62F:C261021EUR1000,00\n", "DAILY"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, admin := newStore(t)
+			le := ids.New()
+			ctx := ctxFor(1, le)
+			acct := activeAccount(t, s, ctx, le)
+			if err := s.ImportStatementFile(ctx, acct.ID, "sta.txt", []byte(tc.file)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := admin.Exec(context.Background(), `update bank_statement set statement_id = $1, file_hash = 'legacy-file-hash'`, tc.legacyID); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.ImportStatementFile(ctx, acct.ID, "sta.txt", []byte(strings.ReplaceAll(tc.file, "\n", "\r\n"))); err != nil {
+				t.Fatalf("the same statement with other bytes must replay: %v", err)
+			}
+			if n := count(t, admin, `select count(*) from bank_statement`); n != 1 {
+				t.Fatalf("statements = %d, want 1: a legacy-id row was imported again", n)
+			}
+		})
+	}
+}
+
+func TestImportStatementFile_LegacyIDDoesNotSwallowAnotherDay(t *testing.T) {
+	s, admin := newStore(t)
+	le := ids.New()
+	ctx := ctxFor(1, le)
+	acct := activeAccount(t, s, ctx, le)
+	day := func(date string) []byte {
+		return []byte(":20:DAILY\n:25:" + testIBAN + "\n:60F:C" + date + "EUR1000,00\n:62F:C" + date + "EUR1000,00\n")
+	}
+	if err := s.ImportStatementFile(ctx, acct.ID, "sta.txt", day("261021")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(context.Background(), `update bank_statement set statement_id = 'DAILY'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ImportStatementFile(ctx, acct.ID, "sta.txt", day("261022")); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, admin, `select count(*) from bank_statement`); n != 2 {
+		t.Fatalf("statements = %d, want one per day", n)
+	}
+}

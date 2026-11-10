@@ -374,7 +374,9 @@ func (s *Postgres) importStatement(ctx context.Context, in StatementImport) (Imp
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if existing, err := scanStatement(tx.QueryRow(ctx, `select `+statementColumns+` from bank_statement where tenant_id = $1 and bank_account_id = $2 and statement_id = $3`, p.TenantID, in.BankAccountID, in.Parsed.StatementID)); err == nil {
+		if existing, err := scanStatement(tx.QueryRow(ctx, `select `+statementColumns+` from bank_statement where tenant_id = $1 and bank_account_id = $2
+			and (statement_id = $3 or (statement_id = $4 and opening_date = $5::date and closing_date = $6::date)) order by statement_id = $3 desc limit 1`,
+			p.TenantID, in.BankAccountID, in.Parsed.StatementID, in.Parsed.LegacyID, in.Parsed.OpeningDate, in.Parsed.ClosingDate)); err == nil {
 			closing, err := parseAmount(domain.CodeStatementBalance, "stored closing balance", existing.ClosingBalance)
 			if err != nil {
 				return err

@@ -172,3 +172,15 @@ func TestParseStatements_DetectsFormat(t *testing.T) {
 		t.Fatalf("line = %d, want 4 (%v)", errLine(err), err)
 	}
 }
+
+func TestParseMT940_LegacyIDIsTheOldReferenceAndNumber(t *testing.T) {
+	for in, want := range map[string]string{
+		":20:REF\n:25:DE89370400440532013000\n:28C:00007/001\n:60F:C261021EUR1,00\n:62F:C261021EUR1,00\n": "REF/00007/001",
+		":20:REF\n:25:DE89370400440532013000\n:60F:C261021EUR1,00\n:62F:C261021EUR1,00\n":                 "REF",
+	} {
+		st, err := ParseMT940([]byte(in))
+		if err != nil || st[0].LegacyID != want {
+			t.Errorf("legacy id = %q (%v), want %q", st[0].LegacyID, err, want)
+		}
+	}
+}
