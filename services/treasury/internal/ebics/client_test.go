@@ -79,13 +79,13 @@ func TestOnboarding_StateMachineAndBankKeyConfirmation(t *testing.T) {
 		}
 
 		other := FormatDigest(KeyDigest(&e.local.a006.PublicKey))
-		if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, other, "treasurer"); !errors.Is(err, ErrKeyHashMismatch) || e.sub().State != StateKeysPending {
+		if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, other, "treasurer", e.sub().Version); !errors.Is(err, ErrKeyHashMismatch) || e.sub().State != StateKeysPending {
 			t.Fatalf("wrong E002 hash: %v, state %s", err, e.sub().State)
 		}
-		if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, ""); err == nil {
+		if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "", e.sub().Version); err == nil {
 			t.Fatal("confirmation without a named person must be refused")
 		}
-		sub, err := e.client.ConfirmBankKeys(ctx, "sub-1", strings.ToLower(strings.ReplaceAll(h.X002, " ", ":")), h.E002, "treasurer")
+		sub, err := e.client.ConfirmBankKeys(ctx, "sub-1", strings.ToLower(strings.ReplaceAll(h.X002, " ", ":")), h.E002, "treasurer", e.sub().Version)
 		if err != nil || sub.State != StateReady || !sub.KeysConfirmed || sub.ConfirmedBy != "treasurer" || sub.ConfirmedAt == nil {
 			t.Fatalf("confirm: %v, %+v", err, sub)
 		}
@@ -102,7 +102,7 @@ func TestOnboarding_TheDownloaderCannotConfirmTheBankKeys(t *testing.T) {
 	if err != nil || e.sub().FetchedBy != "alice" {
 		t.Fatalf("fetch: %v, fetched by %q", err, e.sub().FetchedBy)
 	}
-	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "alice"); !errors.Is(err, ErrFourEyes) || e.sub().State != StateKeysPending {
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "alice", e.sub().Version); !errors.Is(err, ErrFourEyes) || e.sub().State != StateKeysPending {
 		t.Fatalf("the person who fetched the keys confirming them: %v, state %s", err, e.sub().State)
 	}
 	if _, err := e.client.FetchBankKeys(ctx, "sub-1", ""); err == nil {
@@ -111,7 +111,7 @@ func TestOnboarding_TheDownloaderCannotConfirmTheBankKeys(t *testing.T) {
 	if _, err := e.client.FetchBankKeys(ctx, "sub-1", "bob"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "alice"); err != nil {
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "alice", e.sub().Version); err != nil {
 		t.Fatalf("the earlier fetcher may confirm after another person fetched again: %v", err)
 	}
 }
@@ -126,7 +126,7 @@ func TestOnboarding_TamperedBankKeyIsNeverActivated(t *testing.T) {
 		t.Fatal(err)
 	}
 	forged := FormatDigest(KeyDigest(&rsa.PublicKey{N: new(big.Int).Add(e.bank.x002.N, big.NewInt(2)), E: 65537}))
-	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", forged, FormatDigest(KeyDigest(&e.bank.e002.PublicKey)), "treasurer"); !errors.Is(err, ErrKeyHashMismatch) {
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", forged, FormatDigest(KeyDigest(&e.bank.e002.PublicKey)), "treasurer", e.sub().Version); !errors.Is(err, ErrKeyHashMismatch) {
 		t.Fatalf("a hash that is not the downloaded key's must not confirm: %v", err)
 	}
 }
@@ -305,7 +305,7 @@ func TestPark_RefusalNeedingAPersonParksUntilUnparked(t *testing.T) {
 		if e.bank.requests != before {
 			t.Fatalf("%s: a parked subscriber still contacted the bank", code)
 		}
-		if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer"); err != nil {
+		if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer", e.sub().Version); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := e.client.Upload(context.Background(), "sub-1", "CCT", payload(50)); err != nil {
@@ -340,6 +340,24 @@ func TestUpload_FinalSegmentBackOffIsAmbiguousAndNotResent(t *testing.T) {
 	}
 	if len(e.sleeps) != 0 || len(e.bank.txns) != 1 {
 		t.Fatalf("sleeps %v, transactions %d; an upload whose last segment is unconfirmed must not be restarted", e.sleeps, len(e.bank.txns))
+	}
+}
+
+func TestUpload_TransferReplyForAnotherTransactionIsAProtocolError(t *testing.T) {
+	for name, segmentSize := range map[string]int{"middle segment": 300, "only segment": 0} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, false)
+			e.onboard()
+			e.client.SegmentSize = segmentSize
+			e.bank.replyTxID = "TX9999"
+			_, err := e.client.Upload(context.Background(), "sub-1", "CCT", payload(1200))
+			if !errors.Is(err, ErrProtocol) {
+				t.Fatalf("err = %v", err)
+			}
+			if got := errors.Is(err, bankconnect.ErrAmbiguous); got != (segmentSize == 0) {
+				t.Fatalf("ambiguous = %t: only a reply to the last segment leaves the outcome unknown", got)
+			}
+		})
 	}
 }
 

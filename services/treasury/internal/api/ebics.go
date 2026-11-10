@@ -37,14 +37,14 @@ const (
 // EBICS is the subscriber side the onboarding routes drive: the subscriber
 // store and the H004 client.
 type EBICS interface {
-	CreateEBICSSubscriber(ctx context.Context, in store.NewEBICSSubscriber) (ebics.Subscriber, error)
+	CreateEBICSSubscriber(ctx context.Context, in store.NewEBICSSubscriber, idempotencyKey string) (ebics.Subscriber, error)
 	GetSubscriber(ctx context.Context, id string) (ebics.Subscriber, error)
 	SendINI(ctx context.Context, id string) (ebics.Letter, error)
 	SendHIA(ctx context.Context, id string) (ebics.Letter, error)
 	Letter(ctx context.Context, id, order string) (ebics.Letter, error)
 	FetchBankKeys(ctx context.Context, id, actor string) (ebics.BankKeyHashes, error)
-	ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, confirmedBy string) (ebics.Subscriber, error)
-	Unpark(ctx context.Context, id, actor string) (ebics.Subscriber, error)
+	ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, confirmedBy string, version int) (ebics.Subscriber, error)
+	Unpark(ctx context.Context, id, actor string, version int) (ebics.Subscriber, error)
 }
 
 // WithEBICS enables the EBICS subscriber routes; without it they answer 503.
@@ -170,6 +170,10 @@ func (a *API) createSubscriber(w http.ResponseWriter, r *http.Request) {
 	if !a.ebicsReady(w, r) {
 		return
 	}
+	key, ok := requireKey(w, r)
+	if !ok {
+		return
+	}
 	var req createSubscriberRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -195,7 +199,7 @@ func (a *API) createSubscriber(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sub, err := a.ebics.CreateEBICSSubscriber(r.Context(), store.NewEBICSSubscriber{LegalEntityID: req.LegalEntityID, BankAccountID: req.BankAccountID,
-		HostID: req.HostID, PartnerID: req.PartnerID, UserID: req.UserID, URL: req.URL})
+		HostID: req.HostID, PartnerID: req.PartnerID, UserID: req.UserID, URL: req.URL}, key)
 	if err != nil {
 		httpx.Fail(w, r, ebicsProblem(err))
 		return
@@ -298,6 +302,10 @@ func (a *API) confirmBankKeys(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	version, ok := ifMatchVersion(w, r)
+	if !ok {
+		return
+	}
 	var req confirmBankKeysRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -307,7 +315,7 @@ func (a *API) confirmBankKeys(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"x002Hash": "the hash printed on the bank's letter is required", "e002Hash": "the hash printed on the bank's letter is required"})
 		return
 	}
-	sub, err := a.ebics.ConfirmBankKeys(r.Context(), id, req.X002Hash, req.E002Hash, user)
+	sub, err := a.ebics.ConfirmBankKeys(r.Context(), id, req.X002Hash, req.E002Hash, user, version)
 	if err != nil {
 		httpx.Fail(w, r, ebicsProblem(err))
 		return
@@ -327,7 +335,11 @@ func (a *API) unparkSubscriber(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sub, err := a.ebics.Unpark(r.Context(), id, user)
+	version, ok := ifMatchVersion(w, r)
+	if !ok {
+		return
+	}
+	sub, err := a.ebics.Unpark(r.Context(), id, user, version)
 	if err != nil {
 		httpx.Fail(w, r, ebicsProblem(err))
 		return

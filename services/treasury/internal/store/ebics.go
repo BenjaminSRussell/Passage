@@ -55,7 +55,9 @@ func scanSubscriber(row pgx.Row) (ebics.Subscriber, error) {
 	return s, err
 }
 
-func (s *Postgres) CreateEBICSSubscriber(ctx context.Context, in NewEBICSSubscriber) (ebics.Subscriber, error) {
+// CreateEBICSSubscriber registers a subscriber once per Idempotency-Key: a retry
+// with the same key and body returns the first answer.
+func (s *Postgres) CreateEBICSSubscriber(ctx context.Context, in NewEBICSSubscriber, idempotencyKey string) (ebics.Subscriber, error) {
 	p, _ := tenant.FromContext(ctx)
 	probe := ebics.Subscriber{HostID: in.HostID, PartnerID: in.PartnerID, UserID: in.UserID}
 	if err := probe.Validate(); err != nil {
@@ -64,15 +66,21 @@ func (s *Postgres) CreateEBICSSubscriber(ctx context.Context, in NewEBICSSubscri
 	if err := bankconnect.CheckURL(in.URL); err != nil {
 		return ebics.Subscriber{}, unprocessable(CodeSubscriberInvalid, err.Error())
 	}
-	id := ids.New()
-	a006, x002, e002 := ebics.KeyNames(p.TenantID, in.LegalEntityID, id)
+	reqHash, err := requestHash("create-ebics-subscriber", in)
+	if err != nil {
+		return ebics.Subscriber{}, err
+	}
 	var out ebics.Subscriber
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanSubscriber(tx.QueryRow(ctx, `insert into ebics_subscriber
-			(tenant_id, id, legal_entity_id, bank_account_id, host_id, partner_id, user_id, url, a006_key_name, x002_key_name, e002_kv_path)
-			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning `+subscriberColumns,
-			p.TenantID, id, in.LegalEntityID, in.BankAccountID, in.HostID, in.PartnerID, in.UserID, in.URL, a006, x002, e002))
+		out, err = idempotent(ctx, tx, idempotencyKey, reqHash, func() (ebics.Subscriber, error) {
+			id := ids.New()
+			a006, x002, e002 := ebics.KeyNames(p.TenantID, in.LegalEntityID, id)
+			return scanSubscriber(tx.QueryRow(ctx, `insert into ebics_subscriber
+				(tenant_id, id, legal_entity_id, bank_account_id, host_id, partner_id, user_id, url, a006_key_name, x002_key_name, e002_kv_path)
+				values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning `+subscriberColumns,
+				p.TenantID, id, in.LegalEntityID, in.BankAccountID, in.HostID, in.PartnerID, in.UserID, in.URL, a006, x002, e002))
+		})
 		return err
 	})
 	var pgErr *pgconn.PgError
@@ -102,7 +110,24 @@ func (s *Postgres) GetSubscriber(ctx context.Context, id string) (ebics.Subscrib
 // UpdateSubscriber writes the mutable state of a subscriber (state, pinned key
 // versions, the bank's keys, who fetched and who confirmed them, parking) when its version is still the stored one.
 func (s *Postgres) UpdateSubscriber(ctx context.Context, sub ebics.Subscriber) (ebics.Subscriber, error) {
+	return s.writeSubscriber(ctx, sub, "")
+}
+
+// UnparkSubscriber clears the parking of sub and appends the audit row (who,
+// when, which refusal) in the same transaction.
+func (s *Postgres) UnparkSubscriber(ctx context.Context, sub ebics.Subscriber, actor string) (ebics.Subscriber, error) {
+	if actor == "" {
+		return ebics.Subscriber{}, errors.New("who unparked the subscriber must be recorded")
+	}
+	return s.writeSubscriber(ctx, sub, actor)
+}
+
+func (s *Postgres) writeSubscriber(ctx context.Context, sub ebics.Subscriber, unparkedBy string) (ebics.Subscriber, error) {
 	p, _ := tenant.FromContext(ctx)
+	parkedCode, parkedText := sub.ParkedCode, sub.ParkedText
+	if unparkedBy != "" {
+		sub.ParkedCode, sub.ParkedText = "", ""
+	}
 	var out ebics.Subscriber
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
@@ -112,6 +137,12 @@ func (s *Postgres) UpdateSubscriber(ctx context.Context, sub ebics.Subscriber) (
 			where tenant_id = $1 and id = $2 and version = $11 returning `+subscriberColumns,
 			p.TenantID, sub.ID, string(sub.State), sub.BankX002, sub.BankE002, sub.KeysConfirmed, sub.ConfirmedBy, sub.ConfirmedAt, sub.ParkedCode, sub.ParkedText, sub.Version,
 			sub.A006Version, sub.X002Version, sub.FetchedBy))
+		if err != nil || unparkedBy == "" {
+			return err
+		}
+		_, err = tx.Exec(ctx, `insert into ebics_subscriber_audit (tenant_id, id, legal_entity_id, subscriber_id, event, actor, parked_code, parked_text)
+			values ($1, $2, $3, $4, 'unparked', $5, nullif($6, ''), nullif($7, ''))`,
+			p.TenantID, ids.New(), out.LegalEntityID, out.ID, unparkedBy, parkedCode, parkedText)
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -79,9 +79,10 @@ func (m memoryKeys) DecryptE002(_ context.Context, wrapped []byte) ([]byte, erro
 }
 
 type memStore struct {
-	mu     sync.Mutex
-	subs   map[string]Subscriber
-	locked map[string]bool
+	mu      sync.Mutex
+	subs    map[string]Subscriber
+	locked  map[string]bool
+	unparks []string
 }
 
 func (m *memStore) GetSubscriber(_ context.Context, id string) (Subscriber, error) {
@@ -92,6 +93,17 @@ func (m *memStore) GetSubscriber(_ context.Context, id string) (Subscriber, erro
 		return Subscriber{}, fmt.Errorf("subscriber %s not found", id)
 	}
 	return s, nil
+}
+
+func (m *memStore) UnparkSubscriber(ctx context.Context, s Subscriber, actor string) (Subscriber, error) {
+	s.ParkedCode, s.ParkedText = "", ""
+	out, err := m.UpdateSubscriber(ctx, s)
+	if err == nil {
+		m.mu.Lock()
+		m.unparks = append(m.unparks, actor)
+		m.mu.Unlock()
+	}
+	return out, err
 }
 
 func (m *memStore) UpdateSubscriber(_ context.Context, s Subscriber) (Subscriber, error) {
@@ -159,6 +171,7 @@ type fakeBank struct {
 	verifiedRequests int
 	receipts         []string
 	tamper           func([]byte) []byte
+	replyTxID        string
 	dated            []datedStatement
 	ranges           []string
 }
@@ -412,6 +425,13 @@ func (b *fakeBank) downloadReply(tx *bankTxn, n int, wrapped []byte) []byte {
 		"<DataTransfer>"+info+"<OrderData>"+tx.served[n-1]+"</OrderData></DataTransfer>")
 }
 
+func (b *fakeBank) replyTxStatic() string {
+	if b.replyTxID == "" {
+		return ""
+	}
+	return "<TransactionID>" + b.replyTxID + "</TransactionID>"
+}
+
 func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 	tx := b.txns[header.path("static", "TransactionID").content()]
 	if tx == nil {
@@ -437,7 +457,7 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 	}
 	tx.got = append(tx.got, root.path("body", "DataTransfer", "OrderData").content())
 	if !last {
-		return b.signed("000000", "000000", "", "<TransactionPhase>Transfer</TransactionPhase>", "")
+		return b.signed("000000", "000000", b.replyTxStatic(), "<TransactionPhase>Transfer</TransactionPhase>", "")
 	}
 	enc, err := base64.StdEncoding.DecodeString(strings.Join(tx.got, ""))
 	if err != nil {
@@ -453,7 +473,7 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 		return b.refuse("091301")
 	}
 	b.orders = append(b.orders, receivedOrder{orderType: tx.orderType, data: plain})
-	return b.signed("000000", "000000", "", "<TransactionPhase>Transfer</TransactionPhase><OrderID>A"+tx.id+"</OrderID>", "")
+	return b.signed("000000", "000000", b.replyTxStatic(), "<TransactionPhase>Transfer</TransactionPhase><OrderID>A"+tx.id+"</OrderID>", "")
 }
 
 type fakeVault struct {
@@ -629,7 +649,7 @@ func (e *env) onboard() {
 	if err != nil {
 		e.t.Fatalf("HPB: %v", err)
 	}
-	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "treasurer"); err != nil {
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "treasurer", e.sub().Version); err != nil {
 		e.t.Fatalf("confirm: %v", err)
 	}
 }

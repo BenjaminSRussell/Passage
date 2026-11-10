@@ -912,10 +912,12 @@ paths:
       operationId: createEbicsSubscriber
       summary: Register an EBICS user at a bank for one bank account
       description: >-
-        The Vault key names are derived by the service from the tenant, legal entity and subscriber id and cannot be chosen by the caller;
+        A retry with the same Idempotency-Key returns the first subscriber (422 when the key was used with another body). The Vault key names are derived by the service from the tenant, legal entity and subscriber id and cannot be chosen by the caller;
         no key material passes through the API. The subscriber starts in NEW.
         TRS-0496 when host, partner and user exist already or the bank account has a subscriber, TRS-0497 for an unacceptable id or URL, 503 TRS-0502 when EBICS is not enabled.
       x-passage-duty: treasury.ebics.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1029,6 +1031,7 @@ paths:
       x-passage-duty: treasury.ebics.approve
       parameters:
         - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
@@ -1048,15 +1051,19 @@ paths:
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/ebics-subscribers/{id}:unpark:
     post:
       operationId: unparkEbicsSubscriber
       summary: Let a parked subscriber transact again after a person reviewed the bank's refusal
-      description: 409 TRS-0498 when the subscriber is not parked. The authenticated user is logged.
+      description: >-
+        409 TRS-0498 when the subscriber is not parked. The authenticated user and the time are written to an append-only audit row
+        in the same transaction. Needs If-Match with the subscriber's ETag (428 without it, 412 when stale).
       x-passage-duty: treasury.ebics.approve
       parameters:
         - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
           description: Subscriber
@@ -1069,6 +1076,7 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/ebics-subscribers/{id}/letters/{order}:
     get:

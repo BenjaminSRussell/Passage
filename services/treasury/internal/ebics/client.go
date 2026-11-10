@@ -393,10 +393,13 @@ func normalizeHash(s string) string {
 // ConfirmBankKeys is the explicit step that activates a subscriber: the hashes
 // the bank printed on its own letter must equal the hashes of the keys HPB
 // delivered, recomputed here from the stored keys. BANK_KEYS_PENDING -> READY.
-func (c *Client) ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, confirmedBy string) (Subscriber, error) {
+func (c *Client) ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, confirmedBy string, version int) (Subscriber, error) {
 	sub, err := c.Store.GetSubscriber(ctx, id)
 	if err != nil {
 		return Subscriber{}, err
+	}
+	if sub.Version != version {
+		return Subscriber{}, ErrVersionConflict
 	}
 	if err := sub.requireState(StateKeysPending); err != nil {
 		return Subscriber{}, err
@@ -424,10 +427,11 @@ func (c *Client) ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, co
 	return c.Store.UpdateSubscriber(ctx, sub)
 }
 
-// Unpark lets a parked subscriber transact again after a person (actor, who is
-// logged) has dealt with the refusal that parked it. A subscriber that is not
-// parked is ErrBadState.
-func (c *Client) Unpark(ctx context.Context, id, actor string) (Subscriber, error) {
+// Unpark lets a parked subscriber transact again after a person (actor) has
+// dealt with the refusal that parked it; the store records who and when in the
+// same transaction. version is the subscriber version the person saw. A
+// subscriber that is not parked is ErrBadState.
+func (c *Client) Unpark(ctx context.Context, id, actor string, version int) (Subscriber, error) {
 	if actor == "" {
 		return Subscriber{}, errors.New("ebics: who unparked the subscriber must be recorded")
 	}
@@ -435,12 +439,14 @@ func (c *Client) Unpark(ctx context.Context, id, actor string) (Subscriber, erro
 	if err != nil {
 		return Subscriber{}, err
 	}
+	if sub.Version != version {
+		return Subscriber{}, ErrVersionConflict
+	}
 	if sub.ParkedCode == "" {
 		return Subscriber{}, fmt.Errorf("%w: subscriber is not parked", ErrBadState)
 	}
 	slog.WarnContext(ctx, "ebics subscriber unparked", "subscriber", id, "actor", actor, "code", sub.ParkedCode)
-	sub.ParkedCode, sub.ParkedText = "", ""
-	return c.Store.UpdateSubscriber(ctx, sub)
+	return c.Store.UnparkSubscriber(ctx, sub, actor)
 }
 
 func (c *Client) ready(ctx context.Context, id string) (Subscriber, Keys, *rsa.PublicKey, *rsa.PublicKey, error) {
@@ -564,6 +570,13 @@ func (c *Client) uploadOnce(ctx context.Context, sub Subscriber, keys Keys, bx, 
 		reply, err := c.exchange(ctx, sub, keys, bx, signable{doc: doc, lastOfUpload: last})
 		if err != nil {
 			return UploadReceipt{}, err
+		}
+		if reply.txID != "" && reply.txID != r.txID {
+			mismatch := fmt.Errorf("ebics upload: %w: transfer reply carries transaction %q, expected %q", ErrProtocol, reply.txID, r.txID)
+			if last {
+				return UploadReceipt{}, fmt.Errorf("%w: %w", bankconnect.ErrAmbiguous, mismatch)
+			}
+			return UploadReceipt{}, mismatch
 		}
 		if reply.orderID != "" {
 			receipt.OrderID = reply.orderID

@@ -45,6 +45,7 @@ var (
 	ErrVersionConflict = errors.New("ebics subscriber was changed by someone else")
 	ErrBadState        = errors.New("ebics subscriber is not in a state that allows this step")
 	ErrKeyHashMismatch = errors.New("bank key hash does not match the hash the bank confirmed")
+	ErrProtocol        = errors.New("ebics: bank reply breaks the protocol")
 	ErrFourEyes        = errors.New("ebics: the person who downloaded the bank keys cannot also confirm them")
 )
 
@@ -86,6 +87,7 @@ type Subscriber struct {
 type SubscriberStore interface {
 	GetSubscriber(ctx context.Context, id string) (Subscriber, error)
 	UpdateSubscriber(ctx context.Context, s Subscriber) (Subscriber, error)
+	UnparkSubscriber(ctx context.Context, s Subscriber, actor string) (Subscriber, error)
 }
 
 var ebicsID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,35}$`)

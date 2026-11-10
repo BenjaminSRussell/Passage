@@ -50,10 +50,35 @@ create policy ebics_subscriber_legal_entity_scope on ebics_subscriber as restric
   using (current_setting('passage.legal_entity_scopes', true) = '*'
          or legal_entity_id::text = any(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
+-- Append-only record of who unparked a subscriber and when, written in the same transaction as the unpark.
+create table ebics_subscriber_audit (
+  tenant_id uuid not null,
+  id uuid not null,
+  legal_entity_id uuid not null,
+  subscriber_id uuid not null,
+  event text not null check (event in ('unparked')),
+  actor text not null check (actor <> ''),
+  parked_code text,
+  parked_text text,
+  created_at timestamptz not null default now(),
+  primary key (tenant_id, id),
+  foreign key (tenant_id, subscriber_id) references ebics_subscriber (tenant_id, id)
+);
+create index ix_ebics_subscriber_audit_subscriber on ebics_subscriber_audit (tenant_id, subscriber_id, created_at);
+alter table ebics_subscriber_audit enable row level security;
+alter table ebics_subscriber_audit force row level security;
+create policy ebics_subscriber_audit_tenant_access on ebics_subscriber_audit as permissive
+  using (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  with check (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+create policy ebics_subscriber_audit_legal_entity_scope on ebics_subscriber_audit as restrictive
+  using (current_setting('passage.legal_entity_scopes', true) = '*'
+         or legal_entity_id::text = any(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON ebics_subscriber TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT ON ebics_subscriber_audit TO passage_app';
   END IF;
 END
 $$;

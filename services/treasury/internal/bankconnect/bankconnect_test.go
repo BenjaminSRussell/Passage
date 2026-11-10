@@ -295,7 +295,7 @@ func TestBankHTTPClient_RefusesLoopbackPeerAndRedirects(t *testing.T) {
 
 	for _, target := range []string{srv.URL, strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)} {
 		if resp, err := client.Post(target, "text/xml", strings.NewReader("<x/>")); err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatalf("POST %s reached a loopback peer", target)
 		}
 	}
@@ -309,7 +309,7 @@ func TestBankHTTPClient_RefusesLoopbackPeerAndRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusTemporaryRedirect || hits.Load() != 1 {
 		t.Fatalf("redirect was followed: status %d, hits %d", resp.StatusCode, hits.Load())
 	}

@@ -30,11 +30,11 @@ func TestEBICSSubscriber_LifecyclePersistsKeysAndRefusesStaleWrites(t *testing.T
 	le := ids.New()
 	ctx := ctxFor(1, le)
 	acct := activeAccount(t, s, ctx, le)
-	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le))
+	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le), "")
 	if err != nil || sub.State != ebics.StateNew || sub.Version != 1 {
 		t.Fatalf("create: %v %+v", err, sub)
 	}
-	if _, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le)); problemCode(t, err) != CodeSubscriberDuplicate {
+	if _, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le), ""); problemCode(t, err) != CodeSubscriberDuplicate {
 		t.Fatalf("duplicate: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestEBICSSubscriber_ReadyNeedsConfirmedBankKeys(t *testing.T) {
 	s, _ := newStore(t)
 	le := ids.New()
 	ctx := ctxFor(1, le)
-	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(activeAccount(t, s, ctx, le), le))
+	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(activeAccount(t, s, ctx, le), le), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestEBICSSubscriber_KeyNamesAreDerivedFromTenantLegalEntityAndId(t *testing
 	s, admin := newStore(t)
 	le := ids.New()
 	ctx := ctxFor(1, le)
-	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(activeAccount(t, s, ctx, le), le))
+	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(activeAccount(t, s, ctx, le), le), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestEBICSSubscriber_KeyNamesAreDerivedFromTenantLegalEntityAndId(t *testing
 	other := ctxFor(2, "")
 	otherLE := ids.New()
 	otherAcct := activeAccount(t, s, ctxFor(2, otherLE), otherLE)
-	theirs, err := s.CreateEBICSSubscriber(other, newSubscriber(otherAcct, otherLE))
+	theirs, err := s.CreateEBICSSubscriber(other, newSubscriber(otherAcct, otherLE), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,12 +143,12 @@ func TestEBICSSubscriber_OneSubscriberPerBankAccount(t *testing.T) {
 	le := ids.New()
 	ctx := ctxFor(1, le)
 	acct := activeAccount(t, s, ctx, le)
-	if _, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le)); err != nil {
+	if _, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le), ""); err != nil {
 		t.Fatal(err)
 	}
 	second := newSubscriber(acct, le)
 	second.UserID = "USER2"
-	if _, err := s.CreateEBICSSubscriber(ctx, second); problemCode(t, err) != CodeSubscriberDuplicate {
+	if _, err := s.CreateEBICSSubscriber(ctx, second, ""); problemCode(t, err) != CodeSubscriberDuplicate {
 		t.Fatalf("a second subscriber for the same bank account: %v", err)
 	}
 }
@@ -160,7 +160,7 @@ func TestEBICSSubscriber_IsolatedByTenantAndLegalEntityAndValidated(t *testing.T
 	le := ids.New()
 	ctx := ctxFor(1, le)
 	acct := activeAccount(t, s, ctx, le)
-	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le))
+	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,17 +176,17 @@ func TestEBICSSubscriber_IsolatedByTenantAndLegalEntityAndValidated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateEBICSSubscriber(ctxFor(1, ""), NewEBICSSubscriber{LegalEntityID: ids.New(), BankAccountID: unbound.ID, HostID: "H", PartnerID: "P", UserID: "U2", URL: "https://b.example"}); problemCode(t, err) != CodeAccountNotFound {
+	if _, err := s.CreateEBICSSubscriber(ctxFor(1, ""), NewEBICSSubscriber{LegalEntityID: ids.New(), BankAccountID: unbound.ID, HostID: "H", PartnerID: "P", UserID: "U2", URL: "https://b.example"}, ""); problemCode(t, err) != CodeAccountNotFound {
 		t.Fatalf("account of another entity: %v", err)
 	}
 	bad := newSubscriber(acct, le)
 	bad.UserID = "USER 2"
-	if _, err := s.CreateEBICSSubscriber(ctx, bad); problemCode(t, err) != CodeSubscriberInvalid {
+	if _, err := s.CreateEBICSSubscriber(ctx, bad, ""); problemCode(t, err) != CodeSubscriberInvalid {
 		t.Fatalf("bad user id: %v", err)
 	}
 	bad = newSubscriber(acct, le)
 	bad.UserID, bad.URL = "USER3", "http://bank.example/ebics"
-	if _, err := s.CreateEBICSSubscriber(ctx, bad); problemCode(t, err) != CodeSubscriberInvalid {
+	if _, err := s.CreateEBICSSubscriber(ctx, bad, ""); problemCode(t, err) != CodeSubscriberInvalid {
 		t.Fatalf("plain http to a remote bank: %v", err)
 	}
 }
@@ -265,7 +265,7 @@ func TestEBICSSubscriber_PollableAndByAccount(t *testing.T) {
 	le := ids.New()
 	ctx := ctxFor(1, le)
 	acct := activeAccount(t, s, ctx, le)
-	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le))
+	sub, err := s.CreateEBICSSubscriber(ctx, newSubscriber(acct, le), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,5 +386,58 @@ func TestImportStatementFile_LegacyIDDoesNotSwallowAnotherDay(t *testing.T) {
 	}
 	if n := count(t, admin, `select count(*) from bank_statement`); n != 2 {
 		t.Fatalf("statements = %d, want one per day", n)
+	}
+}
+
+func TestEBICSSubscriber_CreateIsIdempotentAndUnparkIsAudited(t *testing.T) {
+	s, admin := newStore(t)
+	le := ids.New()
+	ctx := ctxFor(1, le)
+	acct := activeAccount(t, s, ctx, le)
+	in := newSubscriber(acct, le)
+	first, err := s.CreateEBICSSubscriber(ctx, in, "key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.CreateEBICSSubscriber(ctx, in, "key-1")
+	if err != nil || again.ID != first.ID || again.A006Key != first.A006Key {
+		t.Fatalf("a retry with the same Idempotency-Key must return the first subscriber: %v %+v", err, again)
+	}
+	if n := count(t, admin, `select count(*) from ebics_subscriber`); n != 1 {
+		t.Fatalf("subscribers = %d", n)
+	}
+	other := in
+	other.UserID = "OTHERUSER"
+	if _, err := s.CreateEBICSSubscriber(ctx, other, "key-1"); problemCode(t, err) != CodeIdempotencyReuse {
+		t.Fatalf("the key reused with another body: %v", err)
+	}
+
+	first.ParkedCode, first.ParkedText = "091301", "signature"
+	parked, err := s.UpdateSubscriber(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UnparkSubscriber(ctx, parked, ""); err == nil {
+		t.Fatal("an unpark without a named person must be refused")
+	}
+	stale := parked
+	stale.Version--
+	if _, err := s.UnparkSubscriber(ctx, stale, "treasurer-1"); !errors.Is(err, ebics.ErrVersionConflict) {
+		t.Fatalf("stale unpark: %v", err)
+	}
+	if n := count(t, admin, `select count(*) from ebics_subscriber_audit`); n != 0 {
+		t.Fatalf("a refused unpark left %d audit rows", n)
+	}
+	cleared, err := s.UnparkSubscriber(ctx, parked, "treasurer-1")
+	if err != nil || cleared.ParkedCode != "" {
+		t.Fatalf("unpark: %v %+v", err, cleared)
+	}
+	var actor, code string
+	var at time.Time
+	if err := admin.QueryRow(context.Background(), `select actor, parked_code, created_at from ebics_subscriber_audit where subscriber_id = $1 and event = 'unparked'`, parked.ID).Scan(&actor, &code, &at); err != nil {
+		t.Fatalf("audit row: %v", err)
+	}
+	if actor != "treasurer-1" || code != "091301" || time.Since(at) > time.Minute {
+		t.Fatalf("audit row = %s %s %s", actor, code, at)
 	}
 }

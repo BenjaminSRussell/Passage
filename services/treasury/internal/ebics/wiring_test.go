@@ -154,7 +154,7 @@ func TestPoller_SkipsNewAndParkedSubscribersAndNeverContactsTheBank(t *testing.T
 	if n, err := p.Once(context.Background()); err != nil || n != 0 || e.bank.requests != before {
 		t.Fatalf("parked: n=%d err=%v; the bank was contacted %d more times", n, err, e.bank.requests-before)
 	}
-	if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer"); err != nil {
+	if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer", e.sub().Version); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := p.Once(context.Background()); err != nil || n != 2 {
@@ -181,7 +181,7 @@ func TestPoller_ParkedForLongerThanAnyWindow_NothingIsSkippedAfterUnpark(t *test
 			t.Fatalf("parked: n=%d err=%v", n, err)
 		}
 	}
-	if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer"); err != nil {
+	if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer", e.sub().Version); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := p.Once(context.Background()); err != nil || n != 4 || len(sink.files) != 4 {
@@ -194,6 +194,23 @@ func TestPoller_ParkedForLongerThanAnyWindow_NothingIsSkippedAfterUnpark(t *test
 	}
 	if n, err := p.Once(context.Background()); err != nil || n != 0 {
 		t.Fatalf("receipted files must not come again: n=%d err=%v", n, err)
+	}
+}
+
+func TestUnpark_RecordsWhoAndRefusesAStaleVersion(t *testing.T) {
+	e := newEnv(t, false)
+	e.onboard()
+	e.bank.failNext("init:C53", "091301", 1)
+	_, _ = newPoller(e, &sinkLog{}).Once(context.Background())
+	seen := e.sub().Version
+	if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer", seen-1); !errors.Is(err, ErrVersionConflict) || e.sub().ParkedCode == "" {
+		t.Fatalf("a stale version must not unpark: %v", err)
+	}
+	if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer", seen); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.store.unparks) != 1 || e.store.unparks[0] != "treasurer" || e.sub().ParkedCode != "" {
+		t.Fatalf("unparks %v parked %q", e.store.unparks, e.sub().ParkedCode)
 	}
 }
 
@@ -366,10 +383,10 @@ func TestUnpark_NeedsAParkedSubscriberAndAnActor(t *testing.T) {
 	e := newEnv(t, false)
 	e.onboard()
 	ctx := context.Background()
-	if _, err := e.client.Unpark(ctx, "sub-1", "treasurer"); !errors.Is(err, ErrBadState) {
+	if _, err := e.client.Unpark(ctx, "sub-1", "treasurer", e.sub().Version); !errors.Is(err, ErrBadState) {
 		t.Fatalf("unparking a subscriber that is not parked: %v", err)
 	}
-	if _, err := e.client.Unpark(ctx, "sub-1", ""); err == nil {
+	if _, err := e.client.Unpark(ctx, "sub-1", "", e.sub().Version); err == nil {
 		t.Fatal("an unpark without a named person must be refused")
 	}
 }
@@ -408,7 +425,7 @@ func TestKeyVersion_PinnedAtInitialisationAndSignaturesIgnoreRotation(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "treasurer"); err != nil {
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "treasurer", e.sub().Version); err != nil {
 		t.Fatal(err)
 	}
 
