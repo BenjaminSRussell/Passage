@@ -17,6 +17,7 @@ import { formatDateTime, jobDriven, nextState, overdue, shortId, STATE_LABELS } 
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** The board refreshes on its own; SSE push is a later slice (PRD 4.24.19: 30 s polling is the fallback). */
 export const REFRESH_MS = 30_000;
@@ -48,7 +49,9 @@ function BoardCard({ card, busy, onMove }: CardProps) {
         </div>
         <div>
           <dt className={styles.term}>Item</dt>
-          <dd className={`${styles.value} ${styles.mono}`}>{shortId(card.itemId)}</dd>
+          <dd className={styles.value}>
+            <EntityName entity="product" id={card.itemId} fallback={shortId(card.itemId)} />
+          </dd>
         </div>
         <div>
           <dt className={styles.term}>Due</dt>

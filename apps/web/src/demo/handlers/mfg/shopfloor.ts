@@ -37,7 +37,7 @@ const downtimes: Downtime[] = [
 const andon = table<Andon>([
   { id: uid(KIND_ANDON, 1), resourceId: resourceByCode("BAL-01").id, siteId: PLANT.id, kind: "downtime", severity: "error", downtimeId: downtimes[0].id, jobId: null, detail: "Balancer drive fault E-214 while balancing MO-24618", startedAt: at(-0.06) },
   { id: uid(KIND_ANDON, 2), resourceId: resourceByCode("MCH-01").id, siteId: PLANT.id, kind: "scrap-rate", severity: "warning", downtimeId: null, jobId: null, detail: "Scrap 6.8 % over the last hour on volute housings, machined, 4 in (limit 5 %)", startedAt: at(-0.15) },
-  { id: uid(KIND_ANDON, 3), resourceId: resourceByCode("TST-01").id, siteId: PLANT.id, kind: "quality-fail", severity: "error", downtimeId: null, jobId: uid(233, 1), detail: "Hydrostatic test failed on MO-24611: seal weep at 450 psi, unit 24611-014", startedAt: at(-0.3) },
+  { id: uid(KIND_ANDON, 3), resourceId: resourceByCode("TST-01").id, siteId: PLANT.id, kind: "quality-fail", severity: "error", downtimeId: null, jobId: "JOB-24611-20", detail: "Hydrostatic test failed on MO-24611: seal weep at 450 psi, unit 24611-014", startedAt: at(-0.3) },
   { id: uid(KIND_ANDON, 4), resourceId: resourceByCode("PNT-01").id, siteId: PLANT.id, kind: "downtime", severity: "warning", downtimeId: downtimes[1].id, jobId: null, detail: "Booth idle for 58 min: waiting for 2 in pump housings to coat", startedAt: at(-0.04) },
 ]);
 
@@ -153,9 +153,10 @@ const JOB_SPECS = [
   { n: 5, order: "MO-24624", op: 10, res: "MCH-01", status: "released" as const, plan: 20, good: 0, scrap: 0, start: 0.2 },
   { n: 6, order: "MO-24608", op: 40, res: "PCK-01", status: "finished" as const, plan: 40, good: 40, scrap: 0, start: -1.9 },
 ];
-const jobs = table<Job>(
+// Job ids read as order and operation (JOB-24611-20), since the supervisor screens show them as they are.
+export const jobs = table<Job>(
   JOB_SPECS.map((j) => ({
-    id: uid(233, j.n),
+    id: `JOB-${j.order.slice(3)}-${j.op}`,
     orderRef: j.order,
     operationRef: `${j.op}`,
     resourceId: resourceByCode(j.res).id,
