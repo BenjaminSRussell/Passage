@@ -38,6 +38,25 @@ deterministic in tests.
 | `src/api/decision.ts` | Approval decision (FR-47.8): approver duty (AGT-0203), self-approval (AGT-0209), expiry recorded as REJECTED/EXPIRED (BR-47.3). Idempotent by action id with a first-writer-wins `ApprovalStore.record`; a different decision on a decided action is 409. Every store call is scoped to the caller's tenant |
 | `src/api/principal.ts` | The caller from `x-passage-tenant`, `x-passage-user`, `x-passage-duties` (401 on a missing, malformed or nil tenant), the HTTP error codes and the mapping of `AgentError` to status |
 | `src/runtime/killswitch-feed.ts` | `KillSwitchFeed`: applies each consumed `killswitch.changed` message to a worker's registry and keeps the fail-closed window open on heartbeats. A malformed message, one without an envelope tenant, or a tenant toggle addressed to another tenant throws so the consumer sends it to the DLQ |
+| `src/main.ts`, `src/config.ts`, `src/server.ts` | Process entrypoint. 12-factor config (`MCP_URL`, `DATABASE_URL`, `MIGRATE_ON_START`, `AGENTS_PROVIDER` anthropic/openai/bedrock, `AGENTS_MODEL` default `claude-sonnet-5-5`, `AGENTS_COPILOT_MODEL`, `AGENTS_MODEL_OVERRIDES` per agent, `AGENTS_RUN_TOKEN_CAP`, `AGENTS_EVAL_PASSED`, and the provider keys from the environment only), a provider factory (one adapter per model id, never built until the first run needs it), the public listener (`GET /healthz`, `GET /readyz`, the API) and the admin listener on `ADMIN_ADDR` (`/metrics`, `/healthz`). The Claude ids to choose from are `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`; nothing is hard-wired. Helm chart `charts/agent-runtime`, `Dockerfile` (build from the repository root) |
+| `src/runtime/mcp.ts` | Fetch client of `services/mcp-ts` (`POST /mcp`): `tools/list` and `tools/call` with the invoking user's bearer token and edge identity headers, plus `x-agent-run-id`. It is the engine's `ToolPort`; it holds no credentials of its own |
+| `src/runtime/service.ts`, `src/api/runs.ts` | Run start and read. `POST /api/v1/agents/{agent_id}/runs` checks the agent, `agents.invoke` and the agent's own duties (AGT-0203), the kill switch (AGT-0201), a passing eval (AGT-0204) and the month's budget (AGT-0202), opens the gateway session (502 AGT-0214 when it is down), then runs `runAgent` in the background and answers 202 with the run id. Every agent runs in suggest mode: no autonomous posting in v1. `GET /api/v1/agents/runs/{run_id}` (status, tokens, waiting approvals) and `GET .../actions` (audit rows) need `agents.run.read` and see only the caller's tenant |
+| `src/store/approvals.ts`, `src/runtime/approvals.ts`, `migrations/0002_approvals.sql` | Persisted approvals. `approval_request` holds each request under tenant RLS; `PgApprovalStore.record` is first-writer-wins (`UPDATE ... WHERE decided_at IS NULL`) behind the decision endpoint. `createPersistedApprovalPort` is the engine's approval gate: it stores the request (PII-free: tool, confidence, amount), polls for the first decision and, past `agent.approval_expiry_h`, records REJECTED/EXPIRED (BR-47.3) as `system:expiry` |
+| `src/runtime/copilot.ts`, `src/api/copilot.ts` | Copilot chat backend, `POST /api/v1/copilot/chat` (duty `mcp.copilot.use`). Up to `AGENTS_COPILOT_MAX_TURNS` model turns with read tools only (`get`, `list`, `search`): each call goes to the gateway as the user, results are redacted and fed back. A tool outside the user's allowed set is answered AGT-0203 and never called (BR-47.11); a knowledge answer must pass the 0.75 citation gate or it is AGT-0212; answers are cached per tenant, user, duty set and mode for 5 minutes. A budget hold is reserved and settled per turn, and each turn is one audited run of agent `copilot` with an action row per tool call. `Accept: text/event-stream` gets `token` frames and one `done` frame (the panel's contract); anything else gets JSON |
+
+## Configuration
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `DATABASE_URL` | Postgres, role `passage_app` (required) | |
+| `MCP_URL` | Base URL of the MCP gateway (required) | |
+| `AGENTS_PROVIDER` | `anthropic`, `openai` (OpenAI-compatible, Azure) or `bedrock` | `anthropic` |
+| `AGENTS_MODEL`, `AGENTS_COPILOT_MODEL`, `AGENTS_MODEL_OVERRIDES` | Model ids; the overrides are a JSON object of agent id to model id | `claude-sonnet-5-5` |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` + `AGENTS_OPENAI_BASE_URL`, `AWS_REGION` + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | Provider credentials, from a secret; a missing one fails the first run naming the variable | |
+| `AGENTS_RUN_TOKEN_CAP`, `AGENTS_COPILOT_TOKEN_CAP`, `AGENTS_COPILOT_MAX_TURNS` | Per-run and per-chat token caps, chat turns | 20000, 8000, 4 |
+| `AGENTS_EVAL_PASSED` | `agent@version` pairs whose evaluation passed, comma separated; others answer AGT-0204 | none |
+| `AGENTS_APPROVAL_EXPIRY_H`, `AGENTS_SELF_APPROVAL_LIMIT`, `AGENTS_SELF_APPROVAL_CURRENCY` | BR-47.3 expiry (1 to 240 hours) and the self-approval limit | 72, 0, USD |
+| `HTTP_ADDR`, `ADMIN_ADDR`, `MIGRATE_ON_START`, `AGENTS_DB_POOL` | Listeners and database | `0.0.0.0:8080`, `0.0.0.0:9090`, off, 10 |
 
 ## Run and test
 
@@ -48,6 +67,8 @@ npm test          # vitest: engine, domain and redaction tests
 npm run typecheck
 npm run build
 ```
+
+Postgres-backed tests (`approvals-pg`, `budget-store`) run when `PASSAGE_TEST_DATABASE_URL` (owner) and `PASSAGE_TEST_APP_DATABASE_URL` (`passage_app`) are set, as in CI; without them they are skipped.
 
 The tests run without a database or network. Ports are faked in `test/fakes.ts`.
 CI runs typecheck, tests and build for this package, `services/mcp-ts` and
@@ -68,7 +89,7 @@ rejected with AGT-0202 and no provider call, tenants isolated).
 - FR-47.5 to 47.7 agent definitions: `defaultCatalog` in `src/agents/catalog.ts` builds version 1 of the five agents (prompts, read and propose tools only, required duties); wiring them into the runtime is not built
 - BR-47.9 provider failover: `createFailoverProvider` in `src/providers/failover.ts`; only outages (5xx, timeouts, transport errors) count, a rejected request never fails over
 - FR-47.12 kill switch: `KillSwitchRegistry` and the `killswitch.changed` payload; the engine checks it before the provider call (AC-47.6). The toggle and status endpoints and the worker-side feed are built; the Kafka consumer that drives the feed and the outbox writer behind `publish` are not
-- FR-47.8 approval decision: the endpoint and its rules are built against the `ApprovalStore` port; the `agent_action` table behind it is not
+- FR-47.8 approval decision: the endpoint and its rules run against `PgApprovalStore` (`approval_request`, migration 0002)
 - AC-47.4 cost guard: `budgetThresholdEvent` fires once when the budget moves into SOFT (80%) or HARD (100%). The event is the alert; routing it to a pager is the alerting consumer's job
 - FR-47.14 knowledge retrieval: hybrid fusion and the 0.75 citation gate (AGT-0212) in `src/domain/knowledge.ts`; the search tool and index are not built
 - 9.47.9 reconciliation: `reconcileRuns` compares billed and recorded tokens within 1%; the daily job is not built
@@ -87,7 +108,7 @@ rejected with AGT-0202 and no provider call, tenants isolated).
 | `AGT-0210` | Unredacted PII detected before a provider call or storage; the run fails, except that a kill still ends KILLED and a tool call that already committed still ends COMMITTED |
 | `AGT-0206` | Provider unavailable (transport, timeout, 5xx), rate-limited or rejected (4xx), or an unusable response; the run fails. Only the first group counts towards failover |
 | `AGT-0212` | No knowledge source reaches citation similarity 0.75; the copilot says so instead of guessing |
-| `AGT-0214` | A tool call failed; 4xx is not retried |
+| `AGT-0214` | A tool call failed; 4xx is not retried. Also 502 when the MCP gateway cannot be reached at run start |
 | `AGT-0400` | Malformed request: body not a JSON object, unknown field or invalid value |
 | `AGT-0401` | The edge did not identify a tenant and user |
 | `AGT-0403` | A tenant administrator toggled another tenant's kill switch |
