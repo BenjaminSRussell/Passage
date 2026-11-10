@@ -12,7 +12,7 @@ create table ebics_subscriber (
   host_id text not null check (host_id ~ '^[A-Za-z0-9._-]{1,35}$'),
   partner_id text not null check (partner_id ~ '^[A-Za-z0-9._-]{1,35}$'),
   user_id text not null check (user_id ~ '^[A-Za-z0-9._-]{1,35}$'),
-  url text not null check (url ~ '^https://' or url ~ '^http://(localhost|127\.0\.0\.1|\[::1\])(:|/|$)'),
+  url text not null check (url ~ '^https://'),
   a006_key_name text not null,
   x002_key_name text not null,
   e002_kv_path text not null,

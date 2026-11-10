@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,11 @@ import (
 
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 )
+
+func TestMain(m *testing.M) {
+	bankconnect.AllowLoopback(true)
+	os.Exit(m.Run())
+}
 
 var (
 	keyOnce sync.Once
@@ -252,7 +258,7 @@ func (b *fakeBank) unsecured(root *xnode) []byte {
 	if err != nil {
 		return b.keyMgmt("091010", "", "")
 	}
-	return b.keyMgmt(CodeOK, CodeOK, "")
+	return b.keyMgmt("000000", "000000", "")
 }
 
 func (b *fakeBank) hpb(root *xnode) []byte {
@@ -260,7 +266,7 @@ func (b *fakeBank) hpb(root *xnode) []byte {
 		return b.keyMgmt(code, "", "")
 	}
 	if !b.active || b.userX002 == nil || verifyAuthSignature(root, b.userX002) != nil {
-		return b.keyMgmt(CodeAuthFailed, "", "")
+		return b.keyMgmt("061001", "", "")
 	}
 	b.verifiedRequests++
 	data := `<?xml version="1.0" encoding="UTF-8"?><HPBResponseOrderData xmlns="` + nsH004 + `" xmlns:ds="` + nsDS + `">` +
@@ -270,7 +276,7 @@ func (b *fakeBank) hpb(root *xnode) []byte {
 	if err != nil {
 		panic(err)
 	}
-	return b.keyMgmt(CodeOK, CodeOK, `<DataTransfer><DataEncryptionInfo authenticate="true"><EncryptionPubKeyDigest Version="E002" Algorithm="`+algSHA256+`">`+b64(KeyDigest(b.userE002))+
+	return b.keyMgmt("000000", "000000", `<DataTransfer><DataEncryptionInfo authenticate="true"><EncryptionPubKeyDigest Version="E002" Algorithm="`+algSHA256+`">`+b64(KeyDigest(b.userE002))+
 		`</EncryptionPubKeyDigest><TransactionKey>`+b64(wrapped)+`</TransactionKey></DataEncryptionInfo><OrderData>`+b64(enc)+`</OrderData></DataTransfer>`)
 }
 
@@ -279,7 +285,7 @@ func (b *fakeBank) refuse(code string) []byte { return b.signed(code, code, "", 
 func (b *fakeBank) standard(root *xnode) []byte {
 	header := root.child("header")
 	if b.userX002 == nil || verifyAuthSignature(root, b.userX002) != nil {
-		return b.refuse(CodeAuthFailed)
+		return b.refuse("061001")
 	}
 	b.verifiedRequests++
 	if header.path("static", "HostID").content() != b.hostID {
@@ -293,13 +299,13 @@ func (b *fakeBank) standard(root *xnode) []byte {
 	case "Receipt":
 		tx := b.txns[header.path("static", "TransactionID").content()]
 		if tx == nil {
-			return b.refuse(CodeTxUnknown)
+			return b.refuse("091101")
 		}
 		if code := b.fault("receipt"); code != "" {
 			return b.refuse(code)
 		}
 		b.receipts = append(b.receipts, root.path("body", "TransferReceipt", "ReceiptCode").content())
-		return b.signed(CodeOK, CodeDownloadDone, "", "<TransactionPhase>Receipt</TransactionPhase>", "")
+		return b.signed("000000", "011000", "", "<TransactionPhase>Receipt</TransactionPhase>", "")
 	}
 	return b.refuse("091010")
 }
@@ -307,7 +313,7 @@ func (b *fakeBank) standard(root *xnode) []byte {
 func (b *fakeBank) initPhase(root, header *xnode) []byte {
 	digests := header.path("static", "BankPubKeyDigests")
 	if digests.child("Authentication").content() != b64(KeyDigest(&b.x002.PublicKey)) || digests.child("Encryption").content() != b64(KeyDigest(&b.e002.PublicKey)) {
-		return b.refuse(CodeBankKeyUpdate)
+		return b.refuse("091008")
 	}
 	order := header.path("static", "OrderDetails", "OrderType").content()
 	if code := b.fault("init:" + order); code != "" {
@@ -335,11 +341,11 @@ func (b *fakeBank) initPhase(root, header *xnode) []byte {
 		tx.upload, tx.key = true, key
 		tx.a006, _ = base64.StdEncoding.DecodeString(sd.path("OrderSignatureData", "SignatureValue").content())
 		tx.numSegments, _ = strconv.Atoi(header.path("static", "NumSegments").content())
-		return b.signed(CodeOK, CodeOK, "<TransactionID>"+tx.id+"</TransactionID>", "<TransactionPhase>Initialisation</TransactionPhase>", "")
+		return b.signed("000000", "000000", "<TransactionID>"+tx.id+"</TransactionID>", "<TransactionPhase>Initialisation</TransactionPhase>", "")
 	}
 	data, ok := b.served[order]
 	if !ok {
-		return b.signed(CodeOK, CodeNoDownloadData, "", "", "")
+		return b.signed("000000", "090005", "", "", "")
 	}
 	enc, wrapped, _, err := encryptOrderData(data, b.userE002)
 	if err != nil {
@@ -363,14 +369,14 @@ func (b *fakeBank) downloadReply(tx *bankTxn, n int, wrapped []byte) []byte {
 		info = `<DataEncryptionInfo authenticate="true"><EncryptionPubKeyDigest Version="E002" Algorithm="` + algSHA256 + `">` + b64(KeyDigest(b.userE002)) +
 			`</EncryptionPubKeyDigest><TransactionKey>` + b64(wrapped) + `</TransactionKey></DataEncryptionInfo>`
 	}
-	return b.signed(CodeOK, CodeOK, static, "<TransactionPhase>"+phase+"</TransactionPhase><SegmentNumber"+last+">"+strconv.Itoa(n)+"</SegmentNumber>",
+	return b.signed("000000", "000000", static, "<TransactionPhase>"+phase+"</TransactionPhase><SegmentNumber"+last+">"+strconv.Itoa(n)+"</SegmentNumber>",
 		"<DataTransfer>"+info+"<OrderData>"+tx.served[n-1]+"</OrderData></DataTransfer>")
 }
 
 func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 	tx := b.txns[header.path("static", "TransactionID").content()]
 	if tx == nil {
-		return b.refuse(CodeTxUnknown)
+		return b.refuse("091101")
 	}
 	seg, _ := strconv.Atoi(header.path("mutable", "SegmentNumber").content())
 	last := header.path("mutable", "SegmentNumber").attr("lastSegment") == "true"
@@ -381,7 +387,7 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 		return b.downloadReply(tx, seg, nil)
 	}
 	if seg != len(tx.got)+1 || last != (seg == tx.numSegments) {
-		return b.refuse(CodeTxReplay)
+		return b.refuse("091103")
 	}
 	key := "transfer:" + strconv.Itoa(seg)
 	if last {
@@ -392,7 +398,7 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 	}
 	tx.got = append(tx.got, root.path("body", "DataTransfer", "OrderData").content())
 	if !last {
-		return b.signed(CodeOK, CodeOK, "", "<TransactionPhase>Transfer</TransactionPhase>", "")
+		return b.signed("000000", "000000", "", "<TransactionPhase>Transfer</TransactionPhase>", "")
 	}
 	enc, err := base64.StdEncoding.DecodeString(strings.Join(tx.got, ""))
 	if err != nil {
@@ -405,10 +411,10 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 	once := sha256.Sum256(stripLineBreaksIndependently(plain))
 	twice := sha256.Sum256(once[:])
 	if rsa.VerifyPSS(b.userA006, crypto.SHA256, twice[:], tx.a006, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}) != nil {
-		return b.refuse(CodeSignatureFailed)
+		return b.refuse("091301")
 	}
 	b.orders = append(b.orders, receivedOrder{orderType: tx.orderType, data: plain})
-	return b.signed(CodeOK, CodeOK, "", "<TransactionPhase>Transfer</TransactionPhase><OrderID>A"+tx.id+"</OrderID>", "")
+	return b.signed("000000", "000000", "", "<TransactionPhase>Transfer</TransactionPhase><OrderID>A"+tx.id+"</OrderID>", "")
 }
 
 type fakeVault struct {

@@ -163,7 +163,7 @@ type VaultTransit struct {
 }
 
 func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) (Signature, error) {
-	if err := CheckURL(v.Addr); err != nil {
+	if err := checkOperatorURL(v.Addr); err != nil {
 		return Signature{}, err
 	}
 	if !vaultName.MatchString(keyName) {
@@ -219,8 +219,9 @@ func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) 
 	return Signature{Bytes: sig, KeyVersion: out.Data.KeyVersion}, nil
 }
 
-// CheckURL accepts https, and http only to a loopback host (local fakes).
-func CheckURL(raw string) error {
+// checkOperatorURL accepts https, and http only to a loopback host. It guards
+// URLs an operator sets (VAULT_ADDR), never URLs a caller supplies.
+func checkOperatorURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("invalid url %q", raw)

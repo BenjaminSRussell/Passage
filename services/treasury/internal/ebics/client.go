@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
@@ -59,6 +60,20 @@ type Client struct {
 	Backoff     BackoffPolicy
 	Sleep       func(context.Context, time.Duration) error
 	Now         func() time.Time
+
+	bankOnce   sync.Once
+	bankClient *http.Client
+}
+
+func (c *Client) bankHTTP() *http.Client {
+	c.bankOnce.Do(func() {
+		timeout := c.HTTPTimeout
+		if timeout <= 0 {
+			timeout = defaultHTTPTimeout
+		}
+		c.bankClient = bankconnect.BankHTTPClient(timeout)
+	})
+	return c.bankClient
 }
 
 func (c *Client) now() time.Time {
@@ -112,11 +127,7 @@ func (c *Client) post(ctx context.Context, sub Subscriber, body []byte) (raw []b
 	}
 	hc := c.HTTP
 	if hc == nil {
-		timeout := c.HTTPTimeout
-		if timeout <= 0 {
-			timeout = 60 * time.Second
-		}
-		hc = &http.Client{Timeout: timeout}
+		hc = c.bankHTTP()
 	}
 	resp, err := hc.Do(req)
 	if err != nil {

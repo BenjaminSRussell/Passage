@@ -140,11 +140,34 @@ func TestSegments_SplitOnSizeAndKeepOneForEmpty(t *testing.T) {
 	}
 }
 
+func TestReturnCodes_ConstantsMatchTheEBICS25Annex(t *testing.T) {
+	for name, c := range map[string][2]string{
+		"EBICS_OK":                            {CodeOK, "000000"},
+		"EBICS_DOWNLOAD_POSTPROCESS_DONE":     {CodeDownloadDone, "011000"},
+		"EBICS_DOWNLOAD_POSTPROCESS_SKIPPED":  {CodeDownloadSkipped, "011001"},
+		"EBICS_NO_DOWNLOAD_DATA_AVAILABLE":    {CodeNoDownloadData, "090005"},
+		"EBICS_INTERNAL_ERROR":                {CodeInternalError, "061099"},
+		"EBICS_TX_RECOVERY_SYNC":              {CodeTxRecoverySync, "061101"},
+		"EBICS_AUTHENTICATION_FAILED":         {CodeAuthFailed, "061001"},
+		"EBICS_USER_UNKNOWN":                  {CodeUserUnknown, "091003"},
+		"EBICS_BANK_PUBKEY_UPDATE_REQUIRED":   {CodeBankKeyUpdate, "091008"},
+		"EBICS_TX_UNKNOWN_TXID":               {CodeTxUnknown, "091101"},
+		"EBICS_TX_ABORT":                      {CodeTxAbort, "091102"},
+		"EBICS_TX_MESSAGE_REPLAY":             {CodeTxReplay, "091103"},
+		"EBICS_SIGNATURE_VERIFICATION_FAILED": {CodeSignatureFailed, "091301"},
+	} {
+		if c[0] != c[1] {
+			t.Errorf("%s is %s in code, %s in the annex", name, c[0], c[1])
+		}
+	}
+}
+
 func TestClassify_CodesMapToBackOffParkOrProceed(t *testing.T) {
 	for code, want := range map[string]Disposition{
-		CodeOK: Proceed, CodeDownloadDone: Proceed, CodeNoDownloadData: NoData,
-		CodeInternalError: BackOff, CodeTxAbort: BackOff, CodeTxUnknown: BackOff,
-		CodeAuthFailed: Park, CodeSignatureFailed: Park, CodeBankKeyUpdate: Park, CodeUserUnknown: Park, "999999": Park,
+		"000000": Proceed, "011000": Proceed, "011001": Proceed, "090005": NoData,
+		"061099": BackOff, "061101": BackOff, "091101": BackOff, "091102": BackOff,
+		"061001": Park, "091301": Park, "091008": Park, "091003": Park,
+		"091103": Park, "091118": Park, "091012": Park, "999999": Park,
 	} {
 		if got := Classify(code); got != want {
 			t.Errorf("%s: %s, want %s", code, got, want)

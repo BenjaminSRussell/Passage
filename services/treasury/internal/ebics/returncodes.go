@@ -29,10 +29,10 @@ const (
 	CodeAuthFailed      = "061001"
 	CodeUserUnknown     = "091003"
 	CodeBankKeyUpdate   = "091008"
-	CodeTxUnknown       = "091012"
-	CodeTxAbort         = "091013"
-	CodeTxReplay        = "091014"
-	CodeSignatureFailed = "091118"
+	CodeTxUnknown       = "091101"
+	CodeTxAbort         = "091102"
+	CodeTxReplay        = "091103"
+	CodeSignatureFailed = "091301"
 )
 
 var dispositions = map[string]Disposition{

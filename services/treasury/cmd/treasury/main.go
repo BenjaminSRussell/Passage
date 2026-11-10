@@ -45,6 +45,7 @@ func run() error {
 		}
 		maxMB = n
 	}
+	bankconnect.AllowLoopback(os.Getenv("TREASURY_ENV") == "dev")
 	vaultCfg, err := bankconnect.LoadVaultConfig(os.Getenv)
 	if err != nil {
 		return err

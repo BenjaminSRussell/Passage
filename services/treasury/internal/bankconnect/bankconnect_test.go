@@ -17,7 +17,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type fakeVault struct {
@@ -201,8 +203,79 @@ func TestURLs_PlainHTTPOnlyToLoopback(t *testing.T) {
 			t.Errorf("vault %q: err = %v", bad, err)
 		}
 	}
-	if CheckURL("https://bank.example.com/ebics") != nil || CheckURL("http://localhost:8080") != nil || CheckURL("http://[::1]:8080") != nil {
-		t.Fatal("https and loopback http must be accepted")
+}
+
+func TestCheckURL_Table(t *testing.T) {
+	cases := []struct {
+		url      string
+		dev      bool
+		wantFail bool
+	}{
+		{"https://bank.example.com/ebics", false, false},
+		{"https://203.0.113.9/ebics", false, false},
+		{"http://bank.example.com/ebics", false, true},
+		{"http://bank.example.com/ebics", true, true},
+		{"http://localhost:8080", false, true},
+		{"http://127.0.0.1:8080", false, true},
+		{"http://[::1]:8080", false, true},
+		{"https://localhost/ebics", false, true},
+		{"https://127.0.0.1/ebics", false, true},
+		{"https://[::ffff:127.0.0.1]/ebics", false, true},
+		{"https://10.0.0.5/ebics", false, true},
+		{"https://172.16.0.1/ebics", false, true},
+		{"https://192.168.1.1/ebics", false, true},
+		{"https://169.254.169.254/latest", false, true},
+		{"https://[fe80::1]/ebics", false, true},
+		{"https://[fd00::1]/ebics", false, true},
+		{"https://100.64.0.1/ebics", false, true},
+		{"https://0.0.0.0/ebics", false, true},
+		{"https://user:pw@bank.example.com/ebics", false, true},
+		{"ftp://bank.example.com", false, true},
+		{"", false, true},
+		{"http://localhost:8080", true, false},
+		{"http://127.0.0.1:8080", true, false},
+		{"http://[::1]:8080", true, false},
+		{"http://10.0.0.5", true, true},
+		{"https://10.0.0.5", true, true},
+	}
+	for _, c := range cases {
+		AllowLoopback(c.dev)
+		err := CheckURL(c.url)
+		AllowLoopback(false)
+		if (err != nil) != c.wantFail {
+			t.Errorf("CheckURL(%q) dev=%t: err = %v, want failure %t", c.url, c.dev, err, c.wantFail)
+		}
+	}
+}
+
+func TestBankHTTPClient_RefusesLoopbackPeerAndRedirects(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, "/elsewhere", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+	client := BankHTTPClient(5 * time.Second)
+
+	for _, target := range []string{srv.URL, strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)} {
+		if resp, err := client.Post(target, "text/xml", strings.NewReader("<x/>")); err == nil {
+			resp.Body.Close()
+			t.Fatalf("POST %s reached a loopback peer", target)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("loopback server saw %d requests", hits.Load())
+	}
+
+	AllowLoopback(true)
+	defer AllowLoopback(false)
+	resp, err := client.Post(srv.URL, "text/xml", strings.NewReader("<x/>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect || hits.Load() != 1 {
+		t.Fatalf("redirect was followed: status %d, hits %d", resp.StatusCode, hits.Load())
 	}
 }
 
