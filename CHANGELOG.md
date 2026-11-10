@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Fixed
 
+- Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
 - Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
   so parked coexistence rows can be seen and retried (`hub.delivery.read`, `hub.subscription.write`); a replayed revrec
   credit-note line is acknowledged from its stored reversal after the contract was cancelled; the migration factory refuses a
