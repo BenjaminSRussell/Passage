@@ -6,6 +6,7 @@ import { visibleModules } from "../dutyGate";
 import { usePrincipalDuties } from "../principal";
 import { Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
 import { workspaceIcon } from "../workspaceIcons";
+import { DemoTour } from "../../demo/DemoTour";
 import styles from "./pages.module.css";
 
 export interface HomePageProps {
@@ -18,6 +19,7 @@ export function HomePage({ modules: allModules }: HomePageProps) {
   return (
     <>
       <PageHeader title={copy.home.pageTitle} description={copy.home.description} />
+      {import.meta.env.MODE === "demo" ? <DemoTour /> : null}
       {modules.length === 0 ? (
         <Card>
           <EmptyState icon="grid" title={copy.home.emptyTitle} description={copy.home.emptyDescription} />

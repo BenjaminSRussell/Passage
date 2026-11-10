@@ -1,0 +1,52 @@
+name: pages
+
+# Publishes the web app's demo build (apps/web, `vite build --mode demo`) to GitHub Pages: the real UI with an
+# in-browser fake backend (apps/web/src/demo) holding sample data for one fictional manufacturer.
+on:
+  push:
+    branches: [main]
+    paths: ['apps/web/**', 'policies/authz/data.json', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:demo
+        env:
+          PASSAGE_DEMO_BASE: /${{ github.event.repository.name }}/
+      # Pages has no SPA rewrites: serve the app for deep links (/Passage/sales/orders) through the 404 page.
+      - run: cp dist/index.html dist/404.html
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346

@@ -10,8 +10,13 @@ import { NotesPage } from "./shell/pages/NotesPage";
 import { NotFoundPage } from "./shell/pages/NotFoundPage";
 import "./shell/theme.css";
 
+const demo = import.meta.env.MODE === "demo";
+// The Pages demo serves under a sub-path (vite `base`); everywhere else BASE_URL is "/".
+const basename = import.meta.env.BASE_URL.replace(/\/$/, "") || "/";
+
 const modules = loadModules();
-const router = createBrowserRouter([
+const router = createBrowserRouter(
+  [
   ...(import.meta.env.DEV ? [{ path: "/device", element: <DeviceHost /> }] : []),
   {
     path: "/",
@@ -23,12 +28,21 @@ const router = createBrowserRouter([
       { path: "*", element: <NotFoundPage /> },
     ],
   },
-]);
-
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={new QueryClient()}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
-  </React.StrictMode>,
+  ],
+  { basename },
 );
+
+async function start() {
+  // The demo build answers /api/ calls in the browser; the import is dropped from every other build.
+  const DemoBanner = demo ? (await import("./demo/install"), (await import("./demo/DemoBanner")).DemoBanner) : null;
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+        {DemoBanner ? <DemoBanner /> : null}
+      </QueryClientProvider>
+    </React.StrictMode>,
+  );
+}
+
+void start();
