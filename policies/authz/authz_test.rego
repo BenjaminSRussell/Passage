@@ -1898,3 +1898,44 @@ test_dev_seed_clerk_keeps_its_own_routes if {
 test_dev_seed_unknown_user_is_denied_everything if {
 	not dev_seed_decision("stranger", "GET", "/v1/ledger/journal-lines").allow
 }
+
+inbox_routes := {
+	"procurement.inbox.read": "/v1/procurement/requisition-approvals",
+	"party.inbox.read": "/v1/party/pending-changes",
+	"ledger.inbox.read": "/v1/ledger/journal-batches",
+	"payables.inbox.read": "/v1/payables/open-items",
+}
+
+test_inbox_read_duties_are_service_only if {
+	every duty, _ in inbox_routes {
+		data.duties[duty].service_only == true
+	}
+}
+
+test_batch_grants_exactly_the_inbox_and_product_duties if {
+	data.service_grants.batch == {
+		"product": ["product.variants.explode", "product.released.read", "product.jobs.write"],
+		"purchasing": ["procurement.inbox.read"],
+		"party": ["party.inbox.read"],
+		"ledger": ["ledger.inbox.read"],
+		"payables": ["payables.inbox.read"],
+	}
+}
+
+test_inbox_read_duties_reach_only_their_list_route if {
+	every duty, route in inbox_routes {
+		allowed(duty, "GET", route)
+		not allowed(duty, "GET", concat("/", [route, "item-1"]))
+		not allowed(duty, "POST", route)
+		not allowed(duty, "POST", concat("/", [route, "item-1"]))
+		not allowed(duty, "GET", "/v1/inbox")
+	}
+}
+
+test_inbox_read_reaches_only_the_inbox if {
+	allowed("inbox.read", "GET", "/v1/inbox")
+	not allowed("inbox.read", "POST", "/v1/inbox")
+	not allowed("inbox.read", "GET", "/v1/inbox/item-1")
+	not allowed("inbox.read", "GET", "/v1/ledger/journal-batches")
+	not allowed("ledger.journal.read", "GET", "/v1/inbox")
+}

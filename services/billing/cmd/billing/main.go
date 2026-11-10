@@ -79,6 +79,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	st := store.New(pool)
 	a := api.New(st, tax, maxLines).WithSubscriptions(st)
+	var glProfiles map[string]store.GLProfile
 	ledger, err := ledgerclient.FromEnv(getenv, "billing")
 	if err != nil {
 		return fmt.Errorf("ledger client: %w", err)
@@ -89,6 +90,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return err
 		}
 		a.WithLedger(ledger, st, profiles)
+		glProfiles = profiles
 	}
 	allocations, err := revrec.FromEnv(getenv)
 	if err != nil {
@@ -102,6 +104,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if allocations != nil {
 		a.WithAllocations(allocations)
 	}
+	autobook, err := newAutoBook(getenv, glProfiles, a)
+	if err != nil {
+		return err
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -109,6 +115,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if autobook != nil {
+		go autobook.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

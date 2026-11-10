@@ -8,6 +8,15 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Added
+
+- batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
+  approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
+  source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
+  gain the matching read paths: party `GET /v1/party/pending-changes`, payables `held=true` on `GET /v1/payables/open-items`, and
+  the narrow duties `procurement.inbox.read`, `ledger.inbox.read`, `party.inbox.read` and `payables.inbox.read`.
+- Billing: posted invoices and credit notes book their GL journal without an API request. An auto-book worker (`BILLING_GL_AUTOBOOK_TENANT_IDS`, `BILLING_GL_AUTOBOOK_INTERVAL`; chart `autoBook`) runs the `gl-postings` run per tenant and legal entity, idempotent per document and safe to retry after a lost ledger answer; the `outbox-billing` Debezium connector (CDC migrations 0012-0013, `debezium-cdc-billing` secret, `passage.billing.invoice` ACL) publishes billing's events, with a deploy test that checks the route against the AsyncAPI channel and ACLs (#29).
+
 ### Fixed
 
 - Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
@@ -21,6 +30,7 @@ release may change public APIs.
 ### Added
 
 - Web: vendor invoice list (`/ap-invoices`, status and vendor filters, load more) and invoice detail (`/ap-invoices/:id`: lines, hold or rejection reason, ledger entry, links to the receipts and purchase orders) (#533); the detail reads `GET /v1/receiving/invoices/{id}`.
+- Migration factory: `POST /api/v1/migration/runs/{id}/opening-journal` posts the migrated GL balances of a gl_balances run to a legal entity's ledger through the ledger's posting API, one balanced journal per currency, refused whole with the difference named (MIG-1540) when a currency does not balance, idempotent by a fixed key per company, legal entity and currency (`gl_opening_posting`, migration 0024); `GET` lists what was posted, and a fully posted gl_balances pack no longer needs a go/no-go waiver (49-1, #49).
 - Billing credit reservations (#513): `POST /v1/billing/invoices/{id}/credit-reservations` (idempotent per RMA, line-level qty/net/tax) plus `POST /v1/billing/credit-reservations/{id}:commit` and `:release` (service duty `billing.credit-reservation.write` only; a released key can be retried under the bound) hold part of a posted invoice for a credit issued outside billing; reservations count with posted credit notes under the invoice's row lock, so the total credited can no longer exceed the invoiced amount (`BIL-0005`); the invoice read shows `credited.reserved` and `reservedQty`; receivables is granted `billing.credit-reservation.write` (receivables wiring follows).
 - Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 235 existing raw id fields in 134 files are allowlisted for conversion, including helper-built, template and placeholder labels the first version of the guard missed (#500).
 - Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org

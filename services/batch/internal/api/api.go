@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/batch/internal/inbox"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/schema"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/store"
 )
@@ -33,19 +34,29 @@ const (
 	dutyNotifySend = "notify.send"
 	dutyEventsW    = "events.write"
 	dutyEventsR    = "events.read"
+	dutyInboxR     = "inbox.read"
 )
 
 // API is the Wave 04 HTTP surface.
 type API struct {
-	store     store.Store
-	submitted atomic.Int64
-	failed    atomic.Int64
+	store      store.Store
+	aggregator *inbox.Aggregator
+	submitted  atomic.Int64
+	failed     atomic.Int64
 }
 
 func New(s store.Store) *API { return &API{store: s} }
 
+func (a *API) WithInbox(agg *inbox.Aggregator) *API {
+	a.aggregator = agg
+	return a
+}
+
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
+	if a.aggregator != nil {
+		r.With(authz.RequireDuty(dutyInboxR)).Get("/v1/inbox", a.inboxPage)
+	}
 	r.With(authz.RequireDuty(dutyWorkflowW)).Post("/v1/workflows/definitions", a.saveDefinition)
 	r.With(authz.RequireDuty(dutyWorkflowW)).Post("/v1/workflows/instances", a.submit)
 	r.With(authz.RequireDuty(dutyWorkflowR)).Get("/v1/workflows/instances/{id}", a.getInstance)
@@ -73,6 +84,9 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = fmt.Fprintf(w, "# HELP batch_submitted_total Workflow submits and job starts.\n# TYPE batch_submitted_total counter\nbatch_submitted_total %d\n", a.submitted.Load())
 		_, _ = fmt.Fprintf(w, "# HELP batch_failed_total Failed commands.\n# TYPE batch_failed_total counter\nbatch_failed_total %d\n", a.failed.Load())
+		if a.aggregator != nil {
+			_, _ = fmt.Fprintf(w, "# HELP batch_inbox_source_failures_total Inbox sources that timed out or failed.\n# TYPE batch_inbox_source_failures_total counter\nbatch_inbox_source_failures_total %d\n", a.aggregator.Failures())
+		}
 	})
 }
 

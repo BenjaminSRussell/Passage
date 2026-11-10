@@ -779,6 +779,7 @@
     ]},
     "party.read": {"permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
+      {"resource": "/v1/party/pending-changes", "methods": ["GET"]},
       {"resource": "/v1/party/pending-changes/*", "methods": ["GET"]},
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["GET"]},
       {"resource": "/v1/party/parties/*/vendors", "methods": ["GET"]},
@@ -1458,6 +1459,7 @@
       {"resource": "/api/v1/migration/parallel-runs", "methods": ["POST"]},
       {"resource": "/api/v1/migration/parallel-runs/replay", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/load", "methods": ["POST"]},
+      {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/quarantine/*/release", "methods": ["POST"]}
     ]},
     "migration.factory.view": {"permissions": [
@@ -1468,6 +1470,7 @@
       {"resource": "/api/v1/migration/runs", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/control-totals", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-rows", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]},
@@ -3407,6 +3410,11 @@
       {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
     ]},
+    "inbox.read": {"permissions": [{"resource": "/v1/inbox", "methods": ["GET"]}]},
+    "procurement.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
+    "party.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
+    "ledger.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
+    "payables.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
       {"resource": "/v1/workitems/*/actions", "methods": ["POST"]}
@@ -3446,7 +3454,11 @@
       "carrier-gateway": ["carrier.rate.quote", "carrier.tracking.read"]
     },
     "batch": {
-      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
+      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"],
+      "purchasing": ["procurement.inbox.read"],
+      "party": ["party.inbox.read"],
+      "ledger": ["ledger.inbox.read"],
+      "payables": ["payables.inbox.read"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
