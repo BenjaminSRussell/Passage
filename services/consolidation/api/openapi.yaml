@@ -460,6 +460,258 @@ paths:
       responses:
         '200':
           description: Readiness (the stateless slice has no dependency to check)
+  /v1/consol/groups:
+    post:
+      operationId: createConsolidationGroup
+      summary: Create a consolidation group with its group currency (FR-40.7)
+      description: A retry with the same Idempotency-Key replays the stored group; a second group with the same code is 409 CNS-0925. Group routes need all-entity scope (403 CNS-0923).
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupRequest' }
+      responses:
+        '201':
+          description: The group
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listConsolidationGroups
+      summary: List the tenant's groups with their unit counts
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      responses:
+        '200':
+          description: Groups ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Group' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}:
+    get:
+      operationId: getConsolidationGroup
+      summary: A group with its units and their ownership history
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupDetail' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/units:
+    post:
+      operationId: addConsolidationUnit
+      summary: Add a legal entity to the group with the ledger its balances are collected from
+      description: The same legal entity twice is 409 CNS-0926.
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnitRequest' }
+      responses:
+        '201':
+          description: The unit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/units/{unitId}/ownership:
+    post:
+      operationId: addConsolidationOwnership
+      summary: Record an ownership percentage from a date; the holder's open interval is closed on that date
+      description: Holders of one unit together never exceed 100.00 percent on any date (422 CNS-0904). Without holderUnitId the group's top parent holds the stake.
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: unitId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OwnershipRequest' }
+      responses:
+        '201':
+          description: The unit with its history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/account-map:
+    put:
+      operationId: setConsolidationAccountMap
+      summary: Replace the chart mapping from main accounts to consolidation accounts
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountMap' }
+      responses:
+        '200':
+          description: The stored mapping
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountMap' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getConsolidationAccountMap
+      summary: The group's chart mapping
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The mapping ordered by main account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountMap' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/collections:
+    post:
+      operationId: collectConsolidationBalances
+      summary: Collect each unit's trial balance from its ledger for a period (FR-40.8)
+      description: |
+        Reads the balances of every unit's ledger (balance sheet cumulative to
+        the period, income accounts from January of the period's year), maps
+        them to consolidation accounts and translates them to the group
+        currency, balance sheet at the closing rate and income at the average
+        rate. A unit in another currency needs a rate for it (422 CNS-0927). A
+        ledger that cannot be read is 502 CNS-0929. The result is stored as an
+        immutable version of the group and period.
+      x-passage-duty: consolidation.run
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CollectRequest' }
+      responses:
+        '201':
+          description: The stored collection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listConsolidationCollections
+      summary: A group's collections, newest first
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Collections
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Collection' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/collections/{id}:
+    get:
+      operationId: getConsolidationCollection
+      summary: A collection with every collected line
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The collection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/collections/{id}/trial-balance:
+    get:
+      operationId: getConsolidatedTrialBalance
+      summary: The consolidated trial balance of a collection, before eliminations, with each unit's contribution per account
+      description: Accounts without a mapping are listed apart. unitDifferences is each unit's translation difference, the amount the run books as CTA.
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The trial balance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrialBalance' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     TenantHeader:
@@ -500,6 +752,135 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    GroupRequest:
+      type: object
+      required: [code, name, currency]
+      properties:
+        code: { type: string, pattern: '^[A-Za-z0-9._:-]{1,64}$' }
+        name: { type: string, maxLength: 200 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    Group:
+      type: object
+      required: [id, code, name, currency, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        currency: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        unitCount: { type: integer, description: Only in the list }
+    GroupDetail:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          required: [units]
+          properties:
+            units: { type: array, items: { $ref: '#/components/schemas/Unit' } }
+    UnitRequest:
+      type: object
+      required: [legalEntityId, ledgerId, currency]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        ledgerId: { type: string, description: The ledger the unit's balances are collected from }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    Holding:
+      type: object
+      required: [id, effectiveFrom, percent]
+      properties:
+        id: { type: string, format: uuid }
+        holderUnitId: { type: string, format: uuid }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+        percent: { type: string }
+    Unit:
+      type: object
+      required: [id, legalEntityId, ledgerId, currency, currentPercent, ownership]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        ledgerId: { type: string }
+        currency: { type: string }
+        currentPercent: { type: string, description: Total held on today's date }
+        ownership: { type: array, items: { $ref: '#/components/schemas/Holding' } }
+    OwnershipRequest:
+      type: object
+      required: [effectiveFrom, percent]
+      properties:
+        holderUnitId: { type: string, format: uuid }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+        percent: { type: string, description: Decimal from 0 to 100 }
+    AccountMap:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            required: [mainAccount, consolidationAccount, accountType]
+            properties:
+              mainAccount: { type: string }
+              consolidationAccount: { type: string }
+              accountType: { type: string, enum: [balance_sheet, income] }
+    CollectRequest:
+      type: object
+      required: [period]
+      properties:
+        period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
+        rates:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [currency, average, closing]
+            properties:
+              currency: { type: string }
+              average: { type: string }
+              closing: { type: string }
+    Collection:
+      type: object
+      required: [id, groupId, period, version, currency, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        period: { type: string }
+        version: { type: integer }
+        currency: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        lineCount: { type: integer }
+        unmappedCount: { type: integer }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              unit: { type: string }
+              mainAccount: { type: string }
+              consolidationAccount: { type: string }
+              accountType: { type: string }
+              unitCurrency: { type: string }
+              unitAmount: { type: string }
+              rate: { type: string }
+              groupAmount: { type: string }
+    TrialBalance:
+      type: object
+      required: [rows, unmapped, total, unitDifferences]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              account: { type: string }
+              accountType: { type: string }
+              total: { type: string }
+              units: { type: object, additionalProperties: { type: string } }
+        unmapped: { type: array, items: { type: object } }
+        total: { type: string }
+        unitDifferences: { type: object, additionalProperties: { type: string } }
     Decimal:
       type: string
       pattern: '^-?[0-9]+(\.[0-9]+)?$'

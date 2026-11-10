@@ -1144,12 +1144,19 @@
       {"resource": "/v1/compliance/export-governance:evaluate", "methods": ["POST"]},
       {"resource": "/v1/compliance/read-log:classify", "methods": ["POST"]}
     ]},
+    "consolidation.configure": {"permissions": [
+      {"resource": "/v1/consol/groups", "methods": ["POST"]},
+      {"resource": "/v1/consol/groups/*/account-map", "methods": ["PUT"]},
+      {"resource": "/v1/consol/groups/*/units", "methods": ["POST"]},
+      {"resource": "/v1/consol/groups/*/units/*/ownership", "methods": ["POST"]}
+    ]},
     "consolidation.journal.maintain": {"permissions": [{"resource": "/v1/consol/group-journals:preview", "methods": ["POST"]}]},
     "consolidation.run": {"permissions": [
       {"resource": "/v1/consol/divestitures:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/dividends:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/eliminations:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/equity-method:preview", "methods": ["POST"]},
+      {"resource": "/v1/consol/groups/*/collections", "methods": ["POST"]},
       {"resource": "/v1/consol/ic-differences:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/profit-in-inventory:preview", "methods": ["POST"]},
       {"resource": "/v1/consol/reclassification-runs:preview", "methods": ["POST"]},
@@ -1158,6 +1165,12 @@
       {"resource": "/v1/consol/validations:preview", "methods": ["POST"]}
     ]},
     "consolidation.view": {"permissions": [
+      {"resource": "/v1/consol/collections/*", "methods": ["GET"]},
+      {"resource": "/v1/consol/collections/*/trial-balance", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/account-map", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/collections", "methods": ["GET"]},
       {"resource": "/v1/consol/runs", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*/statements", "methods": ["GET"]}
@@ -3598,6 +3611,8 @@
     "platform.global.admin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
+    "consolidation": {"ledger": ["ledger.balance.read"]},
+    "intercompany": {"ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup"]},
     "finreport": {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]},
     "billing": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],

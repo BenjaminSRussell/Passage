@@ -244,7 +244,8 @@ func (f *Fake) Balances(_ context.Context, q BalanceQuery) (AccountBalances, err
 		}
 		out.Currency = s.Currency
 		for _, l := range s.Lines {
-			if l.Account < q.Account || l.Account > to {
+			// As the ledger does, an empty bound is open: no Account and no AccountTo reads every account.
+			if l.Account < q.Account || (to != "" && l.Account > to) {
 				continue
 			}
 			b := sums[l.Account]
