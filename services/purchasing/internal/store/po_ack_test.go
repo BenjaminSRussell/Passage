@@ -2,11 +2,14 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -240,8 +243,8 @@ func TestPOAck_ApprovedQuantityChangeWaitsForReapproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	approved, err := s.DecideAcknowledgement(ctx, prop.ID, true, "", store.Idem{})
-	if err != nil || approved.ResultingVersionNo != 2 {
-		t.Fatalf("approve = %+v, %v", approved, err)
+	if err != nil || approved.Decision != domain.AckApproved || approved.ResultingVersionNo != 0 {
+		t.Fatalf("approve of a change that waits for re-approval = %+v, %v; want no resulting version yet", approved, err)
 	}
 	got, err := s.GetPurchaseOrder(ctx, po.ID)
 	if err != nil || got.ApprovalStatus != domain.POStatusInReview || !got.Lines[0].Qty.Equal(qty) || !got.Lines[0].UnitPrice.Equal(price) || !got.Total.Equal(dec("1000")) {
@@ -249,6 +252,146 @@ func TestPOAck_ApprovedQuantityChangeWaitsForReapproval(t *testing.T) {
 	}
 	if _, err := s.AcknowledgePurchaseOrder(ctx, vendor, po.ID, accept(1), store.Idem{}); problemCode(err) != store.CodeAckState {
 		t.Fatalf("answer while the buyer's change is in review = %v", err)
+	}
+
+	seen, err := s.GetVendorPurchaseOrder(ctx, vendor, po.ID)
+	if err != nil || seen.ApprovalStatus != domain.POStatusConfirmed || seen.VersionNo != 1 || !seen.Lines[0].Qty.Equal(dec("100")) ||
+		!seen.Lines[0].UnitPrice.Equal(dec("10")) || !seen.Total.Equal(dec("1000")) {
+		t.Fatalf("vendor sees %s v%d qty %s price %s total %s while the change is unconfirmed, %v", seen.ApprovalStatus, seen.VersionNo, seen.Lines[0].Qty, seen.Lines[0].UnitPrice, seen.Total, err)
+	}
+	list, err := s.ListVendorPurchaseOrders(ctx, vendor, "", 50)
+	if err != nil || len(list.Items) != 1 || list.Items[0].ApprovalStatus != domain.POStatusConfirmed || !list.Items[0].Total.Equal(dec("1000")) || list.Items[0].VersionNo != 1 {
+		t.Fatalf("vendor list = %+v, %v; want the confirmed content", list, err)
+	}
+
+	confirmed := walk(t, ctx, s, got, domain.POActionApprove, domain.POActionConfirm)
+	after, err := s.GetVendorPurchaseOrder(ctx, vendor, po.ID)
+	if err != nil || confirmed.VersionNo != 2 || after.VersionNo != 2 || !after.Lines[0].Qty.Equal(qty) || !after.Total.Equal(dec("1000")) {
+		t.Fatalf("vendor after confirm = v%d qty %s, %v", after.VersionNo, after.Lines[0].Qty, err)
+	}
+
+	if _, err := s.ActOnPurchaseOrder(ctx, po.ID, confirmed.RowVersion, domain.POActionCancel, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetVendorPurchaseOrder(ctx, vendor, po.ID); problemCode(err) != store.CodePurchaseOrderNotFound {
+		t.Fatalf("vendor reading a cancelled order = %v", err)
+	}
+	if page, err := s.ListVendorPurchaseOrders(ctx, vendor, "", 50); err != nil || len(page.Items) != 0 {
+		t.Fatalf("vendor list after cancel = %+v, %v", page, err)
+	}
+}
+
+func taxedPO(t *testing.T, vendor string) store.PurchaseOrder {
+	in := lifecyclePO(t, vendor, "100", "2027-01-05")
+	in.Lines[0].TaxAmount, in.TaxTotal, in.Total = dec("80"), dec("80"), dec("1080")
+	return in
+}
+
+func TestPOAck_PriceProposalRescalesLineTax(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(67)
+	vendor := ids.New()
+	po := confirmedPO(t, ctx, s, taxedPO(t, vendor))
+	if !po.TaxTotal.Equal(dec("80")) || !po.Lines[0].TaxAmount.Equal(dec("80")) {
+		t.Fatalf("seed order tax = %s / %s", po.Lines[0].TaxAmount, po.TaxTotal)
+	}
+	price := dec("12")
+	prop, err := s.AcknowledgePurchaseOrder(ctx, vendor, po.ID, domain.AckInput{VersionNo: 1, Outcome: domain.AckChangesProposed,
+		Changes: []domain.LineChange{{LineNo: 1, UnitPrice: &price}}}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecideAcknowledgement(ctx, prop.ID, true, "", store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.GetPurchaseOrder(ctx, po.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed := walk(t, ctx, s, pending, domain.POActionApprove, domain.POActionConfirm)
+	if confirmed.VersionNo != 2 || !confirmed.Lines[0].UnitPrice.Equal(dec("12")) || !confirmed.Lines[0].TaxAmount.Equal(dec("96")) ||
+		!confirmed.TaxTotal.Equal(dec("96")) || !confirmed.Total.Equal(dec("1296")) {
+		t.Fatalf("after a price proposal: v%d price %s tax %s tax total %s total %s", confirmed.VersionNo, confirmed.Lines[0].UnitPrice,
+			confirmed.Lines[0].TaxAmount, confirmed.TaxTotal, confirmed.Total)
+	}
+	rows := outbox(t, ctx, pool)
+	var found bool
+	for _, r := range rows {
+		if r.Type == purchasingevents.POConfirmed && r.Data["version_no"] == float64(2) {
+			found = true
+			if r.Data["tax_total"] != "96" || r.Data["total"] != "1296" {
+				t.Fatalf("po.confirmed v2 = %+v", r.Data)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no po.confirmed for version 2 in %v", eventTypes(rows))
+	}
+}
+
+func TestPOAck_NewConfirmedVersionSupersedesAnOpenProposal(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(68)
+	vendor := ids.New()
+	po := confirmedPO(t, ctx, s, lifecyclePO(t, vendor, "100", "2027-01-05"))
+	if got, err := s.GetPurchaseOrder(ctx, po.ID); err != nil || got.PendingAcknowledgement || got.PendingAcknowledgementID != "" {
+		t.Fatalf("pending indicator before a proposal = %v / %q, %v", got.PendingAcknowledgement, got.PendingAcknowledgementID, err)
+	}
+	prop, err := s.AcknowledgePurchaseOrder(ctx, vendor, po.ID, proposeDate(t, 1, "2027-01-06"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetPurchaseOrder(ctx, po.ID); err != nil || !got.PendingAcknowledgement || got.PendingAcknowledgementID != prop.ID {
+		t.Fatalf("pending indicator with a proposal = %v / %q, %v", got.PendingAcknowledgement, got.PendingAcknowledgementID, err)
+	}
+
+	moved, err := s.EditPurchaseOrder(ctx, po.ID, po.RowVersion, edited(po, lifecyclePO(t, "", "100", "2027-01-08")))
+	if err != nil || moved.VersionNo != 2 || moved.ApprovalStatus != domain.POStatusConfirmed {
+		t.Fatalf("buyer edit = v%d %s, %v", moved.VersionNo, moved.ApprovalStatus, err)
+	}
+	got, err := s.GetAcknowledgement(ctx, prop.ID)
+	if err != nil || got.Decision != domain.AckSuperseded || got.DecidedAt == nil {
+		t.Fatalf("proposal after a new version = %+v, %v", got, err)
+	}
+	if got, err := s.GetPurchaseOrder(ctx, po.ID); err != nil || got.PendingAcknowledgement {
+		t.Fatalf("pending indicator after supersede = %v, %v", got.PendingAcknowledgement, err)
+	}
+	if _, err := s.DecideAcknowledgement(ctx, prop.ID, true, "", store.Idem{}); problemCode(err) != store.CodeAckDecided {
+		t.Fatalf("deciding a superseded proposal = %v", err)
+	}
+	if _, err := s.AcknowledgePurchaseOrder(ctx, vendor, po.ID, accept(2), store.Idem{}); err != nil {
+		t.Fatalf("the vendor answering the new version = %v", err)
+	}
+	var decided []outboxRow
+	for _, r := range outbox(t, ctx, pool) {
+		if r.Type == purchasingevents.POAckDecided {
+			decided = append(decided, r)
+		}
+	}
+	if len(decided) != 1 || decided[0].Data["decision"] != domain.AckSuperseded || decided[0].Data["ack_id"] != prop.ID {
+		t.Fatalf("decided events = %+v", decided)
+	}
+}
+
+func TestPOAck_DecideReplayWithAnotherBodyIsRefused(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(69)
+	vendor := ids.New()
+	po := confirmedPO(t, ctx, s, lifecyclePO(t, vendor, "100", "2027-01-05"))
+	prop, err := s.AcknowledgePurchaseOrder(ctx, vendor, po.ID, proposeDate(t, 1, "2027-01-06"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecideAcknowledgement(ctx, prop.ID, false, "no", store.Idem{Key: "d1", Hash: "decline"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.DecideAcknowledgement(ctx, prop.ID, true, "yes", store.Idem{Key: "d1", Hash: "approve"})
+	var p *httpx.Problem
+	if !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity || p.Code != store.CodeIdempotencyReuse {
+		t.Fatalf("replay with another body = %v", err)
 	}
 }
 

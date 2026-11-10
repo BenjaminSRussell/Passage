@@ -12,8 +12,9 @@ const (
 	AckRejected        = "REJECTED"
 	AckChangesProposed = "CHANGES_PROPOSED"
 
-	AckApproved = "APPROVED"
-	AckDeclined = "DECLINED"
+	AckApproved   = "APPROVED"
+	AckDeclined   = "DECLINED"
+	AckSuperseded = "SUPERSEDED"
 )
 
 const (

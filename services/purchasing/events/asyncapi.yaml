@@ -1339,7 +1339,7 @@ components:
               qty: { type: string, description: decimal string }
               unit_price: { type: string, description: decimal string }
               delivery_date: { type: string, format: date }
-        decision: { type: string, enum: [APPROVED, DECLINED], description: only on poack.decided.v1 }
+        decision: { type: string, enum: [APPROVED, DECLINED, SUPERSEDED], description: only on poack.decided.v1; SUPERSEDED when a newer confirmed version replaced the version the proposal was made on }
         decided_by: { type: string, format: uuid }
         note: { type: string, description: the buyer's note on the decision }
         resulting_version_no: { type: integer, description: the purchase order version an approval wrote, when it changed the order }

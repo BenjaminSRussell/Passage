@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -82,22 +83,55 @@ type vendorChargeView struct {
 	LineNo int             `json:"lineNo,omitempty"`
 }
 
+type vendorAckView struct {
+	ID                 string              `json:"id"`
+	PurchaseOrderID    string              `json:"purchaseOrderId"`
+	PONumber           string              `json:"poNumber"`
+	VersionNo          int                 `json:"versionNo"`
+	Outcome            string              `json:"outcome"`
+	Reason             string              `json:"reason,omitempty"`
+	Changes            []domain.LineChange `json:"changes"`
+	AcknowledgedAt     time.Time           `json:"acknowledgedAt"`
+	Decision           string              `json:"decision,omitempty"`
+	DecidedAt          *time.Time          `json:"decidedAt,omitempty"`
+	ResultingVersionNo int                 `json:"resultingVersionNo,omitempty"`
+}
+
+func vendorAck(a store.POAcknowledgement) vendorAckView {
+	return vendorAckView{ID: a.ID, PurchaseOrderID: a.PurchaseOrderID, PONumber: a.PONumber, VersionNo: a.VersionNo, Outcome: a.Outcome,
+		Reason: a.Reason, Changes: a.Changes, AcknowledgedAt: a.AcknowledgedAt, Decision: a.Decision, DecidedAt: a.DecidedAt,
+		ResultingVersionNo: a.ResultingVersionNo}
+}
+
+type vendorOrderSummaryView struct {
+	ID              string          `json:"id"`
+	Number          string          `json:"number"`
+	Currency        string          `json:"currency"`
+	ApprovalStatus  string          `json:"approvalStatus"`
+	VersionNo       int             `json:"versionNo"`
+	Total           decimal.Decimal `json:"total"`
+	LineCount       int             `json:"lineCount"`
+	Acknowledgement string          `json:"acknowledgement"`
+	CreatedAt       time.Time       `json:"createdAt"`
+}
+
 // vendorOrderView is what a vendor sees of an order: the commercial content only, with none of the
 // buyer's users, accounts, requisition or agreement links.
 type vendorOrderView struct {
-	ID               string                    `json:"id"`
-	Number           string                    `json:"number"`
-	Currency         string                    `json:"currency"`
-	ApprovalStatus   string                    `json:"approvalStatus"`
-	VersionNo        int                       `json:"versionNo"`
-	Subtotal         decimal.Decimal           `json:"subtotal"`
-	DiscountTotal    decimal.Decimal           `json:"discountTotal"`
-	ChargesTotal     decimal.Decimal           `json:"chargesTotal"`
-	TaxTotal         decimal.Decimal           `json:"taxTotal"`
-	Total            decimal.Decimal           `json:"total"`
-	Lines            []vendorLineView          `json:"lines"`
-	Charges          []vendorChargeView        `json:"charges"`
-	Acknowledgements []store.POAcknowledgement `json:"acknowledgements"`
+	ID                   string             `json:"id"`
+	Number               string             `json:"number"`
+	Currency             string             `json:"currency"`
+	ApprovalStatus       string             `json:"approvalStatus"`
+	VersionNo            int                `json:"versionNo"`
+	Subtotal             decimal.Decimal    `json:"subtotal"`
+	DiscountTotal        decimal.Decimal    `json:"discountTotal"`
+	ChargesTotal         decimal.Decimal    `json:"chargesTotal"`
+	TaxTotal             decimal.Decimal    `json:"taxTotal"`
+	Total                decimal.Decimal    `json:"total"`
+	Lines                []vendorLineView   `json:"lines"`
+	Charges              []vendorChargeView `json:"charges"`
+	Acknowledgements     []vendorAckView    `json:"acknowledgements"`
+	AcknowledgementsMore bool               `json:"acknowledgementsMore"`
 }
 
 func (a *API) vendorListOrders(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +150,12 @@ func (a *API) vendorListOrders(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	writePage(w, page)
+	items := make([]vendorOrderSummaryView, 0, len(page.Items))
+	for _, o := range page.Items {
+		items = append(items, vendorOrderSummaryView{ID: o.ID, Number: o.Number, Currency: o.Currency, ApprovalStatus: o.ApprovalStatus,
+			VersionNo: o.VersionNo, Total: o.Total, LineCount: o.LineCount, Acknowledgement: o.AckState, CreatedAt: o.CreatedAt})
+	}
+	writePage(w, store.Page[vendorOrderSummaryView]{Items: items, Next: page.Next})
 }
 
 func (a *API) vendorGetOrder(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +181,10 @@ func (a *API) vendorGetOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	view := vendorOrderView{ID: po.ID, Number: po.Number, Currency: po.Currency, ApprovalStatus: po.ApprovalStatus, VersionNo: po.VersionNo,
 		Subtotal: po.Subtotal, DiscountTotal: po.DiscountTotal, ChargesTotal: po.ChargesTotal, TaxTotal: po.TaxTotal, Total: po.Total,
-		Lines: []vendorLineView{}, Charges: []vendorChargeView{}, Acknowledgements: acks.Items}
+		Lines: []vendorLineView{}, Charges: []vendorChargeView{}, Acknowledgements: []vendorAckView{}, AcknowledgementsMore: acks.Next != ""}
+	for _, ack := range acks.Items {
+		view.Acknowledgements = append(view.Acknowledgements, vendorAck(ack))
+	}
 	for _, l := range po.Lines {
 		view.Lines = append(view.Lines, vendorLineView{LineNo: l.LineNo, ProductID: l.ProductID, Description: l.Description, Qty: l.Qty,
 			Unit: l.Unit, UnitPrice: l.UnitPrice, PriceUnit: l.PriceUnit, DiscountPct: l.DiscountPct, LineAmount: l.LineAmount,
@@ -150,9 +192,6 @@ func (a *API) vendorGetOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, c := range po.Charges {
 		view.Charges = append(view.Charges, vendorChargeView{Calc: c.Calc, Value: c.Value, Amount: c.Amount, LineNo: c.LineNo})
-	}
-	for i := range view.Acknowledgements {
-		view.Acknowledgements[i].AcknowledgedBy, view.Acknowledgements[i].DecidedBy = "", ""
 	}
 	httpx.JSON(w, http.StatusOK, view)
 }
@@ -193,7 +232,7 @@ func (a *API) vendorAcknowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.poAcknowledged.Add(1)
-	httpx.JSON(w, http.StatusCreated, out)
+	httpx.JSON(w, http.StatusCreated, vendorAck(out))
 }
 
 func (a *API) listAwaitingAcknowledgement(w http.ResponseWriter, r *http.Request) {

@@ -759,6 +759,8 @@ components:
           type: array
           description: The charges auto charges have added to the PO (FR-17.9); applyAutoCharges does not add them again. Each is a charge code id (header charge) or "<charge code id>#<line no>" (line charge). The set only grows.
           items: { type: string }
+        pendingAcknowledgement: { type: boolean, description: "On a read of one PO: true while a vendor's proposed changes wait for the buyer to approve or decline (AC-20.7); absent otherwise" }
+        pendingAcknowledgementId: { type: string, format: uuid, description: "The proposal to pass to POST /acknowledgements/{id}:approve or :decline" }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         warnings:
@@ -2241,11 +2243,11 @@ components:
         changes: { type: array, items: { $ref: '#/components/schemas/AckLineChange' } }
         acknowledgedBy: { type: string, format: uuid, description: "Absent in the vendor view" }
         acknowledgedAt: { type: string, format: date-time }
-        decision: { type: string, enum: [APPROVED, DECLINED] }
+        decision: { type: string, enum: [APPROVED, DECLINED, SUPERSEDED], description: "SUPERSEDED when a newer confirmed version replaced the version the proposal was made on (BR-20.9)" }
         decidedBy: { type: string, format: uuid, description: "Absent in the vendor view" }
         decidedAt: { type: string, format: date-time }
         decisionNote: { type: string }
-        resultingVersionNo: { type: integer, description: "The PO version an approved proposal produced" }
+        resultingVersionNo: { type: integer, description: "The PO version an approved proposal confirmed; absent when the change waits for re-approval (the order is then IN_REVIEW)" }
     POAcknowledgementPage:
       type: object
       required: [items]
@@ -2313,7 +2315,43 @@ components:
               value: { type: string }
               amount: { type: string }
               lineNo: { type: integer }
-        acknowledgements: { type: array, items: { $ref: '#/components/schemas/POAcknowledgement' } }
+        acknowledgements: { type: array, items: { $ref: '#/components/schemas/VendorAck' } }
+        acknowledgementsMore: { type: boolean, description: "True when the vendor has more answers on this order than the 200 shown" }
+    VendorAck:
+      type: object
+      description: "A vendor's view of its own answer: no legal entity, no buyer users and no buyer note."
+      required: [id, purchaseOrderId, poNumber, versionNo, outcome, changes, acknowledgedAt]
+      properties:
+        id: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        poNumber: { type: string }
+        versionNo: { type: integer }
+        outcome: { type: string, enum: [ACCEPTED, REJECTED, CHANGES_PROPOSED] }
+        reason: { type: string }
+        changes: { type: array, items: { $ref: '#/components/schemas/AckLineChange' } }
+        acknowledgedAt: { type: string, format: date-time }
+        decision: { type: string, enum: [APPROVED, DECLINED, SUPERSEDED] }
+        decidedAt: { type: string, format: date-time }
+        resultingVersionNo: { type: integer }
+    VendorOrderSummary:
+      type: object
+      required: [id, number, currency, approvalStatus, versionNo, total, lineCount, acknowledgement, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        currency: { type: string }
+        approvalStatus: { type: string, description: "Always CONFIRMED: a vendor sees only confirmed content" }
+        versionNo: { type: integer }
+        total: { type: string }
+        lineCount: { type: integer }
+        acknowledgement: { type: string, description: "NONE until the current version is answered (also after a declined proposal), ACCEPTED, REJECTED or PROPOSAL_PENDING" }
+        createdAt: { type: string, format: date-time }
+    VendorOrderSummaryPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/VendorOrderSummary' } }
+        nextCursor: { type: string, format: uuid }
     AckDecisionInput:
       type: object
       additionalProperties: false
@@ -5766,7 +5804,7 @@ paths:
           description: One page
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PurchaseOrderAckSummaryPage' }
+              schema: { $ref: '#/components/schemas/VendorOrderSummaryPage' }
         '403': { description: Missing duty, or the caller is not a supplier account (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Bad limit or cursor (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/vendor/purchase-orders/{id}:
@@ -5799,9 +5837,9 @@ paths:
           description: The recorded answer
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/POAcknowledgement' }
+              schema: { $ref: '#/components/schemas/VendorAck' }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { description: Missing duty, or the caller is not a supplier account (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Purchase order not found for this vendor (PRC-PO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: Not the latest version (PRC-ACK-001), order not confirmed (PRC-ACK-002), a proposal already open (PRC-ACK-003) or the version already answered (PRC-ACK-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Not the latest version (PRC-ACK-001, SUP-ACK-001 in the PRD), order not confirmed (PRC-ACK-002), a proposal already open (PRC-ACK-003) or the version already answered (PRC-ACK-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation (COM-0001) or a proposed line that does not exist on the order, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

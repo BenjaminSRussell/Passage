@@ -512,6 +512,16 @@ unchanged and the version stays unanswered). One proposal may be open per PO. An
 refused with a plain message (PRC-ACK-001). Every answer and decision is a row in `purchase_order_ack` (FORCEd RLS, tenant and
 legal entity) and writes `poack.accepted.v1`, `poack.rejected.v1`, `poack.proposed.v1` or `poack.decided.v1`.
 
+A new confirmed version of the order marks every proposal still open on an older version SUPERSEDED (BR-20.9; `poack.decided.v1`
+with decision SUPERSEDED) so the vendor can answer the new version. `resultingVersionNo` is set when an approved proposal is
+confirmed at once; when the change waits for re-approval it is absent and the order is IN_REVIEW. `GET /purchase-orders/{id}`
+carries `pendingAcknowledgement` and `pendingAcknowledgementId` while a proposal waits for the buyer (AC-20.7).
+
+A vendor sees only confirmed content: while the buyer's change to a confirmed order is unconfirmed (IN_REVIEW), the vendor's
+read and list show the confirmed version's snapshot, and a cancelled order is gone from the vendor's reads. Vendor responses
+carry no legal entity, no buyer users and no decision note; the order detail lists up to 200 answers and sets
+`acknowledgementsMore` when there are more.
+
 The vendor routes take the vendor only from `VendorPrincipal` (`API.WithVendorPrincipal`). No credential in the platform carries a
 vendor yet, so the default `NoVendorPrincipal` refuses every caller (403 AUTH-0003) until the supplier portal supplies one. Their
 duties, `procurement.vendor-portal.read` and `procurement.vendor-portal.acknowledge`, are `service_only`: never assignable to a person.
@@ -624,7 +634,7 @@ store codes are returned as the `code` field.
 | PRC-IP-NOT-FOUND | 404 | The PO line has no invoicing plan (or no such row on a settlement report) |
 | PRC-IP-004 | 409 | The plan row is settled under another reference or amount, or the line cannot absorb the settled amount |
 | PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
-| PRC-ACK-001 | 409 | The answer or proposal is for a version that is not the PO's latest |
+| PRC-ACK-001 | 409 | The answer or proposal is for a version that is not the PO's latest (the PRD's SUP-ACK-001, "Only the latest PO version {version} can be acknowledged"; the message names the latest version in plain words) |
 | PRC-ACK-002 | 409 | The PO is not CONFIRMED (being changed or closed), or the answer is not a proposal |
 | PRC-ACK-003 | 409 | A proposal is already open on the PO |
 | PRC-ACK-004 | 409 | The version has already been accepted or rejected |

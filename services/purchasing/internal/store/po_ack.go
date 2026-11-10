@@ -250,12 +250,15 @@ func proposedOrder(cur PurchaseOrder, changes []domain.LineChange) (PurchaseOrde
 		}
 		if c, ok := byNo[l.LineNo]; ok {
 			applied++
+			oldNet := l.Qty.Mul(l.UnitPrice)
 			if c.Qty != nil {
-				l.TaxAmount = scaledTax(l, *c.Qty, money.MinorUnits(cur.Currency))
 				l.Qty = *c.Qty
 			}
 			if c.UnitPrice != nil {
 				l.UnitPrice, l.PriceSource = *c.UnitPrice, "MANUAL"
+			}
+			if !oldNet.IsZero() && !l.TaxAmount.IsZero() {
+				l.TaxAmount = l.TaxAmount.Mul(l.Qty.Mul(l.UnitPrice)).DivRound(oldNet, 12).RoundBank(money.MinorUnits(cur.Currency))
 			}
 			if c.DeliveryDate != nil {
 				l.DeliveryDate = *c.DeliveryDate
@@ -299,17 +302,23 @@ func (s *Postgres) DecideAcknowledgement(ctx context.Context, id string, approve
 		if ack.Outcome != domain.AckChangesProposed || ack.Decision != "" {
 			return ackConflict(CodeAckDecided, "This proposal has already been answered.")
 		}
-		decision, resulting := domain.AckDeclined, 0
+		decision := domain.AckDeclined
 		if approve {
 			decision = domain.AckApproved
-			if resulting, err = applyProposal(ctx, tx, ack); err != nil {
+		}
+		if _, err := tx.Exec(ctx, `update purchase_order_ack set decision = $3, decided_by = $4, decided_at = now(), decision_note = $5
+			where tenant_id = $1 and id = $2`, actor.TenantID, id, decision, userOrNil(actor.UserID), note); err != nil {
+			return err
+		}
+		if approve {
+			resulting, err := applyProposal(ctx, tx, ack)
+			if err != nil {
 				return err
 			}
-		}
-		if _, err := tx.Exec(ctx, `update purchase_order_ack set decision = $3, decided_by = $4, decided_at = now(), decision_note = $5,
-			resulting_version_no = $6 where tenant_id = $1 and id = $2`,
-			actor.TenantID, id, decision, userOrNil(actor.UserID), note, nullableInt(resulting)); err != nil {
-			return err
+			if _, err := tx.Exec(ctx, `update purchase_order_ack set resulting_version_no = $3 where tenant_id = $1 and id = $2`,
+				actor.TenantID, id, nullableInt(resulting)); err != nil {
+				return err
+			}
 		}
 		if out, err = loadAck(ctx, tx, id, false); err != nil {
 			return err
@@ -332,7 +341,36 @@ func applyProposal(ctx context.Context, tx pgx.Tx, ack POAcknowledgement) (int, 
 		return 0, err
 	}
 	_, res, err := editLocked(ctx, tx, po, po.RowVersion, next, false)
+	if res.reapproval {
+		return 0, err
+	}
 	return res.versionNo, err
+}
+
+// supersedeAcks marks the proposals still open on versions older than the confirmed version no as SUPERSEDED
+// (BR-20.9), so the vendor can answer the new version, and writes poack.decided.v1 for each.
+func supersedeAcks(ctx context.Context, tx pgx.Tx, poID string, no int) error {
+	p, _ := tenant.FromContext(ctx)
+	rows, err := tx.Query(ctx, `update purchase_order_ack set decision = 'SUPERSEDED', decided_at = now()
+		where tenant_id = $1 and purchase_order_id = $2 and version_no < $3 and outcome = 'CHANGES_PROPOSED' and decision is null returning id`,
+		p.TenantID, poID, no)
+	if err != nil {
+		return err
+	}
+	superseded, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, id := range superseded {
+		a, err := loadAck(ctx, tx, id, false)
+		if err != nil {
+			return err
+		}
+		if err := enqueue(ctx, tx, "purchase_order_ack", id, purchasingevents.POAckDecided, ackEvent(a)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Postgres) GetAcknowledgement(ctx context.Context, id string) (POAcknowledgement, error) {
@@ -383,11 +421,15 @@ func (s *Postgres) listAckOrders(ctx context.Context, vendorID string, awaiting 
 	limit = clampLimit(limit)
 	var items []PurchaseOrderAckSummary
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select * from (select o.id, o.number, o.legal_entity_id, o.vendor_id, o.currency, o.approval_status, o.version_no,
-			o.total, (select count(*) from purchase_order_line l where l.tenant_id = o.tenant_id and l.purchase_order_id = o.id),
+		rows, err := tx.Query(ctx, `select * from (select o.id, o.number, o.legal_entity_id, o.vendor_id, o.currency,
+			case when $2 <> '' then 'CONFIRMED' else o.approval_status end as approval_status, o.version_no,
+			case when $2 <> '' then (v.snapshot->>'total')::numeric else o.total end as total,
+			case when $2 <> '' then (select count(*) from jsonb_array_elements(v.snapshot->'lines') e where e->>'status' <> 'CANCELLED')
+				else (select count(*) from purchase_order_line l where l.tenant_id = o.tenant_id and l.purchase_order_id = o.id) end as line_count,
 			`+ackStateSQL+` as ack_state, o.created_at
 			from purchase_order o
-			where o.tenant_id = $1 and o.version_no > 0 and ($2 = '' or o.vendor_id::text = $2)
+			join purchase_order_version v on v.tenant_id = o.tenant_id and v.purchase_order_id = o.id and v.version_no = o.version_no
+			where o.tenant_id = $1 and o.version_no > 0 and ($2 = '' or (o.vendor_id::text = $2 and o.approval_status <> 'CANCELLED'))
 			and (not $3 or o.approval_status = 'CONFIRMED') and ($4::uuid is null or o.id < $4::uuid)) s
 			where (not $3 or ack_state = 'NONE') order by id desc limit $5`, p.TenantID, vendorID, awaiting, nullable(after), limit+1)
 		if err != nil {
@@ -419,10 +461,53 @@ func (s *Postgres) GetVendorPurchaseOrder(ctx context.Context, vendorID, id stri
 		if out, err = loadPurchaseOrder(ctx, tx, id); err != nil {
 			return err
 		}
-		if out.VendorID != vendorID || out.VersionNo == 0 {
+		if out.VendorID != vendorID || out.VersionNo == 0 || out.ApprovalStatus == domain.POStatusCancelled {
 			return httpx.NewProblem(http.StatusNotFound, CodePurchaseOrderNotFound, "purchase order not found")
 		}
+		if out.ApprovalStatus == domain.POStatusConfirmed {
+			return nil
+		}
+		v, ok, err := loadVersion(ctx, tx, id, out.VersionNo)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("purchase order %s: confirmed version %d is missing", out.Number, out.VersionNo)
+		}
+		out = confirmedView(out, v.Snapshot)
 		return nil
 	})
 	return out, err
+}
+
+// confirmedView is head with the commercial content of its confirmed snapshot, so a vendor never sees a
+// change the buyer has not confirmed. The received quantity is live and still comes from head.
+func confirmedView(head PurchaseOrder, snap domain.Snapshot) PurchaseOrder {
+	minor := money.MinorUnits(head.Currency)
+	received := make(map[int]decimal.Decimal, len(head.Lines))
+	for _, l := range head.Lines {
+		received[l.LineNo] = l.ReceivedQty
+	}
+	out := head
+	out.ApprovalStatus = domain.POStatusConfirmed
+	out.Lines = make([]PurchaseOrderLine, 0, len(snap.Lines))
+	out.Charges = make([]PurchaseOrderCharge, 0, len(snap.Charges))
+	out.Subtotal, out.DiscountTotal, out.ChargesTotal, out.TaxTotal, out.Total = decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, snap.Total
+	for _, l := range snap.Lines {
+		out.Lines = append(out.Lines, PurchaseOrderLine{LineNo: l.LineNo, ProductID: l.ProductID, Description: l.Description, Qty: l.Qty,
+			Unit: l.Unit, UnitPrice: l.UnitPrice, PriceUnit: l.PriceUnit, DiscountPct: l.DiscountPct, LineAmount: l.LineAmount,
+			TaxAmount: l.TaxAmount, DeliveryDate: l.DeliveryDate, Status: l.Status, ReceivedQty: received[l.LineNo]})
+		if l.Status == domain.POLineCancelled || l.PriceUnit.IsZero() {
+			continue
+		}
+		gross := l.Qty.Mul(l.UnitPrice).DivRound(l.PriceUnit, 12).RoundBank(minor)
+		out.Subtotal = out.Subtotal.Add(gross)
+		out.DiscountTotal = out.DiscountTotal.Add(gross.Sub(l.LineAmount))
+		out.TaxTotal = out.TaxTotal.Add(l.TaxAmount)
+	}
+	for _, c := range snap.Charges {
+		out.Charges = append(out.Charges, PurchaseOrderCharge{Calc: c.Calc, Value: c.Value, Amount: c.Amount, LineNo: c.LineNo})
+		out.ChargesTotal = out.ChargesTotal.Add(c.Amount)
+	}
+	return out
 }

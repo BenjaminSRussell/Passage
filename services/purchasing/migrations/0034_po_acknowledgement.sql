@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_ack (
   changes jsonb NOT NULL DEFAULT '[]',
   acknowledged_by uuid,
   acknowledged_at timestamptz NOT NULL DEFAULT now(),
-  decision text CHECK (decision IN ('APPROVED', 'DECLINED')),
+  decision text CHECK (decision IN ('APPROVED', 'DECLINED', 'SUPERSEDED')),
   decided_by uuid,
   decided_at timestamptz,
   decision_note text NOT NULL DEFAULT '' CHECK (length(decision_note) <= 1000),

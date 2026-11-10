@@ -24,14 +24,19 @@ type ackLog struct {
 	approve      bool
 	note         string
 	listVendorID string
+	summaries    []store.PurchaseOrderAckSummary
+	more         bool
 	po           store.PurchaseOrder
 	err          error
 }
 
 func (f *fakeStore) AcknowledgePurchaseOrder(_ context.Context, vendorID, poID string, in domain.AckInput, idem store.Idem) (store.POAcknowledgement, error) {
 	f.ack.vendorID, f.ack.poID, f.ack.in, f.ack.idem = vendorID, poID, in, idem
-	return store.POAcknowledgement{ID: ids.New(), PurchaseOrderID: poID, VendorID: vendorID, VersionNo: in.VersionNo, Outcome: in.Outcome,
-		Changes: []domain.LineChange{}}, f.ack.err
+	if f.ack.po.ID != "" && (f.ack.po.ID != poID || f.ack.po.VendorID != vendorID) {
+		return store.POAcknowledgement{}, httpx.NewProblem(http.StatusNotFound, store.CodePurchaseOrderNotFound, "purchase order not found")
+	}
+	return store.POAcknowledgement{ID: ids.New(), LegalEntityID: ids.New(), PurchaseOrderID: poID, VendorID: vendorID, VersionNo: in.VersionNo, Outcome: in.Outcome,
+		AcknowledgedBy: userB, DecisionNote: "buyer only", Changes: []domain.LineChange{}}, f.ack.err
 }
 
 func (f *fakeStore) DecideAcknowledgement(_ context.Context, id string, approve bool, note string, _ store.Idem) (store.POAcknowledgement, error) {
@@ -49,7 +54,11 @@ func (f *fakeStore) GetAcknowledgement(_ context.Context, id string) (store.POAc
 }
 
 func (f *fakeStore) ListAcknowledgements(_ context.Context, _ store.AckFilter, _ string, _ int) (store.Page[store.POAcknowledgement], error) {
-	return store.Page[store.POAcknowledgement]{Items: f.ack.acks}, nil
+	page := store.Page[store.POAcknowledgement]{Items: f.ack.acks}
+	if f.ack.more {
+		page.Next = ids.New()
+	}
+	return page, nil
 }
 
 func (f *fakeStore) ListAwaitingAcknowledgement(context.Context, string, int) (store.Page[store.PurchaseOrderAckSummary], error) {
@@ -58,7 +67,7 @@ func (f *fakeStore) ListAwaitingAcknowledgement(context.Context, string, int) (s
 
 func (f *fakeStore) ListVendorPurchaseOrders(_ context.Context, vendorID, _ string, _ int) (store.Page[store.PurchaseOrderAckSummary], error) {
 	f.ack.listVendorID = vendorID
-	return store.Page[store.PurchaseOrderAckSummary]{Items: []store.PurchaseOrderAckSummary{}}, nil
+	return store.Page[store.PurchaseOrderAckSummary]{Items: f.ack.summaries}, nil
 }
 
 func (f *fakeStore) GetVendorPurchaseOrder(_ context.Context, vendorID, id string) (store.PurchaseOrder, error) {
@@ -154,27 +163,47 @@ func TestVendorReads_ScopedToTheVerifiedVendor(t *testing.T) {
 		CreatedBy: userB, ChangedBy: userB, Lines: []store.PurchaseOrderLine{{LineNo: 1, Qty: decimal.NewFromInt(5), Unit: "EA", PriceSource: "TRADE_AGREEMENT:x",
 			RequisitionLineID: ids.New(), Status: domain.POLineOpen}}, Charges: []store.PurchaseOrderCharge{{Calc: "FIXED", DebitAccountID: ids.New()}}}
 	h.fake.ack.po = po
+	h.fake.ack.acks = []store.POAcknowledgement{{ID: ids.New(), LegalEntityID: ids.New(), PurchaseOrderID: po.ID, PONumber: "PO-1", VendorID: vendor, VersionNo: 1,
+		Outcome: domain.AckChangesProposed, AcknowledgedBy: userB, Decision: domain.AckDeclined, DecidedBy: userA, DecisionNote: "buyer only", Changes: []domain.LineChange{}}}
+	h.fake.ack.more = true
+	h.fake.ack.summaries = []store.PurchaseOrderAckSummary{{ID: po.ID, Number: "PO-1", LegalEntityID: ids.New(), VendorID: vendor, Currency: "USD", VersionNo: 1, AckState: "NONE"}}
 	read := []string{dutyVendorPortalRead}
-
-	rec := h.do(call{method: "GET", path: "/v1/procurement/vendor/purchase-orders?vendorId=" + ids.New(), user: userA, duties: read})
-	if rec.Code != http.StatusOK || h.fake.ack.listVendorID != vendor {
-		t.Fatalf("list: %d %s listed vendor %s", rec.Code, rec.Body, h.fake.ack.listVendorID)
-	}
-	rec = h.do(call{method: "GET", path: "/v1/procurement/vendor/purchase-orders/" + po.ID, user: userA, duties: read})
-	body := rec.Body.String()
-	if rec.Code != http.StatusOK || !strings.Contains(body, `"number":"PO-1"`) {
-		t.Fatalf("detail: %d %s", rec.Code, body)
-	}
-	for _, internal := range []string{"createdBy", "changedBy", "priceSource", "requisitionLineId", "debitAccountId", "legalEntityId"} {
-		if strings.Contains(body, internal) {
-			t.Errorf("vendor detail leaks %s: %s", internal, body)
+	leaks := []string{"createdBy", "changedBy", "priceSource", "requisitionLineId", "debitAccountId", "legalEntityId", "acknowledgedBy", "decidedBy", "decisionNote", "buyer only", userA, userB}
+	noLeak := func(route, body string) {
+		t.Helper()
+		for _, internal := range leaks {
+			if strings.Contains(body, internal) {
+				t.Errorf("%s leaks %s: %s", route, internal, body)
+			}
 		}
 	}
+
+	rec := h.do(call{method: "GET", path: "/v1/procurement/vendor/purchase-orders?vendorId=" + ids.New(), user: userA, duties: read})
+	if rec.Code != http.StatusOK || h.fake.ack.listVendorID != vendor || !strings.Contains(rec.Body.String(), `"acknowledgement":"NONE"`) {
+		t.Fatalf("list: %d %s listed vendor %s", rec.Code, rec.Body, h.fake.ack.listVendorID)
+	}
+	noLeak("vendor list", rec.Body.String())
+	rec = h.do(call{method: "GET", path: "/v1/procurement/vendor/purchase-orders/" + po.ID, user: userA, duties: read})
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `"number":"PO-1"`) || !strings.Contains(body, `"outcome":"CHANGES_PROPOSED"`) || !strings.Contains(body, `"acknowledgementsMore":true`) {
+		t.Fatalf("detail: %d %s", rec.Code, body)
+	}
+	noLeak("vendor detail", body)
+	rec = h.do(call{method: "POST", path: "/v1/procurement/vendor/purchase-orders/" + po.ID + "/acknowledgements", user: userA, duties: []string{dutyVendorPortalAcknowledge},
+		body: `{"versionNo":1,"outcome":"ACCEPTED"}`, headers: idem("leak")})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("acknowledge: %d %s", rec.Code, rec.Body)
+	}
+	noLeak("vendor acknowledge", rec.Body.String())
 	other := newHarness(t)
 	other.api.WithVendorPrincipal(vendorFor(ids.New()))
 	other.fake.ack.po = po
 	if rec := other.do(call{method: "GET", path: "/v1/procurement/vendor/purchase-orders/" + po.ID, user: userA, duties: read}); rec.Code != http.StatusNotFound {
 		t.Fatalf("another vendor read the order: %d %s", rec.Code, rec.Body)
+	}
+	if rec := other.do(call{method: "POST", path: "/v1/procurement/vendor/purchase-orders/" + po.ID + "/acknowledgements", user: userA,
+		duties: []string{dutyVendorPortalAcknowledge}, body: `{"versionNo":1,"outcome":"ACCEPTED"}`, headers: idem("cross")}); rec.Code != http.StatusNotFound {
+		t.Fatalf("another vendor acknowledged the order: %d %s", rec.Code, rec.Body)
 	}
 }
 
