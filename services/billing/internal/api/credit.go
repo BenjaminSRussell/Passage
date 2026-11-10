@@ -14,6 +14,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 )
@@ -125,20 +126,25 @@ func (a *API) validateCredit(req creditNoteRequest) (time.Time, []domain.CreditQ
 	if reason := strings.TrimSpace(req.Reason); reason == "" || len([]rune(reason)) > maxReasonLength {
 		fields["reason"] = fmt.Sprintf("is required, at most %d characters", maxReasonLength)
 	}
-	if len(req.Lines) > a.maxLines {
+	lines, charges := a.parseCreditLines(req.Lines, req.ChargeAmount, fields)
+	return creditDate, lines, charges, fields
+}
+
+func (a *API) parseCreditLines(in []creditLineDTO, chargeAmount string, fields map[string]string) ([]domain.CreditQty, *decimal.Decimal) {
+	if len(in) > a.maxLines {
 		fields["lines"] = fmt.Sprintf("must hold at most %d lines", a.maxLines)
 	}
 	var charges *decimal.Decimal
-	if req.ChargeAmount != "" {
-		if !decimalText.MatchString(req.ChargeAmount) {
+	if chargeAmount != "" {
+		if !decimalText.MatchString(chargeAmount) {
 			fields["chargeAmount"] = "must be a non-negative decimal with at most 6 fraction digits"
 		} else {
-			c := decimal.RequireFromString(req.ChargeAmount)
+			c := decimal.RequireFromString(chargeAmount)
 			charges = &c
 		}
 	}
 	var lines []domain.CreditQty
-	for i, l := range req.Lines {
+	for i, l := range in {
 		field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		if l.LineNo < 1 {
 			fields[field("lineNo")] = "must be a line number of the original invoice"
@@ -149,7 +155,7 @@ func (a *API) validateCredit(req creditNoteRequest) (time.Time, []domain.CreditQ
 		}
 		lines = append(lines, domain.CreditQty{LineNo: l.LineNo, Qty: decimal.RequireFromString(l.Qty)})
 	}
-	return creditDate, lines, charges, fields
+	return lines, charges
 }
 
 // postCreditNote posts a credit note proposal with the next CN- number.
@@ -188,4 +194,114 @@ func (a *API) postCreditNote(w http.ResponseWriter, r *http.Request) {
 	a.creditNotesPosted.Add(1)
 	w.Header().Set("ETag", etag(posted.Version))
 	httpx.JSON(w, http.StatusOK, toDTO(posted))
+}
+
+type creditReservationRequest struct {
+	Reference    string          `json:"reference"`
+	ChargeAmount string          `json:"chargeAmount,omitempty"`
+	Lines        []creditLineDTO `json:"lines"`
+}
+
+type reservationLineDTO struct {
+	LineNo int    `json:"lineNo"`
+	Qty    string `json:"qty"`
+	Net    string `json:"net"`
+	Tax    string `json:"tax"`
+}
+
+type creditReservationDTO struct {
+	ID         string               `json:"id"`
+	InvoiceID  string               `json:"invoiceId"`
+	Reference  string               `json:"reference"`
+	Status     string               `json:"status"`
+	Currency   string               `json:"currency"`
+	Lines      []reservationLineDTO `json:"lines"`
+	Totals     totalsDTO            `json:"totals"`
+	CreatedAt  string               `json:"createdAt"`
+	ReleasedAt string               `json:"releasedAt,omitempty"`
+}
+
+func toReservationDTO(r store.CreditReservation) creditReservationDTO {
+	exp := money.MinorUnits(r.Currency)
+	out := creditReservationDTO{ID: r.ID, InvoiceID: r.InvoiceID, Reference: r.Reference, Status: r.Status, Currency: r.Currency,
+		Lines: []reservationLineDTO{}, CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
+		Totals: totalsDTO{Net: fixed(r.Totals.Net, exp), Charges: fixed(r.Totals.Charges, exp), Tax: fixed(r.Totals.Tax, exp), Gross: fixed(r.Totals.Gross, exp)}}
+	for _, l := range r.Lines {
+		out.Lines = append(out.Lines, reservationLineDTO{LineNo: l.OriginalLineNo, Qty: l.Line.Qty.String(), Net: fixed(l.Net, exp), Tax: fixed(l.Tax, exp)})
+	}
+	if !r.ReleasedAt.IsZero() {
+		out.ReleasedAt = r.ReleasedAt.UTC().Format(time.RFC3339)
+	}
+	return out
+}
+
+// createCreditReservation holds a credit on a posted invoice for a credit that
+// is not issued as a billing credit note (an RMA credit in receivables). The
+// store takes it under the invoice's row lock, the lock credit note posting
+// takes, so the two never add up to more than was invoiced (BIL-0005). The
+// Idempotency-Key is stable per RMA: a retry returns the same reservation.
+func (a *API) createCreditReservation(w http.ResponseWriter, r *http.Request) {
+	invoiceID := chi.URLParam(r, "id")
+	if !ids.Valid(invoiceID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "invoice not found"))
+		return
+	}
+	key := r.Header.Get(idempotencyKey)
+	if invalidIdempotencyKey(key) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", idempotencyKeyDetail))
+		return
+	}
+	var req creditReservationRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if ref := strings.TrimSpace(req.Reference); ref == "" || len(ref) > 255 {
+		fields["reference"] = "is required, at most 255 characters"
+	}
+	if len(req.Lines) == 0 {
+		fields["lines"] = "must name at least one line of the invoice to credit"
+	}
+	lines, charges := a.parseCreditLines(req.Lines, req.ChargeAmount, fields)
+	if len(fields) > 0 {
+		writeFields(w, r, fields)
+		return
+	}
+	raw, _ := json.Marshal(struct {
+		InvoiceID string
+		creditReservationRequest
+	}{invoiceID, req})
+	sum := sha256.Sum256(raw)
+	res := store.CreditReservation{ID: ids.New(), InvoiceID: invoiceID, Reference: strings.TrimSpace(req.Reference),
+		IdempotencyKey: key, RequestHash: hex.EncodeToString(sum[:])}
+	created, replayed, err := a.store.ReserveCredit(r.Context(), res, lines, charges)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotent-Replayed", "true")
+		httpx.JSON(w, http.StatusOK, toReservationDTO(created))
+		return
+	}
+	a.reservationsMade.Add(1)
+	httpx.JSON(w, http.StatusCreated, toReservationDTO(created))
+}
+
+// releaseCreditReservation frees a reservation, for example when the RMA credit
+// is parked or rejected. Releasing a released reservation returns it unchanged.
+func (a *API) releaseCreditReservation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "credit reservation not found"))
+		return
+	}
+	released, err := a.store.ReleaseCredit(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.reservationsFreed.Add(1)
+	httpx.JSON(w, http.StatusOK, toReservationDTO(released))
 }

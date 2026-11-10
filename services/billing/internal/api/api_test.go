@@ -42,9 +42,12 @@ type fakeStore struct {
 	batchInvoices map[string][]string
 	slipLines     map[string]bool
 	batchCreates  int
+	reservations  map[string]store.CreditReservation
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{invoices: map[string]store.Invoice{}} }
+func newFakeStore() *fakeStore {
+	return &fakeStore{invoices: map[string]store.Invoice{}, reservations: map[string]store.CreditReservation{}}
+}
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
 
@@ -89,7 +92,69 @@ func (f *fakeStore) usage(id string) domain.CreditUsage {
 		u.Charges = u.Charges.Add(cn.Totals.Charges)
 		u.Gross = u.Gross.Add(cn.Totals.Gross)
 	}
+	for _, r := range f.reservations {
+		if r.InvoiceID != id || r.Status != store.StatusReserved {
+			continue
+		}
+		for _, l := range r.Lines {
+			c := u.Lines[l.OriginalLineNo]
+			u.Lines[l.OriginalLineNo] = domain.Credited{Qty: c.Qty.Add(l.Line.Qty), Net: c.Net.Add(l.Net), Tax: c.Tax.Add(l.Tax), ReservedQty: c.ReservedQty.Add(l.Line.Qty), ReservedTax: c.ReservedTax.Add(l.Tax)}
+		}
+		u.Charges = u.Charges.Add(r.Totals.Charges)
+		u.Gross = u.Gross.Add(r.Totals.Gross)
+		u.Reserved = u.Reserved.Add(r.Totals.Gross)
+	}
 	return u
+}
+
+func ruleProblem(err error) error {
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+	}
+	return err
+}
+
+func (f *fakeStore) ReserveCredit(_ context.Context, res store.CreditReservation, req []domain.CreditQty, charges *decimal.Decimal) (store.CreditReservation, bool, error) {
+	for _, r := range f.reservations {
+		if r.IdempotencyKey != res.IdempotencyKey {
+			continue
+		}
+		if r.RequestHash != res.RequestHash {
+			return store.CreditReservation{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeKeyReuse, "key reuse")
+		}
+		return r, true, nil
+	}
+	orig, ok := f.invoices[res.InvoiceID]
+	if !ok {
+		return store.CreditReservation{}, false, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "invoice not found")
+	}
+	if err := domain.CanBeCredited(orig.Status, orig.Type); err != nil {
+		return store.CreditReservation{}, false, ruleProblem(err)
+	}
+	original := make([]domain.PostedLine, len(orig.Lines))
+	for i, l := range orig.Lines {
+		original[i] = domain.PostedLine{Line: l.Line, Net: l.Net, Tax: l.Tax}
+	}
+	planned, totals, err := domain.PlanCredit(orig.Currency, original, orig.Totals, f.usage(orig.ID), req, charges)
+	if err != nil {
+		return store.CreditReservation{}, false, ruleProblem(err)
+	}
+	res.Currency, res.Status, res.Totals, res.Lines, res.CreatedAt = orig.Currency, store.StatusReserved, totals, planned, time.Date(2027, 3, 21, 0, 0, 0, 0, time.UTC)
+	f.reservations[res.ID] = res
+	return res, false, nil
+}
+
+func (f *fakeStore) ReleaseCredit(_ context.Context, id string) (store.CreditReservation, error) {
+	r, ok := f.reservations[id]
+	if !ok {
+		return store.CreditReservation{}, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "credit reservation not found")
+	}
+	if r.Status == store.StatusReserved {
+		r.Status, r.ReleasedAt = store.StatusReleased, time.Date(2027, 3, 22, 0, 0, 0, 0, time.UTC)
+		f.reservations[id] = r
+	}
+	return r, nil
 }
 
 func (f *fakeStore) CreateCreditNote(_ context.Context, cn store.Invoice) (store.Invoice, error) {

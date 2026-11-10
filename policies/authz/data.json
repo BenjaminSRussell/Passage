@@ -441,6 +441,10 @@
     "ar.rmacredit.post": {"service_only": true, "permissions": [{"resource": "/v1/receivables/rma-credits", "methods": ["POST"]}]},
     "inventory.return-receipt.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/return-receipts", "methods": ["POST"]}]},
     "fulfillment.packing-slip.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/packing-slips/*", "methods": ["GET"]}]},
+    "billing.credit-reservation.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/billing/invoices/*/credit-reservations", "methods": ["POST"]},
+      {"resource": "/v1/billing/credit-reservations/*:release", "methods": ["POST"]}
+    ]},
     "billing.invoice.read": {"service_only": true, "permissions": [{"resource": "/v1/billing/invoices/*", "methods": ["GET"]}]},
     "sales.order.lookup": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*", "methods": ["GET"]}]},
     "inventory.hold.apply": {"service_only": true, "permissions": [
@@ -1916,7 +1920,9 @@
     "billing.creditnote.post": {"permissions": [{"resource": "/v1/billing/credit-notes/*:post", "methods": ["POST"]}]},
     "billing.invoice.maintain": {"permissions": [
       {"resource": "/v1/billing/credit-notes", "methods": ["POST"]},
+      {"resource": "/v1/billing/credit-reservations/*:release", "methods": ["POST"]},
       {"resource": "/v1/billing/free-text-invoices", "methods": ["POST"]},
+      {"resource": "/v1/billing/invoices/*/credit-reservations", "methods": ["POST"]},
       {"resource": "/v1/billing/proposals", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions/*:bill", "methods": ["POST"]},
@@ -3450,7 +3456,7 @@
     "receivables": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
       "tax": ["tax.transaction.record"],
-      "billing": ["billing.invoice.read"]
+      "billing": ["billing.invoice.read", "billing.credit-reservation.write"]
     },
     "ledger": {
       "close": ["period.check"],

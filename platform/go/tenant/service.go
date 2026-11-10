@@ -152,7 +152,7 @@ var serviceGrants = map[string]map[string][]string{
 	"receivables": {
 		"ledger":  {"ledger.entry.post", "ledger.ledger.lookup"},
 		"tax":     {"tax.transaction.record"},
-		"billing": {"billing.invoice.read"},
+		"billing": {"billing.invoice.read", "billing.credit-reservation.write"},
 	},
 	"ledger": {
 		"close": {"period.check"},
