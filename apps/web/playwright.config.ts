@@ -13,6 +13,7 @@ const E2E_DUTIES = [
   "hr.team.approve",
   "identity.legal-entity.maintain",
   "identity.security-role.maintain",
+  "inbox.read",
   "tax.code.maintain",
   "metadata.read",
   "notify.write",
