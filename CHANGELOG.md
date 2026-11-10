@@ -19,6 +19,8 @@ release may change public APIs.
 
 ### Added
 
+- Plain-language error messages (#501): the web problem catalog now covers every error code of the party, ledger, tax and
+  product services, and the coverage test reads their Go sources so a new code without a message fails it.
 - Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
   seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
   `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web
