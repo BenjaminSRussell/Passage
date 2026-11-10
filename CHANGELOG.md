@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- Web: five task-based user guides in `docs/user/` (vendor invoice, purchase order, customer payment, order to invoice, company set-up) and a route help map (`shell/help/routeHelp.ts`, `helpForRoute`) covering every procure-to-pay and order-to-cash page, with tests that fail on a page without help, a broken guide link or a bare problem code (#507).
 - batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
   approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
   source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
