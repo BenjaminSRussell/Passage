@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { apiFetch } from "../../../shell/api/http";
 
 export const base = "/api/v1/party";
 
@@ -33,7 +34,7 @@ export class PartyApiError extends Error {
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
+const defaultFetch: FetchLike = (input, init) => apiFetch(input, init);
 
 async function problem(res: Response): Promise<PartyApiError> {
   let body: { code?: unknown; detail?: unknown; errors?: unknown } = {};

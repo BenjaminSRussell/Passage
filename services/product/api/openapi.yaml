@@ -49,19 +49,19 @@ paths:
     patch:
       operationId: updateProduct
       summary: Update a product
-      description: 'Partial update of name, description, searchName and lifecycleState under If-Match (the product version). lifecycleState follows BR-8.1 (draft to active, active to phase_out, phase_out to active or obsolete; obsolete is terminal) and a move to active needs every required attribute (BR-8.9). Writes product.updated with the changed fields; a patch that changes nothing keeps the version and writes no event. Also accepted with duty product.import.write.'
+      description: 'Partial update of name, description, searchName, lifecycleState, itemGroupId (empty clears it), batchTracked, serialTracked and catchWeight under If-Match (the product version). lifecycleState follows BR-8.1 (draft to active, active to phase_out, phase_out to active or obsolete; obsolete is terminal) and a move to active needs every required attribute (BR-8.9). Writes product.updated with the changed fields; a patch that changes nothing keeps the version and writes no event. Also accepted with duty product.import.write.'
       x-passage-duty: product.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: If-Match, in: header, required: true, schema: { type: string }, description: The product version. }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string }, description: { type: string }, searchName: { type: string }, lifecycleState: { type: string, enum: [draft, active, phase_out, obsolete] } } } } }
+        content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string }, description: { type: string }, searchName: { type: string }, lifecycleState: { type: string, enum: [draft, active, phase_out, obsolete] }, itemGroupId: { type: string }, batchTracked: { type: boolean }, serialTracked: { type: boolean }, catchWeight: { type: boolean } } } } }
       responses:
         '200': { description: Updated product with its new version. }
-        '400': { description: Invalid field value., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '400': { description: 'Invalid field value, or itemGroupId is not an item group of the tenant (errors.itemGroupId).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Product not found., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PRD-LC-ILLEGAL (transition outside BR-8.1) or PRD-ATTR-REQUIRED / PRD-ATTR-RANGE (activation with missing or invalid required attributes); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRD-LC-ILLEGAL (transition outside BR-8.1), PRD-ATTR-REQUIRED / PRD-ATTR-RANGE (activation with missing or invalid required attributes) or PRD-SVC-TRACKED (a service with a tracking flag); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: The product changed since it was read (PRD-VERSION-CONFLICT)., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match missing (PRD-VERSION-REQUIRED)., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/products/{id}/variants:explode:
@@ -232,6 +232,12 @@ paths:
         '201': { description: Dimension group created. }
         default: { $ref: '#/components/responses/Problem' }
   /v1/product/setup/item-groups:
+    get:
+      operationId: listItemGroups
+      summary: List item groups
+      x-passage-duty: product.read
+      responses:
+        '200': { description: 'Item groups in code order: {items: [{ID, Code, Name}]}.' }
     post:
       operationId: createItemGroup
       summary: Create an item group
@@ -362,6 +368,10 @@ components:
         searchName: { type: string }
         baseUom: { type: string }
         dimensionGroupId: { type: string, format: uuid }
+        itemGroupId: { type: string, format: uuid, description: 'An item group of the tenant (GET /v1/product/setup/item-groups); 400 when unknown.' }
+        batchTracked: { type: boolean, default: false }
+        serialTracked: { type: boolean, default: false }
+        catchWeight: { type: boolean, default: false }
         lifecycleState: { type: string }
         service: { type: object }
     ExplodeRequest:

@@ -356,6 +356,77 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/tenant/setup:
+    get:
+      operationId: getTenantSetup
+      x-passage-duty: identity.setup.view
+      description: >-
+        The onboarding wizard steps in the order a company is set up, each todo, done or skipped, with who changed it and
+        when. complete is true once every step is done or skipped.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }]
+      responses:
+        '200': { description: The steps and their progress., content: { application/json: { schema: { $ref: '#/components/schemas/TenantSetup' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/tenant/setup/steps/{step}:
+    put:
+      operationId: updateTenantSetupStep
+      x-passage-duty: identity.setup.maintain
+      description: Marks one step todo, done or skipped. Requires access to all legal entities and tenant.administer. Audited and emitted as dev.passage.identity.tenantsetup.updated.v1. An unknown step is 404.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/UserHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: step, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [todo, done, skipped] }
+      responses:
+        '200': { description: The steps after the change., content: { application/json: { schema: { $ref: '#/components/schemas/TenantSetup' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/tenant/workspace-config:
+    get:
+      operationId: getTenantWorkspaceConfig
+      x-passage-duty: identity.setup.view
+      description: The tenant's override of the shell's workspaces (areas, workspaces, hide), or null when the tenant uses the shipped workspaces. The shell merges and validates it.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }]
+      responses:
+        '200': { description: The override., content: { application/json: { schema: { $ref: '#/components/schemas/TenantWorkspaceConfig' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: updateTenantWorkspaceConfig
+      x-passage-duty: identity.setup.maintain
+      description: Replaces the override; null goes back to the shipped workspaces. Only the keys areas, workspaces and hide are accepted. Requires access to all legal entities and tenant.administer. Audited.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantWorkspaceConfig' }
+      responses:
+        '200': { description: The override now in force., content: { application/json: { schema: { $ref: '#/components/schemas/TenantWorkspaceConfig' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/authz/assignments:
     post:
       operationId: assignRole
@@ -673,6 +744,30 @@ components:
       properties:
         features: { type: array, items: { $ref: '#/components/schemas/TenantFeature' } }
         templates: { type: array, items: { $ref: '#/components/schemas/FeatureTemplate' } }
+    TenantSetup:
+      type: object
+      required: [steps, total, finished, complete]
+      properties:
+        steps:
+          type: array
+          items:
+            type: object
+            required: [key, name, description, status]
+            properties:
+              key: { type: string }
+              name: { type: string }
+              description: { type: string }
+              status: { type: string, enum: [todo, done, skipped] }
+              changedBy: { type: string }
+              changedAt: { type: string, format: date-time }
+        total: { type: integer }
+        finished: { type: integer }
+        complete: { type: boolean }
+    TenantWorkspaceConfig:
+      type: object
+      required: [config]
+      properties:
+        config: { type: object, nullable: true, description: 'areas, workspaces and hide, or null.' }
     UpdateTenantFeatures:
       type: object
       properties:

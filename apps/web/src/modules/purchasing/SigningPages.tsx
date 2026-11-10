@@ -17,7 +17,7 @@ import {
   type SigningLimitRequest,
   type SigningRequestStatus,
 } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, currencyPattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure } from "./parts";
+import { Details, LoadError, StatusBadge, currencyPattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -30,7 +30,7 @@ const amount = (value: string, currency: string) => `${Number(value).toLocaleStr
 const expired = (l: SigningLimit) => l.recertifyBy < todayIso();
 
 const limitColumns: DataTableColumn<SigningLimit>[] = [
-  { key: "workerId", header: "Worker", render: (l) => <ShortId id={l.workerId} /> },
+  { key: "workerId", header: "Worker", render: (l) => <Named entity="worker" id={l.workerId} /> },
   { key: "documentType", header: "Document", render: (l) => statusLabel(l.documentType) },
   { key: "spendingLimit", header: "Spending limit", mono: true, render: (l) => amount(l.spendingLimit, l.currency) },
   { key: "approvalLimit", header: "Approval limit", mono: true, render: (l) => amount(l.approvalLimit, l.currency) },
@@ -178,8 +178,8 @@ export function SigningLimitDetailPage() {
           <Card>
             <Details
               items={[
-                { label: "Worker", value: limit.workerId, mono: true },
-                { label: "Legal entity", value: limit.legalEntityId, mono: true },
+                { label: "Worker", value: <Named entity="worker" id={limit.workerId} /> },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={limit.legalEntityId} /> },
                 { label: "Document", value: statusLabel(limit.documentType) },
                 { label: "Spending limit", value: amount(limit.spendingLimit, limit.currency), mono: true },
                 { label: "Approval limit", value: amount(limit.approvalLimit, limit.currency), mono: true },
@@ -217,7 +217,7 @@ export function SigningLimitDetailPage() {
 }
 
 const requestColumns: DataTableColumn<SigningLimitRequest>[] = [
-  { key: "workerId", header: "Worker", render: (r) => <ShortId id={r.workerId} /> },
+  { key: "workerId", header: "Worker", render: (r) => <Named entity="worker" id={r.workerId} /> },
   { key: "documentType", header: "Document", render: (r) => statusLabel(r.documentType) },
   { key: "spendingLimit", header: "Spending limit", mono: true, render: (r) => amount(r.spendingLimit, r.currency) },
   { key: "approvalLimit", header: "Approval limit", mono: true, render: (r) => amount(r.approvalLimit, r.currency) },
@@ -453,8 +453,8 @@ export function SigningLimitRequestDetailPage() {
             <Details
               items={[
                 { label: "Status", value: <StatusBadge status={request.status} /> },
-                { label: "Worker", value: request.workerId, mono: true },
-                { label: "Legal entity", value: request.legalEntityId, mono: true },
+                { label: "Worker", value: <Named entity="worker" id={request.workerId} /> },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={request.legalEntityId} /> },
                 { label: "Document", value: statusLabel(request.documentType) },
                 { label: "Spending limit", value: amount(request.spendingLimit, request.currency), mono: true },
                 { label: "Approval limit", value: amount(request.approvalLimit, request.currency), mono: true },

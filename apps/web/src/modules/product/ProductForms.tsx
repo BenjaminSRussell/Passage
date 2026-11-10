@@ -2,14 +2,15 @@ import { useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { lookupProblem } from "../../shell/errors";
 import { holdsDuty } from "../../shell/dutyGate";
+import { FeatureGate } from "../../shell/tenant/TenantSettings";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Button, FormField, Input, PageHeader, Select, Skeleton, Textarea } from "../../shell/ui";
-import { createProduct, ProductApiError, updateProduct, type Lifecycle, type Product, type ProductType } from "./api/client";
-import { DUTY_WRITE, lifecycleLabel, productTypeLabel } from "./labels";
+import { Alert, Button, FormField, FormSection, Input, PageHeader, Select, Skeleton, Textarea } from "../../shell/ui";
+import { createProduct, ProductApiError, updateProduct, type Lifecycle, type Product, type ProductType, type TrackingFlags } from "./api/client";
+import { DUTY_WRITE, lifecycleLabel, productTypeLabel, trackingFeature, trackingFlags, trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProductNotFound } from "./pages";
 import { ProductProblem } from "./ProductProblem";
-import { useProduct } from "./useProduct";
+import { useItemGroups, useProduct } from "./useProduct";
 
 type Errors = Record<string, string>;
 
@@ -17,7 +18,8 @@ const NUMBER_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,39}$/;
 const UNIT_PATTERN = /^[A-Z0-9._-]{1,10}$/;
 const lifecycleOrder: Lifecycle[] = ["draft", "active", "phase_out", "obsolete"];
 
-interface Values {
+interface Values extends TrackingFlags {
+  itemGroupId: string;
   productNumber: string;
   name: string;
   description: string;
@@ -27,7 +29,19 @@ interface Values {
   lifecycleState: Lifecycle;
 }
 
-const blank: Values = { productNumber: "", name: "", description: "", baseUom: "", subtype: "product", productType: "item", lifecycleState: "draft" };
+const blank: Values = {
+  productNumber: "",
+  name: "",
+  description: "",
+  baseUom: "",
+  subtype: "product",
+  productType: "item",
+  lifecycleState: "draft",
+  itemGroupId: "",
+  batchTracked: false,
+  serialTracked: false,
+  catchWeight: false,
+};
 
 export function validate(values: Values, creating: boolean): Errors {
   const errors: Errors = {};
@@ -70,10 +84,17 @@ function ProductForm({ initial, creating, id, version, submitLabel, onReload }: 
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const itemGroups = useItemGroups();
+  const stocked = values.productType !== "service";
   const attempt = useRef<{ body: string; key: string } | null>(null);
 
   const set = <K extends keyof Values>(field: K, value: Values[K]) => setValues((prev) => ({ ...prev, [field]: value }));
   const field = (name: keyof Values) => errors[name];
+  const tracking = (): TrackingFlags => ({
+    batchTracked: stocked && values.batchTracked,
+    serialTracked: stocked && values.serialTracked,
+    catchWeight: stocked && values.catchWeight,
+  });
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -95,6 +116,8 @@ function ProductForm({ initial, creating, id, version, submitLabel, onReload }: 
           baseUom: values.baseUom.trim().toUpperCase(),
           subtype: values.subtype,
           productType: values.productType,
+          ...(values.itemGroupId !== "" ? { itemGroupId: values.itemGroupId } : {}),
+          ...Object.fromEntries(Object.entries(tracking()).filter(([, on]) => on)),
         };
         const serialized = JSON.stringify(body);
         if (attempt.current?.body !== serialized) attempt.current = { body: serialized, key: crypto.randomUUID() };
@@ -104,6 +127,8 @@ function ProductForm({ initial, creating, id, version, submitLabel, onReload }: 
           name: values.name.trim(),
           description: values.description.trim(),
           lifecycleState: values.lifecycleState,
+          itemGroupId: values.itemGroupId,
+          ...tracking(),
         });
       }
       navigate(`/product/${encodeURIComponent(saved.id)}`);
@@ -177,6 +202,38 @@ function ProductForm({ initial, creating, id, version, submitLabel, onReload }: 
             {(control) => <Textarea {...control} value={values.description} onChange={(event) => set("description", event.target.value)} />}
           </FormField>
         </div>
+        <FormSection collapse="more" defaultOpen={initial.itemGroupId !== "" || trackingFlags.some((flag) => initial[flag])}>
+          <FormField
+            id="product-item-group"
+            label="Item group"
+            optional
+            error={field("itemGroupId")}
+            hint={itemGroups.failed ? "Item groups could not be loaded. Try again later." : "Groups products for posting. Ask an administrator to add groups."}
+          >
+            {(control) => (
+              <Select {...control} value={values.itemGroupId} onChange={(event) => set("itemGroupId", event.target.value)}>
+                <option value="">None</option>
+                {values.itemGroupId !== "" && !itemGroups.groups.some((group) => group.id === values.itemGroupId) ? (
+                  <option value={values.itemGroupId}>Current item group</option>
+                ) : null}
+                {itemGroups.groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name} ({group.code})
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {trackingFlags.map((flag) => (
+            <FeatureGate key={flag} feature={trackingFeature[flag]}>
+              <FormField id={`product-${flag}`} label={trackingLabel[flag]} hint={stocked ? undefined : "A service can't be tracked."}>
+                {(control) => (
+                  <Input {...control} type="checkbox" checked={stocked && values[flag]} disabled={!stocked} onChange={(event) => set(flag, event.target.checked)} />
+                )}
+              </FormField>
+            </FeatureGate>
+          ))}
+        </FormSection>
         <div className={styles.formActions}>
           <Button type="submit" variant="primary" loading={busy}>
             {submitLabel}
@@ -252,7 +309,18 @@ export function EditProductPage() {
       <PageHeader title={`Edit ${data.name}`} />
       <ProductForm
         key={`${data.id}:${data.version}`}
-        initial={{ ...blank, productNumber: data.productNumber, name: data.name, description: data.description, lifecycleState: data.lifecycleState }}
+        initial={{
+          ...blank,
+          productNumber: data.productNumber,
+          name: data.name,
+          description: data.description,
+          lifecycleState: data.lifecycleState,
+          productType: data.productType,
+          itemGroupId: data.itemGroupId,
+          batchTracked: data.batchTracked,
+          serialTracked: data.serialTracked,
+          catchWeight: data.catchWeight,
+        }}
         creating={false}
         id={data.id}
         version={data.version}

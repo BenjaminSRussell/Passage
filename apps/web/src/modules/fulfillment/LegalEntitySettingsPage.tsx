@@ -9,9 +9,10 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<LegalEntitySetting>[] = [
-  { key: "legalEntityId", header: "Legal entity", mono: true },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <PlainName entity="legalEntity" id={row.legalEntityId} /> },
   {
     key: "cogsAtShipment",
     header: "Cost of goods sold",

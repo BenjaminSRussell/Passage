@@ -143,6 +143,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices/i1"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
@@ -150,6 +151,12 @@ segregation_grants := [
 	["receiving.service-entry.accept", "GET", "/v1/receiving/service-entry-sheets/s1"],
 	["receiving.service-entry.accept", "POST", "/v1/receiving/service-entry-sheets/s1:accept"],
 	["receiving.service-entry.accept", "POST", "/v1/receiving/service-entry-sheets/s1:reject"],
+	["receiving.asn.maintain", "POST", "/v1/receiving/asns"],
+	["receiving.asn.maintain", "GET", "/v1/receiving/asns"],
+	["receiving.asn.maintain", "GET", "/v1/receiving/asns/a1"],
+	["receiving.asn.receive", "GET", "/v1/receiving/asns"],
+	["receiving.asn.receive", "GET", "/v1/receiving/asns/a1"],
+	["receiving.asn.receive", "POST", "/v1/receiving/asns/a1:start-receipt"],
 	["receiving.invoice-audit.release", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
 	["receiving.invoice-audit.release", "POST", "/v1/receiving/invoices/i1:reject-audit-block"],
 	["receiving.ers-price.confirm", "PUT", "/v1/receiving/receipts/r1/lines/1/ers-price-confirmation"],
@@ -1721,6 +1728,14 @@ test_reporting_balance_verification_routes if {
 	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
 }
 
+test_org_demo_company_manage_reaches_only_the_demo_load if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/import")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.read", "POST", "/v1/org/demo-company")
+}
+
 test_org_package_manage_reaches_only_export_and_import if {
 	allowed("org.package.manage", "POST", "/v1/org/export")
 	allowed("org.package.manage", "POST", "/v1/org/import")
@@ -2047,6 +2062,22 @@ test_tenant_features_are_not_reachable_through_other_identity_duties if {
 	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
 }
 
+test_tenant_setup_view_reads_only if {
+	allowed("identity.setup.view", "GET", "/v1/tenant/setup")
+	allowed("identity.setup.view", "GET", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/workspace-config")
+}
+
+test_tenant_setup_maintain_reads_and_writes_setup_only if {
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "DELETE", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.maintain", "GET", "/v1/tenants")
+}
+
 test_dev_seed_every_user_reads_features_but_cannot_change_them if {
 	dev_seed_decision("admin", "GET", "/v1/tenant/features").allow
 	dev_seed_decision("clerk", "GET", "/v1/tenant/features").allow
@@ -2120,4 +2151,9 @@ test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
 	not principal_allowed("receivables-billing", "POST", "/v1/ledger/journal-entries")
 	not principal_allowed("receivables-billing", "POST", "/v1/billing/invoices")
 	not allowed("receivables.openitem.from-billing", "POST", "/v1/receivables/open-items")
+}
+
+test_asn_duties_do_not_cross if {
+	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
+	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
 }

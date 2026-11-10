@@ -160,6 +160,8 @@ func pointWebClient(realm map[string]any, webOrigin string) error {
 		if !ok || client["clientId"] != WebClientID {
 			continue
 		}
+		// The password grant lets `make e2e-local` get real Keycloak tokens for the seeded users without a browser.
+		client["directAccessGrantsEnabled"] = true
 		client["redirectUris"] = []string{webOrigin + "/auth/callback"}
 		client["webOrigins"] = []string{webOrigin}
 		attrs, _ := client["attributes"].(map[string]any)

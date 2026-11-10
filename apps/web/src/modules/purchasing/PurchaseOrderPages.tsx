@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { pickProductPatch } from "../../shell/lookup/entities";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -13,7 +14,13 @@ import {
   PageHeader,
   Select,
   buttonClassName,
+  entityText,
+  ListPage,
   type DataTableColumn,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   actOnPurchaseOrder,
@@ -28,6 +35,7 @@ import {
   listPurchaseOrders,
   listServiceSpecs,
   newIdempotencyKey,
+  ProcurementApiError,
   type ApprovalStatus,
   type ChargeCalc,
   type DeliverySchedule,
@@ -57,6 +65,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -68,82 +77,99 @@ const CALCS: { value: ChargeCalc; label: string }[] = [
   { value: "PERCENT", label: "Percent of net lines" },
 ];
 
-const listColumns: DataTableColumn<PurchaseOrderSummary>[] = [
+const listColumns: ListColumn<PurchaseOrderSummary>[] = [
   { key: "number", header: "Number", mono: true },
-  { key: "approvalStatus", header: "Approval", render: (row) => <StatusBadge status={row.approvalStatus} /> },
-  { key: "vendorId", header: "Vendor", render: (row) => <ShortId id={row.vendorId} /> },
+  {
+    key: "approvalStatus",
+    header: "Approval",
+    render: (row) => <StatusBadge status={row.approvalStatus} />,
+    sortValue: (row) => statusLabel(row.approvalStatus),
+    csv: (row) => statusLabel(row.approvalStatus),
+  },
+  {
+    key: "vendorId",
+    header: "Vendor",
+    sortable: false,
+    render: (row) => <Named entity="vendor" id={row.vendorId} />,
+    csv: (row) => entityText("vendor", row.vendorId),
+  },
   { key: "lineCount", header: "Lines", align: "end" },
-  { key: "total", header: "Total", align: "end", render: (row) => money(row.total, row.currency) },
-  { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10) },
+  { key: "total", header: "Total", align: "end", render: (row) => money(row.total, row.currency), csv: (row) => row.total, csvWith: "currency" },
+  { key: "currency", header: "Currency", defaultHidden: true },
+  { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10), csv: (row) => row.createdAt.slice(0, 10) },
 ];
 
-/** Purchase order list with approval-status filter and load-more paging. */
-export function PurchaseOrdersPage() {
-  const navigate = useNavigate();
-  const [status, setStatus] = useState<ApprovalStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<PurchaseOrderSummary[]>([]);
+const listFilters: ListFilterDef[] = [
+  { kind: "select", key: "approvalStatus", label: "Approval status", anyLabel: "All statuses", options: APPROVAL_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+  { kind: "entity", key: "vendorId", label: "Vendor", entity: "vendor" },
+];
+
+interface PagedRows {
+  key: string;
+  rows: PurchaseOrderSummary[];
+  cursor?: string;
+  nextCursor?: string;
+  ready: boolean;
+}
+
+function usePurchaseOrderRows(query: ListQuery): ListData<PurchaseOrderSummary> {
+  const status = (query.filters.approvalStatus ?? "") as ApprovalStatus | "";
+  const vendorId = query.filters.vendorId ?? "";
+  const key = `${status}|${vendorId}`;
+  const [paged, setPaged] = useState<PagedRows>({ key, rows: [], ready: false });
+  const current: PagedRows = paged.key === key ? paged : { key, rows: [], ready: false };
+  const [forbidden, setForbidden] = useState(false);
+  const cursor = current.cursor;
   const page = useResource(
     async (signal) => {
-      const result = await listPurchaseOrders({ approvalStatus: status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
+      try {
+        const result = await listPurchaseOrders({ approvalStatus: status, vendorId: vendorId || undefined }, { cursor, signal });
+        setPaged((s) => {
+          const base: PagedRows = s.key === key ? s : { key, rows: [], ready: false };
+          return { ...base, cursor, rows: cursor ? [...base.rows, ...result.items] : result.items, nextCursor: result.nextCursor, ready: true };
+        });
+        setForbidden(false);
+        return result;
+      } catch (error) {
+        setForbidden(error instanceof ProcurementApiError && error.problem.status === 403);
+        throw error;
+      }
     },
-    [status, cursor],
+    [status, vendorId, cursor],
   );
+  return {
+    rows: page.error ? [] : current.rows,
+    loading: (cursor === undefined && page.loading) || (!current.ready && !page.error),
+    loadingMore: cursor !== undefined && page.loading,
+    error: page.error ?? undefined,
+    forbidden,
+    hasMore: current.ready && Boolean(current.nextCursor) && !page.error,
+    loadMore: () => setPaged((s) => (s.key === key ? { ...s, cursor: s.nextCursor } : s)),
+    retry: page.reload,
+  };
+}
 
+export function PurchaseOrdersPage() {
+  const navigate = useNavigate();
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Purchase orders"
-        description="Orders to vendors with lines, charges and totals that always balance to the cent."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/purchase-orders/new">
-            New purchase order
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="po-status-filter" label="Approval status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as ApprovalStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {APPROVAL_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="purchase orders" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Purchase orders"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(row) => row.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No purchase orders yet", description: "Create one here, or consolidate approved requisition lines." }}
-        onRowOpen={(row) => navigate(`/purchasing/purchase-orders/${row.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-purchase-orders"
+      title="Purchase orders"
+      description="Orders to vendors with lines, charges and totals that always balance to the cent."
+      noun="purchase orders"
+      singular="purchase order"
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/purchase-orders/new">
+          New purchase order
+        </Link>
+      }
+      columns={listColumns}
+      filters={listFilters}
+      useRows={usePurchaseOrderRows}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/purchasing/purchase-orders/${row.id}`)}
+      empty={{ title: "No purchase orders yet", description: "Create one here, or consolidate approved requisition lines." }}
+    />
   );
 }
 
@@ -152,6 +178,8 @@ interface LineDraft {
   /** Set on an edit for a line already on the order; blank price keeps its price. */
   lineNo?: number;
   productId: string;
+  productHint?: string;
+  autoUnit?: string;
   description: string;
   /** Procurement category (FR-17.20); read-only on a line already on the order. */
   category: string;
@@ -352,8 +380,15 @@ function LinesCard({
               ) : null}
             </div>
             <div className={styles.grid}>
-              <FormField id={id("product")} label="Product" optional error={err("productId")}>
-                {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+              <FormField id={id("product")} label="Product" optional hint={line.productHint || undefined} error={err("productId")}>
+                {(c) => (
+                  <EntityLookup
+                    entity="product"
+                    {...c}
+                    value={line.productId}
+                    onChange={(e) => update(i, { productId: e.target.value, ...pickProductPatch(line, e.option, fromRequisition) })}
+                  />
+                )}
               </FormField>
               <FormField id={id("description")} label="Description" optional error={err("description")}>
                 {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}
@@ -747,8 +782,8 @@ function EditForm({ po }: { po: PurchaseOrder }) {
       <Card title="Order">
         <Details
           items={[
-            { label: "Vendor", value: po.vendorId, mono: true },
-            { label: "Legal entity", value: po.legalEntityId, mono: true },
+            { label: "Vendor", value: <Named entity="vendor" id={po.vendorId} /> },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={po.legalEntityId} /> },
             { label: "Currency", value: po.currency, mono: true },
             { label: "Status", value: <StatusBadge status={po.approvalStatus} /> },
           ]}
@@ -925,7 +960,7 @@ const lineColumns = (
   plan?: { poId: string; byLine: Map<number, InvoicingPlan>; schedules: Map<number, DeliverySchedule>; services: Map<number, ServiceSpec>; closed: boolean },
 ): DataTableColumn<PurchaseOrderLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
-  { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+  { key: "item", header: "Item", render: (l) => l.description || <Named entity="product" id={l.productId} /> },
   { key: "category", header: "Category", render: (l) => l.category || "—" },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
   { key: "receivedQty", header: "Received", align: "end", render: (l) => l.receivedQty ?? "0" },
@@ -935,7 +970,7 @@ const lineColumns = (
   { key: "lineAmount", header: "Net amount", align: "end", render: (l) => money(l.lineAmount, currency) },
   { key: "taxAmount", header: "Tax", align: "end", render: (l) => money(l.taxAmount, currency) },
   { key: "deliveryDate", header: "Delivery", mono: true },
-  { key: "warehouseId", header: "Deliver to", render: (l) => <ShortId id={l.warehouseId} /> },
+  { key: "warehouseId", header: "Deliver to", render: (l) => <Named entity="warehouse" id={l.warehouseId} /> },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
   ...(plan
     ? [
@@ -1215,8 +1250,8 @@ export function PurchaseOrderDetailPage() {
       <Card title="Summary">
         <Details
           items={[
-            { label: "Vendor", value: po.vendorId, mono: true },
-            { label: "Legal entity", value: po.legalEntityId, mono: true },
+            { label: "Vendor", value: <Named entity="vendor" id={po.vendorId} /> },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={po.legalEntityId} /> },
             { label: "Document status", value: statusLabel(po.documentStatus) },
             { label: "Confirmed version", value: String(po.versionNo), mono: true },
             { label: "Change management", value: po.changeManagement ? "On" : "Off" },

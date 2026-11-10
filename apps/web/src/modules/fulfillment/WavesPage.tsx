@@ -2,11 +2,12 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listWaves, type WaveSummary } from "./api/client";
-import { dash, formatDateTime, GROUP_LABELS, shortId } from "./format";
+import { dash, formatDateTime, GROUP_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { WaveStatusBadge } from "./WaveActions";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const columns: DataTableColumn<WaveSummary>[] = [
   { key: "waveNumber", header: "Wave", mono: true },
@@ -16,7 +17,7 @@ const columns: DataTableColumn<WaveSummary>[] = [
   { key: "groupKey", header: "Group", render: (row) => (row.groupKey === "UNASSIGNED" ? "Unassigned" : row.groupKey) },
   { key: "lineCount", header: "Lines", align: "end" },
   { key: "orderCount", header: "Orders", align: "end" },
-  { key: "warehouseId", header: "Warehouse", mono: true, render: (row) => shortId(row.warehouseId) },
+  { key: "warehouseId", header: "Warehouse", render: (row) => <EntityName entity="warehouse" id={row.warehouseId} /> },
   { key: "createdAt", header: "Created", render: (row) => formatDateTime(row.createdAt) },
 ];
 

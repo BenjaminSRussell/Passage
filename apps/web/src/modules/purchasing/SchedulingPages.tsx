@@ -41,7 +41,6 @@ import { validity } from "./AgreementPages";
 import {
   Details,
   LoadError,
-  ShortId,
   currencyPattern,
   dash,
   datePattern,
@@ -51,6 +50,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -73,8 +73,8 @@ const qty = (value: string, unit: string) => `${value} ${unit}`;
 
 const monitorColumns: DataTableColumn<SchedulingAgreementRow>[] = [
   { key: "number", header: "Number", mono: true },
-  { key: "vendorId", header: "Vendor", render: (a) => <ShortId id={a.vendorId} /> },
-  { key: "productId", header: "Product", render: (a) => <ShortId id={a.productId} /> },
+  { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
+  { key: "productId", header: "Product", render: (a) => <Named entity="product" id={a.productId} /> },
   { key: "validity", header: "Validity", mono: true, render: validity },
   { key: "openQty", header: "Open quantity", align: "end", render: (a) => qty(a.openQty, a.unit) },
   { key: "releaseCount", header: "Releases", align: "end" },
@@ -705,10 +705,10 @@ export function SchedulingAgreementDetailPage() {
       <Card title="Summary">
         <Details
           items={[
-            { label: "Vendor", value: agreement.vendorId, mono: true },
-            { label: "Product", value: agreement.productId, mono: true },
-            { label: "Site", value: agreement.siteId, mono: true },
-            { label: "Legal entity", value: agreement.legalEntityId, mono: true },
+            { label: "Vendor", value: <Named entity="vendor" id={agreement.vendorId} /> },
+            { label: "Product", value: <Named entity="product" id={agreement.productId} /> },
+            { label: "Site", value: <Named entity="site" id={agreement.siteId} /> },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={agreement.legalEntityId} /> },
             { label: "Price", value: `${money(agreement.unitPrice, agreement.currency)} per ${agreement.unit}`, mono: true },
             { label: "Validity", value: validity(agreement), mono: true },
             { label: "Target quantity", value: qty(agreement.targetQty, agreement.unit), mono: true },

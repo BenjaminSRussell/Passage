@@ -3,17 +3,19 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listShipments, SHIPMENT_STATUSES, type ShipmentStatus, type ShipmentSummary } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
-import { formatDate, formatDateTime, SHIPMENT_STATUS_LABELS, shortId } from "./format";
+import { formatDate, formatDateTime, SHIPMENT_STATUS_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderNumber } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<ShipmentSummary>[] = [
   { key: "shipmentNumber", header: "Shipment", mono: true },
   { key: "status", header: "Status", render: (row) => <ShipmentStatusBadge status={row.status} /> },
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
-  { key: "warehouseId", header: "Warehouse", mono: true, render: (row) => shortId(row.warehouseId) },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
+  { key: "warehouseId", header: "Warehouse", render: (row) => <EntityName entity="warehouse" id={row.warehouseId} /> },
   { key: "plannedShipDate", header: "Planned ship", render: (row) => formatDate(row.plannedShipDate) },
   { key: "actualShipDate", header: "Shipped", render: (row) => formatDateTime(row.actualShipDate) },
   { key: "lineCount", header: "Lines", align: "end" },

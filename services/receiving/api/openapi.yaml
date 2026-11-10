@@ -282,7 +282,7 @@ paths:
       operationId: getInvoice
       summary: Read one vendor invoice
       x-passage-duty: receiving.ap.inquire
-      description: The invoice with its lines and the ledger entry id (empty while held for audit), in the same shape as an item of GET /v1/receiving/invoices. An invoice outside the caller's tenant or legal entities answers 404.
+      description: The invoice with its lines and the ledger entry id (empty while held for audit), in the shape of an item of GET /v1/receiving/invoices plus match. match compares each invoice line with the receipt line it clears (received quantity and unit price) under the standard matching tolerances; receiving stores no matching result and no per-entity policy, so it is computed on read. An invoice outside the caller's tenant or legal entities answers 404.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -350,6 +350,25 @@ paths:
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
         '503': { $ref: '#/components/responses/Problem', description: 'RCV-CRY-001 no field encryption keys are configured.' }
   /v1/receiving/invoice-captures:
+    get:
+      operationId: listInvoiceCaptures
+      summary: List captured vendor invoices
+      x-passage-duty: receiving.ap.inquire
+      description: Invoice captures newest first (CAPTURED or NEEDS_REVIEW), inside the caller's tenant and legal entities. A capture is a draft that posted nothing; it becomes an invoice through POST /v1/receiving/invoices:post. Page with nextCursor.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [CAPTURED, NEEDS_REVIEW] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of captures.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapturePage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
     post:
       operationId: createInvoiceCapture
       x-passage-duty: receiving.vendor-invoice.post
@@ -424,6 +443,116 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-009' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/asns:
+    post:
+      operationId: createAsn
+      x-passage-duty: receiving.asn.maintain
+      description: >-
+        Records a vendor's advance ship notice against a usable purchase order in the caller's legal entity: carrier, tracking number,
+        ship and expected arrival dates and lines (purchase order line, shipped quantity, optional batch, serials and expiry date).
+        The vendor comes from the purchase order. The shipped quantity of a line, together with the other OPEN notices of that
+        line, may not exceed the open purchase order quantity (SUP-ASN-001, serialised per purchase order); a tracking number is
+        used once per vendor (SUP-ASN-002). Safe to repeat with the same Idempotency-Key.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AsnRequest' }
+      responses:
+        '201':
+          description: Recorded.
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asn' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no authenticated user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-004 purchase order not found.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'SUP-ASN-002 tracking number already used by the vendor.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'SUP-ASN-001 quantity over the open quantity; RCV-PO-001 PO not approved; RCV-PO-002 line cancelled; RCV-PO-003 other legal entity; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 purchase order lookup unavailable.' }
+    get:
+      operationId: listAsns
+      x-passage-duty: receiving.asn.maintain or receiving.asn.receive
+      description: Advance ship notices newest first, by vendor and/or purchase order. Only notices inside the caller's tenant and legal entities are returned. Page with nextCursor.
+      parameters:
+        - { name: vendorId, in: query, schema: { type: string, format: uuid } }
+        - { name: purchaseOrderId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of notices.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsnPage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/asns/{id}:
+    get:
+      operationId: getAsn
+      x-passage-duty: receiving.asn.maintain or receiving.asn.receive
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The notice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asn' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-010 unknown, or outside the legal entities of the caller.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/asns/{id}:start-receipt:
+    post:
+      operationId: startReceiptFromAsn
+      x-passage-duty: receiving.asn.receive
+      description: >-
+        Opens the receipt for an OPEN notice: creates an ARRIVED receipt (packing slip ASN-{id}-{suffix}) whose lines are the notice lines
+        bound to the purchase order, marks the notice RECEIVING and records the receipt on it, in one transaction. The response carries
+        the body to send to POST /v1/receiving/receipts/{id}:register as it stands (quantities, batches, serials, and the optional
+        locationId given here, and each line's expiryDate), so registration is one confirmation and stores batch and expiry.
+        The packing slip carries a per-attempt suffix because a cancelled receipt keeps its slip. Cancelling the ARRIVED receipt
+        returns the notice to OPEN. The body may be omitted. A notice yields one receipt (409 SUP-ASN-003).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                receiptDate: { type: string, format: date, description: Defaults to today (UTC). }
+                locationId: { type: string, format: uuid, description: Copied to every registration line. }
+      responses:
+        '201':
+          description: Receipt opened.
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsnReceipt' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-010 unknown notice; RCV-NF-004 the purchase order is unknown.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'SUP-ASN-003 the notice already started a receipt; RCV-DUP-001.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-PO-001, RCV-PO-003, RCV-PO-004, RCV-PO-005 purchase order not usable; INV-OVR-001 no open quantity left on a line; RCV-PO-002, RCV-PO-006, RCV-PO-007.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 the purchasing service is unavailable.' }
   /v1/receiving/service-entry-sheets:
     post:
       operationId: createServiceEntrySheet
@@ -1102,6 +1231,7 @@ components:
         serialTracked: { type: boolean }
         qty: { type: string }
         batch: { type: string }
+        expiryDate: { type: string, format: date, description: Expiry of the batch; absent when none was registered. }
         serials: { type: array, items: { type: string } }
         locationId: { type: string }
         inventoryStatus: { type: string }
@@ -1206,6 +1336,7 @@ components:
                   min: { type: [number, string] }
                   max: { type: [number, string] }
               batch: { type: string, maxLength: 128 }
+              expiryDate: { type: string, format: date, description: Expiry of the batch; stored on the receipt line. }
               serials: { type: array, maxItems: 1000, items: { type: string, minLength: 1, maxLength: 64 } }
               locationId: { type: string, format: uuid }
               inventoryStatus: { type: string, enum: [AVAILABLE, QUARANTINE, BLOCKED], default: AVAILABLE }
@@ -1304,6 +1435,12 @@ components:
         format: { type: string, enum: [UBL, OCR] }
         mediaType: { type: string, enum: [application/pdf, image/png, image/jpeg, image/tiff], description: Required for OCR. }
         content: { type: string, format: byte, description: The document, base64. }
+    InvoiceCapturePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InvoiceCapture' } }
+        nextCursor: { type: string, description: Absent on the last page. }
     InvoiceCapture:
       type: object
       required: [id, legalEntityId, source, status, reviewReasons, vendorTaxId, invoiceNumber, invoiceDate, currency, total, confidence, lines, createdAt]
@@ -1352,6 +1489,86 @@ components:
               unit: { type: string, maxLength: 20 }
               qty: { type: [number, string], exclusiveMinimum: 0 }
               unitPrice: { type: [number, string], minimum: 0 }
+    AsnRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, purchaseOrderId, lines]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        carrier: { type: string, maxLength: 128 }
+        trackingNumber: { type: string, maxLength: 64 }
+        shipDate: { type: string, format: date }
+        expectedArrival: { type: string, format: date }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [poLineNo, qty]
+            properties:
+              poLineNo: { type: integer, minimum: 1, description: Once per notice. }
+              qty: { type: [number, string], exclusiveMinimum: 0 }
+              batch: { type: string, maxLength: 128 }
+              serials: { type: array, maxItems: 1000, items: { type: string, minLength: 1, maxLength: 64 }, description: One per unit shipped when present. }
+              expiryDate: { type: string, format: date }
+    Asn:
+      type: object
+      required: [id, legalEntityId, vendorId, purchaseOrderId, status, createdBy, createdAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        status: { type: string, enum: [OPEN, RECEIVING] }
+        carrier: { type: string }
+        trackingNumber: { type: string }
+        shipDate: { type: string, format: date }
+        expectedArrival: { type: string, format: date }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        receiptId: { type: string, format: uuid, description: The receipt that consumed the notice; present once RECEIVING. }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [poLineNo, qty]
+            properties:
+              poLineNo: { type: integer }
+              qty: { type: string }
+              batch: { type: string }
+              serials: { type: array, items: { type: string } }
+              expiryDate: { type: string, format: date }
+    AsnPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Asn' } }
+        nextCursor: { type: string }
+    AsnReceipt:
+      type: object
+      required: [asn, receipt, registration]
+      properties:
+        asn: { $ref: '#/components/schemas/Asn' }
+        receipt: { $ref: '#/components/schemas/Receipt' }
+        registration:
+          type: object
+          required: [lines]
+          properties:
+            lines:
+              type: array
+              items:
+                type: object
+                required: [lineNo, qty]
+                properties:
+                  lineNo: { type: integer }
+                  qty: { type: string }
+                  batch: { type: string }
+                  expiryDate: { type: string, format: date }
+                  serials: { type: array, items: { type: string } }
+                  locationId: { type: string, format: uuid }
     ServiceEntrySheet:
       type: object
       required: [id, legalEntityId, vendorId, purchaseOrderId, currency, status, total, createdBy, createdAt, lines]
@@ -1420,6 +1637,24 @@ components:
       type: object
       required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, source, status, createdAt, lines]
       properties:
+        match:
+          type: object
+          description: Only on GET /v1/receiving/invoices/{id}. Each line against the receipt line it clears, under the standard tolerances (the default matching policy).
+          required: [status, withinTolerance, lines]
+          properties:
+            status: { type: string, enum: [MATCHED, PRICE_VARIANCE, QTY_VARIANCE, NO_RECEIPT, WAITING_RECEIPT] }
+            withinTolerance: { type: boolean }
+            lines:
+              type: array
+              items:
+                type: object
+                required: [lineNo, status, priceVariance]
+                properties:
+                  lineNo: { type: integer }
+                  status: { type: string, enum: [MATCHED, PRICE_VARIANCE, QTY_VARIANCE, NO_RECEIPT, WAITING_RECEIPT] }
+                  receivedQty: { type: string, description: Quantity on the receipt line; absent when the receipt line is not visible to the caller. }
+                  priceVariance: { $ref: '#/components/schemas/Money' }
+                  currencyMismatch: { type: boolean }
         source: { type: string, enum: [MANUAL, ERS] }
         oneTimePayeeId: { type: string, format: uuid, description: The payee recorded for the invoice; its data is never returned. }
         auditReason: { type: string, enum: [stochastic sample, re-issue after audit rejection], description: Why an invoice is or was held for audit. }

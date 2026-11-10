@@ -176,3 +176,35 @@ func (a *API) getInvoiceCapture(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, toCaptureBody(c))
 }
+
+type capturePage struct {
+	Items      []captureBody `json:"items"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+}
+
+func (a *API) listInvoiceCaptures(w http.ResponseWriter, r *http.Request) {
+	q := query{values: r.URL.Query(), fields: map[string]string{}}
+	f := store.CaptureFilter{Status: q.values.Get("status"), Limit: q.limit()}
+	f.CursorCreatedAt, f.CursorID = q.cursor()
+	if f.Status != "" && f.Status != domain.CaptureCaptured && f.Status != domain.CaptureNeedsReview {
+		q.fields["status"] = "must be CAPTURED or NEEDS_REVIEW"
+	}
+	if len(q.fields) > 0 {
+		httpx.Fail(w, r, validationProblem(q.fields))
+		return
+	}
+	rows, err := a.store.ListCaptures(r.Context(), f)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	page := capturePage{Items: make([]captureBody, 0, len(rows))}
+	if len(rows) > f.Limit {
+		rows = rows[:f.Limit]
+		page.NextCursor = encodeCursor(rows[len(rows)-1].CreatedAt, rows[len(rows)-1].ID)
+	}
+	for _, c := range rows {
+		page.Items = append(page.Items, toCaptureBody(c))
+	}
+	httpx.JSON(w, http.StatusOK, page)
+}

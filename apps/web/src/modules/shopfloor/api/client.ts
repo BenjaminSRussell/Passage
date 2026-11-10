@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the shopfloor service (services/shopfloor/api/openapi.yaml).
 // Browser calls use /api/v1/shopfloor/..., which the web BFF rewrites to the service.
 
@@ -230,7 +231,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }

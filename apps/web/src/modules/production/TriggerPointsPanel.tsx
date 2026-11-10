@@ -22,6 +22,7 @@ import {
 import { dash, describeCondition, describeFiring, triggerEventLabel, triggerFieldLabel, triggerFunctionLabel, triggerOperatorLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceSelect, useResources, formatResource } from "../mfg-shared/resources";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimalPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -128,7 +129,7 @@ export function toTriggerInput(draft: TriggerDraft): { input?: CreateTriggerPoin
     }
     input.operations = draft.operations.map((op, i) => {
       if (!uuidPattern.test(op.resourceId.trim())) {
-        errors[`op.${i}.resourceId`] = "Enter the resource's id (a UUID).";
+        errors[`op.${i}.resourceId`] = "Choose a resource.";
       }
       const out: TriggerOperation = { resourceId: op.resourceId.trim() };
       for (const name of operationDecimals) {
@@ -147,18 +148,21 @@ export function toTriggerInput(draft: TriggerDraft): { input?: CreateTriggerPoin
 }
 
 /** The operations of a definition in short: resource and hours of each. */
-function describeOperations(tp: TriggerPoint): string {
+function DescribeOperations({ tp }: { tp: TriggerPoint }) {
+  const resources = useResources();
   if (tp.operations.length === 0) {
-    return dash;
+    return <>{dash}</>;
   }
-  return tp.operations
+  const text = tp.operations
     .map((op) => {
-      const parts = [op.resourceId.slice(0, 8)];
+      const found = resources.find((r) => r.id === op.resourceId);
+      const parts = [found ? formatResource(found) : "Resource"];
       if (op.setupTimeH && op.setupTimeH !== "0") parts.push(`setup ${op.setupTimeH} h`);
       if (op.runTimeHPer && op.runTimeHPer !== "0") parts.push(`${op.runTimeHPer} h per unit`);
       return parts.join(", ");
     })
     .join("; ");
+  return <>{text}</>;
 }
 
 const at = (iso: string) => <time dateTime={iso}>{iso.slice(0, 16).replace("T", " ")}</time>;
@@ -265,7 +269,7 @@ export function TriggerPointsPanel({ order, onOpenOrder }: TriggerPointsPanelPro
     { key: "event", header: "On", render: (tp) => triggerEventLabel[tp.event] ?? tp.event },
     { key: "condition", header: "When", render: (tp) => describeCondition(tp.condition) },
     { key: "function", header: "Then", render: (tp) => triggerFunctionLabel[tp.function] ?? tp.function },
-    { key: "operations", header: "Operations", render: describeOperations },
+    { key: "operations", header: "Operations", render: (tp) => <DescribeOperations tp={tp} /> },
     { key: "repeatable", header: "Fires", render: (tp) => (tp.repeatable ? "Every time" : "Once") },
     {
       key: "firedCount",
@@ -494,7 +498,7 @@ export function TriggerPointsPanel({ order, onOpenOrder }: TriggerPointsPanelPro
                   <fieldset key={i} className={styles.row} aria-label={`Trigger operation ${i + 1}`}>
                     <legend className={styles.legend}>Operation {i + 1}</legend>
                     <FormField id={`tp-op-${i}-resource`} label="Resource" error={errors[`op.${i}.resourceId`]}>
-                      {(control) => <Input {...control} value={op.resourceId} onChange={(e) => setOperation(i, { resourceId: e.target.value })} />}
+                      {(control) => <ResourceSelect {...control} value={op.resourceId} onChange={(v) => setOperation(i, { resourceId: v })} />}
                     </FormField>
                     {operationDecimals.map((name) => (
                       <FormField key={name} id={`tp-op-${i}-${name}`} label={operationDecimalLabel[name]} optional error={errors[`op.${i}.${name}`]}>

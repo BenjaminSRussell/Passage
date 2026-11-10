@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 const base = "/api/v1/product";
 
 export type Lifecycle = "draft" | "active" | "phase_out" | "obsolete";
@@ -13,9 +14,21 @@ export interface Product {
   subtype: Subtype;
   productType: ProductType;
   baseUom: string;
+  itemGroupId: string;
+  batchTracked: boolean;
+  serialTracked: boolean;
+  catchWeight: boolean;
   lifecycleState: Lifecycle;
   version: number;
 }
+
+export interface ItemGroup {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export type TrackingFlags = Pick<Product, "batchTracked" | "serialTracked" | "catchWeight">;
 
 export interface ProductPage {
   items: Product[];
@@ -29,12 +42,17 @@ export interface NewProduct {
   baseUom: string;
   subtype: "product" | "master";
   productType: ProductType;
+  itemGroupId?: string;
+  batchTracked?: boolean;
+  serialTracked?: boolean;
+  catchWeight?: boolean;
 }
 
-export interface ProductPatch {
+export interface ProductPatch extends Partial<TrackingFlags> {
   name?: string;
   description?: string;
   lifecycleState?: Lifecycle;
+  itemGroupId?: string;
 }
 
 export class ProductApiError extends Error {
@@ -59,6 +77,10 @@ function pick(row: Raw, ...keys: string[]): string {
   return "";
 }
 
+function flag(row: Raw, ...keys: string[]): boolean {
+  return keys.some((key) => row[key] === true);
+}
+
 export function toProduct(row: Raw): Product {
   return {
     id: pick(row, "id", "ID"),
@@ -69,6 +91,10 @@ export function toProduct(row: Raw): Product {
     subtype: (pick(row, "subtype", "Subtype") || "product") as Subtype,
     productType: (pick(row, "productType", "ProductType") || "item") as ProductType,
     baseUom: pick(row, "baseUom", "BaseUOM"),
+    itemGroupId: pick(row, "itemGroupId", "ItemGroupID"),
+    batchTracked: flag(row, "batchTracked", "BatchTracked"),
+    serialTracked: flag(row, "serialTracked", "SerialTracked"),
+    catchWeight: flag(row, "catchWeight", "CatchWeight"),
     lifecycleState: (pick(row, "lifecycleState", "LifecycleState") || "draft") as Lifecycle,
     version: Number(row.version ?? row.Version ?? 1),
   };
@@ -86,7 +112,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }
@@ -102,8 +128,19 @@ export async function listProducts(params: { q: string; cursor?: string; limit?:
   return { items: (body.items ?? []).map(toProduct), nextCursor: body.nextCursor || undefined };
 }
 
+/** GET /released-products: the ids of products released to the caller's legal entity (names come from the product). */
+export async function listReleasedProductIds(signal?: AbortSignal): Promise<string[]> {
+  const body = await send<{ items?: Raw[] }>("/released-products?limit=200", {}, signal);
+  return (body.items ?? []).map((row) => pick(row, "id", "ID")).filter((id) => id !== "");
+}
+
 export async function getProduct(id: string, signal?: AbortSignal): Promise<Product> {
   return toProduct(await send<Raw>(`/products/${encodeURIComponent(id)}`, {}, signal));
+}
+
+export async function listItemGroups(signal?: AbortSignal): Promise<ItemGroup[]> {
+  const body = await send<{ items?: Raw[] }>("/setup/item-groups", {}, signal);
+  return (body.items ?? []).map((row) => ({ id: pick(row, "id", "ID"), code: pick(row, "code", "Code"), name: pick(row, "name", "Name") }));
 }
 
 export async function createProduct(input: NewProduct, key: string): Promise<Product> {

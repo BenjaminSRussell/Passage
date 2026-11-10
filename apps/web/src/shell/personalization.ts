@@ -1,30 +1,15 @@
+import { localPreferenceStorage, type PreferenceStorage } from "./preferenceStorage";
+
 export type Density = "comfortable" | "compact";
 
-export interface SavedView {
-  id: string;
-  name: string;
-  entity: string;
-  columns: string[];
-  density: Density;
+const densityKey = (identity: string) => `passage.density.v1.${identity}`;
+
+export function readDensity(identity: string, storage: PreferenceStorage = localPreferenceStorage): Density {
+  return identity !== "" && storage.read(densityKey(identity)) === "compact" ? "compact" : "comfortable";
 }
 
-export interface Personalization {
-  views: SavedView[];
-  activeViewId?: string;
-}
-
-export function saveView(state: Personalization, view: SavedView): Personalization {
-  const rest = state.views.filter((v) => v.id !== view.id);
-  return { views: [...rest, view], activeViewId: view.id };
-}
-
-export function applyView(state: Personalization, id: string): Personalization {
-  if (!state.views.some((v) => v.id === id)) {
-    return state;
+export function writeDensity(identity: string, density: Density, storage: PreferenceStorage = localPreferenceStorage): void {
+  if (identity !== "") {
+    storage.write(densityKey(identity), density);
   }
-  return { ...state, activeViewId: id };
-}
-
-export function activeView(state: Personalization): SavedView | undefined {
-  return state.views.find((v) => v.id === state.activeViewId);
 }

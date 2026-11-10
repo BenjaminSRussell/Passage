@@ -4,6 +4,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { installLookupStub } from "./lookupStub";
 import purchasing from "./module";
 
 export const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -22,6 +23,7 @@ export function stubFetch(handler: Handler) {
 
 /** Renders the module's routes at path; router.state.location tracks navigation. */
 export function renderAt(path: string) {
+  installLookupStub();
   const router = { state: { location: { pathname: path } } };
   function Probe() {
     router.state.location.pathname = useLocation().pathname;

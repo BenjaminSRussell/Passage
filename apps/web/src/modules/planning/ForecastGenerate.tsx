@@ -4,6 +4,8 @@ import { generateStatisticalForecast, type ForecastModel, type GenerateForecastR
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const QTY = /^(?:0|[1-9]\d{0,11})(?:\.\d{1,6})?$/;
@@ -64,8 +66,8 @@ const pct = (v: number | null) => (v === null ? "n/a" : `${(v * 100).toFixed(1)}
 type Row = GenerateForecastResult["generated"][number];
 
 const columns: DataTableColumn<Row>[] = [
-  { key: "itemId", header: "Item", mono: true },
-  { key: "siteId", header: "Site", mono: true },
+  { key: "itemId", header: "Item", render: (r) => <EntityName entity="product" id={r.itemId} fallback={r.itemId} /> },
+  { key: "siteId", header: "Site", render: (r) => <EntityName entity="site" id={r.siteId} fallback={r.siteId} /> },
   { key: "model", header: "Model used" },
   { key: "seasonLength", header: "Season length", align: "end" },
   { key: "mape", header: "MAPE", align: "end", render: (r) => pct(r.mape) },
@@ -130,11 +132,11 @@ export function GenerateCard({ model, onDone }: { model: ForecastModel; onDone: 
           {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Statistical forecast">
-          <FormField id="gen-item" label="Item" hint="Item id (UUID)." error={errors.itemId}>
-            {(a11y) => <Input {...a11y} value={draft.itemId} onChange={(e) => set("itemId", e.target.value)} />}
+          <FormField id="gen-item" label="Item" error={errors.itemId}>
+            {(a11y) => <EntityLookup {...a11y} entity="product" value={draft.itemId} onChange={(e) => set("itemId", e.target.value)} />}
           </FormField>
-          <FormField id="gen-site" label="Site" hint="Site id (UUID)." error={errors.siteId}>
-            {(a11y) => <Input {...a11y} value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
+          <FormField id="gen-site" label="Site" error={errors.siteId}>
+            {(a11y) => <EntityLookup {...a11y} entity="site" value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
           </FormField>
           <FormField id="gen-history" label="Monthly history" hint="Quantities separated by commas, spaces or new lines." error={errors.history}>
             {(a11y) => <Input {...a11y} inputMode="decimal" value={draft.history} onChange={(e) => set("history", e.target.value)} />}

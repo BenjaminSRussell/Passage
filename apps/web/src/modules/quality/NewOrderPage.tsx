@@ -6,6 +6,9 @@ import { CERT_LABELS, CERT_REQUIREMENTS, DECIMAL, pickFields, TRIGGER_LABELS, UU
 import styles from "./pages.module.css";
 import { emptyPlan, planFieldErrors, PlanFields, validatePlan, type PlanErrors, type PlanValues } from "./PlanFields";
 import { useLoad } from "./useLoad";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
+import { OrderSelect } from "../mfg-shared/orders";
 
 interface Values {
   trigger: Trigger;
@@ -35,13 +38,17 @@ const MAX_BATCH = 60;
 export function validateOrder(values: Values, plan: PlanValues): { errors: Errors; planErrors: PlanErrors; input?: NewOrder } {
   const errors: Errors = {};
   const type = values.sourceType.trim();
+  // A manual order has no source document: the service still wants a reference, so the form makes one.
+  const manualOrder = values.trigger === "MANUAL";
+  const sourceId = manualOrder && values.sourceId.trim() === "" ? crypto.randomUUID() : values.sourceId.trim();
   if (type === "" || type.length > 40) errors.sourceType = "Enter the source document type, up to 40 characters, such as receipt_line.";
-  if (!UUID.test(values.sourceId.trim())) errors.sourceId = "Enter the source document id (a UUID).";
+  if (!UUID.test(sourceId)) errors.sourceId = "Choose the source document.";
+  const choose = { itemId: "Choose an item.", siteId: "Choose a site.", warehouseId: "Choose a warehouse." };
   for (const name of ["itemId", "siteId", "warehouseId"] as const) {
-    if (!UUID.test(values[name].trim())) errors[name] = "Enter the id (a UUID).";
+    if (!UUID.test(values[name].trim())) errors[name] = choose[name];
   }
   for (const name of ["itemGroupId", "partyId"] as const) {
-    if (values[name].trim() !== "" && !UUID.test(values[name].trim())) errors[name] = "Enter a UUID, or leave it empty.";
+    if (values[name].trim() !== "" && !UUID.test(values[name].trim())) errors[name] = name === "partyId" ? "Choose a vendor or customer, or leave it empty." : "Enter a UUID, or leave it empty.";
   }
   const batch = values.batch.trim();
   if (batch.length > MAX_BATCH) errors.batch = `Keep the batch to ${MAX_BATCH} characters.`;
@@ -56,7 +63,7 @@ export function validateOrder(values: Values, plan: PlanValues): { errors: Error
   if (Object.keys(errors).length > 0 || Object.keys(checked.errors).length > 0) return { errors, planErrors: checked.errors };
   const input: NewOrder = {
     trigger: values.trigger,
-    sourceRef: { type, id: values.sourceId.trim() },
+    sourceRef: { type, id: sourceId },
     itemId: values.itemId.trim(),
     siteId: values.siteId.trim(),
     warehouseId: values.warehouseId.trim(),
@@ -158,6 +165,11 @@ export function NewOrderPage() {
       {(control) => <Input {...control} value={values[id]} invalid={Boolean(errors[id])} onChange={(event) => update({ [id]: event.target.value } as Partial<Values>)} />}
     </FormField>
   );
+  const lookup = (id: Field, label: string, entity: LookupEntityKey, hint?: string, optional?: boolean, scope?: { siteId?: string }) => (
+    <FormField id={`order-${id}`} label={label} hint={hint} optional={optional} error={errors[id]}>
+      {(control) => <EntityLookup {...control} entity={entity} scope={scope} value={values[id]} invalid={Boolean(errors[id])} onChange={(event) => update({ [id]: event.target.value } as Partial<Values>)} />}
+    </FormField>
+  );
   const manual = values.trigger === "MANUAL";
 
   return (
@@ -179,13 +191,19 @@ export function NewOrderPage() {
               </Select>
             )}
           </FormField>
-          {text("sourceType", "Source type", "The document line that triggered the order, such as receipt_line.")}
-          {text("sourceId", "Source id")}
-          {text("itemId", "Item id")}
+          {manual ? null : text("sourceType", "Source type", "The document line that triggered the order, such as receipt_line.")}
+          {manual ? null : values.sourceType === "production-order" ? (
+            <FormField id="order-sourceId" label="Source document" hint="The production order that triggered the inspection." error={errors.sourceId}>
+              {(control) => <OrderSelect {...control} value={values.sourceId} onChange={(v) => update({ sourceId: v })} />}
+            </FormField>
+          ) : (
+            text("sourceId", "Source document", "The reference of the document line that triggered the order.")
+          )}
+          {lookup("itemId", "Item", "product")}
           {text("itemGroupId", "Item group id", "Matches item-group associations.", true)}
-          {text("partyId", "Vendor or customer id", "Matches party associations.", true)}
-          {text("siteId", "Site id")}
-          {text("warehouseId", "Warehouse id")}
+          {lookup("partyId", "Vendor or customer", "party", "Matches party associations.", true)}
+          {lookup("siteId", "Site", "site")}
+          {lookup("warehouseId", "Warehouse", "warehouse", undefined, false, { siteId: values.siteId || undefined })}
           {text(
             "batch",
             "Batch",

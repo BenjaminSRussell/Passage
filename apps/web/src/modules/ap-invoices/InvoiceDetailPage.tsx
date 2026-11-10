@@ -9,9 +9,11 @@ import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Ske
 import styles from "../../shell/pageLayout.module.css";
 import { fetchReceipt, type Receipt } from "../receiving/api/client";
 import { ApiError, fetchInvoice, type Invoice } from "./api/client";
-import { invoiceStatusLabel, invoiceStatusTone, UUID } from "./parts";
+import { invoiceStatusLabel, invoiceStatusTone, matchStatusLabel, matchStatusTone, priceDifferenceText, UUID } from "./parts";
+import { PaymentCard, useOpenItemsForInvoices } from "./payment";
 
 type InvoiceLine = Invoice["lines"][number];
+type MatchLine = NonNullable<Invoice["match"]>["lines"][number];
 
 function Detail({ term, children }: { term: string; children: ReactNode }) {
   return (
@@ -56,6 +58,29 @@ function HoldNotice({ invoice }: { invoice: Invoice }) {
   ) : null;
 }
 
+function MatchCard({ invoice }: { invoice: Invoice }) {
+  const match = invoice.match;
+  if (!match) return null;
+  const quantityOf = new Map(invoice.lines.map((l) => [l.lineNo, l.qty]));
+  const columns: DataTableColumn<MatchLine>[] = [
+    { key: "lineNo", header: "Line", align: "end" },
+    { key: "receivedQty", header: "Received", align: "end", render: (l) => l.receivedQty ?? "None" },
+    { key: "invoicedQty", header: "Invoiced", align: "end", render: (l) => quantityOf.get(l.lineNo) ?? "" },
+    { key: "priceVariance", header: "Price difference", render: (l) => (l.currencyMismatch ? "Different currency from the receipt" : priceDifferenceText(l.priceVariance.amount, l.priceVariance.currency)) },
+    { key: "status", header: "Result", render: (l) => <Badge tone={matchStatusTone[l.status]}>{matchStatusLabel[l.status]}</Badge> },
+  ];
+  return (
+    <Card title="Match with the receipt">
+      <p>
+        <Badge tone={matchStatusTone[match.status]}>{matchStatusLabel[match.status]}</Badge>{" "}
+        {match.withinTolerance ? "Every line is within the standard tolerances." : "At least one line is outside the standard tolerances."}
+      </p>
+      <DataTable label="Match per invoice line" columns={columns} rows={match.lines} getRowKey={(l) => String(l.lineNo)} />
+      <p>Checked against the receipts today using the standard tolerances; it is not a saved decision.</p>
+    </Card>
+  );
+}
+
 export function InvoiceDetailPage() {
   const { id = "" } = useParams();
   const duties = usePrincipalDuties();
@@ -64,6 +89,7 @@ export function InvoiceDetailPage() {
   const canLedger = holdsDuty(duties, LEDGER_DUTY);
   const result = useQuery({ queryKey: ["ap-invoices", "invoice", id], queryFn: () => fetchInvoice(id) });
   const invoice = result.data;
+  const payment = useOpenItemsForInvoices(invoice ? [invoice] : []);
   const receiptIds = [...new Set(invoice?.lines.map((l) => l.receiptId) ?? [])];
   const receipts = useQueries({ queries: receiptIds.map((receiptId) => ({ queryKey: ["receiving", "receipt", receiptId], queryFn: () => fetchReceipt(receiptId), enabled: canReceipt })) });
   const receiptById = new Map<string, Receipt>(receipts.flatMap((r) => (r.data ? [[r.data.id, r.data] as [string, Receipt]] : [])));
@@ -151,6 +177,8 @@ export function InvoiceDetailPage() {
             </dl>
           </Card>
           <DataTable label="Invoice lines" columns={columns} rows={invoice.lines} getRowKey={(l) => String(l.lineNo)} />
+          <MatchCard invoice={invoice} />
+          <PaymentCard invoice={invoice} lookup={payment} />
         </>
       )}
     </div>

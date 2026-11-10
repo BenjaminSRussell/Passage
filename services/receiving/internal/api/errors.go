@@ -39,6 +39,9 @@ var domainStatus = map[string]int{
 	domain.CodeSheetSelfAccept:   http.StatusForbidden,
 	domain.CodeSheetNotPending:   http.StatusConflict,
 	domain.CodeCaptureExtraction: http.StatusUnprocessableEntity,
+	domain.CodeAsnOverQty:        http.StatusUnprocessableEntity,
+	domain.CodeAsnTracking:       http.StatusConflict,
+	domain.CodeAsnConsumed:       http.StatusConflict,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -72,6 +75,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-002", "receipt line has no open GR/IR item"))
 	case errors.Is(err, domain.ErrSelfBillPartyIncomplete):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, "AP-ERS-005", "the self-billing document cannot be issued: "+err.Error()))
+	case errors.Is(err, store.ErrAsnNotFound):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-010", "advance ship notice not found"))
 	case errors.Is(err, store.ErrSelfBillNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-009", "self-billing document not found"))
 	default:

@@ -37,6 +37,7 @@ import { DAY, dateTime, DECIMAL, money, REPLY_LABELS, REPLY_TONES, shortId, toda
 import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { PlainName } from "../sales/OrderNumber";
 
 const SIGNED = /^-?\d+(\.\d{1,6})?$/;
 
@@ -232,7 +233,7 @@ function caseLink(row: Confirmation) {
 }
 
 const confirmationColumns: DataTableColumn<Confirmation>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "ourBalance", header: "Our balance", mono: true, align: "end", render: (row) => money(row.ourBalance, row.currency) },
   { key: "status", header: "Reply", render: (row) => <Badge tone={REPLY_TONES[row.status]}>{REPLY_LABELS[row.status]}</Badge> },
   {
@@ -247,7 +248,7 @@ const confirmationColumns: DataTableColumn<Confirmation>[] = [
 ];
 
 const differenceColumns: DataTableColumn<Confirmation>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "ourBalance", header: "Our balance", mono: true, align: "end", render: (row) => money(row.ourBalance, row.currency) },
   {
     key: "customerBalance",

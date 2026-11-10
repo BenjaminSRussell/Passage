@@ -1,0 +1,31 @@
+.banner {
+  position: fixed;
+  /* Bottom left sits over the sidebar's empty foot instead of over page content. */
+  left: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  max-width: min(224px, calc(100vw - 32px));
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+  line-height: var(--text-xs-leading);
+  pointer-events: none;
+}
+
+.banner strong {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-strong);
+  font-weight: var(--weight-semibold);
+}
+
+/* Keep the end of a long sidebar scrollable clear of the banner. This file loads only in the demo build. */
+:global(#sidebar nav) {
+  padding-block-end: 96px;
+}

@@ -133,7 +133,7 @@ export function NetworkDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad<Detail>(async (signal) => {
     const [network, resources] = await Promise.all([getNetwork(id, signal), listResources(signal)]);
-    return { network, codes: Object.fromEntries(resources.map((r) => [r.id, r.code])) };
+    return { network, codes: Object.fromEntries(resources.map((r) => [r.id, `${r.name} (${r.code})`])) };
   }, id);
   const [saved, setSaved] = useState<number | null>(null);
 

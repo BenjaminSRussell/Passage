@@ -163,7 +163,7 @@ describe("amend a sent RFQ", () => {
     // The audit of the moved deadline: vendor B's late reply now counts as on time.
     const amendments = screen.getByRole("table", { name: "Amendments" });
     expect(within(amendments).getByRole("columnheader", { name: "Late replies now on time" })).toBeInTheDocument();
-    expect(within(amendments).getByRole("cell", { name: VENDOR_B.slice(0, 8) })).toBeInTheDocument();
+    expect(await within(amendments).findByText(`Vendor ${VENDOR_B.slice(0, 8)}`)).toBeInTheDocument();
   });
 
   it("locks the scoring criteria once an unsealed RFQ has replies the buyer can read, but not on a sealed one", async () => {
@@ -185,7 +185,7 @@ describe("amend a sent RFQ", () => {
     const acked = { ...amended, amendments: [{ ...amended.amendments![0], acknowledgements: amended.amendments![0].acknowledgements.map((a) => ({ ...a, acknowledgedAt: "2026-10-28T08:00:00Z" })) }] };
     const mock = stubFetch((_url, init) => (init.method === "PUT" ? json(acked) : json(amended, 200, { ETag: '"4"' })));
     const { container } = renderAt(`/purchasing/rfqs/${RFQ_ID}`);
-    fireEvent.click(await screen.findByRole("button", { name: `Record acknowledgement from ${VENDOR_B.slice(0, 8)}` }));
+    fireEvent.click(await screen.findByRole("button", { name: `Record acknowledgement from Vendor ${VENDOR_B.slice(0, 8)}` }));
     expect(await screen.findByText("2 of 2")).toBeInTheDocument();
     const put = mock.mock.calls.find((c) => (c[1] as RequestInit).method === "PUT") as [string, RequestInit];
     expect(put[0]).toBe(`${BASE}/rfqs/${RFQ_ID}/amendments/1/acknowledgements/${VENDOR_B}`);

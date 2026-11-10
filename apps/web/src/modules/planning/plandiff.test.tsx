@@ -84,7 +84,7 @@ describe("Compare plan versions", () => {
     renderAt("/planning/runs/compare?plan=MAIN");
     const added = await findTable({ name: "Added orders" });
     expect(within(added).getByText("Site")).toBeInTheDocument();
-    expect(within(added).getByText("Warehouse 00000000")).toBeInTheDocument();
+    expect(within(added).getByText(wh)).toBeInTheDocument();
   });
 
   it("compares a newest simulation with the current operational version, not the run before it", async () => {

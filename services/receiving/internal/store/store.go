@@ -66,6 +66,7 @@ type Line struct {
 	// book the receipt.
 	SiteID      string
 	WarehouseID string
+	ExpiryDate  time.Time
 }
 
 type Receipt struct {
@@ -292,6 +293,13 @@ type InvoiceFilter struct {
 	Limit           int
 }
 
+type CaptureFilter struct {
+	Status          string
+	CursorCreatedAt time.Time
+	CursorID        string
+	Limit           int
+}
+
 type RegisterFunc func(Receipt, map[domain.SerialKey]struct{}) ([]Line, error)
 
 type PostFunc func(Receipt) (PostOutcome, error)
@@ -312,8 +320,13 @@ type Store interface {
 	GetSheet(ctx context.Context, id string) (ServiceSheet, error)
 	DecideSheet(ctx context.Context, id, by string, accept bool, reason string, fn SheetDecisionFunc) (ServiceSheet, error)
 	AcceptSheet(ctx context.Context, id, by string, fn SheetAcceptFunc) (ServiceSheet, error)
+	CreateAsn(ctx context.Context, in Asn, ordered map[int]decimal.Decimal) (Asn, error)
+	GetAsn(ctx context.Context, id string) (Asn, error)
+	ListAsns(ctx context.Context, f AsnFilter) ([]Asn, error)
+	StartAsnReceipt(ctx context.Context, id string, rec Receipt) (Asn, Receipt, error)
 	GetSelfBill(ctx context.Context, invoiceID string) (SelfBill, error)
 	GetCapture(ctx context.Context, id string) (Capture, error)
+	ListCaptures(ctx context.Context, f CaptureFilter) ([]Capture, error)
 	FindCapture(ctx context.Context, legalEntityID, digest string) (Capture, bool, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
 	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)

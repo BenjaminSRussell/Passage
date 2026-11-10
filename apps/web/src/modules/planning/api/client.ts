@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { apiFetch } from "../../../shell/api/http";
 
 /** Base path of the planning service through the web BFF (see services/planning/api/openapi.yaml). */
 export const PLANNING_API = "/api/v1/planning";
@@ -229,7 +230,7 @@ export class PlanningApiError extends Error {
 }
 
 async function send(path: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(`${PLANNING_API}${path}`, {
+  const res = await apiFetch(`${PLANNING_API}${path}`, {
     credentials: "same-origin",
     ...init,
     headers: { Accept: "application/json", ...(init?.headers ?? {}) },

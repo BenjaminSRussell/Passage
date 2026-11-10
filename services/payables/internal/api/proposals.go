@@ -59,6 +59,7 @@ var (
 type PayablesStore interface {
 	List(ctx context.Context, f store.Filter, limit int) ([]store.OpenItem, error)
 	Get(ctx context.Context, id string) (store.OpenItem, error)
+	ProposalsOfItems(ctx context.Context, itemIDs []string) (map[string]string, error)
 	Candidates(ctx context.Context, legalEntityID, dueBy string) ([]domain.ProposalCandidate, error)
 	FindProposal(ctx context.Context, legalEntityID, runDate, runID string) (store.Proposal, error)
 	CreateProposal(ctx context.Context, in store.NewProposal) (store.Proposal, bool, error)
@@ -161,7 +162,8 @@ type valuation struct {
 
 type openItemBody struct {
 	store.OpenItem
-	Valuation *valuation `json:"valuation,omitempty"`
+	ProposalID string     `json:"proposalId,omitempty"`
+	Valuation  *valuation `json:"valuation,omitempty"`
 }
 
 type openItemPage struct {
@@ -205,6 +207,12 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.VendorID != "" && !ids.Valid(f.VendorID) {
 		fields["vendor"] = "must be a UUID"
+	}
+	if raw := q.Get("source_invoices"); raw != "" {
+		f.SourceInvoiceIDs = strings.Split(raw, ",")
+		if len(f.SourceInvoiceIDs) > maxPageSize || slices.ContainsFunc(f.SourceInvoiceIDs, func(id string) bool { return !ids.Valid(id) }) {
+			fields["source_invoices"] = fmt.Sprintf("must be at most %d comma-separated UUIDs", maxPageSize)
+		}
 	}
 	from, to := parseDay(fields, "due_from", f.DueFrom, false), parseDay(fields, "due_to", f.DueOnOrBy, false)
 	if !from.IsZero() && !to.IsZero() && from.After(to) {
@@ -251,8 +259,12 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	proposals, ok := a.proposalsOf(w, r, items)
+	if !ok {
+		return
+	}
 	for i, it := range items {
-		page.Items = append(page.Items, openItemBody{OpenItem: it, Valuation: valued[i]})
+		page.Items = append(page.Items, openItemBody{OpenItem: it, ProposalID: proposals[it.ID], Valuation: valued[i]})
 	}
 	httpx.JSON(w, http.StatusOK, page)
 }
@@ -284,7 +296,24 @@ func (a *API) getOpenItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	httpx.JSON(w, http.StatusOK, openItemBody{OpenItem: item, Valuation: valued[0]})
+	proposals, ok := a.proposalsOf(w, r, []store.OpenItem{item})
+	if !ok {
+		return
+	}
+	httpx.JSON(w, http.StatusOK, openItemBody{OpenItem: item, ProposalID: proposals[item.ID], Valuation: valued[0]})
+}
+
+func (a *API) proposalsOf(w http.ResponseWriter, r *http.Request, items []store.OpenItem) (map[string]string, bool) {
+	itemIDs := make([]string, len(items))
+	for i, it := range items {
+		itemIDs[i] = it.ID
+	}
+	proposals, err := a.proposals.store.ProposalsOfItems(r.Context(), itemIDs)
+	if err != nil {
+		a.fault(w, r, "open item proposal lookup failed", err)
+		return nil, false
+	}
+	return proposals, true
 }
 
 func (a *API) today() time.Time { return a.now().UTC().Truncate(24 * time.Hour) }

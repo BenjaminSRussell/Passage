@@ -52,6 +52,8 @@
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
     "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
+    "identity.setup.view": {"permissions": [{"resource": "/v1/tenant/setup", "methods": ["GET"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET"]}]},
+    "identity.setup.maintain": {"permissions": [{"resource": "/v1/tenant/setup{,/**}", "methods": ["GET", "PUT"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET", "PUT"]}]},
     "platform.saved-view.maintain": {"permissions": [{"resource": "/v1/saved-views{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "hello.ledger.maintain": {"permissions": [{"resource": "/v1/hello-ledger{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "product.product.view": {"permissions": [{"resource": "/v1/product{,/**}", "methods": ["GET"]}]},
@@ -718,6 +720,15 @@
       {"resource": "/v1/receiving/service-entry-sheets/*:accept", "methods": ["POST"]},
       {"resource": "/v1/receiving/service-entry-sheets/*:reject", "methods": ["POST"]}
     ]},
+    "receiving.asn.maintain": {"permissions": [
+      {"resource": "/v1/receiving/asns", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/asns/*", "methods": ["GET"]}
+    ]},
+    "receiving.asn.receive": {"permissions": [
+      {"resource": "/v1/receiving/asns", "methods": ["GET"]},
+      {"resource": "/v1/receiving/asns/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/asns/*:start-receipt", "methods": ["POST"]}
+    ]},
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
     ]},
@@ -725,6 +736,7 @@
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-captures", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},
@@ -2460,6 +2472,7 @@
       {"resource": "/v1/org/teams/*/members/*:end", "methods": ["POST"]},
       {"resource": "/v1/org/operating-units/*/translations/*", "methods": ["PUT", "DELETE"]}
     ]},
+    "org.demo-company.manage": {"permissions": [{"resource": "/v1/org/demo-company", "methods": ["POST"]}]},
     "org.package.manage": {"permissions": [
       {"resource": "/v1/org/export", "methods": ["POST"]},
       {"resource": "/v1/org/import", "methods": ["POST"]}
@@ -2780,6 +2793,7 @@
       {"resource": "/v1/product/products:search", "methods": ["GET"]},
       {"resource": "/v1/product/released-products/*/process-policy", "methods": ["GET"]},
       {"resource": "/v1/product/released-products/*/site-defaults/*", "methods": ["GET"]},
+      {"resource": "/v1/product/setup/item-groups", "methods": ["GET"]},
       {"resource": "/v1/product/uom/convert", "methods": ["GET"]}
     ]},
     "migration.outbound.render": {"service_only": true, "permissions": [

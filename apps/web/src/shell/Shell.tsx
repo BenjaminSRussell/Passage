@@ -4,13 +4,14 @@ import type { PassageModule } from "../modules/registry";
 import { CommandPalette, type PaletteEntry } from "./CommandPalette";
 import { copy } from "./copy";
 import { holdsDuty, requiredDuty, visibleModules } from "./dutyGate";
+import { InboxProvider } from "./inbox/InboxProvider";
+import { RecentProvider, useRecentPages } from "./recent";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
-import { demoNote } from "./metadata";
 import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
 import { WorkContextProvider } from "./lookup/workContext";
 import { devDuties, devIdentity, PrincipalProvider } from "./principal";
-import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
+import { readDensity, writeDensity, type Density } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
 import { shellNav } from "./shellNav";
@@ -19,6 +20,8 @@ import { clickTrace } from "./telemetry";
 import { TopBar } from "./TopBar";
 import { Alert, Skeleton } from "./ui";
 import { workspaceIcon } from "./workspaceIcons";
+import { filterModulesByFeatures, isPathEnabled } from "./tenant/featureRules";
+import { TenantSettingsProvider, useTenantSettingsLoader } from "./tenant/TenantSettings";
 import { WorkspaceNavProvider } from "./workspaces/WorkspaceNav";
 import { loadWorkspaceConfig, resolveNavEntries, type WorkspaceConfig } from "./workspaces/model";
 
@@ -29,11 +32,25 @@ function isShown(el: HTMLElement): boolean {
   return el.offsetParent !== null && window.getComputedStyle(el).visibility !== "hidden";
 }
 
+/** Remembers the last pages opened, for the home page. Renders nothing. */
+function RecentTracker({ entries }: { entries: ReadonlyMap<string, { label: string }> }) {
+  const { pathname } = useLocation();
+  const { record } = useRecentPages();
+  const entry = entries.get(pathname);
+  const label = entry?.label;
+  useEffect(() => {
+    if (label !== undefined) record({ to: pathname, label });
+  }, [pathname, label, record]);
+  return null;
+}
+
 export interface ShellProps {
   modules: PassageModule[];
   duties?: readonly string[];
   identity?: string;
   workspaceConfig?: WorkspaceConfig;
+  /** Fixed feature states that replace the read of the tenant's features, for tests and demos. */
+  features?: Readonly<Record<string, boolean>>;
 }
 
 function PageSkeleton() {
@@ -47,9 +64,13 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules: allModules, duties, identity, workspaceConfig }: ShellProps) {
+export function Shell({ modules: allModules, duties, identity, workspaceConfig, features: fixedFeatures }: ShellProps) {
   const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
-  const modules = useMemo(() => visibleModules(allModules, principalDuties), [allModules, principalDuties]);
+  const settings = useTenantSettingsLoader(principalDuties, fixedFeatures);
+  const modules = useMemo(
+    () => filterModulesByFeatures(visibleModules(allModules, principalDuties), settings.features),
+    [allModules, principalDuties, settings.features],
+  );
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const online = useOnlineStatus();
@@ -57,8 +78,8 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [toast, setToast] = useState("");
-  const [density, setDensity] = useState<Density>("comfortable");
-  const [personalization, setPersonalization] = useState<Personalization>({ views: [] });
+  const userId = identity ?? devIdentity();
+  const [density, setDensity] = useState<Density>(() => readDensity(userId));
   const searchRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -70,13 +91,14 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
   const announceFrame = useRef<number | undefined>(undefined);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  const available = holdsDuty(principalDuties, requiredDuty(pathname, allModules));
+  const featureOn = isPathEnabled(settings.features, pathname);
+  const available = featureOn && holdsDuty(principalDuties, requiredDuty(pathname, allModules));
   const page = useMemo(
     () => (available ? resolvePage(pathname, allModules, shellNav) : { title: copy.notAvailable.pageTitle }),
     [available, pathname, allModules],
   );
 
-  const config = useMemo(() => workspaceConfig ?? loadWorkspaceConfig(), [workspaceConfig]);
+  const config = useMemo(() => workspaceConfig ?? loadWorkspaceConfig(settings.workspaceOverride), [workspaceConfig, settings.workspaceOverride]);
   const navEntries = useMemo(() => resolveNavEntries(modules, config.areas), [modules, config]);
   const navEntryByTo = useMemo(() => new Map(navEntries.map((e) => [e.to, e])), [navEntries]);
   const entries = useMemo<PaletteEntry[]>(
@@ -239,22 +261,20 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
     menuRef.current?.focus();
   }
 
-  function applySavedView() {
-    const view: SavedView = {
-      id: "default",
-      name: "Default",
-      entity: demoNote.id,
-      columns: demoNote.fields.map((f) => f.name),
-      density,
-    };
-    setPersonalization(applyView(saveView(personalization, view), view.id));
-    announce(copy.announce.savedViewApplied, true);
+  function toggleDensity() {
+    const next: Density = density === "compact" ? "comfortable" : "compact";
+    setDensity(next);
+    writeDensity(userId, next);
   }
 
   return (
     <PrincipalProvider duties={principalDuties}>
-      <WorkContextProvider identity={identity ?? devIdentity()} enabled={principalDuties.includes("org.read")}>
+      <TenantSettingsProvider value={settings}>
+      <WorkContextProvider identity={userId} enabled={principalDuties.includes("org.read")}>
       <WorkspaceNavProvider entries={navEntries} config={config}>
+      <InboxProvider>
+      <RecentProvider identity={userId}>
+      <RecentTracker entries={navEntryByTo} />
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
           Skip to content
@@ -278,8 +298,7 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
               compact={density === "compact"}
               showContext={principalDuties.includes("org.read")}
               onOpenDrawer={() => setDrawerOpen(true)}
-              onApplyView={applySavedView}
-              onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+              onToggleCompact={toggleDensity}
             />
             {online ? null : (
               <div className={styles.banner}>
@@ -289,7 +308,7 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
             <div className={styles.content}>
               <RouteErrorBoundary key={pathname}>
                 <Suspense fallback={<PageSkeleton />}>
-                  {available ? <Outlet /> : <NotAvailablePage />}
+                  {available ? <Outlet /> : <NotAvailablePage featureOff={!featureOn} />}
                 </Suspense>
               </RouteErrorBoundary>
             </div>
@@ -305,8 +324,11 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
         ) : null}
         {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
       </div>
+      </RecentProvider>
+      </InboxProvider>
       </WorkspaceNavProvider>
       </WorkContextProvider>
+      </TenantSettingsProvider>
     </PrincipalProvider>
   );
 }

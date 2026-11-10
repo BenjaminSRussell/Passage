@@ -32,6 +32,43 @@
   white-space: nowrap;
 }
 
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sortButton:hover,
+.sortButton:focus-visible {
+  color: var(--color-text);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+
+.sortMark {
+  display: inline-flex;
+  opacity: 0.35;
+}
+
+.sorted {
+  opacity: 1;
+  color: var(--color-accent);
+}
+
+.ascending {
+  transform: rotate(180deg);
+}
+
 .cell {
   block-size: var(--row-height);
   padding-inline: var(--cell-padding-inline);

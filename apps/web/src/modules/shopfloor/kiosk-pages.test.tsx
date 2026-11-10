@@ -6,6 +6,8 @@ import { checkAxeAA } from "../../shell/a11y";
 import { badgeLogin, listClockedIn, type ClockedWorker, type KioskSession, type Machine } from "./api/client";
 import { elapsed } from "./format";
 import { KIOSK_DEVICE_ID } from "./KioskPage";
+import { resetOrderCache } from "../mfg-shared/orders";
+import { resetResourceCache } from "../mfg-shared/resources";
 import shopfloor from "./module";
 import { validateMachine } from "./NewMachinePage";
 
@@ -21,19 +23,30 @@ type Handler = (url: URL, init: RequestInit) => Reply | undefined;
 const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region", "bypass"]);
 const pageViolations = (container: HTMLElement) => checkAxeAA(container).filter((v) => !shellRules.has(v.id));
 
+const isExtra = (url: URL) => url.pathname.endsWith("/engineering/resources") || url.pathname.includes("/production/orders");
+function extra(url: URL): Reply | undefined {
+  if (url.pathname.endsWith("/engineering/resources")) return { status: 200, body: { items: [{ id: RESOURCE, code: "MIX-1", name: "Mixer" }] } };
+  if (url.pathname.endsWith("/production/orders")) return { status: 200, body: { items: [{ id: ORDER, orderNumber: "MO-77" }] } };
+  if (url.pathname.endsWith(`/production/orders/${ORDER}`)) return { status: 200, body: { id: ORDER, orderNumber: "MO-77", productId: "" } };
+  return undefined;
+}
+const ORDER = "0195f0a0-0000-7000-8000-000000000040";
+
 let handler: Handler;
 let calls: { method: string; url: URL; init: RequestInit; body: unknown }[];
 const json = (status: number, body: unknown): Reply => ({ status, body });
 
 beforeEach(() => {
   calls = [];
+  resetResourceCache();
+  resetOrderCache();
   handler = () => undefined;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
-      calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
-      const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+      if (!isExtra(url)) calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      const reply = handler(url, init) ?? extra(url) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
   );
@@ -58,6 +71,11 @@ function renderAt(path: string) {
 
 const posts = (suffix: string) => calls.filter((c) => c.method === "POST" && c.url.pathname.endsWith(suffix));
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+const pick = async (label: string, value: string) => {
+  const select = screen.getByLabelText(label);
+  await waitFor(() => expect(select.querySelector(`option[value="${value}"]`)).not.toBeNull());
+  fireEvent.change(select, { target: { value } });
+};
 
 const session = (extra: Partial<KioskSession> = {}): KioskSession => ({
   workerId: WORKER,
@@ -240,7 +258,7 @@ describe("Machine idle threshold", () => {
     handler = (url, init) => (url.pathname.endsWith("/machines") ? json(init.method === "POST" ? 201 : 200, init.method === "POST" ? machine : { items: [machine] }) : undefined);
     renderAt("/shopfloor/machines/new");
     fill("Machine code", "M-101");
-    fill("Resource id", RESOURCE);
+    await pick("Work center", RESOURCE);
     fill("Ideal cycle time (seconds)", "60");
     fill("Idle threshold (seconds)", "600");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));

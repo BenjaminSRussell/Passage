@@ -5,6 +5,7 @@ import { createWorker, describeProblem, newKey, type NewWorker, type Problem } f
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 interface Values {
   name: string;
@@ -26,7 +27,7 @@ export function validateWorker(values: Values): { errors: Errors; input?: NewWor
   const errors: Errors = {};
   const name = values.name.trim();
   if (name.length < 1 || name.length > 120) errors.name = "Enter a name of up to 120 characters.";
-  if (!UUID.test(values.partyId.trim())) errors.partyId = "Enter the employee's party id (a UUID).";
+  if (!UUID.test(values.partyId.trim())) errors.partyId = "Choose the employee.";
   if (values.badgeId.trim().length > 64) errors.badgeId = "Use at most 64 characters.";
   if (values.userId.trim().length > 200) errors.userId = "Use at most 200 characters.";
   if (!RATE.test(values.costRate.trim())) errors.costRate = "Enter an hourly rate such as 21.50.";
@@ -86,7 +87,10 @@ export function NewWorkerPage() {
 
   const field = (id: Field, label: string, hint?: string, optional?: boolean, extra?: Record<string, unknown>) => (
     <FormField id={`worker-${id}`} label={label} hint={hint} optional={optional} error={errors[id]}>
-      {(control) => (
+      {(control) =>
+        id === "partyId" ? (
+          <EntityLookup {...control} entity="party" value={values.partyId} onChange={(e) => update({ partyId: e.target.value })} />
+        ) : (
         <Input
           {...control}
           {...extra}
@@ -94,7 +98,8 @@ export function NewWorkerPage() {
           onChange={(event) => update({ [id]: id === "currency" ? event.target.value.toUpperCase() : event.target.value } as Partial<Values>)}
           invalid={Boolean(errors[id])}
         />
-      )}
+        )
+      }
     </FormField>
   );
 
@@ -104,7 +109,7 @@ export function NewWorkerPage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {field("name", "Name", undefined, false, { maxLength: 120 })}
-          {field("partyId", "Party id", "The employee's party record.")}
+          {field("partyId", "Employee", "Choose the employee's party record.")}
           {field("badgeId", "Badge", "Scanned at the kiosk; unique in your tenant.", true, { maxLength: 64 })}
           {field("userId", "Sign-in user", "This user can't approve their own time.", true, { maxLength: 200 })}
           {field("costRate", "Cost rate per hour", "For example 21.50.", false, { inputMode: "decimal" })}

@@ -1,6 +1,7 @@
 // API client for the budgeting service (services/budgeting/api/openapi.yaml).
 // Browser calls use /api/v1/budget/... which the web BFF rewrites to the service's /v1/budget/... paths.
 import type { CheckLineResult, DocumentType } from "../logic";
+import { apiFetch } from "../../../shell/api/http";
 
 const BASE = "/api/v1/budget";
 
@@ -271,7 +272,7 @@ export function describeError(err: unknown, fallback: string): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
+  const res = await apiFetch(path, {
     ...init,
     credentials: "same-origin",
     headers: { accept: "application/json", ...(init.headers as Record<string, string> | undefined) },

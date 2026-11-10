@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
@@ -165,7 +167,12 @@ func (a *API) getInvoice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toInvoiceBody(inv))
+	body := toInvoiceBody(inv)
+	if body.Match, err = a.invoiceMatch(r.Context(), inv); err != nil {
+		slog.ErrorContext(r.Context(), "invoice match left out: a receipt could not be read", "err", err, "invoiceId", inv.ID, "correlationId", middleware.GetReqID(r.Context()))
+		body.Match = nil
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 type grirItemBody struct {
