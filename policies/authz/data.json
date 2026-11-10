@@ -727,6 +727,16 @@
       {"resource": "/v1/receiving/asns/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/asns/*:start-receipt", "methods": ["POST"]}
     ]},
+    "receiving.vendor-portal.asn": {"service_only": true, "permissions": [
+      {"resource": "/v1/receiving/vendor/asns", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/vendor/asns/*", "methods": ["GET"]}
+    ]},
+    "receiving.vendor-portal.invoice": {"service_only": true, "permissions": [
+      {"resource": "/v1/receiving/vendor/invoice-captures", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-captures/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoices", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoices/*", "methods": ["GET"]}
+    ]},
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
     ]},
@@ -790,7 +800,12 @@
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},
-      {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]}
+      {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-questionnaires", "methods": ["POST"]},
+      {"resource": "/v1/party/vendors/*/onboarding", "methods": ["POST"]},
+      {"resource": "/v1/party/vendors/*/documents", "methods": ["POST"]},
+      {"resource": "/v1/party/controlled-documents", "methods": ["POST"]},
+      {"resource": "/v1/party/controlled-documents/*:distribute", "methods": ["POST"]}
     ]},
     "party.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/party/parties", "methods": ["POST"]},
@@ -815,6 +830,14 @@
       {"resource": "/v1/party/vendor-groups", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-questionnaires", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-requests", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-requests/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-documents", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-documents/*/content", "methods": ["GET"]},
+      {"resource": "/v1/party/controlled-documents", "methods": ["GET"]},
+      {"resource": "/v1/party/controlled-documents/*/distributions", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-audit", "methods": ["GET"]},
       {"resource": "/v1/party/merge-requests/*", "methods": ["GET"]},
       {"resource": "/v1/party/customers/*", "methods": ["GET"]},
       {"resource": "/v1/party/parties:search", "methods": ["GET"]},
@@ -842,6 +865,25 @@
     "party.approve": {"permissions": [
       {"resource": "/v1/party/pending-changes/*:approve", "methods": ["POST"]},
       {"resource": "/v1/party/pending-changes/*:reject", "methods": ["POST"]}
+    ]},
+    "party.vendor-request.decide": {"permissions": [
+      {"resource": "/v1/party/vendor-requests/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-requests/*:reject", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/requests", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/requests/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/documents", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/documents/*/content", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/distributions", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]}
+    ]},
+    "party.vendor-portal.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/requests", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/requests/*:submit", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/requests/*:withdraw", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/documents", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]}
     ]},
     "party.approval-policy.write": {"permissions": [
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
@@ -3650,6 +3692,11 @@
     },
     "processmfg": {
       "identity": ["identity.feature.view"]
+    },
+    "supplier-portal": {
+      "purchasing": ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
+      "receiving": ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
+      "party": ["party.vendor-portal.read", "party.vendor-portal.write"]
     }
   },
   "service_principals": {

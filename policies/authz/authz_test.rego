@@ -852,8 +852,6 @@ awaiting_service_caller := {
 	"inventory.transaction.apply",
 	"pricing.contract.accrue",
 	"hub.client.consume",
-	"procurement.vendor-portal.read",
-	"procurement.vendor-portal.acknowledge",
 }
 
 test_vendor_portal_duties_are_service_only_and_open_only_their_routes if {
@@ -870,6 +868,60 @@ test_vendor_portal_duties_are_service_only_and_open_only_their_routes if {
 	not allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/vendor/purchase-orders")
 	not allowed("procurement.purchase-order.confirm", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
 	not allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
+}
+
+# The supplier portal service (#511) acts for one vendor, and holds only vendor-portal duties on the services it calls.
+test_supplier_portal_holds_only_service_only_vendor_duties if {
+	every _, duties in data.service_grants["supplier-portal"] {
+		every duty in duties {
+			data.duties[duty].service_only
+			contains(duty, "vendor-portal")
+		}
+	}
+	data.service_grants["supplier-portal"].purchasing == ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"]
+	data.service_grants["supplier-portal"].receiving == ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"]
+	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write"]
+}
+
+test_receiving_vendor_portal_duties_open_only_vendor_routes if {
+	allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/vendor/asns")
+	allowed("receiving.vendor-portal.asn", "GET", "/v1/receiving/vendor/asns/a1")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-captures")
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoices/i1")
+	not allowed("receiving.vendor-portal.asn", "GET", "/v1/receiving/asns")
+	not allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/asns/a1:start-receipt")
+	not allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/vendor/invoice-captures")
+	not allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/invoices")
+	not allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/invoices:post")
+	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/vendor/asns")
+	not allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/vendor/invoice-captures")
+}
+
+test_party_vendor_portal_duties_are_service_only_and_open_only_their_routes if {
+	data.duties["party.vendor-portal.read"].service_only
+	data.duties["party.vendor-portal.write"].service_only
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/requests")
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/documents/d1/content")
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/distributions/d1/content")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/requests/r1:submit")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/documents")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/distributions/d1:acknowledge")
+	not allowed("party.vendor-portal.read", "POST", "/v1/party/vendor-portal/documents")
+	not allowed("party.vendor-portal.write", "GET", "/v1/party/vendor-portal/documents")
+	not allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-requests")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-requests/r1:approve")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/controlled-documents/c1:distribute")
+}
+
+test_party_vendor_requests_are_decided_by_their_own_duty if {
+	allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-requests/r1:approve")
+	allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-requests/r1:reject")
+	not allowed("party.approve", "POST", "/v1/party/vendor-requests/r1:approve")
+	not allowed("party.write", "POST", "/v1/party/vendor-requests/r1:approve")
+	allowed("party.write", "POST", "/v1/party/controlled-documents/c1:distribute")
+	allowed("party.read", "GET", "/v1/party/vendor-documents/d1/content")
+	allowed("party.read", "GET", "/v1/party/vendor-requests")
+	not allowed("party.read", "POST", "/v1/party/vendor-questionnaires")
 }
 
 test_buyer_acknowledgement_routes if {
