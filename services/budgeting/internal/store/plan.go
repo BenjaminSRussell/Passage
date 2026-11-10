@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,7 @@ const (
 	CodeScenarioLimit     = "BUD-0051"
 	CodeScenarioDuplicate = "BUD-0052"
 	CodePlanRuleMismatch  = "BUD-0053"
+	CodePlanYearApproved  = "BUD-0057"
 	gridLimit             = 10000
 )
 
@@ -282,6 +284,10 @@ type StageOwnerInput struct{ Stage, OrgUnitID, Owner string }
 // of a plan never approves it (7.38.17).
 func (s *Postgres) SetStageOwners(ctx context.Context, key, hash, planID string, owners []StageOwnerInput) (int, []byte, error) {
 	p, _ := tenant.FromContext(ctx)
+	actor, err := actorOf(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
 	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
 		plan, err := loadDraftPlan(ctx, tx, p.TenantID, planID)
 		if err != nil {
@@ -311,7 +317,7 @@ func (s *Postgres) SetStageOwners(ctx context.Context, key, hash, planID string,
 				return 0, nil, err
 			}
 		}
-		if err := bumpPlan(ctx, tx, p.TenantID, planID); err != nil {
+		if _, err := tx.Exec(ctx, `update budget_plan_process set owners_set_by = $3, version = version + 1 where tenant_id = $1 and id = $2`, p.TenantID, planID, actor); err != nil {
 			return 0, nil, err
 		}
 		view, err := loadPlanView(ctx, tx, p.TenantID, planID)
@@ -323,6 +329,10 @@ func (s *Postgres) SetStageOwners(ctx context.Context, key, hash, planID string,
 // with a percentage adjustment.
 func (s *Postgres) CreateScenario(ctx context.Context, key, hash, planID string, in NewScenario) (int, []byte, error) {
 	p, _ := tenant.FromContext(ctx)
+	actor, err := actorOf(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
 	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
 		plan, err := loadDraftPlan(ctx, tx, p.TenantID, planID)
 		if err != nil {
@@ -341,8 +351,9 @@ func (s *Postgres) CreateScenario(ctx context.Context, key, hash, planID string,
 			}
 		}
 		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into budget_plan_scenario (tenant_id, id, legal_entity_id, process_id, name, kind, copied_from_id) values ($1, $2, $3, $4, $5, $6, nullif($7, '')::uuid)`,
-			p.TenantID, id, plan.LegalEntityID, planID, in.Name, in.Kind, in.CopyFromID); err != nil {
+		if _, err := tx.Exec(ctx, `insert into budget_plan_scenario (tenant_id, id, legal_entity_id, process_id, name, kind, copied_from_id, updated_by)
+			values ($1, $2, $3, $4, $5, $6, nullif($7, '')::uuid, case when $7 = '' then null else $8 end)`,
+			p.TenantID, id, plan.LegalEntityID, planID, in.Name, in.Kind, in.CopyFromID, actor); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 				return 0, nil, planProblem(http.StatusConflict, CodeScenarioDuplicate, "a scenario with this name exists in the plan")
@@ -365,6 +376,10 @@ func (s *Postgres) CreateScenario(ctx context.Context, key, hash, planID string,
 // current ETag, otherwise nothing is written (BUD-0050).
 func (s *Postgres) UpsertCells(ctx context.Context, key, hash, planID, scenarioID string, version int64, cells []domain.PlanCell) (int, []byte, error) {
 	p, _ := tenant.FromContext(ctx)
+	actor, err := actorOf(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
 	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
 		plan, err := loadDraftPlan(ctx, tx, p.TenantID, planID)
 		if err != nil {
@@ -390,7 +405,7 @@ func (s *Postgres) UpsertCells(ctx context.Context, key, hash, planID, scenarioI
 			p.TenantID, plan.LegalEntityID, planID, scenarioID, accounts, centers, periods, amounts); err != nil {
 			return 0, nil, err
 		}
-		if _, err := tx.Exec(ctx, `update budget_plan_scenario set version = version + 1 where tenant_id = $1 and id = $2`, p.TenantID, scenarioID); err != nil {
+		if _, err := tx.Exec(ctx, `update budget_plan_scenario set version = version + 1, updated_by = $3 where tenant_id = $1 and id = $2`, p.TenantID, scenarioID, actor); err != nil {
 			return 0, nil, err
 		}
 		after, err := loadScenario(ctx, tx, p.TenantID, planID, scenarioID, false)
@@ -398,10 +413,32 @@ func (s *Postgres) UpsertCells(ctx context.Context, key, hash, planID, scenarioI
 	})
 }
 
+// Replayed reports whether key already holds a stored answer for the same request, so a retry is answered without
+// the work (and the ledger read) that produced it. A key reused with another request body is refused.
+func (s *Postgres) Replayed(ctx context.Context, key, hash string) (bool, error) {
+	var found bool
+	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
+		var stored string
+		err := tx.QueryRow(ctx, `select request_hash from idempotency_keys where tenant_id = $1 and key = $2`, tenantID, key).Scan(&stored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if stored != hash {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
+		}
+		found = true
+		return nil
+	})
+	return found, err
+}
+
 func (s *Postgres) ListPlans(ctx context.Context, legalEntityID string) ([]Plan, error) {
 	out := []Plan{}
 	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
-		rows, err := tx.Query(ctx, `select `+planColumns+` from budget_plan_process where tenant_id = $1 and ($2 = '' or legal_entity_id::text = $2)
+		rows, err := tx.Query(ctx, `select `+planColumns+` from budget_plan_process where tenant_id = $1 and ($2::text = '' or legal_entity_id = nullif($2::text, '')::uuid)
 			order by fiscal_year desc, name limit $3`, tenantID, legalEntityID, listLimit)
 		if err != nil {
 			return err
@@ -544,7 +581,10 @@ func (s *Postgres) SignOff(ctx context.Context, key, hash string, in SignOffRequ
 			if plan.ApprovedScenarioID != "" && plan.ApprovedScenarioID != in.ScenarioID {
 				return 0, nil, planProblem(http.StatusConflict, CodeScenarioConflict, "another org unit already approved a different scenario")
 			}
-			if _, err := loadScenario(ctx, tx, p.TenantID, in.PlanID, in.ScenarioID, false); err != nil {
+			if err := checkApproverIndependent(ctx, tx, p.TenantID, plan, in.ScenarioID, actor); err != nil {
+				return 0, nil, err
+			}
+			if err := ensureYearNotApproved(ctx, tx, p.TenantID, plan); err != nil {
 				return 0, nil, err
 			}
 		}
@@ -579,6 +619,42 @@ func (s *Postgres) SignOff(ctx context.Context, key, hash string, in SignOffRequ
 		view, err := loadPlanView(ctx, tx, p.TenantID, in.PlanID)
 		return http.StatusOK, view, err
 	})
+}
+
+func checkApproverIndependent(ctx context.Context, tx pgx.Tx, tenantID string, plan Plan, scenarioID, actor string) error {
+	if _, err := loadScenario(ctx, tx, tenantID, plan.ID, scenarioID, false); err != nil {
+		return err
+	}
+	var ownersSetBy, editedBy string
+	var positive bool
+	if err := tx.QueryRow(ctx, `select coalesce(p.owners_set_by, ''), coalesce(s.updated_by, ''),
+		exists (select 1 from budget_plan_cell c where c.tenant_id = s.tenant_id and c.scenario_id = s.id and c.amount > 0)
+		from budget_plan_process p join budget_plan_scenario s on s.tenant_id = p.tenant_id and s.process_id = p.id
+		where p.tenant_id = $1 and p.id = $2 and s.id = $3`, tenantID, plan.ID, scenarioID).Scan(&ownersSetBy, &editedBy, &positive); err != nil {
+		return err
+	}
+	if actor == plan.CreatedBy || actor == ownersSetBy || actor == editedBy {
+		return planProblem(http.StatusForbidden, CodePlanSeparation, "the creator of the plan, whoever set its stage owners and whoever last edited the approved scenario cannot approve it")
+	}
+	if !positive {
+		return planProblem(http.StatusUnprocessableEntity, CodePlanIncomplete, "the scenario holds no amount to approve")
+	}
+	return nil
+}
+
+func ensureYearNotApproved(ctx context.Context, tx pgx.Tx, tenantID string, plan Plan) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1 || ':' || $2 || ':' || $3, 0))`, tenantID, plan.RuleVersionID, strconv.Itoa(plan.FiscalYear)); err != nil {
+		return err
+	}
+	var taken bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from budget_plan_process where tenant_id = $1 and rule_version_id = $2 and fiscal_year = $3 and status = 'Approved' and id <> $4)`,
+		tenantID, plan.RuleVersionID, plan.FiscalYear, plan.ID).Scan(&taken); err != nil {
+		return err
+	}
+	if taken {
+		return planProblem(http.StatusConflict, CodePlanYearApproved, fmt.Sprintf("another plan is already approved for this control rule version and fiscal year %d; its register entry is the budget", plan.FiscalYear))
+	}
+	return nil
 }
 
 func completeStage(ctx context.Context, tx pgx.Tx, tenantID string, plan Plan, stage string) error {

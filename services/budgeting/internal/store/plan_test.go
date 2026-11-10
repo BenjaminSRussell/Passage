@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -364,5 +365,101 @@ func TestPlan_CrossTenantPlanIsInvisible(t *testing.T) {
 	other := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(planTenant + 1), UserID: "x", Duties: map[string]struct{}{}})
 	if _, err := f.st.GetPlan(other, f.view.ID); !hasCode(err, CodePlanNotFound) {
 		t.Fatalf("another tenant reading the plan: %v, want %s", err, CodePlanNotFound)
+	}
+}
+
+func TestPlan_ApproverMustBeIndependentOfTheAuthors(t *testing.T) {
+	cases := []struct {
+		name, approver string
+		setter, editor string
+	}{
+		{"the creator", "planner", "setter", "editor"},
+		{"whoever set the owners", "setter", "setter", "editor"},
+		{"whoever last edited the cells", "editor", "setter", "editor"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlanFixture(t)
+			unit := ids.New()
+			base := f.scenario(t, "Baseline")
+			if _, _, err := f.st.UpsertCells(asUser(tc.editor), ids.New(), "h", f.view.ID, base.ID, base.Version, []domain.PlanCell{cell("6000", "CC1", "2027-01", "10")}); err != nil {
+				t.Fatal(err)
+			}
+			mustCommand(t)(f.st.SetStageOwners(asUser(tc.setter), ids.New(), "h", f.view.ID, []StageOwnerInput{
+				{Stage: domain.StageReview, OrgUnitID: unit, Owner: "rev"}, {Stage: domain.StageApprove, OrgUnitID: unit, Owner: tc.approver}}))
+			mustCommand(t)(f.st.SubmitPlan(asUser("submitter"), ids.New(), "h", f.view.ID))
+			if err := f.signOff("rev", SignOffRequest{Stage: domain.StageReview, OrgUnitID: unit, Submission: 1}); err != nil {
+				t.Fatal(err)
+			}
+			err := f.signOff(tc.approver, SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: base.ID, Submission: 1})
+			if !hasCode(err, CodePlanSeparation) {
+				t.Fatalf("%s approving: %v, want %s", tc.name, err, CodePlanSeparation)
+			}
+		})
+	}
+}
+
+func TestPlan_ApprovingAScenarioWithoutAmountsIsRefusedBeforeItLocksIn(t *testing.T) {
+	f := newPlanFixture(t)
+	base := f.scenario(t, "Baseline")
+	f.write(t, base, cell("6000", "CC1", "2027-01", "10"))
+	var empty Scenario
+	if err := json.Unmarshal(mustCommand(t)(f.st.CreateScenario(asUser("planner"), ids.New(), "h", f.view.ID, NewScenario{Name: "Empty", Kind: "Custom"})), &empty); err != nil {
+		t.Fatal(err)
+	}
+	unit := ids.New()
+	f.owners(t, StageOwnerInput{Stage: domain.StageReview, OrgUnitID: unit, Owner: "rev"}, StageOwnerInput{Stage: domain.StageApprove, OrgUnitID: unit, Owner: "boss"})
+	f.submit(t)
+	if err := f.signOff("rev", SignOffRequest{Stage: domain.StageReview, OrgUnitID: unit, Submission: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.signOff("boss", SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: empty.ID, Submission: 1}); !hasCode(err, CodePlanIncomplete) {
+		t.Fatalf("approving an empty scenario: %v, want %s", err, CodePlanIncomplete)
+	}
+	if got := f.plan(t); got.ApprovedScenarioID != "" || got.Status != domain.PlanReviewed {
+		t.Fatalf("the refused pick locked in %q with status %s", got.ApprovedScenarioID, got.Status)
+	}
+	if err := f.signOff("boss", SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: base.ID, Submission: 1}); err != nil {
+		t.Fatalf("approving the scenario with amounts afterwards: %v", err)
+	}
+}
+
+func TestPlan_SecondApprovedPlanOnTheSameRuleAndYearIsRefused(t *testing.T) {
+	f := newPlanFixture(t)
+	approve := func(planID string) error {
+		unit := ids.New()
+		v, err := f.st.GetPlan(asUser("planner"), planID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sc := v.Scenarios[0]
+		mustCommand(t)(f.st.UpsertCells(asUser("planner"), ids.New(), "h", planID, sc.ID, sc.Version, []domain.PlanCell{cell("6000", "CC1", "2027-01", "10")}))
+		mustCommand(t)(f.st.SetStageOwners(asUser("planner"), ids.New(), "h", planID, []StageOwnerInput{
+			{Stage: domain.StageReview, OrgUnitID: unit, Owner: "rev"}, {Stage: domain.StageApprove, OrgUnitID: unit, Owner: "boss"}}))
+		mustCommand(t)(f.st.SubmitPlan(asUser("planner"), ids.New(), "h", planID))
+		if _, _, err := f.st.SignOff(asUser("rev"), ids.New(), "h", SignOffRequest{PlanID: planID, Stage: domain.StageReview, OrgUnitID: unit, Submission: 1}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = f.st.SignOff(asUser("boss"), ids.New(), "h", SignOffRequest{PlanID: planID, Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: sc.ID, Submission: 1})
+		return err
+	}
+	if err := approve(f.view.ID); err != nil {
+		t.Fatal(err)
+	}
+	second := decodePlanView(t, mustCommand(t)(f.st.CreatePlan(asUser("planner"), ids.New(), "h", NewPlan{LegalEntityID: f.rule.LegalEntityID, RuleVersionID: f.rule.ID, Name: "FY27 stretch", FiscalYear: 2027})))
+	if err := approve(second.ID); !hasCode(err, CodePlanYearApproved) {
+		t.Fatalf("second approval for the rule version and year: %v, want %s", err, CodePlanYearApproved)
+	}
+	entries, err := f.st.ListRegisterEntries(asUser("planner"), f.rule.ID)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("register entries = %d (%v), want the first plan's only", len(entries), err)
+	}
+}
+
+func TestPlan_ListPlansMatchesAnUppercaseLegalEntityID(t *testing.T) {
+	f := newPlanFixture(t)
+	plans, err := f.st.ListPlans(asUser("planner"), strings.ToUpper(f.rule.LegalEntityID))
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans for the upper-cased legal entity = %d (%v), want 1", len(plans), err)
 	}
 }

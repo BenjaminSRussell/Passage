@@ -179,6 +179,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `BUD-0054` | Prior-year spreading needs a ledger on the plan and a configured general ledger (422 / 503) |
 | `BUD-0055` | The general ledger refused the balance read (422) |
 | `BUD-0056` | The general ledger could not be read (503) |
+| `BUD-0057` | Another plan is already approved for this control rule version and fiscal year (409) |
+| `BUD-0058` | A fiscal year that does not start in January is not supported (422) |
 | `COM-0428` | If-Match is required on a grid write (428) |
 | `COM-0001` | Malformed request body |
 | `AUTH-0001` | No principal on the request |

@@ -313,7 +313,7 @@ paths:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [legalEntityId, ruleVersionId, name, fiscalYear], properties: { legalEntityId: { type: string, format: uuid }, ruleVersionId: { type: string, format: uuid }, ledgerId: { type: string, format: uuid, description: Names the ledger the prior-year-actuals helper reads. }, name: { type: string }, fiscalYear: { type: integer } } } } }
+        content: { application/json: { schema: { type: object, required: [legalEntityId, ruleVersionId, name, fiscalYear], properties: { legalEntityId: { type: string, format: uuid }, ruleVersionId: { type: string, format: uuid }, ledgerId: { type: string, format: uuid, description: Names the ledger the prior-year-actuals helper reads. }, name: { type: string }, fiscalYear: { type: integer }, fiscalYearStartMonth: { type: integer, enum: [1], description: Only January is supported; any other value is refused with BUD-0058. } } } } }
       responses:
         '201': { description: The plan with its Baseline scenario., content: { application/json: { schema: { type: object } } } }
         default: { $ref: '#/components/responses/Problem' }

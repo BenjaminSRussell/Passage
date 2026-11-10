@@ -34,7 +34,10 @@ type fakePlans struct {
 	owners    []store.StageOwnerInput
 	plan      store.Plan
 	planError error
+	replayed  bool
 }
+
+func (f *fakePlans) Replayed(context.Context, string, string) (bool, error) { return f.replayed, nil }
 
 func (f *fakePlans) CreatePlan(context.Context, string, string, store.NewPlan) (int, []byte, error) {
 	f.calls++
@@ -260,6 +263,44 @@ func TestPlanSpread_PriorYearNeedsLedgerAndPlanLedger(t *testing.T) {
 	rec := servePlan(t, withLedger, failing, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, h)
 	if rec.Code != http.StatusServiceUnavailable || problemCode(t, rec) != codeLedgerUnreadable || withLedger.version != 0 {
 		t.Fatalf("ledger down: %d %s, want 503 %s and no write", rec.Code, rec.Body, codeLedgerUnreadable)
+	}
+}
+
+func TestPlanSpread_ARetryOfAStoredAnswerDoesNotReadTheLedger(t *testing.T) {
+	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LedgerID: ledgerID}, replayed: true}
+	gl := &fakeActuals{err: context.DeadlineExceeded}
+	body := `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
+	rec := servePlan(t, f, gl, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
+	if rec.Code != http.StatusOK || len(gl.queries) != 0 || f.calls != 1 {
+		t.Fatalf("replayed spread: %d %s, ledger queries %d, store calls %d, want 200, 0 and 1", rec.Code, rec.Body, len(gl.queries), f.calls)
+	}
+}
+
+func TestPlanSpread_ANetCreditMonthWeighsNothing(t *testing.T) {
+	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LedgerID: ledgerID}}
+	gl := &fakeActuals{byPeriod: map[string]string{"2026-01": "100", "2026-02": "-300"}}
+	body := `{"account":"6000","total":"100","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
+	rec := servePlan(t, f, gl, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("spread: %d %s", rec.Code, rec.Body)
+	}
+	for _, c := range f.cells {
+		if c.Period == "2027-01" && !c.Amount.Equal(decimal.NewFromInt(100)) || c.Period == "2027-02" && !c.Amount.IsZero() {
+			t.Errorf("%s = %s, want the credit month at 0 and all of the total in January", c.Period, c.Amount)
+		}
+	}
+}
+
+func TestPlanCreate_RefusesAFiscalYearThatDoesNotStartInJanuary(t *testing.T) {
+	f := &fakePlans{}
+	body := `{"legalEntityId":"` + entityID + `","ruleVersionId":"` + scenarioID + `","name":"FY27","fiscalYear":2027,"fiscalYearStartMonth":7}`
+	rec := servePlan(t, f, nil, http.MethodPost, "/v1/budget/plans", body, dutyPlanMaintain, nil)
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != codeFiscalCalendar || f.calls != 0 {
+		t.Fatalf("july fiscal year: %d %s, want 422 %s and no plan", rec.Code, rec.Body, codeFiscalCalendar)
+	}
+	ok := strings.Replace(body, `,"fiscalYearStartMonth":7`, `,"fiscalYearStartMonth":1`, 1)
+	if rec := servePlan(t, f, nil, http.MethodPost, "/v1/budget/plans", ok, dutyPlanMaintain, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("january fiscal year: %d %s, want 201", rec.Code, rec.Body)
 	}
 }
 

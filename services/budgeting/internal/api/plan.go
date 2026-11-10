@@ -26,11 +26,13 @@ const (
 	dutyPlanWorkflow = "budget.plan.workflow"
 	maxGridCells     = 5000
 	maxOwners        = 200
+	maxCostCenters   = 200
 
 	codeLedgerNotSet     = "BUD-0054"
 	codeLedgerRefused    = "BUD-0055"
 	codeLedgerUnreadable = "BUD-0056"
 	codePreconditionReq  = "COM-0428"
+	codeFiscalCalendar   = "BUD-0058"
 	spreadEven           = "even"
 	spreadPriorYear      = "prior-year-actuals"
 )
@@ -52,6 +54,7 @@ type PlanStore interface {
 	ListPlans(ctx context.Context, legalEntityID string) ([]store.Plan, error)
 	GetPlan(ctx context.Context, id string) (store.PlanView, error)
 	GetGrid(ctx context.Context, planID, scenarioID string, f store.GridFilter) (store.Grid, error)
+	Replayed(ctx context.Context, key, hash string) (bool, error)
 }
 
 // PriorActuals reads the ledger's posted balances for the prior-year spreading helper.
@@ -127,6 +130,8 @@ type createPlanRequest struct {
 	LedgerID      string `json:"ledgerId"`
 	Name          string `json:"name"`
 	FiscalYear    int    `json:"fiscalYear"`
+
+	FiscalYearStartMonth *int `json:"fiscalYearStartMonth"`
 }
 
 func (a *API) createPlan(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +162,10 @@ func (a *API) createPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	if req.FiscalYearStartMonth != nil && *req.FiscalYearStartMonth != 1 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeFiscalCalendar, "plan periods are calendar months of the fiscal year number; a fiscal year that does not start in January is not supported"))
 		return
 	}
 	key, hash := splitKey(composite)
@@ -375,8 +384,8 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 	if req.Method != spreadEven && req.Method != spreadPriorYear {
 		fields["method"] = "must be even or prior-year-actuals"
 	}
-	if len(req.CostCenters) == 0 || len(req.CostCenters) > maxOwners {
-		fields["costCenters"] = fmt.Sprintf("must hold 1 to %d cost centers", maxOwners)
+	if len(req.CostCenters) == 0 || len(req.CostCenters) > maxCostCenters {
+		fields["costCenters"] = fmt.Sprintf("must hold 1 to %d cost centers", maxCostCenters)
 	}
 	weights := make([]decimal.Decimal, len(req.CostCenters))
 	for i, c := range req.CostCenters {
@@ -390,6 +399,16 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	key, hash := splitKey(composite)
+	replayed, err := a.plans.Replayed(r.Context(), key, hash)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if replayed {
+		a.replayGrid(w, r)(a.plans.UpsertCells(r.Context(), key, hash, id, sid, version, nil))
 		return
 	}
 	plan, err := a.plans.GetPlan(r.Context(), id)
@@ -413,7 +432,6 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{"costCenters": "a cost center appears twice"})
 		return
 	}
-	key, hash := splitKey(composite)
 	a.replayGrid(w, r)(a.plans.UpsertCells(r.Context(), key, hash, id, sid, version, cells))
 }
 
@@ -425,7 +443,7 @@ func toGridRequests(cells []domain.PlanCell) []gridCellRequest {
 	return out
 }
 
-// periodWeights is 1 for each period (even), or the absolute net of the account's posted balance in each month of
+// periodWeights is 1 for each period (even), or the net debit (debit less credit, never below zero) of the account's posted balance in each month of
 // the prior fiscal year. The ledger balance is per account: it cannot be narrowed to a cost center.
 func (a *API) periodWeights(ctx context.Context, plan store.Plan, account, method string) ([]decimal.Decimal, error) {
 	periods := domain.Periods(plan.FiscalYear)
@@ -454,7 +472,7 @@ func (a *API) periodWeights(ctx context.Context, plan store.Plan, account, metho
 		}
 		for _, row := range set.Rows {
 			if row.Account == account {
-				weights[i] = weights[i].Add(row.Net().Abs())
+				weights[i] = weights[i].Add(decimal.Max(row.Net(), decimal.Zero))
 			}
 		}
 	}
