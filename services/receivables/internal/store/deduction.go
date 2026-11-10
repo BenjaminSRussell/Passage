@@ -389,6 +389,13 @@ func (s *Postgres) resolveDeduction(ctx context.Context, id string, version int,
 		if err != nil {
 			return err
 		}
+		if len(ev.Postings) > 0 {
+			if err := enqueueJournal(ctx, tx, p.TenantID, journalSpec{LegalEntityID: cur.LegalEntityID, SourceType: JournalDeduction, SourceID: id,
+				SourceKey: "deduction:" + id + ":" + action, DocumentID: "DED-" + id, PostingDate: today(), Currency: cur.Currency,
+				Lines: postingLines(ev.Postings)}); err != nil {
+				return err
+			}
+		}
 		if err := enqueue(ctx, tx, "deduction", id, rcvevents.DeductionResolved, p.TenantID, ev); err != nil {
 			return err
 		}

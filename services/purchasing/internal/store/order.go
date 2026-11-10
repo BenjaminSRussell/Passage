@@ -182,6 +182,9 @@ func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, id
 		out, err = insertPurchaseOrder(ctx, tx, in)
 		return err
 	})
+	if err == nil {
+		s.created(ctx, out)
+	}
 	return out, err
 }
 

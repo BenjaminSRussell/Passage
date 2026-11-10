@@ -181,6 +181,7 @@
       "/consolidation",
       "/intercompany/reconciliation",
       "/treasury/cash-forecast",
+      "/tax",
       "/analytics/dashboards",
       "/workflow/inbox"
     ]},

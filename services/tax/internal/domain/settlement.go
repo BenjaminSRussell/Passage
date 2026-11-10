@@ -16,6 +16,12 @@ type Txn struct {
 	TaxDate         Date   `json:"tax_date"`
 	Amount          Dec    `json:"amount"`
 	SettlementRunID string `json:"settlement_run_id"`
+
+	// Optional figures that the VAT return and the EU sales list need.
+	Base                *Dec   `json:"base_amount,omitempty"`
+	CounterpartyCountry string `json:"counterparty_country,omitempty"`
+	CounterpartyVATID   string `json:"counterparty_vat_id,omitempty"`
+	SupplyKind          string `json:"supply_kind,omitempty"`
 }
 
 type Period struct{ From, To Date }

@@ -56,6 +56,16 @@ func TestOpenItemRead_ImportReadDuty(t *testing.T) {
 	}
 }
 
+func TestOpenItemList_ForecastDutyReadsTheListOnly(t *testing.T) {
+	h := router(&fakeStore{})
+	if rec := do(h, http.MethodGet, "/v1/receivables/open-items", "", "receivables.forecast.read", nil); rec.Code != http.StatusOK {
+		t.Fatalf("forecast duty reads the list: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/v1/receivables/open-items/"+fakeOpenItemID, "", "receivables.forecast.read", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("forecast duty reads one item: %d, want 403", rec.Code)
+	}
+}
+
 func TestOpeningImport_RowErrorsAreReportedPerRow(t *testing.T) {
 	f := &fakeStore{}
 	h := router(f)

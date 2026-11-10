@@ -28,7 +28,8 @@ func creditNoteKafkaConfig(getenv func(string) string) (kafka.Config, error) {
 // creditNotesSeeded reports whether the service principal table gives the consumer its principal with the reverse duty; the
 // consumer never borrows another consumer's principal.
 func creditNotesSeeded(table map[string][]string) bool {
-	return slices.Contains(table[api.CreditNoteConsumerName], "revrec.creditnote.reverse")
+	return slices.Contains(table[api.CreditNoteConsumerName], "revrec.creditnote.reverse") &&
+		slices.Contains(table[api.CreditNoteConsumerName], "revrec.contract.from-invoice")
 }
 
 // consume runs the credit-note consumer (BR-29.6, #29): it reverses the schedules of booked credit notes through the store and
@@ -57,7 +58,7 @@ func consume(ctx context.Context, getenv func(string) string) error {
 	}
 	defer client.Close()
 	consumer, err := eventing.NewConsumer(client, client, eventing.NewPgInbox(pool), eventing.Config{
-		Name: api.CreditNoteConsumerName, Idempotent: true, Handlers: api.CreditNoteConsumerHandlers(store.New(pool)),
+		Name: api.CreditNoteConsumerName, Idempotent: true, Handlers: consumerHandlers(store.New(pool)),
 		DeadLetterTopic: creditNoteDeadLetterTopic, Log: slog.Default(),
 	})
 	if err != nil {
@@ -89,4 +90,14 @@ func consume(ctx context.Context, getenv func(string) string) error {
 		errs <- err
 	}()
 	return <-errs
+}
+
+// consumerHandlers serves both billing events of the topic: creditnote.booked reverses schedules (BR-29.6) and invoice.posted
+// opens the revenue contract of the invoiced order (29-4).
+func consumerHandlers(s *store.Postgres) map[string]eventing.Handler {
+	out := api.CreditNoteConsumerHandlers(s)
+	for t, h := range api.InvoiceConsumerHandlers(s) {
+		out[t] = h
+	}
+	return out
 }

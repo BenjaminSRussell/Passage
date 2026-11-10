@@ -8,6 +8,7 @@ import {
   compareScenarios,
   createPlan,
   createScenario,
+  generateGrid,
   getGrid,
   getPlan,
   listOrgUnits,
@@ -31,6 +32,9 @@ import {
   changedCells,
   editErrors,
   emptySpread,
+  toGenerateInput,
+  validateGenerate,
+  type GenerateForm,
   METHOD_LABELS,
   periodLabel,
   periodsOf,
@@ -566,6 +570,8 @@ function PlanGrid({ planId, scenarioId }: { planId: string; scenarioId: string }
   const [extra, setExtra] = useState<GridRow[]>([]);
   const [newRow, setNewRow] = useState({ account: "", costCenter: "" });
   const [spread, setSpread] = useState<SpreadForm>(emptySpread());
+  const [gen, setGen] = useState<GenerateForm>({ source: "prior-plan", adjustment: "", accounts: "", costCenters: "" });
+  const [genErrors, setGenErrors] = useState<Record<string, string>>({});
   const [spreadErrors, setSpreadErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -627,6 +633,14 @@ function PlanGrid({ planId, scenarioId }: { planId: string; scenarioId: string }
     if (newRow.account.trim() === "" || newRow.costCenter.trim() === "") return;
     setExtra((prev) => [...prev, { account: newRow.account.trim(), costCenter: newRow.costCenter.trim() }]);
     setNewRow({ account: "", costCenter: "" });
+  }
+
+  function runGenerate(event: FormEvent) {
+    event.preventDefault();
+    const found = validateGenerate(gen);
+    setGenErrors(found);
+    if (Object.keys(found).length > 0) return;
+    void attempt(() => generateGrid(planId, scenarioId, g!.scenario.version, toGenerateInput(gen), writeKey.current), "Amounts generated.");
   }
 
   function runSpread(event: FormEvent) {
@@ -766,6 +780,35 @@ function PlanGrid({ planId, scenarioId }: { planId: string; scenarioId: string }
                 {(c) => <Input {...c} className={styles.mono} value={newRow.costCenter} onChange={(e) => setNewRow({ ...newRow, costCenter: e.target.value })} />}
               </FormField>
               <Button type="submit">Add row</Button>
+            </form>
+          </Card>
+          <Card title="Fill from last year" headingLevel={3}>
+            <form className={styles.form} onSubmit={runGenerate} noValidate>
+              <FormField id="gn-source" label="Start from">
+                {(c) => (
+                  <Select {...c} value={gen.source} onChange={(e) => setGen({ ...gen, source: e.target.value as GenerateForm["source"] })}>
+                    <option value="prior-plan">Last year's approved plan</option>
+                    <option value="gl-actuals">What was posted last year</option>
+                  </Select>
+                )}
+              </FormField>
+              <FormField id="gn-adjust" label="Change every amount by percent" optional hint="5 adds five percent, -10 takes ten off." error={genErrors.adjustment}>
+                {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={gen.adjustment} onChange={(e) => setGen({ ...gen, adjustment: e.target.value })} invalid={Boolean(genErrors.adjustment)} />}
+              </FormField>
+              <FormField id="gn-accounts" label="Accounts" optional={gen.source === "prior-plan"} hint={gen.source === "prior-plan" ? "Leave empty for every account of last year's plan. Separate accounts with commas." : "The accounts to read from the ledger, separated by commas."} error={genErrors.accounts}>
+                {(c) => <Input {...c} className={styles.mono} value={gen.accounts} onChange={(e) => setGen({ ...gen, accounts: e.target.value })} invalid={Boolean(genErrors.accounts)} />}
+              </FormField>
+              {gen.source === "gl-actuals" ? (
+                <FormField id="gn-centers" label="Cost centers and their weights" hint="The ledger holds each account as one figure, so it is shared over these cost centers. Write CC1=2, CC2=1." error={genErrors.costCenters}>
+                  {(c) => <Input {...c} className={styles.mono} value={gen.costCenters} onChange={(e) => setGen({ ...gen, costCenters: e.target.value })} invalid={Boolean(genErrors.costCenters)} />}
+                </FormField>
+              ) : null}
+              <div className={styles.formActions}>
+                <Button type="submit" loading={busy}>
+                  Fill the grid
+                </Button>
+              </div>
+              <p className={styles.note}>The amounts replace those of the same account, cost center and month. Save any grid edits first.</p>
             </form>
           </Card>
           <Card title="Spread a yearly total" headingLevel={3}>

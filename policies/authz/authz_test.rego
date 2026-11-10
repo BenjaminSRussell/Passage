@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "revrec.contract.from-invoice", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -1109,8 +1109,44 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
-test_budget_check_converts_a_pre_encumbrance_and_view_cannot if {
-	allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
+test_treasury_cash_desk_writes_and_reads_are_separate if {
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:close")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/entries")
+	not allowed("treasury.cashdesk.write", "GET", "/v1/treasury/cash-desks")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days/2026-11-10/entries")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days")
+	not allowed("treasury.view", "POST", "/v1/treasury/cash-desks/d1/entries")
+	not allowed("treasury.cashdesk.write", "POST", "/v1/treasury/checks")
+}
+
+test_treasury_forecast_reads_open_items_only if {
+	data.duties["payables.forecast.read"].service_only
+	data.duties["receivables.forecast.read"].service_only
+	data.service_grants.treasury.payables == ["payables.forecast.read"]
+	data.service_grants.treasury.receivables == ["receivables.forecast.read"]
+	allowed("payables.forecast.read", "GET", "/v1/payables/open-items")
+	allowed("receivables.forecast.read", "GET", "/v1/receivables/open-items")
+	not allowed("payables.forecast.read", "POST", "/v1/payables/open-items/o1:hold")
+	not allowed("payables.forecast.read", "GET", "/v1/payables/payment-proposals")
+	not allowed("receivables.forecast.read", "POST", "/v1/receivables/payments")
+}
+
+test_budget_plan_generation_needs_the_maintain_duty if {
+	allowed("budget.plan.maintain", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+}
+
+test_budget_conversion_is_service_only_and_reaches_only_the_convert_routes if {
+	data.duties["budget.encumbrance.convert"].service_only
+	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert"]
+	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:convert")
+	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances:convert")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/checks")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:release")
+	not allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
 	not allowed("budget.view", "POST", "/v1/budget/encumbrances/e1:convert")
 }
 
@@ -1530,6 +1566,32 @@ test_hub_subscription_write_reaches_test_send_and_delivery_replay if {
 	not allowed("hub.delivery.read", "POST", "/v1/hub/deliveries/d-1:replay")
 }
 
+test_tax_configuration_vat_and_intrastat_duties_reach_only_their_routes if {
+	allowed("tax.config.read", "GET", "/v1/tax/jurisdictions")
+	allowed("tax.config.read", "GET", "/v1/tax/groups/party")
+	allowed("tax.config.read", "GET", "/v1/tax/vat-boxes")
+	not allowed("tax.config.read", "PUT", "/v1/tax/codes/VAT19")
+	allowed("tax.config.manage", "PUT", "/v1/tax/jurisdictions/US-OH")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/codes/VAT19")
+	allowed("tax.config.manage", "PUT", "/v1/tax/groups/item/STANDARD")
+	allowed("tax.config.manage", "PUT", "/v1/tax/vat-boxes")
+	not allowed("tax.config.manage", "GET", "/v1/tax/vat-return")
+	allowed("tax.vatreturn.read", "GET", "/v1/tax/vat-return")
+	allowed("tax.vatreturn.read", "GET", "/v1/tax/esl")
+	not allowed("tax.vatreturn.read", "PUT", "/v1/tax/vat-boxes")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/master/commodity")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/journals/j-1")
+	not allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/journals/j-1/export")
+	allowed("tax.intrastatmaster.manage", "PUT", "/v1/tax/intrastat/master/commodity/84137030")
+	not allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/journals")
+	allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/journals")
+	allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/journals/j-1/validate")
+	allowed("tax.intrastat.manage", "PUT", "/v1/tax/intrastat/journals/j-1/lines/2")
+	not allowed("tax.intrastat.manage", "GET", "/v1/tax/intrastat/journals/j-1/export")
+	allowed("tax.intrastat.export", "GET", "/v1/tax/intrastat/journals/j-1/export")
+	not allowed("tax.intrastat.export", "POST", "/v1/tax/intrastat/journals/j-1/validate")
+}
+
 test_tax_duties_reach_only_their_routes if {
 	allowed("tax.transaction.record", "POST", "/v1/tax/transactions")
 	allowed("tax.settlement.run", "POST", "/v1/tax/settlements:run")
@@ -1698,8 +1760,13 @@ test_treasury_bank_reconciliation_duties_are_distinct if {
 	not allowed("treasury.view", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
 }
 
-test_treasury_service_posts_to_the_ledger_only if {
-	data.service_grants.treasury == {"ledger": ["ledger.entry.post"]}
+# Treasury posts to the ledger and reads the open items of payables and receivables for the cash forecast, nothing else.
+test_treasury_service_grants_are_the_ledger_post_and_the_forecast_reads if {
+	data.service_grants.treasury == {
+		"ledger": ["ledger.entry.post"],
+		"payables": ["payables.forecast.read"],
+		"receivables": ["receivables.forecast.read"],
+	}
 }
 
 test_treasury_ebics_duties_split_ceremony_from_confirmation if {
@@ -2255,6 +2322,34 @@ test_rma_credit_operator_routes_belong_to_the_payment_duty if {
 	allowed("receivables.payment.post", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
 	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:cancel")
 	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
+}
+
+test_remittance_advice_belongs_to_the_payment_post_duty if {
+	allowed("receivables.payment.post", "POST", "/v1/receivables/remittance-advices")
+	not allowed("receivables.view", "POST", "/v1/receivables/remittance-advices")
+	not allowed("receivables.payment-file.import", "POST", "/v1/receivables/remittance-advices")
+}
+
+test_credit_settlement_belongs_to_the_settle_duty if {
+	allowed("receivables.payment.settle", "POST", "/v1/receivables/credit-settlements")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/credit-settlements")
+	not allowed("receivables.view", "POST", "/v1/receivables/credit-settlements")
+}
+
+test_subscription_usage_and_due_job_belong_to_invoice_maintain if {
+	allowed("billing.invoice.maintain", "POST", "/v1/billing/subscriptions/s1/usage")
+	allowed("billing.invoice.maintain", "POST", "/v1/billing/subscriptions:bill-due")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/subscriptions/s1/usage")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/subscriptions:bill-due")
+}
+
+test_gl_journal_routes_split_between_view_and_payment_duties if {
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")
+	allowed("receivables.view", "GET", "/v1/receivables/gl-journals")
+	allowed("receivables.view", "GET", "/v1/receivables/gl-reconciliation")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:sweep")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals/j1:retry")
 }
 
 test_asn_duties_do_not_cross if {

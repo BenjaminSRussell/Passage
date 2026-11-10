@@ -171,6 +171,9 @@ func (s *Postgres) ConsolidateRequisitionLines(ctx context.Context, orders []Pur
 		}
 		return nil
 	})
+	if err == nil {
+		s.created(ctx, out...)
+	}
 	return out, err
 }
 

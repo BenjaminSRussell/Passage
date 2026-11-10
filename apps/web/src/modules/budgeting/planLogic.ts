@@ -116,3 +116,56 @@ export const METHOD_LABELS: Record<SpreadMethod, string> = {
   "prior-year-actuals": "Like last year's actuals",
   custom: "By my own period weights",
 };
+
+/** "6100, 6200" becomes ["6100", "6200"]; empty entries are dropped. */
+export function parseAccounts(text: string): string[] {
+  return text
+    .split(/[,\n]/)
+    .map((a) => a.trim())
+    .filter((a) => a !== "");
+}
+
+/** "CC1=2, CC2=1" becomes weights; a bare "CC1" has weight 1. Returns null for a weight that is not a number. */
+export function parseCostCenterWeights(text: string): { costCenter: string; weight: string }[] | null {
+  const out: { costCenter: string; weight: string }[] = [];
+  for (const part of text.split(/[,\n]/).map((p) => p.trim()).filter((p) => p !== "")) {
+    const [name, weight = "1"] = part.split("=").map((p) => p.trim());
+    if (name === "" || !WEIGHT.test(weight)) return null;
+    out.push({ costCenter: name, weight });
+  }
+  return out;
+}
+
+export interface GenerateForm {
+  source: "prior-plan" | "gl-actuals";
+  adjustment: string;
+  accounts: string;
+  costCenters: string;
+}
+
+export function validateGenerate(f: GenerateForm): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const adj = f.adjustment.trim();
+  if (adj !== "" && (!/^-?\d{1,4}(\.\d{1,4})?$/.test(adj) || Number(adj) <= -100 || Number(adj) > 1000)) errors.adjustment = "Enter a percentage above -100 and at most 1000, such as 5 or -10.";
+  const accounts = parseAccounts(f.accounts);
+  if (new Set(accounts).size !== accounts.length) errors.accounts = "An account appears twice.";
+  if (f.source === "gl-actuals") {
+    if (accounts.length === 0) errors.accounts = "Name the accounts to read from the ledger.";
+    const weights = parseCostCenterWeights(f.costCenters);
+    if (weights === null) errors.costCenters = "Write each cost center as CC1 or CC1=2 (the weight), separated by commas.";
+    else if (weights.length === 0) errors.costCenters = "Name at least one cost center.";
+    else if (weights.every((w) => Number(w.weight) === 0)) errors.costCenters = "Give at least one cost center a weight above zero.";
+    else if (new Set(weights.map((w) => w.costCenter)).size !== weights.length) errors.costCenters = "A cost center appears twice.";
+  }
+  return errors;
+}
+
+export function toGenerateInput(f: GenerateForm): import("./api/plans").GenerateInput {
+  const accounts = parseAccounts(f.accounts);
+  return {
+    source: f.source,
+    ...(f.adjustment.trim() !== "" ? { adjustmentPct: f.adjustment.trim() } : {}),
+    ...(accounts.length > 0 ? { accounts } : {}),
+    ...(f.source === "gl-actuals" ? { costCenters: parseCostCenterWeights(f.costCenters) ?? [] } : {}),
+  };
+}

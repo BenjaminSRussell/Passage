@@ -16,6 +16,15 @@ database:
 # reports settled invoicing-plan rows this way (#289).
 serviceIdentity:
   publicKeys: ""
+  # purchasing signs its call to budgeting (budget.encumbrance.convert) with this Secret's key "signing-key", mounted at
+  # /var/run/passage/service-identity. Add purchasing's public key to budgeting's serviceIdentity.publicKeys first.
+  signingKeySecret: ""
+  keyId: ""
+
+# Base URLs of the services purchasing calls. budgeting converts a requisition line's pre-encumbrance when a PO line is
+# created from it (FR-38.5); unset, nothing is converted and purchasing logs a warning at start.
+serviceUrls:
+  budgeting: ""
 
 env:
   httpAddr: ":8080"

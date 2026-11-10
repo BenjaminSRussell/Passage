@@ -39,7 +39,7 @@ var servicePrincipals = map[string][]string{
 	"production-shopfloor":     {"production.jobcard.shopfloor"},
 	"receiving-erasure":        {"compliance.legal-hold.check"},
 	"receivables-billing":      {"receivables.openitem.from-billing"},
-	"revrec-creditnotes":       {"revrec.creditnote.reverse"},
+	"revrec-creditnotes":       {"revrec.creditnote.reverse", "revrec.contract.from-invoice"},
 	"receiving-ers":            {"receiving.vendor-invoice.post"},
 	"scheduling-downtime":      {"scheduling.downtime.apply"},
 	"scheduling-order-import":  {"scheduling.order.import"},
