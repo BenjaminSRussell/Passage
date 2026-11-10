@@ -8,6 +8,11 @@ export function AuthGate({ auth, children }: { auth: Auth; children: (session: S
   const [state, setState] = useState<State>({ status: "loading" });
   const loginStarted = useRef(false);
 
+  const startLogin = () =>
+    auth.login().catch((error: unknown) => {
+      setState({ status: "failed", message: error instanceof Error ? error.message : "sign-in failed" });
+    });
+
   useEffect(() => {
     let live = true;
     auth
@@ -16,7 +21,7 @@ export function AuthGate({ auth, children }: { auth: Auth; children: (session: S
         if (session === null) {
           if (loginStarted.current) return;
           loginStarted.current = true;
-          await auth.login();
+          await startLogin();
         } else if (live) {
           setState({ status: "ready", session });
         }
@@ -39,7 +44,7 @@ export function AuthGate({ auth, children }: { auth: Auth; children: (session: S
           type="button"
           onClick={() => {
             setState({ status: "loading" });
-            void auth.login();
+            void startLogin();
           }}
         >
           Try again

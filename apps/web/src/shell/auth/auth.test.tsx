@@ -1,11 +1,12 @@
 import { StrictMode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import admin from "../../modules/admin/module";
 import { HomePage } from "../pages/HomePage";
 import { PrincipalProvider } from "../principal";
 import { AuthGate } from "./AuthGate";
+import { AuthRoot } from "./AuthRoot";
 import { createAuth, installBearerFetch, type AuthEnv } from "./auth";
 import { authorizeUrl, challengeS256, endpoints, sessionFrom, type OidcConfig } from "./oidc";
 
@@ -243,5 +244,61 @@ describe("AuthGate", () => {
     render(<AuthGate auth={auth}>{() => <p>app</p>}</AuthGate>);
     expect(await screen.findByRole("alert")).toHaveTextContent("state mismatch");
     expect(screen.queryByText("app")).not.toBeInTheDocument();
+  });
+
+  it("shows the error with a retry when starting the login rejects", async () => {
+    const login = vi.fn().mockRejectedValueOnce(new Error("discovery unreachable")).mockResolvedValue(undefined);
+    render(<AuthGate auth={{ ensureSession: async () => null, accessToken: async () => null, login, logout: vi.fn() }}>{() => <p>app</p>}</AuthGate>);
+    expect(await screen.findByRole("alert")).toHaveTextContent("discovery unreachable");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(login).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("main.tsx wiring under StrictMode", () => {
+  it("creates one auth, wraps fetch once and sends the bearer token on API calls", async () => {
+    const seen: Array<string | null> = [];
+    const target = {
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(new Headers(init?.headers).get("Authorization"));
+        return new Response("{}");
+      }) as typeof fetch,
+    };
+    const { env, store, assign } = envAt("/auth/callback", "?code=c&state=s", () =>
+      new Response(JSON.stringify({ access_token: tokenFor("u", CLERK_DUTIES), expires_in: 300 })),
+    );
+    store.set("passage.oidc.pending", JSON.stringify({ state: "s", verifier: "v", returnTo: "/" }));
+    const created = vi.fn(createAuth);
+    const auth = created(config, env);
+    installBearerFetch(auth, origin, target);
+    const wrapped = target.fetch;
+    installBearerFetch(createAuth(config, envAt("/", "").env), origin, target);
+    expect(target.fetch).toBe(wrapped);
+
+    render(
+      <StrictMode>
+        <AuthRoot auth={auth} requireAuth>
+          {(duties) => <p>app with {duties?.length} duties</p>}
+        </AuthRoot>
+      </StrictMode>,
+    );
+    expect(await screen.findByText("app with 2 duties")).toBeInTheDocument();
+    await target.fetch(`${origin}/api/v1/ledger/ledgers`);
+
+    expect(created).toHaveBeenCalledOnce();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/^Bearer .+\..+\..+$/);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("refuses to render the app without sign-in settings when auth is required", () => {
+    render(<AuthRoot auth={null} requireAuth>{() => <p>app</p>}</AuthRoot>);
+    expect(screen.getByRole("alert")).toHaveTextContent(/not configured|no identity provider/i);
+    expect(screen.queryByText("app")).not.toBeInTheDocument();
+  });
+
+  it("renders the app ungated when auth is optional and unset", () => {
+    render(<AuthRoot auth={null} requireAuth={false}>{() => <p>app</p>}</AuthRoot>);
+    expect(screen.getByText("app")).toBeInTheDocument();
   });
 });

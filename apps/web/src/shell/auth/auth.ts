@@ -130,7 +130,10 @@ export function createAuth(config: OidcConfig, env: AuthEnv): Auth {
   return { ensureSession, accessToken, login, logout };
 }
 
+const BEARER_INSTALLED = Symbol.for("passage.bearerFetch");
+
 export function installBearerFetch(auth: Auth, origin: string, target: { fetch: typeof fetch } = globalThis): void {
+  if (BEARER_INSTALLED in target.fetch) return;
   const original = target.fetch.bind(target);
   target.fetch = async (input, init) => {
     const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -145,4 +148,5 @@ export function installBearerFetch(auth: Auth, origin: string, target: { fetch: 
     headers.set("Authorization", `Bearer ${token}`);
     return original(input, { ...init, headers });
   };
+  Object.defineProperty(target.fetch, BEARER_INSTALLED, { value: true });
 }

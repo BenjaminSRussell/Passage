@@ -5,7 +5,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
 import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
-import { AuthGate } from "./shell/auth/AuthGate";
+import { AuthRoot } from "./shell/auth/AuthRoot";
 import { browserEnv, createAuth, installBearerFetch } from "./shell/auth/auth";
 import { configuredOidc } from "./shell/auth/oidc";
 import { HomePage } from "./shell/pages/HomePage";
@@ -41,20 +41,14 @@ function App({ duties }: { duties?: readonly string[] }) {
   );
 }
 
-function Root() {
-  const oidc = configuredOidc();
-  const auth = useMemo(() => {
-    if (oidc === null) return null;
-    const created = createAuth(oidc, browserEnv());
-    installBearerFetch(created, window.location.origin);
-    return created;
-  }, [oidc]);
-  if (auth === null) return <App />;
-  return <AuthGate auth={auth}>{(session) => <App duties={session.duties} />}</AuthGate>;
-}
+const oidc = configuredOidc();
+const auth = oidc === null ? null : createAuth(oidc, browserEnv());
+if (auth !== null) installBearerFetch(auth, window.location.origin);
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Root />
+    <AuthRoot auth={auth} requireAuth={import.meta.env.PROD}>
+      {(duties) => <App duties={duties} />}
+    </AuthRoot>
   </React.StrictMode>,
 );
