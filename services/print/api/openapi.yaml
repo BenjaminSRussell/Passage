@@ -149,7 +149,7 @@ paths:
   /print/v1/documents:render:
     post:
       operationId: renderBusinessDocument
-      summary: Render a purchase order, customer invoice or packing slip as a PDF (issue #530)
+      summary: Render a purchase order, customer invoice, packing slip or remittance advice as a PDF (issues #530, #528)
       description: >-
         The caller sends the document as data (legal entity name and address, document number, the counterparty with its
         address, up to two additional parties such as a delivery address, header fields, a table and totals). The answer is
@@ -265,7 +265,7 @@ components:
       type: object
       required: [name]
       properties:
-        label: { type: string, maxLength: 200, description: 'For example Vendor, Bill to, Ship to. The counterparty defaults to Vendor on a purchase order, Bill to on an invoice and Ship to on a packing slip.' }
+        label: { type: string, maxLength: 200, description: 'For example Vendor, Bill to, Ship to. The counterparty defaults to Vendor on a purchase order or remittance advice, Bill to on an invoice and Ship to on a packing slip.' }
         name: { type: string, minLength: 1, maxLength: 200 }
         address: { type: array, maxItems: 8, items: { type: string, maxLength: 200 }, description: One entry per printed line. }
     DocumentField:
@@ -279,12 +279,12 @@ components:
       required: [documentType, number, legalEntity, columns, lines]
       description: Text is Unicode. Control characters are refused; only table cells and notes may hold line breaks.
       properties:
-        documentType: { type: string, enum: [PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP] }
+        documentType: { type: string, enum: [PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP, REMITTANCE_ADVICE], description: 'REMITTANCE_ADVICE (#528) is one payment of a payment run: the vendor as counterparty, one line per invoice the payment settled (invoice, date, amount open, discount, tax withheld, paid) and the total paid.' }
         number: { type: string, minLength: 1, maxLength: 200 }
         legalEntity: { $ref: '#/components/schemas/DocumentParty' }
         counterparty:
           allOf: [{ $ref: '#/components/schemas/DocumentParty' }]
-          description: The vendor of a purchase order, or the customer of an invoice or packing slip, with its address.
+          description: The vendor of a purchase order or remittance advice, or the customer of an invoice or packing slip, with its address.
         additionalParties:
           type: array
           maxItems: 2

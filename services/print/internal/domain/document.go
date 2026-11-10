@@ -26,6 +26,9 @@ const (
 	DocPurchaseOrder   = "PURCHASE_ORDER"
 	DocCustomerInvoice = "CUSTOMER_INVOICE"
 	DocPackingSlip     = "PACKING_SLIP"
+	// DocRemittanceAdvice is sent by the payables payment run page (#528): the vendor is the
+	// counterparty, the lines are the invoices a payment settled and the totals what was paid.
+	DocRemittanceAdvice = "REMITTANCE_ADVICE"
 
 	CodeDocument         = "PRN-0008" // a business document cannot be rendered (service-local)
 	CodeDocumentTooLarge = "PRN-0009" // a business document has more lines than one PDF holds (service-local)
@@ -52,9 +55,10 @@ const (
 )
 
 var docTitles = map[string]string{
-	DocPurchaseOrder:   "Purchase order",
-	DocCustomerInvoice: "Invoice",
-	DocPackingSlip:     "Packing slip",
+	DocPurchaseOrder:    "Purchase order",
+	DocCustomerInvoice:  "Invoice",
+	DocPackingSlip:      "Packing slip",
+	DocRemittanceAdvice: "Remittance advice",
 }
 
 // DocParty is a named party with address lines: the legal entity issuing the document,
@@ -144,7 +148,7 @@ func checkParty(prefix string, p DocParty) error {
 func ValidateDocument(d DocumentRequest) error {
 	d = normalizeDocument(d)
 	if _, ok := docTitles[d.DocumentType]; !ok {
-		return docErr("documentType", "must be PURCHASE_ORDER, CUSTOMER_INVOICE or PACKING_SLIP")
+		return docErr("documentType", "must be PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP or REMITTANCE_ADVICE")
 	}
 	if err := checkText("number", d.Number, true, maxDocField, false); err != nil {
 		return err
@@ -517,7 +521,7 @@ func (l *docLayout) parties() {
 	}
 	var blocks []block
 	if l.d.Counterparty != nil {
-		def := map[string]string{DocPurchaseOrder: "Vendor", DocCustomerInvoice: "Bill to", DocPackingSlip: "Ship to"}[l.d.DocumentType]
+		def := map[string]string{DocPurchaseOrder: "Vendor", DocCustomerInvoice: "Bill to", DocPackingSlip: "Ship to", DocRemittanceAdvice: "Vendor"}[l.d.DocumentType]
 		blocks = append(blocks, block{l.d.Counterparty, def})
 	}
 	for i := range l.d.AdditionalParties {
