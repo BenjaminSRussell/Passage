@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -96,8 +97,8 @@ type ARCredit struct {
 }
 
 type ARInvoiceLine struct {
-	LineNo int
-	Qty    decimal.Decimal
+	LineNo int             `json:"lineNo"`
+	Qty    decimal.Decimal `json:"qty"`
 }
 
 type ARTaxLine struct {
@@ -798,9 +799,13 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 	if err != nil {
 		return ReturnOrder{}, err
 	}
+	invoiceLines, err := s.creditInvoiceLines(ctx, current.ID)
+	if err != nil {
+		return ReturnOrder{}, err
+	}
 	note, err := s.ar.PostRMACredit(ctx, ARCredit{RMAID: current.ID, RMANumber: current.RMANumber, LegalEntityID: current.LegalEntityID,
 		InvoiceNumber: current.OriginalInvoiceNo, InvoiceID: current.OriginalInvoiceID, PostingDate: *current.CreditPostingDate, IdempotencyKey: "rma-credit-" + current.ID,
-		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net, TaxLines: taxLines, InvoiceLines: creditedInvoiceLines(current)})
+		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net, TaxLines: taxLines, InvoiceLines: invoiceLines})
 	if err != nil {
 		return ReturnOrder{}, upstreamProblem(ctx, "receivables", err)
 	}
@@ -831,11 +836,18 @@ func (s *Postgres) storeCredit(now time.Time, invoice Invoice) func(context.Cont
 		}
 		date := now.UTC().Format(dayLayout)
 		o.Gross, o.Restocking, o.Net = plan.total.Gross, plan.total.Restocking, plan.total.Net
-		if o.Tax, err = storeReversedTax(ctx, tx, tenantID, *o, invoice, plan); err != nil {
+		var creditLines []ARInvoiceLine
+		if o.Tax, creditLines, err = storeReversedTax(ctx, tx, tenantID, *o, invoice, plan); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `update return_order set gross = $3, restocking = $4, net = $5, tax = $6, credit_posting_date = $7 where tenant_id = $1 and id = $2`,
-			tenantID, o.ID, o.Gross.String(), o.Restocking.String(), o.Net.String(), o.Tax.String(), date)
+		stored := ""
+		if len(creditLines) > 0 {
+			raw, _ := json.Marshal(creditLines)
+			stored = string(raw)
+		}
+		_, err = tx.Exec(ctx, `update return_order set gross = $3, restocking = $4, net = $5, tax = $6, credit_posting_date = $7,
+			credit_invoice_lines = nullif($8, '')::jsonb where tenant_id = $1 and id = $2`,
+			tenantID, o.ID, o.Gross.String(), o.Restocking.String(), o.Net.String(), o.Tax.String(), date, stored)
 		return err
 	}
 }
@@ -847,24 +859,6 @@ type creditPlan struct {
 	lines   []int
 	charges []decimal.Decimal
 	qty     []decimal.Decimal
-}
-
-func creditedInvoiceLines(o ReturnOrder) []ARInvoiceLine {
-	var out []ARInvoiceLine
-	at := map[int]int{}
-	for _, l := range o.Lines {
-		qty := domain.CreditQuantity(l.CreditOnly, l.QuantityExpected, l.QuantityReceived, l.QuantityAccepted)
-		if !qty.IsPositive() {
-			continue
-		}
-		if i, ok := at[l.LineNo]; ok {
-			out[i].Qty = out[i].Qty.Add(qty)
-			continue
-		}
-		at[l.LineNo] = len(out)
-		out = append(out, ARInvoiceLine{LineNo: l.LineNo, Qty: qty})
-	}
-	return out
 }
 
 func planCredit(o ReturnOrder) (creditPlan, error) {
