@@ -16,7 +16,10 @@ function workspaceOf(module: PassageModule): { title: string; to: string } {
 }
 
 export function resolvePage(pathname: string, modules: PassageModule[], shellNav: NavItem[]): PageMeta {
-  const shellEntry = shellNav.find((n) => isExact(n.to, pathname));
+  if (pathname === "/whats-new") {
+    return { title: copy.whatsNew.pageTitle };
+  }
+  const shellEntry =shellNav.find((n) => isExact(n.to, pathname));
   if (shellEntry) {
     return { title: shellEntry.label };
   }

@@ -151,6 +151,22 @@ export const copy = {
     description: "A preview of a form generated from entity metadata.",
     saved: (title: string) => `${title} saved`,
   },
+  help: {
+    button: "Help for this page",
+    panelLabel: "Help",
+    close: "Close help",
+    purposeHeading: "What this page is for",
+    tasksHeading: "Common tasks",
+    guideLink: "Read the full guide",
+    noEntry: "There is no help for this page yet.",
+    whatsNew: "What's new",
+    announceOpened: "Help opened",
+  },
+  whatsNew: {
+    pageTitle: "What's new",
+    description: "Changes to Passage in plain language, newest first.",
+    empty: "No release notes yet.",
+  },
   notFound: {
     title: "We couldn't find that page",
     description: "Check the address, or search for the page you need.",

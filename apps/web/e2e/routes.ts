@@ -7,6 +7,7 @@ export const ROUTES: readonly string[] = [
   "/",
   "/notes",
   "/features",
+  "/whats-new",
   "/metadata/Vendor",
   "/close",
   "/workflow",
