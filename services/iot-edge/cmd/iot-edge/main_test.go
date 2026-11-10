@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -76,12 +77,28 @@ func TestLoadConfig_RuntimeSettings(t *testing.T) {
 		"missing node id":       {"EDGE_SHOPFLOOR_URL": "https://shopfloor", "EDGE_SOURCE": "simulator"},
 		"no source adapter":     {"EDGE_SHOPFLOOR_URL": "https://shopfloor", "EDGE_NODE_ID": node, "EDGE_SOURCE": "opcua"},
 		"capacity too small":    {"IOT_BUFFER_CAPACITY": "10"},
+		"cert dir with http":    {"PASSAGE_ENV": "dev", "EDGE_SHOPFLOOR_URL": "http://localhost", "EDGE_NODE_ID": node, "EDGE_SOURCE": "simulator", "EDGE_CERT_DIR": "/certs"},
+		"token without a dir":   {"EDGE_SHOPFLOOR_URL": "https://shopfloor", "EDGE_NODE_ID": node, "EDGE_SOURCE": "simulator", "EDGE_ENROLLMENT_TOKEN_FILE": "/t"},
 	} {
 		if _, err := loadConfig(env(with(extra))); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	if cfg, err := loadConfig(env(with(map[string]string{"EDGE_SHOPFLOOR_URL": "https://shopfloor", "EDGE_NODE_ID": node, "EDGE_SOURCE": "simulator", "EDGE_CERT_DIR": "/certs", "EDGE_ENROLLMENT_TOKEN_FILE": "/t"}))); err != nil || cfg.CertDir != "/certs" || cfg.EnrollTokenFile != "/t" {
+		t.Errorf("enrollment settings: %+v, %v", cfg, err)
+	}
 	if _, err := loadConfig(env(with(map[string]string{"PASSAGE_ENV": "dev", "EDGE_SHOPFLOOR_URL": "http://localhost:8080", "EDGE_NODE_ID": node, "EDGE_SOURCE": "simulator"}))); err != nil {
 		t.Errorf("http in dev refused: %v", err)
+	}
+}
+
+func TestEnrollIfNeeded_NeedsACertificateOrAToken(t *testing.T) {
+	cfg := config{CertDir: t.TempDir(), ShopfloorURL: "https://shopfloor.invalid", NodeID: "n"}
+	if _, err := enrollIfNeeded(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "EDGE_ENROLLMENT_TOKEN_FILE") {
+		t.Fatalf("no certificate and no token: %v", err)
+	}
+	cfg.EnrollTokenFile = t.TempDir() + "/missing"
+	if _, err := enrollIfNeeded(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "read EDGE_ENROLLMENT_TOKEN_FILE") {
+		t.Fatalf("missing token file: %v", err)
 	}
 }

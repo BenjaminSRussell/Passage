@@ -56,6 +56,16 @@ spec:
               value: {{ .Values.shopfloor.bufferCapacity | quote }}
             - name: EDGE_SEQ_STATE_FILE
               value: /var/lib/iot-edge/seq.json
+{{- if .Values.shopfloor.enrollmentSecret }}
+            - name: EDGE_CERT_DIR
+              value: /var/lib/iot-edge/certs
+            - name: EDGE_ENROLLMENT_TOKEN_FILE
+              value: /var/run/passage/enroll/token
+{{- end }}
+{{- if .Values.shopfloor.serverCaSecret }}
+            - name: EDGE_SERVER_CA_FILE
+              value: /var/run/passage/server-ca/ca.crt
+{{- end }}
 {{- if .Values.shopfloor.tokenSecret }}
             - name: EDGE_TOKEN_FILE
               value: /var/run/passage/edge/token
@@ -65,6 +75,12 @@ spec:
             - { name: state, mountPath: /var/lib/iot-edge }
 {{- if .Values.shopfloor.tokenSecret }}
             - { name: token, mountPath: /var/run/passage/edge, readOnly: true }
+{{- end }}
+{{- if .Values.shopfloor.enrollmentSecret }}
+            - { name: enroll, mountPath: /var/run/passage/enroll, readOnly: true }
+{{- end }}
+{{- if .Values.shopfloor.serverCaSecret }}
+            - { name: server-ca, mountPath: /var/run/passage/server-ca, readOnly: true }
 {{- end }}
           securityContext:
             runAsNonRoot: true
@@ -85,4 +101,16 @@ spec:
           secret:
             secretName: {{ .Values.shopfloor.tokenSecret | quote }}
             items: [{ key: token, path: token }]
+{{- end }}
+{{- if .Values.shopfloor.enrollmentSecret }}
+        - name: enroll
+          secret:
+            secretName: {{ .Values.shopfloor.enrollmentSecret | quote }}
+            items: [{ key: token, path: token }]
+{{- end }}
+{{- if .Values.shopfloor.serverCaSecret }}
+        - name: server-ca
+          secret:
+            secretName: {{ .Values.shopfloor.serverCaSecret | quote }}
+            items: [{ key: ca.crt, path: ca.crt }]
 {{- end }}

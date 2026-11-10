@@ -40,6 +40,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret.name }}
                   key: {{ .Values.databaseSecret.key }}
+{{- if .Values.edgeCa.secret }}
+            - name: SHOPFLOOR_EDGE_CA_CERT_FILE
+              value: /var/run/passage/edge-ca/ca.crt
+            - name: SHOPFLOOR_EDGE_CA_KEY_FILE
+              value: /var/run/passage/edge-ca/ca.key
+          volumeMounts:
+            - { name: edge-ca, mountPath: /var/run/passage/edge-ca, readOnly: true }
+{{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -54,3 +62,10 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+{{- if .Values.edgeCa.secret }}
+      volumes:
+        - name: edge-ca
+          secret:
+            secretName: {{ .Values.edgeCa.secret | quote }}
+            defaultMode: 0440
+{{- end }}

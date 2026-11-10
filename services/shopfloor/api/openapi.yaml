@@ -2564,9 +2564,8 @@ paths:
         node's configuration or report its heartbeat, and a node without one refuses both
         (SF-0154). The node has status `pending` until its first heartbeat. A name, or a connector
         identity bound to another node, already used is SF-0153. Publishes
-        `dev.passage.shopfloor.edgenode.saved.v1`. Token enrollment and the mTLS certificate are
-        not part of this service yet: the binding is set here by hand, and the certificate serial
-        and expiry the connector reports in its heartbeat are stored as reported.
+        `dev.passage.shopfloor.edgenode.saved.v1`. The binding can be set here by hand, or by token enrollment
+        (`:enrollment-token`, `:enroll`), which binds the subject of the certificate it issues.
       x-passage-duty: shopfloor.edge.configure
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -2818,6 +2817,126 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:enrollment-token:
+    post:
+      operationId: mintEdgeEnrollmentToken
+      summary: Mint a one-time enrollment token for an edge node
+      description: |
+        Returns a token a connector redeems once with `:enroll` to receive its client certificate
+        (FR-25.19). The token is shown only in this answer (only the hash of its secret is stored),
+        is good for 24 hours and replaces the node's earlier unredeemed tokens. A node that does
+        not exist is SF-0150 (404) and a switched-off node SF-0152 (409). Not keyed: each call
+        mints a new token.
+      x-passage-duty: shopfloor.edge.configure
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      responses:
+        "201":
+          description: The token, once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeEnrollmentToken"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:enroll:
+    post:
+      operationId: enrollEdgeNode
+      summary: Redeem an enrollment token for a client certificate
+      description: |
+        The connector's first call. It carries no session: the token is the credential and names its
+        own tenant and node. The service signs the PEM certificate request (ECDSA P-256 or stronger,
+        RSA 2048 or more, signature checked) for the subject `edge:<node id>`, ignoring any name in
+        the request, binds that subject to the node as its connector identity, records the
+        certificate (serial, validity) and publishes `dev.passage.shopfloor.edgenode.saved.v1`.
+        The certificate lasts 90 days (BR-25.14). A token that is unknown, used, replaced, expired
+        or for a switched-off node is SF-0171 (401), all alike. A request that cannot be signed is
+        SF-0172 (422) and leaves the token usable. Without a configured issuer the answer is
+        SF-0173 (503).
+      x-passage-public: true
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, csr]
+              properties:
+                token:
+                  type: string
+                csr:
+                  type: string
+                  description: PEM certificate request, at most 16 KiB.
+      responses:
+        "200":
+          description: The certificate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeCertificate"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:renew-certificate:
+    post:
+      operationId: renewEdgeCertificate
+      summary: Renew an edge node's client certificate
+      description: |
+        The connector, authenticated by its current certificate identity, sends a new certificate
+        request (renewal starts when fewer than 30 days remain, BR-25.14). The subject does not
+        change; the node's serial and expiry are updated and the old certificate stays valid until
+        it expires. Only the identity bound to the node may renew (SF-0154, 403); a switched-off
+        node is SF-0152 (409).
+      x-passage-duty: shopfloor.edge.connect
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csr]
+              properties:
+                csr:
+                  type: string
+      responses:
+        "200":
+          description: The new certificate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeCertificate"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
   /v1/shopfloor/edge-nodes/{id}:heartbeat:
     post:
@@ -3897,6 +4016,43 @@ components:
           minLength: 1
           maxLength: 200
         certExpiresAt:
+          type: string
+          format: date-time
+    EdgeEnrollmentToken:
+      type: object
+      required: [edgeId, token, expiresAt]
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: "<tenant id>.<edge id>.<secret>; shown once."
+        expiresAt:
+          type: string
+          format: date-time
+    EdgeCertificate:
+      type: object
+      required: [edgeId, subject, certificate, caChain, serial, notBefore, notAfter]
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+          description: The connector identity bound to the node, the certificate's common name.
+        certificate:
+          type: string
+          description: PEM leaf certificate.
+        caChain:
+          type: string
+          description: PEM CA certificate(s) the connector trusts the gateway's client CA by.
+        serial:
+          type: string
+        notBefore:
+          type: string
+          format: date-time
+        notAfter:
           type: string
           format: date-time
     EdgeHeartbeatResult:

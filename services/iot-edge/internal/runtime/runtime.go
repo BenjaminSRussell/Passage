@@ -56,6 +56,8 @@ type Heartbeat struct {
 	BufferFillPct        float64
 	Machines             map[string]string // machine code to last reported state
 	AppliedConfigVersion int
+	CertSerial           string
+	CertExpiresAt        time.Time
 }
 
 // HeartbeatReply tells the connector what the server has.
@@ -77,16 +79,20 @@ type Options struct {
 	Source           Source
 	Transport        Transport
 	Control          ControlPlane
-	State            SeqState
-	BufferAge        time.Duration
-	BufferCapacity   int
-	BatchSize        int           // events per send, at most 500 (the ingest limit)
-	FlushEvery       time.Duration // how often the publisher looks at the buffer
-	HeartbeatEvery   time.Duration // default 30 s, replaced by the server's answer
-	RetryBackoff     time.Duration // first wait after a failed send, doubling to RetryBackoffMax
-	RetryBackoffMax  time.Duration
-	Now              func() time.Time
-	Log              *slog.Logger
+	// Certs and Renew run the mTLS certificate life (BR-25.14): Beat starts a renewal when fewer than
+	// 30 days remain, reports the serial and expiry, and publishing stops when the certificate expired.
+	Certs           *CertStore
+	Renew           func(ctx context.Context) error
+	State           SeqState
+	BufferAge       time.Duration
+	BufferCapacity  int
+	BatchSize       int           // events per send, at most 500 (the ingest limit)
+	FlushEvery      time.Duration // how often the publisher looks at the buffer
+	HeartbeatEvery  time.Duration // default 30 s, replaced by the server's answer
+	RetryBackoff    time.Duration // first wait after a failed send, doubling to RetryBackoffMax
+	RetryBackoffMax time.Duration
+	Now             func() time.Time
+	Log             *slog.Logger
 }
 
 // Stats are the counters the admin /metrics endpoint serves.
@@ -94,6 +100,7 @@ type Stats struct {
 	Accepted, DroppedDuplicate, DroppedStale, Invalid, Evicted int64
 	Sent, ServerAccepted, ServerDropped, Rejected              int64
 	SendFailures, SeqGaps, HeartbeatFailures                   int64
+	CertRenewals, CertRenewFailures                            int64
 	BufferLen                                                  int
 	BufferFillPct                                              float64
 	AppliedConfigVersion                                       int
@@ -117,6 +124,7 @@ type Runtime struct {
 	accepted, dupDropped, staleDropped, invalid atomic.Int64
 	sent, srvAccepted, srvDropped, rejected     atomic.Int64
 	sendFailures, seqGaps, heartbeatFailures    atomic.Int64
+	certRenewals, certRenewFailures             atomic.Int64
 	intervalNanos                               atomic.Int64
 }
 
@@ -265,6 +273,10 @@ func (r *Runtime) Ingest(rd Reading) {
 // the buffer only after the acknowledgement.
 func (r *Runtime) Flush(ctx context.Context) (int, error) {
 	total := 0
+	if r.o.Certs != nil && !domain.PublishAllowed(r.o.Certs.Action(r.o.Now())) {
+		r.sendFailures.Add(1)
+		return 0, errors.New("client certificate expired; events stay buffered until the connector is enrolled again")
+	}
 	for ctx.Err() == nil {
 		payloads, through := r.buf.Peek(r.o.Now(), r.o.BatchSize)
 		if len(payloads) == 0 {
@@ -318,8 +330,12 @@ func (r *Runtime) Beat(ctx context.Context) error {
 	}
 	applied := r.applied
 	r.mu.Unlock()
-	reply, err := r.o.Control.Heartbeat(ctx, Heartbeat{ConnectorVersion: r.o.ConnectorVersion,
-		BufferFillPct: r.buf.FillPct(r.o.Now()), Machines: machines, AppliedConfigVersion: applied})
+	hb := Heartbeat{ConnectorVersion: r.o.ConnectorVersion, BufferFillPct: r.buf.FillPct(r.o.Now()), Machines: machines, AppliedConfigVersion: applied}
+	if c := r.o.Certs; c != nil {
+		r.renewIfDue(ctx, c)
+		hb.CertSerial, hb.CertExpiresAt = c.Serial(), c.NotAfter()
+	}
+	reply, err := r.o.Control.Heartbeat(ctx, hb)
 	if err != nil {
 		r.heartbeatFailures.Add(1)
 		return err
@@ -331,6 +347,27 @@ func (r *Runtime) Beat(ctx context.Context) error {
 		return r.pullConfig(ctx)
 	}
 	return nil
+}
+
+// renewIfDue starts the renewal BR-25.14 asks for. A failure is remembered, so a renewal failing for
+// seven days is reported as an alert (SF-0018) while the old certificate still works.
+func (r *Runtime) renewIfDue(ctx context.Context, c *CertStore) {
+	now := r.o.Now()
+	action := c.Action(now)
+	if action == domain.CertAlert {
+		r.log.Error("client certificate renewal has failed for 7 days (SF-0018)", "expiresAt", c.NotAfter())
+	}
+	if (action != domain.CertRenew && action != domain.CertAlert) || r.o.Renew == nil {
+		return
+	}
+	if err := r.o.Renew(ctx); err != nil {
+		c.RenewFailed(now)
+		r.certRenewFailures.Add(1)
+		r.log.Warn("client certificate renewal failed", "expiresAt", c.NotAfter(), "err", err)
+		return
+	}
+	r.certRenewals.Add(1)
+	r.log.Info("client certificate renewed", "serial", c.Serial(), "expiresAt", c.NotAfter())
 }
 
 func (r *Runtime) pullConfig(ctx context.Context) error {
@@ -436,6 +473,6 @@ func (r *Runtime) Stats() Stats {
 	return Stats{Accepted: r.accepted.Load(), DroppedDuplicate: r.dupDropped.Load(), DroppedStale: r.staleDropped.Load(),
 		Invalid: r.invalid.Load(), Evicted: int64(r.buf.Evicted()), Sent: r.sent.Load(), ServerAccepted: r.srvAccepted.Load(),
 		ServerDropped: r.srvDropped.Load(), Rejected: r.rejected.Load(), SendFailures: r.sendFailures.Load(),
-		SeqGaps: r.seqGaps.Load(), HeartbeatFailures: r.heartbeatFailures.Load(), BufferLen: r.buf.Len(),
+		SeqGaps: r.seqGaps.Load(), HeartbeatFailures: r.heartbeatFailures.Load(), CertRenewals: r.certRenewals.Load(), CertRenewFailures: r.certRenewFailures.Load(), BufferLen: r.buf.Len(),
 		BufferFillPct: r.buf.FillPct(now), AppliedConfigVersion: r.Applied()}
 }

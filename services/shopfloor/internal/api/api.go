@@ -32,6 +32,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/pki"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
 )
 
@@ -109,6 +110,9 @@ type Store interface {
 	ListEdgeConfigs(ctx context.Context, edgeID string, limit int) ([]store.EdgeConfigVersion, error)
 	CurrentEdgeConfig(ctx context.Context, edgeID, subject string) (store.EdgeConfigVersion, error)
 	Heartbeat(ctx context.Context, edgeID, subject string, in store.HeartbeatInput) (store.HeartbeatResult, error)
+	IssueEnrollmentToken(ctx context.Context, edgeID, createdBy string, now time.Time) (store.EnrollmentToken, error)
+	Enroll(ctx context.Context, token, csrPEM string, issuer pki.Issuer, now time.Time) (store.EdgeCertificate, error)
+	RenewCertificate(ctx context.Context, edgeID, subject, csrPEM string, issuer pki.Issuer, now time.Time) (store.EdgeCertificate, error)
 	AssignWorkerSetup(ctx context.Context, workerID string, version int, profileID, agreementID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	AssignWorkerResource(ctx context.Context, workerID string, version int, resourceID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
@@ -198,6 +202,9 @@ type API struct {
 	finishBlocked   atomic.Int64
 	// jobsReopened counts finished jobs a supervisor reopened (FR-25.3).
 	jobsReopened atomic.Int64
+	// enrollTokens, enrolled and certRenewed count edge enrollment tokens minted, redeemed and certificates renewed.
+	enrollTokens, enrolled, certRenewed atomic.Int64
+	issuer                              pki.Issuer
 	// corrections counts registration corrections; revisedDays approved days revised with reversal.
 	corrections atomic.Int64
 	revisedDays atomic.Int64
@@ -291,6 +298,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerDowntimeReasons(r)
 	a.registerProcessCategories(r)
 	a.registerEdge(r)
+	a.registerEnrollment(r)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers", a.createWorker)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers", a.listWorkers)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers/{id}", a.getWorker)
@@ -339,6 +347,9 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_job_finish_blocked_total", "Job finishes refused because a mandatory check has no passing result (SF-0005).", a.finishBlocked.Load())
 		counter("shopfloor_registration_corrections_total", "Registrations corrected by a supervisor with a reason (FR-25.8).", a.corrections.Load())
 		counter("shopfloor_pay_days_revised_total", "Approved worker-days revised with reversal lines (AC-25.8).", a.revisedDays.Load())
+		counter("shopfloor_edge_enrollment_tokens_total", "Edge enrollment tokens minted.", a.enrollTokens.Load())
+		counter("shopfloor_edge_enrollments_total", "Edge nodes enrolled with a token (certificate issued).", a.enrolled.Load())
+		counter("shopfloor_edge_certificates_renewed_total", "Edge client certificates renewed.", a.certRenewed.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }

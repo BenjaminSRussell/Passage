@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -50,6 +52,11 @@ type config struct {
 	SeqStateFile string
 	Source       string // simulator is the only source built
 	SimMachines  int
+	// CertDir holds the mTLS client certificate (25-4). With it the connector enrolls on first start
+	// with the token in EnrollTokenFile and renews the certificate 30 days before it expires.
+	CertDir         string
+	EnrollTokenFile string
+	ServerCAFile    string // PEM roots for the shopfloor server; the system roots when empty
 }
 
 // loadConfig reads and validates the environment. Invalid configuration is an
@@ -100,6 +107,13 @@ func loadConfig(getenv func(string) string) (config, error) {
 			problems = append(problems, "EDGE_SHOPFLOOR_URL must be https (http only when PASSAGE_ENV is dev)")
 		case !ids.Valid(cfg.NodeID):
 			problems = append(problems, "EDGE_NODE_ID must be the edge node's UUID when EDGE_SHOPFLOOR_URL is set")
+		}
+		cfg.CertDir, cfg.EnrollTokenFile, cfg.ServerCAFile = getenv("EDGE_CERT_DIR"), getenv("EDGE_ENROLLMENT_TOKEN_FILE"), getenv("EDGE_SERVER_CA_FILE")
+		if cfg.CertDir != "" && !strings.HasPrefix(cfg.ShopfloorURL, "https://") {
+			problems = append(problems, "EDGE_CERT_DIR needs an https EDGE_SHOPFLOOR_URL")
+		}
+		if cfg.CertDir == "" && (cfg.EnrollTokenFile != "" || cfg.ServerCAFile != "") {
+			problems = append(problems, "EDGE_ENROLLMENT_TOKEN_FILE and EDGE_SERVER_CA_FILE need EDGE_CERT_DIR")
 		}
 		if cfg.Source != "simulator" {
 			problems = append(problems, "EDGE_SOURCE must be simulator when EDGE_SHOPFLOOR_URL is set (OPC-UA and MQTT adapters are not built)")
@@ -157,7 +171,7 @@ func main() {
 	router := httpx.NewRouter()
 	mux.Handle("/", router)
 	if cfg.ShopfloorURL != "" {
-		rt, err := newRuntime(cfg)
+		rt, err := newRuntime(ctx, cfg)
 		if err != nil {
 			logger.Error("iot-edge runtime not started", "err", err)
 			os.Exit(2)
@@ -176,8 +190,9 @@ func main() {
 	}
 }
 
-// newRuntime builds the runtime for a connector that reports to a shopfloor service.
-func newRuntime(cfg config) (*runtime.Runtime, error) {
+// newRuntime builds the runtime for a connector that reports to a shopfloor service. With EDGE_CERT_DIR
+// it enrolls when no certificate is installed (redeeming the token once), then talks mTLS and renews.
+func newRuntime(ctx context.Context, cfg config) (*runtime.Runtime, error) {
 	token := ""
 	if cfg.TokenFile != "" {
 		b, err := os.ReadFile(cfg.TokenFile)
@@ -189,6 +204,19 @@ func newRuntime(cfg config) (*runtime.Runtime, error) {
 	client := &runtime.Client{BaseURL: cfg.ShopfloorURL, EdgeID: cfg.NodeID, Token: token}
 	o := runtime.Options{Site: cfg.Site, EdgeID: cfg.EdgeID, ConnectorVersion: version, Transport: client, Control: client,
 		BufferAge: time.Duration(cfg.BufferHours) * time.Hour, BufferCapacity: cfg.BufferCapacity}
+	if cfg.CertDir != "" {
+		store, err := enrollIfNeeded(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		roots, err := serverRoots(cfg.ServerCAFile)
+		if err != nil {
+			return nil, err
+		}
+		client.HTTP = store.HTTPClient(roots)
+		o.Certs = store
+		o.Renew = func(ctx context.Context) error { return client.Renew(ctx, store) }
+	}
 	if cfg.SeqStateFile != "" {
 		o.State = runtime.FileSeqState{Path: cfg.SeqStateFile}
 	}
@@ -196,6 +224,51 @@ func newRuntime(cfg config) (*runtime.Runtime, error) {
 	_, sims := runtime.SimConfig(1, cfg.SimMachines, func(int) string { return "" })
 	o.Source = &runtime.Simulator{Machines: sims, Tick: time.Second}
 	return runtime.New(o)
+}
+
+func serverRoots(file string) (*x509.CertPool, error) {
+	if file == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("read EDGE_SERVER_CA_FILE: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(b) {
+		return nil, errors.New("EDGE_SERVER_CA_FILE holds no PEM certificate")
+	}
+	return pool, nil
+}
+
+// enrollIfNeeded loads the installed certificate, or redeems the enrollment token for one. A connector
+// with neither a certificate nor a token does not start.
+func enrollIfNeeded(ctx context.Context, cfg config) (*runtime.CertStore, error) {
+	store := &runtime.CertStore{Dir: cfg.CertDir}
+	if err := store.Load(); err != nil {
+		return nil, err
+	}
+	if store.Has() {
+		return store, nil
+	}
+	if cfg.EnrollTokenFile == "" {
+		return nil, errors.New("no client certificate in EDGE_CERT_DIR and no EDGE_ENROLLMENT_TOKEN_FILE to enroll with")
+	}
+	b, err := os.ReadFile(cfg.EnrollTokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("read EDGE_ENROLLMENT_TOKEN_FILE: %w", err)
+	}
+	roots, err := serverRoots(cfg.ServerCAFile)
+	if err != nil {
+		return nil, err
+	}
+	hc := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}}}
+	out, err := runtime.Enroll(ctx, hc, cfg.ShopfloorURL, cfg.NodeID, strings.TrimSpace(string(b)), store)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("iot-edge enrolled", "subject", out.Subject, "serial", out.Serial, "expiresAt", out.NotAfter)
+	return store, nil
 }
 
 // metricsHandler serves the runtime's counters in Prometheus text format on the loopback admin port.
@@ -217,6 +290,8 @@ func metricsHandler(rt *runtime.Runtime) http.HandlerFunc {
 			{"iotedge_send_failures_total", float64(s.SendFailures), "Sends that failed and left events buffered."},
 			{"iotedge_seq_gaps_total", float64(s.SeqGaps), "Sequence gaps the server reported (SF-0008)."},
 			{"iotedge_heartbeat_failures_total", float64(s.HeartbeatFailures), "Heartbeats that failed."},
+			{"iotedge_cert_renewals_total", float64(s.CertRenewals), "Client certificate renewals that succeeded."},
+			{"iotedge_cert_renew_failures_total", float64(s.CertRenewFailures), "Client certificate renewals that failed."},
 			{"iotedge_buffer_events", float64(s.BufferLen), "Events waiting in the buffer."},
 			{"iotedge_buffer_fill_percent", s.BufferFillPct, "Buffer fill as a percentage of capacity."},
 			{"iotedge_applied_config_version", float64(s.AppliedConfigVersion), "Applied configuration version."},

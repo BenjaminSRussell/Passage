@@ -32,6 +32,11 @@ shopfloor:
   nodeId: ""           # the edge node id (UUID) registered under /shopfloor/edge-nodes
   source: simulator    # the only source built; OPC-UA and MQTT adapters are open
   tokenSecret: ""      # optional Secret with key token (dev, until enrollment issues certificates)
+  # mTLS (25-4): the connector enrolls on first start with the token in this Secret (key token, minted
+  # on the edge node's page) and keeps its certificate under /var/lib/iot-edge/certs, so state.claimName
+  # must be a claim. serverCaSecret holds the CA of the shopfloor server (key ca.crt) when it is private.
+  enrollmentSecret: ""
+  serverCaSecret: ""
   simMachines: 2
   bufferCapacity: 200000
 

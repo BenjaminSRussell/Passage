@@ -279,3 +279,20 @@ the worker by badge, as registrations do, and the list holds nothing a `GET jobs
 retry on their schedules for the tenants in `SWEEP_TENANT_IDS`, so the "scheduler" handoffs in rows D2h, D4, D8a and the
 rollup above are built for the listed tenants. Still open: reading the tenant list from a tenant directory instead of
 configuration, the configurable andon thresholds and a run against a live cluster (tests use a fake store).
+
+## Edge enrollment and certificate binding (#25, 25-4)
+
+Built: enrollment tokens, the token-authenticated redeem route, certificate issuing through the `pki.Issuer` interface (the file-based
+`LocalCA` for dev and the demo plant), binding of the issued subject to the node, renewal for the bound identity, the
+`edge_certificate` audit rows, routes and duty seeds (`shopfloor.edge.configure` mints, `shopfloor.edge.connect` renews;
+the redeem route is public by design), the chart's CA secret, and on the web a "Create enrollment token" card on the edge
+node page. Open:
+
+| Item | Status | Reason |
+|---|---|---|
+| Platform certificate issuer (cert-manager, 90-day) behind `pki.Issuer` | open | Needs the cluster issuer; the file CA is for dev and the demo plant. |
+| Gateway: pass the redeem route without a session, terminate mTLS with the edge CA and forward the certificate's common name as the caller identity (`edge:<id>`, matched to `connectorSubject`) | handoff (deployment-cicd, gateway) | `deploy/gateway/` is outside this service. Until then the binding is by hand or by header in dev. |
+| Revocation: a stolen certificate stays valid until it expires or the node is switched off | open | No CRL or OCSP. Switching the node off (SF-0152) or rebinding `connectorSubject` stops it at the service. |
+| Rate limit on the redeem route | open | The secret is 256 bits; the gateway should still rate limit the public route. |
+| Edge certificate expiry alert SF-0018 | partly | The connector logs the alert after 7 failed days of renewal (`iotedge_cert_renew_failures_total`); raising it as a platform alert needs the alerting pipeline. |
+| Web: certificate history and a revoke action | open | `edge_certificate` rows are not read by an endpoint yet. |

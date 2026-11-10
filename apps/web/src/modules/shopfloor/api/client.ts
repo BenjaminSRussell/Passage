@@ -1341,6 +1341,18 @@ export function listEdgeConfigs(id: string, signal?: AbortSignal): Promise<EdgeC
   return items<EdgeConfigVersion>(`/edge-nodes/${encodeURIComponent(id)}/config-versions`, signal);
 }
 
+/** A one-time token a connector redeems for its client certificate; the service shows it only once. */
+export interface EdgeEnrollmentToken {
+  edgeId: string;
+  token: string;
+  expiresAt: string;
+}
+
+/** Mints an enrollment token for a node (replacing its earlier unredeemed ones). Each call mints a new token, so it takes no key. */
+export function mintEdgeEnrollmentToken(id: string): Promise<EdgeEnrollmentToken> {
+  return post<EdgeEnrollmentToken>(`/edge-nodes/${encodeURIComponent(id)}:enrollment-token`, {});
+}
+
 /** Publishes the next configuration version; reuse one key per form. */
 export function publishEdgeConfig(id: string, document: Record<string, unknown>, key: string = newKey()): Promise<EdgeConfigVersion> {
   return post<EdgeConfigVersion>(`/edge-nodes/${encodeURIComponent(id)}/config-versions`, { document }, key);

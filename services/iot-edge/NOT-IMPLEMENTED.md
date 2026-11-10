@@ -17,7 +17,7 @@ as JSON and published.
 | Persistent SQLite ring (24 h, survives restart and reboot) | later slice of PSG-25 | Slice 1 has the in-memory `domain.Buffer` with the same rules. The SQLite store is an infrastructure adapter, added once the store choice is approved for the edge image. The publisher must use `Peek` and `Ack` (Wave 25 proof): `Drain` removes payloads before the broker acknowledges them, so a broker restart would lose them (`TestPublisher_BrokerRestartLosesNothingWithPeekAck`). |
 | Kafka idempotent producer, topic `shopfloor.machine-events`, ingest through the shopfloor gateway over HTTPS/2 or Kafka TLS | later slice of PSG-25 | Needs the Kafka client decision (`@confluentinc/kafka-javascript` is the TS choice; the Go client is not yet approved) and the ingest gateway. |
 | Heartbeat every 30 s with buffer fill and per-machine status | built (25-3), identity open | `internal/runtime` calls `POST edge-nodes/{id}:heartbeat` at the interval the server answers with (default 30 s) and reports buffer fill, per-machine state and the applied configuration version. It authenticates with a bearer token file (dev); the mTLS client is 25-4. |
-| Token enrollment and mTLS client certificate issuance (cert-manager, 90-day) | later slice of PSG-25 | Needs the platform certificate issuer and the enrollment endpoint. Enrollment must also set the shopfloor node's `connectorSubject` from the issued certificate: since slice 14 the configuration pull and heartbeat accept only the identity bound to the node, and that binding is set by hand until then. The renewal decision (BR-25.14, `DecideCert`) is built; the renewal call and the SF-0018 page are not. |
+| Token enrollment and mTLS client certificate issuance (cert-manager, 90-day) | connector side built (25-4); the cluster issuer is open | Needs the platform certificate issuer and the enrollment endpoint. Enrollment must also set the shopfloor node's `connectorSubject` from the issued certificate: since slice 14 the configuration pull and heartbeat accept only the identity bound to the node, and that binding is set by hand until then. The renewal decision (BR-25.14, `DecideCert`) is built; the renewal call and the SF-0018 page are not. |
 | Versioned configuration: the document, validation and apply rule are built (`EdgeConfig`, `NextApplied`); the runtime pulls a newer version when the heartbeat answer names one and applies it (25-3) | built (25-3) | The shopfloor `GET edge-nodes/{id}/config` endpoint exists since slice 14 (versioned, validated like `EdgeConfig`); the connector does not pull it yet. |
 | Ringed rollout and automatic rollback: ring order, 24 h promotion and the 5 min rollback rule are built (`NextRing`, `CanPromote`, `RollbackDue`); A/B binary swap and the fleet API are not | later slice of PSG-25 | Needs heartbeat and the fleet API. The chart pins `ring` as a label only. |
 | Allowlisted write-back for control recipe setpoints: guard and readback check are built (`CheckWrite`, `ReadbackMatches`); transport and per-write audit row are not | later slice of PSG-25 | Needs control recipes (D6) and the OPC-UA client. |
@@ -61,3 +61,15 @@ rejected batch, heartbeat plus configuration application and a simulator end to 
 | Sequence gap replay by seq range | open | The server's gaps are counted (`iotedge_seq_gaps_total`) and logged; replaying from the buffer needs the persistent ring. |
 | Persistent ring | open | Events wait in memory (capacity `IOT_BUFFER_CAPACITY`, default 200,000); a connector restart loses what was unsent. Only the sequence state is on disk. |
 | Kafka producer | open | Events go to the shopfloor ingest over HTTPS, the option FR-25.9 names; Kafka stays with the client decision above. |
+
+## Enrollment and certificate (25-4)
+
+`internal/runtime/certs.go`: on first start with `EDGE_CERT_DIR` and `EDGE_ENROLLMENT_TOKEN_FILE` the connector makes an ECDSA P-256
+key on the host, sends only a certificate request with the one-time token, and installs the certificate it gets (key 0600, files
+replaced atomically). It then talks mTLS: every handshake reads the current certificate, so a renewal needs no restart. `Beat`
+applies `DecideCert`: it renews with a new key inside 30 days of expiry (the server keeps the same identity), remembers a failed
+renewal so seven days of failures log SF-0018, reports the serial and expiry in each heartbeat, and an expired certificate stops
+publishing while events keep buffering. Tests run against a TLS test server with a test CA (enroll, mTLS use, renewal, reload,
+refused token, BR-25.14 actions, expired certificate). The shopfloor side and its gaps are in
+[../shopfloor/NOT-IMPLEMENTED.md](../shopfloor/NOT-IMPLEMENTED.md). Open: a rollback of a bad certificate (the old pair is
+replaced in place), enrollment on Windows service installs (no installer is built), and the gateway terminating the client CA.

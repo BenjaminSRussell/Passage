@@ -33,6 +33,11 @@ serviceMonitor:
   enabled: false
   interval: 30s
 
+# The CA that signs edge connector client certificates (25-4, dev and demo plant; the platform
+# certificate issuer is not built). A Secret with keys ca.crt and ca.key. Empty: enrollment answers SF-0173.
+edgeCa:
+  secret: ""
+
 # The production operation status consumer (slice 17). It exits at start until
 # service:shopfloor-production is seeded in the service principal table.
 consumer:

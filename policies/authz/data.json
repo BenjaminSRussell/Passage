@@ -3319,11 +3319,13 @@
     "shopfloor.edge.configure": {"permissions": [
       {"resource": "/v1/shopfloor/edge-nodes", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/edge-nodes/*", "methods": ["PUT"]},
-      {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*:enrollment-token", "methods": ["POST"]}
     ]},
     "shopfloor.edge.connect": {"permissions": [
       {"resource": "/v1/shopfloor/edge-nodes/*/config", "methods": ["GET"]},
-      {"resource": "/v1/shopfloor/edge-nodes/*:heartbeat", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/edge-nodes/*:heartbeat", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*:renew-certificate", "methods": ["POST"]}
     ]},
     "shopfloor.job.sync": {"flag": true, "permissions": []},
     "shopfloor.job.schedule": {"permissions": [{"resource": "/v1/shopfloor/jobs", "methods": ["POST"]}]},

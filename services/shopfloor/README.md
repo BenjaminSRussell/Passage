@@ -604,6 +604,22 @@ export MIGRATE_ON_START=true   # dev only; stage/prod run migrations as an Argo 
 go run ./cmd/shopfloor
 ```
 
+### Edge enrollment and certificate binding (25-4)
+
+A supervisor with `shopfloor.edge.configure` mints a one-time token for an edge node (`POST edge-nodes/{id}:enrollment-token`,
+24 hours, only the hash of its secret is stored, one live token per node). The connector redeems it with a PEM certificate
+request (`POST edge-nodes/{id}:enroll`, no session: the token names its tenant and node and is the credential). The service
+signs for the subject `edge:<node id>`, ignoring any name in the request, binds that subject to the node as
+`connectorSubject`, stamps `certSerial` and `certExpiresAt`, records the certificate in `edge_certificate` (migration `0024`) and
+publishes `edgenode.saved`. The certificate lasts 90 days (BR-25.14). The connector renews with its bound identity
+(`POST edge-nodes/{id}:renew-certificate`, duty `shopfloor.edge.connect`) and the subject does not change. Problem codes:
+`SF-0171` (a token that is unknown, used, replaced, expired or for a switched-off node, all alike, 401), `SF-0172` (a request
+that cannot be signed: not PEM, bad signature, ECDSA below P-256 or RSA below 2048, 422) and `SF-0173` (no issuer configured,
+503). The issuer is `internal/pki.LocalCA`, loaded from `SHOPFLOOR_EDGE_CA_CERT_FILE` and `SHOPFLOOR_EDGE_CA_KEY_FILE` (chart
+`edgeCa.secret`), the dev and demo plant issuer; the platform certificate issuer (cert-manager) would sit behind the same
+`pki.Issuer` interface and is not built. Because the redeem route has no identity, `cmd/shopfloor` mounts it on a router without
+the tenant middleware and everything else behind it; the gateway must let that one route through without a session.
+
 ### Tenant sweeper
 
 `go run ./cmd/shopfloor sweep` runs the scheduled jobs in process, so no external scheduler has to call them: the andon
@@ -745,6 +761,9 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0168` | 409 | The worker is already active |
 | `SF-0169` | 422 | The worker's currency cannot change once a day of the worker is approved |
 | `SF-0170` | 409 | The worker already has a cost rate effective on that date; set the change from a later date |
+| `SF-0171` | 401 | The enrollment token is not valid (unknown, used, replaced, expired or the node is switched off) |
+| `SF-0172` | 422 | The certificate request cannot be signed (not PEM, bad signature, weak key) |
+| `SF-0173` | 503 | Certificate issuing is not configured on this service |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

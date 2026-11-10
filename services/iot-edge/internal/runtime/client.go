@@ -167,6 +167,10 @@ func (c *Client) Heartbeat(ctx context.Context, hb Heartbeat) (HeartbeatReply, e
 		machines = append(machines, status{code, state})
 	}
 	body := map[string]any{"connectorVersion": hb.ConnectorVersion, "bufferFillPct": fmt.Sprintf("%.2f", hb.BufferFillPct), "machines": machines}
+	if hb.CertSerial != "" {
+		body["certSerial"] = hb.CertSerial
+		body["certExpiresAt"] = hb.CertExpiresAt.UTC().Format(time.RFC3339)
+	}
 	if hb.AppliedConfigVersion > 0 {
 		body["appliedConfigVersion"] = hb.AppliedConfigVersion
 	}
