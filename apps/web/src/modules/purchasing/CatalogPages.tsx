@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -227,14 +228,14 @@ function EntryFields({
         <FormField id={id("name")} label="Item name" error={err("name")}>
           {(c) => <Input {...c} value={entry.name} onChange={(e) => onChange({ name: e.target.value })} />}
         </FormField>
-        <FormField id={id("vendor")} label="Vendor id" error={err("vendorId")}>
-          {(c) => <Input {...c} value={entry.vendorId} onChange={(e) => onChange({ vendorId: e.target.value })} />}
+        <FormField id={id("vendor")} label="Vendor" error={err("vendorId")}>
+          {(c) => <EntityLookup entity="vendor" {...c} value={entry.vendorId} onChange={(e) => onChange({ vendorId: e.target.value })} />}
         </FormField>
         <FormField id={id("part")} label="Vendor part number" optional>
           {(c) => <Input {...c} value={entry.vendorPartNo} onChange={(e) => onChange({ vendorPartNo: e.target.value })} />}
         </FormField>
-        <FormField id={id("product")} label="Product id" optional error={err("productId")}>
-          {(c) => <Input {...c} value={entry.productId} onChange={(e) => onChange({ productId: e.target.value })} />}
+        <FormField id={id("product")} label="Product" optional error={err("productId")}>
+          {(c) => <EntityLookup entity="product" {...c} value={entry.productId} onChange={(e) => onChange({ productId: e.target.value })} />}
         </FormField>
         <FormField id={id("category")} label="Category" error={err("category")}>
           {(c) => <Input {...c} value={entry.category} onChange={(e) => onChange({ category: e.target.value })} />}
@@ -320,8 +321,8 @@ export function CatalogCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Catalog">
           <div className={styles.grid}>
-            <FormField id="cat-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
+            <FormField id="cat-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="cat-name" label="Name" error={errors.name}>
               {(c) => <Input {...c} value={header.name} onChange={(e) => setH({ name: e.target.value })} />}

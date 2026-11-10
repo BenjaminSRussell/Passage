@@ -781,7 +781,10 @@
       {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]},
       {"resource": "/v1/party/merge-requests/*", "methods": ["GET"]},
-      {"resource": "/v1/party/customers/*", "methods": ["GET"]}
+      {"resource": "/v1/party/customers/*", "methods": ["GET"]},
+      {"resource": "/v1/party/parties:search", "methods": ["GET"]},
+      {"resource": "/v1/party/vendors:search", "methods": ["GET"]},
+      {"resource": "/v1/party/customers:search", "methods": ["GET"]}
     ]},
     "party.vendor-bank.write": {"permissions": [
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["POST"]}

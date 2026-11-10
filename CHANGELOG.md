@@ -20,6 +20,7 @@ release may change public APIs.
 
 ### Added
 
+- Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 235 existing raw id fields in 134 files are allowlisted for conversion, including helper-built, template and placeholder labels the first version of the guard missed (#500).
 - Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org
   unit, up to 10 scenarios with copy-from, a plan grid (account x cost center x period) with bulk upsert under ETag and
   If-Match, even and prior-year-actuals spreading, and RLS on the five new tables. workflow-ts runs the approval as a Temporal

@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -232,8 +233,8 @@ export function NewFormulaPage() {
             {values.lines.map((line, i) => (
               <fieldset key={i} className={styles.lineRow}>
                 <legend className={styles.groupsLegend}>{`Line ${i + 1}`}</legend>
-                <FormField id={`line-${i}-item`} label="Item id" error={lineError(i, "itemId")}>
-                  {(c) => <Input {...c} value={line.itemId} className={styles.mono} onChange={(e) => updateLine(i, { itemId: e.target.value })} invalid={Boolean(lineError(i, "itemId"))} />}
+                <FormField id={`line-${i}-item`} label="Item" error={lineError(i, "itemId")}>
+                  {(c) => <EntityLookup entity="product" {...c} value={line.itemId} onChange={(e) => updateLine(i, { itemId: e.target.value })} invalid={Boolean(lineError(i, "itemId"))} />}
                 </FormField>
                 <FormField id={`line-${i}-type`} label="Type">
                   {(c) => (

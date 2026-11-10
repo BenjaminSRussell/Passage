@@ -107,6 +107,8 @@ segregation_denials := [
 	["platform.release.view", "POST", "/v1/platform/releases"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
+	["party.write", "GET", "/v1/party/vendors:search"],
+	["party.vendor-bank.write", "GET", "/v1/party/customers:search"],
 ]
 
 test_narrow_duties_cannot_reach_verb_routes if {
@@ -158,6 +160,9 @@ segregation_grants := [
 	["platform.promotion.approve", "POST", "/v1/platform/releases"],
 	["platform.environment.rollback", "POST", "/v1/platform/releases"],
 	["platform.release.maintain", "POST", "/v1/platform/releases"],
+	["party.read", "GET", "/v1/party/parties:search"],
+	["party.read", "GET", "/v1/party/vendors:search"],
+	["party.read", "GET", "/v1/party/customers:search"],
 ]
 
 test_verb_routes_granted_to_their_own_duty if {

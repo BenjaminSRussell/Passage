@@ -88,9 +88,9 @@ describe("category vendor create", () => {
   it("posts the assignment with an Idempotency-Key and opens it", async () => {
     const mock = stubFetch(() => json(assignment, 201, { ETag: '"1"' }));
     const { router } = renderAt("/purchasing/category-vendors/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: " IT hardware " } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "PROVISIONAL" } });
     fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/category-vendors/${ID}`));
@@ -108,9 +108,9 @@ describe("category vendor create", () => {
   it("shows a duplicate assignment as a problem with its code", async () => {
     stubFetch(() => problem(409, "PRC-CAT-011", "the vendor already has an assignment for this category"));
     renderAt("/purchasing/category-vendors/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "IT hardware" } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
     expect(await screen.findByText(/already has an assignment/)).toBeInTheDocument();
   });
@@ -181,9 +181,9 @@ describe("category managers", () => {
     await screen.findByText("No category managers yet");
     fireEvent.click(screen.getByRole("button", { name: "Add manager" }));
     expect(await screen.findByText("Enter the worker id (a UUID).")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(document.getElementById("cm-category") as HTMLInputElement, { target: { value: "IT hardware" } });
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.click(screen.getByRole("button", { name: "Add manager" }));
     expect(await screen.findByText("IT hardware manager added.")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Remove IT hardware manager" })).toBeInTheDocument();
@@ -208,9 +208,9 @@ describe("category managers", () => {
     stubFetch((_url, init) => (init.method === "POST" ? problem(409, "PRC-CAT-012", "the worker already manages this category") : json({ items: [] })));
     renderAt("/purchasing/category-managers");
     await screen.findByText("No category managers yet");
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(document.getElementById("cm-category") as HTMLInputElement, { target: { value: "IT hardware" } });
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.click(screen.getByRole("button", { name: "Add manager" }));
     expect(await screen.findByText("the worker already manages this category")).toBeInTheDocument();
     expect(screen.getByText("This worker already manages the category. Choose a different worker.")).toBeInTheDocument();

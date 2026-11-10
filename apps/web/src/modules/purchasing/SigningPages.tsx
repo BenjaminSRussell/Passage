@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -359,11 +360,11 @@ export function SigningLimitRequestCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Limit">
           <div className={styles.grid}>
-            <FormField id="slr-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+            <FormField id="slr-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
             </FormField>
-            <FormField id="slr-worker" label="Worker id" error={errors.workerId}>
-              {(c) => <Input {...c} value={form.workerId} onChange={(e) => set({ workerId: e.target.value })} />}
+            <FormField id="slr-worker" label="Worker" error={errors.workerId}>
+              {(c) => <EntityLookup entity="worker" {...c} value={form.workerId} onChange={(e) => set({ workerId: e.target.value })} />}
             </FormField>
             <FormField id="slr-doc" label="Document" error={errors.documentType}>
               {(c) => (

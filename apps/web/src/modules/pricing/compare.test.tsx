@@ -27,7 +27,7 @@ const compared: CompareResponse = {
 };
 
 function load() {
-  fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+  fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
   fireEvent.click(screen.getByRole("button", { name: "Load versions" }));
 }
 

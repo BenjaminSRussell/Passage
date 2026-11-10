@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -223,11 +224,11 @@ export function NewRulePage() {
             <FormField id="rule-code" label="Code" hint="Cards are numbered CODE-0001, CODE-0002, …" error={errors.code}>
               {(c) => <Input {...c} value={values.code} maxLength={32} onChange={(e) => update({ code: e.target.value.toUpperCase() })} invalid={Boolean(errors.code)} />}
             </FormField>
-            <FormField id="rule-item" label="Item id" error={errors.itemId}>
-              {(c) => <Input {...c} className={styles.mono} value={values.itemId} onChange={(e) => update({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
+            <FormField id="rule-item" label="Item" error={errors.itemId}>
+              {(c) => <EntityLookup entity="product" {...c} value={values.itemId} onChange={(e) => update({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
             </FormField>
-            <FormField id="rule-site" label="Site id" error={errors.siteId}>
-              {(c) => <Input {...c} className={styles.mono} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
+            <FormField id="rule-site" label="Site" error={errors.siteId}>
+              {(c) => <EntityLookup entity="site" {...c} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
             </FormField>
             <FormField id="rule-flow" label="Production flow" optional>
               {(c) => (

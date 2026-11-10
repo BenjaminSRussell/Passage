@@ -93,7 +93,7 @@ describe("packing rules", () => {
     expect((await within(table).findByText("C12")).closest("tr")?.textContent).toContain("All customers");
     expect(pageViolations(container)).toEqual([]);
 
-    fireEvent.change(screen.getByLabelText("Product id", { selector: "#rule-product" }), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Product", { selector: "#rule-product" }), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Container type"), { target: { value: "C12" } });
     fireEvent.change(screen.getByLabelText("Quantity per container"), { target: { value: "0" } });
     fireEvent.change(screen.getByLabelText("Max gross weight (kg)"), { target: { value: "15" } });
@@ -114,7 +114,7 @@ describe("packing rules", () => {
     };
     renderAt("/fulfillment/packing-rules");
     expect(await screen.findByText("Add a container type first")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Product id", { selector: "#rules-product" }), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Product", { selector: "#rules-product" }), { target: { value: PRODUCT } });
     expect(await screen.findByText("No rules for this product")).toBeInTheDocument();
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("productId") === PRODUCT)).toBe(true));
   });
@@ -127,7 +127,7 @@ describe("packing rules", () => {
     };
     renderAt("/fulfillment/packing-rules");
     await screen.findByText("No packing rules yet");
-    fireEvent.change(screen.getByLabelText("Product id", { selector: "#rule-product" }), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Product", { selector: "#rule-product" }), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Container type"), { target: { value: "C12" } });
     fireEvent.change(screen.getByLabelText("Quantity per container"), { target: { value: "12" } });
     fireEvent.change(screen.getByLabelText("Max gross weight (kg)"), { target: { value: "15" } });
@@ -145,7 +145,7 @@ describe("packaging materials", () => {
     const { container } = renderAt("/fulfillment/packaging-materials");
     expect(await within(await findTable({ name: "Packaging per product unit" })).findByText("PLASTIC")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText("Product id", { selector: "#pp-product" }), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Product", { selector: "#pp-product" }), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Material code"), { target: { value: "cardboard" } });
     fireEvent.change(screen.getByLabelText("Weight per unit (kg)"), { target: { value: "0.2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save packaging" }));
@@ -227,7 +227,7 @@ describe("returnable packaging", () => {
     const typeSelect = screen.getByLabelText("Container type");
     expect(within(typeSelect).queryByRole("option", { name: "C12" })).toBeNull();
     fireEvent.click(within(table).getByRole("button", { name: CUSTOMER.slice(0, 8) }));
-    expect(screen.getByLabelText("Customer id", { selector: "#rtp-customer" })).toHaveValue(CUSTOMER);
+    expect(screen.getByLabelText("Customer", { selector: "#rtp-customer" })).toHaveAttribute("data-value", CUSTOMER);
     expect(typeSelect).toHaveValue("PALLET");
 
     fireEvent.change(screen.getByLabelText("Quantity returned"), { target: { value: "1.5" } });

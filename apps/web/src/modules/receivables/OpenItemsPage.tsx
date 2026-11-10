@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
-import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { listOpenItems, type OpenItem } from "./api/client";
 import { money, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -71,8 +72,8 @@ export function OpenItemsPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="oi-customer" label="Customer id" optional error={customerValid ? undefined : "Enter a customer id (a UUID)."}>
-          {(c) => <Input {...c} className={styles.mono} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={!customerValid} />}
+        <FormField id="oi-customer" label="Customer" optional error={customerValid ? undefined : "Choose a customer."}>
+          {(c) => <EntityLookup entity="customer" {...c} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={!customerValid} />}
         </FormField>
         <FormField id="oi-status" label="Show">
           {(c) => (

@@ -153,11 +153,11 @@ describe("warehouse settings page (FR-28.8)", () => {
     renderAt("/fulfillment/warehouse-settings");
     await findTable({ name: "Warehouse settings" });
     const typed = "0195f0a0-0000-7000-8000-000000000099";
-    fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: typed } });
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: typed } });
     fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
     expect(await screen.findByText(/Enter the id of the legal entity/)).toBeInTheDocument();
     expect(calls("PUT", "")).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText(/Legal entity id/), { target: { value: LE2 } });
+    fireEvent.change(screen.getByLabelText(/Legal entity/), { target: { value: LE2 } });
     fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
     expect(await screen.findByText(/belongs to another legal entity/)).toBeInTheDocument();
     const put = calls("PUT", typed)[0];
