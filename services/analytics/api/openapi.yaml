@@ -680,6 +680,110 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/analytics/ux-events:
+    post:
+      operationId: addUxEvents
+      summary: Record UX events from the web app (#510)
+      description: >-
+        A batch of 1 to 50 events about how people move through a flow. Events carry a random per-tab
+        session id and the release, never a user or record id. A search query that looks personal
+        (an at sign or seven or more digits) is not kept and is counted in dropped.
+      x-passage-duty: analytics.ux.record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UxEventsRequest"
+      responses:
+        "202":
+          description: Events stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UxEventsResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/analytics/ux-funnels:
+    get:
+      operationId: getUxFunnel
+      summary: Sessions by step of a flow, with conversion
+      x-passage-duty: analytics.ux.view
+      parameters:
+        - name: flow
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [procure_to_pay, onboarding]
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: release
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The funnel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UxFunnel"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/analytics/ux-signals:
+    get:
+      operationId: getUxSignals
+      summary: Most frequent validation errors, searches with no results and abandoned forms
+      x-passage-duty: analytics.ux.view
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: release
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The signals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UxSignals"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /healthz:
     get:
       operationId: healthz
@@ -1363,3 +1467,129 @@ components:
       properties:
         added:
           type: integer
+    UxEvent:
+      type: object
+      additionalProperties: false
+      required: [sessionId, release, type]
+      properties:
+        sessionId:
+          type: string
+          pattern: "^[A-Za-z0-9-]{8,64}$"
+        release:
+          type: string
+        type:
+          type: string
+          enum: [funnel_step, validation_error, search_no_results, form_abandoned]
+        flow:
+          type: string
+          enum: [procure_to_pay, onboarding]
+          description: Required for funnel_step
+        step:
+          type: string
+          description: Required for funnel_step; one of the flow's steps
+        route:
+          type: string
+          description: Page path template without a query string; required for validation_error and form_abandoned
+        field:
+          type: string
+          description: Field name, never its value; required for validation_error
+        query:
+          type: string
+          description: Search text; required for search_no_results
+        durationMs:
+          type: integer
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+          description: Used when within the last 24 hours, otherwise the server time
+    UxEventsRequest:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/UxEvent"
+    UxEventsResponse:
+      type: object
+      required: [accepted, dropped]
+      properties:
+        accepted:
+          type: integer
+        dropped:
+          type: integer
+    UxFunnelStep:
+      type: object
+      required: [step, sessions, conversionFromPrevious]
+      properties:
+        step:
+          type: string
+        sessions:
+          type: integer
+        conversionFromPrevious:
+          type: number
+    UxFunnel:
+      type: object
+      required: [flow, from, to, steps]
+      properties:
+        flow:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        release:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/UxFunnelStep"
+        secondsToLastStep:
+          type: number
+          description: Median seconds from a session's first event to its last step
+    UxSignals:
+      type: object
+      required: [from, to, validationErrors, noResultSearches, abandonedForms]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        release:
+          type: string
+        validationErrors:
+          type: array
+          items:
+            type: object
+            required: [route, field, count]
+            properties:
+              route:
+                type: string
+              field:
+                type: string
+              count:
+                type: integer
+        noResultSearches:
+          type: array
+          items:
+            type: object
+            required: [query, count]
+            properties:
+              query:
+                type: string
+              count:
+                type: integer
+        abandonedForms:
+          type: array
+          items:
+            type: object
+            required: [route, count]
+            properties:
+              route:
+                type: string
+              count:
+                type: integer

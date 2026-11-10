@@ -4,6 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 declare const process: { env: Record<string, string | undefined> };
 
 const PORT = 4173;
+const DEMO_PORT = 4174;
 
 const E2E_DUTIES = [
   "audit.read",
@@ -65,14 +66,24 @@ export default defineConfig({
     reducedMotion: "reduce",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: /warehouse-mobile/ },
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: [/warehouse-mobile/, /\.demo\.spec/] },
+    // Procure-to-pay and order-to-cash flows run against the demo build: a fake backend and every duty held.
+    { name: "demo-flows", use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${DEMO_PORT}/Passage/` }, testMatch: /\.demo\.spec/ },
     { name: "warehouse-mobile", use: { ...devices["Pixel 5"] }, testMatch: /warehouse-mobile/ },
   ],
-  webServer: {
-    command: `npx vite --port ${PORT} --strictPort`,
-    url: `http://localhost:${PORT}`,
-    env: { PASSAGE_DEV_DUTIES: E2E_DUTIES, PASSAGE_DEV_SHOW_ALL_NAV: "", PASSAGE_MOBILE_STUB: "1" },
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: `npx vite --port ${PORT} --strictPort`,
+      url: `http://localhost:${PORT}`,
+      env: { PASSAGE_DEV_DUTIES: E2E_DUTIES, PASSAGE_DEV_SHOW_ALL_NAV: "", PASSAGE_MOBILE_STUB: "1" },
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      command: `npx vite --mode demo --port ${DEMO_PORT} --strictPort`,
+      url: `http://localhost:${DEMO_PORT}/Passage/`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+  ],
 });

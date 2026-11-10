@@ -2163,6 +2163,20 @@ test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
 }
 
+test_analytics_ux_record_writes_events_and_cannot_read_funnels if {
+	allowed("analytics.ux.record", "POST", "/v1/analytics/ux-events")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/ux-funnels")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/ux-signals")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/metrics")
+}
+
+test_analytics_ux_view_reads_funnels_and_cannot_write_events if {
+	allowed("analytics.ux.view", "GET", "/v1/analytics/ux-funnels")
+	allowed("analytics.ux.view", "GET", "/v1/analytics/ux-signals")
+	not allowed("analytics.ux.view", "POST", "/v1/analytics/ux-events")
+	not allowed("analytics.ux.view", "POST", "/v1/analytics/query")
+}
+
 test_print_document_render_is_its_own_duty if {
 	allowed("print.document.render", "POST", "/print/v1/documents:render")
 	not allowed("print.document.render", "POST", "/print/v1/jobs")

@@ -1,8 +1,12 @@
+import { activeLocale } from "./i18n/locale";
+import { localizeCopy } from "./i18n/localize";
+
 const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform);
 
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
-export const copy = {
+/** The English source text. Other languages live in shell/i18n and are applied by localizeCopy below. */
+const english = {
   nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work", glossary: "Glossary" },
   workspaces: {
     switcherLabel: "Workspace",
@@ -177,6 +181,30 @@ export const copy = {
     getStarted: "Approvals, holds and other tasks assigned to you will appear here, with a button to deal with each one.",
     summary: (count: number, more: boolean) => (count === 0 ? "Nothing is waiting for you." : `${count}${more ? "+" : ""} ${count === 1 && !more ? "item is" : "items are"} waiting for you.`),
   },
+  format: {
+    today: "Today",
+    days: (count: number) => (count === 1 ? "1 day" : `${count} days`),
+  },
+  help: {
+    button: "Help for this page",
+    panelLabel: "Help",
+    close: "Close help",
+    purposeHeading: "What this page is for",
+    tasksHeading: "Common tasks",
+    guideLink: "Read the full guide",
+    noEntry: "There is no help for this page yet.",
+    whatsNew: "What's new",
+    announceOpened: "Help opened",
+    shareUsage: "Share anonymous usage data",
+    language: "Language",
+    opensInNewTab: "(opens in a new tab)",
+    shareUsageHint: "Which steps people finish and where forms fail, so we can make them easier. It holds no names or record details.",
+  },
+  whatsNew: {
+    pageTitle: "What's new",
+    description: "Changes to Passage in plain language, newest first.",
+    empty: "No release notes yet.",
+  },
   notFound: {
     title: "We couldn't find that page",
     description: "Check the address, or search for the page you need.",
@@ -194,3 +222,6 @@ export const copy = {
     body: "Something went wrong while showing this page. Your other workspaces still work.",
   },
 } as const;
+
+export const copyEnglish = english;
+export const copy = localizeCopy(english, activeLocale, { shortcut: shortcutHint });
