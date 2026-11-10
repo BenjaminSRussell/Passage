@@ -51,7 +51,7 @@ describe("route help map", () => {
   it("prefers the most specific pattern", () => {
     expect(helpForRoute("/purchasing/purchase-orders/new")?.title).toBe("New purchase order");
     expect(helpForRoute("/purchasing/purchase-orders/abc")?.title).toBe("Purchase orders");
-    expect(helpForRoute("/purchasing/purchase-orders/abc/reprice")?.title).toBe("Purchase order line details");
+    expect(helpForRoute("/purchasing/purchase-orders/abc/reprice")?.title).toBe("Price change");
     expect(helpForRoute("/receivables/payments/42?tab=1")?.title).toBe("Payment");
     expect(helpForRoute("/purchasing/unknown-page")?.title).toBe("Purchasing set-up and reports");
     expect(helpForRoute("/admin")).toBeUndefined();

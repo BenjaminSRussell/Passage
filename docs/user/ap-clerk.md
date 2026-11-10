@@ -61,6 +61,7 @@ Payment is a two-person job: one person proposes, a different person approves.
 You cannot approve a proposal you created. Ask another approver.
 
 Not available yet: starting the payment run that sends the money after approval. See below.
+
 ## What the statuses mean
 
 | Status | Meaning |
