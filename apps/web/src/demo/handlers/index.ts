@@ -12,3 +12,4 @@ import "./ledger";
 import "./importSetup";
 import "./finance";
 import "./shell";
+import "./fx";
