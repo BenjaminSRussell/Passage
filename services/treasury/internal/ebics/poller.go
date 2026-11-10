@@ -23,9 +23,12 @@ const (
 )
 
 // PollableLister lists the subscribers of the principal's tenant that may be
-// polled: READY, bank keys confirmed and not parked.
+// polled: READY, bank keys confirmed and not parked. TryLockSubscriber takes the
+// cross-replica poll lock of one subscriber without waiting: unlock releases it,
+// and acquired is false when another replica holds it.
 type PollableLister interface {
 	PollableSubscribers(ctx context.Context) ([]Subscriber, error)
+	TryLockSubscriber(ctx context.Context, id string) (unlock func(), acquired bool, err error)
 }
 
 // PollConfig is the statement polling setup read from the environment.
@@ -151,6 +154,15 @@ func (p *Poller) Once(ctx context.Context) (int, error) {
 }
 
 func (p *Poller) pollOne(ctx context.Context, tenantID string, sub Subscriber) (int, error) {
+	unlock, acquired, err := p.Lister.TryLockSubscriber(ctx, sub.ID)
+	if err != nil {
+		return 0, fmt.Errorf("lock subscriber: %w", err)
+	}
+	if !acquired {
+		slog.InfoContext(ctx, "ebics subscriber is being polled by another replica, skipped", "subscriber", sub.ID)
+		return 0, nil
+	}
+	defer unlock()
 	runCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{TenantID: tenantID, LegalEntityID: sub.LegalEntityID, UserID: pollActor}), pollSubscriberBudget)
 	defer cancel()
 	now := p.Client.now().UTC()

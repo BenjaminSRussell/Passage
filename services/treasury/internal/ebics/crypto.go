@@ -155,12 +155,13 @@ func segments(encoded string, size int) []string {
 // the open-source ebics-client-php strips CR and LF from XML orders before it
 // hashes them the same way). The data that is uploaded keeps its line breaks.
 func orderDigest(data []byte) []byte {
-	return sha256Sum(bytes.Map(func(r rune) rune {
-		if r == '\r' || r == '\n' || r == 0x1A {
-			return -1
+	kept := make([]byte, 0, len(data))
+	for _, b := range data {
+		if b != '\r' && b != '\n' && b != 0x1A {
+			kept = append(kept, b)
 		}
-		return r
-	}, data))
+	}
+	return sha256Sum(kept)
 }
 
 func sha256Sum(data []byte) []byte {

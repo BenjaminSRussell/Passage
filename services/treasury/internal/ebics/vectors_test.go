@@ -50,3 +50,11 @@ func TestOrderDigest_RemovesLineBreaksAndCtrlZBeforeHashing(t *testing.T) {
 		t.Fatalf("orderDigest = %x, want %x", got, want)
 	}
 }
+
+func TestOrderDigest_KeepsInvalidUTF8BytesUntouched(t *testing.T) {
+	raw := []byte{0xFC, '\r', 'a', 0xFF, 0x1A, '\n', 0xC3}
+	want := sha256.Sum256([]byte{0xFC, 'a', 0xFF, 0xC3})
+	if got := orderDigest(raw); !bytes.Equal(got, want[:]) {
+		t.Fatalf("orderDigest = %x, want %x", got, want)
+	}
+}

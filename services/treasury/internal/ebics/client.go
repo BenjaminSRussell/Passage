@@ -21,7 +21,26 @@ import (
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 )
 
-const defaultSegmentSize = 1 << 20
+const (
+	defaultSegmentSize = 1 << 20
+	defaultHTTPTimeout = 60 * time.Second
+	minHTTPTimeout     = time.Second
+	maxHTTPTimeout     = 10 * time.Minute
+)
+
+// LoadHTTPTimeout reads TREASURY_EBICS_HTTP_TIMEOUT, the time one request to a
+// bank may take (default 60s, between 1s and 10m).
+func LoadHTTPTimeout(getenv func(string) string) (time.Duration, error) {
+	v := getenv("TREASURY_EBICS_HTTP_TIMEOUT")
+	if v == "" {
+		return defaultHTTPTimeout, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < minHTTPTimeout || d > maxHTTPTimeout {
+		return 0, fmt.Errorf("TREASURY_EBICS_HTTP_TIMEOUT must be a duration between %s and %s, got %s", minHTTPTimeout, maxHTTPTimeout, v)
+	}
+	return d, nil
+}
 
 var (
 	uploadOrders   = map[string]bool{"CCT": true, "CDD": true, "CDB": true, "CIP": true}
@@ -200,14 +219,14 @@ func (c *Client) SendINI(ctx context.Context, id string) (Letter, error) {
 	if err := sub.requireState(StateNew); err != nil {
 		return Letter{}, err
 	}
-	a006, err := keys.Public(ctx, UsageA006)
+	a006, version, err := keys.Public(ctx, UsageA006)
 	if err != nil {
 		return Letter{}, err
 	}
 	if err := c.keyOrder(ctx, sub, "INI", iniOrderData(sub, a006, c.now())); err != nil {
 		return Letter{}, err
 	}
-	sub.State = StateINISent
+	sub.State, sub.A006Version = StateINISent, version
 	if _, err := c.Store.UpdateSubscriber(ctx, sub); err != nil {
 		return Letter{}, err
 	}
@@ -224,18 +243,18 @@ func (c *Client) SendHIA(ctx context.Context, id string) (Letter, error) {
 	if err := sub.requireState(StateINISent); err != nil {
 		return Letter{}, err
 	}
-	x002, err := keys.Public(ctx, UsageX002)
+	x002, version, err := keys.Public(ctx, UsageX002)
 	if err != nil {
 		return Letter{}, err
 	}
-	e002, err := keys.Public(ctx, UsageE002)
+	e002, _, err := keys.Public(ctx, UsageE002)
 	if err != nil {
 		return Letter{}, err
 	}
 	if err := c.keyOrder(ctx, sub, "HIA", hiaOrderData(sub, x002, e002)); err != nil {
 		return Letter{}, err
 	}
-	sub.State = StateHIASent
+	sub.State, sub.X002Version = StateHIASent, version
 	if _, err := c.Store.UpdateSubscriber(ctx, sub); err != nil {
 		return Letter{}, err
 	}
@@ -263,7 +282,7 @@ func (c *Client) Letter(ctx context.Context, id, order string) (Letter, error) {
 	}
 	pubs := map[KeyUsage]*rsa.PublicKey{}
 	for _, u := range usages {
-		if pubs[u], err = keys.Public(ctx, u); err != nil {
+		if pubs[u], _, err = keys.Public(ctx, u); err != nil {
 			return Letter{}, err
 		}
 	}
@@ -290,9 +309,13 @@ func letter(sub Subscriber, order string, pubs map[KeyUsage]*rsa.PublicKey) Lett
 type BankKeyHashes struct{ X002, E002 string }
 
 // FetchBankKeys downloads the bank's X002 and E002 keys (order HPB) and stores
-// them unconfirmed. They are not used for anything until ConfirmBankKeys passes.
+// them unconfirmed. They are not used for anything until ConfirmBankKeys passes,
+// and the person who fetched them (actor) cannot be the one who confirms them.
 // HIA_SENT or BANK_KEYS_PENDING -> BANK_KEYS_PENDING.
-func (c *Client) FetchBankKeys(ctx context.Context, id string) (BankKeyHashes, error) {
+func (c *Client) FetchBankKeys(ctx context.Context, id, actor string) (BankKeyHashes, error) {
+	if actor == "" {
+		return BankKeyHashes{}, errors.New("ebics: who downloaded the bank keys must be recorded")
+	}
 	sub, keys, err := c.load(ctx, id)
 	if err != nil {
 		return BankKeyHashes{}, err
@@ -345,7 +368,7 @@ func (c *Client) FetchBankKeys(ctx context.Context, id string) (BankKeyHashes, e
 	if sub.BankE002, err = x509.MarshalPKIXPublicKey(e002); err != nil {
 		return BankKeyHashes{}, err
 	}
-	sub.State, sub.KeysConfirmed, sub.ConfirmedBy, sub.ConfirmedAt = StateKeysPending, false, "", nil
+	sub.State, sub.KeysConfirmed, sub.ConfirmedBy, sub.ConfirmedAt, sub.FetchedBy = StateKeysPending, false, "", nil, actor
 	if _, err := c.Store.UpdateSubscriber(ctx, sub); err != nil {
 		return BankKeyHashes{}, err
 	}
@@ -369,6 +392,12 @@ func (c *Client) ConfirmBankKeys(ctx context.Context, id, x002Hash, e002Hash, co
 	}
 	if confirmedBy == "" {
 		return Subscriber{}, errors.New("ebics: who confirmed the bank key hashes must be recorded")
+	}
+	if confirmedBy == sub.FetchedBy {
+		return Subscriber{}, ErrFourEyes
+	}
+	if sub.A006Version < 1 || sub.X002Version < 1 {
+		return Subscriber{}, fmt.Errorf("%w: the transit key versions were not pinned at INI and HIA", ErrBadState)
 	}
 	x002, e002, err := sub.bankKeys()
 	if err != nil {
@@ -629,7 +658,7 @@ func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx
 	if r.txID == "" || r.numSegments < 1 {
 		return nil, errors.New("ebics download: bank gave no transaction id or segment count")
 	}
-	own, err := keys.Public(ctx, UsageE002)
+	own, _, err := keys.Public(ctx, UsageE002)
 	if err != nil {
 		return nil, err
 	}

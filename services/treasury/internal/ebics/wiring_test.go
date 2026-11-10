@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,23 @@ func (m *memStore) PollableSubscribers(context.Context) ([]Subscriber, error) {
 		}
 	}
 	return out, nil
+}
+
+func (m *memStore) TryLockSubscriber(_ context.Context, id string) (func(), bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.locked[id] {
+		return nil, false, nil
+	}
+	if m.locked == nil {
+		m.locked = map[string]bool{}
+	}
+	m.locked[id] = true
+	return func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		delete(m.locked, id)
+	}, true, nil
 }
 
 func (m *memStore) SubscriberForAccount(_ context.Context, bankAccountID string) (Subscriber, error) {
@@ -77,6 +95,45 @@ func TestPoller_ImportsStatementsOfReadySubscribersUnderTheirLegalEntity(t *test
 	}
 	if len(e.bank.receipts) != 1 || e.bank.receipts[0] != "0" {
 		t.Fatalf("receipts %v", e.bank.receipts)
+	}
+}
+
+func TestPoller_TwoReplicasOnOneSubscriberRunOneSessionAndSendNoNegativeReceipt(t *testing.T) {
+	e := newEnv(t, false)
+	e.onboard()
+	e.bank.served["C53"] = twoStatements(t)
+	inSink, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	first := newPoller(e, &sinkLog{})
+	first.Sink = func(context.Context, string, string, []byte) error {
+		once.Do(func() { close(inSink) })
+		<-release
+		return nil
+	}
+	type result struct {
+		n   int
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := first.Once(context.Background())
+		done <- result{n, err}
+	}()
+	<-inSink
+	requests := e.bank.requests
+	second := &sinkLog{}
+	if n, err := newPoller(e, second).Once(context.Background()); err != nil || n != 0 || len(second.files) != 0 || e.bank.requests != requests {
+		t.Fatalf("the second replica must skip a subscriber that is being polled: n=%d err=%v files=%v bank requests +%d", n, err, second.files, e.bank.requests-requests)
+	}
+	close(release)
+	if r := <-done; r.err != nil || r.n != 2 {
+		t.Fatalf("first replica: %+v", r)
+	}
+	if len(e.bank.receipts) != 1 || e.bank.receipts[0] != "0" {
+		t.Fatalf("receipts %v: exactly one positive receipt and no negative one", e.bank.receipts)
+	}
+	if n, err := newPoller(e, &sinkLog{}).Once(context.Background()); err != nil || n != 2 {
+		t.Fatalf("the lock must be released after the poll: n=%d err=%v", n, err)
 	}
 }
 
@@ -202,9 +259,12 @@ func TestAccountSender_UploadsThroughTheAccountsSubscriberAndAudits(t *testing.T
 	if len(audit.rows) != 2 || audit.rows[0].Event != bankconnect.EventPrepared || audit.rows[1].Event != bankconnect.EventSent {
 		t.Fatalf("audit %+v", audit.rows)
 	}
+	if audit.rows[1].KeyVersion != 1 {
+		t.Fatalf("the sent row names the pinned A006 key version: %+v", audit.rows[1])
+	}
 	for _, row := range audit.rows {
-		if row.Protocol != "ebics" || row.KeyName != "ebics-a006" || row.KeyVersion != 0 || row.BankAccountID != "ba-1" || row.OrderType != "CCT" {
-			t.Fatalf("audit row %+v; it names the A006 key the order was signed with and no unused transit signature", row)
+		if row.Protocol != "ebics" || row.KeyName != "ebics-a006" || row.BankAccountID != "ba-1" || row.OrderType != "CCT" {
+			t.Fatalf("audit row %+v; it names the A006 key and the pinned version the order was signed with", row)
 		}
 	}
 	if len(e.bank.orders) != 1 || string(e.bank.orders[0].data) != string(data) {
@@ -212,6 +272,10 @@ func TestAccountSender_UploadsThroughTheAccountsSubscriberAndAudits(t *testing.T
 	}
 	if _, err := s.Send(context.Background(), bankconnect.File{BankAccountID: "ba-unknown", OrderType: "CCT", Data: data}); err == nil || len(audit.rows) != 2 {
 		t.Fatalf("an account without a subscriber must fail before anything is audited or sent: %v", err)
+	}
+	if _, err := s.Send(context.Background(), bankconnect.File{LegalEntityID: "le-other", BankAccountID: "ba-1", Name: "p.xml", OrderType: "CCT", Data: data}); !errors.Is(err, ErrLegalEntityMismatch) ||
+		len(audit.rows) != 2 || len(e.bank.orders) != 1 {
+		t.Fatalf("a file of another legal entity must not leave through this subscriber, nor be audited: %v", err)
 	}
 }
 
@@ -287,5 +351,79 @@ func TestChannels_EBICSIsSelectedByProtocolAndNothingFallsBack(t *testing.T) {
 	}
 	if _, err := channels.Send(context.Background(), bankconnect.ProtocolSFTP, f); err == nil || len(e.bank.orders) != 1 {
 		t.Fatalf("a channel that is not enabled must fail and send nothing: %v", err)
+	}
+}
+
+func TestKeyVersion_PinnedAtInitialisationAndSignaturesIgnoreRotation(t *testing.T) {
+	e := newEnv(t, true)
+	ctx := context.Background()
+	ini, err := e.client.SendINI(ctx, "sub-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.client.SendHIA(ctx, "sub-1"); err != nil {
+		t.Fatal(err)
+	}
+	if sub := e.sub(); sub.A006Version != 1 || sub.X002Version != 1 {
+		t.Fatalf("pinned versions a006=%d x002=%d", sub.A006Version, sub.X002Version)
+	}
+	e.bank.mu.Lock()
+	e.bank.active = true
+	e.bank.mu.Unlock()
+	h, err := e.client.FetchBankKeys(ctx, "sub-1", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "treasurer"); err != nil {
+		t.Fatal(err)
+	}
+
+	e.vault.rotateA006(testKeys(t)[3])
+	if _, err := e.client.Upload(ctx, "sub-1", "CCT", payload(40)); err != nil {
+		t.Fatalf("after a rotation in Vault the bank still holds version 1, and the order must still verify: %v", err)
+	}
+	e.vault.mu.Lock()
+	versions := append([]int(nil), e.vault.signVersions...)
+	e.vault.mu.Unlock()
+	if len(versions) == 0 {
+		t.Fatal("no signature reached Vault")
+	}
+	for _, v := range versions {
+		if v != 1 {
+			t.Fatalf("signed with key version %d; only the pinned version 1 may sign (%v)", v, versions)
+		}
+	}
+	letter, err := e.client.Letter(ctx, "sub-1", "INI")
+	if err != nil || letter.Hashes[UsageA006] != ini.Hashes[UsageA006] {
+		t.Fatalf("the letter of a subscriber with a pinned key shows that version's hash, not the rotated key's: %v", err)
+	}
+}
+
+func TestKeyVersion_AnUnpinnedKeyNeverSigns(t *testing.T) {
+	e := newEnv(t, true)
+	keys, err := e.client.Keys(Subscriber{A006Key: "ebics-a006", X002Key: "ebics-x002", E002KVPath: "passage/ebics-e002"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keys.SignA006(context.Background(), make([]byte, 32)); err == nil {
+		t.Fatal("signing with a key whose version was never pinned must be refused")
+	}
+	if len(e.vault.signVersions) != 0 {
+		t.Fatal("the refusal must come before any call to Vault's sign endpoint")
+	}
+}
+
+func TestLoadHTTPTimeout(t *testing.T) {
+	env := func(v string) func(string) string { return func(string) string { return v } }
+	if d, err := LoadHTTPTimeout(env("")); err != nil || d != 60*time.Second {
+		t.Fatalf("default: %v %v", d, err)
+	}
+	if d, err := LoadHTTPTimeout(env("90s")); err != nil || d != 90*time.Second {
+		t.Fatalf("90s: %v %v", d, err)
+	}
+	for _, bad := range []string{"soon", "0s", "500ms", "11m"} {
+		if _, err := LoadHTTPTimeout(env(bad)); err == nil {
+			t.Fatalf("%q must be refused", bad)
+		}
 	}
 }

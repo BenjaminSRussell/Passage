@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -44,16 +45,16 @@ func testKeys(t *testing.T) []*rsa.PrivateKey {
 
 type memoryKeys struct{ a006, x002, e002 *rsa.PrivateKey }
 
-func (m memoryKeys) Public(_ context.Context, u KeyUsage) (*rsa.PublicKey, error) {
+func (m memoryKeys) Public(_ context.Context, u KeyUsage) (*rsa.PublicKey, int, error) {
 	switch u {
 	case UsageA006:
-		return &m.a006.PublicKey, nil
+		return &m.a006.PublicKey, 1, nil
 	case UsageX002:
-		return &m.x002.PublicKey, nil
+		return &m.x002.PublicKey, 1, nil
 	case UsageE002:
-		return &m.e002.PublicKey, nil
+		return &m.e002.PublicKey, 0, nil
 	}
-	return nil, fmt.Errorf("usage %s", u)
+	return nil, 0, fmt.Errorf("usage %s", u)
 }
 
 func (m memoryKeys) SignA006(_ context.Context, orderHash []byte) ([]byte, error) {
@@ -71,8 +72,9 @@ func (m memoryKeys) DecryptE002(_ context.Context, wrapped []byte) ([]byte, erro
 }
 
 type memStore struct {
-	mu   sync.Mutex
-	subs map[string]Subscriber
+	mu     sync.Mutex
+	subs   map[string]Subscriber
+	locked map[string]bool
 }
 
 func (m *memStore) GetSubscriber(_ context.Context, id string) (Subscriber, error) {
@@ -400,7 +402,7 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 	if err != nil {
 		return b.refuse("091104")
 	}
-	once := sha256.Sum256([]byte(strings.NewReplacer("\r", "", "\n", "", "\x1a", "").Replace(string(plain))))
+	once := sha256.Sum256(stripLineBreaksIndependently(plain))
 	twice := sha256.Sum256(once[:])
 	if rsa.VerifyPSS(b.userA006, crypto.SHA256, twice[:], tx.a006, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}) != nil {
 		return b.refuse(CodeSignatureFailed)
@@ -410,12 +412,34 @@ func (b *fakeBank) transferPhase(root, header *xnode) []byte {
 }
 
 type fakeVault struct {
-	srv   *httptest.Server
-	a006  *rsa.PrivateKey
-	x002  *rsa.PrivateKey
-	e002  *rsa.PrivateKey
-	calls []string
-	mu    sync.Mutex
+	srv          *httptest.Server
+	a006         *rsa.PrivateKey
+	a006Rotated  *rsa.PrivateKey
+	x002         *rsa.PrivateKey
+	e002         *rsa.PrivateKey
+	calls        []string
+	signVersions []int
+	mu           sync.Mutex
+}
+
+func (v *fakeVault) rotateA006(next *rsa.PrivateKey) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.a006Rotated = next
+}
+
+func (v *fakeVault) transitKey(name string, version int) *rsa.PrivateKey {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	switch {
+	case name == "ebics-a006" && version == 1:
+		return v.a006
+	case name == "ebics-a006" && version == 2:
+		return v.a006Rotated
+	case name == "ebics-x002" && version == 1:
+		return v.x002
+	}
+	return nil
 }
 
 func newFakeVault(t *testing.T, a006, x002, e002 *rsa.PrivateKey) *fakeVault {
@@ -433,28 +457,45 @@ func (v *fakeVault) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	keyFor := map[string]*rsa.PrivateKey{"ebics-a006": v.a006, "ebics-x002": v.x002}
 	p := strings.TrimPrefix(r.URL.Path, "/v1/")
 	reply := func(data string) { _, _ = io.WriteString(w, `{"data":`+data+`}`) }
 	switch {
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "transit/keys/"):
-		k := keyFor[strings.TrimPrefix(p, "transit/keys/")]
-		if k == nil {
+		name := strings.TrimPrefix(p, "transit/keys/")
+		if v.transitKey(name, 1) == nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		der, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
-		pemText := strings.ReplaceAll(string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})), "\n", `\n`)
-		reply(`{"type":"rsa-2048","exportable":false,"allow_plaintext_backup":false,"latest_version":1,"keys":{"1":{"public_key":"` + pemText + `"}}}`)
+		latest, keys := 1, map[string]map[string]string{}
+		for version := 1; version <= 2; version++ {
+			if k := v.transitKey(name, version); k != nil {
+				der, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
+				keys[strconv.Itoa(version)] = map[string]string{"public_key": string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}
+				latest = version
+			}
+		}
+		body, _ := json.Marshal(map[string]any{"type": "rsa-2048", "exportable": false, "allow_plaintext_backup": false, "latest_version": latest, "keys": keys})
+		reply(string(body))
 	case r.Method == http.MethodPost && strings.HasPrefix(p, "transit/sign/"):
 		name := strings.TrimSuffix(strings.TrimPrefix(p, "transit/sign/"), "/sha2-256")
-		k := keyFor[name]
 		var in struct {
-			Input, SignatureAlgorithm string
-			SaltLength                string `json:"salt_length"`
+			Input              string `json:"input"`
+			SignatureAlgorithm string `json:"signature_algorithm"`
+			KeyVersion         int    `json:"key_version"`
 		}
 		raw, _ := io.ReadAll(r.Body)
-		in.Input, in.SignatureAlgorithm = jsonField(raw, "input"), jsonField(raw, "signature_algorithm")
+		_ = json.Unmarshal(raw, &in)
+		version := in.KeyVersion
+		if version == 0 {
+			version = 1
+			if v.transitKey(name, 2) != nil {
+				version = 2
+			}
+		}
+		v.mu.Lock()
+		v.signVersions = append(v.signVersions, version)
+		v.mu.Unlock()
+		k := v.transitKey(name, version)
 		input, _ := base64.StdEncoding.DecodeString(in.Input)
 		d := sha256.Sum256(input)
 		var sig []byte
@@ -471,7 +512,7 @@ func (v *fakeVault) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		reply(`{"signature":"vault:v1:` + base64.StdEncoding.EncodeToString(sig) + `","key_version":1}`)
+		reply(`{"signature":"vault:v1:` + base64.StdEncoding.EncodeToString(sig) + `","key_version":` + strconv.Itoa(version) + `}`)
 	case r.Method == http.MethodGet && p == "secret/data/passage/ebics-e002":
 		text := strings.ReplaceAll(string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: mustPKCS8(v.e002)})), "\n", `\n`)
 		reply(`{"data":{"pem":"` + text + `"}}`)
@@ -490,15 +531,6 @@ func mustPKCS8(k *rsa.PrivateKey) []byte {
 		panic(err)
 	}
 	return der
-}
-
-func jsonField(raw []byte, name string) string {
-	i := bytes.Index(raw, []byte(`"`+name+`":"`))
-	if i < 0 {
-		return ""
-	}
-	rest := raw[i+len(name)+4:]
-	return string(rest[:bytes.IndexByte(rest, '"')])
 }
 
 type env struct {
@@ -521,7 +553,7 @@ func newEnv(t *testing.T, useVault bool) *env {
 		e.vault = newFakeVault(t, keys[0], keys[1], keys[2])
 		vault := bankconnect.NewVault(bankconnect.VaultConfig{Addr: e.vault.srv.URL, Token: "s.test", SigningKeyNames: []string{"ebics-a006", "ebics-x002"}})
 		c.Keys = func(s Subscriber) (Keys, error) {
-			k, err := vault.EBICSKeys(bankconnect.EBICSKeyRefs{A006: s.A006Key, X002: s.X002Key, E002KVMount: "secret", E002KVPath: s.E002KVPath})
+			k, err := vault.EBICSKeys(bankconnect.EBICSKeyRefs{A006: s.A006Key, X002: s.X002Key, A006Version: s.A006Version, X002Version: s.X002Version, E002KVMount: "secret", E002KVPath: s.E002KVPath})
 			return k, err
 		}
 	} else {
@@ -548,11 +580,17 @@ func (e *env) onboard() {
 	e.bank.mu.Lock()
 	e.bank.active = true
 	e.bank.mu.Unlock()
-	h, err := e.client.FetchBankKeys(ctx, "sub-1")
+	h, err := e.client.FetchBankKeys(ctx, "sub-1", "operator")
 	if err != nil {
 		e.t.Fatalf("HPB: %v", err)
 	}
 	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "treasurer"); err != nil {
 		e.t.Fatalf("confirm: %v", err)
 	}
+}
+
+func stripLineBreaksIndependently(in []byte) []byte {
+	out := bytes.ReplaceAll(in, []byte{0x0D}, nil)
+	out = bytes.ReplaceAll(out, []byte{0x0A}, nil)
+	return bytes.ReplaceAll(out, []byte{0x1A}, nil)
 }

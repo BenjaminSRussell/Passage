@@ -31,10 +31,16 @@ const (
 // a KV v2 secret holding the PEM private key: E002 wraps the transaction key
 // with RSA PKCS#1 v1.5, which the transit engine cannot decrypt (it offers only
 // OAEP), so the key is read into memory for each decryption and not kept.
+//
+// A006Version and X002Version are the transit key versions pinned at INI and
+// HIA; zero means not pinned yet. Signatures are made with exactly the pinned
+// version, never the latest, so a rotation in Vault cannot change which key
+// signs what the bank holds a public key for.
 type EBICSKeyRefs struct {
-	A006, X002  string
-	E002KVMount string
-	E002KVPath  string
+	A006, X002               string
+	A006Version, X002Version int
+	E002KVMount              string
+	E002KVPath               string
 }
 
 // VaultKeys is the Vault-backed EBICS key custody. It satisfies ebics.Keys; no
@@ -71,12 +77,15 @@ func (v *Vault) EBICSKeys(r EBICSKeyRefs) (*VaultKeys, error) {
 
 func (k *VaultKeys) token(ctx context.Context) (string, error) { return k.vault.Token(ctx) }
 
-func (k *VaultKeys) sign(ctx context.Context, name string, input []byte, algorithm string) ([]byte, error) {
+func (k *VaultKeys) sign(ctx context.Context, name string, version int, input []byte, algorithm string) ([]byte, error) {
+	if version < 1 {
+		return nil, fmt.Errorf("vault sign: the version of transit key %q is not pinned; send INI and HIA first", name)
+	}
 	tok, err := k.token(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req := map[string]string{"input": base64.StdEncoding.EncodeToString(input), "signature_algorithm": algorithm}
+	req := map[string]any{"input": base64.StdEncoding.EncodeToString(input), "signature_algorithm": algorithm, "key_version": version}
 	if algorithm == "pss" {
 		req["salt_length"] = "hash"
 	}
@@ -99,30 +108,34 @@ func (k *VaultKeys) sign(ctx context.Context, name string, input []byte, algorit
 // SignA006 signs the SHA-256 digest of an order with RSASSA-PSS; Vault hashes
 // the digest once more, which is what A006 prescribes.
 func (k *VaultKeys) SignA006(ctx context.Context, orderHash []byte) ([]byte, error) {
-	return k.sign(ctx, k.refs.A006, orderHash, "pss")
+	return k.sign(ctx, k.refs.A006, k.refs.A006Version, orderHash, "pss")
 }
 
 // SignX002 signs the canonical SignedInfo with RSASSA-PKCS1-v1_5 and SHA-256.
 func (k *VaultKeys) SignX002(ctx context.Context, signedInfo []byte) ([]byte, error) {
-	return k.sign(ctx, k.refs.X002, signedInfo, "pkcs1v15")
+	return k.sign(ctx, k.refs.X002, k.refs.X002Version, signedInfo, "pkcs1v15")
 }
 
-func (k *VaultKeys) Public(ctx context.Context, usage string) (*rsa.PublicKey, error) {
+// Public returns the public key and its transit version: the pinned version
+// when the subscriber has one, otherwise the latest (which the caller pins).
+// E002 has no version (0).
+func (k *VaultKeys) Public(ctx context.Context, usage string) (*rsa.PublicKey, int, error) {
 	switch usage {
 	case ebicsUsageA006:
-		return k.transitPublic(ctx, k.refs.A006)
+		return k.transitPublic(ctx, k.refs.A006, k.refs.A006Version)
 	case ebicsUsageX002:
-		return k.transitPublic(ctx, k.refs.X002)
+		return k.transitPublic(ctx, k.refs.X002, k.refs.X002Version)
 	case ebicsUsageE002:
-		return k.e002Public(ctx)
+		pub, err := k.e002Public(ctx)
+		return pub, 0, err
 	}
-	return nil, fmt.Errorf("unknown ebics key usage %q", usage)
+	return nil, 0, fmt.Errorf("unknown ebics key usage %q", usage)
 }
 
-func (k *VaultKeys) transitPublic(ctx context.Context, name string) (*rsa.PublicKey, error) {
+func (k *VaultKeys) transitPublic(ctx context.Context, name string, pinned int) (*rsa.PublicKey, int, error) {
 	tok, err := k.token(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var out struct {
 		Data struct {
@@ -137,24 +150,28 @@ func (k *VaultKeys) transitPublic(ctx context.Context, name string) (*rsa.Public
 	}
 	if err := k.vault.cfg.call(ctx, http.MethodGet, "/v1/transit/keys/"+name, tok, nil, &out); err != nil {
 		k.vault.dropOnForbidden(err)
-		return nil, fmt.Errorf("vault read ebics public key: %w", err)
+		return nil, 0, fmt.Errorf("vault read ebics public key: %w", err)
 	}
 	if out.Data.Exportable || out.Data.AllowPlaintextBackup {
-		return nil, errors.New("ebics transit key must not be exportable or allow plaintext backup")
+		return nil, 0, errors.New("ebics transit key must not be exportable or allow plaintext backup")
 	}
 	if !strings.HasPrefix(out.Data.Type, "rsa-") {
-		return nil, fmt.Errorf("ebics transit key type %q is not RSA", out.Data.Type)
+		return nil, 0, fmt.Errorf("ebics transit key type %q is not RSA", out.Data.Type)
 	}
-	block, _ := pem.Decode([]byte(out.Data.Keys[strconv.Itoa(out.Data.LatestVersion)].PublicKey))
+	version := out.Data.LatestVersion
+	if pinned > 0 {
+		version = pinned
+	}
+	block, _ := pem.Decode([]byte(out.Data.Keys[strconv.Itoa(version)].PublicKey))
 	if block == nil {
-		return nil, errors.New("vault read ebics public key: malformed key")
+		return nil, 0, fmt.Errorf("vault read ebics public key: version %d is not available", version)
 	}
 	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
 	pub, ok := parsed.(*rsa.PublicKey)
 	if err != nil || !ok || pub.N.BitLen() < minEBICSBits {
-		return nil, errors.New("vault read ebics public key: not an RSA key of 2048 bits or more")
+		return nil, 0, errors.New("vault read ebics public key: not an RSA key of 2048 bits or more")
 	}
-	return pub, nil
+	return pub, version, nil
 }
 
 // DecryptE002 unwraps an E002 transaction key. A wrapped key that fails PKCS#1
@@ -208,9 +225,11 @@ func (k *VaultKeys) e002Public(ctx context.Context) (*rsa.PublicKey, error) {
 	return pub, nil
 }
 
-// zeroPrivateKey overwrites the key's secret integers in place. Go cannot wipe
-// the JSON reply and PEM strings the key was parsed from; they are short lived
-// and never logged.
+// zeroPrivateKey overwrites the key's secret integers in place and drops the
+// precomputed CRT values. It is best effort: Go cannot wipe the JSON reply and
+// PEM strings the key was parsed from, the copies the garbage collector made,
+// or the internal state the crypto/rsa and FIPS 140 modules build while
+// decrypting, which the package does not expose.
 func zeroPrivateKey(k *rsa.PrivateKey) {
 	wipe := func(x *big.Int) {
 		if x != nil {
@@ -230,6 +249,7 @@ func zeroPrivateKey(k *rsa.PrivateKey) {
 		wipe(c.Coeff)
 		wipe(c.R)
 	}
+	k.Precomputed = rsa.PrecomputedValues{}
 }
 
 func (k *VaultKeys) e002(ctx context.Context) (*rsa.PrivateKey, error) {

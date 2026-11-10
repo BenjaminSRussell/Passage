@@ -30,9 +30,12 @@ const (
 
 // Keys is the subscriber's private-key custody. No method returns private key
 // material: A006 and X002 are signed and E002 transaction keys are unwrapped
-// inside the key store.
+// inside the key store. Public returns the key version too (0 for E002): the
+// version first read at INI or HIA is pinned on the subscriber, and every later
+// signature is made with exactly that version, so a rotation in the key store
+// cannot silently change the key the bank holds.
 type Keys interface {
-	Public(ctx context.Context, usage KeyUsage) (*rsa.PublicKey, error)
+	Public(ctx context.Context, usage KeyUsage) (pub *rsa.PublicKey, version int, err error)
 	SignA006(ctx context.Context, orderHash []byte) ([]byte, error)
 	SignX002(ctx context.Context, signedInfo []byte) ([]byte, error)
 	DecryptE002(ctx context.Context, wrappedKey []byte) ([]byte, error)
@@ -42,7 +45,16 @@ var (
 	ErrVersionConflict = errors.New("ebics subscriber was changed by someone else")
 	ErrBadState        = errors.New("ebics subscriber is not in a state that allows this step")
 	ErrKeyHashMismatch = errors.New("bank key hash does not match the hash the bank confirmed")
+	ErrFourEyes        = errors.New("ebics: the person who downloaded the bank keys cannot also confirm them")
 )
+
+// KeyNames derives the Vault locations of a subscriber's keys from its tenant,
+// legal entity and id. They are never taken from a caller, so one tenant cannot
+// name another's keys; the store's table accepts no other names.
+func KeyNames(tenantID, legalEntityID, subscriberID string) (a006, x002, e002KVPath string) {
+	stem := tenantID + "-" + legalEntityID + "-" + subscriberID
+	return "ebics-" + stem + "-a006", "ebics-" + stem + "-x002", "ebics/" + tenantID + "/" + legalEntityID + "/" + subscriberID + "/e002"
+}
 
 // Subscriber is one EBICS user at one bank, bound to one bank account. Only key
 // names and the bank's public keys are stored; private keys live in Vault.
@@ -57,9 +69,12 @@ type Subscriber struct {
 	A006Key       string
 	X002Key       string
 	E002KVPath    string
+	A006Version   int
+	X002Version   int
 	State         State
 	BankX002      []byte
 	BankE002      []byte
+	FetchedBy     string
 	KeysConfirmed bool
 	ConfirmedBy   string
 	ConfirmedAt   *time.Time

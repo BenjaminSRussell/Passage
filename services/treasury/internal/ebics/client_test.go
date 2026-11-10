@@ -58,7 +58,7 @@ func TestOnboarding_StateMachineAndBankKeyConfirmation(t *testing.T) {
 		}
 
 		var re *ReturnError
-		if _, err := e.client.FetchBankKeys(ctx, "sub-1"); !errors.As(err, &re) || re.Code != CodeAuthFailed || e.sub().State != StateHIASent {
+		if _, err := e.client.FetchBankKeys(ctx, "sub-1", "operator"); !errors.As(err, &re) || re.Code != CodeAuthFailed || e.sub().State != StateHIASent {
 			t.Fatalf("HPB before the bank activated the subscriber: %v, state %s", err, e.sub().State)
 		}
 		if e.sub().ParkedCode != "" {
@@ -67,7 +67,7 @@ func TestOnboarding_StateMachineAndBankKeyConfirmation(t *testing.T) {
 		e.bank.mu.Lock()
 		e.bank.active = true
 		e.bank.mu.Unlock()
-		h, err := e.client.FetchBankKeys(ctx, "sub-1")
+		h, err := e.client.FetchBankKeys(ctx, "sub-1", "operator")
 		if err != nil || e.sub().State != StateKeysPending || e.sub().KeysConfirmed {
 			t.Fatalf("HPB: %v, state %s", err, e.sub().State)
 		}
@@ -92,13 +92,37 @@ func TestOnboarding_StateMachineAndBankKeyConfirmation(t *testing.T) {
 	})
 }
 
+func TestOnboarding_TheDownloaderCannotConfirmTheBankKeys(t *testing.T) {
+	e := newEnv(t, false)
+	ctx := context.Background()
+	_, _ = e.client.SendINI(ctx, "sub-1")
+	_, _ = e.client.SendHIA(ctx, "sub-1")
+	e.bank.active = true
+	h, err := e.client.FetchBankKeys(ctx, "sub-1", "alice")
+	if err != nil || e.sub().FetchedBy != "alice" {
+		t.Fatalf("fetch: %v, fetched by %q", err, e.sub().FetchedBy)
+	}
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "alice"); !errors.Is(err, ErrFourEyes) || e.sub().State != StateKeysPending {
+		t.Fatalf("the person who fetched the keys confirming them: %v, state %s", err, e.sub().State)
+	}
+	if _, err := e.client.FetchBankKeys(ctx, "sub-1", ""); err == nil {
+		t.Fatal("fetching without a named person must be refused")
+	}
+	if _, err := e.client.FetchBankKeys(ctx, "sub-1", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.client.ConfirmBankKeys(ctx, "sub-1", h.X002, h.E002, "alice"); err != nil {
+		t.Fatalf("the earlier fetcher may confirm after another person fetched again: %v", err)
+	}
+}
+
 func TestOnboarding_TamperedBankKeyIsNeverActivated(t *testing.T) {
 	e := newEnv(t, false)
 	ctx := context.Background()
 	_, _ = e.client.SendINI(ctx, "sub-1")
 	_, _ = e.client.SendHIA(ctx, "sub-1")
 	e.bank.active = true
-	if _, err := e.client.FetchBankKeys(ctx, "sub-1"); err != nil {
+	if _, err := e.client.FetchBankKeys(ctx, "sub-1", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	forged := FormatDigest(KeyDigest(&rsa.PublicKey{N: new(big.Int).Add(e.bank.x002.N, big.NewInt(2)), E: 65537}))
@@ -128,6 +152,19 @@ func TestUpload_SegmentedSignedEncryptedOrderReachesTheBank(t *testing.T) {
 		}
 		if e.vault != nil && len(e.vault.calls) == 0 {
 			t.Fatal("no key operation reached Vault")
+		}
+	})
+}
+
+func TestUpload_NonUTF8BytesAreHashedAsTheyAre(t *testing.T) {
+	forBackends(t, func(t *testing.T, e *env) {
+		e.onboard()
+		data := append([]byte("<Document>\r\n\xfc\xe4\x1a\xff"), []byte("\n</Document>")...)
+		if _, err := e.client.Upload(context.Background(), "sub-1", "CCT", data); err != nil {
+			t.Fatalf("the bank must accept an A006 signature over the bytes with CR, LF and Ctrl-Z removed and 0xFC kept: %v", err)
+		}
+		if len(e.bank.orders) != 1 || !bytes.Equal(e.bank.orders[0].data, data) {
+			t.Fatal("uploaded bytes were altered")
 		}
 	})
 }
