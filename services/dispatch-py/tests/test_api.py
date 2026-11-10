@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from fastapi.testclient import TestClient
 
 from passage_dispatch import auth, plan_violations
@@ -232,3 +232,51 @@ def test_service_grant_matches_the_authz_policy_data():
     assert data["service_grants"]["fieldservice"]["dispatch"] == list(auth.SERVICE_GRANTS["fieldservice"])
     for duty in auth.SERVICE_GRANTS["fieldservice"]:
         assert data["duties"][duty]["service_only"] is True
+
+
+GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "service_token.json").read_text())
+
+
+def golden_python_token() -> str:
+    key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(GOLDEN["seed"]))
+    claims = {"iss": "fieldservice", "aud": "dispatch", "tid": GOLDEN["tenant"], "le": GOLDEN["legalEntity"], "act": GOLDEN["actor"],
+              "duties": [auth.DUTY_READ], "iat": GOLDEN["now"], "exp": GOLDEN["now"] + 60, "jti": "python-golden"}
+    body = b64(json.dumps(claims, separators=(",", ":")).encode())
+    return body + "." + b64(key.sign(auth.TOKEN_CONTEXT + body.encode()))
+
+
+def golden_verifier() -> ServiceVerifier:
+    return ServiceVerifier({"fieldservice": {"": Ed25519PublicKey.from_public_bytes(base64.b64decode(GOLDEN["publicKey"]))}}, now=lambda: GOLDEN["now"] + 1)
+
+
+def test_a_token_minted_by_the_go_signer_verifies_here():
+    caller = golden_verifier().verify(GOLDEN["goToken"])
+    assert (caller.tenant_id, caller.legal_entity_id, caller.actor, caller.issuer) == (GOLDEN["tenant"], GOLDEN["legalEntity"], GOLDEN["actor"], "fieldservice")
+    assert caller.duties == {auth.DUTY_CREATE}
+
+
+def test_the_python_golden_token_is_the_one_the_go_verifier_checks():
+    assert golden_python_token() == GOLDEN["pyToken"]
+    assert golden_verifier().verify(GOLDEN["pyToken"]).duties == {auth.DUTY_READ}
+
+
+def test_idempotency_keys_are_scoped_to_the_legal_entity():
+    c = client()
+    first = c.post("/v1/dispatch/runs", json=BODY, headers={**headers(), "Idempotency-Key": "k1"})
+    elsewhere = c.post("/v1/dispatch/runs", json=BODY, headers={**headers(entity=OTHER_ENTITY), "Idempotency-Key": "k1"})
+    assert elsewhere.status_code == 202 and elsewhere.json()["id"] != first.json()["id"]
+
+
+def test_travel_beyond_a_day_is_a_schema_violation():
+    refused = client().post("/v1/dispatch/runs", json={**BODY, "travel": [[0, 1441, 30], [10, 0, 20], [30, 20, 0]]}, headers=headers())
+    assert refused.status_code == 400 and refused.json()["code"] == "COM-0001"
+
+
+def test_a_pinned_plan_the_technician_can_no_longer_work_is_refused_with_422():
+    body = json.loads(json.dumps(BODY))
+    body["technicians"][0]["skills"] = ["ELECTRICAL"]
+    body["pinned"] = [{"workOrderId": "W1", "technicianId": "T1", "start": 700, "end": 760, "sequence": 0}]
+    c = client()
+    refused = c.post("/v1/dispatch/runs", json=body, headers=headers())
+    assert refused.status_code == 422 and refused.json()["code"] == "SVC-DSP-001"
+    assert "lacks skills" in refused.json()["errors"]["pinned"]

@@ -94,7 +94,7 @@ class RunStore:
     ) -> None:
         self._pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="dispatch-run")
         self._runs: dict[str, Run] = {}
-        self._by_key: dict[tuple[str, str], str] = {}
+        self._by_key: dict[tuple[str, str, str | None], str] = {}
         self._lock = threading.Lock()
         self._max_runs, self._max_queued, self._solve = max_runs, max_queued, solve
         self.outcomes: Counter[str] = Counter()
@@ -112,8 +112,9 @@ class RunStore:
         correlation_id: str,
     ) -> tuple[Run, bool]:
         with self._lock:
-            if key is not None and (caller.tenant_id, key) in self._by_key:
-                existing = self._runs.get(self._by_key[(caller.tenant_id, key)])
+            scope = (caller.tenant_id, caller.legal_entity_id, key)
+            if key is not None and scope in self._by_key:
+                existing = self._runs.get(self._by_key[scope])
                 if existing is not None:
                     if existing.request_hash != request_hash:
                         raise IdempotencyReuse
@@ -123,7 +124,7 @@ class RunStore:
             run = Run(str(uuid.uuid4()), caller.tenant_id, caller.legal_entity_id, correlation_id, request_hash, key)
             self._runs[run.id] = run
             if key is not None:
-                self._by_key[(caller.tenant_id, key)] = run.id
+                self._by_key[scope] = run.id
             self._evict()
         self._pool.submit(self._execute, run, problem, pinned, time_limit_s, workers)
         return run, False
@@ -140,7 +141,7 @@ class RunStore:
         for old in finished[: max(0, len(self._runs) - self._max_runs)]:
             del self._runs[old.id]
             if old.key is not None:
-                self._by_key.pop((old.tenant_id, old.key), None)
+                self._by_key.pop((old.tenant_id, old.legal_entity_id, old.key), None)
 
     def _execute(self, run: Run, problem: Problem, pinned: list[Assignment], time_limit_s: float, workers: int) -> None:
         context = {"runId": run.id, "correlationId": run.correlation_id}

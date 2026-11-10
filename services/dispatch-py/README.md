@@ -27,14 +27,14 @@ lateness in the objective but is not a violation.
 
 ## Optimizer
 
-`optimize(problem, pinned, time_limit_s=30, workers=8)` solves the greedy plan
+`optimize(problem, pinned, time_limit_s=20, workers=8)` solves the greedy plan
 first, runs CP-SAT with it as a hint, compacts routes to their earliest starts
 (pinned stops stay put) and verifies the plan with `plan_violations`. It returns the
 greedy plan, with `fallback_reason` set and a `SVC-DSP-002` warning logged, when
 CP-SAT times out without a solution (`timeout`), proves the model infeasible
 (`infeasible`), exceeds the arc cap (`too_large`), is missing (`solver_unavailable`),
 returns a plan the oracle refuses (`invalid_plan`), or ends worse than greedy
-(`not_better_than_greedy`). Infeasible pinned assignments raise `ValueError`.
+(`not_better_than_greedy`), or reports MODEL_INVALID (`model_invalid`). Infeasible pinned assignments raise `ValueError`.
 
 ## API
 

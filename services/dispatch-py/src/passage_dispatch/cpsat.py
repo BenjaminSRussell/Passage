@@ -20,7 +20,7 @@ from .objective import (
 
 log = logging.getLogger("passage_dispatch")
 
-DEFAULT_TIME_LIMIT_S = 30.0
+DEFAULT_TIME_LIMIT_S = 20.0
 DEFAULT_WORKERS = 8
 MAX_ARCS = 400_000
 SOLVED = ("OPTIMAL", "FEASIBLE")
@@ -31,6 +31,7 @@ FALLBACK_TOO_LARGE = "too_large"
 FALLBACK_UNAVAILABLE = "solver_unavailable"
 FALLBACK_INVALID_PLAN = "invalid_plan"
 FALLBACK_NOT_BETTER = "not_better_than_greedy"
+FALLBACK_MODEL_INVALID = "model_invalid"
 
 
 class ModelTooLarge(Exception):
@@ -244,7 +245,8 @@ def optimize(
     except ImportError:
         return greedy(FALLBACK_UNAVAILABLE)
     if outcome.assignments is None:
-        return greedy(FALLBACK_INFEASIBLE if outcome.status == "INFEASIBLE" else FALLBACK_TIMEOUT, outcome.status)
+        reasons = {"INFEASIBLE": FALLBACK_INFEASIBLE, "MODEL_INVALID": FALLBACK_MODEL_INVALID}
+        return greedy(reasons.get(outcome.status, FALLBACK_TIMEOUT), outcome.status)
     plan = _compact(problem, outcome.assignments, pinned_ids)
     assigned = {a.work_order_id for a in plan}
     if plan_violations(problem, plan) or not pinned_ids <= assigned:

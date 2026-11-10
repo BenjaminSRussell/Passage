@@ -12,7 +12,7 @@ import hashlib
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
@@ -64,7 +64,7 @@ class PinnedIn(BaseModel):
 class RunIn(BaseModel):
     technicians: list[TechnicianIn] = Field(max_length=100)
     workOrders: list[WorkOrderIn] = Field(max_length=500)
-    travel: list[list[int]] = Field(max_length=600)
+    travel: list[list[Annotated[int, Field(ge=0, le=1440)]]] = Field(max_length=600)
     bufferMinutes: int = Field(default=5, ge=0, le=60)
     pinned: list[PinnedIn] = Field(default_factory=list, max_length=500)
     timeLimitSeconds: float = Field(default=DEFAULT_TIME_LIMIT_S, ge=1, le=300)

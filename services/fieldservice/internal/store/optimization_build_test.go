@@ -34,9 +34,6 @@ func heldBy(t Technician, lat, lon float64, start, end time.Time) plannedOrder {
 		TechnicianID: &t.ID, AssignedStart: &start, AssignedEnd: &end}, priority: 4}
 }
 
-// BR-45.3: the snapshot carries times as minutes of the local day, shifts widened by
-// overtime, a symmetric travel matrix, held visits as pinned plans, and says what it left
-// out.
 func TestBuildRequest_SnapshotOfTheDay(t *testing.T) {
 	loc, _ := time.LoadLocation("America/Chicago")
 	at := func(h, m int) time.Time { return time.Date(2026, 10, 26, h, m, 0, 0, loc) }
@@ -99,9 +96,6 @@ func TestBuildRequest_SnapshotOfTheDay(t *testing.T) {
 	}
 }
 
-// A manual assignment does not count travel, the optimizer does: a technician whose first
-// visit starts at shift start cannot have been driven there from home, so the run leaves
-// them and their visits out instead of failing on an infeasible pinned plan.
 func TestBuildRequest_HeldRouteTravelCannotBeReached(t *testing.T) {
 	loc, _ := time.LoadLocation("America/Chicago")
 	at := func(h, m int) time.Time { return time.Date(2026, 10, 26, h, m, 0, 0, loc) }
@@ -126,7 +120,6 @@ func TestBuildRequest_HeldRouteTravelCannotBeReached(t *testing.T) {
 	}
 }
 
-// A held visit without coordinates sits at the technician's home, so it costs no travel.
 func TestBuildRequest_HeldVisitWithoutPositionIsAtHome(t *testing.T) {
 	loc, _ := time.LoadLocation("America/Chicago")
 	ana := techAt("ANA", ref(41.88), ref(-87.63))
@@ -139,5 +132,36 @@ func TestBuildRequest_HeldVisitWithoutPositionIsAtHome(t *testing.T) {
 	}
 	if req.WorkOrders[0].ID != held.ID || req.Travel[0][req.WorkOrders[0].Location] != 0 {
 		t.Fatalf("held visit %+v travel %v", req.WorkOrders[0], req.Travel[0])
+	}
+}
+
+func TestBuildRequest_HeldVisitTheTechnicianCannotWorkAnymoreIsReported(t *testing.T) {
+	loc, _ := time.LoadLocation("America/Chicago")
+	at := func(h, m int) time.Time { return time.Date(2026, 10, 26, h, m, 0, 0, loc) }
+	lostSkill, shortShift, intact := techAt("SKL", ref(41.88), ref(-87.63)), techAt("SHF", ref(41.88), ref(-87.63)), techAt("OK", ref(41.88), ref(-87.63))
+	needsMore := heldBy(lostSkill, 41.95, -87.7, at(10, 0), at(11, 0))
+	needsMore.RequiredSkills = []string{"HVAC", "EPA"}
+	pastShift := heldBy(shortShift, 41.95, -87.7, at(16, 30), at(17, 30))
+	fine := heldBy(intact, 41.95, -87.7, at(10, 0), at(11, 0))
+	fine.RequiredSkills = []string{"HVAC"}
+	windowed := heldBy(intact, 41.96, -87.7, at(13, 0), at(14, 0))
+	windowed.WindowStart, windowed.WindowEnd = ref(at(8, 0)), ref(at(12, 0))
+
+	req, skipped, err := buildRequest("2026-10-26", "America/Chicago", 10, []Technician{lostSkill, shortShift, intact}, []plannedOrder{orderAt(ref(41.9), ref(-87.65), 60)},
+		[]plannedOrder{needsMore, pastShift, fine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{lostSkill.ID: "HELD_VISIT_STALE", needsMore.ID: "HELD_VISIT_STALE", shortShift.ID: "HELD_VISIT_STALE", pastShift.ID: "HELD_VISIT_STALE"}
+	if got := skippedReasons(skipped); !maps.Equal(got, want) {
+		t.Fatalf("skipped %v, want %v", got, want)
+	}
+	if len(req.Technicians) != 1 || req.Technicians[0].ID != intact.ID || len(req.Pinned) != 1 || req.Pinned[0].WorkOrderID != fine.ID {
+		t.Fatalf("technicians %+v pinned %+v", req.Technicians, req.Pinned)
+	}
+
+	_, skipped, err = buildRequest("2026-10-26", "America/Chicago", 10, []Technician{intact}, nil, []plannedOrder{windowed})
+	if err != nil || skippedReasons(skipped)[windowed.ID] != "HELD_VISIT_STALE" {
+		t.Fatalf("a visit ending after its window: %+v %v", skipped, err)
 	}
 }

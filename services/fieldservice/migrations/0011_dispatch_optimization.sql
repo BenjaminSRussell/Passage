@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS service_dispatch_optimization (
   result jsonb,
   outcome jsonb,
   attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  retry_generation integer NOT NULL DEFAULT 0 CHECK (retry_generation >= 0),
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
   last_error text,
   requested_by text NOT NULL DEFAULT '',

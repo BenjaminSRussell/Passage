@@ -3236,7 +3236,7 @@ components:
       properties:
         kind: { type: string, enum: [TECHNICIAN, WORK_ORDER] }
         id: { type: string, format: uuid }
-        reason: { type: string, enum: [TIME_ZONE, OFF_DAY, NO_HOME, HELD_ROUTE_UNREACHABLE, NO_LOCATION, WINDOW_OUTSIDE_DAY, OVER_LIMIT] }
+        reason: { type: string, enum: [TIME_ZONE, OFF_DAY, NO_HOME, HELD_ROUTE_UNREACHABLE, HELD_VISIT_STALE, NO_LOCATION, WINDOW_OUTSIDE_DAY, OVER_LIMIT] }
     OptimizationOutcome:
       type: object
       properties:

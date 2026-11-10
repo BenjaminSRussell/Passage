@@ -151,7 +151,7 @@ def test_solve_cpsat_reports_status_and_a_feasible_plan():
 
 @pytest.mark.parametrize(
     ("status", "reason"),
-    [("UNKNOWN", "timeout"), ("INFEASIBLE", "infeasible"), ("MODEL_INVALID", "timeout")],
+    [("UNKNOWN", "timeout"), ("INFEASIBLE", "infeasible"), ("MODEL_INVALID", "model_invalid")],
 )
 def test_falls_back_to_greedy_when_cpsat_yields_no_plan(monkeypatch, status, reason):
     monkeypatch.setattr(cpsat_module, "solve_cpsat", lambda *a, **k: cpsat_module.CpSatOutcome(status, None))
@@ -187,13 +187,13 @@ def test_a_plan_that_fails_the_feasibility_check_is_never_returned(monkeypatch):
 
 
 def test_a_plan_worse_than_greedy_is_replaced_by_greedy(monkeypatch):
-    problem = Problem((T("T1"), T("T2")), (W("W1"),), TRAVEL)
+    problem = Problem((T("T1"), T("T2")), (W("W1", due=600),), TRAVEL)
     worse = [Assignment("W1", "T2", 700, 760, 0)]
     monkeypatch.setattr(cpsat_module, "solve_cpsat", lambda *a, **k: cpsat_module.CpSatOutcome("FEASIBLE", worse))
     monkeypatch.setattr(cpsat_module, "_compact", lambda problem, plan, pinned: plan)
     greedy_cost = plan_cost(problem, solve_greedy(problem)[0])
     result = optimize(problem)
-    assert result.fallback_reason in {"not_better_than_greedy", None} and result.cost.total <= greedy_cost.total
+    assert result.fallback_reason == "not_better_than_greedy" and result.cost.total <= greedy_cost.total
 
 
 def benchmark_problem(seed: int) -> Problem:

@@ -1,5 +1,3 @@
-// Package optimizer calls the dispatch service (CP-SAT optimizer) with a signed service
-// token that carries only the duty each call needs.
 package optimizer
 
 import (
@@ -37,8 +35,6 @@ var (
 	ErrRunLost       = errors.New("dispatch service does not know the run")
 )
 
-// Error is a refusal of the dispatch service. Permanent ones (400, 422) repeat with every
-// retry, so the caller parks instead of backing off.
 type Error struct {
 	Status int
 	Detail string
@@ -49,7 +45,7 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Permanent() bool {
-	return e.Status == http.StatusBadRequest || e.Status == http.StatusUnprocessableEntity
+	return e.Status == http.StatusBadRequest || e.Status == http.StatusForbidden || e.Status == http.StatusUnprocessableEntity
 }
 
 type Technician struct {
@@ -75,8 +71,6 @@ type WorkOrder struct {
 	Due         *int     `json:"due,omitempty"`
 }
 
-// Assignment places a work order on a technician; times are minutes from the start of the
-// local day of the run.
 type Assignment struct {
 	WorkOrderID  string `json:"workOrderId"`
 	TechnicianID string `json:"technicianId"`
@@ -113,7 +107,6 @@ type Result struct {
 	Cost           Cost         `json:"cost"`
 }
 
-// Run is the state of one run at the dispatch service.
 type Run struct {
 	ID     string  `json:"id"`
 	Status string  `json:"status"`
@@ -132,10 +125,8 @@ func New(baseURL string, signer *tenant.ServiceSigner) *Client {
 		http: &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
-// Configured reports whether calls can be made.
 func (c *Client) Configured() bool { return c != nil && c.baseURL != "" && c.signer != nil }
 
-// Submit starts a run; the same key returns the run started earlier.
 func (c *Client) Submit(ctx context.Context, legalEntityID, key string, req Request) (Run, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -151,7 +142,6 @@ func (c *Client) Submit(ctx context.Context, legalEntityID, key string, req Requ
 	return decodeRun(raw)
 }
 
-// Get reads a run; ErrRunLost means the service has no such run (it restarted).
 func (c *Client) Get(ctx context.Context, legalEntityID, id string) (Run, error) {
 	status, raw, err := c.do(ctx, http.MethodGet, c.baseURL+"/v1/dispatch/runs/"+url.PathEscape(id), dutyRead, legalEntityID, "", nil)
 	if err != nil {
@@ -202,7 +192,7 @@ func (c *Client) do(ctx context.Context, method, target, duty, legalEntityID, id
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
 	if _, err := c.signer.ApplyDuties(req, p, audience, legalEntityID, []string{duty}); err != nil {
-		return 0, nil, fmt.Errorf("sign dispatch request: %w", err)
+		return 0, nil, &Error{Status: http.StatusForbidden, Detail: "no service token for this legal entity: " + err.Error()}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

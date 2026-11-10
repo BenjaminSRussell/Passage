@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/optimizer"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/store"
 )
@@ -20,16 +22,15 @@ const (
 	codeOptimizerUnavailable = "SVC-DSP-017"
 	maxOptimizerSeconds      = 120
 	maxLastError             = 500
+	optimizerRunDeadline     = 10 * time.Minute
 )
 
-// Optimizer is the dispatch service as fieldservice uses it.
 type Optimizer interface {
 	Configured() bool
 	Submit(ctx context.Context, legalEntityID, key string, req optimizer.Request) (optimizer.Run, error)
 	Get(ctx context.Context, legalEntityID, id string) (optimizer.Run, error)
 }
 
-// WithOptimizer sets the client of the dispatch service.
 func (a *API) WithOptimizer(o Optimizer) *API {
 	a.optimizer = o
 	return a
@@ -53,9 +54,6 @@ func (a *API) optimizerReady(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// advance takes the one step the optimization is due for: submit a PENDING one whose
-// back-off has passed, or poll a RUNNING one. A failed call is recorded (back-off, and
-// parking after five); only a database error comes back as an error.
 func (a *API) advance(ctx context.Context, o store.Optimization) (store.Optimization, error) {
 	now := a.now()
 	switch {
@@ -64,7 +62,7 @@ func (a *API) advance(ctx context.Context, o store.Optimization) (store.Optimiza
 		if err != nil {
 			return o, err
 		}
-		run, err := a.optimizer.Submit(ctx, o.LegalEntityID, fmt.Sprintf("%s:%d", o.ID, o.AttemptCount), req)
+		run, err := a.optimizer.Submit(ctx, o.LegalEntityID, fmt.Sprintf("%s:%d:%d", o.ID, o.Generation, o.AttemptCount), req)
 		if err != nil {
 			return a.failed(ctx, o, err, now)
 		}
@@ -82,6 +80,8 @@ func (a *API) advance(ctx context.Context, o store.Optimization) (store.Optimiza
 				reason = *run.Error
 			}
 			return a.failed(ctx, o, errors.New(reason), now)
+		case now.Sub(o.UpdatedAt) > optimizerRunDeadline:
+			return a.failed(ctx, o, fmt.Errorf("the dispatch run is still %s after %s", run.Status, optimizerRunDeadline), now)
 		}
 	}
 	return o, nil
@@ -95,7 +95,7 @@ func (a *API) failed(ctx context.Context, o store.Optimization, cause error, now
 		reason = reason[:maxLastError]
 	}
 	slog.WarnContext(ctx, "dispatch optimization call failed", "optimization", o.ID, "attempt", o.AttemptCount+1, "permanent", permanent, "err", cause)
-	next, err := a.store.RecordOptimizationFailure(ctx, o.ID, string(reason), permanent, now)
+	next, err := a.store.RecordOptimizationFailure(ctx, o.ID, o.AttemptCount, string(reason), permanent, now)
 	if err == nil && next.Status == store.OptParked && o.Status != store.OptParked {
 		a.optParked.Add(1)
 	}
@@ -110,9 +110,6 @@ type optimizeRequest struct {
 	TimeLimitSeconds int    `json:"timeLimitSeconds"`
 }
 
-// requestOptimization snapshots the territory-day and starts a run at the dispatch
-// service (BR-45.3). The answer is the optimization as it stands after the first call;
-// :sync polls it and :accept writes the plan.
 func (a *API) requestOptimization(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -140,6 +137,10 @@ func (a *API) requestOptimization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.optimizerReady(w, r) {
+		return
+	}
+	if p, _ := tenant.FromContext(r.Context()); !slices.Contains(tenant.LegalEntityScopeList(p), req.LegalEntityID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the dispatch service is called for one legal entity: the caller must be scoped to it"))
 		return
 	}
 	key, ok := idempotencyKeyOf(w, r)
@@ -195,8 +196,6 @@ func (a *API) getOptimization(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, o)
 }
 
-// syncOptimization takes the next step of an optimization: submit it when its back-off
-// has passed, or poll the run at the dispatch service.
 func (a *API) syncOptimization(w http.ResponseWriter, r *http.Request) {
 	id, ok := optimizationID(w, r)
 	if !ok || !a.optimizerReady(w, r) {
@@ -213,7 +212,6 @@ func (a *API) syncOptimization(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, o)
 }
 
-// retryOptimization puts a PARKED optimization back at attempt zero and tries it now.
 func (a *API) retryOptimization(w http.ResponseWriter, r *http.Request) {
 	id, ok := optimizationID(w, r)
 	if !ok || !a.optimizerReady(w, r) {
@@ -230,7 +228,6 @@ func (a *API) retryOptimization(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, o)
 }
 
-// acceptOptimization writes the plan of a SUCCEEDED optimization as assignments.
 func (a *API) acceptOptimization(w http.ResponseWriter, r *http.Request) {
 	id, ok := optimizationID(w, r)
 	if !ok {

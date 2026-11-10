@@ -1,10 +1,14 @@
 package store
 
 import (
+	"context"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/domain"
@@ -57,9 +61,6 @@ func (d dispatchFixture) succeeded(t *testing.T, o Optimization, plan ...optimiz
 	return done
 }
 
-// BR-45.3: the snapshot holds the technicians who cover the territory, the open work
-// orders with their case priority and SLA due, and the visits already held; what it leaves
-// out is listed with a reason, and a replay under the key returns the same row.
 func TestStore_OptimizationSnapshotsTheTerritoryDay(t *testing.T) {
 	d := newDispatch(t, 21)
 	ana := d.homed(t, "ANA")
@@ -105,7 +106,6 @@ func TestStore_OptimizationSnapshotsTheTerritoryDay(t *testing.T) {
 	}
 }
 
-// Nothing to place is SVC-DSP-016: a territory without technicians, or without open work.
 func TestStore_OptimizationNeedsTechniciansAndOpenWork(t *testing.T) {
 	d := newDispatch(t, 22)
 	d.located(t, 60, 41.9, -87.65, nil)
@@ -122,8 +122,6 @@ func TestStore_OptimizationNeedsTechniciansAndOpenWork(t *testing.T) {
 	}
 }
 
-// Back off and park: the wait doubles from a minute, the fifth failure parks, a refusal
-// that cannot change parks at once, and a retry starts over.
 func TestStore_OptimizationBacksOffAndParks(t *testing.T) {
 	d := newDispatch(t, 23)
 	d.homed(t, "ANA")
@@ -133,38 +131,37 @@ func TestStore_OptimizationBacksOffAndParks(t *testing.T) {
 
 	for attempt, wait := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute} {
 		var err error
-		if o, err = d.s.RecordOptimizationFailure(d.ctx, o.ID, "connection refused", false, now); err != nil {
+		if o, err = d.s.RecordOptimizationFailure(d.ctx, o.ID, o.AttemptCount, "connection refused", false, now); err != nil {
 			t.Fatal(err)
 		}
 		if o.Status != OptPending || o.AttemptCount != attempt+1 || !o.NextAttemptAt.Equal(now.Add(wait)) || o.LastError == nil || *o.LastError != "connection refused" {
 			t.Fatalf("failure %d: %+v, want next attempt in %s", attempt+1, o, wait)
 		}
 	}
-	o, err := d.s.RecordOptimizationFailure(d.ctx, o.ID, "connection refused", false, now)
+	o, err := d.s.RecordOptimizationFailure(d.ctx, o.ID, o.AttemptCount, "connection refused", false, now)
 	if err != nil || o.Status != OptParked || o.AttemptCount != MaxOptimizationAttempts {
 		t.Fatalf("fifth failure: %+v %v", o, err)
 	}
-	if after, err := d.s.RecordOptimizationFailure(d.ctx, o.ID, "again", false, now); err != nil || after.AttemptCount != o.AttemptCount {
+	if after, err := d.s.RecordOptimizationFailure(d.ctx, o.ID, o.AttemptCount, "again", false, now); err != nil || after.AttemptCount != o.AttemptCount {
 		t.Fatalf("a parked optimization counts no more failures: %+v %v", after, err)
 	}
 
 	retried, err := d.s.RetryOptimization(d.ctx, o.ID, now)
-	if err != nil || retried.Status != OptPending || retried.AttemptCount != 0 || !retried.NextAttemptAt.Equal(now) {
+	if err != nil || retried.Status != OptPending || retried.AttemptCount != 0 || retried.Generation != 1 || !retried.NextAttemptAt.Equal(now) {
 		t.Fatalf("retry: %+v %v", retried, err)
 	}
 	if _, err := d.s.RetryOptimization(d.ctx, o.ID, now); problemCode(err) != CodeOptimizationState {
 		t.Fatalf("retry of a pending optimization: %v", err)
 	}
-	refused, err := d.s.RecordOptimizationFailure(d.ctx, o.ID, "422 pinned assignments are infeasible", true, now)
+	if stale, err := d.s.RecordOptimizationFailure(d.ctx, o.ID, 3, "late answer", false, now); err != nil || stale.AttemptCount != 0 || (stale.LastError != nil && *stale.LastError == "late answer") {
+		t.Fatalf("a failure of an earlier attempt was counted: %+v %v", stale, err)
+	}
+	refused, err := d.s.RecordOptimizationFailure(d.ctx, o.ID, retried.AttemptCount, "422 pinned assignments are infeasible", true, now)
 	if err != nil || refused.Status != OptParked || refused.AttemptCount != 1 {
 		t.Fatalf("permanent refusal: %+v %v", refused, err)
 	}
 }
 
-// FR-45.7, BR-45.3: accepting writes each planned visit through the manual checks. A visit
-// outside the shift, or whose work order was assigned meanwhile, is reported and the rest
-// are written; visits held at the time of the request are left alone; a second accept
-// returns the first outcome; another tenant cannot see the optimization.
 func TestStore_AcceptWritesThePlanAndReportsWhatItCannot(t *testing.T) {
 	d := newDispatch(t, 24)
 	ana := d.homed(t, "ANA")
@@ -243,5 +240,30 @@ func TestStore_AcceptWritesThePlanAndReportsWhatItCannot(t *testing.T) {
 	page, err := d.s.ListOptimizations(d.ctx, ListFilter{Territory: d.territory, Status: OptAccepted, Limit: 10})
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID != o.ID {
 		t.Fatalf("list: %+v %v", page, err)
+	}
+}
+
+func TestStore_OptimizationReportsAStaleHeldVisitAndPlansTheRest(t *testing.T) {
+	d := newDispatch(t, 26)
+	ana, bob := d.homed(t, "ANA"), d.homed(t, "BOB")
+	stale := d.assign(t, d.located(t, 60, 41.881, -87.631, nil), ana, d.at(26, 14, 0))
+	kept := d.assign(t, d.located(t, 60, 41.882, -87.632, nil), bob, d.at(26, 14, 0))
+	d.located(t, 60, 41.9, -87.65, nil)
+	err := dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `update service_technician set skills = '{ELECTRICAL}' where tenant_id = $1 and id = $2`, tenantOf(d.ctx), ana.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	o := d.request(t, "stale-1")
+	got := skippedReasons(o.Skipped)
+	if got[ana.ID] != "HELD_VISIT_STALE" || got[stale.ID] != "HELD_VISIT_STALE" || len(got) != 2 {
+		t.Fatalf("skipped %+v", o.Skipped)
+	}
+	req, err := d.s.OptimizationRequest(d.ctx, o.ID)
+	if err != nil || len(req.Technicians) != 1 || req.Technicians[0].ID != bob.ID || len(req.Pinned) != 1 || req.Pinned[0].WorkOrderID != kept.ID {
+		t.Fatalf("request %+v %v", req, err)
 	}
 }

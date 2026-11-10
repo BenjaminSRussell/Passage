@@ -53,8 +53,6 @@ func reply(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// The dispatch service sees a token for its own audience and the legal entity of the
-// call, with only the duty of that call, and the problem as sent.
 func TestClient_SubmitCarriesOnlyTheCreateDuty(t *testing.T) {
 	var seen tenant.ServiceClaims
 	var key string
@@ -105,8 +103,6 @@ func TestClient_GetCarriesOnlyTheReadDutyAndDecodesThePlan(t *testing.T) {
 	}
 }
 
-// What the caller does with a failure depends on its kind: a refusal of the problem never
-// changes, a lost run is submitted again, anything else backs off.
 func TestClient_FailuresAreClassified(t *testing.T) {
 	status := http.StatusOK
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request, _ tenant.ServiceClaims) {
@@ -149,6 +145,10 @@ func TestClient_UnconfiguredAndUnreachable(t *testing.T) {
 	down := New("http://127.0.0.1:1", f.client.signer)
 	if _, err := down.Get(f.ctx, f.le, "x"); err == nil || errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("unreachable service: %v", err)
+	}
+	var refusal *Error
+	if _, err := f.client.Get(f.ctx, ids.New(), "x"); !errors.As(err, &refusal) || refusal.Status != http.StatusForbidden || !refusal.Permanent() {
+		t.Fatalf("a legal entity outside the caller's scope: %v", err)
 	}
 	if _, err := f.client.Get(context.Background(), f.le, "x"); err == nil {
 		t.Fatal("a call without a principal was sent")

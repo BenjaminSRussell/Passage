@@ -73,7 +73,7 @@ func (f *fakeOptimizer) Get(_ context.Context, _, id string) (optimizer.Run, err
 
 type optimizationDay struct {
 	h             http.Handler
-	ctx           context.Context
+	ctx, unscoped context.Context
 	le, territory string
 	technicianID  string
 	workOrderIDs  []string
@@ -82,7 +82,7 @@ type optimizationDay struct {
 
 func newOptimizationDay(t *testing.T, h http.Handler, ctx context.Context, orders int) *optimizationDay {
 	t.Helper()
-	d := &optimizationDay{h: h, ctx: ctx, le: ids.New(), territory: ids.New()}
+	d := &optimizationDay{h: h, ctx: ctx, unscoped: ctx, le: ids.New(), territory: ids.New()}
 	tech := call(t, h, ctx, http.MethodPost, "/v1/service/technicians", `{"code":"ANA","name":"Ana Ruiz","legalEntityId":"`+d.le+`","territoryIds":["`+d.territory+
 		`"],"skills":["hvac"],"timeZone":"America/Chicago","homeLatitude":41.88,"homeLongitude":-87.63}`, map[string]string{"Idempotency-Key": "tech"})
 	if tech.Code != http.StatusCreated {
@@ -97,6 +97,9 @@ func newOptimizationDay(t *testing.T, h http.Handler, ctx context.Context, order
 		}
 		d.workOrderIDs = append(d.workOrderIDs, decodeInto[store.WorkOrder](t, rec.Body.String()).ID)
 	}
+	p, _ := tenant.FromContext(ctx)
+	p.LegalEntityID = d.le
+	d.ctx = tenant.With(ctx, p)
 	d.optimizeBody = `{"legalEntityId":"` + d.le + `","territoryId":"` + d.territory + `","date":"2026-10-26","timeZone":"America/Chicago"}`
 	return d
 }
@@ -124,9 +127,6 @@ func (d *optimizationDay) read(t *testing.T, id string) store.Optimization {
 	return decodeInto[store.Optimization](t, rec.Body.String())
 }
 
-// BR-45.3 over HTTP: request an optimization (snapshot and first call), poll it until the
-// plan arrives, accept it so the orders become SCHEDULED, accept again for the same
-// outcome, and see it in the list and the counters.
 func TestAPI_OptimizationFlow(t *testing.T) {
 	fake := &fakeOptimizer{status: optimizer.Queued}
 	a, h, ctx := dbAPI(t, fake)
@@ -137,7 +137,7 @@ func TestAPI_OptimizationFlow(t *testing.T) {
 	if created.Code != http.StatusCreated || o.Status != store.OptRunning || o.RemoteRunID == nil || o.Technicians != 1 || o.WorkOrders != 2 || o.AttemptCount != 0 {
 		t.Fatalf("request: %d %s", created.Code, created.Body.String())
 	}
-	if len(fake.sent) != 1 || fake.sent[0].TimeLimitSeconds != store.DefaultOptimizerSeconds || fake.keys[0] != o.ID+":0" || len(fake.sent[0].Travel) != 3 {
+	if len(fake.sent) != 1 || fake.sent[0].TimeLimitSeconds != store.DefaultOptimizerSeconds || fake.keys[0] != o.ID+":0:0" || len(fake.sent[0].Travel) != 3 {
 		t.Fatalf("sent %+v keys %v", fake.sent, fake.keys)
 	}
 	replay := d.request(t, "opt-1")
@@ -189,9 +189,6 @@ func TestAPI_OptimizationFlow(t *testing.T) {
 	}
 }
 
-// Back off and park over HTTP: each failed call waits twice as long as the one before,
-// a sync before the wait is over does not call the service, the fifth failure parks, and
-// a retry starts again from zero.
 func TestAPI_OptimizationBacksOffAndParks(t *testing.T) {
 	fake := &fakeOptimizer{submitErr: errors.New("connection refused")}
 	a, h, ctx := dbAPI(t, fake)
@@ -224,7 +221,7 @@ func TestAPI_OptimizationBacksOffAndParks(t *testing.T) {
 
 	fake.submitErr = nil
 	retried := d.step(t, o.ID, "retry")
-	if retried.Status != store.OptRunning || retried.AttemptCount != 0 || fake.keys[len(fake.keys)-1] != o.ID+":0" {
+	if retried.Status != store.OptRunning || retried.AttemptCount != 0 || fake.keys[len(fake.keys)-1] != o.ID+":1:0" {
 		t.Fatalf("retry: %+v keys %v", retried, fake.keys)
 	}
 	rec := httptest.NewRecorder()
@@ -237,8 +234,6 @@ func TestAPI_OptimizationBacksOffAndParks(t *testing.T) {
 	}
 }
 
-// A refusal that cannot change parks at once; a failed run and a lost run go back to
-// PENDING and are submitted again under a new key.
 func TestAPI_OptimizationFailureKinds(t *testing.T) {
 	fake := &fakeOptimizer{submitErr: &optimizer.Error{Status: http.StatusUnprocessableEntity, Detail: "SVC-DSP-001 pinned assignments are infeasible"}}
 	a, h, ctx := dbAPI(t, fake)
@@ -262,7 +257,7 @@ func TestAPI_OptimizationFailureKinds(t *testing.T) {
 		t.Fatalf("failed run: %+v", o)
 	}
 	clock = o.NextAttemptAt.Add(time.Second)
-	if o = d.step(t, o.ID, "sync"); o.Status != store.OptRunning || fake.keys[len(fake.keys)-1] != o.ID+":1" {
+	if o = d.step(t, o.ID, "sync"); o.Status != store.OptRunning || fake.keys[len(fake.keys)-1] != o.ID+":0:1" {
 		t.Fatalf("resubmitted: %+v keys %v", o, fake.keys)
 	}
 	fake.getErr = optimizer.ErrRunLost
@@ -296,8 +291,6 @@ func TestAPI_OptimizationRefusals(t *testing.T) {
 	}
 }
 
-// Requesting, syncing, retrying and accepting need the dispatch duty; reading needs only
-// the inquiry duty.
 func TestAPI_OptimizationDuties(t *testing.T) {
 	fake := &fakeOptimizer{}
 	_, h, _ := dbAPI(t, fake)
@@ -315,5 +308,50 @@ func TestAPI_OptimizationDuties(t *testing.T) {
 	}
 	if len(fake.keys) != 0 {
 		t.Fatal("the dispatch service was called by a caller without the duty")
+	}
+}
+
+func TestAPI_OptimizationRunPastItsDeadlineIsResubmitted(t *testing.T) {
+	fake := &fakeOptimizer{status: optimizer.Queued}
+	a, h, ctx := dbAPI(t, fake)
+	clock := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return clock }
+	d := newOptimizationDay(t, h, ctx, 1)
+	o := decodeInto[store.Optimization](t, d.request(t, "opt-1").Body.String())
+
+	clock = clock.Add(optimizerRunDeadline - time.Minute)
+	if o = d.step(t, o.ID, "sync"); o.Status != store.OptRunning || o.AttemptCount != 0 {
+		t.Fatalf("a run inside its deadline: %+v", o)
+	}
+	clock = clock.Add(2 * time.Minute)
+	if o = d.step(t, o.ID, "sync"); o.Status != store.OptPending || o.AttemptCount != 1 || o.RemoteRunID != nil || o.LastError == nil || !strings.Contains(*o.LastError, "still QUEUED") {
+		t.Fatalf("a run past its deadline: %+v", o)
+	}
+	clock = o.NextAttemptAt.Add(time.Second)
+	if o = d.step(t, o.ID, "sync"); o.Status != store.OptRunning || fake.keys[len(fake.keys)-1] != o.ID+":0:1" || len(fake.sent) != 2 {
+		t.Fatalf("resubmitted: %+v keys %v", o, fake.keys)
+	}
+}
+
+func TestAPI_OptimizationNeedsACallerScopedToTheLegalEntity(t *testing.T) {
+	fake := &fakeOptimizer{}
+	_, h, ctx := dbAPI(t, fake)
+	d := newOptimizationDay(t, h, ctx, 1)
+	rec := call(t, h, d.unscoped, http.MethodPost, optimizationsPath, d.optimizeBody, map[string]string{"Idempotency-Key": "k"})
+	if code, _ := problemOf(t, rec); rec.Code != http.StatusForbidden || code != "AUTH-0003" || len(fake.keys) != 0 {
+		t.Fatalf("all-scope caller: %d %s", rec.Code, rec.Body.String())
+	}
+	other := tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u", LegalEntityID: ids.New(), Duties: map[string]struct{}{dutyDispatch: {}}}
+	if rec := call(t, h, tenant.With(context.Background(), other), http.MethodPost, optimizationsPath, d.optimizeBody, map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("caller scoped to another entity: %d", rec.Code)
+	}
+}
+
+func TestAPI_OptimizationSigningRefusalParksAtOnce(t *testing.T) {
+	fake := &fakeOptimizer{submitErr: &optimizer.Error{Status: http.StatusForbidden, Detail: "no service token for this legal entity"}}
+	_, h, ctx := dbAPI(t, fake)
+	d := newOptimizationDay(t, h, ctx, 1)
+	if o := decodeInto[store.Optimization](t, d.request(t, "opt-1").Body.String()); o.Status != store.OptParked || o.AttemptCount != 1 {
+		t.Fatalf("refusal that never changes: %+v", o)
 	}
 }
