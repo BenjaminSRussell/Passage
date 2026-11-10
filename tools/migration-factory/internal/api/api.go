@@ -25,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/replay"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -109,6 +110,8 @@ type Server struct {
 	// payables is the target of the AP lines of an open_items run (49-3).
 	payables PayablesTarget
 	ledger   ledgerclient.Ledger
+	// subledgers post the subledger documents of a parallel-run replay (49-4).
+	subledgers replay.Ports
 }
 
 // New returns a server over st.

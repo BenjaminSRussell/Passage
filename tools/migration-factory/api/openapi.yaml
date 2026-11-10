@@ -1470,6 +1470,18 @@ paths:
         (BR-49.7). A document the ledger
         refuses is listed in `rejected` and shows as TB variances; any other ledger failure is 502
         MIG-1533 and the replay can be repeated. Without a configured ledger the answer is 503 MIG-1530.
+        Subledger documents (49-4): `subledger` carries the period's AR, AP, INV and FA documents (an
+        invoice, credit note, payment, inventory movement or asset transaction with its signed effect
+        on the balance of its `key`: the party for AR and AP, `item@site` for INV, the asset for FA).
+        They are posted area by area, in the same posting-date-then-seq order, through the subledger
+        port of the area, each under a fixed idempotency key; the period movement of every key is
+        read back and diffed against the legacy side (`legacySubledger` when given, else the
+        documents' own sums) as the INV, AP, AR and FA tuples of the same parallel run, with the
+        same per-document RND-001 tolerance. A document the subledger refuses is in `rejected`
+        (with its `area`) and shows as a variance. Documents of an area no port posts are 503
+        MIG-1534 before anything is posted; a subledger that fails mid-replay is 502 MIG-1535 and
+        the replay can be repeated. A replay of subledger documents alone (no `documents`) needs
+        neither the ledger nor `ledgerId`.
       x-passage-duty: migration.factory.run
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1479,7 +1491,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [period, sourceSystem, legalEntityId, ledgerId, revenue, documents]
+              required: [period, sourceSystem, legalEntityId, revenue]
               properties:
                 period: {type: string, pattern: "^[0-9]{4}-[0-9]{2}$"}
                 sourceSystem: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}
@@ -1515,6 +1527,33 @@ paths:
                       account: {type: string}
                       currency: {type: string}
                       amount: {type: string}
+                subledger:
+                  type: array
+                  items:
+                    type: object
+                    required: [seq, documentId, area, kind, postingDate, key, currency, amount]
+                    properties:
+                      seq: {type: integer, minimum: 1}
+                      documentId: {type: string}
+                      area: {type: string, enum: [AR, AP, INV, FA]}
+                      kind:
+                        type: string
+                        enum: [INVOICE, CREDIT_NOTE, PAYMENT, ADJUSTMENT, RECEIPT, ISSUE, TRANSFER, ACQUISITION, DEPRECIATION, DISPOSAL]
+                        description: "AR and AP: INVOICE, CREDIT_NOTE, PAYMENT, ADJUSTMENT. INV: RECEIPT, ISSUE, TRANSFER, ADJUSTMENT. FA: ACQUISITION, DEPRECIATION, DISPOSAL, ADJUSTMENT."
+                      postingDate: {type: string, format: date}
+                      key: {type: string, description: "Party (AR, AP), item@site (INV) or asset (FA); no '|'."}
+                      currency: {type: string}
+                      amount: {type: string, description: "Signed effect on the balance: an invoice, receipt or acquisition is positive, a credit note, payment, issue, depreciation or disposal negative."}
+                legacySubledger:
+                  type: array
+                  items:
+                    type: object
+                    required: [area, key, currency, amount]
+                    properties:
+                      area: {type: string, enum: [AR, AP, INV, FA]}
+                      key: {type: string}
+                      currency: {type: string}
+                      amount: {type: string, description: "The legacy ledger's net movement of the key in the period."}
       responses:
         "201":
           description: The stored parallel run with its variances, the number of documents posted and the rejected ones.

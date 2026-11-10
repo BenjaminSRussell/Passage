@@ -30,7 +30,8 @@ Built and tested:
   ≤ 0.1 % of revenue (MIG-1509).
 - **Parallel-run replay** (`replay.go`, `internal/replay`, D4): a legacy period's journals posted in
   their original sequence through the ledger into a rehearsal ledger, and the trial balance read
-  back diffed with the legacy one (`POST /migration/parallel-runs/replay`).
+  back diffed with the legacy one (`POST /migration/parallel-runs/replay`). With `subledger` documents (AR, AP, INV, FA) the same call also posts them through a per-area `replay.Port`
+  and diffs each subledger's period movement per key as INV, AP, AR and FA tuples (49-4); no port is wired in `main` yet (503 `MIG-1534`).
 - **Cutover plan** (`cutover.go`): timed steps from T-14d to T+30d with pack load steps, rehearsal
   duration overrides, go/no-go sequencing (CUT-1601), the abort step at `abortOffsetHours`, the
   BR-49.9 abort state (CUT-1604), rollback once with two distinct approvers (CUT-1603), and a plan
@@ -244,6 +245,8 @@ Problem details use `type` `https://passage.dev/problems/<code>`. The stable `co
 | `MIG-1551` | 502 | Payables refused the factory's service token; the load is FAILED and its rows stay pending. |
 | `MIG-1552` | 502 | Payables refused the batch request as a whole (control totals, a changed batch under an old key); the rows stay pending. |
 | `MIG-1553` | 409 | The run was started without `load.payables`, so it has no AP load. |
+| `MIG-1534` | 503 | A replay has subledger documents of an area no subledger port posts. |
+| `MIG-1535` | 502 | A subledger failed during the replay; it can be repeated (every document is posted under a fixed key). |
 | `AUTH-0001` | 401 | No tenant or principal. (Kernel.) |
 | `AUTH-0003` | 403 | Missing duty. (Kernel.) |
 | `COM-0001` | 400 | Malformed JSON body. (Kernel.) |
