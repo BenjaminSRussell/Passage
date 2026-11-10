@@ -68,34 +68,27 @@ export class ProductApiError extends Error {
 
 type Raw = Record<string, unknown>;
 
-function pick(row: Raw, ...keys: string[]): string {
-  for (const key of keys) {
-    const value = row[key];
-    if (typeof value === "string") return value;
-  }
-  return "";
-}
-
-function flag(row: Raw, ...keys: string[]): boolean {
-  return keys.some((key) => row[key] === true);
+function str(row: Raw, key: string): string {
+  const value = row[key];
+  return typeof value === "string" ? value : "";
 }
 
 export function toProduct(row: Raw): Product {
   return {
-    id: pick(row, "id", "ID"),
-    productNumber: pick(row, "productNumber", "ProductNumber"),
-    name: pick(row, "name", "Name"),
-    description: pick(row, "description", "Description"),
-    searchName: pick(row, "searchName", "SearchName"),
-    subtype: (pick(row, "subtype", "Subtype") || "product") as Subtype,
-    productType: (pick(row, "productType", "ProductType") || "item") as ProductType,
-    baseUom: pick(row, "baseUom", "BaseUOM"),
-    itemGroupId: pick(row, "itemGroupId", "ItemGroupID"),
-    batchTracked: flag(row, "batchTracked", "BatchTracked"),
-    serialTracked: flag(row, "serialTracked", "SerialTracked"),
-    catchWeight: flag(row, "catchWeight", "CatchWeight"),
-    lifecycleState: (pick(row, "lifecycleState", "LifecycleState") || "draft") as Lifecycle,
-    version: Number(row.version ?? row.Version ?? 1),
+    id: str(row, "id"),
+    productNumber: str(row, "productNumber"),
+    name: str(row, "name"),
+    description: str(row, "description"),
+    searchName: str(row, "searchName"),
+    subtype: (str(row, "subtype") || "product") as Subtype,
+    productType: (str(row, "productType") || "item") as ProductType,
+    baseUom: str(row, "baseUom"),
+    itemGroupId: str(row, "itemGroupId"),
+    batchTracked: row.batchTracked === true,
+    serialTracked: row.serialTracked === true,
+    catchWeight: row.catchWeight === true,
+    lifecycleState: (str(row, "lifecycleState") || "draft") as Lifecycle,
+    version: Number(row.version ?? 1),
   };
 }
 
@@ -133,7 +126,7 @@ export async function getProduct(id: string, signal?: AbortSignal): Promise<Prod
 
 export async function listItemGroups(signal?: AbortSignal): Promise<ItemGroup[]> {
   const body = await send<{ items?: Raw[] }>("/setup/item-groups", {}, signal);
-  return (body.items ?? []).map((row) => ({ id: pick(row, "id", "ID"), code: pick(row, "code", "Code"), name: pick(row, "name", "Name") }));
+  return (body.items ?? []).map((row) => ({ id: str(row, "id"), code: str(row, "code"), name: str(row, "name") }));
 }
 
 export async function createProduct(input: NewProduct, key: string): Promise<Product> {

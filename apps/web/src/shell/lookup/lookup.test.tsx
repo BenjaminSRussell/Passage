@@ -270,8 +270,8 @@ describe("EntityLookup", () => {
 });
 
 describe("lookup adapters", () => {
-  it("maps product rows whatever the casing of the service JSON", async () => {
-    handler = () => json({ items: [{ ID: "p-1", ProductNumber: "SHIRT1", Name: "Shirt" }, { id: "p-2", productNumber: "HAT1", name: "Hat" }] });
+  it("maps product rows from the service JSON", async () => {
+    handler = () => json({ items: [{ id: "p-1", productNumber: "SHIRT1", name: "Shirt" }, { id: "p-2", productNumber: "HAT1", name: "Hat" }] });
     const found = await lookupDefs.product.search("s", {});
     expect(found.map(formatOption)).toEqual(["Shirt (SHIRT1)", "Hat (HAT1)"]);
   });

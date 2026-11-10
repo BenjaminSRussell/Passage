@@ -215,7 +215,7 @@ let itemGroupNames: Promise<Map<string, string>> | null = null;
 
 function loadItemGroupNames(): Promise<Map<string, string>> {
   itemGroupNames ??= getJson("/api/v1/product/setup/item-groups").then(
-    (body) => new Map(items(body).map((row): [string, string] => [text(row, "id", "ID") ?? "", text(row, "name", "Name") ?? ""])),
+    (body) => new Map(items(body).map((row): [string, string] => [text(row, "id") ?? "", text(row, "name") ?? ""])),
     () => {
       itemGroupNames = null;
       return new Map<string, string>();
@@ -227,18 +227,18 @@ function loadItemGroupNames(): Promise<Map<string, string>> {
 const flag = (row: Raw, ...keys: string[]) => keys.some((key) => row[key] === true);
 
 async function productOption(row: Raw): Promise<LookupOption | null> {
-  const found = option(row, ["name", "Name"], ["productNumber", "ProductNumber"]);
+  const found = option(row, ["name"], ["productNumber"], ["id"]);
   if (!found) {
     return null;
   }
-  const groupId = text(row, "itemGroupId", "ItemGroupID");
+  const groupId = text(row, "itemGroupId");
   return {
     ...found,
-    unit: text(row, "baseUom", "BaseUOM"),
+    unit: text(row, "baseUom"),
     itemGroup: groupId ? (await loadItemGroupNames()).get(groupId) : undefined,
-    batchTracked: flag(row, "batchTracked", "BatchTracked"),
-    serialTracked: flag(row, "serialTracked", "SerialTracked"),
-    catchWeight: flag(row, "catchWeight", "CatchWeight"),
+    batchTracked: flag(row, "batchTracked"),
+    serialTracked: flag(row, "serialTracked"),
+    catchWeight: flag(row, "catchWeight"),
   };
 }
 

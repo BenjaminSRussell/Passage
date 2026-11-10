@@ -41,18 +41,18 @@ afterEach(() => vi.unstubAllGlobals());
 
 const ID = "0195f0a0-0000-7000-8000-0000000000aa";
 const GROUP = "0195f0a0-0000-7000-8000-0000000000bb";
-const groupList = { items: [{ ID: GROUP, Code: "RAW", Name: "Raw material" }] };
+const groupList = { items: [{ id: GROUP, code: "RAW", name: "Raw material" }] };
 const isGroups = (call: Call) => call.url.pathname === "/api/v1/product/setup/item-groups";
 const row = (extra: Record<string, unknown> = {}) => ({
-  ID,
-  ProductNumber: "BOLT",
-  Subtype: "product",
-  ProductType: "item",
-  Name: "Hex bolt",
-  Description: "M8 steel",
-  BaseUOM: "EA",
-  LifecycleState: "draft",
-  Version: 1,
+  id: ID,
+  productNumber: "BOLT",
+  subtype: "product",
+  productType: "item",
+  name: "Hex bolt",
+  description: "M8 steel",
+  baseUom: "EA",
+  lifecycleState: "draft",
+  version: 1,
   ...extra,
 });
 
@@ -96,7 +96,7 @@ describe("product module", () => {
 });
 
 describe("product list", () => {
-  it("lists products from the service, whatever the casing of its JSON", async () => {
+  it("lists products from the service, as the service returns them", async () => {
     handler = () => json(200, { items: [row(), { id: "p-2", productNumber: "SHIRT", name: "Knit shirt", subtype: "master", baseUom: "EA", lifecycleState: "active", version: 2 }] });
     const { container } = renderAt("/product/items");
     const table = await screen.findByRole("table", { name: "Products" });
@@ -120,7 +120,7 @@ describe("product list", () => {
   it("pages by cursor and appends the next page", async () => {
     handler = (call) =>
       call.url.searchParams.get("cursor") === "c1"
-        ? json(200, { items: [row({ ID: "p-3", ProductNumber: "NUT", Name: "Hex nut" })] })
+        ? json(200, { items: [row({ id: "p-3", productNumber: "NUT", name: "Hex nut" })] })
         : json(200, { items: [row()], nextCursor: "c1" });
     renderAt("/product/items");
     fireEvent.click(await screen.findByRole("button", { name: "Show more products" }));
@@ -176,7 +176,7 @@ describe("product detail", () => {
   });
 
   it("shows the base unit, item group and tracking flags", async () => {
-    handler = (call) => (isGroups(call) ? json(200, groupList) : json(200, row({ BaseUOM: "KG", ItemGroupID: GROUP, BatchTracked: true, CatchWeight: true })));
+    handler = (call) => (isGroups(call) ? json(200, groupList) : json(200, row({ baseUom: "KG", itemGroupId: GROUP, batchTracked: true, catchWeight: true })));
     const { container } = renderAt(`/product/${ID}`);
     await screen.findByRole("heading", { name: "Hex bolt" });
     await waitFor(() => expect(container.querySelector("dl")).toHaveTextContent("Raw material"));
@@ -328,7 +328,7 @@ describe("create product", () => {
 
 describe("edit product", () => {
   it("saves under the version it read and returns to the product", async () => {
-    handler = (call) => (call.method === "PATCH" ? json(200, row({ Name: "Hex bolt M8", Version: 2 })) : json(200, row()));
+    handler = (call) => (call.method === "PATCH" ? json(200, row({ name: "Hex bolt M8", version: 2 })) : json(200, row()));
     const { container } = renderAt(`/product/${ID}/edit`);
     await screen.findByLabelText("Name");
     expect(violations(container)).toEqual([]);
@@ -351,7 +351,7 @@ describe("edit product", () => {
   });
 
   it("keeps showing the current item group when the groups can't be loaded", async () => {
-    handler = (call) => (isGroups(call) ? json(503, { code: "COM-0503", detail: "down" }) : json(200, row({ ItemGroupID: GROUP })));
+    handler = (call) => (isGroups(call) ? json(503, { code: "COM-0503", detail: "down" }) : json(200, row({ itemGroupId: GROUP })));
     renderAt(`/product/${ID}/edit`);
     await screen.findByText("Item groups could not be loaded. Try again later.");
     expect(screen.getByLabelText(/Item group/)).toHaveValue(GROUP);
@@ -361,7 +361,7 @@ describe("edit product", () => {
   it("shows the item group and flags already set, and saves a change to them", async () => {
     handler = (call) => {
       if (isGroups(call)) return json(200, groupList);
-      return call.method === "PATCH" ? json(200, row({ ItemGroupID: GROUP, SerialTracked: true, Version: 2 })) : json(200, row({ ItemGroupID: GROUP, BatchTracked: true }));
+      return call.method === "PATCH" ? json(200, row({ itemGroupId: GROUP, serialTracked: true, version: 2 })) : json(200, row({ itemGroupId: GROUP, batchTracked: true }));
     };
     renderAt(`/product/${ID}/edit`);
     await screen.findByLabelText("Name");
@@ -383,7 +383,7 @@ describe("edit product", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText(/Someone else changed this product after you opened it/)).toBeInTheDocument();
-    handler = () => json(200, row({ Name: "Hex bolt v2", Version: 2 }));
+    handler = () => json(200, row({ name: "Hex bolt v2", version: 2 }));
     fireEvent.click(within(alert).getByRole("button", { name: /Reload product/ }));
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Hex bolt v2"));
     expect(screen.queryByRole("alert")).toBeNull();
