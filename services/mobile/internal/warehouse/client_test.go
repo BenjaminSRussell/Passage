@@ -73,6 +73,38 @@ func TestGuardRefusesAnOperationTheUserLacksTheDutyFor(t *testing.T) {
 	if _, err := g.Do(ctxWith(), "nuke", "k", nil); !errors.Is(err, ErrUnknownOp) {
 		t.Fatalf("unknown op: %v", err)
 	}
+	if _, err := g.Do(context.Background(), "confirm", "k", nil); err == nil || inner.calls != 1 {
+		t.Fatalf("a context without a principal must fail closed: %v, %d calls", err, inner.calls)
+	}
+}
+
+func TestClientChecksTheUsersDutyItselfAndOnlyReadWorkSkipsIt(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"id":"wk"}`))
+	}))
+	defer srv.Close()
+	cl, err := New(srv.URL, signer(t), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeOnly := ctxWith("warehouse.work.execute")
+	for _, op := range []string{"get-work", "receive"} {
+		out, err := cl.Do(executeOnly, op, "k", map[string]string{"workId": "wk", "receiptId": "r", "lineNo": "1", "qty": "1"})
+		if err != nil || out.Status != http.StatusForbidden || out.Code != CodeMissingDuty {
+			t.Fatalf("%s without its duty: %+v %v", op, out, err)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("the warehouse was called %d times without the user's duty", hits)
+	}
+	if out, err := cl.ReadWork(executeOnly, "wk"); err != nil || !out.OK() || hits != 1 {
+		t.Fatalf("the internal read needs no duty of the user: %+v %v %d", out, err, hits)
+	}
+	if _, err := cl.ReadWork(context.Background(), "wk"); err == nil {
+		t.Fatal("even the internal read needs a principal to sign as")
+	}
 }
 
 func TestDoSendsSignedIdempotentRequestPerOperation(t *testing.T) {

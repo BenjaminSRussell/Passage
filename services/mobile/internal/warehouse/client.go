@@ -117,10 +117,31 @@ func DutyFor(op string) (string, bool) {
 	return r.duty, err == nil
 }
 
-// Guard refuses an operation the calling user lacks the duty for. The service
+// WorkReader is the one internal read that skips the user's duty: a work read
+// the service makes for its own bookkeeping, whose body never reaches the user.
+type WorkReader interface {
+	ReadWork(ctx context.Context, workID string) (Outcome, error)
+}
+
+var errNoPrincipal = errors.New("warehouse call: no principal in context")
+
+// checkDuty refuses a call the signed-in user lacks the duty for. The service
 // token carries the service grant's duties, never the user's, and the warehouse
-// trusts them, so the user's own duty is checked here before every call. The
-// refusal is a 403 outcome and nothing is sent.
+// trusts them, so the user's own duty is checked before every call. A context
+// without a principal is an error, never a pass. The refusal is a 403 outcome
+// and nothing is sent.
+func checkDuty(ctx context.Context, duty string) (Outcome, bool, error) {
+	p, ok := tenant.FromContext(ctx)
+	switch {
+	case !ok:
+		return Outcome{}, false, errNoPrincipal
+	case !p.HasDuty(duty):
+		return Outcome{Status: http.StatusForbidden, Code: CodeMissingDuty, Detail: "missing duty " + duty}, true, nil
+	}
+	return Outcome{}, false, nil
+}
+
+// Guard applies the same duty check to any Caller.
 func Guard(next Caller) Caller { return guard{next} }
 
 type guard struct{ next Caller }
@@ -130,22 +151,38 @@ func (g guard) Do(ctx context.Context, op, key string, params map[string]string)
 	if !known {
 		return Outcome{}, ErrUnknownOp
 	}
-	if p, ok := tenant.FromContext(ctx); ok && !p.HasDuty(duty) {
-		return Outcome{Status: http.StatusForbidden, Code: CodeMissingDuty, Detail: "missing duty " + duty}, nil
+	if out, refused, err := checkDuty(ctx, duty); err != nil || refused {
+		return out, err
 	}
 	return g.next.Do(ctx, op, key, params)
 }
 
-// Do runs one operation. key is sent as the Idempotency-Key, so repeating a
-// call with the same key never repeats its effect in the warehouse.
+// Do runs one operation as the signed-in user, who must hold the operation's
+// duty. key is sent as the Idempotency-Key, so repeating a call with the same
+// key never repeats its effect in the warehouse.
 func (c *Client) Do(ctx context.Context, op, key string, params map[string]string) (Outcome, error) {
 	r, err := plan(op, params)
 	if err != nil {
 		return Outcome{}, err
 	}
+	if out, refused, err := checkDuty(ctx, r.duty); err != nil || refused {
+		return out, err
+	}
+	return c.send(ctx, r, key)
+}
+
+func (c *Client) ReadWork(ctx context.Context, workID string) (Outcome, error) {
+	r, err := plan("get-work", map[string]string{"workId": workID})
+	if err != nil {
+		return Outcome{}, err
+	}
+	return c.send(ctx, r, "")
+}
+
+func (c *Client) send(ctx context.Context, r route, key string) (Outcome, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return Outcome{}, errors.New("warehouse call: no principal in context")
+		return Outcome{}, errNoPrincipal
 	}
 	var reader io.Reader
 	if r.body != nil {
