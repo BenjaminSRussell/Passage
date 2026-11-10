@@ -8,7 +8,7 @@ For administrators. You create the legal entity, calendar, sites and people so o
 
 ## Create a legal entity
 
-1. Open **Org** and choose **Legal entities**, then **Add legal entity**.
+1. Open **Organization** and choose **Legal entities**, then **Add legal entity**.
 2. Enter **Code** (short and unique, for example DE01), **Name**, **Country**, **Accounting currency** and **Time zone**.
 3. Select the add button to save.
 
@@ -41,24 +41,28 @@ You can also copy an existing legal entity with the copy form on the same page.
 3. Open **Role assignments** to give a person a role. Fill in the user and role, the dates it is valid, and the reason.
 4. Open **Effective permissions** to check what a person can do.
 
+## Create a product
+
+1. Open **Product information**, choose **Products**, then **New product**.
+2. Enter the **Product number** (it cannot change once the product is released), **Name**, **Base unit**, **Kind**, **Type** and **State**. **Description** is optional.
+3. Select **Create product**.
+4. To change a product later, open it and select **Edit product**, then **Save changes**.
+
 ## Numbering
 
 Open **Sequences** under **Admin** to see and change how document numbers are issued.
-
-## What the statuses mean
 
 ## Common messages
 
 | Message | What to do |
 | --- | --- |
 | You don't have permission to do this. | Ask an administrator for access if you need it. |
-| You don't have the duty this action needs. | Ask an administrator to give you the role. |
+| You don't have the duty this action needs. | A duty is a permission your role lacks. Ask an administrator to add it to your role. |
 | Someone else changed this record after you opened it. | Reload the page to see the latest version, then make your change again. |
 
 ## Not available yet
 
-- **Creating products.** Products can be browsed under **Product information**, but there is no form to create one.
-- **Pick-lists for people and roles.** Role assignments ask for ids or role names to be typed in.
+- **Pick-lists for people and roles.** Role assignments ask you to type the user and role.
 
 ## Glossary
 

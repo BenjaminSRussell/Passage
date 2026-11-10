@@ -79,8 +79,8 @@ Receipts: Arrived (recorded), Registered (quantities checked), Posted (goods in 
 
 ## Not available yet
 
-- **Pick-lists on receiving.** Vendor, purchase order and legal entity are typed in as ids.
-- **Paying the vendor.** See [Enter and pay a vendor invoice](ap-clerk.md#not-available-yet).
+- **Pick-lists on receiving.** Vendor, purchase order and legal entity are the code or number you type in.
+- **Sending the payments after approval.** See [Enter and pay a vendor invoice](ap-clerk.md#not-available-yet).
 
 ## Glossary
 

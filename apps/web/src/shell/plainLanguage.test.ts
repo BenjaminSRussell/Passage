@@ -9,9 +9,7 @@
  * and attributes that are never shown (class names, test ids, routes, ids).
  */
 import { parseAst } from "vite";
-
-const SPEC_REF = /\b(?:FR|BR|AC)-\d+\.\d+/;
-const DELIVERY_REF = /\b(?:wave|slice)[ -]?\d+/i;
+import { DELIVERY_REF, SPEC_REF } from "./plainLanguageRules";
 
 /** Attributes whose values are never shown to people. */
 const HIDDEN_ATTRIBUTES = new Set(["className", "id", "key", "htmlFor", "name", "to", "href", "type", "role", "method", "rel", "target"]);

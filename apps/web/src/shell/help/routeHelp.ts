@@ -10,7 +10,7 @@ export interface RouteHelp {
 
 export const routeHelp: readonly RouteHelp[] = [
   {
-    patterns: ["/purchasing", "/purchasing/open-supply"],
+    patterns: ["/purchasing"],
     title: "Purchasing",
     purpose: "Your starting point for buying: requests, orders and what is still on its way.",
     howTo: ["Open Requisitions to ask for something.", "Open Purchase orders to buy from a vendor.", "Use Approvals to decide requests waiting for you."],
@@ -62,7 +62,7 @@ export const routeHelp: readonly RouteHelp[] = [
     patterns: ["/purchasing/purchase-orders/:id/*", "/purchasing/reprice"],
     title: "Purchase order line details",
     purpose: "Invoicing plans, delivery schedules, service details and price updates for one order or line.",
-    howTo: ["Change the schedule or plan, then save.", "A change of more than 5% on quantity or price needs approval again."],
+    howTo: ["Change the schedule or plan, then save.", "Use Update prices to reprice the order."],
     guide: "buyer.md#change-a-confirmed-order",
   },
   {
@@ -85,6 +85,41 @@ export const routeHelp: readonly RouteHelp[] = [
     title: "Agreements, prices and catalogs",
     purpose: "Agreed prices and quantities with vendors. Orders pick up these prices when you leave Unit price blank.",
     howTo: ["Open an agreement to see its lines and what has been ordered.", "Use New to add one.", "Missing price? Add a trade agreement for the product and vendor."],
+    guide: "buyer.md#raise-a-purchase-order",
+  },
+  {
+    patterns: ["/purchasing/inquiries/*", "/purchasing/open-supply"],
+    title: "Purchasing reports",
+    purpose: "Lists of what is overdue, backordered, expiring or changed, to show where buying needs attention.",
+    howTo: ["Open a report from the Inquiries list.", "Open a row to see the order or agreement behind it."],
+    guide: "buyer.md#raise-a-purchase-order",
+  },
+  {
+    patterns: ["/purchasing/inbound-changes/*"],
+    title: "Changes from vendors",
+    purpose: "Changes vendors have asked for on orders you sent them.",
+    howTo: ["Open a change to see what the vendor wants.", "Accept or decline it after you have checked the order."],
+    guide: "buyer.md#change-a-confirmed-order",
+  },
+  {
+    patterns: ["/purchasing/charge-codes/*", "/purchasing/auto-charges/*"],
+    title: "Charges",
+    purpose: "Codes for freight and other extra costs, and rules that add them to orders by themselves.",
+    howTo: ["Use New to add a code or a rule.", "Open a row to change it."],
+    guide: "buyer.md#raise-a-purchase-order",
+  },
+  {
+    patterns: ["/purchasing/signing-limits/*", "/purchasing/signing-limit-requests/*"],
+    title: "Signing limits",
+    purpose: "How much each person may approve, and requests to raise a limit.",
+    howTo: ["Open a limit to see who holds it.", "Use New to ask for a higher limit."],
+    guide: "buyer.md#ask-for-what-you-need",
+  },
+  {
+    patterns: ["/purchasing/category-vendors/*", "/purchasing/category-managers", "/purchasing/model-service-specs/*", "/purchasing/policies/*"],
+    title: "Vendors, categories and buying rules",
+    purpose: "Which vendors may supply each category, who manages it, and the rules that apply to each legal entity.",
+    howTo: ["Open a row to see its details.", "Use New to add one where the page allows it."],
     guide: "buyer.md#raise-a-purchase-order",
   },
   {
@@ -145,20 +180,41 @@ export const routeHelp: readonly RouteHelp[] = [
   },
   {
     patterns: ["/payables"],
-    title: "Payment runs",
-    purpose: "Paying vendors. This page is not available yet.",
-    howTo: ["Nothing to do here yet."],
-    guide: "ap-clerk.md#pay-the-invoice",
+    title: "Payment proposals",
+    purpose: "Lists of vendor invoices chosen for payment. A second person approves each list before it is paid.",
+    howTo: ["Select New payment proposal to start one.", "Filter by status.", "Open a proposal to check or approve it.", "Open Vendor open items to see what is owed."],
+    guide: "ap-clerk.md#create-a-payment-proposal",
   },
   {
-    patterns: ["/sales", "/sales/workspace"],
-    title: "Sales",
+    patterns: ["/payables/open-items"],
+    title: "Vendor open items",
+    purpose: "Invoices you owe vendors. Put one on hold to keep it out of payment.",
+    howTo: ["Filter by vendor, due date or status.", "Select Hold payment of an invoice and give a reason.", "Select Release hold on an invoice when it can be paid."],
+    guide: "ap-clerk.md#check-what-is-due",
+  },
+  {
+    patterns: ["/payables/proposals/new"],
+    title: "New payment proposal",
+    purpose: "Pick the payment date and method. Every invoice that is due is saved as a draft for approval.",
+    howTo: ["Choose the company currency and payment date.", "Set Include invoices due by to look further ahead.", "Use Pay a vendor a different way for exceptions.", "Select Create proposal."],
+    guide: "ap-clerk.md#create-a-payment-proposal",
+  },
+  {
+    patterns: ["/payables/proposals/:id"],
+    title: "Payment proposal",
+    purpose: "One list of invoices to pay, grouped by vendor, with totals.",
+    howTo: ["Check the totals and any invoices left out.", "Select Show invoices on a row for the detail.", "A different person from the creator selects Approve proposal.", "Select Cancel proposal to send the invoices back."],
+    guide: "ap-clerk.md#approve-a-payment-proposal",
+  },
+  {
+    patterns: ["/sales/workspace"],
+    title: "Sales workspace",
     purpose: "Your starting point for customer orders, holds and quotations.",
     howTo: ["Open Orders to see what is in progress.", "Open Credit release queue to see held orders."],
     guide: "order-desk.md#enter-the-order",
   },
   {
-    patterns: ["/sales/orders"],
+    patterns: ["/sales", "/sales/orders"],
     title: "Sales orders",
     purpose: "Customer orders and how far each has got.",
     howTo: ["Select New sales order to enter one.", "Open an order to confirm, change or cancel it."],
@@ -175,14 +231,14 @@ export const routeHelp: readonly RouteHelp[] = [
     patterns: ["/sales/orders/:id", "/sales/orders/:id/change", "/sales/orders/:id/promise"],
     title: "Sales order",
     purpose: "One customer order, with its holds, credit check and deliveries.",
-    howTo: ["Select Confirm order to run the credit check.", "Release or apply holds in the Holds card.", "Select Change or cancel to edit.", "Use Record delivery or invoice to log progress."],
+    howTo: ["Select Confirm order to run the credit check.", "Release or apply holds in the Holds card.", "Select Change or cancel to edit.", "Check Deliveries and invoices for progress."],
     guide: "order-desk.md#confirm-the-order",
   },
   {
     patterns: ["/sales/orders/:id/progress/new", "/sales/order-progress", "/sales/order-auto-close"],
     title: "Order progress",
-    purpose: "Record deliveries and invoices against an order, or close orders that are fully invoiced.",
-    howTo: ["Choose Delivery or Invoice and enter the reference.", "Enter the quantity for each line.", "Use Close invoiced orders to tidy up finished orders."],
+    purpose: "What has been delivered and invoiced on an order. Both are recorded automatically when a packing slip or invoice posts.",
+    howTo: ["Check the delivered and invoiced quantities.", "Use Close invoiced orders to tidy up finished orders."],
     guide: "order-desk.md#invoice-it",
   },
   {
@@ -191,6 +247,83 @@ export const routeHelp: readonly RouteHelp[] = [
     purpose: "Orders held for credit and each customer's credit limit.",
     howTo: ["Open a held order to release or reject it.", "A comment is needed to reject.", "Check a customer's exposure before you release."],
     guide: "order-desk.md#confirm-the-order",
+  },
+  {
+    patterns: ["/sales/quotations"],
+    title: "Quotations",
+    purpose: "Prices offered to customers before they order.",
+    howTo: ["Select New to write a quotation.", "Open a quotation to see its lines and status."],
+    guide: "order-desk.md#enter-the-order",
+  },
+  {
+    patterns: ["/sales/quotations/new"],
+    title: "New quotation",
+    purpose: "Offer a customer a price for products.",
+    howTo: ["Choose the customer and add a line for each product.", "Save it, then open it to follow its status."],
+    guide: "order-desk.md#enter-the-order",
+  },
+  {
+    patterns: ["/sales/quotations/:id"],
+    title: "Quotation",
+    purpose: "One quotation with its lines and status.",
+    howTo: ["Check the lines and prices.", "Follow the status to see whether the customer accepted."],
+    guide: "order-desk.md#enter-the-order",
+  },
+  {
+    patterns: ["/sales/change-requests", "/sales/change-policy"],
+    title: "Order change requests",
+    purpose: "Changes asked for on orders that are already confirmed, and the rules for when a change needs a decision.",
+    howTo: ["Open a request to see what changed.", "Approve or reject it."],
+    guide: "order-desk.md#confirm-the-order",
+  },
+  {
+    patterns: ["/sales/change-requests/:id"],
+    title: "Order change request",
+    purpose: "One requested change to a confirmed order.",
+    howTo: ["Compare the old and new values.", "Approve or reject it, with a comment."],
+    guide: "order-desk.md#confirm-the-order",
+  },
+  {
+    patterns: ["/sales/backorders", "/sales/backorder-runs", "/sales/backorder-processing/*"],
+    title: "Backorders",
+    purpose: "Order lines that could not be shipped yet, and the runs that try again when stock arrives.",
+    howTo: ["Open a row to see the order line.", "Use New to start a processing run."],
+    guide: "order-desk.md#ship-it",
+  },
+  {
+    patterns: ["/sales/atp", "/sales/allocation-quotas/*"],
+    title: "Availability",
+    purpose: "What you can promise customers, and quotas that reserve stock for them.",
+    howTo: ["Look up a product to see what is available.", "Open a quota to change it."],
+    guide: "order-desk.md#enter-the-order",
+  },
+  {
+    patterns: ["/sales/product-listings/*", "/sales/supplementary-items/*", "/sales/product-proposals/*", "/sales/alternative-items/*"],
+    title: "Product listings and suggestions",
+    purpose: "Which products each customer may order, and extra or alternative items offered with them.",
+    howTo: ["Open a row to see its details.", "Use New to add one."],
+    guide: "order-desk.md#enter-the-order",
+  },
+  {
+    patterns: ["/sales/agreements/*", "/sales/schedule-releases"],
+    title: "Sales agreements",
+    purpose: "Agreed prices and quantities with a customer, and the releases that turn them into orders.",
+    howTo: ["Open an agreement to see its lines and releases.", "Use New to add an agreement or a release."],
+    guide: "order-desk.md#enter-the-order",
+  },
+  {
+    patterns: ["/sales/intake-errors/*"],
+    title: "Order intake errors",
+    purpose: "Orders that arrived from outside but could not be entered.",
+    howTo: ["Open an error to see what was wrong.", "Fix the cause, then retry."],
+    guide: "order-desk.md#enter-the-order",
+  },
+  {
+    patterns: ["/sales/delivery-terms/*", "/sales/delivery-tolerances/*", "/sales/parameters"],
+    title: "Sales rules",
+    purpose: "Delivery terms, how much over or under delivery is allowed, and sales settings.",
+    howTo: ["Open a row to change it.", "Use New to add one."],
+    guide: "order-desk.md#enter-the-order",
   },
   {
     patterns: ["/sales/*"],
@@ -228,6 +361,41 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "order-desk.md#invoice-it",
   },
   {
+    patterns: ["/fulfillment/manifests/*", "/fulfillment/drop-ships/*"],
+    title: "Manifests and direct deliveries",
+    purpose: "Carrier manifests for a day's shipments, and orders the vendor ships straight to the customer.",
+    howTo: ["Open a row to see its shipments.", "Follow the status until it is delivered."],
+    guide: "order-desk.md#ship-it",
+  },
+  {
+    patterns: ["/fulfillment/exceptions/*", "/fulfillment/backorders"],
+    title: "Shipping problems",
+    purpose: "Shipments that need attention, and lines that could not ship yet.",
+    howTo: ["Open a row to see what went wrong.", "Fix the cause, then continue the shipment."],
+    guide: "order-desk.md#ship-it",
+  },
+  {
+    patterns: ["/fulfillment/scan", "/fulfillment/sscc-register"],
+    title: "Scanning and labels",
+    purpose: "Scan goods as you pick and pack, and see the labels issued to containers.",
+    howTo: ["Scan an item or container.", "Check the register for a label."],
+    guide: "order-desk.md#ship-it",
+  },
+  {
+    patterns: ["/fulfillment/container-types", "/fulfillment/packing-rules", "/fulfillment/packaging-materials", "/fulfillment/packaging-fees", "/fulfillment/returnable-packaging", "/fulfillment/returnable-movements", "/fulfillment/returnable-aging"],
+    title: "Packaging",
+    purpose: "Container types, packing rules, packaging materials and fees, and returnable packaging held by customers.",
+    howTo: ["Open a row to change it.", "Use Auto-pack by packing rule on a shipment to apply the rules."],
+    guide: "order-desk.md#ship-it",
+  },
+  {
+    patterns: ["/fulfillment/warehouse-settings", "/fulfillment/operation-rules", "/fulfillment/release-rules", "/fulfillment/delivery-tolerances", "/fulfillment/legal-entity-settings"],
+    title: "Warehouse rules",
+    purpose: "Settings that decide how lines are released, picked and shipped.",
+    howTo: ["Open a row to change it.", "Changes apply to new work, not to shipments already started."],
+    guide: "order-desk.md#ship-it",
+  },
+  {
     patterns: ["/fulfillment/*"],
     title: "Fulfillment set-up and reports",
     purpose: "Manifests, packaging, rules and exceptions that support shipping.",
@@ -256,6 +424,27 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "order-desk.md#invoice-it",
   },
   {
+    patterns: ["/billing/free-text-invoices/new"],
+    title: "New free-text invoice",
+    purpose: "Invoice something that did not ship, such as a service or a fee.",
+    howTo: ["Choose the customer and legal entity.", "Add a line with a description, amount and revenue account.", "Save it, then post it."],
+    guide: "order-desk.md#invoice-it",
+  },
+  {
+    patterns: ["/billing/credit-notes", "/billing/credit-notes/new"],
+    title: "Credit notes",
+    purpose: "Documents that reduce what a customer owes.",
+    howTo: ["Select New to write a credit note.", "Or open an invoice and select Credit invoice."],
+    guide: "order-desk.md#invoice-it",
+  },
+  {
+    patterns: ["/billing/revenue-allocation", "/billing/revenue-contracts/*", "/billing/deferred-revenue"],
+    title: "Revenue",
+    purpose: "How revenue from contracts is spread over time.",
+    howTo: ["Open a contract to see its schedule.", "Use New to add a contract."],
+    guide: "order-desk.md#invoice-it",
+  },
+  {
     patterns: ["/billing/*"],
     title: "Billing documents and revenue",
     purpose: "Free-text invoices, credit notes and revenue schedules.",
@@ -263,7 +452,14 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "order-desk.md#invoice-it",
   },
   {
-    patterns: ["/receivables", "/receivables/open-items", "/receivables/opening-items"],
+    patterns: ["/receivables"],
+    title: "AR workspace",
+    purpose: "Your starting point for money owed by customers.",
+    howTo: ["Open Open items to see what is unpaid.", "Open Payments to record money received."],
+    guide: "ar-clerk.md#look-at-what-is-owed",
+  },
+  {
+    patterns: ["/receivables/open-items"],
     title: "Open items",
     purpose: "Customer invoices and debits that are not yet paid.",
     howTo: ["Filter by customer.", "Open Payments to record money received."],
@@ -291,6 +487,41 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "ar-clerk.md#settle-it-against-invoices",
   },
   {
+    patterns: ["/receivables/opening-items"],
+    title: "Imported opening items",
+    purpose: "Customer balances brought in when you started using the system.",
+    howTo: ["Check the imported items against your old records."],
+    guide: "ar-clerk.md#look-at-what-is-owed",
+  },
+  {
+    patterns: ["/receivables/lockbox/*", "/receivables/bank-statements/*"],
+    title: "Bank files",
+    purpose: "Payments and statements loaded from the bank.",
+    howTo: ["Select New to load a file.", "Open a row to check its payments."],
+    guide: "ar-clerk.md#record-the-payment",
+  },
+  {
+    patterns: ["/receivables/disputes/*", "/receivables/deductions/*"],
+    title: "Disputes and deductions",
+    purpose: "Invoices a customer disagrees with, and amounts they took off a payment.",
+    howTo: ["Open a row to see the reason.", "Use New to record one."],
+    guide: "ar-clerk.md#settle-it-against-invoices",
+  },
+  {
+    patterns: ["/receivables/down-payments/*"],
+    title: "Down payments",
+    purpose: "Money received before an invoice, held until it is used.",
+    howTo: ["Open a down payment to see what is left.", "Use New to record one."],
+    guide: "ar-clerk.md#record-the-payment",
+  },
+  {
+    patterns: ["/receivables/worklist", "/receivables/promises/*", "/receivables/dunning-runs/*", "/receivables/interest-notes/*", "/receivables/cases/*", "/receivables/statements", "/receivables/balance-confirmations/*", "/receivables/balance-snapshots"],
+    title: "Collections",
+    purpose: "Chasing late payers: reminders, promises to pay, interest and statements.",
+    howTo: ["Start from the worklist.", "Open a row to see the customer's history.", "Use New to add a reminder run or a case."],
+    guide: "ar-clerk.md#look-at-what-is-owed",
+  },
+  {
     patterns: ["/receivables/*"],
     title: "Collections and bank files",
     purpose: "Disputes, reminders, bank statements and other work that supports getting paid.",
@@ -315,14 +546,16 @@ function score(pattern: string, path: readonly string[]): number | undefined {
   return total;
 }
 
-export function helpForRoute(pathname: string): RouteHelp | undefined {
+export function resolveHelp(pathname: string): { entry: RouteHelp; pattern: string } | undefined {
   const path = segments(pathname.split(/[?#]/)[0] ?? "");
-  let best: { entry: RouteHelp; value: number } | undefined;
+  let best: { entry: RouteHelp; pattern: string; value: number } | undefined;
   for (const entry of routeHelp) {
     for (const pattern of entry.patterns) {
       const value = score(pattern, path);
-      if (value !== undefined && (!best || value > best.value)) best = { entry, value };
+      if (value !== undefined && (!best || value > best.value)) best = { entry, pattern, value };
     }
   }
-  return best?.entry;
+  return best && { entry: best.entry, pattern: best.pattern };
 }
+
+export const helpForRoute = (pathname: string): RouteHelp | undefined => resolveHelp(pathname)?.entry;

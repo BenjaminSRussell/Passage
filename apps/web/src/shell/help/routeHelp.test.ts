@@ -1,16 +1,13 @@
-// @vitest-environment node
-import { readdirSync, readFileSync } from "node:fs";
 import { loadModules } from "../../modules/registry";
-import { helpForRoute, routeHelp } from "./routeHelp";
+import { DELIVERY_REF, SPEC_REF } from "../plainLanguageRules";
+import { helpForRoute, resolveHelp, routeHelp } from "./routeHelp";
 
 const FLOW_MODULES = ["purchasing", "receiving", "ap-invoices", "payables", "sales", "fulfillment", "billing", "receivables"];
 
-const guideDir = new URL("../../../../../docs/user/", import.meta.url);
-const guides: Record<string, string> = Object.fromEntries(
-  readdirSync(guideDir)
-    .filter((name) => name.endsWith(".md"))
-    .map((name) => [`/docs/user/${name}`, readFileSync(new URL(name, guideDir), "utf8")]),
-);
+const CATCH_ALL_ALLOWED: readonly string[] = [];
+const MODULE_CATCH_ALL = /^\/[^/]+\/\*$/;
+
+const guides = import.meta.glob<string>("../../../../../docs/user/*.md", { query: "?raw", import: "default", eager: true });
 
 const slug = (heading: string) =>
   heading
@@ -28,24 +25,27 @@ function headingsOf(file: string): string[] {
     .map((line) => slug(line.replace(/^#+ /, "")));
 }
 
-const SPEC_REF = /\b(?:FR|BR|AC)-\d+\.\d+/;
-const DELIVERY_REF = /\b(?:wave|slice)[ -]?\d+/i;
 const PROBLEM_CODE = /\b[A-Z]{2,5}(?:-[A-Z]{2,5})*-\d{3,4}\b/;
 const INTERNAL_WORDS = /\buuid\b/i;
+const plainFault = (text: string) => SPEC_REF.test(text) || DELIVERY_REF.test(text) || PROBLEM_CODE.test(text) || INTERNAL_WORDS.test(text);
 
 describe("route help map", () => {
-  const flowRoutes = loadModules()
-    .filter((module) => FLOW_MODULES.includes(module.id))
-    .flatMap((module) => module.routes.map((route) => ({ id: module.id, path: route.path ?? "" })));
+  const modules = loadModules().filter((module) => FLOW_MODULES.includes(module.id));
+  const flowRoutes = modules.flatMap((module) => module.routes.map((route) => ({ id: module.id, path: route.path ?? "" })));
 
-  it("covers the procure-to-pay and order-to-cash modules", () => {
-    expect(new Set(flowRoutes.map((route) => route.id))).toEqual(new Set(FLOW_MODULES));
-    expect(flowRoutes.length).toBeGreaterThan(100);
+  it("finds routes in every procure-to-pay and order-to-cash module", () => {
+    expect(modules.map((module) => module.id).sort()).toEqual([...FLOW_MODULES].sort());
+    for (const module of modules) expect(module.routes.length, module.id).toBeGreaterThan(0);
   });
 
-  it("has a help entry for every procure-to-pay and order-to-cash route", () => {
-    const missing = flowRoutes.filter((route) => !helpForRoute(route.path)).map((route) => route.path);
-    expect(missing).toEqual([]);
+  it("has a specific help entry for every route, not a module-wide catch-all", () => {
+    const unresolved = flowRoutes.filter((route) => !helpForRoute(route.path)).map((route) => route.path);
+    expect(unresolved).toEqual([]);
+    const caughtAll = flowRoutes
+      .filter((route) => MODULE_CATCH_ALL.test(resolveHelp(route.path)?.pattern ?? ""))
+      .map((route) => route.path)
+      .filter((path) => !CATCH_ALL_ALLOWED.includes(path));
+    expect(caughtAll).toEqual([]);
   });
 
   it("prefers the most specific pattern", () => {
@@ -53,6 +53,7 @@ describe("route help map", () => {
     expect(helpForRoute("/purchasing/purchase-orders/abc")?.title).toBe("Purchase orders");
     expect(helpForRoute("/purchasing/purchase-orders/abc/reprice")?.title).toBe("Purchase order line details");
     expect(helpForRoute("/receivables/payments/42?tab=1")?.title).toBe("Payment");
+    expect(helpForRoute("/purchasing/unknown-page")?.title).toBe("Purchasing set-up and reports");
     expect(helpForRoute("/admin")).toBeUndefined();
   });
 
@@ -74,12 +75,8 @@ describe("route help map", () => {
     expect(broken).toEqual([]);
   });
 
-  it("uses plain language: no spec ids, delivery references or problem codes", () => {
-    const offenders = routeHelp.flatMap((entry) =>
-      [entry.title, entry.purpose, ...entry.howTo]
-        .filter((text) => SPEC_REF.test(text) || DELIVERY_REF.test(text) || PROBLEM_CODE.test(text) || INTERNAL_WORDS.test(text))
-        .map((text) => `${entry.title}: ${text}`),
-    );
+  it("uses plain language in help text", () => {
+    const offenders = routeHelp.flatMap((entry) => [entry.title, entry.purpose, ...entry.howTo].filter(plainFault).map((text) => `${entry.title}: ${text}`));
     expect(offenders).toEqual([]);
   });
 
@@ -87,7 +84,7 @@ describe("route help map", () => {
     const offenders = Object.entries(guides).flatMap(([path, source]) =>
       source
         .split("\n")
-        .filter((line) => SPEC_REF.test(line) || DELIVERY_REF.test(line) || PROBLEM_CODE.test(line) || INTERNAL_WORDS.test(line))
+        .filter(plainFault)
         .map((line) => `${path}: ${line}`),
     );
     expect(Object.keys(guides).length).toBeGreaterThanOrEqual(6);

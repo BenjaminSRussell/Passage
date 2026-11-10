@@ -10,7 +10,7 @@ For the order desk. You enter a customer's order, confirm it, get it shipped and
 ## Enter the order
 
 1. Open **Sales** and choose **Orders**, then **New sales order**.
-2. Fill in **Legal entity** and **Customer**. These are typed in as ids, not picked from a list.
+2. Fill in **Legal entity** and **Customer**. Type the code or number; there is no list to pick from.
 3. Check **Invoice account**, **Order type** and **Currency**.
 4. Set the **Requested ship date** and, if the customer gave one, the **Customer reference**.
 5. Tick **One-time customer** only for a customer who orders once.
@@ -33,13 +33,14 @@ To change or cancel, select **Change or cancel**. Use **Cancel the remainder** t
 3. Open the shipment from **Shipments**. Select **Confirm pick** for each line. Use **Pick the remainder** with a short-pick reason if you could not find everything.
 4. Pack with **Auto-pack by packing rule**, or **Pack a container** and **Close container**.
 5. Select **Post packing slip** to ship. Check the **Journal preview** first.
+6. The order's delivered quantity updates by itself when the slip posts. There is nothing to record by hand.
 
 ## Invoice it
 
 1. Open **Billing** and select **Invoice shipments**.
 2. Enter the legal entity, customer, invoice account, currency, invoice date and payment terms.
 3. Add each packing slip and its lines, then select **Create proposals**.
-4. Open the proposal and select **Post invoice**. The invoice gets its number and goes to receivables and the ledger.
+4. Open the proposal and select **Post invoice**. The invoice gets its number and goes to receivables and the ledger. The order's invoiced quantity updates by itself.
 5. To undo part of it, select **Credit invoice**.
 
 After a sale, record what the customer pays in [Record a customer payment](ar-clerk.md).
@@ -92,9 +93,8 @@ After a sale, record what the customer pays in [Record a customer payment](ar-cl
 
 ## Not available yet
 
-- **Pick-lists for customer, legal entity and product** on the order form. They are typed in as ids.
+- **Pick-lists for customer, legal entity and product** on the order form. You type the code or number.
 - **Automatic hand-off to the warehouse.** Release lines and Invoice shipments need order, shipment and packing slip details typed in by hand. Confirmed order lines and posted packing slips do not carry over yet.
-- **Plain names for recording a delivery or invoice on an order.** The screen asks for access by an internal name.
 - **Unit cost on the packing slip** is typed in by hand.
 
 ## Glossary

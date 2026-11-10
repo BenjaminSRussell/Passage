@@ -12,10 +12,10 @@ For accounts receivable clerks. You record money from a customer and settle it a
 1. Open **Receivables** and choose **Payments**, then **Record payment**.
 2. Choose the **Legal entity**. Choose the **Customer** if you know who paid.
 3. Pick the **Payment mode**: Check, ACH, Wire, Card or Cash.
-4. Enter the **Check or bank reference**, **Amount** and **Currency**.
+4. Enter the **Amount** and **Currency**.
 5. Enter the **Received date** and the **Value date**.
-6. Add the **Payer name** and **Payer bank account** if they are on the remittance.
-7. If the customer paid less than billed, give the **Short-pay reason**.
+6. Open **More options** to add the **Check or bank reference**, **Payer name** and **Payer bank account** if they are on the remittance.
+7. If the customer paid less than billed, give the **Short-pay reason** under **More options**.
 8. If the customer listed invoices, select **Add reference** for each.
 9. Select **Record payment**. The payment starts as Received.
 
