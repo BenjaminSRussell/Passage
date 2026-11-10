@@ -1,0 +1,31 @@
+import { test } from "vitest";
+import { installDemoBackend } from "../backend";
+import "../handlers";
+test("ar", async () => {
+  installDemoBackend();
+  const get = async (p: string, init?: RequestInit) => {
+    const r = await fetch(p, init);
+    return [r.status, await r.json().catch(() => null)];
+  };
+  const lines: string[] = [];
+  const out = (x: unknown) => lines.push(JSON.stringify(x));
+  const log = (...a: unknown[]) => lines.push(a.join(" "));
+  out(await get("/api/v1/receivables/aging"));
+  const [, items] = (await get("/api/v1/receivables/open-items")) as [number, { items: { documentNumber: string; sourceType: string; customerId: string; dueDate: string; openAmount: string; dunningLevel: number }[] }];
+  for (const i of items.items) log(i.documentNumber, i.sourceType, i.customerId.slice(0, 8), i.dueDate, i.openAmount, i.dunningLevel);
+  out(await get("/api/v1/receivables/worklist?asOf=" + new Date().toISOString().slice(0, 10)));
+  const [, pays] = (await get("/api/v1/receivables/payments?limit=500")) as [number, { items: { id: string; status: string; amount: string; sourceRef: string }[] }];
+  for (const p of pays.items) log(p.status, p.amount, p.sourceRef, p.id);
+  const bw = pays.items.find((p) => p.sourceRef === "ACH 7740288")!;
+  out(await get(`/api/v1/receivables/payments/${bw.id}:match`, { method: "POST" }));
+  const un = pays.items.find((p) => p.sourceRef === "FED 1109-0031")!;
+  out(await get(`/api/v1/receivables/payments/${un.id}:match`, { method: "POST" }));
+  out(await get("/api/v1/receivables/dunning-runs"));
+  out(await get("/api/v1/receivables/dunning-runs", { method: "POST", body: JSON.stringify({ legalEntityId: "x", runDate: new Date().toISOString().slice(0, 10), graceDays: 5 }) }));
+  out(await get("/api/v1/receivables/interest-notes"));
+  out(await get("/api/v1/receivables/interest-notes:calculate", { method: "POST", body: JSON.stringify({ calculationDate: new Date().toISOString().slice(0, 10), annualRate: "0.12", basis: "ACT_365", graceDays: 5 }) }));
+  out(await get("/api/v1/receivables/balance-confirmations"));
+  out(await get("/api/v1/receivables/cases?status=OPEN&limit=500"));
+  out(await get("/api/v1/sales/credit-exposure"));
+  (await import("node:fs")).writeFileSync("/tmp/claude-0/-home-user-Passage/64b295f8-c2c3-48f0-ae07-930c32290dcd/scratchpad/ar/out.txt", lines.join("\n"));
+}, 30000);

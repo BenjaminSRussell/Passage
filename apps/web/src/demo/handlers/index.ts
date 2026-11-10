@@ -7,3 +7,4 @@ import "./budgeting";
 import "./documents";
 import "./tax";
 import "./shell";
+import "./fx";

@@ -5,3 +5,4 @@ import "./billing";
 import "./pricing";
 import "./quotations";
 import "./receivables";
+import "./collections";
