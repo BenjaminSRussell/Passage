@@ -1,63 +1,24 @@
+import { Link } from "react-router-dom";
 import { Badge, Card, DataTable, PageHeader, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
 import styles from "./pages.module.css";
 
 const sampleDataBadge = <Badge tone="neutral">Sample data</Badge>;
 
 export function WorkflowHome({
-  counts = { pending: 4, running: 1, failed: 0 },
+  counts = { running: 1, failed: 0 },
 }: {
-  counts?: { pending: number; running: number; failed: number };
+  counts?: { running: number; failed: number };
 }) {
   return (
     <>
       <PageHeader title="Workflow and batch" description="Approvals, batch jobs and message templates." meta={sampleDataBadge} />
+      <p>
+        <Link to="/workflow/inbox">Open My work</Link>
+      </p>
       <StatGroup label="Workflow tiles">
-        <StatTile label="Pending work items" value={counts.pending} />
         <StatTile label="Running jobs" value={counts.running} />
         <StatTile label="Failed runs" value={counts.failed} tone="danger" />
       </StatGroup>
-    </>
-  );
-}
-
-interface WorkItem {
-  document: string;
-  step: string;
-  submittedBy: string;
-  due: string;
-  status: string;
-}
-
-const workItemColumns: DataTableColumn<WorkItem>[] = [
-  { key: "document", header: "Document", mono: true },
-  { key: "step", header: "Step" },
-  { key: "submittedBy", header: "Submitted by" },
-  {
-    key: "due",
-    header: "Due",
-    render: (row) => (row.due === "overdue" ? <Badge tone="warning">Overdue</Badge> : row.due),
-  },
-  { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
-];
-
-export function InboxPage({
-  items = [
-    { document: "PR-1042", step: "Director", submittedBy: "alice", due: "in 3 hours", status: "pending" },
-    { document: "PR-1043", step: "Controller", submittedBy: "bob", due: "overdue", status: "escalated" },
-  ],
-}: {
-  items?: WorkItem[];
-}) {
-  return (
-    <>
-      <PageHeader title="Inbox" description="Approvals assigned to you." meta={sampleDataBadge} />
-      <DataTable
-        label="Work items"
-        columns={workItemColumns}
-        rows={items}
-        getRowKey={(row) => row.document}
-        empty={{ title: "You're all caught up", description: "Approvals assigned to you appear here." }}
-      />
     </>
   );
 }
