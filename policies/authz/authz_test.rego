@@ -1359,6 +1359,17 @@ test_migration_service_grant_reaches_only_the_import_routes if {
 	}
 }
 
+test_opening_target_release_is_its_own_duty if {
+	allowed("migration.opening-target.release", "POST", "/api/v1/migration/opening-targets/AX2012/USMF/release")
+	not allowed("migration.opening-target.release", "POST", "/api/v1/migration/runs/r1/opening-journal")
+	not allowed("migration.opening-target.release", "PUT", "/api/v1/cutover/plans/p1/opening-targets/AX2012/USMF")
+	not allowed("migration.cutover.manage", "POST", "/api/v1/migration/opening-targets/AX2012/USMF/release")
+	not allowed("migration.factory.run", "POST", "/api/v1/migration/opening-targets/AX2012/USMF/release")
+	allowed("migration.cutover.manage", "PUT", "/api/v1/cutover/plans/p1/opening-targets/AX2012/USMF")
+	allowed("migration.cutover.manage", "GET", "/api/v1/cutover/plans/p1/opening-targets")
+	not allowed("migration.factory.view", "PUT", "/api/v1/cutover/plans/p1/opening-targets/AX2012/USMF")
+}
+
 test_integration_hub_reaches_only_render_and_xref_record if {
 	data.service_grants["integration-hub"] == {"migration": ["migration.outbound.render", "migration.xref.record"]}
 	data.service_principals["integration-hub"] == ["migration.outbound.render", "migration.xref.record"]

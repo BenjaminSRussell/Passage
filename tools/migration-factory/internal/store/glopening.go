@@ -149,6 +149,13 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		if journals, err = domain.BuildOpeningJournals(rows, run.SourceSystem, run.SourceCompany, in.LegalEntityID, in.LedgerID, in.PostingDate); err != nil {
 			return err
 		}
+		mapped, err := readOpeningMapping(ctx, tx, string(run.SourceSystem), run.SourceCompany)
+		if err != nil {
+			return err
+		}
+		if mapped != nil && (mapped.legalEntityID != in.LegalEntityID || mapped.ledgerID != in.LedgerID) {
+			return openingTargetMapped(run.SourceCompany)
+		}
 		pin, err := readOpeningTarget(ctx, tx, string(run.SourceSystem), run.SourceCompany)
 		if err != nil {
 			return err
