@@ -698,6 +698,31 @@ func TestGLEntry_UnbalancedDocumentIsNamedNotPosted(t *testing.T) {
 	}
 }
 
+// Tax is booked to the account of its code when the profile maps one, the rest to the profile tax account (#560).
+func TestGLEntry_TaxIsBookedPerCodeWhenTheProfileMapsAccounts(t *testing.T) {
+	p := store.GLProfile{LegalEntityID: leID, LedgerID: ids.New(), ReceivableAccount: "1200", TaxAccount: "2300", ChargeAccount: "4800", DeferredRevenueAccounts: []string{"4100"},
+		TaxAccounts: map[string]string{"DE19": "2310", "DE7": "2307"}}
+	d := store.GLDocument{ID: ids.New(), Currency: "USD", PostingDate: "2027-03-12", Gross: decimal.RequireFromString("166.50"), Tax: decimal.RequireFromString("16.50"),
+		Lines: []store.GLLine{
+			{No: 1, Account: "4000", Net: decimal.NewFromInt(100), Tax: decimal.NewFromInt(13), TaxCode: "DE19"},
+			{No: 2, Account: "4000", Net: decimal.NewFromInt(50), Tax: decimal.RequireFromString("3.50"), TaxCode: "DE7"}}}
+	shares, code := glSplit(p, d, nil, nil)
+	if code != "" {
+		t.Fatalf("split code %q", code)
+	}
+	e, code := glEntry(p, d, shares)
+	if code != "" {
+		t.Fatalf("entry code %q", code)
+	}
+	got := map[string]string{}
+	for _, l := range e.Lines {
+		got[l.Account] = l.Amount.String()
+	}
+	if got["2310"] != "13" || got["2307"] != "3.5" || got["2300"] != "" || got["4000"] != "150" {
+		t.Errorf("accounts %v, want 13 on 2310 and 3.5 on 2307 and nothing on 2300", got)
+	}
+}
+
 func TestParseGLProfiles(t *testing.T) {
 	le, ledger := ids.New(), ids.New()
 	entry := func(le, ledger, extra string) string {

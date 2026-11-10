@@ -1981,7 +1981,8 @@
       {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
       {"resource": "/v1/billing/invoices/*:post", "methods": ["POST"]},
       {"resource": "/v1/billing/sales-reports/*:retry", "methods": ["POST"]},
-      {"resource": "/v1/billing/tax-reports/*:retry", "methods": ["POST"]}
+      {"resource": "/v1/billing/tax-reports/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/billing/tax-reports:backfill", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},

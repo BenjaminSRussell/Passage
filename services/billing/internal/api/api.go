@@ -143,6 +143,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/sales-reports/{id}:retry", a.retrySalesReport)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/tax-reports", a.listTaxReports)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/tax-reports/{id}:retry", a.retryTaxReport)
+	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/tax-reports:backfill", a.backfillTaxReports)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions", a.createSubscription)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/subscriptions/{id}", a.getSubscription)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:change-plan", a.changePlan)
