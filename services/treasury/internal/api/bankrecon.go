@@ -18,15 +18,17 @@ import (
 )
 
 const (
-	dutyReconView   = "treasury.reconciliation.view"
-	dutyReconClose  = "treasury.reconciliation.close"
-	dutyReconReopen = "treasury.reconciliation.reopen"
-	dutyReconPost   = "treasury.reconciliation.post"
+	dutyReconView    = "treasury.reconciliation.view"
+	dutyReconClose   = "treasury.reconciliation.close"
+	dutyReconReopen  = "treasury.reconciliation.reopen"
+	dutyReconPost    = "treasury.reconciliation.post"
+	dutyReconAbandon = "treasury.reconciliation.abandon"
 
 	CodeReconNotEnabled = "TRS-0514"
 	CodeLedgerNoProfile = "TRS-0515"
 	CodeLedgerRefused   = "TRS-0518"
 	CodeLedgerDown      = "TRS-0519"
+	CodeLedgerHeld      = "TRS-0522"
 )
 
 type Reconciliations interface {
@@ -41,6 +43,9 @@ type Reconciliations interface {
 	BeginLineTransaction(ctx context.Context, in store.NewLineTransaction) (store.LineTransaction, error)
 	FinishLineTransaction(ctx context.Context, id, ledgerEntryID string) (store.LineTransaction, error)
 	RefuseLineTransaction(ctx context.Context, id, code string) error
+	HoldLineTransaction(ctx context.Context, id, code string) error
+	MarkLineAttempt(ctx context.Context, id string) error
+	AbandonLineTransaction(ctx context.Context, reconciliationID string, lineNo int, reason string) (store.LineTransaction, error)
 }
 
 type reconCounters struct {
@@ -68,6 +73,7 @@ func (a *API) registerBankReconciliation(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:exclude", a.excludeLine)
 	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:include", a.includeLine)
 	r.With(authz.RequireDuty(dutyReconPost)).Post("/v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:create-transaction", a.createLineTransaction)
+	r.With(authz.RequireDuty(dutyReconAbandon)).Post("/v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:abandon", a.abandonLineTransaction)
 }
 
 func (a *API) reconsReady(w http.ResponseWriter, r *http.Request) bool {
@@ -264,7 +270,9 @@ func (a *API) closeBankRecon(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	a.reconClosed.Add(1)
+	if !rec.Replayed {
+		a.reconClosed.Add(1)
+	}
 	setETag(w, rec.Version)
 	httpx.JSON(w, http.StatusOK, rec)
 }
@@ -340,6 +348,26 @@ func (a *API) excludeLine(w http.ResponseWriter, r *http.Request) {
 	}
 	a.linesExcluded.Add(1)
 	httpx.JSON(w, http.StatusOK, line)
+}
+
+func (a *API) abandonLineTransaction(w http.ResponseWriter, r *http.Request) {
+	if !a.reconsReady(w, r) {
+		return
+	}
+	id, lineNo, ok := reconLine(w, r)
+	if !ok {
+		return
+	}
+	reason, ok := requireReason(w, r)
+	if !ok {
+		return
+	}
+	t, err := a.recons.AbandonLineTransaction(r.Context(), id, lineNo, reason)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, t)
 }
 
 func (a *API) includeLine(w http.ResponseWriter, r *http.Request) {

@@ -85,13 +85,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("ledger client: %w", err)
 	}
-	if ledger != nil {
-		profiles := map[string]api.GLProfile{}
-		if raw := os.Getenv(api.EnvGLProfiles); raw != "" {
-			if profiles, err = api.ParseGLProfiles(raw); err != nil {
-				return err
-			}
+	profiles := map[string]api.GLProfile{}
+	if raw := os.Getenv(api.EnvGLProfiles); raw != "" {
+		if profiles, err = api.ParseGLProfiles(raw); err != nil {
+			return err
 		}
+	}
+	if ledger != nil {
 		a.WithLedger(ledger, profiles)
 	}
 

@@ -84,6 +84,9 @@ func (f *fakeRecons) BeginLineTransaction(_ context.Context, in store.NewLineTra
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	t, ok := f.txs[in.LineNo]
+	if ok && t.Status == store.TransactionHeld {
+		return store.LineTransaction{}, httpx.NewProblem(http.StatusConflict, store.CodeLineConflict, "held for a person")
+	}
 	if !ok {
 		t = &store.LineTransaction{ID: ids.New(), ReconciliationID: in.ReconciliationID, LegalEntityID: testLE, BankAccountID: testBankAcct, StatementID: reconStatement,
 			LineNo: in.LineNo, Kind: in.Kind, Amount: f.amount, Currency: "EUR", PostingDate: "2026-10-22", Status: store.TransactionPending, Version: 1}
@@ -127,6 +130,39 @@ func (f *fakeRecons) RefuseLineTransaction(_ context.Context, id, _ string) erro
 		}
 	}
 	return nil
+}
+
+func (f *fakeRecons) HoldLineTransaction(_ context.Context, id, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.txs {
+		if t.ID == id {
+			t.Status = store.TransactionHeld
+		}
+	}
+	return nil
+}
+
+func (f *fakeRecons) MarkLineAttempt(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.txs {
+		if t.ID == id {
+			t.AttemptUnanswered = true
+		}
+	}
+	return nil
+}
+
+func (f *fakeRecons) AbandonLineTransaction(_ context.Context, _ string, lineNo int, _ string) (store.LineTransaction, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.txs[lineNo]
+	if !ok || (t.Status != store.TransactionPending && t.Status != store.TransactionHeld) {
+		return store.LineTransaction{}, httpx.NewProblem(http.StatusConflict, store.CodeNothingToAbandon, "nothing to abandon")
+	}
+	t.Status = store.TransactionAbandon
+	return *t, nil
 }
 
 func (f *fakeRecons) status(lineNo int) string {
@@ -227,6 +263,62 @@ func TestCreateLineTransaction_ALedgerRefusalMatchesNothingAndExplainsInPlainLan
 	s.ledger.FailPosts(nil)
 	if code, _, body = s.post("/lines/4:create-transaction", `{"kind":"bank_fee"}`, nil); code != http.StatusCreated || s.recons.finishCalls != 1 {
 		t.Fatalf("retry after the cause is fixed = %d %s with %d finishes; want 201 and one finish", code, body, s.recons.finishCalls)
+	}
+}
+
+func TestCreateLineTransaction_AFourXXAfterAnUnansweredAttemptIsHeldForAPersonNeverReleased(t *testing.T) {
+	s := newReconServer(t, testProfile())
+	s.ledger.LoseAnswers(errors.New("connection reset"))
+	s.post("/lines/4:create-transaction", `{"kind":"bank_fee"}`, nil)
+	s.ledger.LoseAnswers(nil)
+	s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+	code, problem, body := s.post("/lines/4:create-transaction", `{"kind":"bank_fee"}`, nil)
+	if code != http.StatusConflict || problem != CodeLedgerHeld || s.recons.status(4) != store.TransactionHeld {
+		t.Fatalf("refusal after a lost answer = %d %s %s with status %q; want 409 %s and the line held", code, problem, body, s.recons.status(4), CodeLedgerHeld)
+	}
+	s.ledger.FailPosts(nil)
+	if code, problem, _ = s.post("/lines/4:create-transaction", `{"kind":"bank_fee"}`, nil); code != http.StatusConflict || problem != store.CodeLineConflict {
+		t.Fatalf("retry of a held line = %d %s; want 409 %s", code, problem, store.CodeLineConflict)
+	}
+}
+
+func TestCreateLineTransaction_AnIdempotencyConflictIsNeverReleased(t *testing.T) {
+	s := newReconServer(t, testProfile())
+	s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusConflict, Code: ledgerclient.CodeIdempotencyConflict})
+	code, problem, _ := s.post("/lines/4:create-transaction", `{"kind":"bank_fee"}`, nil)
+	if code != http.StatusConflict || problem != CodeLedgerHeld || s.recons.status(4) != store.TransactionHeld {
+		t.Fatalf("idempotency conflict = %d %s status %q; want 409 %s and the line held", code, problem, s.recons.status(4), CodeLedgerHeld)
+	}
+}
+
+func TestCreateLineTransaction_AuthAndThrottleRefusalsAreNotBusinessRefusals(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests} {
+		s := newReconServer(t, testProfile())
+		s.ledger.FailPosts(&ledgerclient.Error{Op: "post", Status: status, Code: "X"})
+		code, problem, _ := s.post("/lines/4:create-transaction", `{"kind":"bank_fee"}`, nil)
+		if code != http.StatusServiceUnavailable || problem != CodeLedgerDown || s.recons.status(4) != store.TransactionPending {
+			t.Fatalf("ledger %d = %d %s status %q; want 503 %s and the line still pending", status, code, problem, s.recons.status(4), CodeLedgerDown)
+		}
+	}
+}
+
+func TestAbandonLineTransaction_NeedsItsOwnDutyAndAReason(t *testing.T) {
+	s := newReconServer(t, testProfile())
+	s.ledger.LoseAnswers(errors.New("connection reset"))
+	s.post("/lines/4:create-transaction", `{"kind":"bank_fee"}`, nil)
+	if code, problem, _ := s.post("/lines/4:abandon", `{}`, nil); code != http.StatusBadRequest || problem != "COM-0001" {
+		t.Fatalf("abandon without a reason = %d %s; want 400 COM-0001", code, problem)
+	}
+	rec := call(s.h, http.MethodPost, reconPath+s.id+"/lines/4:abandon", bytes.NewBufferString(`{"reason":"ledger never accepts"}`), "application/json",
+		map[string]string{tenant.HeaderDuties: "treasury.reconciliation.post"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("abandon with the post duty = %d; want 403", rec.Code)
+	}
+	if code, _, body := s.post("/lines/4:abandon", `{"reason":"ledger never accepts"}`, nil); code != http.StatusOK || s.recons.status(4) != store.TransactionAbandon {
+		t.Fatalf("abandon = %d %s status %q; want 200 and abandoned", code, body, s.recons.status(4))
+	}
+	if code, problem, _ := s.post("/lines/9:abandon", `{"reason":"x"}`, nil); code != http.StatusConflict || problem != store.CodeNothingToAbandon {
+		t.Fatalf("abandon with nothing pending = %d %s; want 409 %s", code, problem, store.CodeNothingToAbandon)
 	}
 }
 

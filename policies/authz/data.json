@@ -3337,6 +3337,7 @@
     "treasury.forecast.write": {"permissions": [{"resource": "/v1/treasury/cash-forecast-entries", "methods": ["POST"]}]},
     "treasury.loan.write": {"permissions": [{"resource": "/v1/treasury/loans", "methods": ["POST"]}]},
     "treasury.reconciliation.close": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*:close", "methods": ["POST"]}]},
+    "treasury.reconciliation.abandon": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*/lines/*:abandon", "methods": ["POST"]}]},
     "treasury.reconciliation.post": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*/lines/*:create-transaction", "methods": ["POST"]}]},
     "treasury.reconciliation.reopen": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*:reopen", "methods": ["POST"]}]},
     "treasury.reconciliation.view": {"permissions": [

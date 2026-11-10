@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -150,7 +151,21 @@ func (a *API) createLineTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, t)
 		return
 	}
+	wasUnanswered := t.AttemptUnanswered
+	hold := func(code, detail string) {
+		if err := a.recons.HoldLineTransaction(ctx, t.ID, code); err != nil {
+			logFailure(r, "hold line transaction for a person", err)
+		}
+		a.lineTxNoAnswer.Add(1)
+		p := httpx.NewProblem(http.StatusConflict, CodeLedgerHeld, detail)
+		p.Errors = map[string]string{"ledgerCode": code}
+		httpx.Fail(w, r, p)
+	}
 	refuse := func(code, detail string) {
+		if wasUnanswered {
+			hold(code, "An earlier attempt to post this statement line went unanswered and the general ledger now refuses it, so the entry may already exist there. A person must check the general ledger, then abandon or exclude this line.")
+			return
+		}
 		if err := a.recons.RefuseLineTransaction(ctx, t.ID, code); err != nil {
 			logFailure(r, "release refused line transaction", err)
 		}
@@ -164,13 +179,22 @@ func (a *API) createLineTransaction(w http.ResponseWriter, r *http.Request) {
 		refuse(code, detail+"; nothing was recorded as matched")
 		return
 	}
+	if err := a.recons.MarkLineAttempt(ctx, t.ID); err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
 	entryID, err := a.ledger.Post(ctx, entry)
-	if ledgerclient.Rejected(err) || ledgerclient.CodeOf(err) == ledgerclient.CodeIdempotencyConflict {
+	switch {
+	case err == nil:
+	case ledgerclient.CodeOf(err) == ledgerclient.CodeIdempotencyConflict:
+		slog.ErrorContext(ctx, "general ledger reports an idempotency conflict for a bank transaction", "reconciliationId", id, "lineNo", lineNo, "correlationId", cid)
+		hold(ledgerclient.CodeIdempotencyConflict, "The general ledger already holds a different entry under this statement line's key, so a person must check the general ledger before this line is retried.")
+		return
+	case ledgerclient.Rejected(err) && !authRefusal(err):
 		slog.WarnContext(ctx, "general ledger refused a bank transaction", "reconciliationId", id, "lineNo", lineNo, "ledgerCode", ledgerclient.CodeOf(err), "correlationId", cid)
 		refuse(ledgerRefusalCode(err), "The general ledger refused the entry, so the statement line was not matched and nothing was booked. Fix the cause named in ledgerCode, then try again.")
 		return
-	}
-	if err != nil {
+	default:
 		a.lineTxNoAnswer.Add(1)
 		slog.ErrorContext(ctx, "general ledger call failed", "reconciliationId", id, "lineNo", lineNo, "ledgerCode", ledgerclient.CodeOf(err), "err", err, "correlationId", cid)
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeLedgerDown, "The general ledger did not answer. Nothing was recorded as matched; repeat the request, it is safe to repeat."))
@@ -178,9 +202,18 @@ func (a *API) createLineTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 	done, err := a.recons.FinishLineTransaction(ctx, t.ID, entryID)
 	if err != nil {
-		httpx.Fail(w, r, problemFrom(err))
+		logFailure(r, "finish line transaction after the ledger accepted it", err)
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeLedgerDown, "The general ledger accepted the entry but the match could not be saved. Repeat the request, it is safe to repeat."))
 		return
 	}
 	a.lineTxPosted.Add(1)
 	httpx.JSON(w, http.StatusCreated, done)
+}
+
+func authRefusal(err error) bool {
+	var le *ledgerclient.Error
+	if !errors.As(err, &le) {
+		return false
+	}
+	return le.Status == http.StatusUnauthorized || le.Status == http.StatusForbidden || le.Status == http.StatusTooManyRequests
 }

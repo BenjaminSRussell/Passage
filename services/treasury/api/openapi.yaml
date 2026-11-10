@@ -979,7 +979,10 @@ paths:
     post:
       operationId: setBankReconciliationBalances
       summary: Replace the book balance and the book items not yet on the statement
-      description: Refused with 409 TRS-0506 once the period is closed.
+      description: |
+        Refused with 409 TRS-0506 once the period is closed. The book balance is stated by the caller, not read from the
+        ledger: every change is written to the reconciliation's audit trail (`balances_set`, with old and new values and the
+        actor) and the person is stored as `bookBalanceStatedBy`. That person cannot close the reconciliation (403 TRS-0520).
       x-passage-duty: treasury.reconciliation.write
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1016,7 +1019,8 @@ paths:
       summary: Close the period; its lines and matches are locked against change
       description: |
         Allowed only when every line is matched or excluded with a reason (422 TRS-0507) and the difference is zero
-        (422 TRS-0410), and no bank transaction from a line is still being posted (409 TRS-0517). Records who closed it and when.
+        (422 TRS-0410), and no bank transaction from a line is still being posted or held for a person (409 TRS-0517, `errors.pendingLines`
+        lists the line numbers). The person who last stated the book balance cannot close it (403 TRS-0520). Records who closed it and when.
         Closing a closed reconciliation answers 200 with it unchanged.
       x-passage-duty: treasury.reconciliation.close
       parameters:
@@ -1113,6 +1117,35 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:abandon:
+    post:
+      operationId: abandonLineTransaction
+      summary: Give up a bank transaction from a line that the ledger will never accept
+      description: |
+        For a transaction that is pending or held for a person (409 TRS-0522). It is stored as abandoned with the reason and the
+        actor and written to the audit trail. The line stays unmatched and no longer blocks the close; check the general ledger
+        by hand first, because an unanswered attempt may already have booked the entry. Then exclude the line or match it.
+        409 TRS-0523 when the line has no such transaction.
+      x-passage-duty: treasury.reconciliation.abandon
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/LineNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReasonRequest"}
+      responses:
+        "200":
+          description: Transaction abandoned
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LineTransaction"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:create-transaction:
     post:
       operationId: createTransactionFromStatementLine
@@ -1123,8 +1156,12 @@ paths:
         Once per statement line: the ledger key is derived from the statement and line, so repeating the request, also
         after a lost answer, never posts twice. A line that already has its transaction answers 200 with it.
         A bank fee needs money out, an unknown receipt money in, interest either. The line currency must equal the account currency (422 TRS-0512).
-        A refusal by the ledger or the profile (422 TRS-0518) stores nothing as matched and names the cause in `errors.ledgerCode`.
-        A ledger that does not answer gives 503 TRS-0519 and leaves the line pending; repeat the request.
+        A refusal by the ledger or the profile (422 TRS-0518) stores nothing as matched, names the cause in `errors.ledgerCode` and releases
+        the line for another try, also with another kind. After an earlier attempt that went unanswered the entry may already exist in the
+        ledger, so a later refusal or an idempotency conflict does not release the line: it is held for a person (409 TRS-0522) until the
+        transaction is abandoned. A 401, 403 or 429 from the ledger is not a business refusal and gives 503 TRS-0519.
+        A ledger that does not answer gives 503 TRS-0519 and leaves the line pending; repeat the request. The same 503 answers when the
+        ledger accepted the entry but the match could not be saved; repeating is safe.
         An unmapped bank account or a legal entity without a profile gives 422 TRS-0515 or TRS-0518.
         503 TRS-0514 when the service has no ledger client.
       x-passage-duty: treasury.reconciliation.post
@@ -1919,7 +1956,10 @@ components:
         openingBalance: {type: string}
         closingBalance: {type: string}
         bookBalance: {type: string}
-        outstandingAmount: {type: string}
+        outstandingAmount: {type: string, description: "Signed. Positive: book payments not yet on the statement (outstanding checks). Negative: book receipts not yet on it (deposits in transit)."}
+        bookBalanceSource: {type: string, enum: [stated], description: The book balance is stated by a person, not read from the ledger}
+        bookBalanceStatedBy: {type: string, description: The person who last stated the book balance; cannot close the reconciliation}
+        bookBalanceStatedAt: {type: string, format: date-time}
         difference: {type: string, description: "closing - (book + outstanding + excluded lines); zero to close"}
         summary: {$ref: "#/components/schemas/BankReconciliationLines"}
         closedBy: {type: string}
@@ -1950,10 +1990,10 @@ components:
         statementId: {type: string, format: uuid}
         lineNo: {type: integer}
         kind: {type: string, enum: [bank_fee, interest, unknown_receipt]}
-        amount: {type: string, description: Signed as on the statement line}
+        amount: {type: string, description: Signed as on the statement line, in the currency's minor units}
         currency: {type: string}
         postingDate: {type: string, format: date}
-        status: {type: string, enum: [pending, posted, refused]}
+        status: {type: string, enum: [pending, posted, refused, conflict, abandoned]}
         ledgerEntryId: {type: string}
         matchId: {type: string, format: uuid}
         version: {type: integer}
