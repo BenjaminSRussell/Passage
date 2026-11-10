@@ -7,7 +7,8 @@ import { HomePage } from "../pages/HomePage";
 import { PrincipalProvider } from "../principal";
 import { AuthGate } from "./AuthGate";
 import { AuthRoot } from "./AuthRoot";
-import { createAuth, installBearerFetch, type AuthEnv } from "./auth";
+import { bootstrapAuth, createAuth, installBearerFetch, type AuthEnv } from "./auth";
+import { checkAxeAA } from "../a11y";
 import { authorizeUrl, challengeS256, endpoints, sessionFrom, type OidcConfig } from "./oidc";
 
 const config: OidcConfig = { issuer: "http://localhost:8080/realms/passage", clientId: "passage-web" };
@@ -264,15 +265,13 @@ describe("main.tsx wiring under StrictMode", () => {
         return new Response("{}");
       }) as typeof fetch,
     };
-    const { env, store, assign } = envAt("/auth/callback", "?code=c&state=s", () =>
+    const { env, store, assign, fetcher } = envAt("/auth/callback", "?code=c&state=s", () =>
       new Response(JSON.stringify({ access_token: tokenFor("u", CLERK_DUTIES), expires_in: 300 })),
     );
     store.set("passage.oidc.pending", JSON.stringify({ state: "s", verifier: "v", returnTo: "/" }));
-    const created = vi.fn(createAuth);
-    const auth = created(config, env);
-    installBearerFetch(auth, origin, target);
+    const auth = bootstrapAuth(config, env, target);
     const wrapped = target.fetch;
-    installBearerFetch(createAuth(config, envAt("/", "").env), origin, target);
+    bootstrapAuth(config, envAt("/", "").env, target);
     expect(target.fetch).toBe(wrapped);
 
     render(
@@ -285,16 +284,19 @@ describe("main.tsx wiring under StrictMode", () => {
     expect(await screen.findByText("app with 2 duties")).toBeInTheDocument();
     await target.fetch(`${origin}/api/v1/ledger/ledgers`);
 
-    expect(created).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledOnce();
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatch(/^Bearer .+\..+\..+$/);
     expect(assign).not.toHaveBeenCalled();
   });
 
   it("refuses to render the app without sign-in settings when auth is required", () => {
-    render(<AuthRoot auth={null} requireAuth>{() => <p>app</p>}</AuthRoot>);
-    expect(screen.getByRole("alert")).toHaveTextContent(/not configured|no identity provider/i);
+    const { container } = render(<AuthRoot auth={null} requireAuth>{() => <p>app</p>}</AuthRoot>);
+    expect(screen.getByRole("heading", { name: /not available yet/i })).toBeInTheDocument();
+    expect(screen.getByText(/not available yet in this version/i)).toBeInTheDocument();
     expect(screen.queryByText("app")).not.toBeInTheDocument();
+    const shellOnly = ["landmark-unique", "bypass"];
+    expect(checkAxeAA(container).filter((v) => !shellOnly.includes(v.id))).toEqual([]);
   });
 
   it("renders the app ungated when auth is optional and unset", () => {

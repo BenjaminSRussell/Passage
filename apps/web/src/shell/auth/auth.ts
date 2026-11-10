@@ -1,4 +1,4 @@
-import { authorizeUrl, CALLBACK_PATH, endpoints, LOGOUT_PATH, randomToken, sessionFrom, type OidcConfig, type Session, type TokenResponse } from "./oidc";
+import { authorizeUrl, CALLBACK_PATH, configuredOidc, endpoints, LOGOUT_PATH, randomToken, sessionFrom, type OidcConfig, type Session, type TokenResponse } from "./oidc";
 
 const PENDING_KEY = "passage.oidc.pending";
 const REFRESH_MARGIN_MS = 30_000;
@@ -149,4 +149,15 @@ export function installBearerFetch(auth: Auth, origin: string, target: { fetch: 
     return original(input, { ...init, headers });
   };
   Object.defineProperty(target.fetch, BEARER_INSTALLED, { value: true });
+}
+
+export function bootstrapAuth(
+  oidc: OidcConfig | null = configuredOidc(),
+  env: AuthEnv = browserEnv(),
+  target: { fetch: typeof fetch } = globalThis,
+): Auth | null {
+  if (oidc === null) return null;
+  const auth = createAuth(oidc, env);
+  installBearerFetch(auth, env.location.origin, target);
+  return auth;
 }

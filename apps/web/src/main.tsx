@@ -6,8 +6,7 @@ import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
 import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
 import { AuthRoot } from "./shell/auth/AuthRoot";
-import { browserEnv, createAuth, installBearerFetch } from "./shell/auth/auth";
-import { configuredOidc } from "./shell/auth/oidc";
+import { bootstrapAuth } from "./shell/auth/auth";
 import { HomePage } from "./shell/pages/HomePage";
 import { NotesPage } from "./shell/pages/NotesPage";
 import { NotFoundPage } from "./shell/pages/NotFoundPage";
@@ -41,9 +40,7 @@ function App({ duties }: { duties?: readonly string[] }) {
   );
 }
 
-const oidc = configuredOidc();
-const auth = oidc === null ? null : createAuth(oidc, browserEnv());
-if (auth !== null) installBearerFetch(auth, window.location.origin);
+const auth = bootstrapAuth();
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

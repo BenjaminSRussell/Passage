@@ -69,6 +69,18 @@ type proc struct {
 	cmd  *exec.Cmd
 	done chan struct{}
 	log  string
+	own  bool
+}
+
+func (p *proc) signal(sig syscall.Signal) {
+	if p.cmd.Process == nil {
+		return
+	}
+	pid := p.cmd.Process.Pid
+	if p.own {
+		pid = -pid
+	}
+	_ = syscall.Kill(pid, sig)
 }
 
 type Stack struct {
@@ -155,10 +167,12 @@ func (s *Stack) queryOne(service, tenantID, script string, vars map[string]strin
 		args = append(args, "-v", k+"="+v)
 	}
 	cmd := exec.Command("psql", args...)
-	cmd.Stdin = strings.NewReader("SELECT set_config('passage.tenant_id', :'tenant', false) \\gset\n" + script)
+	cmd.Stdin = strings.NewReader("SELECT set_config('passage.tenant_id', :'tenant', false) \\gset\nSELECT set_config('passage.legal_entity_scopes', '*', false) \\gset\n" + script)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("psql %s: %w", service, err)
+		return "", fmt.Errorf("psql %s: %w: %s", service, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -247,7 +261,7 @@ func (s *Stack) launch(ctx context.Context, svc service) error {
 	if err != nil {
 		return err
 	}
-	p, err := s.spawn(svc.name, "", env, filepath.Join(s.binDir(), svc.name))
+	p, err := s.spawn(svc.name, "", env, false, filepath.Join(s.binDir(), svc.name))
 	if err != nil {
 		return err
 	}
@@ -257,15 +271,24 @@ func (s *Stack) launch(ctx context.Context, svc service) error {
 // Spawn runs one more process under the stack's supervision: its output goes to the run directory's logs, FirstExit
 // reports it, and Stop ends it.
 func (s *Stack) Spawn(name, dir string, extraEnv map[string]string, command string, args ...string) error {
+	return s.spawnExtra(name, dir, extraEnv, false, command, args...)
+}
+
+// SpawnGroup is Spawn for a command that starts children of its own; Stop signals the whole process group.
+func (s *Stack) SpawnGroup(name, dir string, extraEnv map[string]string, command string, args ...string) error {
+	return s.spawnExtra(name, dir, extraEnv, true, command, args...)
+}
+
+func (s *Stack) spawnExtra(name, dir string, extraEnv map[string]string, own bool, command string, args ...string) error {
 	env := append([]string(nil), os.Environ()...)
 	for k, v := range extraEnv {
 		env = append(env, k+"="+v)
 	}
-	_, err := s.spawn(name, dir, env, command, args...)
+	_, err := s.spawn(name, dir, env, own, command, args...)
 	return err
 }
 
-func (s *Stack) spawn(name, dir string, env []string, command string, args ...string) (*proc, error) {
+func (s *Stack) spawn(name, dir string, env []string, own bool, command string, args ...string) (*proc, error) {
 	if err := os.MkdirAll(filepath.Join(s.cfg.RunDir, "logs"), 0o755); err != nil {
 		return nil, err
 	}
@@ -277,12 +300,12 @@ func (s *Stack) spawn(name, dir string, env []string, command string, args ...st
 	cmd := exec.Command(command, args...)
 	cmd.Dir, cmd.Env = dir, env
 	cmd.Stdout, cmd.Stderr = logFile, logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: own}
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
 		return nil, fmt.Errorf("start %s: %w", name, err)
 	}
-	p := &proc{name: name, cmd: cmd, done: make(chan struct{}), log: logPath}
+	p := &proc{name: name, cmd: cmd, done: make(chan struct{}), log: logPath, own: own}
 	go func() {
 		_ = cmd.Wait()
 		_ = logFile.Close()
@@ -366,16 +389,17 @@ func (s *Stack) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, p := range s.procs {
-		if p.cmd.Process != nil {
-			_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGINT)
-		}
+		p.signal(syscall.SIGINT)
 	}
 	for _, p := range s.procs {
 		select {
 		case <-p.done:
 		case <-time.After(5 * time.Second):
-			_ = p.cmd.Process.Kill()
+			p.signal(syscall.SIGKILL)
 			<-p.done
+		}
+		if p.own {
+			p.signal(syscall.SIGKILL)
 		}
 	}
 	if !s.cfg.KeepDBs {

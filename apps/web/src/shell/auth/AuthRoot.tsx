@@ -7,8 +7,8 @@ export function AuthRoot({ auth, requireAuth, children }: { auth: Auth | null; r
   if (!requireAuth) return <>{children()}</>;
   return (
     <main>
-      <h1>Sign-in is not configured</h1>
-      <p role="alert">This build has no identity provider settings, so the application is not available. Ask an administrator to configure sign-in.</p>
+      <h1>Sign-in is not available yet</h1>
+      <p>Sign-in for production builds is not available yet in this version, so the application cannot be opened. No administrator action can enable it today.</p>
     </main>
   );
 }

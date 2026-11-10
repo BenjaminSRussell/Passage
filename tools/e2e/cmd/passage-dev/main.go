@@ -49,7 +49,7 @@ func run(args []string) error {
 		_, err = render(root)
 		return err
 	case "up":
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
 		return up(ctx, root)
 	}
@@ -212,7 +212,7 @@ func startWeb(root string, stk *stack.Stack, seed devenv.Seed) error {
 	if _, err := os.Stat(filepath.Join(web, "node_modules")); err != nil {
 		return errors.New("apps/web has no node_modules; run `npm ci` in apps/web first")
 	}
-	return stk.Spawn("web", web, map[string]string{
+	return stk.SpawnGroup("web", web, map[string]string{
 		"PASSAGE_OIDC_ISSUER": keycloakURL + "/realms/" + devenv.RealmName, "PASSAGE_OIDC_CLIENT_ID": devenv.WebClientID,
 		"PASSAGE_GATEWAY_URL": "http://" + gatewayAddr, "PASSAGE_DEV_TENANT": seed.TenantID,
 	}, "npm", "run", "dev")
