@@ -2790,6 +2790,7 @@
       {"resource": "/v1/product/products:search", "methods": ["GET"]},
       {"resource": "/v1/product/released-products/*/process-policy", "methods": ["GET"]},
       {"resource": "/v1/product/released-products/*/site-defaults/*", "methods": ["GET"]},
+      {"resource": "/v1/product/setup/item-groups", "methods": ["GET"]},
       {"resource": "/v1/product/uom/convert", "methods": ["GET"]}
     ]},
     "migration.outbound.render": {"service_only": true, "permissions": [

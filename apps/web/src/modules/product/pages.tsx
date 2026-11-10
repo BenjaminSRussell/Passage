@@ -4,10 +4,10 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Badge, Button, Card, DataTable, EmptyState, Input, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { listProducts, ProductApiError, type Product } from "./api/client";
-import { DUTY_WRITE, productTypeLabel, subtypeLabel } from "./labels";
+import { DUTY_WRITE, productTypeLabel, subtypeLabel, trackingFlags, trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProductProblem } from "./ProductProblem";
-import { useProduct } from "./useProduct";
+import { useItemGroups, useProduct } from "./useProduct";
 
 const PAGE_SIZE = 50;
 
@@ -185,6 +185,11 @@ function Entry({ term, children, mono }: { term: string; children: string; mono?
   );
 }
 
+function ItemGroupEntry({ id }: { id: string }) {
+  const { groups, failed } = useItemGroups();
+  return <Entry term="Item group">{groups.find((group) => group.id === id)?.name ?? (failed ? "Not available" : "")}</Entry>;
+}
+
 export function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -231,6 +236,8 @@ export function ProductDetail() {
           <Entry term="Base unit" mono>
             {data.baseUom}
           </Entry>
+          {data.itemGroupId !== "" ? <ItemGroupEntry id={data.itemGroupId} /> : <Entry term="Item group">{""}</Entry>}
+          <Entry term="Tracking">{trackingFlags.filter((flag) => data[flag]).map((flag) => trackingLabel[flag]).join(", ")}</Entry>
           <Entry term="Description">{data.description}</Entry>
         </dl>
       </Card>

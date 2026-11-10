@@ -421,3 +421,68 @@ func TestUpdateProductFollowsTheLifecycleMachineAndActivationAttributes(t *testi
 		t.Fatalf("refused moves must write nothing: %v %+v", err, got)
 	}
 }
+
+func TestItemGroupAndTrackingFlagsRoundTripAndAreGuarded(t *testing.T) {
+	s, ctx := newStore(t, 1)
+	group, err := s.CreateItemGroup(ctx, domain.ItemGroup{Code: "RAW", Name: "Raw material"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	made, err := s.CreateProduct(ctx, domain.Product{ProductNumber: "TRK-1", Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "Tracked", BaseUOM: "KG", ItemGroupID: group.ID, BatchTracked: true, CatchWeight: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.GetProduct(ctx, made.ID)
+	if err != nil || read.ItemGroupID != group.ID || !read.BatchTracked || read.SerialTracked || !read.CatchWeight {
+		t.Fatalf("flags must read back as created: %v %+v", err, read)
+	}
+	serial, none := true, ""
+	got, err := s.UpdateProduct(ctx, made.ID, domain.ProductPatch{SerialTracked: &serial, ItemGroupID: &none}, 1)
+	if err != nil || got.ItemGroupID != "" || !got.SerialTracked || got.Version != 2 {
+		t.Fatalf("patch must set a flag and clear the group: %v %+v", err, got)
+	}
+	groups, err := s.ListItemGroups(ctx)
+	if err != nil || len(groups) != 1 || groups[0].Code != "RAW" {
+		t.Fatalf("item groups: %v %+v", err, groups)
+	}
+
+	var pr *httpx.Problem
+	unknown := testkit.TenantID(88)
+	if _, err := s.UpdateProduct(ctx, made.ID, domain.ProductPatch{ItemGroupID: &unknown}, 2); !errors.As(err, &pr) || pr.Status != 400 || pr.Errors["itemGroupId"] == "" {
+		t.Fatalf("an unknown item group must be 400 on itemGroupId, got %v", err)
+	}
+	if _, err := s.CreateProduct(ctx, domain.Product{ProductNumber: "TRK-2", Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "Bad group", BaseUOM: "EA", ItemGroupID: unknown}, ""); !errors.As(err, &pr) || pr.Status != 400 {
+		t.Fatalf("create with an unknown item group must be 400, got %v", err)
+	}
+	if _, err := s.CreateProduct(ctx, domain.Product{ProductNumber: "SVC-T-1", Subtype: domain.SubtypeProduct, ProductType: domain.TypeService, Name: "Consulting", BaseUOM: "H", SerialTracked: true}, ""); !errors.As(err, &pr) || pr.Status != 422 || pr.Code != domain.CodeSvcTracked {
+		t.Fatalf("a tracked service must be 422 %s, got %v", domain.CodeSvcTracked, err)
+	}
+	other := tenant.With(context.Background(), principal(2))
+	if _, err := s.CreateProduct(other, domain.Product{ProductNumber: "TRK-3", Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: "Other tenant", BaseUOM: "EA", ItemGroupID: group.ID}, ""); !errors.As(err, &pr) || pr.Status != 400 {
+		t.Fatalf("another tenant's item group must be refused, got %v", err)
+	}
+}
+
+func TestVariantsInheritTheMastersItemGroupAndTrackingFlags(t *testing.T) {
+	s, ctx := newStore(t, 1)
+	g, err := s.CreateDimensionGroup(ctx, domain.DimensionGroup{Code: "SZ", Name: "Size", Kind: "product", Fields: []domain.Dimension{{Code: "size", Name: "size", Values: []string{"S", "M"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ig, err := s.CreateItemGroup(ctx, domain.ItemGroup{Code: "APP", Name: "Apparel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	master, err := s.CreateProduct(ctx, domain.Product{ProductNumber: "TEE", Subtype: domain.SubtypeMaster, ProductType: domain.TypeItem, Name: "Tee", BaseUOM: "EA", DimensionGroupID: g.ID, LifecycleState: domain.StateActive, ItemGroupID: ig.ID, SerialTracked: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.ExplodeVariants(ctx, master.ID, nil, 0)
+	if err != nil || len(res.Created) != 2 {
+		t.Fatalf("explode %v %+v", err, res)
+	}
+	v, err := s.LookupVariant(ctx, master.ID, res.Created[0].DimensionValues)
+	if err != nil || v.ItemGroupID != ig.ID || !v.SerialTracked || v.BatchTracked || v.CatchWeight {
+		t.Fatalf("variant must copy the master's group and flags: %v %+v", err, v)
+	}
+}
