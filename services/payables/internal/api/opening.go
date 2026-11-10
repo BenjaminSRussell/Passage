@@ -3,15 +3,18 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +24,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
@@ -31,20 +35,20 @@ const (
 	dutyOpeningRead   = "opening-item.import.read"
 	pathOpeningBatch  = "/v1/payables/opening-batches"
 
-	CodeOpeningInvalid      = "AP-OPN-001"
-	CodeOpeningKeyConflict  = "AP-OPN-002"
-	CodeOpeningControlTotal = "AP-OPN-003"
-	CodeOpeningReference    = "AP-OPN-004"
+	CodeOpeningInvalid      = "AP-OPB-001"
+	CodeOpeningKeyConflict  = "AP-OPB-002"
+	CodeOpeningControlTotal = "AP-OPB-003"
+	CodeOpeningReference    = "AP-OPB-004"
 
-	maxOpeningRows   = 1000
-	maxOpeningAmount = int64(1) << 53
+	maxOpeningRows = 1000
+	maxJSONInteger = int64(1) << 53
 )
 
 var openingKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,100}$`)
 
 type OpeningStore interface {
 	ImportOpeningBatch(ctx context.Context, in store.OpeningImport) (store.OpeningBatch, bool, error)
-	ListOpeningBatches(ctx context.Context, legalEntityID, batchKey string, limit int) ([]store.OpeningBatch, error)
+	ListOpeningBatches(ctx context.Context, legalEntityID, batchKey string, limit int, afterAt time.Time, afterID string) ([]store.OpeningBatch, error)
 }
 
 type openingDeps struct {
@@ -169,7 +173,7 @@ func (a *API) openingImport(le, user string, req openingBatchRequest) (store.Ope
 	bad := map[string]string{}
 	seen := map[string]int{}
 	for cur, total := range req.ControlTotals {
-		if !currencyPattern.MatchString(cur) || total <= 0 || total > maxOpeningAmount {
+		if !currencyPattern.MatchString(cur) || total <= 0 || total > maxMinorAmount(cur) {
 			bad["controlTotalsMinor."+cur] = "must be a positive amount in minor units for a 3-letter currency"
 		}
 	}
@@ -196,14 +200,23 @@ func (a *API) openingImport(le, user string, req openingBatchRequest) (store.Ope
 		if !currencyPattern.MatchString(it.Currency) {
 			bad[rowField(row, "currency")] = "must be a 3-letter ISO 4217 code in capitals"
 		}
-		if it.AmountMinor <= 0 || it.AmountMinor > maxOpeningAmount {
-			bad[rowField(row, "amountMinor")] = "must be a positive whole number of minor units"
+		if it.AmountMinor <= 0 || it.AmountMinor > maxMinorAmount(it.Currency) {
+			bad[rowField(row, "amountMinor")] = "must be a positive whole number of minor units that fits the column (at most 14 digits before the decimal point)"
 		}
 		in.Items = append(in.Items, store.OpeningItem{Reference: it.Reference, VendorID: vendor, InvoiceNumber: it.InvoiceNumber, InvoiceDate: it.InvoiceDate,
 			DueDate: it.DueDate, Currency: it.Currency, AmountMinor: it.AmountMinor})
 	}
 	in.ContentHash = openingHash(in)
 	return in, bad
+}
+
+// maxMinorAmount is the largest amount in minor units that numeric(20,6) holds for the currency, capped at what a JSON integer carries exactly.
+func maxMinorAmount(currency string) int64 {
+	digits := 14 + int(money.MinorUnits(currency))
+	if digits >= 16 {
+		return maxJSONInteger
+	}
+	return min(maxJSONInteger, int64(math.Pow10(digits))-1)
 }
 
 func openingHash(in store.OpeningImport) string {
@@ -239,7 +252,7 @@ func (a *API) unknownVendors(w http.ResponseWriter, r *http.Request, le string, 
 		vendor, _ := ids.Canonical(it.VendorID)
 		exists, checked := known[vendor]
 		if !checked {
-			_, err := a.runs.banks.BankAccounts(r.Context(), le, vendor)
+			err := a.runs.banks.VendorExists(r.Context(), le, vendor)
 			switch {
 			case errors.Is(err, party.ErrVendorNotFound):
 			case err != nil:
@@ -305,12 +318,36 @@ func (a *API) listOpeningBatches(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	batches, err := a.opening.store.ListOpeningBatches(r.Context(), le, r.URL.Query().Get("batch_key"), limit)
+	afterAt, afterID, ok := parseOpeningCursor(r.URL.Query().Get("cursor"))
+	if !ok {
+		a.invalid(w, r, map[string]string{"cursor": "is not a cursor this list returned"})
+		return
+	}
+	batches, err := a.opening.store.ListOpeningBatches(r.Context(), le, r.URL.Query().Get("batch_key"), limit+1, afterAt, afterID)
 	if err != nil {
 		a.fault(w, r, "opening batch list failed", err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": batches, "asOf": a.now().UTC().Format(time.RFC3339)})
+	next := ""
+	if len(batches) > limit {
+		batches = batches[:limit]
+		last := batches[limit-1]
+		next = base64.RawURLEncoding.EncodeToString([]byte(last.ImportedAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": batches, "nextCursor": next, "asOf": a.now().UTC().Format(time.RFC3339)})
+}
+
+func parseOpeningCursor(raw string) (time.Time, string, bool) {
+	if raw == "" {
+		return time.Time{}, "", true
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	at, id, found := strings.Cut(string(decoded), "|")
+	when, perr := time.Parse(time.RFC3339Nano, at)
+	if err != nil || !found || perr != nil || !ids.Valid(id) {
+		return time.Time{}, "", false
+	}
+	return when, id, true
 }
 
 func (a *API) writeOpeningMetrics(w http.ResponseWriter) {

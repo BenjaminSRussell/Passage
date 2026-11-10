@@ -23,6 +23,8 @@ CREATE POLICY ap_opening_batch_legal_entity_scope ON ap_opening_batch AS RESTRIC
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
+ALTER TABLE ap_open_item DROP CONSTRAINT IF EXISTS ap_open_item_due_date_source_check;
+ALTER TABLE ap_open_item ADD CONSTRAINT ap_open_item_due_date_source_check CHECK (due_date_source IN ('EVENT', 'DEFAULTED', 'OPENING'));
 ALTER TABLE ap_open_item ADD COLUMN IF NOT EXISTS opening_batch_id uuid;
 ALTER TABLE ap_open_item ADD COLUMN IF NOT EXISTS opening_reference text;
 CREATE UNIQUE INDEX IF NOT EXISTS ap_open_item_opening_reference

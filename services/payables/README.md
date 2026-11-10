@@ -65,10 +65,10 @@ The preview settles one credit against open invoices per PRD FR-19.2: priority o
 | AP-PRP-006 | 422 | unknown withholding code for the legal entity, or the tax service refused the calculation |
 | AP-RUN-017 | 422 | vendor bank details from party unusable: unknown vendor, no or several accounts in the currency, no holder or country |
 | AP-EMP-001 | 422 | the vendor of an employee-vendor registration is not in the party vendor master |
-| AP-OPN-001 | 422 | an opening batch has rows that cannot be imported (errors keyed `items[row].field`, rows from 1, including a vendor not in the party vendor master) |
-| AP-OPN-002 | 409 | the opening batch key was already imported with different content |
-| AP-OPN-003 | 422 | the opening batch items do not add up to the declared control totals |
-| AP-OPN-004 | 422 | an opening item reference was already imported by another batch |
+| AP-OPB-001 | 422 | an opening batch has rows that cannot be imported (errors keyed `items[row].field`, rows from 1, including a vendor not in the party vendor master) |
+| AP-OPB-002 | 409 | the opening batch key was already imported with different content |
+| AP-OPB-003 | 422 | the opening batch items do not add up to the declared control totals |
+| AP-OPB-004 | 422 | an opening item reference was already imported by another batch |
 | AP-EMP-002 | 409 | the worker is already registered to another vendor (remapping is not supported) |
 | COM-0404 | 404 | open item or proposal not found (or outside the caller's tenant and legal entity) |
 | COM-0502 | 502 | fx service unavailable |

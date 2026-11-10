@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -62,6 +63,23 @@ func toMinor(amount decimal.Decimal, currency string) int64 {
 // key with the same content is a replay (false); the same key with other content is
 // ErrOpeningKeyConflict; an item reference taken by another batch is an *OpeningReferenceError.
 func (s *Postgres) ImportOpeningBatch(ctx context.Context, in OpeningImport) (OpeningBatch, bool, error) {
+	out, created, err := s.importOpeningBatch(ctx, in)
+	if isReferenceRace(err) {
+		out, created, err = s.importOpeningBatch(ctx, in)
+		if isReferenceRace(err) {
+			err = &OpeningReferenceError{Taken: map[string]string{}}
+		}
+	}
+	return out, created, err
+}
+
+// isReferenceRace is a unique violation on an item reference: a concurrent batch with another key imported it first.
+func isReferenceRace(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "ap_open_item_opening_reference"
+}
+
+func (s *Postgres) importOpeningBatch(ctx context.Context, in OpeningImport) (OpeningBatch, bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out OpeningBatch
 	created := false
@@ -75,7 +93,7 @@ func (s *Postgres) ImportOpeningBatch(ctx context.Context, in OpeningImport) (Op
 			if hash != in.ContentHash {
 				return ErrOpeningKeyConflict
 			}
-			batches, err := openingBatches(ctx, tx, in.LegalEntityID, in.BatchKey, 1)
+			batches, err := openingBatches(ctx, tx, in.LegalEntityID, in.BatchKey, 1, time.Time{}, "")
 			if err != nil || len(batches) == 0 {
 				return errors.Join(err, pgx.ErrNoRows)
 			}
@@ -100,7 +118,7 @@ func (s *Postgres) ImportOpeningBatch(ctx context.Context, in OpeningImport) (Op
 			batch.Queue(`insert into ap_open_item (tenant_id, id, legal_entity_id, vendor_id, source_invoice_id, invoice_number, invoice_date, due_date, due_date_source,
 				currency, amount, open_amount, status, opening_batch_id, opening_reference)
 				values ($1, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7::date, $8::date, $9, $10, $11::numeric, $11::numeric, 'OPEN', $12::uuid, $13)`,
-				p.TenantID, ids.New(), in.LegalEntityID, it.VendorID, ids.New(), it.InvoiceNumber, it.InvoiceDate, it.DueDate, DueDateEvent, it.Currency, amount, id, it.Reference)
+				p.TenantID, ids.New(), in.LegalEntityID, it.VendorID, ids.New(), it.InvoiceNumber, it.InvoiceDate, it.DueDate, DueDateOpening, it.Currency, amount, id, it.Reference)
 		}
 		res := tx.SendBatch(ctx, batch)
 		for range in.Items {
@@ -113,7 +131,7 @@ func (s *Postgres) ImportOpeningBatch(ctx context.Context, in OpeningImport) (Op
 			return err
 		}
 		created = true
-		batches, err := openingBatches(ctx, tx, in.LegalEntityID, in.BatchKey, 1)
+		batches, err := openingBatches(ctx, tx, in.LegalEntityID, in.BatchKey, 1, time.Time{}, "")
 		if err != nil || len(batches) == 0 {
 			return errors.Join(err, pgx.ErrNoRows)
 		}
@@ -151,24 +169,28 @@ func rejectTakenReferences(ctx context.Context, tx pgx.Tx, in OpeningImport) err
 	return nil
 }
 
-// ListOpeningBatches returns a legal entity's imported batches, newest first, optionally one batch key.
-func (s *Postgres) ListOpeningBatches(ctx context.Context, legalEntityID, batchKey string, limit int) ([]OpeningBatch, error) {
+// ListOpeningBatches returns a legal entity's imported batches, newest first, optionally one batch key, after the (afterAt, afterID) keyset position.
+func (s *Postgres) ListOpeningBatches(ctx context.Context, legalEntityID, batchKey string, limit int, afterAt time.Time, afterID string) ([]OpeningBatch, error) {
 	var out []OpeningBatch
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = openingBatches(ctx, tx, legalEntityID, batchKey, min(max(limit, 1), maxLimit))
+		out, err = openingBatches(ctx, tx, legalEntityID, batchKey, min(max(limit, 1), maxLimit+1), afterAt, afterID)
 		return err
 	})
 	return out, err
 }
 
-func openingBatches(ctx context.Context, tx pgx.Tx, legalEntityID, batchKey string, limit int) ([]OpeningBatch, error) {
+func openingBatches(ctx context.Context, tx pgx.Tx, legalEntityID, batchKey string, limit int, afterAt time.Time, afterID string) ([]OpeningBatch, error) {
+	var cursorAt any
+	if !afterAt.IsZero() {
+		cursorAt = afterAt
+	}
 	rows, err := tx.Query(ctx, `select b.id::text, b.legal_entity_id::text, b.batch_key, b.imported_by, b.imported_at,
 			coalesce(i.currency, ''), count(i.id), coalesce(sum(i.amount), 0)::text
-		from (select * from ap_opening_batch where legal_entity_id = $1::uuid and ($2 = '' or batch_key = $2) order by imported_at desc, id limit $3) b
+		from (select * from ap_opening_batch where legal_entity_id = $1::uuid and ($2 = '' or batch_key = $2) and ($4::timestamptz is null or (imported_at, id) < ($4::timestamptz, $5::uuid)) order by imported_at desc, id desc limit $3) b
 		left join ap_open_item i on i.tenant_id = b.tenant_id and i.opening_batch_id = b.id
 		group by b.id, b.legal_entity_id, b.batch_key, b.imported_by, b.imported_at, i.currency
-		order by b.imported_at desc, b.id, i.currency`, legalEntityID, batchKey, limit)
+		order by b.imported_at desc, b.id desc, i.currency`, legalEntityID, batchKey, limit, cursorAt, nullable(afterID))
 	if err != nil {
 		return nil, err
 	}
