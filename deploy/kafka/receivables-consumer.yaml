@@ -1,0 +1,39 @@
+# The receivables billing consumer (#30, `receivables consume`, group receivables-billing) opens the receivables of billing's
+# invoice.posted (one open item per installment) and creditnote.posted (one credit item) and parks what it cannot apply on
+# passage.receivables.invoices.dlq. The chart's consumer.kafka.username names this user. Literal ACLs: the user reads only
+# billing's invoice topic (billing routes its outbox by aggregate, so invoices and credit notes share passage.billing.invoice;
+# the consumer skips creditnote.booked) and writes only its dead-letter topic. The outbox-billing connector in connect.yaml
+# creates passage.billing.invoice; the consumer stays off in dev until it is enabled in the receivables chart.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: receivables-consumer
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: passage.billing.invoice, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.receivables.invoices.dlq, patternType: literal}
+        operations: [Write, Describe]
+      - resource: {type: group, name: receivables-billing, patternType: literal}
+        operations: [Read, Describe]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: passage-receivables-invoices-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  topicName: passage.receivables.invoices.dlq
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: 2592000000

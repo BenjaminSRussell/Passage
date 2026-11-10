@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -1963,4 +1963,20 @@ test_inbox_read_reaches_only_the_inbox if {
 	not allowed("inbox.read", "GET", "/v1/inbox/item-1")
 	not allowed("inbox.read", "GET", "/v1/ledger/journal-batches")
 	not allowed("ledger.journal.read", "GET", "/v1/inbox")
+}
+
+test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
+	data.service_principals["receivables-billing"] == ["receivables.openitem.from-billing"]
+	data.duties["receivables.openitem.from-billing"].flag
+	count(data.duties["receivables.openitem.from-billing"].permissions) == 0
+	every _, targets in data.service_grants {
+		not "receivables.openitem.from-billing" in object.get(targets, "receivables", [])
+	}
+	not principal_allowed("receivables-billing", "POST", "/v1/receivables/open-items")
+	not principal_allowed("receivables-billing", "POST", "/v1/receivables/open-items:batch")
+	not principal_allowed("receivables-billing", "POST", "/v1/receivables/payments")
+	not principal_allowed("receivables-billing", "GET", "/v1/receivables/open-items")
+	not principal_allowed("receivables-billing", "POST", "/v1/ledger/journal-entries")
+	not principal_allowed("receivables-billing", "POST", "/v1/billing/invoices")
+	not allowed("receivables.openitem.from-billing", "POST", "/v1/receivables/open-items")
 }

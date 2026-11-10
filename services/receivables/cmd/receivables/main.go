@@ -23,10 +23,25 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	start, err := command(os.Args[1:])
+	if err == nil {
+		err = start(context.Background(), os.Getenv)
+	}
+	if err != nil {
 		slog.Error("receivables exited", "err", err)
 		os.Exit(1)
 	}
+}
+
+// command picks what the process runs: no argument serves the API, "consume" runs the billing consumer.
+func command(args []string) (func(context.Context, func(string) string) error, error) {
+	switch {
+	case len(args) == 0:
+		return func(context.Context, func(string) string) error { return run() }, nil
+	case args[0] == "consume" && len(args) == 1:
+		return consume, nil
+	}
+	return nil, fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the billing consumer)", args)
 }
 
 // parseRMALedgers reads RECEIVABLES_RMA_LEDGERS: a JSON object from legal entity id to the ledger id its RMA credit journals post to.

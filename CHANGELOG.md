@@ -10,6 +10,14 @@ release may change public APIs.
 
 ### Added
 
+- Receivables opens an item for every invoice and credit note billing posts (#30): a new consumer (`receivables consume`, group
+  and service principal `receivables-billing`, flag duty `receivables.openitem.from-billing`, dead-letter topic
+  `passage.receivables.invoices.dlq`, `deploy/kafka/receivables-consumer.yaml`, off by default in the chart) reads
+  `invoice.posted` and `creditnote.posted` from `passage.billing.invoice` and opens one INVOICE item per installment (the whole
+  gross when there is no plan) or one negative CREDIT_NOTE item linked to the credited invoice. A document is keyed by (type,
+  billing id, installment), so a replay changes nothing; an event it cannot apply (installments that do not add up, a document
+  number already taken, a credit note for another customer or currency) is dead-lettered with its reason in the log.
+
 - Billing reports INVOICED to the sales order (#29): posting an invoice that bills order lines queues one report per (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014), and a leased reporter (`SALES_URL`, `BILLING_SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it to sales' `:record-progress` as `service:billing-sales-report` with only `sales.order.record-invoice` (now `service_only`), key `billing-invoice:{invoiceId}:{orderId}`, retrying with backoff and parking a refused report with its reason; credit notes are not reported (sales has no reversal of an invoice). `SLS-0058`/`SLS-0059` answers are retried as "not yet" until the delivery report arrives; `GET /v1/billing/sales-reports` and `POST /v1/billing/sales-reports/{id}:retry` list and re-queue parked reports, the counter `billing_sales_reports_parked_total` counts them, and a batch is sized to fit the lease. The web record form now says deliveries and invoices are recorded automatically.
 - batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
   approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing

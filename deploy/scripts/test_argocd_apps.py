@@ -490,6 +490,34 @@ class ArgoApplicationsTest(unittest.TestCase):
                                                     ("group", group): {"Read", "Describe"}})
         self.assertIn(dlq, topics)
 
+    def test_receivables_billing_consumer_acls(self):
+        # The receivables billing consumer (#30): its KafkaUser reads exactly billing's invoice topic, the channel billing's
+        # AsyncAPI declares for invoice.posted and creditnote.posted, and the group the code uses, and writes the dead-letter
+        # topic it parks on.
+        api = (REPO / "services/receivables/internal/api/billing_consumer.go").read_text()
+        cmd = (REPO / "services/receivables/cmd/receivables/consumer.go").read_text()
+        (topic,) = re.findall(r'BillingInvoiceTopic\s+=\s+"([^"]+)"', api)
+        event_types = {re.findall(r'"(dev\.passage\.[^"]+)"', line)[0] for line in api.splitlines()
+                       if re.search(r'(InvoicePostedType|CreditNotePostedType)\s+=', line)}
+        (group,) = re.findall(r'BillingConsumerName\s+=\s+"([^"]+)"', api)
+        (dlq,) = re.findall(r'billingDeadLetterTopic\s+=\s+"([^"]+)"', cmd)
+        spec = yaml.safe_load((REPO / "services/billing/events/asyncapi.yaml").read_text())
+        for event_type in event_types:
+            channels = {ch["address"] for ch in spec["channels"].values()
+                        for ref in ch["messages"].values()
+                        if spec["components"]["messages"][ref["$ref"].rsplit("/", 1)[1]]["name"] == event_type}
+            self.assertEqual(channels, {topic}, event_type)
+        self.assertEqual(len(event_types), 2)
+        values = yaml.safe_load((REPO / "services/receivables/charts/receivables/values.yaml").read_text())
+        kafka = values["consumer"]["kafka"]
+        self.assertFalse(values["consumer"]["enabled"], "the receivables consumer is off by default, like the other consumers")
+        users, topics = self.synced_kafka_resources()
+        self.assertEqual((kafka["group"], kafka["dlqTopic"]), (group, dlq))
+        self.assertIn(kafka["username"], users, "deploy/kafka/receivables-consumer.yaml")
+        self.assertEqual(users[kafka["username"]], {("topic", topic): {"Read", "Describe"}, ("topic", dlq): {"Write", "Describe"},
+                                                    ("group", group): {"Read", "Describe"}})
+        self.assertIn(dlq, topics)
+
     def test_type_routed_outbox_connectors_match_their_asyncapi_channels(self):
         # outbox-sales and outbox-fulfillment route by the event type's entity, not aggregate_type (#480): every
         # message the service's AsyncAPI declares under its own topic prefix routes to that message's channel, the
