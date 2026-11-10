@@ -180,13 +180,17 @@ func TestPostRMACredit_SendsOnlyWhatReceivablesDerivesNothingFrom(t *testing.T) 
 		_, _ = w.Write([]byte(`{"openItemId":"oi","documentNumber":"CN-RMA-1","journalPostingId":"je"}`))
 	})
 	note, err := returnsOn(h).PostRMACredit(h.ctx, store.ARCredit{RMAID: "r1", RMANumber: "RMA-1", LegalEntityID: h.le, InvoiceNumber: "INV-1", PostingDate: "2027-03-01",
-		IdempotencyKey: "k1", Gross: decimal.NewFromInt(400), Restocking: decimal.NewFromInt(60), Net: decimal.NewFromInt(340),
+		IdempotencyKey: "k1", InvoiceLines: []store.ARInvoiceLine{{LineNo: 2, Qty: decimal.RequireFromString("3.5")}}, Gross: decimal.NewFromInt(400), Restocking: decimal.NewFromInt(60), Net: decimal.NewFromInt(340),
 		TaxLines: []store.ARTaxLine{{Code: "DE19", Amount: decimal.RequireFromString("64.6")}, {Code: "DE7", Amount: decimal.NewFromInt(2)}}})
 	if err != nil || note.OpenItemID != "oi" || note.JournalPostingID != "je" {
 		t.Fatalf("note %+v %v", note, err)
 	}
 	if got["gross"] != "400.00" || got["net"] != "340.00" || got["invoiceNumber"] != "INV-1" || got["customerId"] != nil || got["ledgerId"] != nil {
 		t.Fatalf("body %+v", got)
+	}
+	invoiceLines, _ := got["invoiceLines"].([]any)
+	if len(invoiceLines) != 1 || invoiceLines[0].(map[string]any)["lineNo"] != float64(2) || invoiceLines[0].(map[string]any)["qty"] != "3.5" {
+		t.Fatalf("invoice lines %+v", got["invoiceLines"])
 	}
 	lines, _ := got["taxLines"].([]any)
 	if len(lines) != 2 || lines[0].(map[string]any)["code"] != "DE19" || lines[0].(map[string]any)["amount"] != "64.60" || lines[1].(map[string]any)["amount"] != "2.00" {

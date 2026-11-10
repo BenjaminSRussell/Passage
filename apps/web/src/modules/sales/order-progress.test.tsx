@@ -331,7 +331,7 @@ describe("Record delivery or invoice", () => {
   it("warns and disables the form without the duty, and reports a load failure", async () => {
     handler = () => ({ status: 200, body: order(), etag: '"4"' });
     const first = renderAt(`/sales/orders/${ORDER_ID}/progress/new`, ["sales.order.read"]);
-    expect(await screen.findByText(/needs the sales.order.record-delivery duty/)).toBeInTheDocument();
+    expect(await screen.findByText(/recorded automatically when a packing slip posts and invoiced quantities when the invoice posts/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Record delivery" })).toBeDisabled();
     first.unmount();
     handler = () => ({ status: 404, body: { code: "SLS-0100", detail: "order not found" } });
