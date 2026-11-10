@@ -30,6 +30,7 @@ release may change public APIs.
 
 ### Added
 
+- Web form standard (#505): `FormSection` (More options / Advanced), `FormField required`, shared field help in `copy.fieldHelp`, `FormErrorSummary` that focuses the first problem, and `useUnsavedChanges` (dialog on in-app navigation, warning on tab close); applied to Record payment and New requisition; documented in `apps/web/docs/forms.md`.
 - Product: the web product pages run on the product service instead of built-in sample data: search by number or name with
   keyset paging, product detail, and create and edit forms with field checks and plain-language errors (#529). `GET
   /v1/product/products` gains `q`, `limit` (1 to 100, default 50) and `cursor`, and answers `nextCursor` when more follow.
