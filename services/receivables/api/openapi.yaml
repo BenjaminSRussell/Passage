@@ -1470,6 +1470,116 @@ paths:
                   committed: { type: integer, description: Posted credits whose billing reservation the sweep committed }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals:
+    get:
+      operationId: listGLJournals
+      summary: List the journals receivables owes or has posted to the ledger
+      description: |
+        Cash receipts (Dr 1000 / Cr 1205), payment applications (Dr 1205, Dr 4100 discount, Dr 6100 write-off /
+        Cr 1200), dunning fees (Cr 4300), interest (Cr 4310), down payment and deposit moves and deduction
+        write-offs. A journal is stored in the transaction of the change that causes it and posted by a worker.
+      x-passage-duty: receivables.view
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED] } }
+        - { name: sourceType, in: query, schema: { type: string } }
+        - { name: parked, in: query, schema: { type: boolean } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Journals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/GLJournalView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals:sweep:
+    post:
+      operationId: sweepGLJournals
+      summary: Post the caller's due journals to the ledger
+      description: |
+        The scheduler's entry point; the in-process sweeper (`RECEIVABLES_RMA_SWEEP_TENANT_IDS`) runs the
+        same pass per tenant and legal entity. Posts, oldest first and at most 200 (or `limit`), the unparked
+        journals whose backoff ran out, under the key `gl-journal:{legalEntityId}:{journalId}`. A failure is
+        recorded on the journal (backoff, or park on a ledger refusal) and the pass goes on. The ledger is the
+        one pinned per legal entity in `RECEIVABLES_GL_LEDGERS`, else `RECEIVABLES_RMA_LEDGERS`.
+      x-passage-duty: receivables.payment.post
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Sweep result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [posted, failed, parked]
+                properties:
+                  posted: { type: integer }
+                  failed: { type: integer }
+                  parked: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals/{id}:retry:
+    post:
+      operationId: retryGLJournal
+      summary: Unpark, optionally re-date, and post a journal now
+      description: |
+        For a journal that is not POSTED: clears the park and the backoff, optionally re-dates it (a ledger
+        refusal such as a closed period) and posts it now. A POSTED journal is 409 AR-JOURNAL-STATE.
+      x-passage-duty: receivables.payment.post
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                postingDate: { type: string, format: date }
+      responses:
+        "200":
+          description: Journal after the attempt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GLJournalView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-reconciliation:
+    get:
+      operationId: getGLReconciliation
+      summary: Compare the open items and unapplied payments with GL 1200 and 1205
+      description: |
+        Reads the ledger's balances of 1200 and 1205 up to `asOf` and compares them with the open amounts of
+        the legal entity's open items and the unapplied amounts of its payments in one currency.
+        `reconciled` needs both differences at zero and no journal pending or parked. Items loaded by the
+        opening-item import have no journal here, so they show in the difference until the ledger's opening
+        balance is loaded.
+      x-passage-duty: receivables.view
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: asOf, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Reconciliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GLReconciliation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
   /v1/receivables/rma-credits/{id}:retry:
     post:
       operationId: retryRMACredit
@@ -2411,6 +2521,51 @@ components:
             properties:
               code: { type: string, minLength: 1, maxLength: 20 }
               amount: { $ref: "#/components/schemas/Money" }
+    GLJournalView:
+      type: object
+      required: [id, legalEntityId, sourceType, sourceId, documentId, postingDate, currency, status, attempts, parked, createdAt, debit, lines]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        sourceType: { type: string, enum: [payment_receipt, payment_apply, dunning_fee, interest, down_payment, deduction] }
+        sourceId: { type: string, format: uuid }
+        documentId: { type: string }
+        postingDate: { type: string, format: date }
+        currency: { type: string }
+        status: { type: string, enum: [PENDING, POSTED] }
+        journalPostingId: { type: string }
+        attempts: { type: integer }
+        nextAttemptAt: { type: string, format: date-time }
+        parked: { type: boolean }
+        lastError: { type: string }
+        createdAt: { type: string, format: date-time }
+        debit: { $ref: "#/components/schemas/Money" }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [account, side, amount]
+            properties:
+              account: { type: string }
+              side: { type: string, enum: [D, C] }
+              amount: { $ref: "#/components/schemas/Money" }
+              text: { type: string }
+    GLReconciliation:
+      type: object
+      required: [legalEntityId, asOf, currency, openItemsNet, ledgerReceivable, receivableDifference, unappliedPayments, ledgerUnapplied, unappliedDifference, pendingJournals, parkedJournals, reconciled]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        currency: { type: string }
+        openItemsNet: { $ref: "#/components/schemas/Money" }
+        ledgerReceivable: { $ref: "#/components/schemas/Money" }
+        receivableDifference: { $ref: "#/components/schemas/Money" }
+        unappliedPayments: { $ref: "#/components/schemas/Money" }
+        ledgerUnapplied: { $ref: "#/components/schemas/Money" }
+        unappliedDifference: { $ref: "#/components/schemas/Money" }
+        pendingJournals: { type: integer }
+        parkedJournals: { type: integer }
+        reconciled: { type: boolean }
     RMACreditView:
       type: object
       required: [id, rmaId, rmaNumber, legalEntityId, documentNumber, creditOpenItemId, customerId, currency, postingDate, gross, restocking, net, tax, status, glAttempts, glParked, createdAt]

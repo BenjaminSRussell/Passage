@@ -913,7 +913,9 @@
       {"resource": "/v1/receivables/rma-credits/*:backfill-reservation", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:retry", "methods": ["POST"]},
-      {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]}
+      {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]},
+      {"resource": "/v1/receivables/gl-journals/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/receivables/gl-journals:sweep", "methods": ["POST"]}
     ]},
     "receivables.payment.refund": {"permissions": [{"resource": "/v1/receivables/down-payments/*:release", "methods": ["POST"]}]},
     "receivables.payment.settle": {"permissions": [{"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}]},
@@ -942,6 +944,8 @@
       {"resource": "/v1/receivables/payments/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/promises", "methods": ["GET"]},
       {"resource": "/v1/receivables/rma-credits", "methods": ["GET"]},
+      {"resource": "/v1/receivables/gl-journals", "methods": ["GET"]},
+      {"resource": "/v1/receivables/gl-reconciliation", "methods": ["GET"]},
       {"resource": "/v1/receivables/statements", "methods": ["GET"]},
       {"resource": "/v1/receivables/worklist", "methods": ["GET"]}
     ]},

@@ -96,6 +96,19 @@ func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMAS
 	return store.RMASweepResult{Posted: 1}, nil
 }
 
+func (f *fakeStore) ListGLJournals(context.Context, store.GLJournalFilter) ([]store.GLJournalView, error) {
+	return []store.GLJournalView{}, nil
+}
+func (f *fakeStore) PostDueJournals(context.Context, time.Time, int) (store.JournalSweepResult, error) {
+	return store.JournalSweepResult{Posted: 1}, nil
+}
+func (f *fakeStore) RetryGLJournal(context.Context, string, string) (store.GLJournalView, error) {
+	return store.GLJournalView{}, nil
+}
+func (f *fakeStore) GLReconcile(context.Context, string, string, string) (store.GLReconciliation, error) {
+	return store.GLReconciliation{}, nil
+}
+
 // Collections, dunning and interest stubs; collectionsFake overrides them.
 func (f *fakeStore) OpenDispute(context.Context, store.Dispute, string) (store.Dispute, error) {
 	return store.Dispute{}, nil

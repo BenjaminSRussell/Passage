@@ -358,6 +358,11 @@ func issueRun(ctx context.Context, tx pgx.Tx, tenantID string, run DunningRun) e
 				revised.Fee.String()); err != nil {
 				return err
 			}
+			if err := enqueueJournal(ctx, tx, tenantID, journalSpec{LegalEntityID: run.LegalEntityID, SourceType: JournalDunningFee, SourceID: l.ID,
+				SourceKey: "fee:" + l.ID, DocumentID: "FEE-" + l.ID, PostingDate: asOf.Format(dateLayout), Currency: l.Currency,
+				Lines: []journalLine{debit(domain.AccountReceivable, revised.Fee, "Dunning fee"), credit(domain.AccountDunningFee, revised.Fee, "Dunning fee")}}); err != nil {
+				return err
+			}
 		}
 		raw, err := json.Marshal(letterItems(revised.Lines))
 		if err != nil {

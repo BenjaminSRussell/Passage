@@ -2217,6 +2217,15 @@ test_rma_credit_operator_routes_belong_to_the_payment_duty if {
 	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
 }
 
+test_gl_journal_routes_split_between_view_and_payment_duties if {
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")
+	allowed("receivables.view", "GET", "/v1/receivables/gl-journals")
+	allowed("receivables.view", "GET", "/v1/receivables/gl-reconciliation")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:sweep")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals/j1:retry")
+}
+
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")

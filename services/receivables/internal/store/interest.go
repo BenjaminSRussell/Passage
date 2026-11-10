@@ -132,6 +132,11 @@ func (s *Postgres) PostInterest(ctx context.Context, req InterestRequest, key st
 				req.AnnualRate.String(), req.Basis, c.Principal.String(), c.Amount.String()); err != nil {
 				return err
 			}
+			if err := enqueueJournal(ctx, tx, p.TenantID, journalSpec{LegalEntityID: req.LegalEntityID, SourceType: JournalInterest, SourceID: noteID,
+				SourceKey: "interest:" + noteID, DocumentID: "IN-" + period + "-" + c.DocumentNumber, PostingDate: req.CalculationDate, Currency: c.Currency,
+				Lines: []journalLine{debit(domain.AccountReceivable, c.Amount, "Interest"), credit(domain.AccountInterestIncome, c.Amount, "Interest")}}); err != nil {
+				return err
+			}
 			out.Posted = append(out.Posted, InterestNote{ID: noteID, LegalEntityID: req.LegalEntityID, CustomerID: c.CustomerID,
 				OpenItemID: c.OpenItemID, DocumentNumber: c.DocumentNumber, InterestItemID: itemID, Period: period,
 				CalculationDate: req.CalculationDate, Days: c.Days, AnnualRate: req.AnnualRate, Basis: req.Basis, Currency: c.Currency,
