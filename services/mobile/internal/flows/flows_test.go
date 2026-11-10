@@ -171,3 +171,51 @@ func TestMultiClassScanAcceptsEither(t *testing.T) {
 		t.Fatalf("verdict: %+v", r.Verdict)
 	}
 }
+
+func scanStep(classes ...gs1.ScanClass) Draft {
+	return Draft{Code: "X1", EntryStepID: "s", Steps: []Step{{ID: "s", Type: StepScan, ExpectedScan: classes, Next: map[string]*string{"default": nil}}}}
+}
+
+func TestUnprefixedPlainScansAreNotReadAsGS1(t *testing.T) {
+	cases := []struct {
+		name    string
+		classes []gs1.ScanClass
+		value   string
+		want    string
+	}{
+		{"location 10-01-02", []gs1.ScanClass{gs1.ClassLocation}, "10-01-02", "10-01-02"},
+		{"location 21-A-03", []gs1.ScanClass{gs1.ClassLocation}, "21-A-03", "21-A-03"},
+		{"location 01-02-03", []gs1.ScanClass{gs1.ClassLocation}, "01-02-03", "01-02-03"},
+		{"location 10-01-02 beside LP", []gs1.ScanClass{gs1.ClassLP, gs1.ClassLocation}, "10-01-02", "10-01-02"},
+		{"EAN-13", []gs1.ScanClass{gs1.ClassGTIN}, "4006381333931", "4006381333931"},
+		{"UPC-A", []gs1.ScanClass{gs1.ClassGTIN}, "012345678905", "012345678905"},
+		{"EAN-13 3017620422003", []gs1.ScanClass{gs1.ClassGTIN}, "3017620422003", "3017620422003"},
+	}
+	for _, c := range cases {
+		d := scanStep(c.classes...)
+		r, err := Submit(d, Start("X1", 1, d, nil), "s", Input{Value: c.value}, gs1.ClassifyOptions{})
+		if err != nil || r.Verdict != nil || !r.State.Done || r.State.Values["s"] != c.want {
+			t.Errorf("%s: err=%v verdict=%+v state=%+v", c.name, err, r.Verdict, r.State)
+		}
+	}
+}
+
+func TestUnprefixedGS1StillParsesWhereAGS1ClassIsExpected(t *testing.T) {
+	d := scanStep(gs1.ClassGTIN)
+	r, err := Submit(d, Start("X1", 1, d, nil), "s", Input{Value: "0109501101530003"}, gs1.ClassifyOptions{})
+	if err != nil || r.Verdict != nil || r.State.Values["s.01"] != "09501101530003" {
+		t.Fatalf("a GS1 element string without a symbology id on a GTIN step: %+v %v", r, err)
+	}
+}
+
+func TestOverlongValuesAreRefused(t *testing.T) {
+	d := scanStep(gs1.ClassAny)
+	long := strings.Repeat("A", MaxValueLength+1)
+	if _, err := Submit(d, Start("X1", 1, d, nil), "s", Input{Value: long}, gs1.ClassifyOptions{}); !errors.Is(err, ErrValueTooLong) {
+		t.Fatalf("scan: %v", err)
+	}
+	in := Draft{Code: "X1", EntryStepID: "i", Steps: []Step{{ID: "i", Type: StepInput, Next: map[string]*string{"default": nil}}}}
+	if _, err := Submit(in, Start("X1", 1, in, nil), "i", Input{Value: long}, gs1.ClassifyOptions{}); !errors.Is(err, ErrValueTooLong) {
+		t.Fatalf("input: %v", err)
+	}
+}

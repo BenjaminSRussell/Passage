@@ -14,7 +14,10 @@ var (
 	ErrNoOutcome    = errors.New("flows: the outcome is not one of the step's outcomes")
 	ErrValueNeeded  = errors.New("flows: the step needs a value")
 	ErrFlowFinished = errors.New("flows: the flow already finished")
+	ErrValueTooLong = errors.New("flows: the value is too long")
 )
+
+const MaxValueLength = 512
 
 // State is where a device is in a flow. Version pins the flow version the run
 // started on, so a publish never changes a run in progress (BR-32.9).
@@ -67,11 +70,13 @@ func Submit(d Draft, st State, stepID string, in Input, opts gs1.ClassifyOptions
 	if !ok {
 		return Result{}, ErrWrongStep
 	}
+	if len(in.Value) > MaxValueLength || len(in.Outcome) > MaxValueLength {
+		return Result{}, ErrValueTooLong
+	}
 	next := clone(st)
 	switch step.Type {
 	case StepScan:
-		opts.ExpectGS1 = true
-		c := gs1.Classify(in.Value, opts)
+		c := gs1.ClassifyFor(in.Value, step.ExpectedScan, opts)
 		verdict := firstOK(step.ExpectedScan, c)
 		if verdict != nil {
 			return Result{State: st, Verdict: verdict}, nil

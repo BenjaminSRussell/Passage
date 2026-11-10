@@ -86,8 +86,10 @@ func Resumed(s View, workID string, status WorkStatus, sessions []View, now time
 	if workID == "" || workID != s.CurrentWorkID {
 		return false, "no work held"
 	}
-	if holder, held := LockHolder(sessions, workID, now, idle); held && holder.ID != s.ID {
-		return false, "work is locked by another active session"
+	for _, other := range sessions {
+		if other.ID != s.ID && other.CurrentWorkID == workID && StateAt(other, now, idle) == Active {
+			return false, "work is locked by another active session"
+		}
 	}
 	if status != WorkOpen && status != WorkAssigned {
 		return false, "work is " + string(status)

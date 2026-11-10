@@ -62,6 +62,25 @@ func Classify(raw string, opts ClassifyOptions) Classified {
 	return Classified{Kind: "plain", Value: raw}
 }
 
+// ClassifyFor classifies a scan for a step that expects one of the classes. A
+// step that expects only a location never reads unprefixed text as GS1. An
+// unprefixed scan that parses as GS1 falls back to a plain value when the parse
+// fails or the plain value already fits one of the specific classes, so an
+// EAN-13, a UPC-A or the location 10-01-02 is not taken for AIs.
+func ClassifyFor(raw string, expected []ScanClass, opts ClassifyOptions) Classified {
+	opts.ExpectGS1 = slices.ContainsFunc(expected, func(c ScanClass) bool { return c != ClassLocation })
+	c := Classify(raw, opts)
+	if c.GS1 == nil || hasSymbologyID(raw) {
+		return c
+	}
+	plain := Classified{Kind: "plain", Value: raw}
+	fits := slices.ContainsFunc(expected, func(e ScanClass) bool { return e != ClassAny && matches(e, plain) })
+	if !c.GS1.OK || fits {
+		return plain
+	}
+	return c
+}
+
 var classLabel = map[ScanClass]string{ClassLP: "LP", ClassGTIN: "GTIN", ClassLot: "lot", ClassLocation: "location", ClassAny: "any barcode"}
 
 // Describe names what the worker scanned, in the words of MOB-0101.

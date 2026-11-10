@@ -56,6 +56,13 @@ func TestResumeRelocksOnlyFreeWork(t *testing.T) {
 	if ok, _ := Resumed(stale, "w1", WorkAssigned, []View{stale, taker}, now, idle); ok {
 		t.Error("work taken by another active session must not re-lock")
 	}
+	self := view("a", "w1", now)
+	if ok, why := Resumed(self, "w1", WorkAssigned, []View{self, taker}, now, idle); ok {
+		t.Errorf("the resuming session is listed first and already ACTIVE; another active holder must still block: %s", why)
+	}
+	if ok, why := Resumed(self, "w1", WorkAssigned, []View{self}, now, idle); !ok {
+		t.Errorf("a session alone on its work re-locks: %s", why)
+	}
 	if ok, why := Resumed(stale, "w1", "COMPLETED", []View{stale}, now, idle); ok || why != "work is COMPLETED" {
 		t.Errorf("completed work: %v %s", ok, why)
 	}
