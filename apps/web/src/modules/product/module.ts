@@ -1,21 +1,7 @@
 import { createElement } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import type { PassageModule } from "../registry";
-import { CatalogPage, ProductDetail, ProductHome, ProductNotFound, ReleasedPage, sampleProducts } from "./pages";
-
-function CatalogRoute() {
-  const navigate = useNavigate();
-  return createElement(CatalogPage, { onOpen: (number: string) => navigate(`/product/${encodeURIComponent(number)}`) });
-}
-
-function ProductDetailRoute() {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const found = sampleProducts.find((p) => p.number === id);
-  return found
-    ? createElement(ProductDetail, { product: found })
-    : createElement(ProductNotFound, { onBack: () => navigate("/product/items") });
-}
+import { CatalogPage, ProductDetail, ProductHome, ReleasedPage } from "./pages";
+import { EditProductPage, NewProductPage } from "./ProductForms";
 
 const product: PassageModule = {
   id: "product",
@@ -23,9 +9,11 @@ const product: PassageModule = {
   description: "Products, masters and what's released to each legal entity.",
   routes: [
     { path: "/product", element: createElement(ProductHome) },
-    { path: "/product/items", element: createElement(CatalogRoute) },
+    { path: "/product/items", element: createElement(CatalogPage) },
+    { path: "/product/items/new", element: createElement(NewProductPage), handle: { title: "New product", duty: "product.write" } },
     { path: "/product/released", element: createElement(ReleasedPage) },
-    { path: "/product/:id", element: createElement(ProductDetailRoute), handle: { title: "Product details" } },
+    { path: "/product/:id", element: createElement(ProductDetail), handle: { title: "Product details" } },
+    { path: "/product/:id/edit", element: createElement(EditProductPage), handle: { title: "Edit product", duty: "product.write" } },
   ],
   nav: [
     { label: "Overview", to: "/product", duty: "product.read" },
