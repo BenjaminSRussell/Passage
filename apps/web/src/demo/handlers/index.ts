@@ -3,4 +3,5 @@ import "./mfg";
 import "./supply";
 import "./o2c";
 import "./documents";
+import "./tax";
 import "./shell";
