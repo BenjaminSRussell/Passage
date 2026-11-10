@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/posting"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/store"
@@ -154,6 +155,20 @@ func parseTargets(rows []entityTarget, f fieldParser) map[string]domain.Target {
 	return out
 }
 
+// targetsInScope refuses a posting into a legal entity outside the caller's
+// scope: the ledger calls go out under the intercompany service's identity, so
+// the caller's own scope is checked here, for every side, before anything is stored.
+func targetsInScope(w http.ResponseWriter, r *http.Request, targets map[string]domain.Target) bool {
+	p, _ := tenant.FromContext(r.Context())
+	for _, t := range targets {
+		if !tenant.InLegalEntityScope(p, t.LegalEntityID) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal entity in this posting is outside the caller's scope"))
+			return false
+		}
+	}
+	return true
+}
+
 // postProblem turns the poster's outcome into a response. A journal whose
 // second side was refused answers 422 IC-0845 and the ledger being unreachable
 // 503 IC-0846; both leave the stored journal readable by its id in the detail.
@@ -199,7 +214,7 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	date := f.date("postingDate", req.PostingDate)
 	targets := parseTargets(req.Entities, f)
-	if !validation(w, r, f) {
+	if !validation(w, r, f) || !targetsInScope(w, r, targets) {
 		return
 	}
 	pairID := ids.New()

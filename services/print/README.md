@@ -92,6 +92,17 @@ from this pod; nothing connects inbound to the cluster.
     address lines 200 characters, a table cell 500, the notes 2000, 8 address lines per party, 20
     header fields, 20 totals, 8 columns. More than 500 lines is refused with PRN-0009. Fields and
     limits added after the first release are optional or wider, so earlier callers keep working.
+- **Queue management** (print.admin): `PATCH /print/v1/printers/{id}` edits a printer or moves it to
+  another queue or failover rank (PRN-0006 when the rank is held; the code and device type never
+  change); `POST /print/v1/printers/{id}:retire` takes it out of its queue (the row stays for the
+  job log, its rank is free again, `GET /printers?includeRetired=true` lists it); `PUT` and `DELETE
+  /print/v1/routing-rules/{id}` edit and remove a rule. Migration `0006` adds `retired_at`, makes the
+  rank unique among active printers, and grants the app role UPDATE on printers and UPDATE/DELETE on
+  rules (printers are never deleted).
+- **Stale job sweep** (`POST /print/v1/jobs:sweep`, and every 15 s for each tenant in
+  `PRINT_PURGE_TENANT_IDS`): a job still QUEUED after a minute (its process died between insert and
+  completion) is claimed (its `updated_at` is stamped, so a second sweep skips it) and dispatched in
+  failover order. A swept job prints the stored layout, like a reprint.
 - **Reprints**: `reprintOf` reuses the stored ZPL or PDF and records the source job.
 - **Job log** (`GET /print/v1/jobs?status=&queueCode=&printerCode=&limit=`): newest first (§6.32.14).
 - **Printer status** (`GET /print/v1/printers/status`): per printer, the state from its last job
@@ -167,6 +178,8 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS).
 | PRN-0004 | 409 | Job already completed (terminal) |
 | PRN-0005 | 404 | Print job not found |
 | PRN-0006 | 409 | The queue already has a printer at this failover rank |
+| PRN-0010 | 404 | Printer not found, or already retired |
+| PRN-0011 | 404 | Routing rule not found |
 | PRN-0007 | 201 (job FAILED) | The label does not fit the media of any device in the queue |
 | PRN-0008 | 422 | A business document cannot be rendered; the detail names the field |
 | PRN-0009 | 422 | A business document has more than 500 lines |

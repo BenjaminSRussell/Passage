@@ -13,3 +13,4 @@ import "./importSetup";
 import "./finance";
 import "./shell";
 import "./fx";
+import "./print";
