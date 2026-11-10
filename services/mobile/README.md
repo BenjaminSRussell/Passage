@@ -18,6 +18,7 @@ user. Contracts: `api/openapi.yaml`, `events/asyncapi.yaml`. Gaps: `NOT-IMPLEMEN
 
 - A session silent past the idle timeout is replaceable: the next user's login ends it as TAKEOVER and releases its work (AC-32.8). A returning STALE session keeps its work only if the warehouse still has it OPEN or ASSIGNED and no other ACTIVE session holds it.
 - A published flow version never changes; runs stay pinned to theirs. An invalid graph is 422 MOB-0113; a stale `If-Match` is 412.
+- Offline replay needs the caller's open session on the device (`sessionId`, or the caller's only open session there when omitted); another user's or an unknown device is 403 MOB-NOT-OWNER.
 - Offline transactions carry `device_id:seq`. They apply once, in order. The first conflict parks (MOB-0107) and blocks the device's later transactions until a supervisor resolves it.
 - Replay single-form statuses: 200 applied, 409 conflict, 422 rejected or sequence gap (MOB-0108) or key reuse, 429 behind an unresolved earlier transaction, 503 warehouse down or device clock more than 300 s off (MOB-0114).
 - Error codes: MOB-0101 scan does not match, 0102 check digit, 0103 malformed or unknown AI, 0104 bad date, 0107 conflict, 0108 gap, 0113 invalid graph, 0114 clock skew, 0117 resumed notice, 0118 unmapped.
@@ -35,8 +36,14 @@ user. Contracts: `api/openapi.yaml`, `events/asyncapi.yaml`. Gaps: `NOT-IMPLEMEN
 
 ## Service grant
 
-`mobile` may call the warehouse as the user with `warehouse.work.execute`
-(`platform/go/tenant/service.go` and `policies/authz/data.json`).
+`mobile` may call the warehouse with `warehouse.work.execute`,
+`warehouse.inquiry.view` and `warehouse.receipt.register`
+(`platform/go/tenant/service.go` and `policies/authz/data.json`). The service
+token carries the grant's duties, never the user's, and the warehouse trusts
+them, so the client checks that the signed-in user holds the duty of each
+operation (`work.execute` for assign, confirm and exception, `receipt.register`
+for receive, `inquiry.view` for the work read behind a STALE resume) before it
+calls, on the step path and on replay; a user without it gets 403 `AUTH-0003`.
 
 ## Events
 
@@ -51,7 +58,7 @@ PASSAGE_TEST_APP_DATABASE_URL=postgres://passage_app:passage_app@localhost:5432/
 go test ./...
 ```
 
-Acceptance map: AC-32.1 `gs1` (`TestAC321...`), AC-32.3 `store/replay_test.go`
+Acceptance map: AC-32.1 `gs1` (`TestAC321...`), AC-32.3 `internal/replay` (`replay_test.go`)
 (`TestAC323...`), AC-32.4 store and api (`TestAC324...`), AC-32.6 replay and api
 (`TestAC326...`), AC-32.8 session, store and api (`TestAC328...`). AC-32.2 is the
 web Playwright spec; AC-32.5 and AC-32.7 are in `NOT-IMPLEMENTED.md`.

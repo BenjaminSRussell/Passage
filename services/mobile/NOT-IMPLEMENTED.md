@@ -12,5 +12,8 @@
 | Scheduled stale sweep per tenant | BR-32.6 | infra | `POST /sessions:sweep` works; a cron per tenant is not deployed. |
 | SSE across pods | FR-32.2 | later slice | The hub is in-process; devices also poll the menu. |
 | Gateway HTTPRoute, warehouse chart trusting the mobile public key in dev values | deploy | infra | Not wired in `deploy/`. |
-| `services/mobile` in the CI lint matrix and image build | CI | infra | Lint cleanliness unverified; the Dockerfile builds locally only. |
+| `services/mobile` image build | CI | infra | Lint runs in the CI matrix (`golangci-lint`); the Dockerfile builds locally only. |
 | Four-eyes flow approval, flow diff and smoke scripts | BR-32.9 | later slice | Publish validates the graph only. |
+| GS1 application identifiers beyond the BR-32.1 subset | BR-32.1 | later slice | The AI table is the BR-32.1 subset: 00, 01, 02, 10, 11 to 13, 15 to 17, 20, 21, 30, 37, 240, 241, 250, 251, 400, 410 to 414, 420, 91 to 99 and the 310x to 325x measure families. Any other AI is MOB-0103. |
+| GS1 symbologies other than GS1-128, GS1 DataMatrix and GS1 QR | BR-32.1 | later slice | Only symbology ids `]C1`, `]d2` and `]Q3` are parsed as GS1. Any other id (for example `]E0` EAN-13, `]A0` Code 128, `]e0` GS1 DataBar, `]J1` GS1 composite) is read as a plain value with the id removed; GS1 DataBar and composite data are not parsed. |
+| Per-tenant cap on event-stream connections and warehouse filtering of events | FR-32.2 | later slice | Every device of a tenant receives every `flow.published`; the number of open streams per tenant is not limited. |

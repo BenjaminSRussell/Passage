@@ -7,9 +7,13 @@ info:
     versioned server-driven flows and their step runner, GS1-128 and DataMatrix
     scan parsing, and idempotent offline replay with a supervisor conflict
     queue. Work-changing steps call the warehouse work API as the signed-in
-    user. Commands require an Idempotency-Key (kept 24 hours): a repeat returns
-    the first answer with Idempotent-Replayed: true, a repeat with another
-    request is 422 idempotency_key_reuse. Errors are RFC 7807 problems with a
+    user. Commands that list the Idempotency-Key parameter (kept 24 hours):
+    a repeat returns the first answer with Idempotent-Replayed: true, a repeat
+    with another request is 422 idempotency_key_reuse; a failed attempt stores
+    nothing and can be retried with the same key. Heartbeat, end, start run and
+    replay need no key (replay is exactly-once per device_id:seq). A warehouse
+    operation needs the user's own duty, not only the service's: 403 AUTH-0003
+    when it is missing. Errors are RFC 7807 problems with a
     catalog code (MOB-0101 to MOB-0117) or a service code.
 servers:
   - url: https://api.{env}.passage.dev
@@ -59,7 +63,9 @@ paths:
       description: >
         A STALE session that comes back keeps its work only if the warehouse
         still has it OPEN or ASSIGNED and no other ACTIVE session holds it
-        (BR-32.6); otherwise relocked is false and the session lets it go. deviceTime
+        (BR-32.6); otherwise relocked is false and the session lets go of the work
+        and of the run seeded with it. Starting a session again as the same user
+        does the same re-lock for a STALE session. deviceTime
         records the clock skew used by replay (MOB-0114 above 300 s).
       x-passage-duty: warehouse.work.execute
       parameters: [{ $ref: "#/components/parameters/Id" }]
@@ -92,6 +98,7 @@ paths:
     post:
       operationId: assignWork
       summary: Ask the warehouse for the user's next work and hold it on the session
+      description: A repeat of the Idempotency-Key returns the first answer.
       x-passage-duty: warehouse.work.execute
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
@@ -117,7 +124,8 @@ paths:
         A scan that fails its check is 422 with MOB-0101 to MOB-0104 and leaves
         the run where it was. A call step calls the warehouse as the user, keyed
         by Idempotency-Key, and advances only when the call succeeds; a warehouse
-        409 is passed through.
+        409 is passed through. The call needs the user's duty for the operation
+        (403 AUTH-0003 otherwise). A repeat of the key returns the first answer.
       x-passage-duty: warehouse.work.execute
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -127,6 +135,7 @@ paths:
         content: { application/json: { schema: { type: object, properties: { value: { type: string }, outcome: { type: string } } } } }
       responses:
         "200": { description: The run and its next step. }
+        "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
   /v1/mobile/menus/{id}:
     get:
@@ -135,13 +144,16 @@ paths:
       description: >
         A menu's role is a duty the caller must hold; a role menu outranks a site
         menu, which outranks the general one. The default key always exists and
-        offers every published flow. Flows are the versions published now.
+        offers every published flow. Flows are the versions published now. A flow
+        restricted to warehouses is offered only for a warehouseId it lists;
+        without warehouseId none is. warehouseId must be a UUID (400 otherwise).
       x-passage-duty: warehouse.work.execute
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: warehouseId, in: query, schema: { type: string, format: uuid } }
       responses:
         "200": { description: Menu., content: { application/json: { schema: { $ref: "#/components/schemas/Menu" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
   /v1/mobile/menus:
     get: { operationId: listMenus, summary: List menus, x-passage-duty: warehouse.mobile-flow.admin, responses: { "200": { description: Menus. } } }
@@ -211,7 +223,11 @@ paths:
       summary: Replay queued offline transactions in sequence order, exactly once
       description: >
         Batch form (deviceId, transactions) answers 200 with a status per
-        transaction. Single form (idempotencyKey = "deviceId:seq", the browser
+        transaction. The caller must have an open session on the device:
+        sessionId names it, or it is the caller's only open session there; no
+        such session is 403 MOB-NOT-OWNER, and a command whose warehouse
+        operation needs a duty the caller lacks is 403 AUTH-0003, with nothing
+        recorded. Single form (idempotencyKey = "deviceId:seq", the browser
         device) answers 200 APPLIED, 409 MOB-0107 CONFLICT, 422 REJECTED, MOB-0108
         (sequence gap) or idempotency_key_reuse, 429 while it waits behind an
         earlier transaction that is not applied, and 503 when the warehouse is
@@ -226,6 +242,7 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/Replay" } } }
       responses:
         "200": { description: Applied, or per-transaction results. }
+        "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/Problem" }
