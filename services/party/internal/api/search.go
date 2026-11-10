@@ -58,6 +58,11 @@ func (a *API) searchRoute(kind store.SearchKind) http.HandlerFunc {
 			}
 			limit = n
 		}
+		legalEntityID := query.Get("legalEntityId")
+		if legalEntityID != "" && !ids.Valid(legalEntityID) {
+			badSearchParam(w, r, "legalEntityId", "must be a UUID")
+			return
+		}
 		var after store.SearchKey
 		if cursor := query.Get("cursor"); cursor != "" {
 			raw, err := base64.RawURLEncoding.DecodeString(cursor)
@@ -68,7 +73,7 @@ func (a *API) searchRoute(kind store.SearchKind) http.HandlerFunc {
 			}
 			after = store.SearchKey{Name: name, ID: id}
 		}
-		page, err := a.search.Search(r.Context(), kind, text, after, limit)
+		page, err := a.search.Search(r.Context(), kind, text, legalEntityID, after, limit)
 		if err != nil {
 			failParty(w, r, err)
 			return

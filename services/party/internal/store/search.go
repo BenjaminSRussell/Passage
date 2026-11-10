@@ -26,6 +26,7 @@ type SearchHit struct {
 	Name          string `json:"name"`
 	AccountNumber string `json:"accountNumber,omitempty"`
 	Blocked       string `json:"blocked,omitempty"`
+	LegalEntityID string `json:"legalEntityId,omitempty"`
 }
 
 type SearchKey struct{ Name, ID string }
@@ -36,20 +37,24 @@ type SearchPage struct {
 }
 
 type SearchStore interface {
-	Search(ctx context.Context, kind SearchKind, query string, after SearchKey, limit int) (SearchPage, error)
+	Search(ctx context.Context, kind SearchKind, query, legalEntityID string, after SearchKey, limit int) (SearchPage, error)
 }
 
-func searchSQL(kind SearchKind) string {
-	head, extraMatch, idColumn := `select p.id::text, p.id::text, p.party_number, p.name, '', '' from party p where p.tenant_id = $1`, "", "p.id"
+func searchSQL(kind SearchKind) (string, bool) {
+	head, extraMatch, idColumn, scoped := `select p.id::text, p.id::text, p.party_number, p.name, '', '', '' from party p where p.tenant_id = $1`, "", "p.id", false
 	switch kind {
 	case SearchVendors, SearchCustomers:
 		table := string(kind) + "_role"
-		head = `select r.id::text, p.id::text, p.party_number, p.name, r.account_number, r.blocked
+		head = `select r.id::text, p.id::text, p.party_number, p.name, r.account_number, r.blocked, r.legal_entity_id::text
 			from ` + table + ` r join party p on p.tenant_id = r.tenant_id and p.id = r.party_id where r.tenant_id = $1`
-		extraMatch, idColumn = " or r.account_number ilike $2", "r.id"
+		extraMatch, idColumn, scoped = " or r.account_number ilike $2", "r.id", true
 	}
-	return head + ` and p.status <> 'merged' and ($2::text = '' or p.name ilike $2 or p.party_number ilike $2` + extraMatch + `)
-		and (p.name, ` + idColumn + `) > ($3, $4::uuid) order by p.name, ` + idColumn + ` limit $5`
+	sql := head + ` and p.status <> 'merged' and ($2::text = '' or p.name ilike $2 or p.party_number ilike $2` + extraMatch + `)
+		and (p.name, ` + idColumn + `) > ($3, $4::uuid)`
+	if scoped {
+		sql += ` and ($6::text = '' or r.legal_entity_id::text = $6)`
+	}
+	return sql + ` order by p.name, ` + idColumn + ` limit $5`, scoped
 }
 
 func searchPattern(q string) string {
@@ -60,7 +65,7 @@ func searchPattern(q string) string {
 	return "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(q) + "%"
 }
 
-func (s *Postgres) Search(ctx context.Context, kind SearchKind, query string, after SearchKey, limit int) (SearchPage, error) {
+func (s *Postgres) Search(ctx context.Context, kind SearchKind, query, legalEntityID string, after SearchKey, limit int) (SearchPage, error) {
 	caller, _ := tenant.FromContext(ctx)
 	if after.ID == "" {
 		after.ID = "00000000-0000-0000-0000-000000000000"
@@ -70,14 +75,19 @@ func (s *Postgres) Search(ctx context.Context, kind SearchKind, query string, af
 	}
 	page := SearchPage{Items: []SearchHit{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, searchSQL(kind), caller.TenantID, searchPattern(query), after.Name, after.ID, limit+1)
+		sql, scoped := searchSQL(kind)
+		args := []any{caller.TenantID, searchPattern(query), after.Name, after.ID, limit + 1}
+		if scoped {
+			args = append(args, legalEntityID)
+		}
+		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var hit SearchHit
-			if err := rows.Scan(&hit.ID, &hit.PartyID, &hit.PartyNumber, &hit.Name, &hit.AccountNumber, &hit.Blocked); err != nil {
+			if err := rows.Scan(&hit.ID, &hit.PartyID, &hit.PartyNumber, &hit.Name, &hit.AccountNumber, &hit.Blocked, &hit.LegalEntityID); err != nil {
 				return err
 			}
 			page.Items = append(page.Items, hit)

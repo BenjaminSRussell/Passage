@@ -577,11 +577,12 @@ paths:
     get:
       operationId: searchVendors
       summary: Search vendors by name or number
-      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are vendor roles in the caller's legal entities (id is the vendor role id; partyId the party), ordered by name and paged by an opaque cursor.
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are vendor roles in the caller's legal entities (narrowed to legalEntityId when given; each hit carries its legalEntityId) (id is the vendor role id; partyId the party), ordered by name and paged by an opaque cursor.
       x-passage-duty: party.read
       parameters:
         - { name: q, in: query, schema: { type: string, maxLength: 100 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: legalEntityId, in: query, description: 'Only vendor roles in this legal entity.', schema: { type: string, format: uuid } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         '200':
@@ -604,6 +605,7 @@ paths:
                         name: { type: string }
                         accountNumber: { type: string }
                         blocked: { type: string }
+                        legalEntityId: { type: string, format: uuid }
                   nextCursor: { type: string }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
@@ -613,11 +615,12 @@ paths:
     get:
       operationId: searchCustomers
       summary: Search customers by name or number
-      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are customer roles in the caller's legal entities (id is the customer role id; partyId the party), ordered by name and paged by an opaque cursor.
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are customer roles in the caller's legal entities (narrowed to legalEntityId when given; each hit carries its legalEntityId) (id is the customer role id; partyId the party), ordered by name and paged by an opaque cursor.
       x-passage-duty: party.read
       parameters:
         - { name: q, in: query, schema: { type: string, maxLength: 100 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: legalEntityId, in: query, description: 'Only customer roles in this legal entity.', schema: { type: string, format: uuid } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         '200':
@@ -640,6 +643,7 @@ paths:
                         name: { type: string }
                         accountNumber: { type: string }
                         blocked: { type: string }
+                        legalEntityId: { type: string, format: uuid }
                   nextCursor: { type: string }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }

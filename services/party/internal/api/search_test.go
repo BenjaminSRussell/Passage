@@ -13,16 +13,17 @@ import (
 )
 
 type fakeSearch struct {
-	kind  store.SearchKind
-	query string
-	after store.SearchKey
-	limit int
-	page  store.SearchPage
-	err   error
+	kind   store.SearchKind
+	query  string
+	entity string
+	after  store.SearchKey
+	limit  int
+	page   store.SearchPage
+	err    error
 }
 
-func (f *fakeSearch) Search(_ context.Context, kind store.SearchKind, query string, after store.SearchKey, limit int) (store.SearchPage, error) {
-	f.kind, f.query, f.after, f.limit = kind, query, after, limit
+func (f *fakeSearch) Search(_ context.Context, kind store.SearchKind, query, legalEntityID string, after store.SearchKey, limit int) (store.SearchPage, error) {
+	f.kind, f.query, f.entity, f.after, f.limit = kind, query, legalEntityID, after, limit
 	return f.page, f.err
 }
 
@@ -43,6 +44,13 @@ func TestSearchRoutes_PassTheKindQueryAndLimit(t *testing.T) {
 		if rec.Code != http.StatusOK || f.kind != kind || f.query != "contoso" || f.limit != 5 || !strings.Contains(rec.Body.String(), `"name":"Contoso Ltd"`) || strings.Contains(rec.Body.String(), "nextCursor") {
 			t.Fatalf("%s = %d %s with %+v", path, rec.Code, rec.Body, f)
 		}
+	}
+}
+
+func TestSearchRoutes_PassTheLegalEntityFilter(t *testing.T) {
+	f := &fakeSearch{}
+	if rec := do(searchRouter(f), http.MethodGet, "/v1/party/vendors:search?legalEntityId="+knownID, "", "party.read", true); rec.Code != http.StatusOK || f.entity != knownID {
+		t.Fatalf("got %d %s with entity %q", rec.Code, rec.Body, f.entity)
 	}
 }
 
@@ -81,6 +89,7 @@ func TestSearchRoutes_Refusals(t *testing.T) {
 		"limit not int": {"?limit=x", "party.read", true, http.StatusBadRequest},
 		"bad cursor":    {"?cursor=!!", "party.read", true, http.StatusBadRequest},
 		"cursor no id":  {"?cursor=Q29udG9zbw", "party.read", true, http.StatusBadRequest},
+		"bad entity":    {"?legalEntityId=x", "party.read", true, http.StatusBadRequest},
 		"text too long": {"?q=" + strings.Repeat("a", 101), "party.read", true, http.StatusBadRequest},
 		"write only":    {"", "party.write", true, http.StatusForbidden},
 		"no tenant":     {"", "party.read", false, http.StatusUnauthorized},
