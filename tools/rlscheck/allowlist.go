@@ -16,6 +16,10 @@ func allowReason(v violation) (string, bool) {
 }
 
 var allowlist = map[string]string{
+	"ops.ops_region:" + problemNotForced:    "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0001_init, #50)",
+	"ops.ops_region:" + problemNoTenantID:   "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0001_init, #50)",
+	"ops.ops_failover:" + problemNotForced:  "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0001_init, #50)",
+	"ops.ops_failover:" + problemNoTenantID: "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0001_init, #50)",
 	// A consolidation group spans legal entities by design: the group's units, ownership chain and consolidated trial balance are read
 	// whole by the consolidation duties, and hiding a unit outside the caller's scope would give a wrong consolidated result, not a smaller one.
 	"consolidation.consolidation_unit:" + problemNoEntityPol: "permanent: group-level master data; a consolidation group spans legal entities and is read whole by the consolidation duties (0003_groups, #40)",

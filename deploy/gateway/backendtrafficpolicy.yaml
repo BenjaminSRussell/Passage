@@ -47,6 +47,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: controlling
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: ops
   rateLimit:
     type: Global
     global:

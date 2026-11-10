@@ -35,6 +35,7 @@ updates:
       - /services/migration
       - /services/mobile
       - /services/numbering
+      - /services/ops
       - /services/org
       - /services/party
       - /services/payables
