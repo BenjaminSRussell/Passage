@@ -121,6 +121,8 @@ export interface Forecast {
   asOf: string;
   buckets: ForecastBucket[];
   outOfHorizon: number;
+  /** How each live source (AP open items from payables, AR from receivables) took part; absent when none is configured. */
+  sources?: { type: "AP" | "AR"; status: "ok" | "truncated" | "unavailable"; count: number }[];
 }
 
 /** Problem details (RFC 9457) surfaced to the UI with the stable service code and field errors. */
@@ -649,4 +651,89 @@ export async function importIntradayReport(bankAccountId: string, file: Blob, fi
   form.set("file", file, fileName);
   const res = await request("/intraday-reports/import", { method: "POST", body: form });
   return { report: (await res.json()) as IntradayReport, replayed: res.status === 200 };
+}
+
+// ---- Cash desks (FR-36.16) ----
+
+export interface CashDesk {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  name: string;
+  currency: string;
+  mainAccountId: string;
+  maxBalance: string;
+  status: "active" | "inactive";
+  version: number;
+  /** The open business day and its book balance, when there is an open day. */
+  openDate?: string;
+  balance?: string;
+}
+
+export interface CashDeskDay {
+  deskId: string;
+  businessDate: string;
+  status: "open" | "closed";
+  openingBalance: string;
+  bookBalance: string;
+  countedBalance?: string;
+  difference?: string;
+  differenceReason?: string;
+  openedBy: string;
+  closedBy?: string;
+}
+
+export interface CashDeskEntry {
+  id: string;
+  lineNo: number;
+  kind: "receipt" | "payment";
+  amount: string;
+  description: string;
+  reference?: string;
+  createdBy: string;
+  balanceAfter: string;
+}
+
+export interface CashDeskInput {
+  legalEntityId: string;
+  code: string;
+  name: string;
+  currency: string;
+  mainAccountId: string;
+  maxBalance: string;
+}
+
+export function listCashDesks(legalEntityId: string, signal?: AbortSignal): Promise<CashDesk[]> {
+  return items<CashDesk>(`/cash-desks${query({ legalEntityId })}`, signal);
+}
+
+export function getCashDesk(id: string, signal?: AbortSignal): Promise<CashDesk> {
+  return send<CashDesk>(`/cash-desks/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createCashDesk(input: CashDeskInput, key: string = newKey()): Promise<CashDesk> {
+  return send<CashDesk>("/cash-desks", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+export function listCashDeskDays(id: string, signal?: AbortSignal): Promise<CashDeskDay[]> {
+  return items<CashDeskDay>(`/cash-desks/${encodeURIComponent(id)}/days`, signal);
+}
+
+export function openCashDeskDay(id: string, businessDate: string): Promise<CashDeskDay> {
+  return send<CashDeskDay>(`/cash-desks/${encodeURIComponent(id)}/days`, { method: "POST", body: JSON.stringify({ businessDate }) });
+}
+
+export function closeCashDeskDay(id: string, date: string, countedBalance: string, reason: string): Promise<CashDeskDay> {
+  return send<CashDeskDay>(`/cash-desks/${encodeURIComponent(id)}/days/${encodeURIComponent(date)}:close`, {
+    method: "POST",
+    body: JSON.stringify({ countedBalance, ...(reason ? { reason } : {}) }),
+  });
+}
+
+export function listCashDeskEntries(id: string, date: string, signal?: AbortSignal): Promise<CashDeskEntry[]> {
+  return items<CashDeskEntry>(`/cash-desks/${encodeURIComponent(id)}/days/${encodeURIComponent(date)}/entries`, signal);
+}
+
+export function addCashDeskEntry(id: string, input: { kind: "receipt" | "payment"; amount: string; description: string; reference?: string }, key: string = newKey()): Promise<CashDeskEntry> {
+  return send<CashDeskEntry>(`/cash-desks/${encodeURIComponent(id)}/entries`, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
 }

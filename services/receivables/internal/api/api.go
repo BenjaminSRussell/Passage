@@ -28,6 +28,7 @@ import (
 const (
 	readyTimeout     = 500 * time.Millisecond
 	dutyView         = "receivables.view"
+	dutyForecastRead = "receivables.forecast.read"
 	dutyPayment      = "receivables.payment.post"
 	dutyRMACredit    = "ar.rmacredit.post"
 	dutyImport       = "receivables.payment-file.import"
@@ -64,7 +65,7 @@ func New(s store.Store) *API { return &API{store: s} }
 // Register mounts the receivables routes on r.
 func (a *API) Register(r chi.Router) {
 	r.Route("/v1/receivables", func(r chi.Router) {
-		r.With(authz.RequireDuty(dutyView)).Get("/open-items", a.listOpenItems)
+		r.With(authz.RequireAnyDuty(dutyView, dutyForecastRead)).Get("/open-items", a.listOpenItems)
 		r.With(authz.RequireDuty(dutyOpeningImport)).Post("/open-items:batch", a.importOpeningItems)
 		r.With(authz.RequireAnyDuty(dutyView, dutyOpeningRead)).Get("/open-items/{ref}", a.getOpenItem)
 		r.With(authz.RequireDuty(dutyView)).Get("/open-item-imports", a.listOpeningImports)
@@ -84,6 +85,9 @@ func (a *API) Register(r chi.Router) {
 		a.bankStatementRoutes(r)
 		a.deductionRoutes(r)
 		a.statementRoutes(r)
+		a.glJournalRoutes(r)
+		a.creditSettlementRoutes(r)
+		a.adviceRoutes(r)
 		r.With(authz.RequireDuty(dutyImport)).Post("/lockbox/imports", a.importLockbox)
 		r.With(authz.RequireDuty(dutyView)).Get("/lockbox/imports", a.listLockboxBatches)
 		r.With(authz.RequireDuty(dutyView)).Get("/worklist", a.worklist)

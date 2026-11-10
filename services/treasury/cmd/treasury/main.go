@@ -17,8 +17,10 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/api"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
+	"github.com/BenjaminSRussell/passage/services/treasury/internal/forecastsrc"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 	"github.com/BenjaminSRussell/passage/services/treasury/migrations"
 )
@@ -82,6 +84,10 @@ func run() error {
 	}
 	a.WithReconciliations(pg)
 	a.WithCashPositions(pg)
+	a.WithCashDesks(pg)
+	if err := wireForecastSources(a); err != nil {
+		return err
+	}
 	ledger, err := ledgerclient.FromEnv(os.Getenv, "treasury")
 	if err != nil {
 		return fmt.Errorf("ledger client: %w", err)
@@ -122,4 +128,30 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// wireForecastSources adds the AP and AR feeds of the cash forecast (FR-36.9) for each of PAYABLES_URL and
+// RECEIVABLES_URL that is set. They need the service signing key; without one they are not started.
+func wireForecastSources(a *api.API) error {
+	var sources []forecastsrc.Source
+	payables, receivables := os.Getenv("PAYABLES_URL"), os.Getenv("RECEIVABLES_URL")
+	if payables == "" && receivables == "" {
+		slog.Warn("PAYABLES_URL and RECEIVABLES_URL are empty: the cash forecast uses stored entries only")
+		return nil
+	}
+	signer, err := tenant.ServiceSignerFromEnv(os.Getenv)
+	if err != nil {
+		return err
+	}
+	if signer == nil {
+		return errors.New("PAYABLES_URL or RECEIVABLES_URL needs a service signing key (PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+	}
+	if payables != "" {
+		sources = append(sources, forecastsrc.NewPayables(payables, signer, nil))
+	}
+	if receivables != "" {
+		sources = append(sources, forecastsrc.NewReceivables(receivables, signer, nil))
+	}
+	a.WithForecastSources(sources...)
+	return nil
 }

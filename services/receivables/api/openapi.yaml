@@ -1470,6 +1470,234 @@ paths:
                   committed: { type: integer, description: Posted credits whose billing reservation the sweep committed }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/remittance-advices:
+    post:
+      operationId: importRemittanceAdvice
+      summary: Attach a payer's remittance advice (CSV, JSON or EDI 820) to the payments it describes (FR-30.4)
+      description: |
+        Each advice line names a payment by its reference (`paymentRef`, matched to the payment's source reference; a
+        bank statement payment's reference is `<statement>:<entry>`, so the entry reference alone finds it) and the
+        invoices it pays. CSV has a header naming `paymentRef`, `reference` and `amount`, one row per invoice. JSON is
+        `{"lines":[{"paymentRef","references":[{"reference","amount"}]}]}`. EDI820 reads an X12 820: each TRN segment
+        starts a payment (TRN02) and each RMR segment names an invoice (RMR02) and the amount paid (RMR04). The advice
+        replaces the payment's remittance, so a repeat changes nothing; a payment already applied, an unknown or shared
+        reference, and references that total more than the payment are reported per line and skipped. With `autoApply`
+        the payments that got an advice are then matched and applied like an import's. 400 AR-ADVICE-MALFORMED names the
+        row, element or segment.
+      x-passage-duty: receivables.payment.post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, format, content]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                format: { type: string, enum: [CSV, JSON, EDI820] }
+                content: { type: string, minLength: 1, maxLength: 3145728 }
+                autoApply: { type: boolean }
+      responses:
+        "200":
+          description: Advice processed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lines, attached, skipped]
+                properties:
+                  attached: { type: integer }
+                  skipped: { type: integer }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      required: [paymentRef, outcome]
+                      properties:
+                        paymentRef: { type: string }
+                        outcome: { type: string, enum: [ATTACHED, UNMATCHED, AMBIGUOUS, ALREADY_APPLIED, INVALID] }
+                        paymentId: { type: string, format: uuid }
+                        detail: { type: string }
+                  autoApply: { $ref: "#/components/schemas/AutoApplyResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/credit-settlements:
+    post:
+      operationId: settleCredit
+      summary: Settle a credit item against debit items (30-3)
+      description: |
+        Offsets one credit item (a credit note, an adjustment or an unapplied payment item, negative amount) against open
+        debit items of the same customer, legal entity and currency, in one transaction. Name the `debits` and the amount
+        of each, or set `againstOriginal` to settle a credit note against the open items of the invoice it credits, the
+        oldest due date and installment first, up to what the credit holds. Each debit is reduced by its amount and the
+        credit by the total, which may not exceed the credit's open amount (422 AR-SETTLE-INVALID); an item reaching zero
+        is SETTLED. Nothing is posted to the ledger: both sides are in 1200. Items are locked while the settlement runs
+        (409 AR-0002 if another user holds one). A repeat with the same `Idempotency-Key` and body replays the answer.
+        Applying a payment to a credit item stays refused (AR-CREDIT-ITEM); this is the operation for credits.
+      x-passage-duty: receivables.payment.settle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, creditItemId]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                creditItemId: { type: string, format: uuid }
+                againstOriginal: { type: boolean }
+                debits:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [openItemId, amount]
+                    additionalProperties: false
+                    properties:
+                      openItemId: { type: string, format: uuid }
+                      amount: { $ref: "#/components/schemas/Money" }
+      responses:
+        "200":
+          description: Settled (or replayed)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [batchId, creditItemId, creditOpenAfter, creditStatus, total, settlements]
+                properties:
+                  batchId: { type: string, format: uuid }
+                  creditItemId: { type: string, format: uuid }
+                  creditOpenAfter: { $ref: "#/components/schemas/Money" }
+                  creditStatus: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }
+                  total: { $ref: "#/components/schemas/Money" }
+                  settlements:
+                    type: array
+                    items:
+                      type: object
+                      required: [openItemId, documentNumber, amount, openAfter, itemStatus]
+                      properties:
+                        openItemId: { type: string, format: uuid }
+                        documentNumber: { type: string }
+                        amount: { $ref: "#/components/schemas/Money" }
+                        openAfter: { $ref: "#/components/schemas/Money" }
+                        itemStatus: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals:
+    get:
+      operationId: listGLJournals
+      summary: List the journals receivables owes or has posted to the ledger
+      description: |
+        Cash receipts (Dr 1000 / Cr 1205), payment applications (Dr 1205, Dr 4100 discount, Dr 6100 write-off /
+        Cr 1200), dunning fees (Cr 4300), interest (Cr 4310), down payment and deposit moves and deduction
+        write-offs. A journal is stored in the transaction of the change that causes it and posted by a worker.
+      x-passage-duty: receivables.view
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED] } }
+        - { name: sourceType, in: query, schema: { type: string } }
+        - { name: parked, in: query, schema: { type: boolean } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Journals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/GLJournalView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals:sweep:
+    post:
+      operationId: sweepGLJournals
+      summary: Post the caller's due journals to the ledger
+      description: |
+        The scheduler's entry point; the in-process sweeper (`RECEIVABLES_RMA_SWEEP_TENANT_IDS`) runs the
+        same pass per tenant and legal entity. Posts, oldest first and at most 200 (or `limit`), the unparked
+        journals whose backoff ran out, under the key `gl-journal:{legalEntityId}:{journalId}`. A failure is
+        recorded on the journal (backoff, or park on a ledger refusal) and the pass goes on. The ledger is the
+        one pinned per legal entity in `RECEIVABLES_GL_LEDGERS`, else `RECEIVABLES_RMA_LEDGERS`.
+      x-passage-duty: receivables.payment.post
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Sweep result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [posted, failed, parked]
+                properties:
+                  posted: { type: integer }
+                  failed: { type: integer }
+                  parked: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals/{id}:retry:
+    post:
+      operationId: retryGLJournal
+      summary: Unpark, optionally re-date, and post a journal now
+      description: |
+        For a journal that is not POSTED: clears the park and the backoff, optionally re-dates it (a ledger
+        refusal such as a closed period) and posts it now. A POSTED journal is 409 AR-JOURNAL-STATE.
+      x-passage-duty: receivables.payment.post
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                postingDate: { type: string, format: date }
+      responses:
+        "200":
+          description: Journal after the attempt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GLJournalView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-reconciliation:
+    get:
+      operationId: getGLReconciliation
+      summary: Compare the open items and unapplied payments with GL 1200 and 1205
+      description: |
+        Reads the ledger's balances of 1200 and 1205 up to `asOf` and compares them with the open amounts of
+        the legal entity's open items and the unapplied amounts of its payments in one currency.
+        `reconciled` needs both differences at zero and no journal pending or parked. Items loaded by the
+        opening-item import have no journal here, so they show in the difference until the ledger's opening
+        balance is loaded.
+      x-passage-duty: receivables.view
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: asOf, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Reconciliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GLReconciliation" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
   /v1/receivables/rma-credits/{id}:retry:
     post:
       operationId: retryRMACredit
@@ -2090,6 +2318,15 @@ components:
               writeOff: { $ref: "#/components/schemas/Money" }
               openAfter: { $ref: "#/components/schemas/Money" }
               itemStatus: { type: string }
+    AutoApplyResult:
+      type: object
+      required: [applied, suggested, onAccount, failed, appliedPaymentIds]
+      properties:
+        applied: { type: integer }
+        suggested: { type: integer, description: Left for the clerk; SUGGESTED is never applied automatically. }
+        onAccount: { type: integer }
+        failed: { type: integer, description: The matcher said AUTO_APPLY but the application was refused (item locked or settled meanwhile); the payment stays RECEIVED. }
+        appliedPaymentIds: { type: array, items: { type: string, format: uuid } }
     LockboxImportRequest:
       type: object
       additionalProperties: false
@@ -2102,9 +2339,16 @@ components:
           description: Bank profile check credit codes (BAI2 credits, 100 to 399); defaults to 116, Item in Lockbox Deposit.
           items: { type: string, pattern: "^[1-3][0-9]{2}$" }
         content: { type: string, maxLength: 3145728, description: BAI2 file as received from the bank, UTF-8. }
+        autoApply:
+          type: boolean
+          description: >
+            Match each imported payment and apply the ones the matcher is sure of (AUTO_APPLY, BR-30.1), in file order,
+            so a later payment sees the items an earlier one settled. Needs receivables.payment.post as well. A SUGGESTED
+            payment is never applied without a clerk. The answer carries `autoApply` counts.
     LockboxBatch:
       type: object
       properties:
+        autoApply: { $ref: "#/components/schemas/AutoApplyResult" }
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         fileSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
@@ -2300,10 +2544,17 @@ components:
       properties:
         legalEntityId: { type: string, format: uuid }
         content: { type: string, minLength: 1, maxLength: 3145728, description: "The camt.053 XML document (.001.02 to .001.08) as received from the bank." }
+        autoApply:
+          type: boolean
+          description: >
+            Match each imported payment and apply the ones the matcher is sure of (AUTO_APPLY, BR-30.1), in file order,
+            so a later payment sees the items an earlier one settled. Needs receivables.payment.post as well. A SUGGESTED
+            payment is never applied without a clerk. The answer carries `autoApply` counts.
     BankStatementBatch:
       type: object
       required: [id, legalEntityId, fileSha256, statementCount, paymentCount, duplicateCount, skippedCount]
       properties:
+        autoApply: { $ref: "#/components/schemas/AutoApplyResult" }
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         fileSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
@@ -2411,6 +2662,51 @@ components:
             properties:
               code: { type: string, minLength: 1, maxLength: 20 }
               amount: { $ref: "#/components/schemas/Money" }
+    GLJournalView:
+      type: object
+      required: [id, legalEntityId, sourceType, sourceId, documentId, postingDate, currency, status, attempts, parked, createdAt, debit, lines]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        sourceType: { type: string, enum: [payment_receipt, payment_apply, dunning_fee, interest, down_payment, deduction] }
+        sourceId: { type: string, format: uuid }
+        documentId: { type: string }
+        postingDate: { type: string, format: date }
+        currency: { type: string }
+        status: { type: string, enum: [PENDING, POSTED] }
+        journalPostingId: { type: string }
+        attempts: { type: integer }
+        nextAttemptAt: { type: string, format: date-time }
+        parked: { type: boolean }
+        lastError: { type: string }
+        createdAt: { type: string, format: date-time }
+        debit: { $ref: "#/components/schemas/Money" }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [account, side, amount]
+            properties:
+              account: { type: string }
+              side: { type: string, enum: [D, C] }
+              amount: { $ref: "#/components/schemas/Money" }
+              text: { type: string }
+    GLReconciliation:
+      type: object
+      required: [legalEntityId, asOf, currency, openItemsNet, ledgerReceivable, receivableDifference, unappliedPayments, ledgerUnapplied, unappliedDifference, pendingJournals, parkedJournals, reconciled]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        currency: { type: string }
+        openItemsNet: { $ref: "#/components/schemas/Money" }
+        ledgerReceivable: { $ref: "#/components/schemas/Money" }
+        receivableDifference: { $ref: "#/components/schemas/Money" }
+        unappliedPayments: { $ref: "#/components/schemas/Money" }
+        ledgerUnapplied: { $ref: "#/components/schemas/Money" }
+        unappliedDifference: { $ref: "#/components/schemas/Money" }
+        pendingJournals: { type: integer }
+        parkedJournals: { type: integer }
+        reconciled: { type: boolean }
     RMACreditView:
       type: object
       required: [id, rmaId, rmaNumber, legalEntityId, documentNumber, creditOpenItemId, customerId, currency, postingDate, gross, restocking, net, tax, status, glAttempts, glParked, createdAt]

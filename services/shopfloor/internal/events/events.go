@@ -62,13 +62,18 @@ var (
 	EdgeNodeSaved        = events.Type(Context, "edgenode", "saved", 1)
 	EdgeConfigPublished  = events.Type(Context, "edgeconfig", "published", 1)
 	EdgeConfigApplied    = events.Type(Context, "edgeconfig", "applied", 1)
+	// The control recipe events (FR-25.15) are not in the PRD event table: the EBR (w24) and the
+	// consumers of a batch order's execution follow a recipe's status, and a readback deviation is the
+	// BR-25.15 audit record.
+	ControlRecipeStatusChanged = events.Type(Context, "controlrecipe", "statuschanged", 1)
+	ControlRecipeDeviation     = events.Type(Context, "controlrecipe", "deviation", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
 		OEEBucketUpdated, OEEBucketRemoved, JobReported, JobReopened, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned, WorkerSaved, WorkerCostRateSet, AbsenceCodeSaved,
-		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved, ProcessCategorySaved}
+		EdgeNodeSaved, EdgeConfigPublished, EdgeConfigApplied, DowntimeReasonSaved, ProcessCategorySaved, ControlRecipeStatusChanged, ControlRecipeDeviation}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -450,4 +455,33 @@ type EdgeConfigAppliedData struct {
 	EdgeID          string `json:"edgeId"`
 	Version         int    `json:"version"`
 	PreviousVersion *int   `json:"previousVersion"`
+}
+
+// ControlRecipeStatusChangedData is the payload of dev.passage.shopfloor.controlrecipe.statuschanged.v1,
+// published when a control recipe is generated and sent (From empty), when its status is reported
+// (received, in-execution, completed, error) and when it is sent again (From error, SendCount raised).
+type ControlRecipeStatusChangedData struct {
+	RecipeID    string  `json:"recipeId"`
+	OrderID     string  `json:"orderId"`
+	ResourceID  string  `json:"resourceId"`
+	Destination string  `json:"destination"`
+	From        *string `json:"from"`
+	To          string  `json:"to"`
+	SendCount   int     `json:"sendCount"`
+	Forced      bool    `json:"forced"`
+	Note        *string `json:"note"`
+	Actor       string  `json:"actor"`
+}
+
+// ControlRecipeDeviationData is the payload of dev.passage.shopfloor.controlrecipe.deviation.v1, published
+// when a value read back after a setpoint write differs from the value written (BR-25.15). The deviation
+// process message the PRD asks for is raised from this event by the process message path (open).
+type ControlRecipeDeviationData struct {
+	RecipeID  string  `json:"recipeId"`
+	OrderID   string  `json:"orderId"`
+	EdgeID    string  `json:"edgeId"`
+	PhasePath string  `json:"phasePath"`
+	Node      string  `json:"node"`
+	Written   string  `json:"written"`
+	Readback  *string `json:"readback"`
 }

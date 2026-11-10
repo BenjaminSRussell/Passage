@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import type { PlanCell, PlanView } from "./api/plans";
 import { PlanDetailPage, PlanGridPage } from "./PlanPages";
-import { amountMap, cellError, changedCells, emptySpread, periodsOf, rowsOf, toSpreadInput, total, validateSpread } from "./planLogic";
+import { amountMap, cellError, parseAccounts, parseCostCenterWeights, toGenerateInput, validateGenerate, changedCells, emptySpread, periodsOf, rowsOf, toSpreadInput, total, validateSpread } from "./planLogic";
 
 const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region", "bypass"]);
 const pageViolations = (container: HTMLElement) => checkAxeAA(container).filter((v) => !shellRules.has(v.id));
@@ -171,5 +171,51 @@ describe("plan pages", () => {
     await screen.findByText("Grid total: 300.00 USD");
     expect(screen.queryByLabelText("6100 CR-PLANT Jan")).toBeNull();
     expect(screen.queryByRole("button", { name: /Save/ })).toBeNull();
+  });
+});
+
+describe("plan generation", () => {
+  it("reads accounts and cost center weights the way a person writes them", () => {
+    expect(parseAccounts(" 6100, 6200 ,,\n6300")).toEqual(["6100", "6200", "6300"]);
+    expect(parseCostCenterWeights("CC1=2, CC2")).toEqual([
+      { costCenter: "CC1", weight: "2" },
+      { costCenter: "CC2", weight: "1" },
+    ]);
+    expect(parseCostCenterWeights("CC1=lots")).toBeNull();
+  });
+
+  it("checks the form like the service and builds the request", () => {
+    expect(validateGenerate({ source: "prior-plan", adjustment: "", accounts: "", costCenters: "" })).toEqual({});
+    expect(validateGenerate({ source: "prior-plan", adjustment: "-100", accounts: "6100,6100", costCenters: "" })).toMatchObject({ adjustment: expect.any(String), accounts: "An account appears twice." });
+    expect(Object.keys(validateGenerate({ source: "gl-actuals", adjustment: "", accounts: "", costCenters: "" })).sort()).toEqual(["accounts", "costCenters"]);
+    expect(validateGenerate({ source: "gl-actuals", adjustment: "5", accounts: "6100", costCenters: "CC1=0" }).costCenters).toMatch(/above zero/);
+    expect(toGenerateInput({ source: "gl-actuals", adjustment: "5", accounts: "6100", costCenters: "CC1=2, CC2" })).toEqual({
+      source: "gl-actuals",
+      adjustmentPct: "5",
+      accounts: ["6100"],
+      costCenters: [
+        { costCenter: "CC1", weight: "2" },
+        { costCenter: "CC2", weight: "1" },
+      ],
+    });
+    expect(toGenerateInput({ source: "prior-plan", adjustment: "", accounts: "", costCenters: "CC1" })).toEqual({ source: "prior-plan" });
+  });
+
+  it("fills the grid from last year's plan with the grid version in If-Match", async () => {
+    const mock = stub((method, url) => {
+      if (url.endsWith(`/api/v1/budget/plans/${PLAN}`)) return json(200, plan);
+      if (url.includes(`/scenarios/${S1}/grid`) && method === "GET") return json(200, { scenario: plan.scenarios[0], cells, total: "300", truncated: false });
+      if (url.includes(`/scenarios/${S1}:generate`)) return json(200, { scenarioId: S1, version: 8, cells: 12, total: "900" });
+      return undefined;
+    });
+    at(`/budgeting/plans/${PLAN}/scenarios/${S1}`);
+    await screen.findByRole("heading", { name: "Fill from last year" });
+    fireEvent.change(screen.getByLabelText(/Change every amount by percent/), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fill the grid" }));
+    await waitFor(() => expect(callsTo(mock, "POST", ":generate")).toHaveLength(1));
+    const [, init] = callsTo(mock, "POST", ":generate")[0];
+    expect((init.headers as Record<string, string>)["If-Match"]).toBe('"7"');
+    expect(JSON.parse(String(init.body))).toEqual({ source: "prior-plan", adjustmentPct: "5" });
+    await screen.findByText("Amounts generated.");
   });
 });

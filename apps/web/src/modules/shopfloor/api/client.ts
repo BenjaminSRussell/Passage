@@ -1341,7 +1341,88 @@ export function listEdgeConfigs(id: string, signal?: AbortSignal): Promise<EdgeC
   return items<EdgeConfigVersion>(`/edge-nodes/${encodeURIComponent(id)}/config-versions`, signal);
 }
 
+/** A one-time token a connector redeems for its client certificate; the service shows it only once. */
+export interface EdgeEnrollmentToken {
+  edgeId: string;
+  token: string;
+  expiresAt: string;
+}
+
+/** Mints an enrollment token for a node (replacing its earlier unredeemed ones). Each call mints a new token, so it takes no key. */
+export function mintEdgeEnrollmentToken(id: string): Promise<EdgeEnrollmentToken> {
+  return post<EdgeEnrollmentToken>(`/edge-nodes/${encodeURIComponent(id)}:enrollment-token`, {});
+}
+
 /** Publishes the next configuration version; reuse one key per form. */
 export function publishEdgeConfig(id: string, document: Record<string, unknown>, key: string = newKey()): Promise<EdgeConfigVersion> {
   return post<EdgeConfigVersion>(`/edge-nodes/${encodeURIComponent(id)}/config-versions`, { document }, key);
+}
+
+/** Generates and resends control recipes (FR-25.15); the kiosk reports its own recipes with the execute duty. */
+export const DUTY_CONTROL_RECIPE_CREATE = "shopfloor.controlrecipe.create";
+
+export type RecipeDestination = "kiosk" | "pcs-opcua" | "pcs-mqtt";
+export type RecipeStatus = "sent" | "received" | "in-execution" | "completed" | "error";
+
+/** One control recipe row of the monitor. The recipe document is the ISA-88 structure of the order. */
+export interface ControlRecipe {
+  id: string;
+  orderId: string;
+  resourceId: string;
+  destination: RecipeDestination;
+  edgeId: string | null;
+  topic: string | null;
+  status: RecipeStatus;
+  recipe: { procedure?: { name: string; unitProcedures: { name: string; operations: { name: string; phases: { name: string; instructions: { seq: number; category: string; text?: string; node?: string; value?: number }[] }[] }[] }[] } };
+  sendCount: number;
+  lastSentAt: string;
+  lastError: string | null;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecipeHistoryEntry {
+  id: string;
+  fromStatus: RecipeStatus | null;
+  toStatus: RecipeStatus;
+  actor: string;
+  note: string | null;
+  forced: boolean;
+  at: string;
+}
+
+/** A setpoint write the connector made or refused, with the value read back (BR-25.15). */
+export interface RecipeWrite {
+  id: string;
+  phasePath: string;
+  node: string;
+  value: string;
+  readback: string | null;
+  written: boolean;
+  deviation: boolean;
+  reason: string | null;
+  at: string;
+}
+
+export interface ControlRecipeDetail extends ControlRecipe {
+  history: RecipeHistoryEntry[];
+  writes: RecipeWrite[];
+}
+
+export function listControlRecipes(
+  filter: { status?: RecipeStatus; destination?: RecipeDestination } = {},
+  signal?: AbortSignal,
+): Promise<ControlRecipe[]> {
+  return items<ControlRecipe>(`/control-recipes${query({ status: filter.status, destination: filter.destination })}`, signal);
+}
+
+export function getControlRecipe(id: string, signal?: AbortSignal): Promise<ControlRecipeDetail> {
+  return send<ControlRecipeDetail>(`/control-recipes/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Sends a recipe in error again (BR-25.11); force and a reason are needed once process messages for the order exist. */
+export function resendControlRecipe(id: string, input: { force: boolean; reason: string }, key: string = newKey()): Promise<ControlRecipe> {
+  return post<ControlRecipe>(`/control-recipes/${encodeURIComponent(id)}:resend`, input, key);
 }

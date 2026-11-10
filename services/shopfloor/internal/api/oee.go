@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -109,12 +110,21 @@ func (a *API) rollupOEE(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	ctx := r.Context()
+	out, err := a.rollup(r.Context(), now, resourceIDs, from, to, width)
+	if err != nil {
+		a.fail(w, r, "oee rollup", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// rollup computes and stores the buckets of [from, to) for the resources (every registered machine
+// when none are named) under the tenant in ctx. The HTTP job and the in-process sweeper share it.
+func (a *API) rollup(ctx context.Context, now time.Time, resourceIDs []string, from, to time.Time, width time.Duration) (store.OEERollupResult, error) {
 	if len(resourceIDs) == 0 {
 		machines, err := a.store.ListMachines(ctx, maxRollupResources)
 		if err != nil {
-			a.fail(w, r, "list machines for oee rollup", err)
-			return
+			return store.OEERollupResult{}, fmt.Errorf("list machines for oee rollup: %w", err)
 		}
 		for _, m := range machines {
 			resourceIDs = append(resourceIDs, m.ResourceID)
@@ -125,8 +135,7 @@ func (a *API) rollupOEE(w http.ResponseWriter, r *http.Request) {
 	if len(resourceIDs) > 0 {
 		streams, err := a.store.LoadOEEStreams(ctx, resourceIDs, from, to)
 		if err != nil {
-			a.fail(w, r, "load oee streams", err)
-			return
+			return store.OEERollupResult{}, fmt.Errorf("load oee streams: %w", err)
 		}
 		for _, rid := range resourceIDs {
 			s, ok := streams[rid]
@@ -135,8 +144,7 @@ func (a *API) rollupOEE(w http.ResponseWriter, r *http.Request) {
 			}
 			buckets, err := domain.BuildBuckets(withHorizon(s, now), from, to, width)
 			if err != nil {
-				a.fail(w, r, "build oee buckets", err)
-				return
+				return store.OEERollupResult{}, fmt.Errorf("build oee buckets: %w", err)
 			}
 			for _, b := range buckets {
 				rollup.Rows = append(rollup.Rows, store.OEERow{ResourceID: rid, IdealCycleSeconds: s.IdealCycleSeconds, Bucket: b})
@@ -145,10 +153,9 @@ func (a *API) rollupOEE(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.store.SaveOEEBuckets(ctx, rollup)
 	if err != nil {
-		a.fail(w, r, "save oee buckets", err)
-		return
+		return store.OEERollupResult{}, fmt.Errorf("save oee buckets: %w", err)
 	}
 	a.oeeChanged.Add(int64(out.Changed))
 	a.oeeRemoved.Add(int64(out.Removed))
-	httpx.JSON(w, http.StatusOK, out)
+	return out, nil
 }

@@ -33,6 +33,7 @@ const (
 	dutyConfigure    = "budget.configure"
 	dutyMaintain     = "budget.maintain"
 	dutyCheck        = "budget.check"
+	dutyConvert      = "budget.encumbrance.convert"
 	dutyOverride     = "budget.override"
 	dutyView         = "budget.view"
 	dutyReserve      = "budget.reserve"
@@ -99,7 +100,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/checks", a.checkBudget)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:relieve", a.relieve)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:release", a.release)
-	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:convert", a.convert)
+	r.With(authz.RequireDuty(dutyConvert)).Post("/v1/budget/encumbrances/{id}:convert", a.convert)
+	r.With(authz.RequireDuty(dutyConvert)).Post("/v1/budget/encumbrances:convert", a.convertByLine)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations", a.createReservation)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations:expire", a.expireReservations)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations/{id}:close", a.closeReservation)
@@ -600,4 +602,37 @@ func (a *API) convert(w http.ResponseWriter, r *http.Request) {
 	}
 	key, hash := splitKey(composite)
 	a.replay(w, r)(a.store.ConvertPreEncumbrance(r.Context(), key, hash, store.ConvertRequest{EncumbranceID: id, PurchaseOrderID: req.PurchaseOrderID, PurchaseOrderLineID: req.PurchaseOrderLineID}))
+}
+
+// convertByLine is convert for a caller that knows the requisition line, not the encumbrance (purchasing, when it
+// creates a PO line from a requisition line).
+func (a *API) convertByLine(w http.ResponseWriter, r *http.Request) {
+	body, composite, ok := readCommand(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		RequisitionLineID string `json:"requisitionLineId"`
+		convertRequest
+	}
+	if err := decodeBody(body, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(req.RequisitionLineID) {
+		fields["requisitionLineId"] = "must be a UUID (the requisition line the pre-encumbrance was checked for)"
+	}
+	if !ids.Valid(req.PurchaseOrderID) {
+		fields["purchaseOrderId"] = "must be a UUID (the purchase order)"
+	}
+	if !ids.Valid(req.PurchaseOrderLineID) {
+		fields["purchaseOrderLineId"] = "must be a UUID (the purchase order line)"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	key, hash := splitKey(composite)
+	a.replay(w, r)(a.store.ConvertPreEncumbrance(r.Context(), key, hash, store.ConvertRequest{RequisitionLineID: req.RequisitionLineID, PurchaseOrderID: req.PurchaseOrderID, PurchaseOrderLineID: req.PurchaseOrderLineID}))
 }

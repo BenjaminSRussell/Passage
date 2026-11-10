@@ -36,6 +36,7 @@ type fakePlans struct {
 	planError error
 	replayed  bool
 	fallback  bool
+	prior     []domain.PlanCell
 }
 
 func (f *fakePlans) Replayed(context.Context, string, string) (bool, error) { return f.replayed, nil }
@@ -103,6 +104,11 @@ func (f *fakePlans) GetGrid(context.Context, string, string, store.GridFilter) (
 func (f *fakePlans) CompareScenarios(_ context.Context, _, baseID, otherID, groupBy string) (store.Comparison, error) {
 	f.calls++
 	return store.Comparison{GroupBy: groupBy, Base: store.Scenario{ID: baseID}, Other: store.Scenario{ID: otherID}, Rows: []store.ComparisonRow{}}, nil
+}
+
+func (f *fakePlans) PriorPlanCells(context.Context, string, []string) ([]domain.PlanCell, error) {
+	f.calls++
+	return f.prior, nil
 }
 
 type fakeActuals struct {

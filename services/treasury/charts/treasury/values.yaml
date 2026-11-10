@@ -10,6 +10,12 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 256Mi }
 serviceMonitor: { enabled: false }
+# The cash forecast reads open items from payables (AP) and receivables (AR) with a signed service token
+# (payables.forecast.read, receivables.forecast.read). The Secret holds the base64 Ed25519 seed under "signing-key";
+# add treasury's public key to payables' and receivables' serviceIdentity.publicKeys first. Unset URLs leave the
+# forecast on stored entries only.
+serviceIdentity: { signingKeySecret: "", keyId: "" }
+serviceUrls: { payables: "", receivables: "" }
 # Bank connectivity keys stay in Vault transit and are never exported. Leave addr
 # empty to switch it off (refused outside dev while bankChannels is set; the
 # chart still emits TREASURY_BANK_CHANNELS so that refusal fires). Use k8sRole

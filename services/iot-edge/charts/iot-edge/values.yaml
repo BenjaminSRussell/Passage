@@ -25,3 +25,27 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
+
+# The runtime (25-3). Without shopfloor.url the pod serves only its loopback admin endpoint.
+shopfloor:
+  url: ""              # https://... of the shopfloor service
+  nodeId: ""           # the edge node id (UUID) registered under /shopfloor/edge-nodes
+  source: simulator    # the only source built; OPC-UA and MQTT adapters are open
+  tokenSecret: ""      # optional Secret with key token (dev, until enrollment issues certificates)
+  # mTLS (25-4): the connector enrolls on first start with the token in this Secret (key token, minted
+  # on the edge node's page) and keeps its certificate under /var/lib/iot-edge/certs, so state.claimName
+  # must be a claim. serverCaSecret holds the CA of the shopfloor server (key ca.crt) when it is private.
+  enrollmentSecret: ""
+  serverCaSecret: ""
+  # Control recipes (25-5): `simulator` runs them against an in-memory process control system (the demo
+  # plant). An OPC-UA writer is not built. recipeAutoComplete reports a recipe completed after its writes.
+  writer: ""
+  recipeAutoComplete: false
+  simMachines: 2
+  bufferCapacity: 200000
+
+# Where the connector keeps its sequence state (/var/lib/iot-edge/seq.json). Use a claim in a real
+# plant: with the default emptyDir a rescheduled pod forgets its sequence numbers, restarts from 1,
+# and the server drops the new events as duplicates (BR-25.4) until they pass the old ones.
+state:
+  claimName: ""

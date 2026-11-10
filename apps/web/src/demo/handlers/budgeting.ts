@@ -1,6 +1,6 @@
 // Budgeting service (/api/v1/budget) for the demo: control rule versions and budget plans with scenarios, the plan grid,
 // spreading and scenario comparison. Typed against the module's own client types so shape drift fails `tsc`.
-import type { Rule } from "../../modules/budgeting/api/client";
+import type { Balance, Rule } from "../../modules/budgeting/api/client";
 import type { Comparison, Plan, PlanCell, PlanScenario, StageOwner } from "../../modules/budgeting/api/plans";
 import { LEGAL_ENTITY } from "../company";
 import { reply, route } from "../backend";
@@ -125,6 +125,35 @@ function ifMatch(headers: Headers): number | null {
 
 route("GET", `${BASE}/control-rules`, ({ query }) => ({ items: rules.all().filter((r) => !query.get("legalEntityId") || r.legalEntityId === query.get("legalEntityId")) }));
 route("GET", `${BASE}/control-rules/{id}`, ({ params }) => rules.get(params.id) ?? notFound("budget control rule"));
+// Available funds per control combination, the figures the cost control workspace reads.
+function balance(n: number, dimension: string, span: string, budget: number, actuals: number, enc: number, pre: number, res: number): Balance {
+  return {
+    id: uid(372, n),
+    ruleVersionId: uid(K_RULE, 1),
+    controlDimensionKey: dimension,
+    timeSpanKey: span,
+    budgetTotal: dec(budget * 10_000),
+    actuals: dec(actuals * 10_000),
+    encumbrances: dec(enc * 10_000),
+    preEncumbrances: dec(pre * 10_000),
+    reservations: dec(res * 10_000),
+    available: dec((budget - actuals - enc - pre - res) * 10_000),
+    version: 1,
+  };
+}
+
+const balances: Balance[] = [
+  balance(1, "CR-PLANT/6100 wages", "FY2026-Q3", 365_000, 351_200, 0, 0, 0),
+  balance(2, "CR-PLANT/6100 wages", "FY2026-Q4", 372_000, 148_600, 0, 0, 0),
+  balance(3, "CR-PLANT/6200 utilities", "FY2026-Q4", 64_500, 31_900, 18_400, 0, 0),
+  balance(4, "CR-PLANT/6300 maintenance", "FY2026-Q4", 42_750, 29_400, 9_800, 6_200, 0),
+  balance(5, "DAL-DC/6400 freight", "FY2026-Q3", 93_000, 96_450, 0, 0, 0),
+  balance(6, "DAL-DC/6400 freight", "FY2026-Q4", 93_000, 38_200, 41_000, 0, 12_000),
+  balance(7, "ADMIN/6500 office", "FY2026-Q4", 29_400, 11_100, 2_300, 0, 0),
+];
+
+route("GET", `${BASE}/available`, ({ query }) => ({ items: query.get("rule") === uid(K_RULE, 1) ? balances : [] }));
+
 route("GET", "/api/v1/org/operating-units", () => ({ items: orgUnits.map((u) => ({ ...u, type: "cost_center", status: "active", version: 1, defaultLegalEntityId: LEGAL_ENTITY.id })) }));
 
 route("GET", `${BASE}/plans`, ({ query }) => ({
@@ -255,6 +284,23 @@ route("POST", `${BASE}/plans/{id}/scenarios/{sid}:spread`, ({ params, body, head
       periods.forEach((period, i) => made.push({ account: input.account, costCenter: c.costCenter, period, amount: dec(Math.round((share * weights[i]) / weightSum)) }));
     }
     return upsert(existing, made);
+  });
+});
+
+route("POST", `${BASE}/plans/{id}/scenarios/{sid}:generate`, ({ params, body, headers }) => {
+  const input = body as { source: "prior-plan" | "gl-actuals"; adjustmentPct?: string; accounts?: string[]; costCenters?: { costCenter: string; weight: string }[] };
+  return write(params.id, params.sid, headers, (existing) => {
+    const factor = 1 + Number(input.adjustmentPct ?? 0) / 100;
+    const wanted = new Set(input.accounts ?? []);
+    const lastYear = (cells.get(uid(K_SCENARIO, 3)) ?? []).filter((c) => wanted.size === 0 || wanted.has(c.account));
+    if (lastYear.length === 0) return reply.problem(422, "BUD-0061", "no approved plan of the previous fiscal year holds amounts for these accounts");
+    if (input.source === "prior-plan") return upsert(existing, lastYear.map((c) => ({ ...c, period: `${YEAR}-${c.period.slice(5)}`, amount: dec(Math.round(units(c.amount) * factor)) })));
+    const centers = input.costCenters ?? [];
+    const sum = centers.reduce((s, c) => s + Number(c.weight), 0);
+    if (sum <= 0) return reply.problem(422, "BUD-0060", "the cost center weights sum to zero");
+    const byMonth = new Map<string, number>();
+    for (const c of lastYear) byMonth.set(`${c.account}|${c.period.slice(5)}`, (byMonth.get(`${c.account}|${c.period.slice(5)}`) ?? 0) + units(c.amount));
+    return upsert(existing, [...byMonth.entries()].flatMap(([k, total]) => centers.map((c) => ({ account: k.split("|")[0], costCenter: c.costCenter, period: `${YEAR}-${k.split("|")[1]}`, amount: dec(Math.round((total * factor * Number(c.weight)) / sum)) }))));
   });
 });
 

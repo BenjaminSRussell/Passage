@@ -863,3 +863,44 @@ func (s *Postgres) CompareScenarios(ctx context.Context, planID, baseID, otherID
 	cmp.Delta = cmp.Other.Total.Sub(cmp.Base.Total)
 	return cmp, err
 }
+
+// PriorPlanCells returns the cells of the approved scenario of the previous fiscal year's plan on the same legal entity
+// and rule version, optionally only for the named accounts. No such plan, or no cells, gives none. It refuses to read
+// more than gridLimit cells, so the caller never writes a truncated source.
+func (s *Postgres) PriorPlanCells(ctx context.Context, planID string, accounts []string) ([]domain.PlanCell, error) {
+	var out []domain.PlanCell
+	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
+		cur, err := loadPlan(ctx, tx, tenantID, planID, false)
+		if err != nil {
+			return err
+		}
+		var scenarioID *string
+		err = tx.QueryRow(ctx, `select approved_scenario_id::text from budget_plan_process
+			where tenant_id = $1 and legal_entity_id = $2 and rule_version_id = $3 and fiscal_year = $4 and status = 'Approved'`,
+			tenantID, cur.LegalEntityID, cur.RuleVersionID, cur.FiscalYear-1).Scan(&scenarioID)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && scenarioID == nil) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select account, cost_center, period, amount::text from budget_plan_cell
+			where tenant_id = $1 and scenario_id = $2 and (coalesce(cardinality($3::text[]), 0) = 0 or account = any($3::text[]))
+			order by account, cost_center, period limit $4`, tenantID, *scenarioID, accounts, gridLimit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c domain.PlanCell
+			var amount string
+			if err := rows.Scan(&c.Account, &c.CostCenter, &c.Period, &amount); err != nil {
+				return err
+			}
+			c.Amount = parseDec(amount)
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}

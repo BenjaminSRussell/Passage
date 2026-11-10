@@ -773,6 +773,12 @@
       ],
       "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
+    "modules/treasury/CashDesks.tsx": {
+      "labels": [
+        "General ledger account id"
+      ],
+      "reason": "No ledger account lookup adapter exists yet (the same gap as the bank account's GL main account id); tracked with the follow-up to #500."
+    },
     "modules/treasury/Checks.tsx": {
       "labels": [
         "Bank account id",

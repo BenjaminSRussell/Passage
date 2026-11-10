@@ -46,16 +46,23 @@ func command(args []string) (func(context.Context, func(string) string) error, e
 
 // parseRMALedgers reads RECEIVABLES_RMA_LEDGERS: a JSON object from legal entity id to the ledger id its RMA credit journals post to.
 func parseRMALedgers(raw string) (map[string]string, error) {
+	return parseLedgers("RECEIVABLES_RMA_LEDGERS", raw)
+}
+
+// parseLedgers reads a JSON object from legal entity id to ledger id; name is the variable, for the errors.
+// RECEIVABLES_GL_LEDGERS pins the ledger of the payment, fee, interest, down payment and deduction journals (30-2);
+// a legal entity without a pin posts them to its RMA ledger.
+func parseLedgers(name, raw string) (map[string]string, error) {
 	out := map[string]string{}
 	if raw == "" {
 		return out, nil
 	}
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("RECEIVABLES_RMA_LEDGERS must be a JSON object of legal entity id to ledger id: %w", err)
+		return nil, fmt.Errorf("%s must be a JSON object of legal entity id to ledger id: %w", name, err)
 	}
 	for le, ledger := range out {
 		if !ids.Valid(le) || !ids.Valid(ledger) {
-			return nil, fmt.Errorf("RECEIVABLES_RMA_LEDGERS entry %q needs UUID legal entity and ledger ids", le)
+			return nil, fmt.Errorf("%s entry %q needs UUID legal entity and ledger ids", name, le)
 		}
 	}
 	return out, nil
@@ -117,6 +124,11 @@ func run() error {
 		return err
 	}
 	s.WithRMALedgers(rmaLedgers)
+	glLedgers, err := parseLedgers("RECEIVABLES_GL_LEDGERS", os.Getenv("RECEIVABLES_GL_LEDGERS"))
+	if err != nil {
+		return err
+	}
+	s.WithGLLedgers(glLedgers)
 	rmaTaxAccounts, err := parseRMATaxAccounts(os.Getenv("RECEIVABLES_RMA_TAX_ACCOUNTS"))
 	if err != nil {
 		return err

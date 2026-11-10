@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/api"
+	"github.com/BenjaminSRussell/passage/services/purchasing/internal/budget"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 	"github.com/BenjaminSRussell/passage/services/purchasing/migrations"
 )
@@ -71,7 +72,22 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-	a := api.New(store.New(pool)).WithVendorPrincipal(api.PortalVendorPrincipal{})
+	st := store.New(pool)
+	// Budget control converts a requisition line's pre-encumbrance when a PO line is created from it (FR-38.5). Unset, orders
+	// are still created and the pre-encumbrance stays until budgeting is told some other way.
+	if url := getenv("BUDGETING_URL"); url != "" {
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		if signer == nil {
+			return errors.New("BUDGETING_URL needs a service signing key (PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+		}
+		st.WithOrderHook(budget.Hook(budget.New(url, nil, signer)))
+	} else {
+		slog.Warn("BUDGETING_URL is empty: requisition pre-encumbrances are not converted when a purchase order line is created")
+	}
+	a := api.New(st).WithVendorPrincipal(api.PortalVendorPrincipal{})
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

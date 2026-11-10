@@ -72,6 +72,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyView, dutyAllocationRead)).Get("/v1/revrec/contracts", a.listContracts)
 	r.With(authz.RequireAnyDuty(dutyView, dutyAllocationRead)).Get("/v1/revrec/contracts/{id}", a.getContract)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/milestones/{id}:satisfy", a.satisfyMilestone)
+	r.With(authz.RequireDuty(dutyMaintain)).Put("/v1/revrec/recognition-templates/{id}", a.putTemplate)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/recognition-templates", a.listTemplates)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/revrec/recognition-runs", a.runRecognition)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/recognition-runs", a.listRuns)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/roll-forward", a.rollForward)
