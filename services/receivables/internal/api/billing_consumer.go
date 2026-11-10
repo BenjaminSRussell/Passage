@@ -77,6 +77,7 @@ type creditNotePostedData struct {
 	CreditNoteID      string        `json:"credit_note_id"`
 	Number            string        `json:"number"`
 	OriginalInvoiceID string        `json:"original_invoice_id"`
+	OriginalNumber    string        `json:"original_number"`
 	LegalEntityID     string        `json:"legal_entity_id"`
 	Customer          string        `json:"customer"`
 	InvoiceAccount    string        `json:"invoice_account"`
@@ -196,7 +197,7 @@ func openCreditNote(ctx context.Context, s BillingStore, evt events.Event) error
 	if err != nil {
 		return eventing.Permanent(fmt.Errorf("creditnote.posted %s: %w", d.Number, err))
 	}
-	return apply(ctx, s, evt, store.BillingDocument{SourceType: "CREDIT_NOTE", ID: c["credit_note_id"], Number: d.Number, OriginalID: c["original_invoice_id"],
+	return apply(ctx, s, evt, store.BillingDocument{SourceType: "CREDIT_NOTE", ID: c["credit_note_id"], Number: d.Number, OriginalID: c["original_invoice_id"], OriginalNumber: d.OriginalNumber,
 		LegalEntityID: c["legal_entity_id"], CustomerID: c["customer"], Currency: d.Currency, DocumentDate: d.CreditDate,
 		Items: []domain.PlannedItem{item}}, d.Number)
 }

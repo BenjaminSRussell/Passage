@@ -281,6 +281,25 @@ func TestApplyBillingDocument_AnImportedItemWithTheInvoiceNumberBlocksItsInstall
 	}
 }
 
+// An invoice loaded by the opening import has no billing document id; its credit note finds it by number (#560).
+func TestApplyBillingDocument_CreditNoteFindsAnImportedInvoiceByItsNumber(t *testing.T) {
+	s := setup(t)
+	ctx := scopedCtx(51, legalEntity)
+	if _, err := s.CreateOpenItem(tenantCtx(51), OpenItem{LegalEntityID: legalEntity, CustomerID: billCustomer, SourceType: "INVOICE",
+		DocumentNumber: "INV-2026-0000099", DocumentDate: "2026-12-31", DueDate: "2027-01-30", Currency: "USD",
+		Amount: amt("1000.00"), OpenAmount: amt("1000.00")}); err != nil {
+		t.Fatal(err)
+	}
+	cn := creditDoc(t, creditDocID, invoiceDocID, "CN-2027-0000009")
+	if _, err := s.ApplyBillingDocument(ctx, cn); !errors.Is(err, ErrOriginalInvoiceNotFound) {
+		t.Fatalf("without the original number the imported invoice is not found: %v", err)
+	}
+	cn.OriginalNumber = "INV-2026-0000099"
+	if n, err := s.ApplyBillingDocument(ctx, cn); err != nil || n != 1 {
+		t.Fatalf("credit note against an imported invoice: %d %v", n, err)
+	}
+}
+
 func TestApplyBillingDocument_NumberCheckTreatsLikeWildcardsAsText(t *testing.T) {
 	s := setup(t)
 	ctx := scopedCtx(51, legalEntity)
@@ -346,6 +365,22 @@ func TestPostRMACredit_FindsAnInstallmentInvoiceByBillingIdAndBoundsItBySumOfIns
 	second.Gross, second.Restocking, second.Net = amt("200.00"), amt("0"), amt("200.00")
 	if _, err := s.PostRMACredit(ctx, second); problemCode(err) != CodeRMAInvoice {
 		t.Fatalf("200.00 more than the 100.00 left across the installments: %v", err)
+	}
+}
+
+// An RMA credit that names no billing invoice id finds the items billing's invoice opened by the invoice number (#560).
+func TestPostRMACredit_WithoutAnInvoiceIDFindsTheItemsTheConsumerOpened(t *testing.T) {
+	s, _, _ := rmaSetup(t)
+	doc := invoiceDoc(t, invoiceDocID, "INV-2027-0000052",
+		domain.BillingInstallment{No: 1, Amount: amt("600.00"), DueDate: "2027-04-30"},
+		domain.BillingInstallment{No: 2, Amount: amt("400.00"), DueDate: "2027-05-30"})
+	if _, err := s.ApplyBillingDocument(scopedCtx(54, legalEntity), doc); err != nil {
+		t.Fatal(err)
+	}
+	in := rmaIn("INV-2027-0000052")
+	in.Gross, in.Restocking, in.Net = amt("900.00"), amt("0"), amt("900.00")
+	if note, err := s.PostRMACredit(tenantCtx(54), in); err != nil || !note.Net.Equal(amt("900.00")) {
+		t.Fatalf("900.00 against the two installments of a consumer-opened invoice: %+v %v", note, err)
 	}
 }
 
