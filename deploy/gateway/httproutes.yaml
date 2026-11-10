@@ -177,3 +177,243 @@ spec:
       backendRefs:
         - name: batch
           port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ledger
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/ledger
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/ledger
+      backendRefs:
+        - name: ledger
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/ledger
+      backendRefs:
+        - name: ledger
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pricing
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/pricing
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/pricing
+      backendRefs:
+        - name: pricing
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/pricing
+      backendRefs:
+        - name: pricing
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sales
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/sales
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/sales
+      backendRefs:
+        - name: sales
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/sales
+      backendRefs:
+        - name: sales
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: party
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/party
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/party
+      backendRefs:
+        - name: party
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/party
+      backendRefs:
+        - name: party
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: analytics
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/analytics
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/analytics
+      backendRefs:
+        - name: analytics
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/analytics
+      backendRefs:
+        - name: analytics
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: planning
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/planning
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/planning
+      backendRefs:
+        - name: planning
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/planning
+      backendRefs:
+        - name: planning
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: data
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/data
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/data
+      backendRefs:
+        - name: metadata
+          port: 80
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/data
+      backendRefs:
+        - name: metadata
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: controlling
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/controlling
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/controlling
+      backendRefs:
+        - name: costacct
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/controlling
+      backendRefs:
+        - name: costacct
+          port: 8080

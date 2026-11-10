@@ -23,6 +23,30 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: inbox
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: ledger
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: pricing
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: sales
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: party
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: analytics
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: planning
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: data
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: controlling
   rateLimit:
     type: Global
     global:
