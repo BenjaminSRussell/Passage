@@ -70,6 +70,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	// A nil *ledgerclient.Client stored in the PriorActuals interface would be non-nil there, so the unset client is passed as a bare nil.
 	if gl != nil {
 		a.WithPlanning(pg, gl)
 	} else {

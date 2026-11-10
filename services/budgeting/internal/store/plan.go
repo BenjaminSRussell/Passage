@@ -36,7 +36,9 @@ const (
 	CodeScenarioDuplicate = "BUD-0052"
 	CodePlanRuleMismatch  = "BUD-0053"
 	CodePlanYearApproved  = "BUD-0057"
+	CodeYearHasOriginal   = "BUD-0059"
 	gridLimit             = 10000
+	oneApprovedPlanIndex  = "budget_plan_one_approved_per_rule_year"
 )
 
 type NewPlan struct {
@@ -100,9 +102,10 @@ type NewScenario struct {
 type GridFilter struct{ Account, CostCenter, Period string }
 
 type Grid struct {
-	Scenario Scenario          `json:"scenario"`
-	Cells    []domain.PlanCell `json:"cells"`
-	Total    decimal.Decimal   `json:"total"`
+	Scenario  Scenario          `json:"scenario"`
+	Cells     []domain.PlanCell `json:"cells"`
+	Total     decimal.Decimal   `json:"total"`
+	Truncated bool              `json:"truncated"`
 }
 
 // GridWritten reports a bulk cell write; Version is the grid's new ETag.
@@ -111,6 +114,8 @@ type GridWritten struct {
 	Version    int64           `json:"version"`
 	Cells      int             `json:"cells"`
 	Total      decimal.Decimal `json:"total"`
+
+	PriorYearFallback bool `json:"priorYearFallback,omitempty"`
 }
 
 type SignOffRequest struct {
@@ -366,15 +371,34 @@ func (s *Postgres) CreateScenario(ctx context.Context, key, hash, planID string,
 				from budget_plan_cell where tenant_id = $1 and scenario_id = $2`, p.TenantID, in.CopyFromID, id, in.AdjustmentPct.String()); err != nil {
 				return 0, nil, err
 			}
+			if _, err := tx.Exec(ctx, `insert into budget_plan_scenario_editor (tenant_id, legal_entity_id, scenario_id, actor)
+				select tenant_id, legal_entity_id, $3, actor from budget_plan_scenario_editor where tenant_id = $1 and scenario_id = $2`, p.TenantID, in.CopyFromID, id); err != nil {
+				return 0, nil, err
+			}
+			if err := recordEditor(ctx, tx, p.TenantID, plan.LegalEntityID, id, actor); err != nil {
+				return 0, nil, err
+			}
 		}
 		sc, err := loadScenario(ctx, tx, p.TenantID, planID, id, false)
 		return http.StatusCreated, sc, err
 	})
 }
 
+func recordEditor(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, scenarioID, actor string) error {
+	_, err := tx.Exec(ctx, `insert into budget_plan_scenario_editor (tenant_id, legal_entity_id, scenario_id, actor) values ($1, $2, $3, $4) on conflict do nothing`,
+		tenantID, legalEntityID, scenarioID, actor)
+	return err
+}
+
 // UpsertCells writes cells into a scenario's grid under optimistic concurrency: version must equal the grid's
 // current ETag, otherwise nothing is written (BUD-0050).
 func (s *Postgres) UpsertCells(ctx context.Context, key, hash, planID, scenarioID string, version int64, cells []domain.PlanCell) (int, []byte, error) {
+	return s.SpreadCells(ctx, key, hash, planID, scenarioID, version, cells, false)
+}
+
+// SpreadCells is UpsertCells for a spread; priorYearFallback records in the stored answer that the prior year had no
+// actuals and the periods were weighted evenly.
+func (s *Postgres) SpreadCells(ctx context.Context, key, hash, planID, scenarioID string, version int64, cells []domain.PlanCell, priorYearFallback bool) (int, []byte, error) {
 	p, _ := tenant.FromContext(ctx)
 	actor, err := actorOf(ctx)
 	if err != nil {
@@ -408,8 +432,11 @@ func (s *Postgres) UpsertCells(ctx context.Context, key, hash, planID, scenarioI
 		if _, err := tx.Exec(ctx, `update budget_plan_scenario set version = version + 1, updated_by = $3 where tenant_id = $1 and id = $2`, p.TenantID, scenarioID, actor); err != nil {
 			return 0, nil, err
 		}
+		if err := recordEditor(ctx, tx, p.TenantID, plan.LegalEntityID, scenarioID, actor); err != nil {
+			return 0, nil, err
+		}
 		after, err := loadScenario(ctx, tx, p.TenantID, planID, scenarioID, false)
-		return http.StatusOK, GridWritten{ScenarioID: scenarioID, Version: after.Version, Cells: len(cells), Total: after.Total}, err
+		return http.StatusOK, GridWritten{ScenarioID: scenarioID, Version: after.Version, Cells: len(cells), Total: after.Total, PriorYearFallback: priorYearFallback}, err
 	})
 }
 
@@ -473,9 +500,14 @@ func (s *Postgres) GetGrid(ctx context.Context, planID, scenarioID string, f Gri
 		if g.Scenario, err = loadScenario(ctx, tx, tenantID, planID, scenarioID, false); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `select account, cost_center, period, amount::text from budget_plan_cell
-			where tenant_id = $1 and scenario_id = $2 and ($3 = '' or account = $3) and ($4 = '' or cost_center = $4) and ($5 = '' or period = $5)
-			order by account, cost_center, period limit $6`, tenantID, scenarioID, f.Account, f.CostCenter, f.Period, gridLimit)
+		const filter = ` from budget_plan_cell where tenant_id = $1 and scenario_id = $2 and ($3 = '' or account = $3) and ($4 = '' or cost_center = $4) and ($5 = '' or period = $5)`
+		var total string
+		if err := tx.QueryRow(ctx, `select coalesce(sum(amount), 0)::text`+filter, tenantID, scenarioID, f.Account, f.CostCenter, f.Period).Scan(&total); err != nil {
+			return err
+		}
+		g.Total = parseDec(total)
+		rows, err := tx.Query(ctx, `select account, cost_center, period, amount::text`+filter+` order by account, cost_center, period limit $6`,
+			tenantID, scenarioID, f.Account, f.CostCenter, f.Period, gridLimit+1)
 		if err != nil {
 			return err
 		}
@@ -487,8 +519,10 @@ func (s *Postgres) GetGrid(ctx context.Context, planID, scenarioID string, f Gri
 				return err
 			}
 			c.Amount = parseDec(amount)
-			g.Total = g.Total.Add(c.Amount)
 			g.Cells = append(g.Cells, c)
+		}
+		if g.Truncated = len(g.Cells) > gridLimit; g.Truncated {
+			g.Cells = g.Cells[:gridLimit]
 		}
 		return rows.Err()
 	})
@@ -625,16 +659,17 @@ func checkApproverIndependent(ctx context.Context, tx pgx.Tx, tenantID string, p
 	if _, err := loadScenario(ctx, tx, tenantID, plan.ID, scenarioID, false); err != nil {
 		return err
 	}
-	var ownersSetBy, editedBy string
-	var positive bool
-	if err := tx.QueryRow(ctx, `select coalesce(p.owners_set_by, ''), coalesce(s.updated_by, ''),
+	var ownersSetBy string
+	var edited, positive bool
+	if err := tx.QueryRow(ctx, `select coalesce(p.owners_set_by, ''),
+		exists (select 1 from budget_plan_scenario_editor e where e.tenant_id = s.tenant_id and e.scenario_id = s.id and e.actor = $4),
 		exists (select 1 from budget_plan_cell c where c.tenant_id = s.tenant_id and c.scenario_id = s.id and c.amount > 0)
 		from budget_plan_process p join budget_plan_scenario s on s.tenant_id = p.tenant_id and s.process_id = p.id
-		where p.tenant_id = $1 and p.id = $2 and s.id = $3`, tenantID, plan.ID, scenarioID).Scan(&ownersSetBy, &editedBy, &positive); err != nil {
+		where p.tenant_id = $1 and p.id = $2 and s.id = $3`, tenantID, plan.ID, scenarioID, actor).Scan(&ownersSetBy, &edited, &positive); err != nil {
 		return err
 	}
-	if actor == plan.CreatedBy || actor == ownersSetBy || actor == editedBy {
-		return planProblem(http.StatusForbidden, CodePlanSeparation, "the creator of the plan, whoever set its stage owners and whoever last edited the approved scenario cannot approve it")
+	if actor == plan.CreatedBy || actor == ownersSetBy || edited {
+		return planProblem(http.StatusForbidden, CodePlanSeparation, "the creator of the plan, whoever set its stage owners and anyone who edited the approved scenario or the scenario it was copied from cannot approve it")
 	}
 	if !positive {
 		return planProblem(http.StatusUnprocessableEntity, CodePlanIncomplete, "the scenario holds no amount to approve")
@@ -653,6 +688,15 @@ func ensureYearNotApproved(ctx context.Context, tx pgx.Tx, tenantID string, plan
 	}
 	if taken {
 		return planProblem(http.StatusConflict, CodePlanYearApproved, fmt.Sprintf("another plan is already approved for this control rule version and fiscal year %d; its register entry is the budget", plan.FiscalYear))
+	}
+	var original bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from budget_register_entry e, jsonb_array_elements(e.lines) l
+		where e.tenant_id = $1 and e.rule_version_id = $2 and e.entry_type = 'Original' and (l->>'spanKey' = $3 or l->>'spanKey' like $4))`,
+		tenantID, plan.RuleVersionID, fmt.Sprintf("FY%d", plan.FiscalYear), fmt.Sprintf("%d-%%", plan.FiscalYear)).Scan(&original); err != nil {
+		return err
+	}
+	if original {
+		return planProblem(http.StatusConflict, CodeYearHasOriginal, fmt.Sprintf("an Original register entry already exists on this control rule version for fiscal year %d; posting the plan on top would double the budget, so revise that entry instead", plan.FiscalYear))
 	}
 	return nil
 }
@@ -695,6 +739,10 @@ func completeStage(ctx context.Context, tx pgx.Tx, tenantID string, plan Plan, s
 	}
 	if _, err := tx.Exec(ctx, `update budget_plan_process set status = 'Approved', register_entry_id = $3, version = version + 1 where tenant_id = $1 and id = $2`,
 		tenantID, plan.ID, entry.ID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == oneApprovedPlanIndex {
+			return planProblem(http.StatusConflict, CodePlanYearApproved, fmt.Sprintf("another plan is already approved for this control rule version and fiscal year %d; its register entry is the budget", plan.FiscalYear))
+		}
 		return err
 	}
 	return enqueue(ctx, tx, "plan", plan.ID, budgetevents.PlanApproved, tenantID, budgetevents.PlanApprovedData{

@@ -3,11 +3,14 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -461,5 +464,202 @@ func TestPlan_ListPlansMatchesAnUppercaseLegalEntityID(t *testing.T) {
 	plans, err := f.st.ListPlans(asUser("planner"), strings.ToUpper(f.rule.LegalEntityID))
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("plans for the upper-cased legal entity = %d (%v), want 1", len(plans), err)
+	}
+}
+
+func (f planFixture) writeAs(t *testing.T, user string, sc Scenario, cells ...domain.PlanCell) {
+	t.Helper()
+	cur := f.scenarioByID(t, sc.ID)
+	mustCommand(t)(f.st.UpsertCells(asUser(user), ids.New(), "h", f.view.ID, sc.ID, cur.Version, cells))
+}
+
+func (f planFixture) scenarioByID(t *testing.T, id string) Scenario {
+	t.Helper()
+	for _, s := range f.plan(t).Scenarios {
+		if s.ID == id {
+			return s
+		}
+	}
+	t.Fatalf("no scenario %s", id)
+	return Scenario{}
+}
+
+func (f planFixture) reviewedWith(t *testing.T, approver string) string {
+	t.Helper()
+	unit := ids.New()
+	f.owners(t, StageOwnerInput{Stage: domain.StageReview, OrgUnitID: unit, Owner: "rev"}, StageOwnerInput{Stage: domain.StageApprove, OrgUnitID: unit, Owner: approver})
+	mustCommand(t)(f.st.SubmitPlan(asUser("submitter"), ids.New(), "h", f.view.ID))
+	if err := f.signOff("rev", SignOffRequest{Stage: domain.StageReview, OrgUnitID: unit, Submission: 1}); err != nil {
+		t.Fatal(err)
+	}
+	return unit
+}
+
+func TestPlan_AnEarlierEditorCannotApproveAfterSomeoneElseEdits(t *testing.T) {
+	f := newPlanFixture(t)
+	base := f.scenario(t, "Baseline")
+	f.writeAs(t, "boss", base, cell("6000", "CC1", "2027-01", "10"))
+	f.writeAs(t, "later", base, cell("6000", "CC1", "2027-02", "20"))
+	unit := f.reviewedWith(t, "boss")
+	err := f.signOff("boss", SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: base.ID, Submission: 1})
+	if !hasCode(err, CodePlanSeparation) {
+		t.Fatalf("an earlier editor approving: %v, want %s", err, CodePlanSeparation)
+	}
+}
+
+func TestPlan_ACopyKeepsTheEditorsOfItsSourceAndTheCopier(t *testing.T) {
+	for _, approver := range []string{"author", "copier"} {
+		t.Run(approver, func(t *testing.T) {
+			f := newPlanFixture(t)
+			base := f.scenario(t, "Baseline")
+			f.writeAs(t, "author", base, cell("6000", "CC1", "2027-01", "10"))
+			var copied Scenario
+			raw := mustCommand(t)(f.st.CreateScenario(asUser("copier"), ids.New(), "h", f.view.ID, NewScenario{Name: "Copy", Kind: "Custom", CopyFromID: base.ID, AdjustmentPct: d("10")}))
+			if err := json.Unmarshal(raw, &copied); err != nil {
+				t.Fatal(err)
+			}
+			unit := f.reviewedWith(t, approver)
+			err := f.signOff(approver, SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: copied.ID, Submission: 1})
+			if !hasCode(err, CodePlanSeparation) {
+				t.Fatalf("%s approving the copy: %v, want %s", approver, err, CodePlanSeparation)
+			}
+		})
+	}
+}
+
+func TestPlan_ApproverWhoNeverTouchedTheScenarioMayApproveIt(t *testing.T) {
+	f := newPlanFixture(t)
+	base := f.scenario(t, "Baseline")
+	f.writeAs(t, "author", base, cell("6000", "CC1", "2027-01", "10"))
+	unit := f.reviewedWith(t, "boss")
+	if err := f.signOff("boss", SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: base.ID, Submission: 1}); err != nil {
+		t.Fatalf("an uninvolved approver: %v", err)
+	}
+}
+
+func TestPlan_ConcurrentApprovalsOfTwoPlansOnTheSameRuleAndYearPostOnce(t *testing.T) {
+	f := newPlanFixture(t)
+	second := decodePlanView(t, mustCommand(t)(f.st.CreatePlan(asUser("planner"), ids.New(), "h", NewPlan{LegalEntityID: f.rule.LegalEntityID, RuleVersionID: f.rule.ID, Name: "FY27 stretch", FiscalYear: 2027})))
+	type ready struct{ planID, unit, scenarioID string }
+	prepare := func(planID string) ready {
+		v, err := f.st.GetPlan(asUser("planner"), planID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sc, unit := v.Scenarios[0], ids.New()
+		mustCommand(t)(f.st.UpsertCells(asUser("author"), ids.New(), "h", planID, sc.ID, sc.Version, []domain.PlanCell{cell("6000", "CC1", "2027-01", "10")}))
+		mustCommand(t)(f.st.SetStageOwners(asUser("planner"), ids.New(), "h", planID, []StageOwnerInput{
+			{Stage: domain.StageReview, OrgUnitID: unit, Owner: "rev"}, {Stage: domain.StageApprove, OrgUnitID: unit, Owner: "boss"}}))
+		mustCommand(t)(f.st.SubmitPlan(asUser("submitter"), ids.New(), "h", planID))
+		if _, _, err := f.st.SignOff(asUser("rev"), ids.New(), "h", SignOffRequest{PlanID: planID, Stage: domain.StageReview, OrgUnitID: unit, Submission: 1}); err != nil {
+			t.Fatal(err)
+		}
+		return ready{planID, unit, sc.ID}
+	}
+	plans := []ready{prepare(f.view.ID), prepare(second.ID)}
+	errs := make([]error, len(plans))
+	var wg sync.WaitGroup
+	for i, p := range plans {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, errs[i] = f.st.SignOff(asUser("boss"), ids.New(), "h", SignOffRequest{PlanID: p.planID, Stage: domain.StageApprove, OrgUnitID: p.unit, ScenarioID: p.scenarioID, Submission: 1})
+		}()
+	}
+	wg.Wait()
+	won, lost := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			won++
+		case hasCode(err, CodePlanYearApproved):
+			lost++
+		default:
+			t.Fatalf("concurrent approval: %v", err)
+		}
+	}
+	if won != 1 || lost != 1 {
+		t.Fatalf("concurrent approvals: %d won, %d refused with %s, want 1 and 1", won, lost, CodePlanYearApproved)
+	}
+	entries, err := f.st.ListRegisterEntries(asUser("planner"), f.rule.ID)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("register entries = %d (%v), want 1", len(entries), err)
+	}
+}
+
+func TestPlan_TheDatabaseRefusesASecondApprovedPlanForTheRuleAndYear(t *testing.T) {
+	f := newPlanFixture(t)
+	second := decodePlanView(t, mustCommand(t)(f.st.CreatePlan(asUser("planner"), ids.New(), "h", NewPlan{LegalEntityID: f.rule.LegalEntityID, RuleVersionID: f.rule.ID, Name: "FY27 stretch", FiscalYear: 2027})))
+	for i, id := range []string{f.view.ID, second.ID} {
+		_, err := f.st.pool.Exec(context.Background(), `update budget_plan_process set status = 'Approved' where id = $1`, id)
+		var pgErr *pgconn.PgError
+		if i == 0 && err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 && (!errors.As(err, &pgErr) || pgErr.ConstraintName != oneApprovedPlanIndex) {
+			t.Fatalf("second Approved plan: %v, want a violation of %s", err, oneApprovedPlanIndex)
+		}
+	}
+}
+
+func TestPlan_AnExistingOriginalEntryForTheYearBlocksApproval(t *testing.T) {
+	cases := []struct {
+		name, span string
+		blocked    bool
+	}{
+		{"fiscal year span", "FY2027", true},
+		{"month span in the year", "2027-03", true},
+		{"another year", "FY2026", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlanFixture(t)
+			mustCommand(t)(f.st.PostRegisterEntry(asUser("setup"), ids.New(), "h", RegisterRequest{RuleVersionID: f.rule.ID, EntryType: domain.EntryOriginal,
+				Lines: []domain.RegisterLine{{DimensionKey: "d1", SpanKey: tc.span, Amount: d("500")}}}))
+			base := f.scenario(t, "Baseline")
+			f.writeAs(t, "author", base, cell("6000", "CC1", "2027-01", "10"))
+			unit := f.reviewedWith(t, "boss")
+			err := f.signOff("boss", SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: base.ID, Submission: 1})
+			if tc.blocked {
+				if !hasCode(err, CodeYearHasOriginal) {
+					t.Fatalf("approving over an Original entry: %v, want %s", err, CodeYearHasOriginal)
+				}
+				if got := f.plan(t); got.Status != domain.PlanReviewed || got.ApprovedScenarioID != "" {
+					t.Fatalf("the refused approval left status %s and approved scenario %q", got.Status, got.ApprovedScenarioID)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("approving with an Original entry for another year: %v", err)
+			}
+		})
+	}
+}
+
+func TestPlan_GridReadSaysWhenItIsCutOffAndTotalsTheWholeFilter(t *testing.T) {
+	f := newPlanFixture(t)
+	base := f.scenario(t, "Baseline")
+	if _, err := f.st.pool.Exec(context.Background(), `insert into budget_plan_cell (tenant_id, legal_entity_id, process_id, scenario_id, account, cost_center, period, amount)
+		select $1, $2, $3, $4, 'A' || g, 'CC1', '2027-01', 1 from generate_series(1, $5::int) g`,
+		testkit.TenantID(planTenant), f.rule.LegalEntityID, f.view.ID, base.ID, gridLimit+1); err != nil {
+		t.Fatal(err)
+	}
+	g, err := f.st.GetGrid(asUser("planner"), f.view.ID, base.ID, GridFilter{})
+	if err != nil || !g.Truncated || len(g.Cells) != gridLimit || !g.Total.Equal(d("10001")) {
+		t.Fatalf("grid over the cap: %d cells, truncated %v, total %s, err %v; want %d cells, truncated and the full total 10001", len(g.Cells), g.Truncated, g.Total, err, gridLimit)
+	}
+	one, err := f.st.GetGrid(asUser("planner"), f.view.ID, base.ID, GridFilter{Account: "A7"})
+	if err != nil || one.Truncated || len(one.Cells) != 1 || !one.Total.Equal(d("1")) {
+		t.Fatalf("filtered grid: %+v err %v, want one cell, not truncated", one, err)
+	}
+}
+
+func TestPlan_SpreadAnswerCarriesThePriorYearFallbackFlag(t *testing.T) {
+	f := newPlanFixture(t)
+	base := f.scenario(t, "Baseline")
+	var written GridWritten
+	raw := mustCommand(t)(f.st.SpreadCells(asUser("planner"), ids.New(), "h", f.view.ID, base.ID, base.Version, []domain.PlanCell{cell("6000", "CC1", "2027-01", "10")}, true))
+	if err := json.Unmarshal(raw, &written); err != nil || !written.PriorYearFallback || !strings.Contains(string(raw), `"priorYearFallback":true`) {
+		t.Fatalf("spread answer %s (%v), want priorYearFallback true", raw, err)
 	}
 }

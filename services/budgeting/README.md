@@ -89,6 +89,10 @@ investment programs.
   transaction, posts the approved scenario as an Original register entry (one line per account, cost center and
   period; dimension key `account|costCenter`, span key `YYYY-MM`), which is what budget control reads. A reject returns
   the plan to Draft. The `submission` number ties each signal to its round, so a stale workflow cannot sign a newer one.
+  The approver may not have created the plan, set its owners or written any cell of the approved scenario (every
+  editor is recorded, and a copy inherits its source's editors). The approved plan is the year's budget, not an
+  addition to it: one approved plan per rule version and fiscal year (database unique index), and approval is refused
+  (`BUD-0059`) when an Original entry for that year (span key `FY<year>` or `<year>-..`) is already on the rule version.
 
 Money is `numeric(19,4)` with a currency. Every command requires `Idempotency-Key`. Commands emit outbox events
 (`dev.passage.budget.register.posted.v1`, `dev.passage.budget.check.completed.v1`,
@@ -181,6 +185,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `BUD-0056` | The general ledger could not be read (503) |
 | `BUD-0057` | Another plan is already approved for this control rule version and fiscal year (409) |
 | `BUD-0058` | A fiscal year that does not start in January is not supported (422) |
+| `BUD-0059` | An Original register entry already exists on the control rule version for the fiscal year; approving would double the budget (409) |
+| `BUD-0060` | The cost center weights of a spread sum to zero (422) |
 | `COM-0428` | If-Match is required on a grid write (428) |
 | `COM-0001` | Malformed request body |
 | `AUTH-0001` | No principal on the request |

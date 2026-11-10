@@ -35,6 +35,7 @@ type fakePlans struct {
 	plan      store.Plan
 	planError error
 	replayed  bool
+	fallback  bool
 }
 
 func (f *fakePlans) Replayed(context.Context, string, string) (bool, error) { return f.replayed, nil }
@@ -60,6 +61,11 @@ func (f *fakePlans) UpsertCells(_ context.Context, _, _, _, _ string, version in
 	f.calls++
 	f.version, f.cells = version, cells
 	return http.StatusOK, []byte(`{"scenarioId":"s","version":8,"cells":1,"total":"1"}`), nil
+}
+
+func (f *fakePlans) SpreadCells(ctx context.Context, key, hash, planID, scenarioID string, version int64, cells []domain.PlanCell, priorYearFallback bool) (int, []byte, error) {
+	f.fallback = priorYearFallback
+	return f.UpsertCells(ctx, key, hash, planID, scenarioID, version, cells)
 }
 
 func (f *fakePlans) SubmitPlan(context.Context, string, string, string) (int, []byte, error) {
@@ -212,7 +218,7 @@ func TestPlanGrid_PutRejectsBadCells(t *testing.T) {
 }
 
 func TestPlanSpread_EvenAllocatesTheTotalExactly(t *testing.T) {
-	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027}}
+	f := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027}}
 	body := `{"account":"6000","total":"1000","method":"even","costCenters":[{"costCenter":"CC1","weight":"1"},{"costCenter":"CC2","weight":"2"}]}`
 	rec := servePlan(t, f, nil, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"3"`})
 	if rec.Code != http.StatusOK || f.version != 3 || len(f.cells) != 24 {
@@ -230,7 +236,7 @@ func TestPlanSpread_EvenAllocatesTheTotalExactly(t *testing.T) {
 }
 
 func TestPlanSpread_PriorYearActualsWeighsPeriodsByTheLedger(t *testing.T) {
-	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LegalEntityID: entityID, LedgerID: ledgerID}}
+	f := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027, LegalEntityID: entityID, LedgerID: ledgerID}}
 	gl := &fakeActuals{byPeriod: map[string]string{"2026-01": "100", "2026-02": "300"}}
 	body := `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
 	rec := servePlan(t, f, gl, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
@@ -251,11 +257,11 @@ func TestPlanSpread_PriorYearActualsWeighsPeriodsByTheLedger(t *testing.T) {
 func TestPlanSpread_PriorYearNeedsLedgerAndPlanLedger(t *testing.T) {
 	body := `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
 	h := map[string]string{"If-Match": `"1"`}
-	noLedgerOnPlan := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027}}
+	noLedgerOnPlan := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027}}
 	if rec := servePlan(t, noLedgerOnPlan, &fakeActuals{}, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, h); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != codeLedgerNotSet {
 		t.Fatalf("plan without a ledger: %d %s, want 422 %s", rec.Code, rec.Body, codeLedgerNotSet)
 	}
-	withLedger := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LedgerID: ledgerID}}
+	withLedger := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027, LedgerID: ledgerID}}
 	if rec := servePlan(t, withLedger, nil, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, h); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("service without a ledger client: %d, want 503", rec.Code)
 	}
@@ -267,7 +273,7 @@ func TestPlanSpread_PriorYearNeedsLedgerAndPlanLedger(t *testing.T) {
 }
 
 func TestPlanSpread_ARetryOfAStoredAnswerDoesNotReadTheLedger(t *testing.T) {
-	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LedgerID: ledgerID}, replayed: true}
+	f := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027, LedgerID: ledgerID}, replayed: true}
 	gl := &fakeActuals{err: context.DeadlineExceeded}
 	body := `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
 	rec := servePlan(t, f, gl, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
@@ -277,7 +283,7 @@ func TestPlanSpread_ARetryOfAStoredAnswerDoesNotReadTheLedger(t *testing.T) {
 }
 
 func TestPlanSpread_ANetCreditMonthWeighsNothing(t *testing.T) {
-	f := &fakePlans{plan: store.Plan{ID: planID, FiscalYear: 2027, LedgerID: ledgerID}}
+	f := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027, LedgerID: ledgerID}}
 	gl := &fakeActuals{byPeriod: map[string]string{"2026-01": "100", "2026-02": "-300"}}
 	body := `{"account":"6000","total":"100","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
 	rec := servePlan(t, f, gl, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
@@ -288,6 +294,47 @@ func TestPlanSpread_ANetCreditMonthWeighsNothing(t *testing.T) {
 		if c.Period == "2027-01" && !c.Amount.Equal(decimal.NewFromInt(100)) || c.Period == "2027-02" && !c.Amount.IsZero() {
 			t.Errorf("%s = %s, want the credit month at 0 and all of the total in January", c.Period, c.Amount)
 		}
+	}
+}
+
+func TestPlanSpread_RefusesWhatItWouldSpreadWrongBeforeReadingTheLedger(t *testing.T) {
+	path := planPath + "/scenarios/" + scenarioID + ":spread"
+	h := map[string]string{"If-Match": `"1"`}
+	cases := []struct {
+		name, body string
+		plan       store.Plan
+		code       int
+		problem    string
+	}{
+		{"duplicate cost centers", `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"},{"costCenter":"CC1","weight":"2"}]}`,
+			store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027, LedgerID: ledgerID}, http.StatusBadRequest, "COM-0001"},
+		{"weights summing to zero", `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"0"},{"costCenter":"CC2","weight":"0"}]}`,
+			store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027, LedgerID: ledgerID}, http.StatusUnprocessableEntity, codeZeroWeights},
+		{"a plan that is not a Draft", `{"account":"6000","total":"400","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`,
+			store.Plan{ID: planID, Status: domain.PlanSubmitted, FiscalYear: 2027, LedgerID: ledgerID}, http.StatusConflict, store.CodePlanNotDraft},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, gl := &fakePlans{plan: c.plan}, &fakeActuals{}
+			rec := servePlan(t, f, gl, http.MethodPost, path, c.body, dutyPlanMaintain, h)
+			if rec.Code != c.code || problemCode(t, rec) != c.problem || len(gl.queries) != 0 || f.version != 0 {
+				t.Fatalf("%s: %d %s, ledger queries %d, want %d %s with no ledger read and no write", c.name, rec.Code, rec.Body, len(gl.queries), c.code, c.problem)
+			}
+		})
+	}
+}
+
+func TestPlanSpread_NoPriorYearActualsFallsBackToEvenAndSaysSo(t *testing.T) {
+	f := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027, LedgerID: ledgerID}}
+	body := `{"account":"6000","total":"1200","method":"prior-year-actuals","costCenters":[{"costCenter":"CC1","weight":"1"}]}`
+	rec := servePlan(t, f, &fakeActuals{}, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
+	if rec.Code != http.StatusOK || !f.fallback || len(f.cells) != 12 || !f.cells[0].Amount.Equal(decimal.NewFromInt(100)) {
+		t.Fatalf("spread without actuals: %d %s fallback %v cells %v, want the even split flagged", rec.Code, rec.Body, f.fallback, f.cells)
+	}
+	f2 := &fakePlans{plan: f.plan}
+	gl := &fakeActuals{byPeriod: map[string]string{"2026-01": "100"}}
+	if rec := servePlan(t, f2, gl, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK || f2.fallback {
+		t.Fatalf("spread with actuals: %d %s fallback %v, want no fallback", rec.Code, rec.Body, f2.fallback)
 	}
 }
 

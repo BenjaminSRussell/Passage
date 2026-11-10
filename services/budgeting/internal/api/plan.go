@@ -33,6 +33,7 @@ const (
 	codeLedgerUnreadable = "BUD-0056"
 	codePreconditionReq  = "COM-0428"
 	codeFiscalCalendar   = "BUD-0058"
+	codeZeroWeights      = "BUD-0060"
 	spreadEven           = "even"
 	spreadPriorYear      = "prior-year-actuals"
 )
@@ -48,6 +49,7 @@ type PlanStore interface {
 	SetStageOwners(ctx context.Context, key, hash, planID string, owners []store.StageOwnerInput) (int, []byte, error)
 	CreateScenario(ctx context.Context, key, hash, planID string, in store.NewScenario) (int, []byte, error)
 	UpsertCells(ctx context.Context, key, hash, planID, scenarioID string, version int64, cells []domain.PlanCell) (int, []byte, error)
+	SpreadCells(ctx context.Context, key, hash, planID, scenarioID string, version int64, cells []domain.PlanCell, priorYearFallback bool) (int, []byte, error)
 	SubmitPlan(ctx context.Context, key, hash, planID string) (int, []byte, error)
 	SignOff(ctx context.Context, key, hash string, in store.SignOffRequest) (int, []byte, error)
 	RejectPlan(ctx context.Context, key, hash string, in store.RejectRequest) (int, []byte, error)
@@ -388,17 +390,28 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 		fields["costCenters"] = fmt.Sprintf("must hold 1 to %d cost centers", maxCostCenters)
 	}
 	weights := make([]decimal.Decimal, len(req.CostCenters))
+	weightSum := decimal.Zero
+	seenCenters := make(map[string]bool, len(req.CostCenters))
 	for i, c := range req.CostCenters {
 		if n := len([]rune(c.CostCenter)); n < 1 || n > 100 {
 			fields[fmt.Sprintf("costCenters[%d].costCenter", i)] = "must be 1 to 100 characters"
 		}
+		if seenCenters[c.CostCenter] {
+			fields[fmt.Sprintf("costCenters[%d].costCenter", i)] = "the cost center appears twice in the request"
+		}
+		seenCenters[c.CostCenter] = true
 		if c.Weight.Sign() < 0 || c.Weight.Exponent() < -4 {
 			fields[fmt.Sprintf("costCenters[%d].weight", i)] = "must not be negative and have at most 4 decimal places"
 		}
 		weights[i] = c.Weight
+		weightSum = weightSum.Add(c.Weight)
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	if weightSum.Sign() <= 0 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeZeroWeights, "the cost center weights sum to zero: give at least one cost center a positive weight"))
 		return
 	}
 	key, hash := splitKey(composite)
@@ -408,7 +421,7 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if replayed {
-		a.replayGrid(w, r)(a.plans.UpsertCells(r.Context(), key, hash, id, sid, version, nil))
+		a.replayGrid(w, r)(a.plans.SpreadCells(r.Context(), key, hash, id, sid, version, nil, false))
 		return
 	}
 	plan, err := a.plans.GetPlan(r.Context(), id)
@@ -416,7 +429,11 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	periodWeights, err := a.periodWeights(r.Context(), plan.Plan, req.Account, req.Method)
+	if plan.Status != domain.PlanDraft {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, store.CodePlanNotDraft, fmt.Sprintf("the plan is %s; only a Draft plan can be changed", plan.Status)))
+		return
+	}
+	periodWeights, fallback, err := a.periodWeights(r.Context(), plan.Plan, req.Account, req.Method)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -428,55 +445,46 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 			cells = append(cells, domain.PlanCell{Account: req.Account, CostCenter: req.CostCenters[i].CostCenter, Period: periods[j], Amount: amount})
 		}
 	}
-	if _, dup := gridCells(toGridRequests(cells)); len(dup) > 0 {
-		validationFailed(w, r, map[string]string{"costCenters": "a cost center appears twice"})
-		return
-	}
-	a.replayGrid(w, r)(a.plans.UpsertCells(r.Context(), key, hash, id, sid, version, cells))
-}
-
-func toGridRequests(cells []domain.PlanCell) []gridCellRequest {
-	out := make([]gridCellRequest, len(cells))
-	for i, c := range cells {
-		out[i] = gridCellRequest{Account: c.Account, CostCenter: c.CostCenter, Period: c.Period, Amount: c.Amount}
-	}
-	return out
+	a.replayGrid(w, r)(a.plans.SpreadCells(r.Context(), key, hash, id, sid, version, cells, fallback))
 }
 
 // periodWeights is 1 for each period (even), or the net debit (debit less credit, never below zero) of the account's posted balance in each month of
-// the prior fiscal year. The ledger balance is per account: it cannot be narrowed to a cost center.
-func (a *API) periodWeights(ctx context.Context, plan store.Plan, account, method string) ([]decimal.Decimal, error) {
+// the prior fiscal year. The ledger balance is per account: it cannot be narrowed to a cost center. fallback reports that the prior year held no
+// net debit at all, so the weights are the even ones.
+func (a *API) periodWeights(ctx context.Context, plan store.Plan, account, method string) (weights []decimal.Decimal, fallback bool, err error) {
 	periods := domain.Periods(plan.FiscalYear)
-	weights := make([]decimal.Decimal, len(periods))
+	weights = make([]decimal.Decimal, len(periods))
 	if method == spreadEven {
 		for i := range weights {
 			weights[i] = decimal.NewFromInt(1)
 		}
-		return weights, nil
+		return weights, false, nil
 	}
 	if plan.LedgerID == "" {
-		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, codeLedgerNotSet, "the plan names no ledger: set ledgerId on the plan to spread by prior-year actuals")
+		return nil, false, httpx.NewProblem(http.StatusUnprocessableEntity, codeLedgerNotSet, "the plan names no ledger: set ledgerId on the plan to spread by prior-year actuals")
 	}
 	if a.ledger == nil {
-		return nil, httpx.NewProblem(http.StatusServiceUnavailable, codeLedgerNotSet, "the general ledger is not configured for this service")
+		return nil, false, httpx.NewProblem(http.StatusServiceUnavailable, codeLedgerNotSet, "the general ledger is not configured for this service")
 	}
+	total := decimal.Zero
 	for i, period := range domain.Periods(plan.FiscalYear - 1) {
 		set, err := a.ledger.Balances(ctx, ledgerclient.BalanceQuery{LegalEntityID: plan.LegalEntityID, LedgerID: plan.LedgerID, Account: account, AccountTo: account,
 			PeriodFrom: period, PeriodTo: period})
 		if err != nil {
 			slog.ErrorContext(ctx, "ledger balance read for prior-year spreading failed", "plan", plan.ID, "period", period, "err", err)
 			if ledgerclient.Rejected(err) {
-				return nil, httpx.NewProblem(http.StatusUnprocessableEntity, codeLedgerRefused, "the general ledger refused the balance read: "+ledgerclient.CodeOf(err))
+				return nil, false, httpx.NewProblem(http.StatusUnprocessableEntity, codeLedgerRefused, "the general ledger refused the balance read: "+ledgerclient.CodeOf(err))
 			}
-			return nil, httpx.NewProblem(http.StatusServiceUnavailable, codeLedgerUnreadable, "the general ledger could not be read")
+			return nil, false, httpx.NewProblem(http.StatusServiceUnavailable, codeLedgerUnreadable, "the general ledger could not be read")
 		}
 		for _, row := range set.Rows {
 			if row.Account == account {
 				weights[i] = weights[i].Add(decimal.Max(row.Net(), decimal.Zero))
 			}
 		}
+		total = total.Add(weights[i])
 	}
-	return weights, nil
+	return weights, total.IsZero(), nil
 }
 
 func (a *API) submitPlan(w http.ResponseWriter, r *http.Request) {

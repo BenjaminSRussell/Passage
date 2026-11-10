@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS budget_plan_process (
   UNIQUE (tenant_id, legal_entity_id, fiscal_year, name),
   FOREIGN KEY (tenant_id, rule_version_id) REFERENCES budget_control_rule (tenant_id, id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS budget_plan_one_approved_per_rule_year ON budget_plan_process (tenant_id, rule_version_id, fiscal_year) WHERE status = 'Approved';
 ALTER TABLE budget_plan_process ENABLE ROW LEVEL SECURITY;
 ALTER TABLE budget_plan_process FORCE ROW LEVEL SECURITY;
 CREATE POLICY budget_plan_process_tenant_access ON budget_plan_process AS PERMISSIVE
@@ -80,6 +81,23 @@ CREATE POLICY budget_plan_scenario_legal_entity_scope ON budget_plan_scenario AS
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
+CREATE TABLE IF NOT EXISTS budget_plan_scenario_editor (
+  tenant_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
+  scenario_id uuid NOT NULL,
+  actor text NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 200),
+  PRIMARY KEY (tenant_id, scenario_id, actor),
+  FOREIGN KEY (tenant_id, scenario_id) REFERENCES budget_plan_scenario (tenant_id, id)
+);
+ALTER TABLE budget_plan_scenario_editor ENABLE ROW LEVEL SECURITY;
+ALTER TABLE budget_plan_scenario_editor FORCE ROW LEVEL SECURITY;
+CREATE POLICY budget_plan_scenario_editor_tenant_access ON budget_plan_scenario_editor AS PERMISSIVE
+  USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY budget_plan_scenario_editor_legal_entity_scope ON budget_plan_scenario_editor AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+
 CREATE TABLE IF NOT EXISTS budget_plan_cell (
   tenant_id uuid NOT NULL,
   legal_entity_id uuid NOT NULL,
@@ -131,6 +149,7 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON budget_plan_process, budget_plan_scenario, budget_plan_cell TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT ON budget_plan_scenario_editor TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON budget_plan_stage_owner TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON budget_plan_decision TO passage_app';
   END IF;
