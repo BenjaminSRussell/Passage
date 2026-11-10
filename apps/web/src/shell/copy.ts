@@ -161,6 +161,8 @@ export const copy = {
     noEntry: "There is no help for this page yet.",
     whatsNew: "What's new",
     announceOpened: "Help opened",
+    shareUsage: "Share anonymous usage data",
+    shareUsageHint: "Which steps people finish and where forms fail, so we can make them easier. It holds no names or record details.",
   },
   whatsNew: {
     pageTitle: "What's new",

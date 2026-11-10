@@ -15,6 +15,7 @@ import styles from "./Shell.module.css";
 import { shellNav } from "./shellNav";
 import { Sidebar } from "./Sidebar";
 import { clickTrace } from "./telemetry";
+import { observeFetch, ux } from "./uxEvents";
 import { TopBar } from "./TopBar";
 import { Alert, Skeleton } from "./ui";
 import { workspaceIcon } from "./workspaceIcons";
@@ -122,6 +123,19 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
   }, []);
 
   const announceQuietly = useCallback((message: string) => announce(message), [announce]);
+
+  useEffect(() => {
+    ux.configure({ duties: principalDuties, identity: userId, release: import.meta.env.VITE_PASSAGE_RELEASE });
+  }, [principalDuties, userId]);
+  useEffect(() => {
+    const stop = observeFetch();
+    const flush = () => void ux.flush(true);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      stop();
+      window.removeEventListener("pagehide", flush);
+    };
+  }, []);
 
   useEffect(
     () => () => {

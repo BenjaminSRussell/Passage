@@ -81,6 +81,9 @@ const workers = WORKERS.map((w) => ({ id: w.id, personnelNumber: w.number, legal
 route("GET", "/api/v1/hr/workers", ({ query }) => ({ items: limit(workers.filter((w) => matches(query.get("q"), w.legalName, w.personnelNumber)), query) }));
 route("GET", "/api/v1/hr/workers/{id}", ({ params }) => workers.find((w) => w.id === params.id) ?? reply.problem(404, "HR-0404", "No worker with that id"));
 
+// UX telemetry: the demo accepts events and drops them, so nothing is stored or sent anywhere.
+route("POST", "/api/v1/analytics/ux-events", () => reply.accepted({ accepted: 0, dropped: 0 }));
+
 // My work: a short, believable inbox that points into the demo tour.
 const inbox: InboxPage = {
   items: [

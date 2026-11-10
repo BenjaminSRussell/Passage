@@ -4,6 +4,7 @@ import { copy } from "../copy";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import styles from "./HelpPanel.module.css";
 import { helpForRoute, type RouteHelp } from "./routeHelp";
+import { isOptedOut, setOptOut } from "../uxEvents";
 
 /** Where the end-user guides are read. A docs site can replace this at build time. */
 const GUIDE_BASE = import.meta.env.VITE_USER_GUIDE_BASE ?? "https://github.com/BenjaminSRussell/Passage/blob/main/docs/user/";
@@ -64,11 +65,33 @@ export function HelpPanel({ pathname, onClose }: HelpPanelProps) {
           </div>
         )}
         <footer className={styles.foot}>
+          <UsageDataChoice />
           <Link to="/whats-new" onClick={onClose}>
             {copy.help.whatsNew}
           </Link>
         </footer>
       </aside>
+    </div>
+  );
+}
+
+/** The opt-out for anonymous usage data. It is on by default for people who hold the record duty. */
+function UsageDataChoice() {
+  const [share, setShare] = useState(() => !isOptedOut());
+  const id = useId();
+  return (
+    <div className={styles.choice}>
+      <input
+        id={id}
+        type="checkbox"
+        checked={share}
+        onChange={(event) => {
+          setShare(event.target.checked);
+          setOptOut(!event.target.checked);
+        }}
+      />
+      <label htmlFor={id}>{copy.help.shareUsage}</label>
+      <p className={styles.choiceHint}>{copy.help.shareUsageHint}</p>
     </div>
   );
 }

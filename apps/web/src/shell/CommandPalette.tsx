@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./CommandPalette.module.css";
 import { copy } from "./copy";
+import { trackSearchNoResults } from "./uxEvents";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 import { Button, Icon, type IconName } from "./ui";
 
@@ -60,6 +61,7 @@ export function CommandPalette({ entries, onSelect, onClose, announce }: Command
     }
     const timer = window.setTimeout(() => {
       announcedQuery.current = query;
+      if (visible.length === 0) trackSearchNoResults(query);
       announce(visible.length === 0 ? copy.announce.noResults : visible.length === 1 ? copy.announce.oneResult : copy.announce.results(visible.length));
     }, ANNOUNCE_DELAY_MS);
     return () => window.clearTimeout(timer);
