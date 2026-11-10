@@ -18,7 +18,7 @@ import type { AuditPort, BudgetPort, KillSwitchPort, ModelProvider, ModelUsage, 
 import type { McpConnector } from "./mcp.js";
 
 /** The duty to use the copilot (seeded in policies/authz/data.json). */
-export const COPILOT_DUTY = "copilot.use";
+export const COPILOT_DUTY = "mcp.copilot.use";
 export const COPILOT_AGENT_ID = "copilot";
 export const MAX_MESSAGE_CHARS = 4000;
 export const KNOWLEDGE_SEARCH_TOOL = "passage.knowledge.search";

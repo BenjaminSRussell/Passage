@@ -4,6 +4,8 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApprovalRequest, RecordedDecision } from "../src/api/decision.js";
 import { createAgentsHandler, MAX_BODY_BYTES } from "../src/api/router.js";
+import type { CopilotService } from "../src/runtime/copilot.js";
+import type { RunService } from "../src/runtime/service.js";
 import type { AgentEvent } from "../src/domain/events.js";
 import { KillSwitchRegistry } from "../src/domain/killswitch.js";
 
@@ -184,14 +186,21 @@ describe("api/openapi.yaml matches the router", () => {
   it("documents exactly the operations the router serves", async () => {
     expect(documentedOperations()).toEqual([
       "GET /api/v1/agents/kill-switch",
+      "GET /api/v1/agents/runs/{runId}",
+      "GET /api/v1/agents/runs/{runId}/actions",
       "POST /api/v1/agents/kill-switch",
       "POST /api/v1/agents/runs/{runId}/actions/{actionId}/decision",
+      "POST /api/v1/agents/{agentId}/runs",
+      "POST /api/v1/copilot/chat",
     ]);
     const handler = createAgentsHandler({
       registry: new KillSwitchRegistry(() => Date.now()),
       versions: { next: () => 1 },
       approvals: { find: async () => undefined, record: async (_t, _r, _a, d) => d },
       publish: async () => undefined,
+      // Never reached: an anonymous call is refused at the edge identity check.
+      runs: {} as RunService,
+      copilot: {} as CopilotService,
     });
     const s = createServer((req, res) => void handler(req, res));
     await new Promise<void>((resolve) => s.listen(0, "127.0.0.1", resolve));
@@ -199,7 +208,7 @@ describe("api/openapi.yaml matches the router", () => {
       const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
       for (const op of documentedOperations()) {
         const [method, template] = op.split(" ") as [string, string];
-        const url = template.replace("{runId}", RUN).replace("{actionId}", ACT);
+        const url = template.replace("{runId}", RUN).replace("{actionId}", ACT).replace("{agentId}", "ap_coding");
         // Anonymous: a served route answers 401, an unserved one 404 or 405.
         const res = await fetch(`${base}${url}`, { method, ...(method === "GET" ? {} : { body: "{}" }) });
         expect(res.status, op).toBe(401);

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agent-runtime
+description: Passage agent runtime and copilot chat backend (FR-47.3 to FR-47.13)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
