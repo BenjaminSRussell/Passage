@@ -143,6 +143,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices/i1"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
@@ -150,6 +151,12 @@ segregation_grants := [
 	["receiving.service-entry.accept", "GET", "/v1/receiving/service-entry-sheets/s1"],
 	["receiving.service-entry.accept", "POST", "/v1/receiving/service-entry-sheets/s1:accept"],
 	["receiving.service-entry.accept", "POST", "/v1/receiving/service-entry-sheets/s1:reject"],
+	["receiving.asn.maintain", "POST", "/v1/receiving/asns"],
+	["receiving.asn.maintain", "GET", "/v1/receiving/asns"],
+	["receiving.asn.maintain", "GET", "/v1/receiving/asns/a1"],
+	["receiving.asn.receive", "GET", "/v1/receiving/asns"],
+	["receiving.asn.receive", "GET", "/v1/receiving/asns/a1"],
+	["receiving.asn.receive", "POST", "/v1/receiving/asns/a1:start-receipt"],
 	["receiving.invoice-audit.release", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
 	["receiving.invoice-audit.release", "POST", "/v1/receiving/invoices/i1:reject-audit-block"],
 	["receiving.ers-price.confirm", "PUT", "/v1/receiving/receipts/r1/lines/1/ers-price-confirmation"],
@@ -2120,4 +2127,9 @@ test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
 	not principal_allowed("receivables-billing", "POST", "/v1/ledger/journal-entries")
 	not principal_allowed("receivables-billing", "POST", "/v1/billing/invoices")
 	not allowed("receivables.openitem.from-billing", "POST", "/v1/receivables/open-items")
+}
+
+test_asn_duties_do_not_cross if {
+	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
+	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
 }

@@ -1,32 +1,16 @@
 import { readProblem } from "../../../shell/api/http";
+import { OPEN_ITEM_STATUSES, type OpenItem, type OpenItemStatus } from "../../../shell/api/openItems";
 
 export { ApiError } from "../../../shell/api/http";
+export { OPEN_ITEM_STATUSES, type OpenItem, type OpenItemStatus };
 
 const BASE = "/api/v1/payables";
-
-export const OPEN_ITEM_STATUSES = ["OPEN", "PARTIALLY_SETTLED", "SETTLED", "REVERSED"] as const;
-export type OpenItemStatus = (typeof OPEN_ITEM_STATUSES)[number];
 
 export const PROPOSAL_STATUSES = ["DRAFT", "APPROVED", "CANCELLED", "EXECUTING", "EXECUTED", "FAILED"] as const;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 
 export const PAYMENT_METHODS = ["TRANSFER", "ACH", "CHECK", "CARD", "WIRE"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
-
-export interface OpenItem {
-  id: string;
-  legalEntityId: string;
-  vendorId: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-  dueDate: string;
-  currency: string;
-  amount: string;
-  openAmount: string;
-  status: OpenItemStatus;
-  paymentHold: boolean;
-  paymentHoldReason?: string;
-}
 
 export interface Page<T> {
   items: T[];

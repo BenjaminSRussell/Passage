@@ -35,7 +35,7 @@ const (
 		COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
 		unit_price, currency, COALESCE(unit, ''), COALESCE(batch, ''), COALESCE(location_id::text, ''), inventory_status,
 		batch_tracked, serial_tracked, amount, amount_acct, cw_qty, cw_nominal, cw_min, cw_max,
-		COALESCE(site_id::text, ''), COALESCE(warehouse_id::text, '')`
+		COALESCE(site_id::text, ''), COALESCE(warehouse_id::text, ''), expiry_date`
 )
 
 type scanner interface{ Scan(dest ...any) error }
@@ -90,9 +90,13 @@ func scanLine(row scanner) (Line, error) {
 	var l Line
 	var cwQty *int
 	var nominal, minv, maxv *decimal.Decimal
+	var expiry *time.Time
 	err := row.Scan(&l.LineNo, &l.POLineID, &l.POLineNo, &l.ProductID, &l.Qty, &l.InvoicedQty, &l.ClearedAmount, &l.OrderedRemaining, &l.OverDeliveryPct, &l.UnitPrice, &l.Currency,
 		&l.Unit, &l.Batch, &l.LocationID, &l.InventoryStatus, &l.BatchTracked, &l.SerialTracked, &l.Amount, &l.AmountAcct, &cwQty, &nominal, &minv, &maxv,
-		&l.SiteID, &l.WarehouseID)
+		&l.SiteID, &l.WarehouseID, &expiry)
+	if expiry != nil {
+		l.ExpiryDate = *expiry
+	}
 	if cwQty != nil {
 		l.CWQty = *cwQty
 	}
@@ -322,13 +326,13 @@ func registerTx(ctx context.Context, tx pgx.Tx, tenantID, id string, fn Register
 	}
 	var lineRows, serialRows [][]any
 	for _, l := range lines {
-		lineRows = append(lineRows, []any{tenantID, id, l.LineNo, l.Qty, l.Batch, l.LocationID, l.InventoryStatus, nullInt(l.CWQty), nullDec(l.CWNominal), nullDec(l.CWMin), nullDec(l.CWMax)})
+		lineRows = append(lineRows, []any{tenantID, id, l.LineNo, l.Qty, l.Batch, l.LocationID, l.InventoryStatus, nullInt(l.CWQty), nullDec(l.CWNominal), nullDec(l.CWMin), nullDec(l.CWMax), nullTime(l.ExpiryDate)})
 		for _, serial := range l.Serials {
 			serialRows = append(serialRows, []any{tenantID, l.ProductID, serial, current.LegalEntityID, id, l.LineNo})
 		}
 	}
 	if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET qty = $4, batch = NULLIF($5, ''), location_id = NULLIF($6, '')::uuid,
-		inventory_status = COALESCE(NULLIF($7, ''), 'AVAILABLE'), cw_qty = $8, cw_nominal = $9, cw_min = $10, cw_max = $11
+		inventory_status = COALESCE(NULLIF($7, ''), 'AVAILABLE'), cw_qty = $8, cw_nominal = $9, cw_min = $10, cw_max = $11, expiry_date = $12
 		WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {
 		return Receipt{}, err
 	}
@@ -367,28 +371,35 @@ func attachOtherReceived(ctx context.Context, tx pgx.Tx, tenantID string, r *Rec
 	return nil
 }
 
+func receivedOnOrder(ctx context.Context, tx pgx.Tx, tenantID, purchaseOrderID string) (map[int]decimal.Decimal, error) {
+	out := map[int]decimal.Decimal{}
+	rows, err := tx.Query(ctx, `SELECT l.po_line_no, sum(l.qty) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+		WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no IS NOT NULL AND r.source <> $3 AND r.state IN `+receivedStates+` GROUP BY l.po_line_no`, tenantID, purchaseOrderID, domain.ReceiptSourceService)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n int
+		var qty decimal.Decimal
+		if err := rows.Scan(&n, &qty); err != nil {
+			return nil, err
+		}
+		out[n] = qty
+	}
+	return out, rows.Err()
+}
+
 func (s *Postgres) ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (map[int]decimal.Decimal, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := map[int]decimal.Decimal{}
+	var out map[int]decimal.Decimal
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT l.po_line_no, sum(l.qty) FROM receiving_receipt_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
-			WHERE l.tenant_id = $1 AND r.purchase_order_id = $2 AND l.po_line_no IS NOT NULL AND r.source <> $3 AND r.state IN `+receivedStates+` GROUP BY l.po_line_no`, tenantID, purchaseOrderID, domain.ReceiptSourceService)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var n int
-			var qty decimal.Decimal
-			if err := rows.Scan(&n, &qty); err != nil {
-				return err
-			}
-			out[n] = qty
-		}
-		return rows.Err()
+		var err error
+		out, err = receivedOnOrder(ctx, tx, tenantID, purchaseOrderID)
+		return err
 	})
 	return out, err
 }

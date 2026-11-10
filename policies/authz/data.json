@@ -718,6 +718,15 @@
       {"resource": "/v1/receiving/service-entry-sheets/*:accept", "methods": ["POST"]},
       {"resource": "/v1/receiving/service-entry-sheets/*:reject", "methods": ["POST"]}
     ]},
+    "receiving.asn.maintain": {"permissions": [
+      {"resource": "/v1/receiving/asns", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/asns/*", "methods": ["GET"]}
+    ]},
+    "receiving.asn.receive": {"permissions": [
+      {"resource": "/v1/receiving/asns", "methods": ["GET"]},
+      {"resource": "/v1/receiving/asns/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/asns/*:start-receipt", "methods": ["POST"]}
+    ]},
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
     ]},
@@ -725,6 +734,7 @@
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-captures", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},

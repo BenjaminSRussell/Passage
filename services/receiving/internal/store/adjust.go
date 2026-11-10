@@ -107,6 +107,9 @@ func (s *Postgres) Cancel(ctx context.Context, id string, fn AdjustFunc) (Receip
 		} else if _, err := tx.Exec(ctx, `DELETE FROM receiving_serial WHERE tenant_id = $1 AND receipt_id = $2`, tenantID, id); err != nil {
 			return err
 		}
+		if err := reopenAsn(ctx, tx, tenantID, id); err != nil {
+			return err
+		}
 		if err := enqueueAdjustment(ctx, tx, tenantID, id, adj); err != nil {
 			return err
 		}
