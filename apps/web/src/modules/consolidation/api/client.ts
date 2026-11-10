@@ -383,3 +383,26 @@ export interface GroupJournalPreview {
 export function previewGroupJournal(req: GroupJournalRequest, signal?: AbortSignal): Promise<GroupJournalPreview> {
   return post<GroupJournalPreview>("/group-journals:preview", req, signal);
 }
+
+export interface CallOptions {
+  body?: unknown;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
+
+/** Sends one request to the service and returns its JSON; a problem response throws a ConsolidationApiError. */
+export async function call<T>(method: string, path: string, opts: CallOptions = {}): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json", ...opts.headers };
+  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await apiFetch(`${base}${path}`, {
+    method,
+    headers,
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    credentials: "same-origin",
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+  return (await res.json()) as T;
+}

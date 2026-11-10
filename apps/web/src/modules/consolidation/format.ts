@@ -43,3 +43,8 @@ export function isNonZero(value: string): boolean {
 export function isCount(value: string): boolean {
   return /^\d{1,6}$/.test(value.trim());
 }
+
+/** A percentage with two decimals, keeping more only when they are not zeros: "80.0000" → "80.00", "33.3333" stays. */
+export function percent(value: string | undefined): string {
+  return amount(value === undefined ? value : value.replace(/(\.\d\d)0+$/, "$1"));
+}

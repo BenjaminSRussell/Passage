@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -106,9 +107,13 @@ func TestMigrate_AppliesTwice(t *testing.T) {
 			t.Fatalf("migrate run %d: %v", i+1, err)
 		}
 	}
+	files, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var applied int
-	if err := pool.QueryRow(ctx, "select count(*) from schema_migrations").Scan(&applied); err != nil || applied != 13 {
-		t.Fatalf("schema_migrations rows = %d, %v; want 13", applied, err)
+	if err := pool.QueryRow(ctx, "select count(*) from schema_migrations").Scan(&applied); err != nil || applied != len(files) {
+		t.Fatalf("schema_migrations rows = %d, %v; want one per migration file (%d)", applied, err, len(files))
 	}
 }
 

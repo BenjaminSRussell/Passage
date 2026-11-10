@@ -62,6 +62,16 @@ var (
 // API serves the intercompany routes and counts what it computes for /metrics.
 type API struct {
 	partners PartnerStore
+	poster   JournalPoster
+	journals JournalStore
+	charges  ChargeStore
+	recon    ReconStore
+
+	journalsPosted   atomic.Int64
+	chargesPosted    atomic.Int64
+	chargesSuspended atomic.Int64
+	reconRuns        atomic.Int64
+	reconResolved    atomic.Int64
 
 	journalPreviews        atomic.Int64
 	reconItems             atomic.Int64
@@ -97,6 +107,16 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/interco/chains:preview", DutyView, a.previewChain},
 		{http.MethodPost, "/v1/interco/transfer-pricing/evidence:export", DutyView, a.exportEvidence},
 		{http.MethodPost, "/v1/interco/centralized-payments/reversals:preview", DutyConfigure, a.previewReversal},
+		{http.MethodPost, "/v1/interco/journals", DutyPost, a.postJournal},
+		{http.MethodGet, "/v1/interco/journals", DutyView, a.listJournals},
+		{http.MethodGet, "/v1/interco/journals/{id}", DutyView, a.getJournal},
+		{http.MethodPost, "/v1/interco/charges", DutyPost, a.postCharge},
+		{http.MethodGet, "/v1/interco/charges", DutyView, a.listCharges},
+		{http.MethodGet, "/v1/interco/charges/{id}", DutyView, a.getCharge},
+		{http.MethodPost, "/v1/interco/reconciliations/run", DutyReconcile, a.runReconciliation},
+		{http.MethodGet, "/v1/interco/reconciliations", DutyView, a.listReconRuns},
+		{http.MethodGet, "/v1/interco/reconciliations/{id}", DutyView, a.getReconRun},
+		{http.MethodPost, "/v1/interco/reconciliations/items/{id}/resolve", DutyReconcile, a.resolveReconItem},
 		{http.MethodGet, "/v1/interco/partners", DutyView, a.listPartners},
 		{http.MethodPost, "/v1/interco/partners", DutyConfigure, a.createPartner},
 		{http.MethodGet, "/v1/interco/partners/{id}", DutyView, a.getPartner},
@@ -131,6 +151,11 @@ func (a *API) Metrics() http.Handler {
 		counter("intercompany_reversal_previews_total", "Centralized payment reversals derived.", a.reversalPreviews.Load())
 		counter("intercompany_partner_changes_total", "Trading-partner pairings created or changed.", a.partnerChanges.Load())
 		counter("intercompany_lines_priced_total", "IC lines priced from a stored pairing.", a.linesPriced.Load())
+		counter("intercompany_journals_posted_total", "IC journals posted to both ledgers.", a.journalsPosted.Load())
+		counter("intercompany_charges_posted_total", "IC charges posted to both ledgers.", a.chargesPosted.Load())
+		counter("intercompany_charges_suspended_total", "IC charges kept on suspense for lack of a transfer price.", a.chargesSuspended.Load())
+		counter("intercompany_recon_runs_total", "Reconciliation runs stored.", a.reconRuns.Load())
+		counter("intercompany_recon_items_resolved_total", "Reconciliation items resolved.", a.reconResolved.Load())
 		counter("intercompany_change_evaluations_total", "Linked order changes checked against a pairing's tolerance.", a.changeEvaluations.Load())
 	})
 }
@@ -466,8 +491,10 @@ func problemFrom(err error) error {
 		switch de.Code {
 		case domain.CodeInvalid:
 			status = http.StatusBadRequest
-		case domain.CodePartnerNotFound:
+		case domain.CodePartnerNotFound, domain.CodePostingNotFound, domain.CodeChargeNotFound, domain.CodeReconRunNotFound, domain.CodeReconItemNotFound:
 			status = http.StatusNotFound
+		case domain.CodeReconNotOpen:
+			status = http.StatusConflict
 		case domain.CodePairingExists:
 			status = http.StatusConflict
 		case domain.CodeVersionConflict:

@@ -2,13 +2,13 @@
 // the entity lookups that turn ids into names (shell/lookup/entities.ts). Imported after the area handlers, so an
 // area file that serves one of these paths more specifically wins.
 import type { InboxPage } from "../../shell/inbox/inbox";
-import { CUSTOMERS, ITEMS, LEGAL_ENTITY, SITES, VENDORS, WAREHOUSES, WORKERS, type Item, type Party } from "../company";
+import { CUSTOMERS, ITEMS, LEGAL_ENTITIES, LEGAL_ENTITY, SITES, VENDORS, WAREHOUSES, WORKERS, type Item, type Party } from "../company";
 import { reply, route } from "../backend";
 import { at, day } from "../store";
 
 const ORG = "/api/v1/org";
 
-const legalEntities = [{ id: LEGAL_ENTITY.id, code: LEGAL_ENTITY.code, name: LEGAL_ENTITY.name, currency: LEGAL_ENTITY.currency, country: LEGAL_ENTITY.country, status: "active" }];
+const legalEntities = LEGAL_ENTITIES.map((e) => ({ id: e.id, code: e.code, name: e.name, currency: e.currency, country: e.country, status: "active" }));
 const sites = SITES.map((s) => ({ ...s, legalEntityId: LEGAL_ENTITY.id, status: "active" }));
 const warehouses = WAREHOUSES.map((w) => ({ ...w, legalEntityId: LEGAL_ENTITY.id, status: "active" }));
 const currencies = [

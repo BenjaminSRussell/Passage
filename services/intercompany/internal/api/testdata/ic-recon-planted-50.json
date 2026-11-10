@@ -1,0 +1,836 @@
+{
+ "request": {
+  "period": "2026-11",
+  "currency": "USD",
+  "items": [
+   {
+    "icPairId": "IC-PLANT-001",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "100.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-002",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "101.00",
+    "amountB": "106.00"
+   },
+   {
+    "icPairId": "IC-PLANT-003",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "102.00",
+    "amountB": "0.00",
+    "nextPeriodA": "102.00"
+   },
+   {
+    "icPairId": "IC-PLANT-004",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "103.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-005",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "104.00",
+    "amountB": "109.00"
+   },
+   {
+    "icPairId": "IC-PLANT-006",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "105.00",
+    "amountB": "0.00",
+    "nextPeriodA": "105.00"
+   },
+   {
+    "icPairId": "IC-PLANT-007",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "106.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-008",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "107.00",
+    "amountB": "112.00"
+   },
+   {
+    "icPairId": "IC-PLANT-009",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "108.00",
+    "amountB": "0.00",
+    "nextPeriodA": "108.00"
+   },
+   {
+    "icPairId": "IC-PLANT-010",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "109.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-011",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "110.00",
+    "amountB": "115.00"
+   },
+   {
+    "icPairId": "IC-PLANT-012",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "111.00",
+    "amountB": "0.00",
+    "nextPeriodA": "111.00"
+   },
+   {
+    "icPairId": "IC-PLANT-013",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "112.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-014",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "113.00",
+    "amountB": "118.00"
+   },
+   {
+    "icPairId": "IC-PLANT-015",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "114.00",
+    "amountB": "0.00",
+    "nextPeriodA": "114.00"
+   },
+   {
+    "icPairId": "IC-PLANT-016",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "115.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-017",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "116.00",
+    "amountB": "121.00"
+   },
+   {
+    "icPairId": "IC-PLANT-018",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "117.00",
+    "amountB": "0.00",
+    "nextPeriodA": "117.00"
+   },
+   {
+    "icPairId": "IC-PLANT-019",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "118.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-020",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "119.00",
+    "amountB": "124.00"
+   },
+   {
+    "icPairId": "IC-PLANT-021",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "120.00",
+    "amountB": "0.00",
+    "nextPeriodA": "120.00"
+   },
+   {
+    "icPairId": "IC-PLANT-022",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "121.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-023",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "122.00",
+    "amountB": "127.00"
+   },
+   {
+    "icPairId": "IC-PLANT-024",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "123.00",
+    "amountB": "0.00",
+    "nextPeriodA": "123.00"
+   },
+   {
+    "icPairId": "IC-PLANT-025",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "124.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-026",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "125.00",
+    "amountB": "130.00"
+   },
+   {
+    "icPairId": "IC-PLANT-027",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "126.00",
+    "amountB": "0.00",
+    "nextPeriodA": "126.00"
+   },
+   {
+    "icPairId": "IC-PLANT-028",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "127.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-029",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "128.00",
+    "amountB": "133.00"
+   },
+   {
+    "icPairId": "IC-PLANT-030",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "129.00",
+    "amountB": "0.00",
+    "nextPeriodA": "129.00"
+   },
+   {
+    "icPairId": "IC-PLANT-031",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "130.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-032",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "131.00",
+    "amountB": "136.00"
+   },
+   {
+    "icPairId": "IC-PLANT-033",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "132.00",
+    "amountB": "0.00",
+    "nextPeriodA": "132.00"
+   },
+   {
+    "icPairId": "IC-PLANT-034",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "133.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-035",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "134.00",
+    "amountB": "139.00"
+   },
+   {
+    "icPairId": "IC-PLANT-036",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "135.00",
+    "amountB": "0.00",
+    "nextPeriodA": "135.00"
+   },
+   {
+    "icPairId": "IC-PLANT-037",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "136.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-038",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "137.00",
+    "amountB": "142.00"
+   },
+   {
+    "icPairId": "IC-PLANT-039",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "138.00",
+    "amountB": "0.00",
+    "nextPeriodA": "138.00"
+   },
+   {
+    "icPairId": "IC-PLANT-040",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "139.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-041",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "140.00",
+    "amountB": "145.00"
+   },
+   {
+    "icPairId": "IC-PLANT-042",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "141.00",
+    "amountB": "0.00",
+    "nextPeriodA": "141.00"
+   },
+   {
+    "icPairId": "IC-PLANT-043",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "142.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-044",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "143.00",
+    "amountB": "148.00"
+   },
+   {
+    "icPairId": "IC-PLANT-045",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "144.00",
+    "amountB": "0.00",
+    "nextPeriodA": "144.00"
+   },
+   {
+    "icPairId": "IC-PLANT-046",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "145.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-047",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "146.00",
+    "amountB": "151.00"
+   },
+   {
+    "icPairId": "IC-PLANT-048",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "147.00",
+    "amountB": "0.00",
+    "nextPeriodA": "147.00"
+   },
+   {
+    "icPairId": "IC-PLANT-049",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "148.00",
+    "amountB": "0.00"
+   },
+   {
+    "icPairId": "IC-PLANT-050",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "149.00",
+    "amountB": "154.00"
+   },
+   {
+    "icPairId": "IC-CLEAN-001",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "10.37",
+    "amountB": "0.00",
+    "nextPeriodB": "10.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-002",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "11.37",
+    "amountB": "11.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-003",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "12.37",
+    "amountB": "12.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-004",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "13.37",
+    "amountB": "13.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-005",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "14.37",
+    "amountB": "14.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-006",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "15.37",
+    "amountB": "0.00",
+    "nextPeriodB": "15.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-007",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "16.37",
+    "amountB": "16.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-008",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "17.37",
+    "amountB": "17.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-009",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "18.37",
+    "amountB": "18.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-010",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "19.37",
+    "amountB": "19.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-011",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "20.37",
+    "amountB": "0.00",
+    "nextPeriodB": "20.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-012",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "21.37",
+    "amountB": "21.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-013",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "22.37",
+    "amountB": "22.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-014",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "23.37",
+    "amountB": "23.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-015",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "24.37",
+    "amountB": "24.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-016",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "25.37",
+    "amountB": "0.00",
+    "nextPeriodB": "25.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-017",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "26.37",
+    "amountB": "26.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-018",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "27.37",
+    "amountB": "27.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-019",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "28.37",
+    "amountB": "28.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-020",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "29.37",
+    "amountB": "29.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-021",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "30.37",
+    "amountB": "0.00",
+    "nextPeriodB": "30.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-022",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "31.37",
+    "amountB": "31.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-023",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "32.37",
+    "amountB": "32.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-024",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "33.37",
+    "amountB": "33.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-025",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "34.37",
+    "amountB": "34.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-026",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "35.37",
+    "amountB": "0.00",
+    "nextPeriodB": "35.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-027",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "36.37",
+    "amountB": "36.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-028",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "37.37",
+    "amountB": "37.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-029",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "38.37",
+    "amountB": "38.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-030",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "39.37",
+    "amountB": "39.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-031",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "40.37",
+    "amountB": "0.00",
+    "nextPeriodB": "40.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-032",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "41.37",
+    "amountB": "41.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-033",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "42.37",
+    "amountB": "42.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-034",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "43.37",
+    "amountB": "43.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-035",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "44.37",
+    "amountB": "44.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-036",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "45.37",
+    "amountB": "0.00",
+    "nextPeriodB": "45.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-037",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "46.37",
+    "amountB": "46.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-038",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "47.37",
+    "amountB": "47.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-039",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "48.37",
+    "amountB": "48.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-040",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "49.37",
+    "amountB": "49.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-041",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "50.37",
+    "amountB": "0.00",
+    "nextPeriodB": "50.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-042",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "51.37",
+    "amountB": "51.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-043",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "52.37",
+    "amountB": "52.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-044",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "53.37",
+    "amountB": "53.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-045",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "54.37",
+    "amountB": "54.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-046",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "55.37",
+    "amountB": "0.00",
+    "nextPeriodB": "55.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-047",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "56.37",
+    "amountB": "56.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-048",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "57.37",
+    "amountB": "57.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-049",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "58.37",
+    "amountB": "58.37"
+   },
+   {
+    "icPairId": "IC-CLEAN-050",
+    "entityA": "A",
+    "entityB": "B",
+    "amountA": "59.37",
+    "amountB": "59.37"
+   }
+  ]
+ },
+ "expected": {
+  "IC-PLANT-001": "Mismatch",
+  "IC-PLANT-002": "Mismatch",
+  "IC-PLANT-003": "Mismatch",
+  "IC-PLANT-004": "Mismatch",
+  "IC-PLANT-005": "Mismatch",
+  "IC-PLANT-006": "Mismatch",
+  "IC-PLANT-007": "Mismatch",
+  "IC-PLANT-008": "Mismatch",
+  "IC-PLANT-009": "Mismatch",
+  "IC-PLANT-010": "Mismatch",
+  "IC-PLANT-011": "Mismatch",
+  "IC-PLANT-012": "Mismatch",
+  "IC-PLANT-013": "Mismatch",
+  "IC-PLANT-014": "Mismatch",
+  "IC-PLANT-015": "Mismatch",
+  "IC-PLANT-016": "Mismatch",
+  "IC-PLANT-017": "Mismatch",
+  "IC-PLANT-018": "Mismatch",
+  "IC-PLANT-019": "Mismatch",
+  "IC-PLANT-020": "Mismatch",
+  "IC-PLANT-021": "Mismatch",
+  "IC-PLANT-022": "Mismatch",
+  "IC-PLANT-023": "Mismatch",
+  "IC-PLANT-024": "Mismatch",
+  "IC-PLANT-025": "Mismatch",
+  "IC-PLANT-026": "Mismatch",
+  "IC-PLANT-027": "Mismatch",
+  "IC-PLANT-028": "Mismatch",
+  "IC-PLANT-029": "Mismatch",
+  "IC-PLANT-030": "Mismatch",
+  "IC-PLANT-031": "Mismatch",
+  "IC-PLANT-032": "Mismatch",
+  "IC-PLANT-033": "Mismatch",
+  "IC-PLANT-034": "Mismatch",
+  "IC-PLANT-035": "Mismatch",
+  "IC-PLANT-036": "Mismatch",
+  "IC-PLANT-037": "Mismatch",
+  "IC-PLANT-038": "Mismatch",
+  "IC-PLANT-039": "Mismatch",
+  "IC-PLANT-040": "Mismatch",
+  "IC-PLANT-041": "Mismatch",
+  "IC-PLANT-042": "Mismatch",
+  "IC-PLANT-043": "Mismatch",
+  "IC-PLANT-044": "Mismatch",
+  "IC-PLANT-045": "Mismatch",
+  "IC-PLANT-046": "Mismatch",
+  "IC-PLANT-047": "Mismatch",
+  "IC-PLANT-048": "Mismatch",
+  "IC-PLANT-049": "Mismatch",
+  "IC-PLANT-050": "Mismatch",
+  "IC-CLEAN-001": "Timing",
+  "IC-CLEAN-002": "Matched",
+  "IC-CLEAN-003": "Matched",
+  "IC-CLEAN-004": "Matched",
+  "IC-CLEAN-005": "Matched",
+  "IC-CLEAN-006": "Timing",
+  "IC-CLEAN-007": "Matched",
+  "IC-CLEAN-008": "Matched",
+  "IC-CLEAN-009": "Matched",
+  "IC-CLEAN-010": "Matched",
+  "IC-CLEAN-011": "Timing",
+  "IC-CLEAN-012": "Matched",
+  "IC-CLEAN-013": "Matched",
+  "IC-CLEAN-014": "Matched",
+  "IC-CLEAN-015": "Matched",
+  "IC-CLEAN-016": "Timing",
+  "IC-CLEAN-017": "Matched",
+  "IC-CLEAN-018": "Matched",
+  "IC-CLEAN-019": "Matched",
+  "IC-CLEAN-020": "Matched",
+  "IC-CLEAN-021": "Timing",
+  "IC-CLEAN-022": "Matched",
+  "IC-CLEAN-023": "Matched",
+  "IC-CLEAN-024": "Matched",
+  "IC-CLEAN-025": "Matched",
+  "IC-CLEAN-026": "Timing",
+  "IC-CLEAN-027": "Matched",
+  "IC-CLEAN-028": "Matched",
+  "IC-CLEAN-029": "Matched",
+  "IC-CLEAN-030": "Matched",
+  "IC-CLEAN-031": "Timing",
+  "IC-CLEAN-032": "Matched",
+  "IC-CLEAN-033": "Matched",
+  "IC-CLEAN-034": "Matched",
+  "IC-CLEAN-035": "Matched",
+  "IC-CLEAN-036": "Timing",
+  "IC-CLEAN-037": "Matched",
+  "IC-CLEAN-038": "Matched",
+  "IC-CLEAN-039": "Matched",
+  "IC-CLEAN-040": "Matched",
+  "IC-CLEAN-041": "Timing",
+  "IC-CLEAN-042": "Matched",
+  "IC-CLEAN-043": "Matched",
+  "IC-CLEAN-044": "Matched",
+  "IC-CLEAN-045": "Matched",
+  "IC-CLEAN-046": "Timing",
+  "IC-CLEAN-047": "Matched",
+  "IC-CLEAN-048": "Matched",
+  "IC-CLEAN-049": "Matched",
+  "IC-CLEAN-050": "Matched"
+ }
+}

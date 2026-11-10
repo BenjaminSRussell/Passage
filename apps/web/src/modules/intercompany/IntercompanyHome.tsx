@@ -18,6 +18,27 @@ const tools = [
       "Enter one line in entity A with its offset in entity B and see the due-to and due-from legs both entities would post, balanced per entity and sharing one pair id.",
   },
   {
+    title: "Posted journals",
+    to: "/intercompany/journals",
+    action: "Open posted journals",
+    description:
+      "See every intercompany journal posted to the ledgers with the entry each entity made, and which ones were paused or reversed because a ledger refused its side.",
+  },
+  {
+    title: "Reconciliation runs",
+    to: "/intercompany/reconciliation-runs",
+    action: "Open the runs",
+    description:
+      "Open the stored reconciliation of a period, filter the pairs that need action and resolve each with a note.",
+  },
+  {
+    title: "Charge log",
+    to: "/intercompany/charge-log",
+    action: "Open the charge log",
+    description:
+      "See every charge by source and version, including the ones kept on suspense for lack of a transfer price.",
+  },
+  {
     title: "Reconciliation",
     to: "/intercompany/reconciliation",
     action: "Classify balances",
@@ -67,7 +88,7 @@ export function IntercompanyHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Intercompany workspace"
-        description="Set up trading partners, derive intercompany journals, reconcile due-to and due-from balances, price intercompany charges, preview centralized payments, check direct delivery chains, export transfer-pricing evidence and sequence planning groups. Mirror documents, posting and the stored reconciliation workspace arrive with the next slices."
+        description="Set up trading partners, derive intercompany journals, reconcile due-to and due-from balances, price intercompany charges, preview centralized payments, check direct delivery chains, export transfer-pricing evidence and sequence planning groups. Journals and charges post to the ledgers and reconciliation runs are stored; mirror documents arrive with the next slice."
       />
       <CardGrid as="ul" label="Intercompany tools">
         {tools.map((tool) => (
