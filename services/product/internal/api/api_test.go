@@ -57,6 +57,9 @@ func (f *fakeStore) CreateItemGroup(_ context.Context, in domain.ItemGroup) (dom
 	in.ID = "ig-1"
 	return in, nil
 }
+func (f *fakeStore) ListItemGroups(context.Context) ([]domain.ItemGroup, error) {
+	return []domain.ItemGroup{{ID: "ig-1", Code: "FG", Name: "Finished goods"}}, nil
+}
 func (f *fakeStore) CreateItemModelGroup(_ context.Context, in domain.ItemModelGroup) (domain.ItemModelGroup, error) {
 	in.ID = "img-1"
 	return in, nil
@@ -628,5 +631,68 @@ func TestConvertIntoTheBaseUnitUnderTheNarrowDuty(t *testing.T) {
 	}
 	if rec = do(r, http.MethodGet, "/v1/product/products/"+id, "", "product.uom.convert"); rec.Code != http.StatusForbidden {
 		t.Fatalf("product read under product.uom.convert %d", rec.Code)
+	}
+}
+
+func TestProductItemGroupAndTrackingFlagsCreateReadPatchAndListGroups(t *testing.T) {
+	f := newFake()
+	r := newRouter(f)
+	group := testkit.TenantID(7)
+	created := do(r, http.MethodPost, "/v1/product/products", fmt.Sprintf(`{"productNumber":"FLAG1","name":"Flagged","baseUom":"KG","itemGroupId":%q,"batchTracked":true,"catchWeight":true}`, group), "product.write")
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create %d %s", created.Code, created.Body.String())
+	}
+	var body struct {
+		ID            string
+		ItemGroupID   string
+		BatchTracked  bool
+		SerialTracked bool
+		CatchWeight   bool
+		Version       int
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &body); err != nil || body.ItemGroupID != group || !body.BatchTracked || body.SerialTracked || !body.CatchWeight {
+		t.Fatalf("create body %v %+v", err, body)
+	}
+	body.ID = testkit.TenantID(5)
+	stored := f.created[0]
+	stored.ID = body.ID
+	f.products[body.ID] = stored
+	read := do(r, http.MethodGet, "/v1/product/products/"+body.ID, "", "product.read")
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"BatchTracked":true`) {
+		t.Fatalf("read %d %s", read.Code, read.Body.String())
+	}
+	patch := httptest.NewRequest(http.MethodPatch, "/v1/product/products/"+body.ID, strings.NewReader(`{"serialTracked":true,"batchTracked":false}`))
+	patch.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	patch.Header.Set("X-Passage-Duties", "product.write")
+	patch.Header.Set("If-Match", `"1"`)
+	patch.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, patch)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"SerialTracked":true`) || !strings.Contains(rec.Body.String(), `"BatchTracked":false`) {
+		t.Fatalf("patch %d %s", rec.Code, rec.Body.String())
+	}
+	for name, payload := range map[string]string{
+		"create": `{"productNumber":"FLAG2","name":"Bad","baseUom":"EA","itemGroupId":"not-an-id"}`,
+	} {
+		if bad := do(r, http.MethodPost, "/v1/product/products", payload, "product.write"); bad.Code != http.StatusBadRequest || !strings.Contains(bad.Body.String(), "itemGroupId") {
+			t.Fatalf("%s with a malformed item group %d %s", name, bad.Code, bad.Body.String())
+		}
+	}
+	badPatch := httptest.NewRequest(http.MethodPatch, "/v1/product/products/"+body.ID, strings.NewReader(`{"itemGroupId":"nope"}`))
+	badPatch.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	badPatch.Header.Set("X-Passage-Duties", "product.write")
+	badPatch.Header.Set("If-Match", `"2"`)
+	badPatch.Header.Set("Content-Type", "application/json")
+	badRec := httptest.NewRecorder()
+	r.ServeHTTP(badRec, badPatch)
+	if badRec.Code != http.StatusBadRequest || !strings.Contains(badRec.Body.String(), "itemGroupId") {
+		t.Fatalf("patch with a malformed item group %d %s", badRec.Code, badRec.Body.String())
+	}
+	groups := do(r, http.MethodGet, "/v1/product/setup/item-groups", "", "product.read")
+	if groups.Code != http.StatusOK || !strings.Contains(groups.Body.String(), "Finished goods") {
+		t.Fatalf("list groups %d %s", groups.Code, groups.Body.String())
+	}
+	if denied := do(r, http.MethodGet, "/v1/product/setup/item-groups", "", "product.write"); denied.Code != http.StatusForbidden {
+		t.Fatalf("list groups without product.read %d", denied.Code)
 	}
 }
