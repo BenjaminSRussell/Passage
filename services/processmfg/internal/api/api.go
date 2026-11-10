@@ -69,6 +69,7 @@ type API struct {
 	store  store.Store
 	reauth Reauthenticator
 	now    func() time.Time
+	gate   func(http.Handler) http.Handler
 }
 
 // New returns the handler set. Signing fails closed until WithReauth binds a
@@ -81,6 +82,11 @@ func (a *API) WithReauth(r Reauthenticator) *API {
 	return a
 }
 
+func (a *API) WithFeatureGate(gate func(http.Handler) http.Handler) *API {
+	a.gate = gate
+	return a
+}
+
 // WithClock sets the clock of the signing lockout (tests).
 func (a *API) WithClock(now func() time.Time) *API {
 	a.now = now
@@ -89,6 +95,9 @@ func (a *API) WithClock(now func() time.Time) *API {
 
 // Register mounts every route on r. /healthz comes from httpx.NewRouter.
 func (a *API) Register(r chi.Router) {
+	if a.gate != nil {
+		r = r.With(a.gate)
+	}
 	read := authz.RequireDuty(DutyRead)
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(DutyFormulaWrite)).Post("/v1/production/formulas", a.createFormula)
