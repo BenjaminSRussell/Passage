@@ -25,14 +25,15 @@ const (
 	reasonTimeout    = "did not answer in time"
 	reasonFailed     = "could not be read right now"
 	reasonNotSetUp   = "is not set up"
-	cursorFieldCount = 3
+	cursorFieldCount = 4
 	cursorTimeLayout = time.RFC3339Nano
 	cursorFieldSplit = "|"
 )
 
 var (
-	ErrNotConfigured = errors.New("source is not configured")
-	ErrBadCursor     = errors.New("cursor is not from this inbox")
+	ErrNotConfigured  = errors.New("source is not configured")
+	ErrBadCursor      = errors.New("cursor is not from this inbox")
+	ErrSourcesChanged = errors.New("the sources that answered changed since the first page")
 )
 
 type Item struct {
@@ -44,6 +45,7 @@ type Item struct {
 	Link      string    `json:"link"`
 	Actions   []string  `json:"actions"`
 	CreatedAt time.Time `json:"createdAt"`
+	DueDate   string    `json:"dueDate,omitempty"`
 }
 
 type Fetched struct {
@@ -104,16 +106,23 @@ func (a *Aggregator) Page(ctx context.Context, p tenant.Principal, legalEntity s
 
 	page := Page{Items: []Item{}, Unavailable: []Unavailable{}, Truncated: []string{}}
 	var all []Item
+	var answered []string
 	for i, o := range outcomes {
 		switch {
 		case o.failure != nil:
 			page.Unavailable = append(page.Unavailable, *o.failure)
 		default:
+			answered = append(answered, entitled[i].Name())
 			all = append(all, o.fetched.Items...)
 			if o.fetched.More {
 				page.Truncated = append(page.Truncated, entitled[i].Name())
 			}
 		}
+	}
+	slices.Sort(answered)
+	answeredKey := strings.Join(answered, ",")
+	if after != nil && after.Reason != answeredKey {
+		return Page{}, ErrSourcesChanged
 	}
 	slices.SortFunc(all, compare)
 	if after != nil {
@@ -125,7 +134,7 @@ func (a *Aggregator) Page(ctx context.Context, p tenant.Principal, legalEntity s
 	}
 	if len(all) > limit {
 		all = all[:limit]
-		page.NextCursor = encodeCursor(all[limit-1])
+		page.NextCursor = encodeCursor(all[limit-1], answeredKey)
 	}
 	page.Items = append(page.Items, all...)
 	return page, nil
@@ -164,8 +173,8 @@ func compare(a, b Item) int {
 	return strings.Compare(a.ID, b.ID)
 }
 
-func encodeCursor(it Item) string {
-	raw := strings.Join([]string{it.CreatedAt.UTC().Format(cursorTimeLayout), it.Source, it.ID}, cursorFieldSplit)
+func encodeCursor(it Item, answered string) string {
+	raw := strings.Join([]string{it.CreatedAt.UTC().Format(cursorTimeLayout), it.Source, it.ID, answered}, cursorFieldSplit)
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
@@ -185,5 +194,5 @@ func decodeCursor(cursor string) (*Item, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadCursor, err)
 	}
-	return &Item{CreatedAt: at, Source: parts[1], ID: parts[2]}, nil
+	return &Item{CreatedAt: at, Source: parts[1], ID: parts[2], Reason: parts[3]}, nil
 }

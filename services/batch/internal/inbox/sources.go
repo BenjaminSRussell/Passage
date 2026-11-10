@@ -107,10 +107,9 @@ func NewSources(e Endpoints, signer *tenant.ServiceSigner, timeout time.Duration
 func decodeRequisitions(body []byte, _ string) (Fetched, error) {
 	var page struct {
 		Items []struct {
-			ID           string    `json:"id"`
-			Number       string    `json:"number"`
-			NextApprover string    `json:"nextApprover"`
-			SubmittedAt  time.Time `json:"submittedAt"`
+			ID          string    `json:"id"`
+			Number      string    `json:"number"`
+			SubmittedAt time.Time `json:"submittedAt"`
 		} `json:"items"`
 		NextCursor string `json:"nextCursor"`
 	}
@@ -121,18 +120,11 @@ func decodeRequisitions(body []byte, _ string) (Fetched, error) {
 	for _, r := range page.Items {
 		out.Items = append(out.Items, Item{
 			ID: r.ID, Source: SourcePurchasing, Kind: "Requisition approval", Number: r.Number, CreatedAt: r.SubmittedAt,
-			Reason: "Waiting for your approval as " + roleLabel(r.NextApprover), Link: "/purchasing/requisitions/" + r.ID,
+			Reason: "Waiting for approval", Link: "/purchasing/requisitions/" + r.ID,
 			Actions: []string{"approve", "reject", "open"},
 		})
 	}
 	return out, nil
-}
-
-func roleLabel(role string) string {
-	if role == "" {
-		return "an approver"
-	}
-	return strings.ToLower(strings.ReplaceAll(role, "_", " "))
 }
 
 func decodePartyChanges(body []byte, userID string) (Fetched, error) {
@@ -197,6 +189,7 @@ func decodeHolds(body []byte, _ string) (Fetched, error) {
 		Items []struct {
 			ID            string `json:"id"`
 			InvoiceNumber string `json:"invoiceNumber"`
+			InvoiceDate   string `json:"invoiceDate"`
 			DueDate       string `json:"dueDate"`
 		} `json:"items"`
 		NextCursor string `json:"nextCursor"`
@@ -206,13 +199,16 @@ func decodeHolds(body []byte, _ string) (Fetched, error) {
 	}
 	out := Fetched{More: page.NextCursor != ""}
 	for _, h := range page.Items {
-		due, err := time.Parse(time.DateOnly, h.DueDate)
-		if err != nil {
-			return Fetched{}, fmt.Errorf("decode payables due date: %w", err)
+		created, _ := time.Parse(time.DateOnly, h.InvoiceDate)
+		reason := "On payment hold"
+		if _, err := time.Parse(time.DateOnly, h.DueDate); err != nil {
+			h.DueDate = ""
+		} else {
+			reason += "; due " + h.DueDate
 		}
 		out.Items = append(out.Items, Item{
-			ID: h.ID, Source: SourcePayables, Kind: "Payment hold", Number: h.InvoiceNumber, CreatedAt: due,
-			Reason: "On payment hold; due " + h.DueDate, Link: "/payables",
+			ID: h.ID, Source: SourcePayables, Kind: "Payment hold", Number: h.InvoiceNumber, CreatedAt: created, DueDate: h.DueDate,
+			Reason: reason, Link: "/payables",
 			Actions: []string{"open"},
 		})
 	}

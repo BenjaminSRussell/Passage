@@ -199,8 +199,8 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	} else if held != "" {
 		fields["held"] = "must be true when given"
 	}
-	if caller, _ := tenant.FromContext(r.Context()); !caller.HasDuty(dutyOpenItemRead) && !f.HeldOnly {
-		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "the inbox duty reads held items only (held=true)")
+	if caller, _ := tenant.FromContext(r.Context()); !caller.HasDuty(dutyOpenItemRead) && (!f.HeldOnly || q.Get("value_in") != "") {
+		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "the inbox duty reads held items only (held=true) and values nothing")
 		return
 	}
 	if f.VendorID != "" && !ids.Valid(f.VendorID) {

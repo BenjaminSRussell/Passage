@@ -215,7 +215,7 @@ func TestHTTPSourcesForwardTheCallersIdentityAndOnlyTheirNarrowDuty(t *testing.T
 		"ledger": `{"items":[{"id":"b1","journalName":"GJ","description":"Accruals","submittedBy":"` + otherID + `","createdAt":"2026-11-02T07:00:00Z"},
 			{"id":"b2","journalName":"GJ","description":"Mine","submittedBy":"` + userID + `","selfApprovalAllowed":false,"createdAt":"2026-11-02T06:00:00Z"},
 			{"id":"b3","journalName":"GJ","description":"Mine allowed","submittedBy":"` + userID + `","selfApprovalAllowed":true,"createdAt":"2026-11-02T05:00:00Z"}]}`,
-		"payables": `{"items":[{"id":"h1","invoiceNumber":"INV-9","dueDate":"2026-11-30"}]}`,
+		"payables": `{"items":[{"id":"h1","invoiceNumber":"INV-9","invoiceDate":"2026-11-01","dueDate":"2026-11-30"},{"id":"h2","invoiceNumber":"INV-10","invoiceDate":"","dueDate":""}]}`,
 	}
 	servers := map[string]*httptest.Server{}
 	for name := range bodies {
@@ -247,7 +247,7 @@ func TestHTTPSourcesForwardTheCallersIdentityAndOnlyTheirNarrowDuty(t *testing.T
 	if len(page.Unavailable) != 0 {
 		t.Fatalf("unavailable %v", page.Unavailable)
 	}
-	if want := "h1 r1 c1 b1 b3"; fmt.Sprint(ids(page)) != "["+want+"]" {
+	if want := "r1 c1 b1 b3 h1 h2"; fmt.Sprint(ids(page)) != "["+want+"]" {
 		t.Fatalf("items %v, want %s", ids(page), want)
 	}
 	if len(page.Truncated) != 1 || page.Truncated[0] != inbox.SourcePurchasing {
@@ -298,5 +298,41 @@ func TestHTTPSourceFailureStatusIsReportedNotRetried(t *testing.T) {
 	}
 	if len(page.Unavailable) != 1 || hits.Load() != 1 {
 		t.Fatalf("unavailable %v after %d calls", page.Unavailable, hits.Load())
+	}
+}
+
+func TestAPayablesItemWithoutDatesDoesNotHideTheOthers(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("batch", priv)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"id":"h1","invoiceNumber":"A","invoiceDate":"2026-11-01","dueDate":"2026-11-30"},{"id":"h2","invoiceNumber":"B","invoiceDate":"nope","dueDate":""}]}`))
+	}))
+	defer server.Close()
+	agg := &inbox.Aggregator{Sources: inbox.NewSources(inbox.Endpoints{PayablesURL: server.URL}, signer, time.Second)}
+	page, err := agg.Page(context.Background(), principal(inbox.DutyPaymentHold), entityID, 10, "")
+	if err != nil || len(page.Unavailable) != 0 || len(page.Items) != 2 {
+		t.Fatalf("page %+v err %v", page, err)
+	}
+	first := page.Items[0]
+	if first.ID != "h1" || first.DueDate != "2026-11-30" || !first.CreatedAt.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) || page.Items[1].DueDate != "" {
+		t.Fatalf("items %+v", page.Items)
+	}
+}
+
+func TestPageAfterASourceDroppedOutIsRefusedNotSilentlySkipped(t *testing.T) {
+	a := &fakeSource{name: "a", duty: "d", items: items("a", 5, 3, 1)}
+	b := &fakeSource{name: "b", duty: "d", items: items("b", 4, 2)}
+	agg := &inbox.Aggregator{Sources: []inbox.Source{a, b}}
+	first, err := agg.Page(context.Background(), principal("d"), entityID, 2, "")
+	if err != nil || first.NextCursor == "" {
+		t.Fatalf("first page %+v err %v", first, err)
+	}
+	b.err = errors.New("down")
+	if _, err := agg.Page(context.Background(), principal("d"), entityID, 2, first.NextCursor); !errors.Is(err, inbox.ErrSourcesChanged) {
+		t.Fatalf("err %v, want ErrSourcesChanged", err)
+	}
+	b.err = nil
+	if _, err := agg.Page(context.Background(), principal("d"), entityID, 2, first.NextCursor); err != nil {
+		t.Fatalf("same sources again: %v", err)
 	}
 }

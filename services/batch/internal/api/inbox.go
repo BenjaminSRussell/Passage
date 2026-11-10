@@ -43,6 +43,10 @@ func (a *API) inboxPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := a.aggregator.Page(r.Context(), p, legalEntity, limit, q.Get("cursor"))
+	if errors.Is(err, inbox.ErrSourcesChanged) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodeInvalid, "Some of your work could not be loaded the same way as on the first page. Reload My work from the start."))
+		return
+	}
 	if errors.Is(err, inbox.ErrBadCursor) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeInvalid, "cursor must be the nextCursor of the previous page"))
 		return

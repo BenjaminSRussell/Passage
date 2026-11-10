@@ -293,6 +293,11 @@ func TestInboxDutyListsBatchesAndNothingElse(t *testing.T) {
 	if rec := call(server(&fakeStore{}), http.MethodGet, "/v1/ledger/journal-batches?status=in_approval", "", dutyInboxRead, nil); rec.Code != http.StatusOK {
 		t.Fatalf("list with the inbox duty: status %d %s", rec.Code, rec.Body.String())
 	}
+	for _, target := range []string{"/v1/ledger/journal-batches", "/v1/ledger/journal-batches?status=posted"} {
+		if rec := call(server(&fakeStore{}), http.MethodGet, target, "", dutyInboxRead, nil); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s with the inbox duty: status %d, want 403", target, rec.Code)
+		}
+	}
 	for _, rt := range []struct{ method, path, body string }{
 		{http.MethodGet, batchPath, ""},
 		{http.MethodGet, "/v1/ledger/journal-names", ""},

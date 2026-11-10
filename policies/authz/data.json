@@ -3381,10 +3381,10 @@
       {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
     ]},
     "inbox.read": {"permissions": [{"resource": "/v1/inbox", "methods": ["GET"]}]},
-    "procurement.inbox.read": {"permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
-    "party.inbox.read": {"permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
-    "ledger.inbox.read": {"permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
-    "payables.inbox.read": {"permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
+    "procurement.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
+    "party.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
+    "ledger.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
+    "payables.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
       {"resource": "/v1/workitems/*/actions", "methods": ["POST"]}

@@ -258,10 +258,15 @@ func checkBatchLines(lines []batchLineDTO, fields map[string]string) []store.Bat
 var maxBatchAmount = decimal.New(1, 14)
 
 func (a *API) listBatches(w http.ResponseWriter, r *http.Request) {
-	if _, ok := principal(w, r); !ok {
+	p, ok := principal(w, r)
+	if !ok {
 		return
 	}
 	q := r.URL.Query()
+	if !p.HasDuty(dutyRead) && q.Get("status") != "in_approval" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the inbox duty reads batches in approval only (status=in_approval)"))
+		return
+	}
 	fields := map[string]string{}
 	if ledger := q.Get("ledger"); ledger != "" && !ids.Valid(ledger) {
 		fields["ledger"] = "must be a UUID"
