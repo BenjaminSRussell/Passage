@@ -87,11 +87,12 @@ type POCancelledLine struct {
 
 // POCancelledData is the data member of po.cancelled.v1.
 type POCancelledData struct {
-	POID        string            `json:"po_id"`
-	Number      string            `json:"number"`
-	VersionNo   int               `json:"version_no"`
-	PriorStatus string            `json:"prior_status"`
-	Lines       []POCancelledLine `json:"lines"`
+	POID          string            `json:"po_id"`
+	Number        string            `json:"number"`
+	LegalEntityID string            `json:"legal_entity_id"`
+	VersionNo     int               `json:"version_no"`
+	PriorStatus   string            `json:"prior_status"`
+	Lines         []POCancelledLine `json:"lines"`
 }
 
 // PORepricedLine is one line on po.repriced.v1. Prices, quantities and amounts

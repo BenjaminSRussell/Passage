@@ -145,6 +145,18 @@ channels:
         $ref: '#/components/messages/InboundChangeRefused'
       inboundChangeResolved:
         $ref: '#/components/messages/InboundChangeResolved'
+  poack:
+    address: passage.procurement.poack
+    description: A vendor's answer to a confirmed purchase order (accepted, rejected, or changes proposed) and the buyer's decision on a proposal; the Kafka key is the acknowledgement id.
+    messages:
+      poAckAccepted:
+        $ref: '#/components/messages/POAckAccepted'
+      poAckRejected:
+        $ref: '#/components/messages/POAckRejected'
+      poAckProposed:
+        $ref: '#/components/messages/POAckProposed'
+      poAckDecided:
+        $ref: '#/components/messages/POAckDecided'
   requisitionrelease:
     address: passage.procurement.requisitionrelease
     description: Requisition release runs (FR-17.3, PRD 3.17.16) that ordered or tried to order approved requisition lines; the Kafka key is the run id.
@@ -186,6 +198,30 @@ channels:
       saReleaseCreated:
         $ref: '#/components/messages/SAReleaseCreated'
 operations:
+  publishPOAckAccepted:
+    action: send
+    channel:
+      $ref: '#/channels/poack'
+    messages:
+      - $ref: '#/channels/poack/messages/poAckAccepted'
+  publishPOAckRejected:
+    action: send
+    channel:
+      $ref: '#/channels/poack'
+    messages:
+      - $ref: '#/channels/poack/messages/poAckRejected'
+  publishPOAckProposed:
+    action: send
+    channel:
+      $ref: '#/channels/poack'
+    messages:
+      - $ref: '#/channels/poack/messages/poAckProposed'
+  publishPOAckDecided:
+    action: send
+    channel:
+      $ref: '#/channels/poack'
+    messages:
+      - $ref: '#/channels/poack/messages/poAckDecided'
   publishInboundChangeRecorded:
     action: send
     channel:
@@ -440,6 +476,62 @@ operations:
       - $ref: '#/channels/catalogimport/messages/catalogImportCommitted'
 components:
   messages:
+    POAckAccepted:
+      name: POAckAccepted
+      title: poack.accepted.v1
+      x-passage-type: dev.passage.procurement.poack.accepted.v1
+      summary: The vendor accepted the current version of a confirmed purchase order.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.poack.accepted.v1 }
+              subject: { type: string, format: uuid, description: acknowledgement id }
+              data: { $ref: '#/components/schemas/POAckData' }
+    POAckRejected:
+      name: POAckRejected
+      title: poack.rejected.v1
+      x-passage-type: dev.passage.procurement.poack.rejected.v1
+      summary: The vendor rejected the current version of a confirmed purchase order and gave a reason; the buyer follows up by hand.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.poack.rejected.v1 }
+              subject: { type: string, format: uuid, description: acknowledgement id }
+              data: { $ref: '#/components/schemas/POAckData' }
+    POAckProposed:
+      name: POAckProposed
+      title: poack.proposed.v1
+      x-passage-type: dev.passage.procurement.poack.proposed.v1
+      summary: The vendor proposed changes to quantity, delivery date or price of lines of a confirmed purchase order; the proposal waits for the buyer.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.poack.proposed.v1 }
+              subject: { type: string, format: uuid, description: acknowledgement id }
+              data: { $ref: '#/components/schemas/POAckData' }
+    POAckDecided:
+      name: POAckDecided
+      title: poack.decided.v1
+      x-passage-type: dev.passage.procurement.poack.decided.v1
+      summary: A buyer approved or declined a vendor's proposal; an approval is the next purchase order version (resulting_version_no), which poversion.created.v1 and po.confirmed.v1 describe once confirmed.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.poack.decided.v1 }
+              subject: { type: string, format: uuid, description: acknowledgement id }
+              data: { $ref: '#/components/schemas/POAckData' }
     InboundChangeRecorded:
       name: InboundChangeRecorded
       title: inboundchange.recorded.v1
@@ -1222,13 +1314,43 @@ components:
               path: { type: string }
               value: {}
         reapproval_required: { type: boolean, description: true when the change went back through approval before this confirmation }
+    POAckData:
+      type: object
+      required: [ack_id, po_id, number, version_no, vendor_id, legal_entity_id, outcome]
+      additionalProperties: false
+      properties:
+        ack_id: { type: string, format: uuid }
+        po_id: { type: string, format: uuid }
+        number: { type: string, example: PO-00000001 }
+        version_no: { type: integer, description: purchase order version the vendor answered }
+        vendor_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [ACCEPTED, REJECTED, CHANGES_PROPOSED] }
+        reason: { type: string, description: the vendor's reason for a rejection }
+        changes:
+          type: array
+          description: proposed line changes of CHANGES_PROPOSED; a member that is absent is not proposed
+          items:
+            type: object
+            required: [line_no]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer }
+              qty: { type: string, description: decimal string }
+              unit_price: { type: string, description: decimal string }
+              delivery_date: { type: string, format: date }
+        decision: { type: string, enum: [APPROVED, DECLINED, SUPERSEDED], description: only on poack.decided.v1; SUPERSEDED when a newer confirmed version replaced the version the proposal was made on }
+        decided_by: { type: string, format: uuid }
+        note: { type: string, description: the buyer's note on the decision }
+        resulting_version_no: { type: integer, description: the purchase order version an approval wrote, when it changed the order }
     POCancelledData:
       type: object
-      required: [po_id, number, version_no, prior_status, lines]
+      required: [po_id, number, legal_entity_id, version_no, prior_status, lines]
       additionalProperties: false
       properties:
         po_id: { type: string, format: uuid }
         number: { type: string, example: PO-00000001 }
+        legal_entity_id: { type: string, format: uuid }
         version_no: { type: integer, description: confirmed version at cancellation; 0 when never confirmed }
         prior_status: { type: string, enum: [DRAFT, IN_REVIEW, APPROVED, REJECTED, CONFIRMED] }
         lines:

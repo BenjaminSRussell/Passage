@@ -65,6 +65,7 @@ type LedgerPoster interface {
 
 type VendorBanks interface {
 	BankAccounts(ctx context.Context, legalEntityID, vendorID string) ([]party.BankAccount, error)
+	VendorExists(ctx context.Context, legalEntityID, vendorID string) error
 }
 
 type runDeps struct {
