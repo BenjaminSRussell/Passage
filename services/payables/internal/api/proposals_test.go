@@ -291,6 +291,22 @@ func TestListOpenItems_PassesFiltersAndPages(t *testing.T) {
 
 const defaultListLimit = 50
 
+func TestListOpenItems_HeldFilterAndInboxDuty(t *testing.T) {
+	s := newFakeStore()
+	r, _ := proposalRouter(s, nil)
+	inbox := caller{duties: "payables.inbox.read", user: "inbox", entity: entityA}
+	if rec := inbox.send(r, http.MethodGet, "/v1/payables/open-items?held=true", ""); rec.Code != http.StatusOK || !s.listFilter.HeldOnly || !s.listFilter.OpenOnly {
+		t.Fatalf("held=true with the inbox duty: %d %+v", rec.Code, s.listFilter)
+	}
+	wantProblem(t, inbox.send(r, http.MethodGet, "/v1/payables/open-items", ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, inbox.send(r, http.MethodGet, "/v1/payables/open-items?held=false", ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, reader.send(r, http.MethodGet, "/v1/payables/open-items?held=maybe", ""), http.StatusBadRequest, "COM-0001")
+	wantProblem(t, caller{duties: "payment-hold.manage", entity: entityA}.send(r, http.MethodGet, "/v1/payables/open-items?held=true", ""), http.StatusForbidden, "AUTH-0003")
+	if rec := inbox.send(r, http.MethodGet, "/v1/payables/open-items/"+itemOne, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("the inbox duty reads one item: %d", rec.Code)
+	}
+}
+
 func TestListOpenItems_RejectsBadQueries(t *testing.T) {
 	r, _ := proposalRouter(newFakeStore(), nil)
 	tests := []struct{ name, query, field string }{

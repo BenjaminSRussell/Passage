@@ -33,6 +33,7 @@ import (
 
 const (
 	dutyOpenItemRead      = "open-item.read"
+	dutyInboxRead         = "payables.inbox.read"
 	dutyProposalWrite     = "payment-proposal.write"
 	dutyProposalRead      = "payment-proposal.read"
 	dutyProposalApprove   = "payment-proposal.approve"
@@ -99,7 +100,7 @@ func (a *API) registerProposals(r chi.Router) {
 	if a.proposals == nil {
 		return
 	}
-	r.With(authz.RequireDuty(dutyOpenItemRead)).Get(pathOpenItems, a.listOpenItems)
+	r.With(authz.RequireAnyDuty(dutyOpenItemRead, dutyInboxRead)).Get(pathOpenItems, a.listOpenItems)
 	r.With(authz.RequireDuty(dutyOpenItemRead)).Get(pathOpenItems+"/{id}", a.getOpenItem)
 	r.With(authz.RequireDuty(dutyProposalWrite)).Post(pathProposals, a.createProposal)
 	r.With(authz.RequireDuty(dutyProposalRead)).Get(pathProposals, a.listProposals)
@@ -193,6 +194,15 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	f := store.Filter{LegalEntityID: le, VendorID: q.Get("vendor"), DueFrom: q.Get("due_from"), DueOnOrBy: q.Get("due_to"), Currency: q.Get("currency"), Status: q.Get("status")}
+	if held := q.Get("held"); held == "true" {
+		f.HeldOnly, f.OpenOnly = true, true
+	} else if held != "" {
+		fields["held"] = "must be true when given"
+	}
+	if caller, _ := tenant.FromContext(r.Context()); !caller.HasDuty(dutyOpenItemRead) && !f.HeldOnly {
+		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "the inbox duty reads held items only (held=true)")
+		return
+	}
 	if f.VendorID != "" && !ids.Valid(f.VendorID) {
 		fields["vendor"] = "must be a UUID"
 	}
