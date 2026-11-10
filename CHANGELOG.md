@@ -19,6 +19,11 @@ release may change public APIs.
 
 ### Added
 
+- Postgres backups and tenant-scoped point-in-time restore (#48, P3a): the multi-region chart renders a
+  barman-cloud `ObjectStore` (per-region bucket, 30 d retention), continuous WAL archiving from the CNPG cluster, a
+  daily `ScheduledBackup` and `PassageBackupStale` / `PassageWalArchiveFailing` alerts; `tools/tenant-restore`
+  prints the recovery manifest for a scratch cluster at a timestamp and copies one tenant's rows back into the
+  live database, dry run by default. The restore drill on a cluster and the pen test stay open.
 - Product costing: activation revaluation report and mass roll by stored-BOM selection (#39). `GET
   /v1/product-costing/activations/{id}/revaluation-report` (duty `productcost.view`) sets each stored activation line
   beside the inventory on-hand read again from the inventory service for the posting date (the existing
