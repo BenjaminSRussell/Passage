@@ -46,10 +46,25 @@
 
 - `src/modules/ap-invoices/InvoicesPage.tsx` (react-query infinite query, server filters).
 - `src/modules/purchasing/PurchaseOrderPages.tsx` (`PurchaseOrdersPage`, `useResource` with an accumulating cursor).
+- `src/modules/receiving/ReceiptsPage.tsx` (react-query infinite query, entity and date-range filters mapped to `vendorId`, `from` and `to`).
+- `src/modules/sales/OrdersPage.tsx` and `src/modules/billing/InvoicesPage.tsx` (the module's `useLoad` / `usePaged` with a cursor; a failed Load more keeps the rows and retries the next page).
+- `src/modules/fulfillment/PackingSlipsPage.tsx` and `src/modules/receivables/PaymentsPage.tsx` (a single page, no Load more; `forbidden` is read from the module's API error in the loader, because the module's `Problem` carries no status).
 
 ## Rollout checklist (505-3)
 
-For each list (purchase orders, receipts, vendor invoices, sales orders, packing slips, billing invoices, AR payments):
+The procure-to-pay and order-to-cash lists are all converted:
+
+| List | Page | Status |
+| --- | --- | --- |
+| Purchase orders | `purchasing/PurchaseOrderPages.tsx` | Converted |
+| Receipts | `receiving/ReceiptsPage.tsx` | Converted |
+| Vendor invoices | `ap-invoices/InvoicesPage.tsx` | Converted |
+| Sales orders | `sales/OrdersPage.tsx` | Converted |
+| Packing slips | `fulfillment/PackingSlipsPage.tsx` | Converted |
+| Billing invoices | `billing/InvoicesPage.tsx` | Converted |
+| AR payments | `receivables/PaymentsPage.tsx` | Converted |
+
+For each further list:
 
 1. Move the fetch into a `use...Rows(query)` hook that returns `ListData<T>`. Do not change what is requested for the filters the page already had. Set `forbidden` from a 403 so the no-access state shows.
 2. Turn the page's filters into `ListFilterDef`s. Add a filter only when the API takes the parameter.

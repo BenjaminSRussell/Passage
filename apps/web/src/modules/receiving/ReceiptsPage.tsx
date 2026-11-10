@@ -1,81 +1,111 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { fetchReceipts, RECEIPT_STATES, type Receipt, type ReceiptState } from "./api/client";
-import { Named, StateBadge } from "./parts";
-import { PurchaseOrderRef } from "./parts";
-import styles from "../../shell/pageLayout.module.css";
+import { buttonClassName, entityText, ListPage, type ListColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
+import { ApiError, fetchPurchaseOrderRef, fetchReceipts, RECEIPT_STATES, type Receipt, type ReceiptState } from "./api/client";
+import { Named, PurchaseOrderRef, StateBadge, stateLabel } from "./parts";
 
-const columns: DataTableColumn<Receipt>[] = [
+const poNumbers = new Map<string, Promise<string>>();
+
+/** The purchase order number for the CSV export; the id when the order cannot be read. */
+function purchaseOrderText(id: string): Promise<string> {
+  let pending = poNumbers.get(id);
+  if (!pending) {
+    pending = id === "" ? Promise.resolve("") : fetchPurchaseOrderRef(id).then(
+      (po) => po.number,
+      () => {
+        poNumbers.delete(id);
+        return id;
+      },
+    );
+    poNumbers.set(id, pending);
+  }
+  return pending;
+}
+
+const columns: ListColumn<Receipt>[] = [
   { key: "receiptNumber", header: "Receipt", mono: true },
   { key: "packingSlip", header: "Packing slip" },
-  { key: "vendorId", header: "Vendor", render: (r) => <Named entity="vendor" id={r.vendorId} /> },
-  { key: "purchaseOrderId", header: "Purchase order", render: (r) => <PurchaseOrderRef id={r.purchaseOrderId} /> },
+  {
+    key: "vendorId",
+    header: "Vendor",
+    sortable: false,
+    render: (r) => <Named entity="vendor" id={r.vendorId} />,
+    csv: (r) => entityText("vendor", r.vendorId),
+  },
+  {
+    key: "purchaseOrderId",
+    header: "Purchase order",
+    sortable: false,
+    render: (r) => <PurchaseOrderRef id={r.purchaseOrderId} />,
+    csv: (r) => purchaseOrderText(r.purchaseOrderId),
+  },
   { key: "receiptDate", header: "Receipt date" },
   { key: "currency", header: "Currency" },
-  { key: "state", header: "State", render: (r) => <StateBadge state={r.state} /> },
+  {
+    key: "state",
+    header: "State",
+    render: (r) => <StateBadge state={r.state} />,
+    sortValue: (r) => stateLabel[r.state],
+    csv: (r) => stateLabel[r.state],
+  },
 ];
 
-/** Receipts newest first, filtered by state, paged by the service's cursor. */
-export function ReceiptsPage() {
-  const navigate = useNavigate();
-  const [state, setState] = useState<ReceiptState | "">("");
+const filters: ListFilterDef[] = [
+  { kind: "select", key: "state", label: "State", anyLabel: "All states", options: RECEIPT_STATES.map((s) => ({ value: s, label: stateLabel[s] })) },
+  { kind: "entity", key: "vendorId", label: "Vendor", entity: "vendor" },
+  { kind: "dateRange", key: "receiptDate", label: "Receipt date" },
+];
+
+/** Receipts newest first, paged by the service's cursor; state, vendor and receipt date filter on the service. */
+function useReceiptRows(query: ListQuery): ListData<Receipt> {
+  const { state = "", vendorId = "", receiptDateFrom: from = "", receiptDateTo: to = "" } = query.filters;
   const result = useInfiniteQuery({
-    queryKey: ["receiving", "receipts", state],
-    queryFn: ({ pageParam }) => fetchReceipts({ state: state || undefined, cursor: pageParam }),
+    queryKey: ["receiving", "receipts", { state, vendorId, from, to }],
+    queryFn: ({ pageParam }) =>
+      fetchReceipts({ state: (state as ReceiptState) || undefined, vendorId: vendorId || undefined, from: from || undefined, to: to || undefined, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor,
   });
-  const rows = result.data?.pages.flatMap((p) => p.items) ?? [];
+  return {
+    rows: result.data?.pages.flatMap((p) => p.items) ?? [],
+    loading: result.isPending,
+    loadingMore: result.isFetchingNextPage,
+    error: result.isError ? result.error : undefined,
+    forbidden: result.error instanceof ApiError && result.error.status === 403,
+    hasMore: Boolean(result.hasNextPage),
+    loadMore: () => void result.fetchNextPage(),
+    retry: () => void result.refetch(),
+  };
+}
 
+export function ReceiptsPage() {
+  const navigate = useNavigate();
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Receipts"
-        description="Deliveries from arrival at the dock to posting. Open a receipt to register what was received, post it to the ledger, correct it or cancel it."
-        actions={
-          <Link className={buttonClassName("primary")} to="/receiving/receipts/new">
-            Record arrival
+    <ListPage
+      id="receiving-receipts"
+      title="Receipts"
+      description="Deliveries from arrival at the dock to posting. Open a receipt to register what was received, post it to the ledger, correct it or cancel it."
+      noun="receipts"
+      singular="receipt"
+      actions={
+        <Link className={buttonClassName("primary")} to="/receiving/receipts/new">
+          Record arrival
+        </Link>
+      }
+      columns={columns}
+      filters={filters}
+      useRows={useReceiptRows}
+      getRowKey={(r) => r.id}
+      onRowOpen={(r) => navigate(`/receiving/receipts/${encodeURIComponent(r.id)}`)}
+      empty={{
+        title: "No receipts yet",
+        description: "Record an arrival when a delivery reaches the dock.",
+        action: (
+          <Link className={buttonClassName("secondary")} to="/receiving/receipts/new">
+            Record the first arrival
           </Link>
-        }
-      />
-      <div className={styles.filters}>
-        <FormField id="receipt-state" label="State" optional>
-          {(c) => (
-            <Select {...c} value={state} onChange={(e) => setState(e.target.value as ReceiptState | "")}>
-              <option value="">All states</option>
-              {RECEIPT_STATES.map((s) => (
-                <option key={s} value={s}>
-                  {s.charAt(0) + s.slice(1).toLowerCase()}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {result.isError ? (
-        <Alert tone="danger" title="Could not load the receipts" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
-          {(result.error as Error).message}
-        </Alert>
-      ) : (
-        <DataTable
-          label="Receipts"
-          columns={columns}
-          rows={rows}
-          getRowKey={(r) => r.id}
-          loading={result.isPending}
-          empty={{ title: "No receipts yet", description: "Record an arrival when a delivery reaches the dock." }}
-          onRowOpen={(r) => navigate(`/receiving/receipts/${encodeURIComponent(r.id)}`)}
-        />
-      )}
-      {result.hasNextPage ? (
-        <div>
-          <Button loading={result.isFetchingNextPage} onClick={() => void result.fetchNextPage()}>
-            Load more receipts
-          </Button>
-        </div>
-      ) : null}
-    </div>
+        ),
+      }}
+    />
   );
 }
