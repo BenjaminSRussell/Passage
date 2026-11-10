@@ -3374,12 +3374,21 @@
     "shopfloor.edge.configure": {"permissions": [
       {"resource": "/v1/shopfloor/edge-nodes", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/edge-nodes/*", "methods": ["PUT"]},
-      {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*:enrollment-token", "methods": ["POST"]}
     ]},
     "shopfloor.edge.connect": {"permissions": [
       {"resource": "/v1/shopfloor/edge-nodes/*/config", "methods": ["GET"]},
-      {"resource": "/v1/shopfloor/edge-nodes/*:heartbeat", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/edge-nodes/*:heartbeat", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*:renew-certificate", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/control-recipes", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/control-recipes/*:report", "methods": ["POST"]}
     ]},
+    "shopfloor.controlrecipe.create": {"permissions": [
+      {"resource": "/v1/shopfloor/control-recipes", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/control-recipes/*:resend", "methods": ["POST"]}
+    ]},
+    "shopfloor.controlrecipe.execute": {"permissions": [{"resource": "/v1/shopfloor/control-recipes/*:report", "methods": ["POST"]}]},
     "shopfloor.job.sync": {"flag": true, "permissions": []},
     "shopfloor.job.schedule": {"permissions": [{"resource": "/v1/shopfloor/jobs", "methods": ["POST"]}]},
     "shopfloor.job.reopen": {"permissions": [{"resource": "/v1/shopfloor/jobs/*:reopen", "methods": ["POST"]}]},
@@ -3433,6 +3442,8 @@
       {"resource": "/v1/shopfloor/registrations", "methods": ["POST"]}
     ]},
     "shopfloor.view": {"permissions": [
+      {"resource": "/v1/shopfloor/control-recipes", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/control-recipes/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/absence-codes", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/absence-codes/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/andon", "methods": ["GET"]},

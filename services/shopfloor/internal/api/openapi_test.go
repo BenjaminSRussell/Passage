@@ -53,10 +53,16 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	served := map[string]bool{}
-	_ = chi.Walk(newRouter(&fakeStore{}).(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		served[route+" "+strings.ToLower(method)] = true
-		return nil
-	})
+	walk := func(r chi.Routes) {
+		_ = chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			served[route+" "+strings.ToLower(method)] = true
+			return nil
+		})
+	}
+	walk(newRouter(&fakeStore{}).(chi.Routes))
+	public := chi.NewRouter()
+	New(&fakeStore{}).RegisterPublic(public)
+	walk(public)
 	declared := declaredOperations(string(spec))
 	duties := map[string]string{
 		"/v1/shopfloor/workers post":                                               DutySetup,
@@ -127,6 +133,16 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/edge-nodes/{id}/config-versions get":                        DutyView,
 		"/v1/shopfloor/edge-nodes/{id}/config get":                                 DutyEdgeConnect,
 		"/v1/shopfloor/edge-nodes/{id}:heartbeat post":                             DutyEdgeConnect,
+		"/v1/shopfloor/edge-nodes/{id}:enrollment-token post":                      DutyEdgeConfigure,
+		"/v1/shopfloor/edge-nodes/{id}:renew-certificate post":                     DutyEdgeConnect,
+		"/v1/shopfloor/edge-nodes/{id}:enroll post":                                "",
+		"/v1/shopfloor/control-recipes post":                                       DutyControlRecipeCreate,
+		"/v1/shopfloor/control-recipes get":                                        DutyView,
+		"/v1/shopfloor/control-recipes/{id} get":                                   DutyView,
+		"/v1/shopfloor/control-recipes/{id}:report post":                           DutyControlRecipeExecute,
+		"/v1/shopfloor/control-recipes/{id}:resend post":                           DutyControlRecipeCreate,
+		"/v1/shopfloor/edge-nodes/{id}/control-recipes get":                        DutyEdgeConnect,
+		"/v1/shopfloor/edge-nodes/{id}/control-recipes/{rid}:report post":          DutyEdgeConnect,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             DutySetup,
 		"/v1/shopfloor/workers/{id}:assign-resource post":                          DutySetup,
 		"/v1/shopfloor/workers/{id} put":                                           DutySetup,
@@ -156,6 +172,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/downtime-reasons post":                                      true,
 		"/v1/shopfloor/process-categories post":                                    true,
 		"/v1/shopfloor/edge-nodes post":                                            true,
+		"/v1/shopfloor/control-recipes post":                                       true,
+		"/v1/shopfloor/control-recipes/{id}:resend post":                           true,
 		"/v1/shopfloor/edge-nodes/{id}/config-versions post":                       true,
 		"/v1/shopfloor/workers/{id}:assign-setup post":                             true,
 		"/v1/shopfloor/workers/{id}:assign-resource post":                          true,

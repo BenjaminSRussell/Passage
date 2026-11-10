@@ -43,9 +43,80 @@ spec:
               value: {{ .Values.config.adminAddr | quote }}
             - name: IOT_BUFFER_HOURS
               value: {{ .Values.config.bufferHours | quote }}
+{{- if .Values.shopfloor.url }}
+            - name: EDGE_SHOPFLOOR_URL
+              value: {{ .Values.shopfloor.url | quote }}
+            - name: EDGE_NODE_ID
+              value: {{ required "shopfloor.nodeId is required with shopfloor.url" .Values.shopfloor.nodeId | quote }}
+            - name: EDGE_SOURCE
+              value: {{ .Values.shopfloor.source | quote }}
+{{- if .Values.shopfloor.writer }}
+            - name: EDGE_WRITER
+              value: {{ .Values.shopfloor.writer | quote }}
+            - name: EDGE_RECIPE_AUTO_COMPLETE
+              value: {{ .Values.shopfloor.recipeAutoComplete | quote }}
+{{- end }}
+            - name: EDGE_SIM_MACHINES
+              value: {{ .Values.shopfloor.simMachines | quote }}
+            - name: IOT_BUFFER_CAPACITY
+              value: {{ .Values.shopfloor.bufferCapacity | quote }}
+            - name: EDGE_SEQ_STATE_FILE
+              value: /var/lib/iot-edge/seq.json
+{{- if .Values.shopfloor.enrollmentSecret }}
+            - name: EDGE_CERT_DIR
+              value: /var/lib/iot-edge/certs
+            - name: EDGE_ENROLLMENT_TOKEN_FILE
+              value: /var/run/passage/enroll/token
+{{- end }}
+{{- if .Values.shopfloor.serverCaSecret }}
+            - name: EDGE_SERVER_CA_FILE
+              value: /var/run/passage/server-ca/ca.crt
+{{- end }}
+{{- if .Values.shopfloor.tokenSecret }}
+            - name: EDGE_TOKEN_FILE
+              value: /var/run/passage/edge/token
+{{- end }}
+{{- end }}
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/iot-edge }
+{{- if .Values.shopfloor.tokenSecret }}
+            - { name: token, mountPath: /var/run/passage/edge, readOnly: true }
+{{- end }}
+{{- if .Values.shopfloor.enrollmentSecret }}
+            - { name: enroll, mountPath: /var/run/passage/enroll, readOnly: true }
+{{- end }}
+{{- if .Values.shopfloor.serverCaSecret }}
+            - { name: server-ca, mountPath: /var/run/passage/server-ca, readOnly: true }
+{{- end }}
           securityContext:
             runAsNonRoot: true
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: state
+{{- if .Values.state.claimName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.state.claimName | quote }}
+{{- else }}
+          emptyDir: {}
+{{- end }}
+{{- if .Values.shopfloor.tokenSecret }}
+        - name: token
+          secret:
+            secretName: {{ .Values.shopfloor.tokenSecret | quote }}
+            items: [{ key: token, path: token }]
+{{- end }}
+{{- if .Values.shopfloor.enrollmentSecret }}
+        - name: enroll
+          secret:
+            secretName: {{ .Values.shopfloor.enrollmentSecret | quote }}
+            items: [{ key: token, path: token }]
+{{- end }}
+{{- if .Values.shopfloor.serverCaSecret }}
+        - name: server-ca
+          secret:
+            secretName: {{ .Values.shopfloor.serverCaSecret | quote }}
+            items: [{ key: ca.crt, path: ca.crt }]
+{{- end }}

@@ -8,10 +8,12 @@ import {
   DUTY_EDGE_CONFIGURE,
   getEdgeNode,
   listEdgeConfigs,
+  mintEdgeEnrollmentToken,
   newKey,
   publishEdgeConfig,
   updateEdgeNode,
   type EdgeConfigVersion,
+  type EdgeEnrollmentToken,
   type EdgeNode,
   type EdgeRing,
   type Problem,
@@ -102,6 +104,7 @@ export function EdgeNodeDetailPage() {
           {canConfigure ? (
             <>
               <EditForm node={current} onSaved={setFresh} />
+              <EnrollmentCard node={current} />
               <PublishForm
                 nodeId={id}
                 onPublished={() => {
@@ -215,6 +218,55 @@ function EditForm({ node, onSaved }: { node: EdgeNode; onSaved(saved: EdgeNode):
           </Button>
         </div>
       </form>
+    </Card>
+  );
+}
+
+/** Mints the one-time token a connector redeems for its certificate (FR-25.19). The token is shown once. */
+function EnrollmentCard({ node }: { node: EdgeNode }) {
+  const [token, setToken] = useState<EdgeEnrollmentToken | null>(null);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function mint() {
+    setFailure(null);
+    setBusy(true);
+    try {
+      setToken(await mintEdgeEnrollmentToken(node.id));
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Enroll the connector">
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          Give the connector a one-time token. It redeems the token for a 90-day client certificate and from then on is the only identity that may pull this node&apos;s configuration.
+          A new token replaces any earlier one that was not used.
+        </p>
+        {!node.active ? <p className={styles.note}>This node is switched off. Switch it on to enroll its connector.</p> : null}
+        {failure ? (
+          <Alert tone="danger" title="Could not create an enrollment token" live="alert">
+            <ProblemMessage problem={failure} />
+          </Alert>
+        ) : null}
+        {token ? (
+          <Alert tone="success" title="Enrollment token" live="status">
+            {`Copy it now; it is not shown again. It expires ${formatDateTime(token.expiresAt)}.`}
+            <pre className={styles.file} tabIndex={0} aria-label="Enrollment token">
+              {token.token}
+            </pre>
+          </Alert>
+        ) : null}
+        <div className={styles.formActions}>
+          <Button type="button" loading={busy} disabled={!node.active} onClick={mint}>
+            Create enrollment token
+          </Button>
+        </div>
+      </div>
     </Card>
   );
 }
