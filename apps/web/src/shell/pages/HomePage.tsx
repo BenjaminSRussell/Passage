@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { copy } from "../copy";
+import { DemoTour } from "../../demo/DemoTour";
 import { Badge, Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
 import { MyWorkSummary } from "./MyWorkSummary";
 import { ALL_FEATURES_PATH, HOME_WORKSPACE_LIMIT, TOP_TASK_COUNT } from "../workspaces/model";
@@ -12,6 +13,7 @@ export function HomePage() {
   return (
     <>
       <PageHeader title={copy.home.pageTitle} description={copy.home.description} />
+      {import.meta.env.MODE === "demo" ? <DemoTour /> : null}
       <MyWorkSummary />
       {ordered.length === 0 ? (
         <Card>
