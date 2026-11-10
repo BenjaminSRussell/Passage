@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the edi service (services/edi/api/openapi.yaml). Browser calls use
 // /api/v1/edi/..., which the web BFF rewrites to /edi/v1/... on the service.
 
@@ -396,7 +397,7 @@ async function toError(res: Response): Promise<EdiApiError> {
 async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../shell/api/http";
 import { Select } from "../../shell/ui";
 import { formatOption, resolveOption } from "../../shell/lookup/entities";
 
@@ -26,7 +27,7 @@ export function resetOrderCache(): void {
 function loadOrder(id: string): Promise<OrderRef | null> {
   let pending = cache.get(id);
   if (!pending) {
-    pending = fetch(`/api/v1/production/orders/${encodeURIComponent(id)}`, { headers: { Accept: "application/json" } })
+    pending = apiFetch(`/api/v1/production/orders/${encodeURIComponent(id)}`, { headers: { Accept: "application/json" } })
       .then(async (res) => {
         if (!res.ok) return null;
         const body = (await res.json()) as { orderNumber?: string; productId?: string };
@@ -73,7 +74,7 @@ export function OrderNumber({ id }: { id: string }) {
 }
 
 function loadOrderList() {
-  listCache ??= fetch("/api/v1/production/orders?limit=200", { headers: { Accept: "application/json" } })
+  listCache ??= apiFetch("/api/v1/production/orders?limit=200", { headers: { Accept: "application/json" } })
     .then((res) => (res.ok ? (res.json() as Promise<{ items?: { id: string; orderNumber: string; status?: string }[] }>) : { items: [] }))
     .then((body) => (body.items ?? []).filter((o) => o.id && o.orderNumber))
     .catch(() => {

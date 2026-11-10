@@ -26,13 +26,13 @@ describe("copy and route cancel client", () => {
     await copyBomVersion("a/b", { effectiveFrom: "2027-01-01" }, "key-1");
     expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/a%2Fb:copy", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "key-1" },
+      headers: expect.objectContaining({ "Content-Type": "application/json", "Idempotency-Key": "key-1" }),
       body: JSON.stringify({ effectiveFrom: "2027-01-01" }),
     });
     await copyRouteVersion("a/b", { effectiveFrom: "2027-01-01", effectiveTo: "2027-12-31" }, "key-2");
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("/api/v1/engineering/route-versions/a%2Fb:copy");
     await cancelRouteVersion("a/b");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions/a%2Fb:cancel", { method: "POST" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions/a%2Fb:cancel", expect.objectContaining({ method: "POST" }));
   });
 });
 
@@ -159,7 +159,7 @@ describe("RouteVersionPage copy and cancel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Activate" })).toBeNull());
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions/r1:cancel", { method: "POST" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions/r1:cancel", expect.objectContaining({ method: "POST" }));
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent("Route R version 2 draft is cancelled");
   });

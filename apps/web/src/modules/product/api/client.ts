@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 const base = "/api/v1/product";
 
 export type Lifecycle = "draft" | "active" | "phase_out" | "obsolete";
@@ -111,7 +112,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }

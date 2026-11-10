@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { readProblem } from "./http";
+import { apiFetch } from "./http";
 
 const BASE = "/api/v1/payables";
 
@@ -30,7 +31,7 @@ export const OPEN_ITEMS_BY_INVOICE_LIMIT = 50;
 /** Open items payables created from the given receiving invoices (one entity, at most 50 invoices). */
 export async function fetchOpenItemsForInvoices(legalEntityId: string, invoiceIds: readonly string[]): Promise<OpenItem[]> {
   const params = new URLSearchParams({ legal_entity: legalEntityId, source_invoices: invoiceIds.join(","), limit: String(OPEN_ITEMS_BY_INVOICE_LIMIT) });
-  const res = await fetch(`${BASE}/open-items?${params}`, { headers: { Accept: "application/json" } });
+  const res = await apiFetch(`${BASE}/open-items?${params}`, { headers: { Accept: "application/json" } });
   if (!res.ok) throw await readProblem(res);
   return z.object({ items: z.array(openItemSchema) }).parse(await res.json()).items;
 }

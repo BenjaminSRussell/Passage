@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../shell/api/http";
 import { Select } from "../../shell/ui";
 
 // Work centres and machines have no shell lookup entity yet, so the manufacturing modules share this small reader of
@@ -13,7 +14,7 @@ export interface ResourceRef {
 let cache: Promise<ResourceRef[]> | null = null;
 
 function loadResources(): Promise<ResourceRef[]> {
-  cache ??= fetch("/api/v1/engineering/resources?limit=200", { headers: { Accept: "application/json" } })
+  cache ??= apiFetch("/api/v1/engineering/resources?limit=200", { headers: { Accept: "application/json" } })
     .then((res) => (res.ok ? (res.json() as Promise<{ items?: ResourceRef[] }>) : { items: [] }))
     .then((body) => (body.items ?? []).filter((r) => r.id && r.name))
     .catch(() => {

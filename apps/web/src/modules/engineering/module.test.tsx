@@ -260,7 +260,7 @@ describe("engineering module", () => {
     expect(table).toHaveTextContent("WHEEL");
     expect(table).toHaveTextContent("BIKE");
     expect(screen.getByText(/2 parents found/)).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/engineering/boms:where-used?component=${SPOKE}&asOf=2026-03-01`);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/engineering/boms:where-used?component=${SPOKE}&asOf=2026-03-01`, expect.anything());
   });
 
   it("announces a failed lookup and shows no table", async () => {

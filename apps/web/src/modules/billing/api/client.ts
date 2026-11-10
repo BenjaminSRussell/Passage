@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Typed clients for the billing and revrec services (services/billing/api/openapi.yaml,
 // services/revrec/api/openapi.yaml). The browser calls /api/v1/...; the BFF rewrites to /v1/....
 
@@ -265,7 +266,7 @@ async function send<T>(url: string, init: RequestInit = {}, signal?: AbortSignal
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(url, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(url, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }

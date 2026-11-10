@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // API client for the costacct service (services/costacct/api/openapi.yaml).
 // Browser calls use /api/v1/controlling/... which the web BFF rewrites to the service's /v1/controlling/... paths.
 
@@ -223,7 +224,7 @@ export function describeError(err: unknown, fallback: string): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
+  const res = await apiFetch(path, {
     ...init,
     credentials: "same-origin",
     headers: { accept: "application/json", ...(init.headers as Record<string, string> | undefined) },
