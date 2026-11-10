@@ -10,7 +10,6 @@
  * tables (purchasing, receiving, payables, sales, inventory, ledger, party, tax and product).
  * A code without an entry falls back to the server's title or detail.
  */
-import { translateProblem } from "../i18n/problemMessages";
 
 export interface ProblemCatalogEntry {
   /** What happened and why, in one or two plain sentences. */
@@ -934,6 +933,5 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
 export function lookupProblem(code: string | undefined | null): ProblemCatalogEntry | undefined {
   if (!code) return undefined;
   if (!Object.prototype.hasOwnProperty.call(problemCatalog, code)) return undefined;
-  const entry = problemCatalog[code];
-  return entry === undefined ? undefined : translateProblem(code, entry);
+  return problemCatalog[code];
 }

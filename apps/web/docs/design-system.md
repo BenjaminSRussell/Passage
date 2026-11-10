@@ -226,7 +226,7 @@ Every module page uses `PageHeader` (h2). The state matrix applies: **Offline** 
 
   `--color-border` (1.58 light) is decorative only. Never use it as the sole boundary of an input.
 
-## 7. Microcopy (sentence case, second person; strings live in `src/shell/copy.ts` until i18next is allowed)
+## 7. Microcopy (sentence case, second person; strings live in `src/shell/copy.ts`; Passage is English only)
 
 The full writing rules (voice, task verbs, error messages, glossary) are in [ux-writing.md](ux-writing.md).
 
