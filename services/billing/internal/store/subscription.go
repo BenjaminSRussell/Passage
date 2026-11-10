@@ -216,7 +216,7 @@ func (s *Postgres) FindPeriodInvoice(ctx context.Context, subscriptionID string,
 	return inv, found, err
 }
 
-func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVersion int, periodFrom, periodTo time.Time, inv Invoice) (Invoice, bool, error) {
+func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVersion int, periodFrom, periodTo time.Time, inv Invoice, usageIDs []string) (Invoice, bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	var replay Invoice
 	var replayed bool
@@ -248,9 +248,22 @@ func (s *Postgres) BillSubscription(ctx context.Context, id string, expectedVers
 		if err := writeProposal(ctx, tx, inv); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `insert into subscription_period (tenant_id, subscription_id, period_from, period_to, invoice_id)
-			values ($1, $2, $3::date, $4::date, $5)`, p.TenantID, id, periodFrom.Format(dateLayout), periodTo.Format(dateLayout), inv.ID)
-		return err
+		if _, err = tx.Exec(ctx, `insert into subscription_period (tenant_id, subscription_id, period_from, period_to, invoice_id)
+			values ($1, $2, $3::date, $4::date, $5)`, p.TenantID, id, periodFrom.Format(dateLayout), periodTo.Format(dateLayout), inv.ID); err != nil {
+			return err
+		}
+		if len(usageIDs) == 0 {
+			return nil
+		}
+		tag, err := tx.Exec(ctx, `update subscription_usage set invoice_id = $3::uuid where tenant_id = $1 and subscription_id = $2::uuid
+			and id = any($4::uuid[]) and invoice_id is null`, p.TenantID, id, inv.ID, usageIDs)
+		if err != nil {
+			return err
+		}
+		if int(tag.RowsAffected()) != len(usageIDs) {
+			return httpx.NewProblem(http.StatusConflict, CodeUsageBilled, "usage of this bill was invoiced by another request; retry")
+		}
+		return nil
 	})
 	if err != nil {
 		return Invoice{}, false, writeProblem(err)

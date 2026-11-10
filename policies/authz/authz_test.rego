@@ -2229,6 +2229,13 @@ test_credit_settlement_belongs_to_the_settle_duty if {
 	not allowed("receivables.view", "POST", "/v1/receivables/credit-settlements")
 }
 
+test_subscription_usage_and_due_job_belong_to_invoice_maintain if {
+	allowed("billing.invoice.maintain", "POST", "/v1/billing/subscriptions/s1/usage")
+	allowed("billing.invoice.maintain", "POST", "/v1/billing/subscriptions:bill-due")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/subscriptions/s1/usage")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/subscriptions:bill-due")
+}
+
 test_gl_journal_routes_split_between_view_and_payment_duties if {
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")

@@ -2039,9 +2039,11 @@
       {"resource": "/v1/billing/free-text-invoices", "methods": ["POST"]},
       {"resource": "/v1/billing/proposals", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions/*/usage", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions/*:bill", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]}
+      {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions:bill-due", "methods": ["POST"]}
     ]},
     "billing.invoice.post": {"permissions": [
       {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
