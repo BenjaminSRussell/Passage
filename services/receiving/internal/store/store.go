@@ -282,6 +282,16 @@ type ReceiptFilter struct {
 	Limit           int
 }
 
+type InvoiceFilter struct {
+	VendorID        string
+	ReceiptID       string
+	PurchaseOrderID string
+	Status          string
+	CursorCreatedAt time.Time
+	CursorID        string
+	Limit           int
+}
+
 type RegisterFunc func(Receipt, map[domain.SerialKey]struct{}) ([]Line, error)
 
 type PostFunc func(Receipt) (PostOutcome, error)
@@ -323,6 +333,7 @@ type Store interface {
 	GetReceipt(ctx context.Context, id string) (Receipt, error)
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
 	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
+	ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice, error)
 	ReservePosting(ctx context.Context, p PendingPosting) (string, error)
 	ReleasePosting(ctx context.Context, key string) error
 	EnsureNoPending(ctx context.Context, subject string) error

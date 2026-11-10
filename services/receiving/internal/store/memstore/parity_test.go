@@ -606,6 +606,96 @@ var cases = []struct {
 			t.Fatalf("other tenant err=%v, want ErrGrirNotFound", err)
 		}
 	}},
+	{"list invoices filters by receipt, purchase order, vendor and status, pages by keyset and respects legal entity scope", func(t *testing.T, b backend) {
+		p := principal(1)
+		postedReceipt := func(slip, po string) store.Receipt {
+			in := arrival(p, slip)
+			in.PurchaseOrderID = po
+			created, err := b.st.CreateArrival(ctxOf(p), in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = b.st.Register(ctxOf(p), created.ID, registerWith(slip+"-1", slip+"-2", slip+"-3")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = b.st.Post(ctxOf(p), created.ID, postWith(t, p, "entry-"+slip)); err != nil {
+				t.Fatal(err)
+			}
+			return created
+		}
+		r1, r2 := postedReceipt("PS-1", poID), postedReceipt("PS-2", otherPOID)
+		invoiceOn := func(number string, r store.Receipt, blocked bool) store.Invoice {
+			in := store.Invoice{
+				ID: ids.New(), LegalEntityID: p.LegalEntityID, VendorID: vendorID, InvoiceNumber: number, InvoiceDate: day(3, 2), PostingDate: day(3, 2),
+				Currency: "USD", LedgerID: locationA, FiscalPeriodID: locationA,
+				Lines: []store.InvoiceLine{{ReceiptID: r.ID, ReceiptLineNo: 1, Qty: decimal.NewFromInt(1), UnitPrice: decimal.RequireFromString("2.5"), Amount: decimal.RequireFromString("2.5")}},
+			}
+			posted, err := b.st.PostInvoice(ctxOf(p), in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
+				items[0].InvoicedQty = items[0].InvoicedQty.Add(decimal.NewFromInt(1))
+				items[0].ClearedAmount.Value = items[0].ClearedAmount.Value.Add(decimal.RequireFromString("2.5"))
+				evt, err := events.New(events.Type("payables", "invoice", "posted", 1), "/passage/receiving/receiving", r.ID, p.TenantID, map[string]string{"invoice": "x"})
+				return store.InvoiceOutcome{LedgerEntryID: "entry-" + number, Total: decimal.RequireFromString("2.5"), Blocked: blocked, Event: evt}, err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return posted
+		}
+		a := invoiceOn("INV-A", r1, false)
+		invoiceOn("INV-C", r2, false)
+		invoiceOn("INV-B", r1, true)
+		list := func(ctx context.Context, f store.InvoiceFilter) []store.Invoice {
+			got, err := b.st.ListInvoices(ctx, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		numbers := func(got []store.Invoice) string {
+			var out []string
+			for _, inv := range got {
+				out = append(out, inv.InvoiceNumber)
+			}
+			return strings.Join(out, ",")
+		}
+		if got := numbers(list(ctxOf(p), store.InvoiceFilter{})); got != "INV-B,INV-C,INV-A" {
+			t.Fatalf("all=%s, want newest first", got)
+		}
+		if got := list(ctxOf(p), store.InvoiceFilter{ReceiptID: r1.ID}); numbers(got) != "INV-B,INV-A" || len(got[1].Lines) != 1 || got[1].LedgerEntryID != a.LedgerEntryID {
+			t.Fatalf("by receipt=%+v", got)
+		}
+		if got := numbers(list(ctxOf(p), store.InvoiceFilter{PurchaseOrderID: otherPOID})); got != "INV-C" {
+			t.Fatalf("by purchase order=%s", got)
+		}
+		if got := numbers(list(ctxOf(p), store.InvoiceFilter{Status: domain.InvoiceStatusAuditBlocked})); got != "INV-B" {
+			t.Fatalf("by status=%s", got)
+		}
+		if got := list(ctxOf(p), store.InvoiceFilter{VendorID: otherVendorID}); len(got) != 0 {
+			t.Fatalf("other vendor=%+v", got)
+		}
+		page1 := list(ctxOf(p), store.InvoiceFilter{Limit: 2})
+		if len(page1) != 3 {
+			t.Fatalf("page1 len=%d, want limit+1 rows", len(page1))
+		}
+		if page2 := list(ctxOf(p), store.InvoiceFilter{Limit: 2, CursorCreatedAt: page1[1].CreatedAt, CursorID: page1[1].ID}); numbers(page2) != "INV-A" {
+			t.Fatalf("page2=%s", numbers(page2))
+		}
+		eight := tenant.Principal{TenantID: p.TenantID, LegalEntityID: testkit.TenantID(8)}
+		if got := list(ctxOf(eight), store.InvoiceFilter{}); len(got) != 0 {
+			t.Fatalf("other legal entity sees %d invoices", len(got))
+		}
+		if got := list(ctxOf(eight), store.InvoiceFilter{PurchaseOrderID: poID}); len(got) != 0 {
+			t.Fatalf("other legal entity sees %d invoices by purchase order", len(got))
+		}
+		for _, inv := range page1[:2] {
+			if len(inv.Lines) != 1 {
+				t.Fatalf("invoice %s on the page has %d lines, want 1", inv.InvoiceNumber, len(inv.Lines))
+			}
+		}
+		if got := list(ctxOf(principal(2)), store.InvoiceFilter{}); len(got) != 0 {
+			t.Fatalf("other tenant sees %d invoices", len(got))
+		}
+	}},
 	{"pending postings block other keys and changed bodies until the subject's command completes", func(t *testing.T, b backend) {
 		p := principal(1)
 		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")

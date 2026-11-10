@@ -21,6 +21,21 @@ release may change public APIs.
 
 - Usability program (#510): persona task scripts, a baseline report template and a release usability gate in
   `apps/web/docs`, and a "Usability gate" section in the release notes template.
+- Plain-language error messages (#501): the web problem catalog now covers every error code of the party, ledger, tax and
+  product services, and the coverage test reads their Go sources so a new code without a message fails it.
+- Receiving: `GET /v1/receiving/invoices` lists vendor invoices with their lines and ledger entry id, filtered by
+  vendor, receipt, purchase order or status, keyset-paged and scoped to the caller's legal entities
+  (`receiving.ap.inquire`); `GET /v1/receiving/receipts?purchaseOrderId=` already existed and now has an API test (#502).
+- Treasury EBICS wiring (#36): subscriber onboarding routes with split duties (`treasury.ebics.write|keys|approve`; the confirmer is the authenticated user), a statement poller (`TREASURY_EBICS_POLL_WORKERS`), the `ebics` bank channel behind `TREASURY_BANK_CHANNELS`, downloads acknowledged only after import with per-statement account routing, E002 private key wiped after use with its public key stored apart, A006 over the order without CR/LF/Ctrl-Z.
+- EBICS H004 bank connectivity in treasury (#36, FR-36.12): `internal/ebics` replaces the unencrypted upload subset. A
+  subscriber moves NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY (migration 0009; bank key hashes must be confirmed by
+  a named person before any order). Keys stay in Vault: A006 (RSASSA-PSS) and X002 (PKCS#1 v1.5) sign in transit, E002 is
+  read from KV for each unwrap. Orders carry the C14N `AuthSignature`, E002 hybrid encryption (AES-128-CBC, RSA key
+  transport), zlib and segmentation; the bank's answers are verified against its X002 key. Upload CCT, CDD, CDB, CIP;
+  download C53, C52, C54, HAC, PTK, STA, VMK; C53 and STA feed the existing statement import. Return codes map to
+  back-off (bounded retries) or park (subscriber refuses orders until a person unparks it). Tested against an in-process
+  fake bank that verifies signatures, decrypts, segments and answers in H004; live bank sandbox and Vault stay with #213.
+- Mobile warehouse execution service (`services/mobile`, wave 32, #32): device sessions with idle timeout, takeover and resume, role- and site-based menus with SSE publish notice, versioned server-driven flows and step runner calling the warehouse work API (new `mobile` service grant), GS1-128/DataMatrix scan parsing, idempotent offline replay with conflict parking and a supervisor resolve queue, chart, migrations with forced RLS, authz routes, OpenAPI and AsyncAPI.
 - Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
   seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
   `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web

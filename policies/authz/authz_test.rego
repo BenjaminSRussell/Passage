@@ -138,6 +138,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/consignment-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/ers-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
@@ -1423,6 +1424,23 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
 }
 
+test_treasury_ebics_duties_split_ceremony_from_confirmation if {
+	allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers")
+	not allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-hia")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:fetch-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1/letters/INI")
+	not allowed("treasury.view", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+}
+
 test_payroll_run_duties_split_maintain_finalize_post_and_read if {
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs")
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/review")
@@ -1749,6 +1767,27 @@ test_sales_credit_exposure if {
 test_production_order_end_check if {
 	allowed("production.order.read", "GET", "/v1/production/orders/o-1/end-check")
 	not allowed("production.order.read", "POST", "/v1/production/orders/o-1/end-check")
+}
+
+test_mobile_service_routes if {
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1:heartbeat")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1/runs/current/steps/scan_item:submit")
+	allowed("warehouse.work.execute", "GET", "/v1/mobile/menus/default")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/offline:replay")
+	not allowed("warehouse.work.execute", "GET", "/v1/mobile/sessions")
+	not allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1:force-signout")
+	not allowed("warehouse.work.execute", "POST", "/v1/mobile/flows")
+	allowed("warehouse.work.supervise", "GET", "/v1/mobile/sessions")
+	allowed("warehouse.work.supervise", "POST", "/v1/mobile/sessions/s-1:force-signout")
+	not allowed("warehouse.work.supervise", "POST", "/v1/mobile/offline:replay")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/flows/f-1:publish")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/flows:install-core")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/menus")
+	not allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
+	allowed("warehouse.offline-conflict.resolve", "GET", "/v1/mobile/offline/conflicts")
+	allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
+	not allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/flows")
 }
 
 # Issue #495: the dev seed (deploy/local/seed.json) holds an admin and a clerk; admin routes are the admin's alone.
