@@ -13,7 +13,25 @@ resources:
 serviceMonitor: { enabled: false, interval: 30s }
 # Outbound 856 and 810 are read from their owning services under a signed service grant.
 serviceIdentity: { signingKeySecret: "", keyId: "" }
-sources: { fulfillmentUrl: "", billingUrl: "", salesUrl: "" }
+sources: { fulfillmentUrl: "", billingUrl: "", salesUrl: "", purchasingUrl: "" }
+# The outbound consumer (#35, 35-1, args [consume]): sends the 856, DESADV, 810 or INVOIC of fulfillment's asn.issued and billing's
+# invoice.posted to the partners with auto-outbound sets. It exits at start unless service:edi-outbound is seeded in the service
+# principal table, and needs serviceIdentity and the three source URLs like the API. Off by default, like the other consumers, until
+# it is turned on per environment (the source services' outbox connectors create the topics). Its KafkaUser, ACLs and dead-letter
+# topic are deploy/kafka/edi-consumer.yaml. The purchasing chart must also list edi's public key (serviceIdentity.publicKeys) for
+# punchout requisitions.
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: edi-outbound
+    username: edi-consumer
+    dlqTopic: passage.edi.outbound.dlq
+    secret: ""
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
 # Serves POST /partners/{id}/outbound with the document in the request body (the web Send EDI document screen and 855).
 allowBodyOutbound: true
 # Partner transports (#483). Secret material never goes to the database: a partner's transport names files in the
