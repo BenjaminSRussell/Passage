@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Textarea, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, Textarea, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, etagOf, HOLD_TYPES, listHolds, rejectHold, releaseHold, type HoldQueueFilter, type HoldQueueItem, type HoldType, type Problem } from "./api/client";
-import { dash, formatDateTime, money, sentence, shortId, UUID } from "./format";
+import { dash, formatDateTime, money, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const COMMENT_MAX = 500;
 
@@ -118,7 +120,7 @@ export function HoldQueuePage() {
 
   const columns: DataTableColumn<HoldQueueItem>[] = [
     { key: "orderNumber", header: "Order", mono: true, render: (h) => <Link to={`/sales/orders/${h.orderId}`}>{h.orderNumber}</Link> },
-    { key: "customerId", header: "Customer", mono: true, render: (h) => shortId(h.customerId) },
+    { key: "customerId", header: "Customer", render: (h) => <EntityName entity="customer" id={h.customerId} /> },
     { key: "holdType", header: "Hold", render: (h) => <Badge tone={h.holdType === "CREDIT" || h.holdType === "FRAUD" ? "danger" : "warning"}>{sentence(h.holdType)}</Badge> },
     { key: "amount", header: "Amount", align: "end", render: (h) => money(h.amount, h.currency) },
     { key: "rule", header: "Rule failed", render: ruleText },
@@ -175,7 +177,7 @@ export function HoldQueuePage() {
         }}
       >
         <FormField id="queue-le" label="Legal entity" error={invalid} optional>
-          {(control) => <Input {...control} className={styles.mono} value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid)} />}
+          {(control) => <EntityLookup entity="legalEntity" {...control} prefill={false} placeholder="All legal entities" value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid)} />}
         </FormField>
         <FormField id="queue-type" label="Hold type">
           {(control) => (

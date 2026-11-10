@@ -17,6 +17,9 @@ import {
 import { coProductTypeLabel, flushingLabel, reworkRefLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
+import { ResourceSelect } from "../mfg-shared/resources";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimalPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -108,7 +111,7 @@ export const initialValues = (): OrderValues => ({
   minimumQty: "",
   maximumQty: "",
   multiple: "",
-  lines: [emptyLine(1)],
+  lines: [],
   operations: [emptyOperation(1)],
   coProducts: [],
   rework: false,
@@ -122,9 +125,10 @@ const optionalDecimal = (v: string) => v === "" || decimalPattern.test(v);
 /** Client-side checks that mirror the service's validation, keyed like the form fields. */
 export function validateOrder(values: OrderValues): OrderErrors {
   const errors: OrderErrors = {};
+  const choose: Record<"productId" | "siteId" | "warehouseId", string> = { productId: "Choose a product.", siteId: "Choose a site.", warehouseId: "Choose a warehouse." };
   for (const key of ["productId", "siteId", "warehouseId"] as const) {
     if (!uuidPattern.test(values[key].trim())) {
-      errors[key] = "Enter the record's id (a UUID).";
+      errors[key] = choose[key];
     }
   }
   if (!currencyPattern.test(values.currency)) {
@@ -132,7 +136,7 @@ export function validateOrder(values: OrderValues): OrderErrors {
   }
   const releasedProductId = values.releasedProductId.trim();
   if (releasedProductId !== "" && !uuidPattern.test(releasedProductId)) {
-    errors.releasedProductId = "Enter the released product's id (a UUID), or leave it empty.";
+    errors.releasedProductId = "Choose the released product, or leave it empty.";
   }
   // With a released product the standard quantity fills an empty quantity (FR-21.1).
   if (!positive(values.quantity) && !(releasedProductId !== "" && values.quantity === "")) {
@@ -158,7 +162,7 @@ export function validateOrder(values: OrderValues): OrderErrors {
     }
     seen.add(line.lineNo.trim());
     if (!uuidPattern.test(line.itemId.trim())) {
-      errors[`lines.${i}.itemId`] = "Enter the item id (a UUID).";
+      errors[`lines.${i}.itemId`] = "Choose an item.";
     }
     if (!positive(line.qtyPer)) {
       errors[`lines.${i}.qtyPer`] = "Enter a positive quantity.";
@@ -194,7 +198,7 @@ export function validateOrder(values: OrderValues): OrderErrors {
     }
     seenCo.add(co.lineNo.trim());
     if (!uuidPattern.test(co.itemId.trim())) {
-      errors[`coProducts.${i}.itemId`] = "Enter the item id (a UUID).";
+      errors[`coProducts.${i}.itemId`] = "Choose an item.";
     } else if (co.itemId.trim() === values.productId.trim()) {
       errors[`coProducts.${i}.itemId`] = "A co-product cannot be the order's own product.";
     }
@@ -212,7 +216,7 @@ export function validateOrder(values: OrderValues): OrderErrors {
     }
     previous = Number.isNaN(n) ? previous : n;
     if (!uuidPattern.test(op.resourceId.trim())) {
-      errors[`operations.${i}.resourceId`] = "Enter the resource id (a UUID).";
+      errors[`operations.${i}.resourceId`] = "Choose a resource.";
     }
     for (const key of ["setupTimeH", "runTimeHPer", "laborRate", "overheadRate", "queueBeforeH", "queueAfterH", "transitH"] as const) {
       if (!optionalDecimal(op[key] ?? "")) {
@@ -363,6 +367,24 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
     </FormField>
   );
 
+  const lookup = (
+    id: string,
+    label: string,
+    entity: LookupEntityKey,
+    value: string,
+    onChange: (v: string) => void,
+    extra: { optional?: boolean; hint?: string; readOnly?: boolean; scope?: { siteId?: string; legalEntityId?: string } } = {},
+  ) => (
+    <FormField id={id} label={label} error={errors[id.replace(/^po-/, "").replace(/-/g, ".")]} optional={extra.optional} hint={extra.hint}>
+      {(control) => <EntityLookup {...control} entity={entity} scope={extra.scope} readOnly={extra.readOnly} prefill={!extra.readOnly} value={value} onChange={(e) => onChange(e.target.value)} />}
+    </FormField>
+  );
+  const resource = (id: string, value: string, onChange: (v: string) => void) => (
+    <FormField id={id} label="Resource" error={errors[id.replace(/^po-/, "").replace(/-/g, ".")]}>
+      {(control) => <ResourceSelect {...control} value={value} onChange={onChange} />}
+    </FormField>
+  );
+
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -432,12 +454,13 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
 
         <Card title="Order">
           <div className={styles.fields}>
-            {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "The id of the released product.", readOnly: !!intake })}
+            {lookup("po-productId", "Product", "product", values.productId, (v) => set({ productId: v }), { readOnly: !!intake })}
             {text("po-quantity", "Quantity", values.quantity, (v) => set({ quantity: v }), { inputMode: "decimal", readOnly: !!intake })}
             {text("po-currency", "Currency", values.currency, (v) => set({ currency: v.toUpperCase() }))}
             {text("po-deliveryDate", "Delivery date", values.deliveryDate, (v) => set({ deliveryDate: v }), { optional: true, type: "date", readOnly: !!intake })}
-            {text("po-siteId", "Site", values.siteId, (v) => set({ siteId: v }), { readOnly: !!intake })}
-            {text("po-warehouseId", "Warehouse", values.warehouseId, (v) => set({ warehouseId: v }), {
+            {lookup("po-siteId", "Site", "site", values.siteId, (v) => set({ siteId: v, warehouseId: "" }), { readOnly: !!intake })}
+            {lookup("po-warehouseId", "Warehouse", "warehouse", values.warehouseId, (v) => set({ warehouseId: v }), {
+              scope: { siteId: values.siteId || undefined },
               readOnly: !!intake?.warehouseId,
               hint: intake?.warehouseId ? "The warehouse planning firmed the order for." : undefined,
             })}
@@ -454,7 +477,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
           <div className={styles.fields}>
             {intake
               ? null
-              : text("po-releasedProductId", "Released product", values.releasedProductId, (v) => set({ releasedProductId: v }), {
+              : lookup("po-releasedProductId", "Released product", "product", values.releasedProductId, (v) => set({ releasedProductId: v }), {
                   optional: true,
                   hint: "Leave the quantity empty to use the product's standard quantity.",
                 })}
@@ -478,7 +501,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
               <fieldset key={i} className={styles.row}>
                 <legend className={styles.legend}>Component {i + 1}</legend>
                 {text(`po-lines-${i}-lineNo`, "Line", line.lineNo, (v) => setLine(i, { lineNo: v }))}
-                {text(`po-lines-${i}-itemId`, "Item", line.itemId, (v) => setLine(i, { itemId: v }))}
+                {lookup(`po-lines-${i}-itemId`, "Item", "product", line.itemId, (v) => setLine(i, { itemId: v }))}
                 {text(`po-lines-${i}-qtyPer`, "Quantity per unit", line.qtyPer, (v) => setLine(i, { qtyPer: v }), { inputMode: "decimal" })}
                 {text(`po-lines-${i}-scrapPct`, "Scrap %", line.scrapPct, (v) => setLine(i, { scrapPct: v }), { optional: true, inputMode: "decimal" })}
                 {text(`po-lines-${i}-unitCost`, "Unit cost", line.unitCost, (v) => setLine(i, { unitCost: v }), { optional: true, inputMode: "decimal" })}
@@ -527,7 +550,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
                       </Select>
                     )}
                   </FormField>
-                  {text(`po-coProducts-${i}-itemId`, "Item", co.itemId, (v) => setCoProduct(i, { itemId: v }))}
+                  {lookup(`po-coProducts-${i}-itemId`, "Item", "product", co.itemId, (v) => setCoProduct(i, { itemId: v }))}
                   {text(`po-coProducts-${i}-qtyPer`, "Quantity per unit", co.qtyPer, (v) => setCoProduct(i, { qtyPer: v }), { inputMode: "decimal" })}
                   <Button variant="ghost" size="sm" onClick={() => set({ coProducts: values.coProducts.filter((_, j) => j !== i) })}>
                     Remove co-product {i + 1}
@@ -556,7 +579,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel, initial, intake
               <fieldset key={i} className={styles.row}>
                 <legend className={styles.legend}>Operation {i + 1}</legend>
                 {text(`po-operations-${i}-operNumber`, "Operation", op.operNumber, (v) => setOperation(i, { operNumber: v }), { inputMode: "numeric" })}
-                {text(`po-operations-${i}-resourceId`, "Resource", op.resourceId, (v) => setOperation(i, { resourceId: v }))}
+                {resource(`po-operations-${i}-resourceId`, op.resourceId, (v) => setOperation(i, { resourceId: v }))}
                 {text(`po-operations-${i}-setupTimeH`, "Setup hours", op.setupTimeH, (v) => setOperation(i, { setupTimeH: v }), { optional: true, inputMode: "decimal" })}
                 {text(`po-operations-${i}-runTimeHPer`, "Run hours per unit", op.runTimeHPer, (v) => setOperation(i, { runTimeHPer: v }), { optional: true, inputMode: "decimal" })}
                 {text(`po-operations-${i}-laborRate`, "Labor rate", op.laborRate, (v) => setOperation(i, { laborRate: v }), { optional: true, inputMode: "decimal" })}

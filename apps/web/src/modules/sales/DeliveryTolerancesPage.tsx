@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -26,6 +26,7 @@ import { DECIMAL, PERCENT, dash, formatDateTime, sentence, shortId, UUID } from 
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** Changing a delivery tolerance needs this duty (enforced by the service; the route rows are seeded under #313). */
 export const DUTY_DELIVERY_TOLERANCE_MAINTAIN = "sales.parameter.maintain";
@@ -110,11 +111,11 @@ function FigureFields({ values, errors, readOnly, onChange }: FigureFieldsProps)
 
 const columns: DataTableColumn<DeliveryTolerance>[] = [
   { key: "productId", header: "Product", mono: true, render: (t) => <Link to={`/sales/delivery-tolerances/${t.id}`}>{shortId(t.productId)}</Link> },
-  { key: "customerId", header: "Customer", mono: true, render: (t) => (t.customerId ? shortId(t.customerId) : "Every customer") },
+  { key: "customerId", header: "Customer", render: (t) => (t.customerId ? <EntityName entity="customer" id={t.customerId} /> : "Every customer") },
   { key: "overdeliveryPct", header: "Over", align: "end", render: (t) => percentText(t.overdeliveryPct) },
   { key: "underdeliveryPct", header: "Under", align: "end", render: (t) => percentText(t.underdeliveryPct) },
   { key: "partialDelivery", header: "Partial delivery", render: (t) => sentence(t.partialDelivery) },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (t) => shortId(t.legalEntityId) },
+  { key: "legalEntityId", header: "Legal entity", render: (t) => <EntityName entity="legalEntity" id={t.legalEntityId} /> },
   { key: "updatedAt", header: "Changed", render: (t) => formatDateTime(t.updatedAt) },
 ];
 
@@ -421,21 +422,20 @@ export function DeliveryToleranceDetailPage() {
     }
   }
 
-  const facts: [string, string][] = [
-    ["Product", rule.productId],
-    ["Customer", rule.customerId ?? "Every customer"],
-    ["Legal entity", rule.legalEntityId],
+  const facts: [string, ReactNode][] = [
+    ["Product", <EntityName entity="product" id={rule.productId} />],
+    ["Customer", rule.customerId ? <EntityName entity="customer" id={rule.customerId} /> : "Every customer"],
+    ["Legal entity", <EntityName entity="legalEntity" id={rule.legalEntityId} />],
     ["Over-delivery", percentText(rule.overdeliveryPct)],
     ["Under-delivery", percentText(rule.underdeliveryPct)],
     ["Partial delivery", sentence(rule.partialDelivery)],
     ["Changed", `${formatDateTime(rule.updatedAt)} by ${rule.updatedBy}`],
   ];
-  const mono = new Set(["Product", "Legal entity"]);
 
   return (
     <div className={styles.stack}>
       <PageHeader
-        title={`Delivery tolerance of product ${shortId(rule.productId)}`}
+        title="Delivery tolerance"
         description={rule.customerId ? undefined : "This rule applies to every customer without a rule of their own."}
         actions={
           <Link className={buttonClassName("ghost")} to="/sales/delivery-tolerances">
@@ -448,7 +448,7 @@ export function DeliveryToleranceDetailPage() {
           {facts.map(([term, value]) => (
             <div key={term} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={mono.has(term) || (term === "Customer" && rule.customerId) ? `${styles.value} ${styles.mono}` : styles.value}>{value === "" ? dash : value}</dd>
+              <dd className={styles.value}>{value === "" ? dash : value}</dd>
             </div>
           ))}
         </dl>

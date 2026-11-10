@@ -24,6 +24,7 @@ export type InboxItem = z.infer<typeof inboxItem>;
 export type InboxPage = z.infer<typeof inboxPage>;
 
 export const INBOX_DUTY = "inbox.read";
+export const MY_WORK_PATH = "/workflow/inbox";
 export const INBOX_PAGE_SIZE = 50;
 
 const sourceNames: Record<string, string> = {

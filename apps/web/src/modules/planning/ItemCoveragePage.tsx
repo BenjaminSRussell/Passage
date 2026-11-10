@@ -31,6 +31,8 @@ import { describeError, useLoad, type LoadError } from "./hooks";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const LIST = "/planning/item-coverages";
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -213,8 +215,8 @@ function scopeText(c: ItemCoverage): string {
 }
 
 const columns: DataTableColumn<ItemCoverage>[] = [
-  { key: "itemId", header: "Item", mono: true },
-  { key: "siteId", header: "Site", mono: true },
+  { key: "itemId", header: "Item", render: (r) => <EntityName entity="product" id={r.itemId} fallback={r.itemId} /> },
+  { key: "siteId", header: "Site", render: (r) => <EntityName entity="site" id={r.siteId} fallback={r.siteId} /> },
   { key: "scope", header: "Scope", render: scopeText },
   { key: "group", header: "Coverage group", mono: true, render: (c) => c.coverageGroupCode },
   { key: "min", header: "Min", align: "end", render: (c) => trimQty(c.minQty) },
@@ -394,10 +396,10 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
         ) : null}
       </div>
       <FormField id="ic-item" label="Item" error={errors.itemId}>
-        {(a11y) => <Input {...a11y} className={styles.mono} value={draft.itemId} onChange={(e) => set("itemId", e.target.value)} />}
+        {(a11y) => <EntityLookup {...a11y} entity="product" value={draft.itemId} onChange={(e) => set("itemId", e.target.value)} />}
       </FormField>
       <FormField id="ic-site" label="Site" error={errors.siteId}>
-        {(a11y) => <Input {...a11y} className={styles.mono} value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
+        {(a11y) => <EntityLookup {...a11y} entity="site" value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
       </FormField>
       <FormField id="ic-group" label="Coverage group" error={errors.coverageGroupId}>
         {(a11y) => (
@@ -432,7 +434,7 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
       </FormField>
       {draft.planningScope === "warehouse" ? (
         <FormField id="ic-warehouse" label="Warehouse" error={errors.warehouseId}>
-          {(a11y) => <Input {...a11y} className={styles.mono} value={draft.warehouseId} onChange={(e) => set("warehouseId", e.target.value)} />}
+          {(a11y) => <EntityLookup {...a11y} entity="warehouse" value={draft.warehouseId} onChange={(e) => set("warehouseId", e.target.value)} />}
         </FormField>
       ) : null}
       <FormField
@@ -441,7 +443,7 @@ function ItemCoverageForm({ coverage, onSaved, onReload }: FormProps) {
         optional={draft.planningScope !== "subcontractor"}
         error={errors.vendorId}
       >
-        {(a11y) => <Input {...a11y} className={styles.mono} value={draft.vendorId} onChange={(e) => set("vendorId", e.target.value)} />}
+        {(a11y) => <EntityLookup {...a11y} entity="vendor" value={draft.vendorId} onChange={(e) => set("vendorId", e.target.value)} />}
       </FormField>
       <FormField id="ic-orderType" label="Planned order type" error={errors.plannedOrderType}>
         {(a11y) => (

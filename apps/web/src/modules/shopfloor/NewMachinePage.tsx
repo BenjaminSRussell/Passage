@@ -5,6 +5,8 @@ import { createMachine, describeProblem, IDLE_THRESHOLD, newKey, type NewMachine
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { ResourceSelect } from "../mfg-shared/resources";
 
 interface Values {
   machineId: string;
@@ -26,8 +28,8 @@ export function validateMachine(values: Values): { errors: Errors; input?: NewMa
   const errors: Errors = {};
   const code = values.machineId.trim();
   if (code.length < 1 || code.length > 64) errors.machineId = "Enter the machine code the edge reports, up to 64 characters.";
-  if (!UUID.test(values.resourceId.trim())) errors.resourceId = "Enter the resource id (a UUID).";
-  if (values.siteId.trim() !== "" && !UUID.test(values.siteId.trim())) errors.siteId = "Enter the site id as a UUID, or leave it empty.";
+  if (!UUID.test(values.resourceId.trim())) errors.resourceId = "Choose the work center.";
+  if (values.siteId.trim() !== "" && !UUID.test(values.siteId.trim())) errors.siteId = "Choose a site, or leave it empty.";
   const cycle = values.idealCycleSeconds.trim();
   if (!CYCLE.test(cycle) || /^0+(\.0+)?$/.test(cycle) || Number(cycle) > 86_400) {
     errors.idealCycleSeconds = "Enter seconds per unit above 0 and at most 86400, such as 60 or 1.5.";
@@ -83,15 +85,21 @@ export function NewMachinePage() {
 
   const field = (id: Field, label: string, hint?: string, optional?: boolean, extra?: Record<string, unknown>) => (
     <FormField id={`machine-${id}`} label={label} hint={hint} optional={optional} error={errors[id]}>
-      {(control) => (
-        <Input
-          {...control}
-          {...extra}
-          value={values[id] ?? ""}
-          onChange={(event) => update({ [id]: event.target.value } as Partial<Values>)}
-          invalid={Boolean(errors[id])}
-        />
-      )}
+      {(control) =>
+        id === "resourceId" ? (
+          <ResourceSelect {...control} value={values.resourceId} onChange={(v) => update({ resourceId: v })} />
+        ) : id === "siteId" ? (
+          <EntityLookup {...control} entity="site" value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} />
+        ) : (
+          <Input
+            {...control}
+            {...extra}
+            value={values[id] ?? ""}
+            onChange={(event) => update({ [id]: event.target.value } as Partial<Values>)}
+            invalid={Boolean(errors[id])}
+          />
+        )
+      }
     </FormField>
   );
 
@@ -101,8 +109,8 @@ export function NewMachinePage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {field("machineId", "Machine code", "As the edge connector reports it, e.g. M-101.", false, { maxLength: 64 })}
-          {field("resourceId", "Resource id", "The work center resource this machine runs.")}
-          {field("siteId", "Site id", "Andon alerts can be filtered by site.", true)}
+          {field("resourceId", "Work center", "The work center resource this machine runs.")}
+          {field("siteId", "Site", "Andon alerts can be filtered by site.", true)}
           {field("idealCycleSeconds", "Ideal cycle time (seconds)", "Seconds per unit at rated speed; sets OEE performance.", false, { inputMode: "decimal" })}
           {field(
             "idleThresholdSeconds",

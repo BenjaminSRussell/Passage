@@ -317,7 +317,7 @@ describe("Journals on the order detail", () => {
     await userEvent.click(screen.getByRole("button", { name: "Delete draft" }));
     await userEvent.click(screen.getByRole("button", { name: "Yes, delete the draft" }));
     expect(await screen.findByText("Draft PJ-000001 deleted.")).toBeInTheDocument();
-    expect(posts(fetchMock)[0]).toEqual([`/api/v1/production/journals/${journalId}`, { method: "DELETE" }]);
+    expect(posts(fetchMock)[0]).toEqual([`/api/v1/production/journals/${journalId}`, expect.objectContaining({ method: "DELETE" })]);
     expect(await screen.findByRole("heading", { name: "No journals yet" })).toBeInTheDocument();
   });
 

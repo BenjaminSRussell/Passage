@@ -1,11 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listOrders, type Order, type OrderStatus } from "./api/client";
 import { formatDateTime, ORDER_STATUSES, qty, shortId, STATUS_LABELS, TRIGGER_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { SourceDocument } from "../mfg-shared/orders";
 
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
   const s = STATUS_LABELS[status] ?? { label: status, tone: "neutral" as const };
@@ -15,7 +18,8 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
 const columns: DataTableColumn<Order>[] = [
   { key: "id", header: "Order", mono: true, render: (row) => <Link to={`/quality/orders/${row.id}`}>{`Open order ${shortId(row.id)}`}</Link> },
   { key: "trigger", header: "Trigger", render: (row) => TRIGGER_LABELS[row.trigger] ?? row.trigger },
-  { key: "itemId", header: "Item", mono: true, render: (row) => shortId(row.itemId) },
+  { key: "itemId", header: "Item", render: (row) => <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> },
+  { key: "source", header: "Source", render: (row) => <SourceDocument type={row.sourceRef.type} id={row.sourceRef.id} /> },
   { key: "lotQty", header: "Lot", align: "end", mono: true, render: (row) => `${qty(row.lotQty)} ${row.uom}` },
   { key: "sampleQty", header: "Sample", align: "end", mono: true, render: (row) => qty(row.sampleQty) },
   { key: "acceptNo", header: "Ac / Re", align: "end", render: (row) => `${row.acceptNo} / ${row.rejectNo}` },
@@ -43,7 +47,7 @@ export function OrdersPage() {
     event.preventDefault();
     const value = siteDraft.trim();
     if (value !== "" && !UUID.test(value)) {
-      setSiteError("Enter the site id (a UUID), or leave it empty for every site.");
+      setSiteError("Choose a site, or leave it empty for every site.");
       return;
     }
     setSiteError(null);
@@ -77,8 +81,8 @@ export function OrdersPage() {
           )}
         </FormField>
         <form className={styles.toolbar} onSubmit={applySite} noValidate>
-          <FormField id="orders-site" label="Site" hint="Site id; empty shows every site." error={siteError ?? undefined}>
-            {(control) => <Input {...control} value={siteDraft} invalid={Boolean(siteError)} onChange={(event) => setSiteDraft(event.target.value)} />}
+          <FormField id="orders-site" label="Site" hint="Empty shows every site." error={siteError ?? undefined}>
+            {(control) => <EntityLookup {...control} entity="site" prefill={false} value={siteDraft} invalid={Boolean(siteError)} onChange={(event) => setSiteDraft(event.target.value)} />}
           </FormField>
           <Button type="submit">Show orders</Button>
         </form>

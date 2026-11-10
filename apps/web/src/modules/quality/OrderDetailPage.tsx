@@ -11,6 +11,8 @@ import { SamplesPanel } from "./SamplesPage";
 import { UsageDecisionForm } from "./UsageDecisionForm";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { SourceDocument } from "../mfg-shared/orders";
 
 interface Detail {
   order: OrderView;
@@ -71,7 +73,11 @@ export function OrderDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title={`Quality order ${shortId(order.id)}`}
-        description={`${TRIGGER_LABELS[order.trigger] ?? order.trigger}, ${order.sourceRef.type} ${shortId(order.sourceRef.id)}`}
+        description={
+          <>
+            {TRIGGER_LABELS[order.trigger] ?? order.trigger}, {order.sourceRef.type} <SourceDocument type={order.sourceRef.type} id={order.sourceRef.id} />
+          </>
+        }
         meta={<OrderStatusBadge status={order.status} />}
         actions={
           <Link className={buttonClassName("secondary")} to="/quality/orders">
@@ -100,11 +106,15 @@ export function OrderDetailPage() {
         <dl className={styles.details}>
           <div className={styles.entry}>
             <dt className={styles.term}>Item</dt>
-            <dd className={`${styles.value} ${styles.mono}`}>{order.itemId}</dd>
+            <dd className={styles.value}><EntityName entity="product" id={order.itemId} fallback={order.itemId} /></dd>
           </div>
           <div className={styles.entry}>
             <dt className={styles.term}>Site / warehouse</dt>
-            <dd className={`${styles.value} ${styles.mono}`}>{`${shortId(order.siteId)} / ${shortId(order.warehouseId)}`}</dd>
+            <dd className={styles.value}>
+              <EntityName entity="site" id={order.siteId} fallback={order.siteId} />
+              {" / "}
+              <EntityName entity="warehouse" id={order.warehouseId} fallback={order.warehouseId} />
+            </dd>
           </div>
           <div className={styles.entry}>
             <dt className={styles.term}>Batch</dt>

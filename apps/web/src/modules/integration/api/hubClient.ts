@@ -3,6 +3,7 @@
 // Credentials are write-only: this client sends them on create and never reads them back.
 
 import { EdiApiError, newKey } from "./client";
+import { apiFetch } from "../../../shell/api/http";
 
 export { newKey };
 
@@ -167,7 +168,7 @@ async function toError(res: Response): Promise<EdiApiError> {
 async function hub<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  const res = await fetch(`${hubBase}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${hubBase}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return (res.status === 204 ? null : await res.json()) as T;
 }

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Typed client for services/payroll (contract: services/payroll/api/openapi.yaml).
 // The browser calls /api/v1/...; the BFF rewrites the path and attaches the session.
 
@@ -80,7 +81,7 @@ export class PayrollProblem extends Error {
 
 export async function calculatePayroll(
   body: CalculationRequest,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = apiFetch,
 ): Promise<Statement> {
   const res = await fetchImpl("/api/v1/payroll/calculations", {
     method: "POST",

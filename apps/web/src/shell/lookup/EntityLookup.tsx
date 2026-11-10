@@ -55,6 +55,11 @@ type Phase = "idle" | "loading" | "error";
 
 const NOTHING_ACTIVE = -1;
 
+/** English plural of a lookup noun ("legal entity" → "legal entities", "warehouse" → "warehouses"). */
+export function plural(noun: string): string {
+  return /[^aeiou]y$/.test(noun) ? `${noun.slice(0, -1)}ies` : `${noun}s`;
+}
+
 export function EntityLookup({
   entity,
   id,
@@ -235,7 +240,7 @@ export function EntityLookup({
       ? "Searching…"
       : phase === "error"
         ? denied
-          ? `You can't search ${def.noun}s. Paste its id instead.`
+          ? `You can't search ${plural(def.noun)}. Paste its id instead.`
           : `Could not load ${def.noun} matches. Keep typing to try again, or paste its id.`
         : listed.length === 0
           ? `No ${def.noun} found.`
@@ -268,7 +273,7 @@ export function EntityLookup({
           invalid={invalid}
           disabled={disabled}
           readOnly={readOnly}
-          placeholder={placeholder ?? `Search ${def.noun}s by name or number`}
+          placeholder={placeholder ?? `Search ${plural(def.noun)} by name or number`}
           value={typed ?? label}
           onFocus={readOnly ? undefined : openList}
           onChange={(e) => {

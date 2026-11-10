@@ -68,6 +68,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -92,7 +93,7 @@ const listColumns: ListColumn<PurchaseOrderSummary>[] = [
     key: "vendorId",
     header: "Vendor",
     sortable: false,
-    render: (row) => <ShortId id={row.vendorId} />,
+    render: (row) => <Named entity="vendor" id={row.vendorId} />,
     csv: (row) => entityText("vendor", row.vendorId),
   },
   { key: "lineCount", header: "Lines", align: "end" },
@@ -784,8 +785,8 @@ function EditForm({ po }: { po: PurchaseOrder }) {
       <Card title="Order">
         <Details
           items={[
-            { label: "Vendor", value: po.vendorId, mono: true },
-            { label: "Legal entity", value: po.legalEntityId, mono: true },
+            { label: "Vendor", value: <Named entity="vendor" id={po.vendorId} /> },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={po.legalEntityId} /> },
             { label: "Currency", value: po.currency, mono: true },
             { label: "Status", value: <StatusBadge status={po.approvalStatus} /> },
           ]}
@@ -962,7 +963,7 @@ const lineColumns = (
   plan?: { poId: string; byLine: Map<number, InvoicingPlan>; schedules: Map<number, DeliverySchedule>; services: Map<number, ServiceSpec>; closed: boolean },
 ): DataTableColumn<PurchaseOrderLine>[] => [
   { key: "lineNo", header: "Line", align: "end" },
-  { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+  { key: "item", header: "Item", render: (l) => l.description || <Named entity="product" id={l.productId} /> },
   { key: "category", header: "Category", render: (l) => l.category || "—" },
   { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
   { key: "receivedQty", header: "Received", align: "end", render: (l) => l.receivedQty ?? "0" },
@@ -972,7 +973,7 @@ const lineColumns = (
   { key: "lineAmount", header: "Net amount", align: "end", render: (l) => money(l.lineAmount, currency) },
   { key: "taxAmount", header: "Tax", align: "end", render: (l) => money(l.taxAmount, currency) },
   { key: "deliveryDate", header: "Delivery", mono: true },
-  { key: "warehouseId", header: "Deliver to", render: (l) => <ShortId id={l.warehouseId} /> },
+  { key: "warehouseId", header: "Deliver to", render: (l) => <Named entity="warehouse" id={l.warehouseId} /> },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
   ...(plan
     ? [
@@ -1254,8 +1255,8 @@ export function PurchaseOrderDetailPage() {
       <Card title="Summary">
         <Details
           items={[
-            { label: "Vendor", value: po.vendorId, mono: true },
-            { label: "Legal entity", value: po.legalEntityId, mono: true },
+            { label: "Vendor", value: <Named entity="vendor" id={po.vendorId} /> },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={po.legalEntityId} /> },
             { label: "Document status", value: statusLabel(po.documentStatus) },
             { label: "Confirmed version", value: String(po.versionNo), mono: true },
             { label: "Change management", value: po.changeManagement ? "On" : "Off" },

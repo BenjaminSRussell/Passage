@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the HR service (services/hr/api/openapi.yaml). Browser calls use
 // /api/v1/hr/..., which the web BFF rewrites to the service.
 
@@ -175,7 +176,7 @@ export async function send<T>(path: string, init: RequestInit = {}, signal?: Abo
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }
@@ -766,7 +767,7 @@ export function setSkillRequirement(positionId: string, skillCode: string, minRa
 }
 
 export async function removeSkillRequirement(positionId: string, skillCode: string): Promise<void> {
-  const res = await fetch(`${base}/positions/${id(positionId)}/skill-requirements/${id(skillCode)}`, {
+  const res = await apiFetch(`${base}/positions/${id(positionId)}/skill-requirements/${id(skillCode)}`, {
     method: "DELETE",
     headers: { Accept: "application/json" },
     credentials: "same-origin",
@@ -819,7 +820,7 @@ export function setJobSkillRequirement(jobId: string, skillCode: string, minRati
 }
 
 export async function removeJobSkillRequirement(jobId: string, skillCode: string): Promise<void> {
-  const res = await fetch(`${base}/jobs/${id(jobId)}/skill-requirements/${id(skillCode)}`, {
+  const res = await apiFetch(`${base}/jobs/${id(jobId)}/skill-requirements/${id(skillCode)}`, {
     method: "DELETE",
     headers: { Accept: "application/json" },
     credentials: "same-origin",

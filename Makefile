@@ -3,7 +3,7 @@ GO_MODULES := $(shell find platform/go services tools/rlscheck tools/tenant-rest
 TS_PACKAGES := $(shell find apps services -maxdepth 2 -name package.json -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 PY_PACKAGES := $(shell find services -maxdepth 2 -name pyproject.toml -exec dirname {} \; 2>/dev/null)
 
-.PHONY: test test-go test-ts test-py test-e2e bench-ledger vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local dev dev-down dev-render
+.PHONY: test test-go test-ts test-py test-e2e bench-ledger vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local dev dev-down dev-render e2e-local
 
 # One command for a laptop: Postgres, Kafka, Keycloak and OPA in Docker, the services, the dev gateway and the web
 # app on the host. Needs docker compose, psql, go and node (see deploy/local/README.md).
@@ -12,6 +12,11 @@ dev:
 
 dev-render:
 	cd tools/e2e && go run ./cmd/passage-dev render
+
+# The vendor -> PO -> receipt -> AP invoice -> ledger flow against the stack `make dev` is running: real Keycloak
+# tokens for the seeded users, the dev gateway, OPA and the real services. Run `make dev` in another terminal first.
+e2e-local:
+	cd tools/e2e && PASSAGE_E2E_LIVE=1 go test -count=1 -v -run TestLiveStackFlow ./
 
 dev-down:
 	PASSAGE_DEV_DIR=$(CURDIR)/.run/dev docker compose -f deploy/local/compose.yaml down

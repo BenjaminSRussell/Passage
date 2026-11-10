@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 const base = "/api/v1/engineering";
 
 export interface UsedBy {
@@ -262,7 +263,7 @@ function fieldErrors(raw: unknown): Record<string, string> {
 const NO_CONTENT = 204;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = init ? await fetch(`${base}${path}`, init) : await fetch(`${base}${path}`);
+  const res = init ? await apiFetch(`${base}${path}`, init) : await apiFetch(`${base}${path}`);
   if (!res.ok) {
     const problem: { code?: unknown; title?: unknown; detail?: unknown; errors?: unknown } = await res.json().catch(() => ({}));
     // The service puts the readable reason in detail; title is only the HTTP status text.

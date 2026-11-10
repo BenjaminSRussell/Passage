@@ -16,6 +16,7 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { PlainName } from "../sales/OrderNumber";
 
 export const ACTION_LABELS: Record<ShortPickAction, string> = {
   KEEP_OPEN: "Keep open for a re-pick",
@@ -24,7 +25,7 @@ export const ACTION_LABELS: Record<ShortPickAction, string> = {
 };
 
 const columns: DataTableColumn<WarehouseSetting>[] = [
-  { key: "warehouseId", header: "Warehouse", mono: true },
+  { key: "warehouseId", header: "Warehouse", render: (row) => <PlainName entity="warehouse" id={row.warehouseId} /> },
   { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => row.legalEntityId ?? dash },
   {
     key: "shortPickAction",

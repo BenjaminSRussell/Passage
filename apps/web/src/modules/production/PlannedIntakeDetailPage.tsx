@@ -4,6 +4,7 @@ import { describeProblem, dismissPlannedIntake, getPlannedIntake, type PlannedIn
 import { dash, intakeStatusLabel, intakeStatusTone } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 export interface PlannedIntakeDetailPageProps {
   intakeId: string;
@@ -132,20 +133,20 @@ export function PlannedIntakeDetailPage({ intakeId, onBack, onConvert, onOpenOrd
           <Detail term="Status">
             <Badge tone={intakeStatusTone[row.status]}>{intakeStatusLabel[row.status]}</Badge>
           </Detail>
-          <Detail term="Product" mono>
-            {row.productId}
+          <Detail term="Product">
+            <EntityName entity="product" id={row.productId} fallback={row.productId} />
           </Detail>
           <Detail term="Quantity">{row.quantity}</Detail>
           <Detail term="Order date">{row.orderDate}</Detail>
           <Detail term="Delivery date">{row.deliveryDate}</Detail>
-          <Detail term="Site" mono>
-            {row.siteId}
+          <Detail term="Site">
+            <EntityName entity="site" id={row.siteId} fallback={row.siteId} />
           </Detail>
-          <Detail term="Legal entity" mono>
-            {row.legalEntityId ?? "Not given by planning"}
+          <Detail term="Legal entity">
+            {row.legalEntityId ? <EntityName entity="legalEntity" id={row.legalEntityId} fallback="Not available" /> : "Not given by planning"}
           </Detail>
-          <Detail term="Warehouse" mono>
-            {row.warehouseId ?? "Site scope: enter the warehouse when converting"}
+          <Detail term="Warehouse">
+            {row.warehouseId ? <EntityName entity="warehouse" id={row.warehouseId} fallback={row.warehouseId} /> : "Site scope: enter the warehouse when converting"}
           </Detail>
           <Detail term="Planned order" mono>
             {row.plannedOrderId}

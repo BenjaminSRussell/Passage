@@ -122,7 +122,7 @@ describe("Invoice detail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Post invoice" }));
     expect(await screen.findByRole("heading", { name: "INV-2027-0000001" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Posted as INV-2027-0000001");
+    expect(screen.getByText("Posted as INV-2027-0000001", { exact: false })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Post invoice" })).not.toBeInTheDocument();
     const post = server.calls.find((c) => c.method === "POST");
     expect(new Headers(post?.init.headers).get("If-Match")).toBe('"1"');

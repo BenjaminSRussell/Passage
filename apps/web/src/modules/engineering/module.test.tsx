@@ -1,4 +1,4 @@
-import { findAlert, findStatus, findTable } from "../../test-utils";
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -238,9 +238,11 @@ describe("engineering module", () => {
     expect(opened).toEqual(["routes"]);
   });
 
+  const SPOKE = "66666666-6666-4666-8666-666666666666";
+
   it("prefills the where-used component from initialComponent", () => {
-    render(<WhereUsedPage initialComponent="SPOKE" />);
-    expect(screen.getByLabelText("Component")).toHaveValue("SPOKE");
+    render(<WhereUsedPage initialComponent={SPOKE} />);
+    expect(screen.getByLabelText("Component")).toHaveAttribute("data-value", SPOKE);
   });
 
   it("lists every parent level returned by the where-used report", async () => {
@@ -251,32 +253,32 @@ describe("engineering module", () => {
       }),
     });
     render(<WhereUsedPage />);
-    fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
+    fireEvent.change(screen.getByLabelText("Component"), { target: { value: SPOKE } });
     fireEvent.change(screen.getByLabelText("As of date"), { target: { value: "2026-03-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
     const table = await findTable({ name: "Where-used results" });
     expect(table).toHaveTextContent("WHEEL");
     expect(table).toHaveTextContent("BIKE");
-    expect(screen.getByRole("status")).toHaveTextContent("2 parents found");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/boms:where-used?component=SPOKE&asOf=2026-03-01");
+    expect(screen.getByText(/2 parents found/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/engineering/boms:where-used?component=${SPOKE}&asOf=2026-03-01`, expect.anything());
   });
 
   it("announces a failed lookup and shows no table", async () => {
     stubFetch({ ok: false });
     render(<WhereUsedPage />);
-    fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
+    fireEvent.change(screen.getByLabelText("Component"), { target: { value: SPOKE } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
     expect(await findAlert()).toHaveTextContent("Where-used lookup failed");
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByLabelText("Component")).toHaveValue("SPOKE");
+    expect(screen.getByLabelText("Component")).toHaveAttribute("data-value", SPOKE);
   });
 
   it("says so when nothing uses the component", async () => {
     stubFetch({ ok: true, json: async () => ({ items: [] }) });
     render(<WhereUsedPage />);
-    fireEvent.change(screen.getByLabelText("Component"), { target: { value: "SPOKE" } });
+    fireEvent.change(screen.getByLabelText("Component"), { target: { value: SPOKE } });
     fireEvent.click(screen.getByRole("button", { name: "Find parents" }));
-    expect(await findStatus()).toHaveTextContent("No active BOM uses this component on that date.");
+    expect(await screen.findByText("No active BOM uses this component on that date.")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
     expect(await screen.findByText("No parents found")).toBeInTheDocument();
   });

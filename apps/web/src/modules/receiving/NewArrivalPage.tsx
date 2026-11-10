@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createArrival, fetchPurchaseOrderLines, newKey, type ArrivalInput, type PurchaseOrderLine } from "./api/client";
+import { createArrival, fetchOpenPurchaseOrders, fetchPurchaseOrderLines, newKey, type ArrivalInput, type PurchaseOrderLine } from "./api/client";
 import { DECIMAL, fieldErrors, UUID } from "../../shell/api/http";
 import styles from "../../shell/pageLayout.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -57,8 +58,9 @@ export const emptyArrival: ArrivalDraft = {
 /** Client checks that mirror POST /arrivals; the service has the last word. */
 export function validateArrival(v: ArrivalDraft): Errors {
   const errors: Errors = {};
+  const chosen = { vendorId: "Choose the vendor.", purchaseOrderId: "Choose the purchase order.", legalEntityId: "Choose the legal entity." } as const;
   for (const key of ["vendorId", "purchaseOrderId", "legalEntityId"] as const) {
-    if (!UUID.test(v[key])) errors[key] = "Enter a UUID.";
+    if (!UUID.test(v[key])) errors[key] = chosen[key];
   }
   if (v.packingSlip.trim() === "" || v.packingSlip.length > 64) errors.packingSlip = "Enter a packing slip of up to 64 characters.";
   if (v.carrier.length > 128) errors.carrier = "Enter a carrier of up to 128 characters.";
@@ -70,7 +72,7 @@ export function validateArrival(v: ArrivalDraft): Errors {
     const at = (field: string) => `lines[${i}].${field}`;
     if (!LINE_NO.test(l.poLineNo)) errors[at("poLineNo")] = "Choose the purchase order line.";
     else if (v.lines.findIndex((o) => o.poLineNo === l.poLineNo) !== i) errors[at("poLineNo")] = "Use each purchase order line once.";
-    if (!UUID.test(l.productId)) errors[at("productId")] = "Enter a UUID.";
+    if (!UUID.test(l.productId)) errors[at("productId")] = "Choose the product.";
     if (!DECIMAL.test(l.overDeliveryPct) || Number(l.overDeliveryPct) > 100) errors[at("overDeliveryPct")] = "Enter a percent from 0 to 100.";
     if (l.unit.trim() === "" || l.unit.length > 16) errors[at("unit")] = "Enter a unit of up to 16 characters.";
   });
@@ -112,7 +114,7 @@ export function NewArrivalPage() {
   const queryClient = useQueryClient();
   const key = useRef(newKey());
   const carried = useSearchParams()[0];
-  const [values, setValues] = useState<ArrivalDraft>(() => ({ ...emptyArrival, purchaseOrderId: carried.get("purchaseOrderId") ?? "", vendorId: carried.get("vendorId") ?? "" }));
+  const [values, setValues] = useState<ArrivalDraft>(() => ({ ...emptyArrival, receiptDate: new Date().toLocaleDateString("en-CA"), purchaseOrderId: carried.get("purchaseOrderId") ?? "", vendorId: carried.get("vendorId") ?? "" }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -122,6 +124,11 @@ export function NewArrivalPage() {
     enabled: UUID.test(values.purchaseOrderId),
   });
   const poLines = purchaseOrder.data?.filter((l) => l.status !== "CANCELLED");
+  const openOrders = useQuery({
+    queryKey: ["receiving", "open-purchase-orders", values.vendorId],
+    queryFn: () => fetchOpenPurchaseOrders(values.vendorId),
+    enabled: UUID.test(values.vendorId),
+  });
 
   const update = (patch: Partial<ArrivalDraft>) => setValues((prev) => ({ ...prev, ...patch }));
   const updateLine = (index: number, patch: Partial<ArrivalLineDraft>) =>
@@ -158,9 +165,44 @@ export function NewArrivalPage() {
       <PageHeader title="Record arrival" description="Log a delivery as it reaches the dock. You register the quantities received on the receipt afterwards." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New arrival">
-          {text("vendorId", "Vendor ID", { mono: true })}
-          {text("purchaseOrderId", "Purchase order ID", { mono: true })}
-          {text("legalEntityId", "Legal entity ID", { mono: true })}
+          <FormField id="arrival-vendorId" label="Vendor" error={errors.vendorId}>
+            {(c) => (
+              <EntityLookup
+                entity="vendor"
+                scope={{ legalEntityId: values.legalEntityId || undefined }}
+                {...c}
+                value={values.vendorId}
+                onChange={(e) => update({ vendorId: e.target.value, purchaseOrderId: e.target.value === values.vendorId ? values.purchaseOrderId : "" })}
+              />
+            )}
+          </FormField>
+          <FormField
+            id="arrival-purchaseOrderId"
+            label="Purchase order"
+            hint={values.vendorId === "" ? "Choose the vendor first to see its open orders." : openOrders.data?.length === 0 ? "This vendor has no confirmed orders to receive against." : undefined}
+            error={errors.purchaseOrderId}
+          >
+            {(c) => (
+              <Select
+                {...c}
+                value={values.purchaseOrderId}
+                disabled={values.vendorId === ""}
+                onChange={(e) => update({ purchaseOrderId: e.target.value, lines: [emptyLine] })}
+                invalid={Boolean(errors.purchaseOrderId)}
+              >
+                <option value="">Choose an order</option>
+                {values.purchaseOrderId !== "" && !(openOrders.data ?? []).some((o) => o.id === values.purchaseOrderId) ? <option value={values.purchaseOrderId}>This purchase order</option> : null}
+                {(openOrders.data ?? []).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.number}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          <FormField id="arrival-legalEntityId" label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} />}
+          </FormField>
           {text("packingSlip", "Packing slip", { hint: "Unique per vendor." })}
           {text("carrier", "Carrier", { optional: true })}
           {text("palletCount", "Pallet count", { optional: true })}
@@ -189,7 +231,7 @@ export function NewArrivalPage() {
                 <FormField
                   id={`line-${i}-poLineNo`}
                   label={`Line ${n} PO line`}
-                  hint={poLines ? "Fills in the product and unit; the service takes the open quantity and price from it." : purchaseOrder.isError ? "Could not read the purchase order's lines; enter the line number." : "Enter the purchase order ID to choose from its lines."}
+                  hint={poLines ? "Fills in the product and unit; the service takes the open quantity and price from it." : purchaseOrder.isError ? "Could not read the purchase order's lines; enter the line number." : "Choose the purchase order to pick from its lines."}
                   error={errors[at("poLineNo")]}
                 >
                   {(c) =>
@@ -207,7 +249,9 @@ export function NewArrivalPage() {
                     )
                   }
                 </FormField>
-                {field("productId", "product ID", { mono: true })}
+                <FormField id={`line-${i}-productId`} label={`Line ${n} product`} error={errors[at("productId")]}>
+                  {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => updateLine(i, { productId: e.target.value })} />}
+                </FormField>
                 {field("overDeliveryPct", "over-delivery percent")}
                 {field("unit", "unit")}
                 <span className={styles.check}>

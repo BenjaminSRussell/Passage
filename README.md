@@ -38,6 +38,17 @@ Stack ([ADR-0001](docs/adr/0001-platform-stack.md)): Kubernetes · Go, TypeScrip
 make dev           # Ctrl-C stops the services; `make dev-down` removes the containers
 ```
 
+`make dev` starts Postgres, Kafka, Keycloak (realm `passage`) and OPA in Docker, then builds and runs ledger, numbering, party, purchasing, receiving and batch, the dev gateway and the web app. The first start builds Go binaries and pulls images, so allow a few minutes; it is ready when it prints `Passage is up`. The AP invoice screens are served by receiving, so the vendor to PO to receipt to AP invoice to ledger flow needs no other service.
+
+In a second terminal, prove the flow against the running stack:
+
+```sh
+make e2e-local     # signs the seeded users in to Keycloak, then drives vendor -> PO -> receipt -> AP invoice -> ledger through the gateway
+(cd apps/web && PASSAGE_E2E_LIVE_URL=http://localhost:5173 npx playwright test e2e/login.live.spec.ts)   # browser sign-in
+```
+
+`make e2e-local` is repeatable: each run creates its own vendor and checks the change in the trial balance.
+
 Open http://localhost:5173 and sign in as `admin` / `passage-admin-dev` (every duty the purchase-to-ledger flow needs, plus the admin screens) or `clerk` / `passage-clerk-dev` (no admin duties: the admin navigation is hidden and the gateway answers 403 on admin routes). Users, duties and the tenant come from [deploy/local/seed.json](deploy/local/seed.json); see [deploy/local/README.md](deploy/local/README.md) for what runs where.
 
 ### 1. The web app

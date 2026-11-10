@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { holdsDuty } from "../dutyGate";
 import { ProblemMessage } from "../errors";
-import { readProblem } from "../api/http";
+import { apiFetch, readProblem } from "../api/http";
 import { formatOption, resolveOption, type LookupEntityKey } from "../lookup/entities";
 import { usePrincipalDuties } from "../principal";
 import { Alert, Button } from "../ui";
@@ -30,7 +30,7 @@ export interface DocumentRequest {
 const RENDER = "/api/v1/print/documents:render";
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: "application/json" } });
+  const res = await apiFetch(path, { headers: { Accept: "application/json" } });
   if (!res.ok) throw await readProblem(res);
   return (await res.json()) as T;
 }
@@ -68,7 +68,7 @@ export function pdfText(s: string | undefined): string {
 }
 
 export async function renderDocumentPdf(request: DocumentRequest): Promise<Blob> {
-  const res = await fetch(RENDER, {
+  const res = await apiFetch(RENDER, {
     method: "POST",
     headers: { Accept: "application/pdf", "Content-Type": "application/json" },
     body: JSON.stringify(request),

@@ -43,7 +43,7 @@ describe("consolidation board", () => {
     const table = await findTable({ name: "Lines to order" });
     await waitFor(() => expect(within(table).getAllByRole("link", { name: "PR-00000007" })).toHaveLength(2));
     expect(within(table).getByLabelText("Vendor for PR-00000007 line 2")).toHaveAttribute("placeholder", "Needs a vendor");
-    expect(within(table).getByLabelText("Vendor for PR-00000007 line 1")).toHaveAttribute("placeholder", VENDOR.slice(0, 8));
+    await waitFor(() => expect(within(table).getByLabelText("Vendor for PR-00000007 line 1")).toHaveValue(`Vendor ${VENDOR.slice(0, 8)}`));
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Show"), { target: { value: "NEEDS_SOURCING" } });
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/requisition-lines?sourcing=NEEDS_SOURCING"));

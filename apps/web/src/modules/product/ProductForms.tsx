@@ -2,10 +2,11 @@ import { useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { lookupProblem } from "../../shell/errors";
 import { holdsDuty } from "../../shell/dutyGate";
+import { FeatureGate } from "../../shell/tenant/TenantSettings";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, FormField, FormSection, Input, PageHeader, Select, Skeleton, Textarea } from "../../shell/ui";
 import { createProduct, ProductApiError, updateProduct, type Lifecycle, type Product, type ProductType, type TrackingFlags } from "./api/client";
-import { DUTY_WRITE, lifecycleLabel, productTypeLabel, trackingFlags, trackingLabel } from "./labels";
+import { DUTY_WRITE, lifecycleLabel, productTypeLabel, trackingFeature, trackingFlags, trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProductNotFound } from "./pages";
 import { ProductProblem } from "./ProductProblem";
@@ -224,11 +225,13 @@ function ProductForm({ initial, creating, id, version, submitLabel, onReload }: 
             )}
           </FormField>
           {trackingFlags.map((flag) => (
-            <FormField key={flag} id={`product-${flag}`} label={trackingLabel[flag]} hint={stocked ? undefined : "A service can't be tracked."}>
-              {(control) => (
-                <Input {...control} type="checkbox" checked={stocked && values[flag]} disabled={!stocked} onChange={(event) => set(flag, event.target.checked)} />
-              )}
-            </FormField>
+            <FeatureGate key={flag} feature={trackingFeature[flag]}>
+              <FormField id={`product-${flag}`} label={trackingLabel[flag]} hint={stocked ? undefined : "A service can't be tracked."}>
+                {(control) => (
+                  <Input {...control} type="checkbox" checked={stocked && values[flag]} disabled={!stocked} onChange={(event) => set(flag, event.target.checked)} />
+                )}
+              </FormField>
+            </FeatureGate>
           ))}
         </FormSection>
         <div className={styles.formActions}>
