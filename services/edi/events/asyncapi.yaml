@@ -35,6 +35,41 @@ channels:
     messages:
       deliveryFailed:
         $ref: '#/components/messages/DeliveryFailed'
+  eInvoiceSubmitted:
+    address: passage.edi.einvoice
+    messages:
+      eInvoiceSubmitted:
+        $ref: '#/components/messages/EInvoiceSubmitted'
+  eInvoiceAccepted:
+    address: passage.edi.einvoice
+    messages:
+      eInvoiceAccepted:
+        $ref: '#/components/messages/EInvoiceAccepted'
+  eInvoiceRejected:
+    address: passage.edi.einvoice
+    messages:
+      eInvoiceRejected:
+        $ref: '#/components/messages/EInvoiceRejected'
+  punchoutReturned:
+    address: passage.edi.punchout
+    messages:
+      punchoutReturned:
+        $ref: '#/components/messages/PunchoutReturned'
+  selfBillingReconciled:
+    address: passage.edi.selfbilling
+    messages:
+      selfBillingReconciled:
+        $ref: '#/components/messages/SelfBillingReconciled'
+  disputeOpened:
+    address: passage.edi.dispute
+    messages:
+      disputeOpened:
+        $ref: '#/components/messages/DisputeOpened'
+  disputeResolved:
+    address: passage.edi.dispute
+    messages:
+      disputeResolved:
+        $ref: '#/components/messages/DisputeResolved'
 operations:
   publishMessageReceived:
     action: send
@@ -60,6 +95,34 @@ operations:
     action: send
     channel: { $ref: '#/channels/deliveryFailed' }
     summary: A transport delivery gave up and needs an operator (attempts used up, no asynchronous MDN within the wait, or the partner's transport is gone); a resend queues a new delivery
+  publishEInvoiceSubmitted:
+    action: send
+    channel: { $ref: '#/channels/eInvoiceSubmitted' }
+    summary: An e-invoice was handed to its network or access point (35-2).
+  publishEInvoiceAccepted:
+    action: send
+    channel: { $ref: '#/channels/eInvoiceAccepted' }
+    summary: The network accepted the e-invoice (35-2).
+  publishEInvoiceRejected:
+    action: send
+    channel: { $ref: '#/channels/eInvoiceRejected' }
+    summary: The network rejected the e-invoice; reason carries its text (35-2).
+  publishPunchoutReturned:
+    action: send
+    channel: { $ref: '#/channels/punchoutReturned' }
+    summary: A punchout cart came back from the supplier and was validated (BR-35.13): the lines to put on a requisition for the requester (35-3).
+  publishSelfBillingReconciled:
+    action: send
+    channel: { $ref: '#/channels/selfBillingReconciled' }
+    summary: A customer's self-billed invoice (INVOIC 389) was matched to the shipments (BR-35.15, 35-5).
+  publishDisputeOpened:
+    action: send
+    channel: { $ref: '#/channels/disputeOpened' }
+    summary: A self-billing dispute was opened: a line that differs or has no shipment, or a shipment not billed in time (35-5).
+  publishDisputeResolved:
+    action: send
+    channel: { $ref: '#/channels/disputeResolved' }
+    summary: A self-billing dispute was accepted or rejected (35-5).
 components:
   messages:
     MessageReceived:
@@ -209,3 +272,178 @@ components:
               mdn_timeouts: { type: integer, minimum: 0, description: waits for an asynchronous MDN that ran out (EDI_AS2_MDN_TIMEOUT_MINUTES) }
               mdn_timeout: { type: boolean, description: true when the last wait for an asynchronous MDN ran out }
               error: { type: string, description: the last failure recorded on the delivery }
+    EInvoiceSubmitted:
+      name: dev.passage.edi.einvoice.submitted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.einvoice.submitted.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          data:
+            type: object
+            required: [einvoice_id, legal_entity_id, invoice_id, number, mandate]
+            properties:
+              einvoice_id: { type: string, format: uuid }
+              legal_entity_id: { type: string, format: uuid }
+              invoice_id: { type: string, format: uuid, description: the billing invoice }
+              number: { type: string }
+              mandate: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI] }
+              reference: { type: string, description: the network's submission reference }
+              reason: { type: string, description: the network's rejection text }
+    EInvoiceAccepted:
+      name: dev.passage.edi.einvoice.accepted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.einvoice.accepted.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          data:
+            type: object
+            required: [einvoice_id, legal_entity_id, invoice_id, number, mandate]
+            properties:
+              einvoice_id: { type: string, format: uuid }
+              legal_entity_id: { type: string, format: uuid }
+              invoice_id: { type: string, format: uuid, description: the billing invoice }
+              number: { type: string }
+              mandate: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI] }
+              reference: { type: string, description: the network's submission reference }
+              reason: { type: string, description: the network's rejection text }
+    EInvoiceRejected:
+      name: dev.passage.edi.einvoice.rejected.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.einvoice.rejected.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          data:
+            type: object
+            required: [einvoice_id, legal_entity_id, invoice_id, number, mandate]
+            properties:
+              einvoice_id: { type: string, format: uuid }
+              legal_entity_id: { type: string, format: uuid }
+              invoice_id: { type: string, format: uuid, description: the billing invoice }
+              number: { type: string }
+              mandate: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI] }
+              reference: { type: string, description: the network's submission reference }
+              reason: { type: string, description: the network's rejection text }
+    PunchoutReturned:
+      name: dev.passage.edi.punchout.returned.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.punchout.returned.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          data:
+            type: object
+            required: [session_id, partner_id, legal_entity_id, requester_id, cart_rejected, lines]
+            properties:
+              session_id: { type: string, format: uuid }
+              partner_id: { type: string, format: uuid }
+              legal_entity_id: { type: string, format: uuid }
+              requester_id: { type: string, format: uuid }
+              cart_rejected: { type: boolean, description: true when the cart total differs from its lines (EDI-0134); no lines are kept }
+              lines:
+                type: array
+                items:
+                  type: object
+                  required: [line, supplier_part_id, quantity, unit_code, unit_price, currency, catalog, needs_approval]
+                  properties:
+                    line: { type: integer }
+                    supplier_part_id: { type: string }
+                    description: { type: string }
+                    quantity: { type: string }
+                    unit_code: { type: string, description: UN/ECE Recommendation 20 }
+                    unit_price: { type: string }
+                    currency: { type: string }
+                    unspsc: { type: string }
+                    lead_time_days: { type: integer }
+                    catalog: { type: boolean, description: always true, the line comes from a supplier catalog }
+                    needs_approval: { type: boolean }
+    SelfBillingReconciled:
+      name: dev.passage.edi.selfbilling.reconciled.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.selfbilling.reconciled.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          data:
+            type: object
+            required: [document_id, partner_id, legal_entity_id, number, status, matched_lines, disputed_lines]
+            properties:
+              document_id: { type: string, format: uuid }
+              partner_id: { type: string, format: uuid }
+              legal_entity_id: { type: string, format: uuid }
+              number: { type: string }
+              status: { type: string, enum: [MATCHED, DISPUTED] }
+              matched_lines: { type: integer }
+              disputed_lines: { type: integer }
+    DisputeOpened:
+      name: dev.passage.edi.dispute.opened.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.dispute.opened.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          data:
+            type: object
+            required: [dispute_id, partner_id, legal_entity_id, kind, code, detail]
+            properties:
+              dispute_id: { type: string, format: uuid }
+              partner_id: { type: string, format: uuid }
+              legal_entity_id: { type: string, format: uuid }
+              kind: { type: string, enum: [DIFFERENCE, UNMATCHED, UNBILLED] }
+              code: { type: string, description: EDI-0136, EDI-0137 or EDI-0138 }
+              document_id: { type: string, format: uuid }
+              line: { type: string }
+              shipment_id: { type: string, format: uuid }
+              detail: { type: string }
+              decision: { type: string, enum: [ACCEPTED, REJECTED], description: set on dispute.resolved }
+    DisputeResolved:
+      name: dev.passage.edi.dispute.resolved.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.dispute.resolved.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          data:
+            type: object
+            required: [dispute_id, partner_id, legal_entity_id, kind, code, detail, decision]
+            properties:
+              dispute_id: { type: string, format: uuid }
+              partner_id: { type: string, format: uuid }
+              legal_entity_id: { type: string, format: uuid }
+              kind: { type: string, enum: [DIFFERENCE, UNMATCHED, UNBILLED] }
+              code: { type: string, description: EDI-0136, EDI-0137 or EDI-0138 }
+              document_id: { type: string, format: uuid }
+              line: { type: string }
+              shipment_id: { type: string, format: uuid }
+              detail: { type: string }
+              decision: { type: string, enum: [ACCEPTED, REJECTED], description: set on dispute.resolved }

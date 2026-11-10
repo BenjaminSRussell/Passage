@@ -51,6 +51,8 @@ type SBLine struct {
 	Quantity     decimal.Decimal
 	UnitPrice    decimal.Decimal
 	Tax          decimal.Decimal // tax amount the customer computed for the line
+	// NoTax says the document states no tax on the line (an INVOIC with its tax only in the summary): the tax is then not compared.
+	NoTax bool
 }
 
 // SBTolerance is the customer's DIFFERENCE threshold per line.
@@ -130,7 +132,7 @@ func MatchSelfBilling(lines []SBLine, shipments []SBShipment, tol SBTolerance, a
 			diffs = append(diffs, SBDifference{Field: "unitPrice", Theirs: line.UnitPrice.String(), Ours: s.UnitPrice.String()})
 		}
 		ourTax := line.Quantity.Mul(line.UnitPrice).Mul(s.TaxRatePct).Div(hundred).Round(2)
-		if line.Tax.Sub(ourTax).Abs().GreaterThan(taxTolerance) {
+		if !line.NoTax && line.Tax.Sub(ourTax).Abs().GreaterThan(taxTolerance) {
 			diffs = append(diffs, SBDifference{Field: "tax", Theirs: line.Tax.StringFixed(2), Ours: ourTax.StringFixed(2)})
 		}
 		lr := SBLineResult{Line: line.Line, Outcome: SelfBillMatched, ShipmentID: s.ID, Differences: diffs}

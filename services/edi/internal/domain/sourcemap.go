@@ -94,9 +94,10 @@ type SourceShipment struct {
 }
 
 type SourceOrderLine struct {
-	ID     string `json:"id"`
-	LineNo int    `json:"lineNo"`
-	Unit   string `json:"unit"`
+	ID        string          `json:"id"`
+	LineNo    int             `json:"lineNo"`
+	Unit      string          `json:"unit"`
+	UnitPrice decimal.Decimal `json:"unitPrice"`
 }
 
 type SourceOrder struct {
@@ -110,6 +111,7 @@ type SourceOrder struct {
 
 type SourceInvoiceLine struct {
 	LineNo      int             `json:"lineNo"`
+	Description string          `json:"description"`
 	Qty         decimal.Decimal `json:"qty"`
 	UnitPrice   decimal.Decimal `json:"unitPrice"`
 	Net         decimal.Decimal `json:"net"`
@@ -133,7 +135,9 @@ type SourceInvoice struct {
 	Type            string              `json:"type"`
 	Status          string              `json:"status"`
 	Number          string              `json:"number"`
+	Currency        string              `json:"currency"`
 	InvoiceDate     string              `json:"invoiceDate"`
+	DueDate         string              `json:"dueDate"`
 	PaymentTermDays int                 `json:"paymentTermDays"`
 	Totals          SourceInvoiceTotals `json:"totals"`
 	Lines           []SourceInvoiceLine `json:"lines"`

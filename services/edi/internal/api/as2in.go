@@ -48,31 +48,37 @@ const maxAsyncMDNBody = 1 << 20
 //	POST /as2/v1/{endpoint}/mdn  an asynchronous MDN for one of our messages
 func (a *API) AS2Routes() http.Handler {
 	r := httpx.NewRouterWithoutTenant()
-	limited := r.With(a.as2RateLimit)
+	limited := r.With(a.limitBy("endpoint"))
 	limited.Post("/as2/v1/{endpoint}", a.as2Receive)
 	limited.Post("/as2/v1/{endpoint}/mdn", a.as2AsyncMDN)
+	// The two other public endpoints of the B2B batch share the listener and its limit: a partner's cXML URL (35-4) and the
+	// return URL of a punchout session (35-3), each limited by its own id.
+	limited.Post("/cxml/v1/{endpoint}", a.cxmlReceive)
+	r.With(a.limitBy("session")).Post("/punchout/v1/return/{session}", a.punchoutReturn)
 	return r
 }
 
-// as2RateLimit answers 429 when the endpoint's bucket is empty. Only
-// well-formed endpoint ids get a bucket; anything else is a 404 later that
+// limitBy answers 429 when the bucket of the id in the URL parameter is empty. Only
+// well-formed ids get a bucket; anything else is a 404 later that
 // costs nothing.
-func (a *API) as2RateLimit(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		endpoint := chi.URLParam(r, "endpoint")
-		if a.AS2Limit != nil && validID(endpoint) {
-			ok, wait, first := a.AS2Limit.Allow(endpoint)
-			if !ok {
-				if first {
-					slog.Warn("as2 rate limit reached", "endpoint", endpoint)
+func (a *API) limitBy(param string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			endpoint := chi.URLParam(r, param)
+			if a.AS2Limit != nil && validID(endpoint) {
+				ok, wait, first := a.AS2Limit.Allow(endpoint)
+				if !ok {
+					if first {
+						slog.Warn("public endpoint rate limit reached", "endpoint", endpoint)
+					}
+					w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+					http.Error(w, "too many requests", http.StatusTooManyRequests)
+					return
 				}
-				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
-				http.Error(w, "too many requests", http.StatusTooManyRequests)
-				return
 			}
-		}
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // as2Partner resolves the endpoint to its active AS2 partner transport and
