@@ -733,6 +733,42 @@ func TestARetakenClaimIsNotOverwrittenOrReleasedByTheRunnerThatLostIt(t *testing
 	}
 }
 
+// #522: a reject of a PENDING transaction a replay is applying waits for the apply; once it settled the reject is a
+// version conflict, and a lease a dead replay left runs out.
+func TestSupervisorRejectWaitsForAnApplyInProgress(t *testing.T) {
+	st, admin, ctx := setup(t)
+	alice := as(ctx, "alice", dutyExecute)
+	if _, err := st.Record(alice, OfflineIn{DeviceID: "dev-apply", Seq: 1, Command: "ConfirmWorkLine", Payload: []byte(`{}`), CapturedAt: time.Now(), Hash: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	sup := as(ctx, "sup", dutySupervise)
+	if next, err := st.NextPending(alice, "dev-apply"); err != nil || next == nil {
+		t.Fatalf("claim: %v %v", next, err)
+	}
+	if _, _, err := st.Resolve(sup, key("ra1"), "dev-apply:1", ResolveReject, 0); !errors.Is(err, ErrApplyInProgress) {
+		t.Fatalf("a reject during the apply: %v", err)
+	}
+	if _, err := st.Settle(alice, "dev-apply:1", TxApplied, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.Resolve(sup, key("ra2"), "dev-apply:1", ResolveReject, 0); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("a reject after the apply settled: %v", err)
+	}
+
+	if _, err := st.Record(alice, OfflineIn{DeviceID: "dev-apply", Seq: 2, Command: "ConfirmWorkLine", Payload: []byte(`{}`), CapturedAt: time.Now(), Hash: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := st.NextPending(alice, "dev-apply"); err != nil || next == nil {
+		t.Fatalf("claim 2: %v %v", next, err)
+	}
+	if _, err := admin.Exec(context.Background(), `update offline_transaction set apply_until = now() - interval '1 second' where idempotency_key = 'dev-apply:2'`); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := st.Resolve(sup, key("ra3"), "dev-apply:2", ResolveReject, 0); err != nil || out.Status != TxRejected {
+		t.Fatalf("a reject after the lease ran out: %+v %v", out, err)
+	}
+}
+
 func TestSupervisorRejectFreesADeviceQueueHeldByAnotherUsersPendingEntry(t *testing.T) {
 	st, _, ctx := setup(t)
 	alice := as(ctx, "alice", dutyExecute)
