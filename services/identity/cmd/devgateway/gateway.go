@@ -58,10 +58,16 @@ func newGateway(verifier *identity.JWTVerifier, opa *identity.OPAClient, upstrea
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		trimmed, ok := strings.CutPrefix(r.URL.Path, "/api")
+		if !ok || !strings.HasPrefix(trimmed, "/") {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "GW-0404", "no route"))
+			return
+		}
 		selected := selection{legalEntity: r.Header.Get(tenant.HeaderWebLegalEntity), scope: r.Header.Get(tenant.HeaderLegalEntityScopeAll)}
-		stripIdentity(r.Header)
-		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
-		guarded.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), selectionKey{}, selected)))
+		forwarded := r.Clone(context.WithValue(r.Context(), selectionKey{}, selected))
+		stripIdentity(forwarded.Header)
+		forwarded.URL.Path = trimmed
+		guarded.ServeHTTP(w, forwarded)
 	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !canonicalPath(r) {

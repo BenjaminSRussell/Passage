@@ -42,6 +42,9 @@ func run(getenv func(string) string, environ []string) error {
 	if !loopback(addr) && getenv(allowNonLocalEnv) != "1" {
 		return fmt.Errorf("refusing to bind %s: the dev gateway is for one machine; set %s=1 to override", addr, allowNonLocalEnv)
 	}
+	if getenv(allowNonLocalEnv) == "1" {
+		slog.Warn("devgateway non-local guard is off", "env", allowNonLocalEnv, "addr", addr)
+	}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	slog.Info("devgateway listening", "addr", addr)
 	return server.ListenAndServe()

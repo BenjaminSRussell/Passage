@@ -225,6 +225,15 @@ func TestGatewayRoutesOnlyConfiguredServices(t *testing.T) {
 	}
 }
 
+func TestGatewayAnswers404ForBareAPIAndLookalikePrefixes(t *testing.T) {
+	f := newFixture(t)
+	for _, p := range []string{"/api", "/apifoo", "/v1/numbering/sequences"} {
+		if got := f.get(t, p, f.token(t, adminUser, nil), nil).StatusCode; got != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", p, got)
+		}
+	}
+}
+
 func TestUpstreamsFromReadsPassageSvcVariables(t *testing.T) {
 	got, err := upstreamsFrom([]string{"PASSAGE_SVC_LEDGER_URL=http://127.0.0.1:1", "PASSAGE_SVC_URL=http://x", "OTHER=1"})
 	if err != nil {
