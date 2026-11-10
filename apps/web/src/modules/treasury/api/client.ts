@@ -121,6 +121,8 @@ export interface Forecast {
   asOf: string;
   buckets: ForecastBucket[];
   outOfHorizon: number;
+  /** How each live source (AP open items from payables, AR from receivables) took part; absent when none is configured. */
+  sources?: { type: "AP" | "AR"; status: "ok" | "truncated" | "unavailable"; count: number }[];
 }
 
 /** Problem details (RFC 9457) surfaced to the UI with the stable service code and field errors. */

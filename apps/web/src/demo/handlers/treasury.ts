@@ -380,5 +380,6 @@ route("GET", `${BASE}/cash-forecast`, ({ query }) => {
       running += b.inflow - b.outflow;
       return { key, currency: "USD", inflow: dec(b.inflow), outflow: dec(b.outflow), net: dec(b.inflow - b.outflow), cumulative: dec(running) };
     });
-  return { layout, asOf, buckets: rows, outOfHorizon: 0 };
+  const count = (type: string) => forecastEntries.all().filter((e) => e.legalEntityId === query.get("legalEntityId") && e.sourceType === type && e.expectedDate >= asOf).length;
+  return { layout, asOf, buckets: rows, outOfHorizon: 0, sources: [{ type: "AP" as const, status: "ok" as const, count: count("AP") }, { type: "AR" as const, status: "ok" as const, count: count("AR") }] };
 });

@@ -155,8 +155,11 @@ var serviceGrants = map[string]map[string][]string{
 	"expense": {
 		"ledger": {"ledger.entry.post"},
 	},
+	// treasury reads the open items of payables and receivables to forecast cash (FR-36.9).
 	"treasury": {
-		"ledger": {"ledger.entry.post"},
+		"ledger":      {"ledger.entry.post"},
+		"payables":    {"payables.forecast.read"},
+		"receivables": {"receivables.forecast.read"},
 	},
 	"sales": {
 		"product":     {"product.configuration.read"},

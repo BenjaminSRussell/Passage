@@ -364,6 +364,18 @@ func TestListOpenItems_HeldFilterAndInboxDuty(t *testing.T) {
 	}
 }
 
+func TestListOpenItems_ForecastDutyReadsTheListButNotOneItem(t *testing.T) {
+	s := newFakeStore()
+	r, _ := proposalRouter(s, nil)
+	treasury := caller{duties: "payables.forecast.read", user: "treasury", entity: entityA}
+	if rec := treasury.send(r, http.MethodGet, "/v1/payables/open-items?due_to=2026-12-31", ""); rec.Code != http.StatusOK {
+		t.Fatalf("forecast duty reads the list: %d %s", rec.Code, rec.Body)
+	}
+	if rec := treasury.send(r, http.MethodGet, "/v1/payables/open-items/"+itemOne, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("forecast duty reads one item: %d, want 403", rec.Code)
+	}
+}
+
 func TestListOpenItems_RejectsBadQueries(t *testing.T) {
 	r, _ := proposalRouter(newFakeStore(), nil)
 	tests := []struct{ name, query, field string }{

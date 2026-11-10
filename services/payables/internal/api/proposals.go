@@ -34,6 +34,7 @@ import (
 const (
 	dutyOpenItemRead      = "open-item.read"
 	dutyInboxRead         = "payables.inbox.read"
+	dutyForecastRead      = "payables.forecast.read"
 	dutyProposalWrite     = "payment-proposal.write"
 	dutyProposalRead      = "payment-proposal.read"
 	dutyProposalApprove   = "payment-proposal.approve"
@@ -101,7 +102,7 @@ func (a *API) registerProposals(r chi.Router) {
 	if a.proposals == nil {
 		return
 	}
-	r.With(authz.RequireAnyDuty(dutyOpenItemRead, dutyInboxRead)).Get(pathOpenItems, a.listOpenItems)
+	r.With(authz.RequireAnyDuty(dutyOpenItemRead, dutyInboxRead, dutyForecastRead)).Get(pathOpenItems, a.listOpenItems)
 	r.With(authz.RequireDuty(dutyOpenItemRead)).Get(pathOpenItems+"/{id}", a.getOpenItem)
 	r.With(authz.RequireDuty(dutyProposalWrite)).Post(pathProposals, a.createProposal)
 	r.With(authz.RequireDuty(dutyProposalRead)).Get(pathProposals, a.listProposals)
@@ -201,7 +202,7 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	} else if held != "" {
 		fields["held"] = "must be true when given"
 	}
-	if caller, _ := tenant.FromContext(r.Context()); !caller.HasDuty(dutyOpenItemRead) && (!f.HeldOnly || q.Get("value_in") != "") {
+	if caller, _ := tenant.FromContext(r.Context()); !caller.HasDuty(dutyOpenItemRead) && !caller.HasDuty(dutyForecastRead) && (!f.HeldOnly || q.Get("value_in") != "") {
 		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "the inbox duty reads held items only (held=true) and values nothing")
 		return
 	}

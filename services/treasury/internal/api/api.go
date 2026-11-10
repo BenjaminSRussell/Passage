@@ -24,6 +24,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/treasury/internal/forecastsrc"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 )
 
@@ -54,6 +55,7 @@ type API struct {
 	channels     bankconnect.Channels
 	recons       Reconciliations
 	cash         CashPositions
+	sources      []forecastsrc.Source
 	ledger       ledgerclient.Ledger
 	glProfiles   map[string]GLProfile
 
@@ -282,4 +284,11 @@ func pathID(w http.ResponseWriter, r *http.Request, code, detail string) (string
 
 func logFailure(r *http.Request, op string, err error) {
 	slog.Error(op+" failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+}
+
+// WithForecastSources sets the live feeds of the cash forecast (AP and AR open items). With none, the forecast
+// uses stored entries only.
+func (a *API) WithForecastSources(s ...forecastsrc.Source) *API {
+	a.sources = s
+	return a
 }

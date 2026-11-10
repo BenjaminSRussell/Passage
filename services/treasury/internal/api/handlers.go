@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -474,8 +477,14 @@ func (a *API) cashForecast(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	contribs := make([]domain.Contribution, 0, len(entries))
+	// A live source that answers replaces the stored entries of its type, so an open item is never counted twice.
+	live, statuses, fromLive := a.liveContributions(r.Context(), le, currency, asOf.AddDate(0, 0, -forecastLookbackDays), asOf.AddDate(0, 0, forecastLookaheadDay), q.Get("live") != "false")
+	contribs := make([]domain.Contribution, 0, len(entries)+len(fromLive))
+	contribs = append(contribs, fromLive...)
 	for _, e := range entries {
+		if live[e.SourceType] {
+			continue
+		}
 		date, err := domain.Day(e.ExpectedDate)
 		if err != nil {
 			httpx.Fail(w, r, err)
@@ -496,5 +505,54 @@ func (a *API) cashForecast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.forecastsBuilt.Add(1)
-	httpx.JSON(w, http.StatusOK, fc)
+	httpx.JSON(w, http.StatusOK, forecastResponse{Forecast: fc, Sources: statuses})
+}
+
+// sourceStatus says how one live source took part in a forecast.
+type sourceStatus struct {
+	Type string `json:"type"`
+	// Status is ok, truncated (the subledger holds more items than were read, so the forecast is understated) or
+	// unavailable (the subledger did not answer; its stored entries, if any, are used instead).
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+}
+
+type forecastResponse struct {
+	domain.Forecast
+	Sources []sourceStatus `json:"sources"`
+}
+
+// liveContributions reads every configured source. It returns the set of source types that answered, a status per
+// source and their contributions in the requested currency.
+func (a *API) liveContributions(ctx context.Context, le, currency string, from, to time.Time, enabled bool) (map[string]bool, []sourceStatus, []domain.Contribution) {
+	live, statuses, out := map[string]bool{}, []sourceStatus{}, []domain.Contribution{}
+	if !enabled {
+		return live, statuses, out
+	}
+	for _, src := range a.sources {
+		res, err := src.Contribute(ctx, le, from, to)
+		if err != nil {
+			logFailure0(ctx, "forecast source "+src.Type(), err)
+			statuses = append(statuses, sourceStatus{Type: src.Type(), Status: "unavailable"})
+			continue
+		}
+		live[src.Type()] = true
+		n := 0
+		for _, c := range res.Contributions {
+			if currency == "" || c.Currency == currency {
+				out = append(out, c)
+				n++
+			}
+		}
+		status := "ok"
+		if res.Truncated {
+			status = "truncated"
+		}
+		statuses = append(statuses, sourceStatus{Type: src.Type(), Status: status, Count: n})
+	}
+	return live, statuses, out
+}
+
+func logFailure0(ctx context.Context, op string, err error) {
+	slog.ErrorContext(ctx, op+" failed", "err", err)
 }

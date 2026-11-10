@@ -1109,6 +1109,18 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
+test_treasury_forecast_reads_open_items_only if {
+	data.duties["payables.forecast.read"].service_only
+	data.duties["receivables.forecast.read"].service_only
+	data.service_grants.treasury.payables == ["payables.forecast.read"]
+	data.service_grants.treasury.receivables == ["receivables.forecast.read"]
+	allowed("payables.forecast.read", "GET", "/v1/payables/open-items")
+	allowed("receivables.forecast.read", "GET", "/v1/receivables/open-items")
+	not allowed("payables.forecast.read", "POST", "/v1/payables/open-items/o1:hold")
+	not allowed("payables.forecast.read", "GET", "/v1/payables/payment-proposals")
+	not allowed("receivables.forecast.read", "POST", "/v1/receivables/payments")
+}
+
 test_budget_conversion_is_service_only_and_reaches_only_the_convert_routes if {
 	data.duties["budget.encumbrance.convert"].service_only
 	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert"]

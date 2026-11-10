@@ -346,6 +346,13 @@ paths:
         - name: currency
           in: query
           schema: {type: string, pattern: "^[A-Z]{3}$"}
+        - name: live
+          in: query
+          description: >-
+            false reads stored entries only. By default the AP and AR sources (open items of payables and receivables, read live)
+            replace the stored entries of their type when they answer; one that does not answer is reported as unavailable and its
+            stored entries are used.
+          schema: {type: boolean, default: true}
       responses:
         "200":
           description: Buckets; each Net equals Inflow plus Outflow and Cumulative is the running Net
@@ -1664,6 +1671,16 @@ components:
               net: {$ref: "#/components/schemas/Money"}
               cumulative: {$ref: "#/components/schemas/Money"}
         outOfHorizon: {type: integer, minimum: 0}
+        sources:
+          type: array
+          description: How each live source (AP, AR) took part; absent sources are not configured
+          items:
+            type: object
+            required: [type, status, count]
+            properties:
+              type: {type: string, enum: [AP, AR]}
+              status: {type: string, enum: [ok, truncated, unavailable], description: truncated means the subledger holds more items than were read, so the forecast is understated}
+              count: {type: integer, minimum: 0}
     PositiveMoney:
       type: string
       pattern: "^[0-9]{1,14}(\\.[0-9]{1,4})?$"

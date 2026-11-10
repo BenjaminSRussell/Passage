@@ -3538,6 +3538,8 @@
     "procurement.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
     "party.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
     "ledger.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
+    "payables.forecast.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
+    "receivables.forecast.read": {"service_only": true, "permissions": [{"resource": "/v1/receivables/open-items", "methods": ["GET"]}]},
     "payables.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
@@ -3646,7 +3648,9 @@
       "ledger": ["ledger.entry.post"]
     },
     "treasury": {
-      "ledger": ["ledger.entry.post"]
+      "ledger": ["ledger.entry.post"],
+      "payables": ["payables.forecast.read"],
+      "receivables": ["receivables.forecast.read"]
     },
     "sales": {
       "product": ["product.configuration.read"],
