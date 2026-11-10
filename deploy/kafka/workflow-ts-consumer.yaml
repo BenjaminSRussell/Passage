@@ -1,5 +1,6 @@
-# workflow-ts consumes transport's load.released and tender outcomes to start and signal tenderWorkflow (#426).
-# The topics are created by transport's outbox-transport connector (deploy/kafka/connect.yaml).
+# workflow-ts consumes transport's load.released and tender outcomes to start and signal tenderWorkflow (#426), and
+# budgeting's plan.submitted to start budgetPlanWorkflow (#38). The topics are created by the outbox-transport and
+# outbox-budgeting connectors (deploy/kafka/connect.yaml); a refused event goes to the one dead-letter topic below.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -16,6 +17,8 @@ spec:
       - resource: {type: topic, name: passage.tms.load, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: passage.tms.tender, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.budget.plan, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: passage.workflow.tender.dlq, patternType: literal}
         operations: [Write, Describe]

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
@@ -76,8 +77,8 @@ function ExpiryCard({ onExpired }: { onExpired(): void }) {
   return (
     <Card title="Record expiry">
       <form className={styles.form} onSubmit={run} noValidate>
-        <FormField id="ex-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-          {(c) => <Input {...c} className={styles.mono} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(errors.legalEntityId)} />}
+        <FormField id="ex-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+          {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(errors.legalEntityId)} />}
         </FormField>
         <FormField id="ex-as-of" label="Expire validity ended before" error={errors.asOf}>
           {(c) => <Input {...c} type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} invalid={Boolean(errors.asOf)} />}

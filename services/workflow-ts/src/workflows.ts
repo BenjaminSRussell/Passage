@@ -10,6 +10,7 @@ import type { PartyMergeActivities } from "./partyMergeActivities.js";
 
 export * from "./paymentRunWorkflow.js";
 export * from "./ecoApprovalWorkflow.js";
+export * from "./budgetPlanWorkflow.js";
 export * from "./capaWorkflow.js";
 export * from "./tenderWorkflow.js";
 

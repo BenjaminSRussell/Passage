@@ -107,6 +107,8 @@ segregation_denials := [
 	["platform.release.view", "POST", "/v1/platform/releases"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
+	["party.write", "GET", "/v1/party/vendors:search"],
+	["party.vendor-bank.write", "GET", "/v1/party/customers:search"],
 ]
 
 test_narrow_duties_cannot_reach_verb_routes if {
@@ -158,6 +160,9 @@ segregation_grants := [
 	["platform.promotion.approve", "POST", "/v1/platform/releases"],
 	["platform.environment.rollback", "POST", "/v1/platform/releases"],
 	["platform.release.maintain", "POST", "/v1/platform/releases"],
+	["party.read", "GET", "/v1/party/parties:search"],
+	["party.read", "GET", "/v1/party/vendors:search"],
+	["party.read", "GET", "/v1/party/customers:search"],
 ]
 
 test_verb_routes_granted_to_their_own_duty if {
@@ -591,6 +596,20 @@ test_inventory_issue_claim_is_service_only_and_opens_only_its_routes if {
 	not allowed("inventory.read", "POST", "/v1/inventory/issue-claims")
 }
 
+test_credit_reservation_routes_are_service_only if {
+	data.duties["billing.credit-reservation.write"].service_only
+	data.service_grants.receivables.billing == ["billing.invoice.read", "billing.credit-reservation.write"]
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/invoices/i1/credit-reservations")
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-reservations/r1:commit")
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-reservations/r1:release")
+	not allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-notes")
+	every duty in ["billing.invoice.maintain", "billing.invoice.post", "billing.creditnote.post", "billing.invoice.view"] {
+		not allowed(duty, "POST", "/v1/billing/invoices/i1/credit-reservations")
+		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:commit")
+		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:release")
+	}
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],
@@ -941,6 +960,51 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances")
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:approve")
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
+}
+
+test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject if {
+	data.duties["budget.plan.workflow"].service_only
+	data.service_grants["workflow-ts"].budgeting == ["budget.plan.workflow"]
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/review:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.workflow", "GET", "/v1/budget/plans/p1")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:submit")
+	not allowed("budget.plan.workflow", "PUT", "/v1/budget/plans/p1/scenarios/s1/grid")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
+}
+
+test_budget_plan_workflow_routes_are_refused_to_every_person_duty if {
+	routes := [
+		"/v1/budget/plans/p1/stages/review:sign-off",
+		"/v1/budget/plans/p1/stages/approve:sign-off",
+		"/v1/budget/plans/p1:reject",
+	]
+	every route in routes {
+		granting := granting_duties with input as {"action": "POST", "resource": route}
+		granting == {"budget.plan.workflow"}
+		person := person_duties with input as {"action": "POST", "resource": route}
+		person == set()
+		every duty in ["budget.plan.maintain", "budget.plan.decide", "budget.view", "budget.maintain", "budget.override"] {
+			not allowed(duty, "POST", route)
+		}
+	}
+}
+
+test_budget_plan_decide_routes_are_the_workflow_ts_decision_routes_only if {
+	not data.duties["budget.plan.decide"].service_only
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/review:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:reject")
+	not allowed("budget.plan.decide", "GET", "/v1/workflows/budget-plans/p1")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:submit")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/final:sign-off/extra")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/eco-approvals/e1:approve")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1:reject")
 }
 
 test_workflow_ts_transport_service_duty if {

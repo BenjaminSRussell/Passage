@@ -120,7 +120,7 @@ describe("LegalHoldsPage", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Place hold" }));
     expect(await within(form).findByText("Enter the legal entity id as a UUID.")).toBeInTheDocument();
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
-    fireEvent.change(within(form).getByLabelText(/^Legal entity id/), { target: { value: ENTITY.toUpperCase() } });
+    fireEvent.change(within(form).getByLabelText(/^Legal entity/), { target: { value: ENTITY.toUpperCase() } });
     fireEvent.change(within(form).getByLabelText(/^Reason/), { target: { value: " Audit 2026-17 " } });
     fireEvent.click(within(form).getByRole("button", { name: "Place hold" }));
     expect(await screen.findByText("Details")).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("LegalHoldsPage", () => {
     };
     renderAt("/finreport/legal-holds", [DUTY]);
     const form = await screen.findByRole("form", { name: "Put a library on hold" });
-    fireEvent.change(within(form).getByLabelText(/^Legal entity id/), { target: { value: ENTITY } });
+    fireEvent.change(within(form).getByLabelText(/^Legal entity/), { target: { value: ENTITY } });
     fireEvent.change(within(form).getByLabelText(/^Reason/), { target: { value: "Again" } });
     fireEvent.click(within(form).getByRole("button", { name: "Place hold" }));
     expect(await findAlert()).toHaveTextContent("already under legal hold");

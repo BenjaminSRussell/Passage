@@ -301,6 +301,19 @@ describe("main.tsx wiring under StrictMode", () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
+  it("hands the signed-in tenant and subject to the app as its identity", async () => {
+    const { env, store } = envAt("/auth/callback", "?code=c&state=s", () =>
+      new Response(JSON.stringify({ access_token: tokenFor("u", CLERK_DUTIES), expires_in: 300 })),
+    );
+    store.set("passage.oidc.pending", JSON.stringify({ state: "s", verifier: "v", returnTo: "/" }));
+    render(
+      <AuthRoot auth={bootstrapAuth(config, env, { fetch: (async () => new Response("{}")) as typeof fetch })} requireAuth>
+        {(_duties, identity) => <p>identity {identity}</p>}
+      </AuthRoot>,
+    );
+    expect(await screen.findByText("identity tenant-1.u")).toBeInTheDocument();
+  });
+
   it("refuses to render the app without sign-in settings when auth is required", () => {
     const { container } = render(<AuthRoot auth={null} requireAuth>{() => <p>app</p>}</AuthRoot>);
     expect(screen.getByRole("heading", { name: /not available yet/i })).toBeInTheDocument();

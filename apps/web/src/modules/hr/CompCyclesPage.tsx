@@ -6,7 +6,7 @@ import { buttonClassName, Button, Card, DataTable, PageHeader, type DataTableCol
 import { advanceCompCycle, applyCompCycle, approveCompCycle, getCompCycle, listCompCycles, type CompCycle, type CycleBudget, type CycleMove, type GuidelineRow } from "./api/recruitment";
 import { UUID, dayOf } from "./format";
 import styles from "./pages.module.css";
-import { BackLink, ConfirmAction, Entry, Facts, humanize, ListPage, Loaded, Status, TextField, useAction } from "./parts";
+import { BackLink, ConfirmAction, Entry, Facts, humanize, ListPage, Loaded, LookupField, Status, useAction } from "./parts";
 import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<CompCycle>[] = [
@@ -156,7 +156,7 @@ export function CompCycleDetailPage() {
                   navigate(`/hr/compensation/cycles/${cycle.id}/worksheets/${manager.trim()}`);
                 }}
               >
-                <TextField id="cycle-manager" label="Manager's worker id" value={manager} error={managerError} onChange={(v) => {
+                <LookupField entity="worker" id="cycle-manager" label="Manager" value={manager} error={managerError} onChange={(v) => {
                     setManager(v);
                     if (UUID.test(v.trim())) setManagerError(undefined);
                   }}

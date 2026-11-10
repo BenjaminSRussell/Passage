@@ -114,7 +114,7 @@ func (a *API) listWarehouses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	q := r.URL.Query()
-	f := store.WarehouseFilter{LegalEntityID: q.Get("legalEntityId"), SiteID: q.Get("siteId"), Type: q.Get("type"), Status: q.Get("status")}
+	f := store.WarehouseFilter{LegalEntityID: q.Get("legalEntityId"), SiteID: q.Get("siteId"), Type: q.Get("type"), Status: q.Get("status"), Query: q.Get("q")}
 	for _, c := range []struct {
 		field, rule string
 		invalid     bool

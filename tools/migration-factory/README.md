@@ -74,6 +74,11 @@ Built and tested:
   count of non-zero combinations and the trial balance per currency. A run that names an
   open_items run of the same company also compares the open items per control account with the
   GL balance of that account (BR-49.2, MIG-1506).
+  `POST /api/v1/migration/runs/{id}/opening-journal` (`opening journal`, `gl_opening_posting`) then
+  posts the migrated balances through the ledger's posting API (`LEDGER_URL`) as one journal per
+  currency for a legal entity and ledger: refused whole with the difference named (MIG-1540) when a
+  currency's debits differ from its credits, never rounded, and idempotent by a fixed key per
+  company, legal entity and currency, so a repeat or a re-run of the import books nothing twice.
 - **On-hand stock** (`onhand.go`, `internal/store/onhand.go`): the onhand pack quarantines lines by
   uniqueness (legacy id and (item, site, warehouse, location, batch, serial)), referential (the
   item master given with the run) and domain (site, warehouse and unit present, quantity above

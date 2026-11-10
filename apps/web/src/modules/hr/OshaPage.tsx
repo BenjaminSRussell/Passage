@@ -3,7 +3,7 @@ import { Alert, Card, DataTable, PageHeader, StatGroup, StatTile, type DataTable
 import { oshaExtract, type OshaLine } from "./api/safety";
 import { UUID, dayOf } from "./format";
 import styles from "./pages.module.css";
-import { humanize, LoadFailure, TextField } from "./parts";
+import { humanize, LoadFailure, LookupField, TextField } from "./parts";
 import { useLoad } from "./useLoad";
 
 const logColumns: DataTableColumn<OshaLine>[] = [
@@ -46,7 +46,7 @@ export function OshaPage() {
       <PageHeader title="OSHA logs" description="The 300 log of recordable cases, the 300A annual summary and 301 detail." />
       <div className={styles.toolbar}>
         <TextField id="osha-year" label="Year" inputMode="numeric" maxLength={4} value={rawYear} error={yearError} onChange={(v) => setParam("year", v)} />
-        <TextField id="osha-site" label="Site id" optional value={rawSite} error={siteError} onChange={(v) => setParam("siteId", v)} />
+        <LookupField entity="site" prefill={false} id="osha-site" label="Site" optional value={rawSite} error={siteError} onChange={(v) => setParam("siteId", v)} />
       </div>
       {state.error ? (
         <LoadFailure error={state.error} reload={state.reload} what="OSHA extract" />

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Button, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listOpenOrderLines, type OpenOrderLine, type OpenSupplyFilters } from "./api/client";
@@ -101,18 +102,18 @@ export function OpenSupplyPage() {
         }}
       >
         <div className={styles.filter}>
-          <FormField id="supply-warehouse" label="Warehouse id" optional error={errors.warehouseId}>
-            {(c) => <Input {...c} value={draft.warehouseId} onChange={(e) => set({ warehouseId: e.target.value })} />}
+          <FormField id="supply-warehouse" label="Warehouse" optional error={errors.warehouseId}>
+            {(c) => <EntityLookup entity="warehouse" {...c} value={draft.warehouseId} onChange={(e) => set({ warehouseId: e.target.value })} />}
           </FormField>
         </div>
         <div className={styles.filter}>
-          <FormField id="supply-site" label="Site id" optional error={errors.siteId}>
-            {(c) => <Input {...c} value={draft.siteId} onChange={(e) => set({ siteId: e.target.value })} />}
+          <FormField id="supply-site" label="Site" optional error={errors.siteId}>
+            {(c) => <EntityLookup entity="site" prefill={false} {...c} value={draft.siteId} onChange={(e) => set({ siteId: e.target.value })} />}
           </FormField>
         </div>
         <div className={styles.filter}>
-          <FormField id="supply-product" label="Product id" optional error={errors.productId}>
-            {(c) => <Input {...c} value={draft.productId} onChange={(e) => set({ productId: e.target.value })} />}
+          <FormField id="supply-product" label="Product" optional error={errors.productId}>
+            {(c) => <EntityLookup entity="product" {...c} value={draft.productId} onChange={(e) => set({ productId: e.target.value })} />}
           </FormField>
         </div>
         <div className={styles.filter}>

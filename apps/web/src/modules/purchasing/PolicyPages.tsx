@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -56,8 +57,8 @@ export function PolicyListPage() {
       />
       <Card title="Open a legal entity">
         <form className={styles.form} onSubmit={open} noValidate>
-          <FormField id="policy-entity" label="Legal entity id" error={error}>
-            {(control) => <Input {...control} value={entity} onChange={(e) => setEntity(e.target.value)} />}
+          <FormField id="policy-entity" label="Legal entity" error={error}>
+            {(control) => <EntityLookup entity="legalEntity" {...control} value={entity} onChange={(e) => setEntity(e.target.value)} />}
           </FormField>
           <div className={styles.actions}>
             <Button type="submit" variant="primary">

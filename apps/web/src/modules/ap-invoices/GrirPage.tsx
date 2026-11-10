@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type BadgeTone, type DataTableColumn } from "../../shell/ui";
@@ -104,8 +105,8 @@ export function GrirPage() {
     <div className={styles.stack}>
       <PageHeader title="GR/IR open items" description="Goods received and not yet invoiced. Select items from one vendor to put them on a vendor invoice." />
       <form className={styles.filters} onSubmit={apply} noValidate aria-label="Filter GR/IR items">
-        <FormField id="grir-vendor" label="Vendor ID" optional error={errors.vendorId}>
-          {(c) => <Input {...c} className={styles.mono} value={draft.vendorId} onChange={(e) => setDraft({ ...draft, vendorId: e.target.value })} invalid={Boolean(errors.vendorId)} />}
+        <FormField id="grir-vendor" label="Vendor" optional error={errors.vendorId}>
+          {(c) => <EntityLookup entity="vendor" {...c} value={draft.vendorId} onChange={(e) => setDraft({ ...draft, vendorId: e.target.value })} invalid={Boolean(errors.vendorId)} />}
         </FormField>
         <FormField id="grir-status" label="Status" optional>
           {(c) => (

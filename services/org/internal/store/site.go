@@ -57,7 +57,7 @@ type SitePatch struct {
 	DefaultWarehouseID *string `json:"defaultWarehouseId"`
 }
 
-type SiteFilter struct{ LegalEntityID, Status string }
+type SiteFilter struct{ LegalEntityID, Status, Query string }
 
 type SiteKey struct{ Code, ID string }
 
@@ -204,7 +204,8 @@ func (s *Postgres) ListSites(ctx context.Context, f SiteFilter, after SiteKey, l
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+siteColumns+` from site where tenant_id = $1 and (code, id) > ($2, $3::uuid)
 			and ($4::text = '' or legal_entity_id::text = lower($4)) and ($5::text = '' or status = $5)
-			order by code, id limit $6`, p.TenantID, after.Code, after.ID, f.LegalEntityID, f.Status, limit+1)
+			and ($7::text = '' or code ilike $7 or name ilike $7)
+			order by code, id limit $6`, p.TenantID, after.Code, after.ID, f.LegalEntityID, f.Status, limit+1, likePattern(f.Query))
 		if err != nil {
 			return err
 		}
