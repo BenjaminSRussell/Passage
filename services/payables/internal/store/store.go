@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -393,6 +394,39 @@ func (s *Postgres) UnblockVendor(ctx context.Context, legalEntityID, vendorID st
 		}
 		return enqueueEvent(ctx, tx, VendorUnblockedType, "vendor", vendorID, p.TenantID, vendorBlockEvent{VendorID: vendorID, LegalEntityID: legalEntityID, Actor: p.UserID})
 	})
+}
+
+// VendorBlock is a vendor blocked for payment in one legal entity.
+type VendorBlock struct {
+	VendorID      string    `json:"vendorId"`
+	LegalEntityID string    `json:"legalEntityId"`
+	Reason        string    `json:"reason"`
+	BlockedBy     *string   `json:"blockedBy,omitempty"`
+	BlockedAt     time.Time `json:"blockedAt"`
+}
+
+// VendorBlocks lists the vendors blocked for payment in a legal entity, newest first, at most maxLimit of them;
+// vendorID narrows the list to one vendor.
+func (s *Postgres) VendorBlocks(ctx context.Context, legalEntityID, vendorID string) ([]VendorBlock, error) {
+	out := []VendorBlock{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select vendor_id::text, legal_entity_id::text, reason, blocked_by, created_at from ap_vendor_block
+			where legal_entity_id = $1::uuid and ($2::uuid is null or vendor_id = $2::uuid)
+			order by created_at desc, vendor_id limit $3`, legalEntityID, nullable(vendorID), maxLimit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var b VendorBlock
+			if err := rows.Scan(&b.VendorID, &b.LegalEntityID, &b.Reason, &b.BlockedBy, &b.BlockedAt); err != nil {
+				return err
+			}
+			out = append(out, b)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (s *Postgres) Settle(ctx context.Context, id string, version int, amount decimal.Decimal, settlementID string) (OpenItem, error) {

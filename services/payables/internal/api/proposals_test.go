@@ -77,6 +77,7 @@ type fakeStore struct {
 	holdCalls  []string
 	blockErr   error
 	blockCalls []string
+	blocks     []store.VendorBlock
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{proposals: map[string]store.Proposal{}} }
@@ -188,6 +189,17 @@ func (f *fakeStore) BlockVendor(_ context.Context, le, vendorID, reason string) 
 func (f *fakeStore) UnblockVendor(_ context.Context, le, vendorID string) error {
 	f.blockCalls = append(f.blockCalls, "unblock:"+le+":"+vendorID)
 	return f.blockErr
+}
+
+func (f *fakeStore) VendorBlocks(_ context.Context, le, vendorID string) ([]store.VendorBlock, error) {
+	f.blockCalls = append(f.blockCalls, "list:"+le+":"+vendorID)
+	out := []store.VendorBlock{}
+	for _, b := range f.blocks {
+		if b.LegalEntityID == le && (vendorID == "" || b.VendorID == vendorID) {
+			out = append(out, b)
+		}
+	}
+	return out, f.blockErr
 }
 
 type fakeRates struct {

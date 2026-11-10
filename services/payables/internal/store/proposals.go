@@ -76,6 +76,7 @@ type Proposal struct {
 	CancelledAt         *time.Time                 `json:"cancelledAt,omitempty"`
 	ExecutedAt          *time.Time                 `json:"executedAt,omitempty"`
 	FailedAt            *time.Time                 `json:"failedAt,omitempty"`
+	PaymentRunID        *string                    `json:"paymentRunId,omitempty"` // the run started from the proposal; at most one
 	Groups              []domain.ProposalGroup     `json:"groups"`
 	TotalValued         decimal.Decimal            `json:"totalValued"`
 	TotalWithheld       map[string]decimal.Decimal `json:"totalWithheld"`
@@ -142,12 +143,13 @@ func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) 
 }
 
 const proposalColumns = `id::text, legal_entity_id::text, run_date::text, run_id, due_by::text, rate_date::text, legal_entity_currency, payment_method, status,
-	created_by, created_at, approved_by, approved_at, cancelled_by, cancelled_at, executed_at, failed_at, request_hash, excluded_items`
+	created_by, created_at, approved_by, approved_at, cancelled_by, cancelled_at, executed_at, failed_at, request_hash, excluded_items,
+	(select r.id::text from ap_payment_run r where r.tenant_id = ap_payment_proposal.tenant_id and r.proposal_id = ap_payment_proposal.id)`
 
 func scanProposal(row pgx.Row) (Proposal, error) {
 	var p Proposal
 	err := row.Scan(&p.ID, &p.LegalEntityID, &p.RunDate, &p.RunID, &p.DueBy, &p.RateDate, &p.LegalEntityCurrency, &p.PaymentMethod, &p.Status,
-		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.CancelledBy, &p.CancelledAt, &p.ExecutedAt, &p.FailedAt, &p.RequestHash, &p.ExcludedItems)
+		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.CancelledBy, &p.CancelledAt, &p.ExecutedAt, &p.FailedAt, &p.RequestHash, &p.ExcludedItems, &p.PaymentRunID)
 	return p, err
 }
 
