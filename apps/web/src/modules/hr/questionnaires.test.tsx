@@ -267,7 +267,7 @@ describe("questionnaires", () => {
     fireEvent.change(await screen.findByLabelText("How satisfied are you? (required)"), { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
     expect(await screen.findByText("Enter your worker id.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Your worker id"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Your worker record"), { target: { value: WORKER } });
     fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
     expect(await screen.findByText("Thank you, your answers were recorded")).toBeTruthy();
     expect(api.posts("/answers")[0]?.body).toEqual({ workerId: WORKER, answers: { Q1: 4 } });

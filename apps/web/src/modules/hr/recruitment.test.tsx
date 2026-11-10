@@ -393,10 +393,10 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
   it("opens a manager's worksheet from the cycle", async () => {
     api.handler = routes({ [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle({ status: "MANAGER_INPUT" })), [`GET ${worksheetUrl}`]: json(200, { items: [] }) });
     renderAt(`/hr/compensation/cycles/${CYCLE}`);
-    fireEvent.change(await screen.findByLabelText("Manager's worker id"), { target: { value: "nope" } });
+    fireEvent.change(await screen.findByLabelText("Manager"), { target: { value: "nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Open worksheet" }));
     expect(await screen.findByText("Enter the manager's worker id.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Manager's worker id"), { target: { value: MANAGER } });
+    fireEvent.change(screen.getByLabelText("Manager"), { target: { value: MANAGER } });
     fireEvent.click(screen.getByRole("button", { name: "Open worksheet" }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/hr/compensation/cycles/${CYCLE}/worksheets/${MANAGER}`));
   });
@@ -449,7 +449,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     });
     renderAt(`/hr/compensation/cycles/${CYCLE}/worksheets/${MANAGER}`);
     fireEvent.click(await screen.findByRole("button", { name: "Add worker" }));
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: id(2) } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: id(2) } });
     fireEvent.change(screen.getByLabelText("Raise (%)"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     expect((await findStatus()).textContent).toBe("The worksheet was saved as a draft.");
@@ -488,10 +488,10 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
 
     api.handler = routes({ [`GET /api/v1/hr/compensation/cycles/${CYCLE}`]: json(200, cycle({ status: "MANAGER_INPUT" })) });
     renderAt(`/hr/compensation/cycles/${CYCLE}`);
-    fireEvent.change(await screen.findByLabelText("Manager's worker id"), { target: { value: "nope" } });
+    fireEvent.change(await screen.findByLabelText("Manager"), { target: { value: "nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Open worksheet" }));
     expect(await screen.findByText("Enter the manager's worker id.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Manager's worker id"), { target: { value: MANAGER } });
+    fireEvent.change(screen.getByLabelText("Manager"), { target: { value: MANAGER } });
     expect(screen.queryByText("Enter the manager's worker id.")).toBeNull();
   });
 

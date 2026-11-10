@@ -20,6 +20,8 @@ import {
   type DataTableColumn,
   type InputProps,
 } from "../../shell/ui";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { describeProblem, newKey, type Page, type Problem } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad, type LoadState } from "./useLoad";
@@ -443,6 +445,24 @@ export function TextField({
   return (
     <FormField id={id} label={label} hint={hint} error={error} optional={optional}>
       {(control) => <Input {...control} {...input} value={value} invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} />}
+    </FormField>
+  );
+}
+
+export function LookupField({
+  id,
+  label,
+  error,
+  hint,
+  optional,
+  entity,
+  value,
+  onChange,
+  prefill,
+}: FieldBase & { entity: LookupEntityKey; value: string; onChange(value: string): void; prefill?: boolean }) {
+  return (
+    <FormField id={id} label={label} hint={hint} error={error} optional={optional}>
+      {(control) => <EntityLookup {...control} entity={entity} prefill={prefill} value={value} invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} />}
     </FormField>
   );
 }
