@@ -1,6 +1,7 @@
 {
   "entries": [
     {"to": "/payables", "module": "payables", "label": "Payment runs", "area": "finance", "decision": "keep", "taskLabel": "Pay vendors"},
+    {"to": "/payables/open-items", "module": "payables", "label": "Vendor open items", "area": "finance", "decision": "keep", "taskLabel": "See what you owe vendors"},
     {"to": "/receivables", "module": "receivables", "label": "AR workspace", "area": "finance", "decision": "keep", "taskLabel": "Receivables overview"},
     {"to": "/receivables/open-items", "module": "receivables", "label": "Open items", "area": "finance", "decision": "keep", "taskLabel": "See what customers owe"},
     {"to": "/receivables/opening-items", "module": "receivables", "label": "Imported opening items", "area": "finance", "decision": "advanced"},
