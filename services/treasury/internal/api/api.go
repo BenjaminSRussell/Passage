@@ -55,12 +55,14 @@ type API struct {
 	channels     bankconnect.Channels
 	recons       Reconciliations
 	cash         CashPositions
+	desks        CashDesks
 	sources      []forecastsrc.Source
 	ledger       ledgerclient.Ledger
 	glProfiles   map[string]GLProfile
 
 	reconCounters
 	cashCounters
+	deskCounters
 	accountsCreated      atomic.Int64
 	accountsTransitioned atomic.Int64
 	statementsImported   atomic.Int64
@@ -146,6 +148,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-matches/{id}:unmatch", a.unmatch)
 	a.registerBankReconciliation(r)
 	a.registerCashPosition(r)
+	a.registerCashDesks(r)
 	a.registerEBICS(r)
 }
 
@@ -178,6 +181,9 @@ func (a *API) Metrics() http.Handler {
 			{"treasury_intraday_reports_replayed_total", "camt.052 uploads answered with an existing report.", a.reportsReplayed.Load()},
 			{"treasury_intraday_reports_rejected_total", "camt.052 uploads rejected by parsing or rules.", a.reportsRejected.Load()},
 			{"treasury_cash_positions_built_total", "Cash positions computed.", a.positionsBuilt.Load()},
+			{"treasury_cash_desks_created_total", "Cash desks created.", a.desksCreated.Load()},
+			{"treasury_cash_desk_entries_total", "Cash journal entries booked.", a.deskEntries.Load()},
+			{"treasury_cash_desk_days_total", "Cash desk days opened or closed.", a.deskDays.Load()},
 			{"treasury_bank_reconciliations_created_total", "Bank reconciliations opened.", a.reconCreated.Load()},
 			{"treasury_bank_reconciliations_closed_total", "Bank reconciliations closed.", a.reconClosed.Load()},
 			{"treasury_bank_reconciliations_reopened_total", "Bank reconciliations reopened.", a.reconReopened.Load()},

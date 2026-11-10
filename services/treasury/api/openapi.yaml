@@ -327,6 +327,207 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks:
+    post:
+      operationId: createCashDesk
+      summary: Create a cash desk of a legal entity in one currency (FR-36.16)
+      description: A desk has a maximum balance (a receipt above it is TRS-0541) and the general-ledger cash account it belongs to. 409 TRS-0550 when the code exists in the legal entity. 503 TRS-0551 when cash desks are not enabled.
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, code, name, currency, mainAccountId, maxBalance]
+              additionalProperties: false
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                code: {type: string, pattern: "^[A-Z0-9-]{1,20}$"}
+                name: {type: string, minLength: 1, maxLength: 120}
+                currency: {type: string, pattern: "^[A-Z]{3}$"}
+                mainAccountId: {type: string, format: uuid}
+                maxBalance: {$ref: "#/components/schemas/PositiveMoney"}
+      responses:
+        "201":
+          description: Desk created (or the stored one for a repeated key)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDesk"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listCashDesks
+      summary: Cash desks of a legal entity, each with the balance of its open day
+      x-passage-duty: treasury.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Desks by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/CashDesk"}}
+        "400": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}:
+    get:
+      operationId: getCashDesk
+      summary: One cash desk with its open day's balance
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Desk
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDesk"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}/days:
+    post:
+      operationId: openCashDeskDay
+      summary: Open a business day; the opening balance is the last closed day's count
+      description: One day is open at a time (409 TRS-0543) and a day must be later than the last closed day (409 TRS-0545).
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessDate]
+              additionalProperties: false
+              properties:
+                businessDate: {type: string, format: date}
+      responses:
+        "201":
+          description: Day opened
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDeskDay"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listCashDeskDays
+      summary: A desk's business days, newest first (at most 100), each with its book balance
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Days
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/CashDeskDay"}}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}/days/{date}:close:
+    post:
+      operationId: closeCashDeskDay
+      summary: Close the open day against the counted cash
+      description: >-
+        The difference is counted less book. A difference needs a reason (422 TRS-0542) and is kept on the day. The counted
+        cash opens the next day. A day that is not open is 409 TRS-0544.
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - {name: date, in: path, required: true, schema: {type: string, format: date}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [countedBalance]
+              additionalProperties: false
+              properties:
+                countedBalance: {type: string, description: "Not negative, at most the currency's minor units"}
+                reason: {type: string, maxLength: 200}
+      responses:
+        "200":
+          description: Day closed
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDeskDay"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}/days/{date}/entries:
+    get:
+      operationId: listCashDeskEntries
+      summary: The cash journal of one day in line order, each line with the balance after it
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - {name: date, in: path, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/CashDeskEntry"}}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}/entries:
+    post:
+      operationId: addCashDeskEntry
+      summary: Book a receipt or payment on the desk's open day
+      description: >-
+        A payment that would take the desk below zero is 422 TRS-0540 and a receipt that would take it above its maximum is 422
+        TRS-0541; the rules run under the desk's row lock. No open day is 409 TRS-0544. A repeated Idempotency-Key replays the entry.
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, amount, description]
+              additionalProperties: false
+              properties:
+                kind: {type: string, enum: [receipt, payment]}
+                amount: {$ref: "#/components/schemas/PositiveMoney"}
+                description: {type: string, minLength: 1, maxLength: 200}
+                reference: {type: string, maxLength: 100}
+      responses:
+        "201":
+          description: Entry booked
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDeskEntry"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/cash-forecast:
     get:
       operationId: getCashForecast
@@ -1599,6 +1800,53 @@ components:
               currency: {type: string}
               booked: {type: string}
               available: {type: string}
+    CashDesk:
+      type: object
+      required: [id, legalEntityId, code, name, currency, mainAccountId, maxBalance, status, version, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        currency: {type: string}
+        mainAccountId: {type: string, format: uuid}
+        maxBalance: {type: string}
+        status: {type: string, enum: [active, inactive]}
+        version: {type: integer}
+        createdAt: {type: string, format: date-time}
+        openDate: {type: string, format: date, description: The open business day, when there is one}
+        balance: {type: string, description: Book balance of the open day}
+    CashDeskDay:
+      type: object
+      required: [deskId, businessDate, status, openingBalance, bookBalance, openedBy, openedAt]
+      properties:
+        deskId: {type: string, format: uuid}
+        businessDate: {type: string, format: date}
+        status: {type: string, enum: [open, closed]}
+        openingBalance: {type: string}
+        bookBalance: {type: string}
+        countedBalance: {type: string}
+        difference: {type: string, description: counted less book}
+        differenceReason: {type: string}
+        openedBy: {type: string}
+        closedBy: {type: string}
+        openedAt: {type: string, format: date-time}
+        closedAt: {type: string, format: date-time}
+    CashDeskEntry:
+      type: object
+      required: [id, deskId, businessDate, lineNo, kind, amount, description, createdBy, createdAt, balanceAfter]
+      properties:
+        id: {type: string, format: uuid}
+        deskId: {type: string, format: uuid}
+        businessDate: {type: string, format: date}
+        lineNo: {type: integer}
+        kind: {type: string, enum: [receipt, payment]}
+        amount: {type: string}
+        description: {type: string}
+        reference: {type: string}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        balanceAfter: {type: string}
     ImportedStatement:
       allOf:
         - $ref: "#/components/schemas/Statement"

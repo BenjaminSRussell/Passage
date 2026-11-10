@@ -914,6 +914,16 @@ const treasury: Record<string, ProblemCatalogEntry> = {
   "TRS-0519": { message: "The ledger did not answer. The transaction may still be posted.", action: "Try the same action again; it will not post twice." },
   "TRS-0525": { message: "A report with this id was already imported with other balances.", action: "Ask the bank for a new report; an imported report is never overwritten." },
   "TRS-0526": { message: "The cash position is not turned on for this deployment.", action: "Ask an administrator to enable it." },
+  "TRS-0540": { message: "The cash desk does not hold enough cash for that payment.", action: "Check the amount, or book the cash that came in first." },
+  "TRS-0541": { message: "That receipt would take the desk above the most cash it may hold.", action: "Pay cash into the bank first, or book a smaller amount." },
+  "TRS-0542": { message: "The cash you counted differs from the books.", action: "Recount, or enter the reason for the difference and close again." },
+  "TRS-0543": { message: "This desk already has an open day.", action: "Count and close the open day before opening another." },
+  "TRS-0544": { message: "The desk has no open day, so nothing can be booked.", action: "Open a day first." },
+  "TRS-0545": { message: "A day must come after the last closed day.", action: "Pick a later business date." },
+  "TRS-0550": { message: "A cash desk with this code already exists in the legal entity.", action: "Use another code." },
+  "BUD-0070": { message: "This budget line is a requisition's pre-encumbrance, so it cannot be checked or relieved as a purchase order.", action: "Convert it to the purchase order line first." },
+  "BUD-0071": { message: "This budget line is not a pre-encumbrance, or it was already converted.", action: "Nothing to convert; check the purchase order line instead." },
+  "BUD-0072": { message: "The purchase order line already carries a budget reservation.", action: "Use that reservation; do not convert a second one onto the line." },
   "TRS-0520": { message: "You stated the book balance, so you can't close this period.", action: "Ask a colleague to close it." },
 };
 

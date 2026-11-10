@@ -1109,6 +1109,18 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
+test_treasury_cash_desk_writes_and_reads_are_separate if {
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:close")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/entries")
+	not allowed("treasury.cashdesk.write", "GET", "/v1/treasury/cash-desks")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days/2026-11-10/entries")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days")
+	not allowed("treasury.view", "POST", "/v1/treasury/cash-desks/d1/entries")
+	not allowed("treasury.cashdesk.write", "POST", "/v1/treasury/checks")
+}
+
 test_treasury_forecast_reads_open_items_only if {
 	data.duties["payables.forecast.read"].service_only
 	data.duties["receivables.forecast.read"].service_only
