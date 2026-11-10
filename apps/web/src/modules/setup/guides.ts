@@ -7,6 +7,9 @@ export interface StepGuide {
   help: string[];
 }
 
+/** The step that checks and imports the first master data inside the guide, not on another screen. */
+export const IMPORT_STEP = "import";
+
 export const stepGuides: Record<string, StepGuide> = {
   features: {
     to: "/setup/features",
@@ -53,9 +56,9 @@ export const stepGuides: Record<string, StepGuide> = {
     linkLabel: "Open users",
     help: ["Add the people who will use Passage.", "Give each person the role that matches their job, so they land in the right workspace."],
   },
-  import: {
-    to: "/admin/import",
-    linkLabel: "Open import",
-    help: ["Import vendors, customers and products from a spreadsheet. Download the template first.", "Rows with problems are listed with the row number and what to fix."],
+  [IMPORT_STEP]: {
+    to: "/migration",
+    linkLabel: "Open imports",
+    help: ["Import vendors, customers and products from a CSV file saved from your spreadsheet.", "Check the file here first. Rows with problems are listed with the row number and what to fix, and nothing is loaded until you start the import."],
   },
 };

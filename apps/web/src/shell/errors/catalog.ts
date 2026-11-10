@@ -944,6 +944,17 @@ const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
 };
 
+const companySetup: Record<string, ProblemCatalogEntry> = {
+  "ORG-0403": {
+    message: "Only a tenant administrator whose access covers every legal entity can load or reset the demo company.",
+    action: "Ask a tenant administrator to do this.",
+  },
+  "ORG-DEMO-IN-USE": {
+    message: "The demo company wasn't reset, because records that are not part of the demo have been added under it. Nothing was removed.",
+    action: "Open Details to see what was added. Remove those records first, or keep the demo company as it is.",
+  },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -967,6 +978,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...p2pGaps,
   ...p2pMore,
   ...treasury,
+  ...companySetup,
   ...shared,
 });
 

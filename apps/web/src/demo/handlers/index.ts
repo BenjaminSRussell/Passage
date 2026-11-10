@@ -6,4 +6,6 @@ import "./treasury";
 import "./budgeting";
 import "./documents";
 import "./tax";
+import "./ledger";
+import "./importSetup";
 import "./shell";

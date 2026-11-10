@@ -155,6 +155,10 @@ export const copy = {
     setupLink: "Continue setup",
     emptyTitle: "No workspaces yet",
     emptyDescription: "Workspaces appear here once your account has access to their features.",
+    kpiTitle: (workspace: string) => `${workspace} at a glance`,
+    kpiLoading: "Loading…",
+    kpiUnavailable: "This number could not be loaded right now.",
+    kpiMore: "The list has more than were counted. Open it to see them all.",
   },
   myWork: {
     title: "My work",

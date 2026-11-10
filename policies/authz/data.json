@@ -2589,7 +2589,7 @@
       {"resource": "/v1/org/teams/*/members/*:end", "methods": ["POST"]},
       {"resource": "/v1/org/operating-units/*/translations/*", "methods": ["PUT", "DELETE"]}
     ]},
-    "org.demo-company.manage": {"permissions": [{"resource": "/v1/org/demo-company", "methods": ["POST"]}]},
+    "org.demo-company.manage": {"permissions": [{"resource": "/v1/org/demo-company", "methods": ["POST"]}, {"resource": "/v1/org/demo-company:reset", "methods": ["POST"]}]},
     "org.package.manage": {"permissions": [
       {"resource": "/v1/org/export", "methods": ["POST"]},
       {"resource": "/v1/org/import", "methods": ["POST"]}

@@ -5,6 +5,7 @@ import { useRecentPages } from "../recent";
 import { useTenantSettings } from "../tenant/TenantSettings";
 import { Alert, Badge, Button, Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
 import { MyWorkSummary } from "./MyWorkSummary";
+import { WorkspaceKpis } from "./WorkspaceKpis";
 import { ALL_FEATURES_PATH, HOME_WORKSPACE_LIMIT, TOP_TASK_COUNT } from "../workspaces/model";
 import { useWorkspaceNav } from "../workspaces/WorkspaceNav";
 import styles from "./pages.module.css";
@@ -53,7 +54,7 @@ function Recent() {
 
 /**
  * The home page is the role home. For the person's current workspace it shows what is waiting for them, a few
- * numbers about it, shortcuts to the top tasks and the pages they used last. Their other workspaces are one
+ * numbers that matter to the role, shortcuts to the top tasks and the pages they used last. Their other workspaces are one
  * click away but add no links, so the page stays short however many workspaces the person holds.
  */
 export function HomePage() {
@@ -65,6 +66,7 @@ export function HomePage() {
       {import.meta.env.MODE === "demo" ? <DemoTour /> : null}
       <SetupBanner />
       <MyWorkSummary />
+      <WorkspaceKpis workspace={active} />
       {ordered.length === 0 ? (
         <Card>
           <EmptyState icon="grid" title={copy.home.emptyTitle} description={copy.home.emptyDescription} />
