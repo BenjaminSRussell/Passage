@@ -1712,8 +1712,13 @@ test_treasury_bank_reconciliation_duties_are_distinct if {
 	not allowed("treasury.view", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
 }
 
-test_treasury_service_posts_to_the_ledger_only if {
-	data.service_grants.treasury == {"ledger": ["ledger.entry.post"]}
+# Treasury posts to the ledger and reads the open items of payables and receivables for the cash forecast, nothing else.
+test_treasury_service_grants_are_the_ledger_post_and_the_forecast_reads if {
+	data.service_grants.treasury == {
+		"ledger": ["ledger.entry.post"],
+		"payables": ["payables.forecast.read"],
+		"receivables": ["receivables.forecast.read"],
+	}
 }
 
 test_treasury_ebics_duties_split_ceremony_from_confirmation if {
