@@ -2,15 +2,16 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listReconciliations, RECONCILIATION_STATUSES, type Reconciliation, type ReconciliationStatus } from "./api/client";
-import { shortId, signed } from "./format";
+import { signed } from "./format";
 import { ProblemAlert } from "./parts";
 import { reconciliationStatusLabels, reconciliationTones } from "./ReconciliationPage";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<Reconciliation>[] = [
   { key: "runDate", header: "Run date", mono: true, render: (row) => <Link to={`/inventory/reconciliations/${row.id}`}>{row.runDate}</Link> },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => shortId(row.legalEntityId) },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <Named entity="legalEntity" id={row.legalEntityId} /> },
   { key: "account", header: "Account", mono: true },
   { key: "inventoryValue", header: "Inventory value", align: "end", mono: true, render: (row) => `${row.inventoryValue} ${row.currency}` },
   { key: "ledgerBalance", header: "Ledger balance", align: "end", mono: true, render: (row) => `${row.ledgerBalance} ${row.currency}` },

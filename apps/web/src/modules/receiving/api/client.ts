@@ -127,6 +127,31 @@ export async function fetchPurchaseOrderLines(purchaseOrderId: string, fetchImpl
   return purchaseOrderSchema.parse(await res.json()).lines;
 }
 
+const purchaseOrderRefSchema = z.object({ id: z.string(), number: z.string(), vendorId: z.string().optional(), documentStatus: z.string().optional() });
+export type PurchaseOrderRef = z.infer<typeof purchaseOrderRefSchema>;
+
+/** The number of a purchase order, so a receipt can name its order. */
+export async function fetchPurchaseOrderRef(purchaseOrderId: string, fetchImpl: FetchLike = defaultFetch): Promise<PurchaseOrderRef> {
+  const res = await fetchImpl(`/api/v1/procurement/purchase-orders/${encodeURIComponent(purchaseOrderId)}`, { method: "GET", headers: { Accept: "application/json" } });
+  if (!res.ok) throw await readProblem(res);
+  return purchaseOrderRefSchema.parse(await res.json());
+}
+
+/** Confirmed purchase orders of one vendor, the orders a delivery can arrive against. */
+export async function fetchOpenPurchaseOrders(vendorId: string, fetchImpl: FetchLike = defaultFetch): Promise<PurchaseOrderRef[]> {
+  const query = new URLSearchParams({ vendorId, approvalStatus: "CONFIRMED" });
+  const res = await fetchImpl(`/api/v1/procurement/purchase-orders?${query}`, { method: "GET", headers: { Accept: "application/json" } });
+  if (!res.ok) throw await readProblem(res);
+  return z.object({ items: z.array(purchaseOrderRefSchema) }).parse(await res.json()).items;
+}
+
+/** The bin locations of a warehouse, by name, for choosing where received goods are put. */
+export async function fetchLocations(warehouseId: string, fetchImpl: FetchLike = defaultFetch): Promise<{ id: string; name: string; zone: string }[]> {
+  const res = await fetchImpl(`/api/v1/warehouse/locations?${new URLSearchParams({ warehouseId, limit: "200" })}`, { method: "GET", headers: { Accept: "application/json" } });
+  if (!res.ok) throw await readProblem(res);
+  return z.object({ items: z.array(z.object({ id: z.string(), name: z.string(), zone: z.string().default("") })) }).parse(await res.json()).items;
+}
+
 /** POST /arrivals: records a delivery at the dock in state ARRIVED. */
 export function createArrival(input: ArrivalInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<Receipt> {
   return request("POST", "/arrivals", receiptSchema, fetchImpl, { "Idempotency-Key": idempotencyKey }, input);

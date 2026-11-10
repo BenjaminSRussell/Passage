@@ -302,12 +302,6 @@
       ],
       "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
     },
-    "modules/inventory/OnHandPage.tsx": {
-      "labels": [
-        "Product id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
     "modules/inventory/StatusChangesPage.tsx": {
       "labels": [
         "Transaction id"
@@ -704,21 +698,6 @@
         "Open item id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/receiving/NewArrivalPage.tsx": {
-      "labels": [
-        "Legal entity ID",
-        "Purchase order ID",
-        "Vendor ID",
-        "product ID"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/receiving/ReceiptPage.tsx": {
-      "labels": [
-        "Line ${n} location ID"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
     "modules/sales/OneTimeFields.tsx": {
       "labels": [

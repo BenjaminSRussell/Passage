@@ -127,6 +127,12 @@ export async function listProducts(params: { q: string; cursor?: string; limit?:
   return { items: (body.items ?? []).map(toProduct), nextCursor: body.nextCursor || undefined };
 }
 
+/** GET /released-products: the ids of products released to the caller's legal entity (names come from the product). */
+export async function listReleasedProductIds(signal?: AbortSignal): Promise<string[]> {
+  const body = await send<{ items?: Raw[] }>("/released-products?limit=200", {}, signal);
+  return (body.items ?? []).map((row) => pick(row, "id", "ID")).filter((id) => id !== "");
+}
+
 export async function getProduct(id: string, signal?: AbortSignal): Promise<Product> {
   return toProduct(await send<Raw>(`/products/${encodeURIComponent(id)}`, {}, signal));
 }
