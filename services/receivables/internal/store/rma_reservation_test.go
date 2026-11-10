@@ -339,3 +339,156 @@ func TestPostRMACredit_ConcurrentRepeatsPostOnceAndKeepTheReservation(t *testing
 		t.Fatalf("status %q journals %d", reservationStatus(t, bill, in), len(gl.Entries()))
 	}
 }
+
+type gatedLedger struct {
+	*ledgerclient.Fake
+	entered chan struct{}
+	proceed chan struct{}
+}
+
+func (g *gatedLedger) Post(ctx context.Context, e ledgerclient.Entry) (string, error) {
+	g.entered <- struct{}{}
+	<-g.proceed
+	return g.Fake.Post(ctx, e)
+}
+
+func TestPostRMACredit_ATwinWhileAnAttemptIsPostingNeitherParksNorReleases(t *testing.T) {
+	s, _, bill := reservedSetup(t)
+	gate := &gatedLedger{Fake: ledgerclient.NewFake(), entered: make(chan struct{}, 2), proceed: make(chan struct{})}
+	ledgerID := s.rmaLedgers[legalEntity]
+	gate.AddLedger(ledgerID, legalEntity)
+	s.WithLedger(gate)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := reservedIn(inv.DocumentNumber)
+	first := make(chan error, 1)
+	go func() {
+		_, err := s.PostRMACredit(ctx, in)
+		first <- err
+	}()
+	<-gate.entered
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeIdempotencyBusy {
+		t.Fatalf("the twin must wait its turn: %v", err)
+	}
+	row, _ := storedCredit(t, s, ctx, in.RMAID)
+	if row.parked || row.reservationID == "" || reservationStatus(t, bill, in) != "RESERVED" {
+		t.Fatalf("the twin must not park or release: %+v status %q", row, reservationStatus(t, bill, in))
+	}
+	close(gate.proceed)
+	if err := <-first; err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if reservationStatus(t, bill, in) != "CONSUMED" {
+		t.Fatalf("status %q", reservationStatus(t, bill, in))
+	}
+	calls := bill.ReserveCalls()
+	stale := row
+	if got, err := s.postRMAJournal(ctx, testkit.TenantID(1), stale, time.Now().Add(time.Hour)); err != nil || got.status != "POSTED" || bill.ReserveCalls() != calls {
+		t.Fatalf("a stale snapshot of a posted credit must not post or reserve again: %+v %v", got, err)
+	}
+}
+
+func TestPostRMACredit_CommitFindingNoRoomFlagsThePostedCreditForAnOperator(t *testing.T) {
+	s, _, bill := reservedSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := reservedIn(inv.DocumentNumber)
+	bill.CommitErr = errors.New("billing: timeout")
+	_, _ = s.PostRMACredit(ctx, in)
+	row, _ := storedCredit(t, s, ctx, in.RMAID)
+	_ = bill.Release(ctx, in.LegalEntityID, row.reservationID)
+	bill.CommitErr = nil
+	bill.NoRoom = true
+	before := ReservationAttention.Load()
+	if res, err := s.SweepRMACredits(ctx, time.Now().UTC(), 10); err != nil || res.Failed != 1 {
+		t.Fatalf("sweep: %+v %v", res, err)
+	}
+	flagged, _ := storedCredit(t, s, ctx, in.RMAID)
+	if flagged.status != "POSTED" || flagged.attention == "" || ReservationAttention.Load() != before+1 {
+		t.Fatalf("flag %+v", flagged)
+	}
+	list, err := s.ListRMACredits(ctx, RMACreditFilter{AttentionOnly: true, Limit: 10})
+	if err != nil || len(list) != 1 || list[0].NeedsAttention == "" {
+		t.Fatalf("the operator list must show it: %+v %v", list, err)
+	}
+	calls := bill.ReserveCalls()
+	if res, err := s.SweepRMACredits(ctx, time.Now().UTC(), 10); err != nil || res != (RMASweepResult{}) || bill.ReserveCalls() != calls {
+		t.Fatalf("a flagged credit is not retried forever: %+v %v", res, err)
+	}
+}
+
+func TestPostRMACredit_AnyOtherBillingRejectionIsAPlain422AndParksAStoredCredit(t *testing.T) {
+	s, gl, bill := reservedSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := reservedIn(inv.DocumentNumber)
+	bill.ReserveErr = billingclient.ErrRejected
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("400 from billing: %v", err)
+	}
+	bill.ReserveErr = billingclient.ErrKeyReuse
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("key reuse: %v", err)
+	}
+	if _, found := storedCredit(t, s, ctx, in.RMAID); found {
+		t.Fatalf("nothing may be stored")
+	}
+	bill.ReserveErr = nil
+	gl.err = &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "period_closed"}
+	_, _ = s.PostRMACredit(ctx, in)
+	row, _ := storedCredit(t, s, ctx, in.RMAID)
+	gl.err = nil
+	bill.ReserveErr = billingclient.ErrRejected
+	if _, err := s.RetryRMACredit(ctx, row.id, ""); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("retry: %v", err)
+	}
+	if after, _ := storedCredit(t, s, ctx, in.RMAID); !after.parked || after.status != "PENDING" {
+		t.Fatalf("a rejected re-reserve parks instead of backing off forever: %+v", after)
+	}
+}
+
+func TestPostRMACredit_ReservedLessThanTheReturnValueIsRefusedAndReleased(t *testing.T) {
+	s, gl, bill := reservedSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := reservedIn(inv.DocumentNumber)
+	short := amt("100.00")
+	bill.Net = &short
+	if _, err := s.PostRMACredit(ctx, in); problemCode(err) != CodeRMAInvoice {
+		t.Fatalf("short: %v", err)
+	}
+	if _, found := storedCredit(t, s, ctx, in.RMAID); found || gl.calls != 0 || reservationStatus(t, bill, in) != "RELEASED" {
+		t.Fatalf("found %v ledger %d status %q", found, gl.calls, reservationStatus(t, bill, in))
+	}
+	enough := amt("400.00")
+	bill.Net = &enough
+	if _, err := s.PostRMACredit(ctx, in); err != nil {
+		t.Fatalf("enough: %v", err)
+	}
+}
+
+func TestPostRMACredit_ACreditStoredBeforeReservationsGetsItsLinesFromTheRepeatAndReservesBeforePosting(t *testing.T) {
+	s, gl, bill := reservedSetup(t)
+	s.reserver = nil
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := reservedIn(inv.DocumentNumber)
+	legacy := in
+	legacy.InvoiceLines = nil
+	gl.err = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable, Code: "down"}
+	if _, err := s.PostRMACredit(ctx, legacy); problemCode(err) != CodeRMAUnavailable {
+		t.Fatalf("legacy store: %v", err)
+	}
+	gl.err = nil
+	clearBackoff(t, s, ctx)
+	s.WithReservations(bill)
+	if res, err := s.SweepRMACredits(ctx, time.Now().UTC().Add(time.Hour), 10); err != nil || res.Posted != 0 || len(gl.Entries()) != 0 {
+		t.Fatalf("the sweep must not post a credit nothing was reserved for: %+v %v", res, err)
+	}
+	if _, err := s.PostRMACredit(ctx, in); err != nil {
+		t.Fatalf("repeat with lines: %v", err)
+	}
+	if reservationStatus(t, bill, in) != "CONSUMED" || len(gl.Entries()) != 1 {
+		t.Fatalf("status %q journals %d", reservationStatus(t, bill, in), len(gl.Entries()))
+	}
+}

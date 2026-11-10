@@ -49,6 +49,9 @@ var (
 	ErrReleased  = errors.New("billing: the reservation was released")
 	ErrConsumed  = errors.New("billing: the reservation was already consumed")
 	ErrBusy      = errors.New("billing: a concurrent request holds the same key")
+	ErrKeyReuse  = errors.New("billing: the reservation key was used with other lines")
+	ErrRejected  = errors.New("billing: the reservation request was rejected")
+	codeKeyReuse = "idempotency_key_reuse"
 	codeNoRoom   = "BIL-0005"
 	codeState    = "reservation_state"
 	codeInFlight = "idempotency_in_progress"
@@ -62,6 +65,8 @@ type Line struct {
 type Reservation struct {
 	ID     string
 	Status string
+	Net    decimal.Decimal
+	Known  bool
 }
 
 type Reserver interface {
@@ -160,6 +165,10 @@ type reservationBody struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
 	Code   string `json:"code"`
+	Totals struct {
+		Net     string `json:"net"`
+		Charges string `json:"charges"`
+	} `json:"totals"`
 }
 
 func (c *Client) send(ctx context.Context, legalEntityID, path, key string, body any) (reservationBody, error) {
@@ -206,6 +215,11 @@ func (c *Client) send(ctx context.Context, legalEntityID, path, key string, body
 		return reservationBody{}, ErrBusy
 	case resp.StatusCode == http.StatusConflict && out.Code == codeState:
 		return out, errStateConflict
+	case resp.StatusCode == http.StatusUnprocessableEntity && out.Code == codeKeyReuse:
+		return reservationBody{}, ErrKeyReuse
+	case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity:
+		slog.ErrorContext(ctx, "billing rejected the reservation request", "path", path, "status", resp.StatusCode, "code", out.Code, "correlationId", middleware.GetReqID(ctx))
+		return reservationBody{}, fmt.Errorf("%w (status %d code %q)", ErrRejected, resp.StatusCode, out.Code)
 	}
 	slog.ErrorContext(ctx, "billing refused the reservation call", "path", path, "status", resp.StatusCode, "code", out.Code, "correlationId", middleware.GetReqID(ctx))
 	return reservationBody{}, fmt.Errorf("billing: unexpected status %d", resp.StatusCode)
@@ -227,7 +241,13 @@ func (c *Client) Reserve(ctx context.Context, legalEntityID, invoiceID, key, ref
 	if err != nil {
 		return Reservation{}, err
 	}
-	return Reservation{ID: out.ID, Status: out.Status}, nil
+	res := Reservation{ID: out.ID, Status: out.Status}
+	net, nerr := optional(out.Totals.Net)
+	charges, cerr := optional(out.Totals.Charges)
+	if out.Totals.Net != "" && nerr == nil && cerr == nil {
+		res.Net, res.Known = net.Add(charges), true
+	}
+	return res, nil
 }
 
 func (c *Client) Commit(ctx context.Context, legalEntityID, reservationID string) error {
@@ -260,6 +280,7 @@ type Fake struct {
 	CommitErr   error
 	ReleaseErr  error
 	NoRoom      bool
+	Net         *decimal.Decimal
 	invoices    map[string]Basis
 	byKey       map[string]*FakeReservation
 	byID        map[string]*FakeReservation
@@ -305,14 +326,22 @@ func (f *Fake) Reserve(_ context.Context, _, invoiceID, key, _ string, lines []L
 			}
 			r.Status = "RESERVED"
 		}
-		return Reservation{ID: r.ID, Status: r.Status}, nil
+		return f.answer(r), nil
 	}
 	if f.NoRoom {
 		return Reservation{}, ErrNoRoom
 	}
 	r := &FakeReservation{ID: ids.New(), Key: key, InvoiceID: invoiceID, Status: "RESERVED", Lines: lines}
 	f.byKey[key], f.byID[r.ID] = r, r
-	return Reservation{ID: r.ID, Status: r.Status}, nil
+	return f.answer(r), nil
+}
+
+func (f *Fake) answer(r *FakeReservation) Reservation {
+	out := Reservation{ID: r.ID, Status: r.Status}
+	if f.Net != nil {
+		out.Net, out.Known = *f.Net, true
+	}
+	return out
 }
 
 func (f *Fake) Commit(_ context.Context, _, reservationID string) error {

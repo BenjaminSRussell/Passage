@@ -112,6 +112,14 @@ func (a *API) listRMACredits(w http.ResponseWriter, r *http.Request) {
 		badQuery(w, r, "status", "must be PENDING or POSTED")
 		return
 	}
+	switch q.Get("needsAttention") {
+	case "", "false":
+	case "true":
+		f.AttentionOnly = true
+	default:
+		badQuery(w, r, "needsAttention", "must be true or false")
+		return
+	}
 	switch q.Get("parked") {
 	case "", "false":
 	case "true":

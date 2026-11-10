@@ -1400,6 +1400,9 @@ paths:
         POSTED (the response is still 201) and a repeat or the sweep commits it later. A credit
         that is parked or refused after reserving releases the reservation; `:retry` reserves again with the same
         key and is refused 422 AR-RMA-INVOICE when the room is gone.
+        Any other billing rejection (400, 422 such as idempotency_key_reuse) is 422 AR-RMA-INVOICE with
+        a plain message; the reservation must cover the return value. A POSTED credit whose reservation
+        billing cannot restore is flagged needsAttention for an operator.
       x-passage-duty: ar.rmacredit.post
       requestBody:
         required: true
@@ -1425,6 +1428,7 @@ paths:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED] } }
         - { name: parked, in: query, description: true lists only credits the ledger refused, schema: { type: boolean } }
+        - { name: needsAttention, in: query, description: true lists only POSTED credits whose billing reservation was lost, schema: { type: boolean } }
         - { $ref: "#/components/parameters/Limit" }
       responses:
         "200":
@@ -2362,6 +2366,7 @@ components:
         glNextAttemptAt: { type: string, format: date-time }
         glParked: { type: boolean, description: True when the ledger or billing refused the credit and it waits for an operator's retry }
         reservationId: { type: string, format: uuid, description: The billing reservation held for the credit, when it holds one }
+        needsAttention: { type: string, description: Why a POSTED credit needs an operator (its billing reservation was lost); the sweep does not retry it }
         reservationCommitted: { type: boolean, description: True once billing consumed the reservation; a POSTED credit without it is committed by a repeat or the sweep }
         createdAt: { type: string, format: date-time }
     RMACreditNote:

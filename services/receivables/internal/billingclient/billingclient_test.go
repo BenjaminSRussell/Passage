@@ -117,6 +117,9 @@ func TestReservations_UseTheWriteDutyKeyAndPathsAndMapBillingsRefusals(t *testin
 	}{
 		{http.StatusUnprocessableEntity, `{"code":"BIL-0005"}`, func() error { _, e := c.Reserve(ctx, le, "i", "k", "r", nil); return e }, ErrNoRoom},
 		{http.StatusNotFound, `{"code":"BIL-0100"}`, func() error { _, e := c.Reserve(ctx, le, "i", "k", "r", nil); return e }, ErrNotFound},
+		{http.StatusBadRequest, `{"code":"COM-0001"}`, func() error { _, e := c.Reserve(ctx, le, "i", "k", "r", nil); return e }, ErrRejected},
+		{http.StatusUnprocessableEntity, `{"code":"something_else"}`, func() error { _, e := c.Reserve(ctx, le, "i", "k", "r", nil); return e }, ErrRejected},
+		{http.StatusUnprocessableEntity, `{"code":"idempotency_key_reuse"}`, func() error { _, e := c.Reserve(ctx, le, "i", "k", "r", nil); return e }, ErrKeyReuse},
 		{http.StatusConflict, `{"code":"idempotency_in_progress"}`, func() error { _, e := c.Reserve(ctx, le, "i", "k", "r", nil); return e }, ErrBusy},
 		{http.StatusConflict, `{"code":"reservation_state"}`, func() error { return c.Commit(ctx, le, "r1") }, ErrReleased},
 		{http.StatusConflict, `{"code":"reservation_state"}`, func() error { return c.Release(ctx, le, "r1") }, ErrConsumed},

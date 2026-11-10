@@ -95,6 +95,7 @@ type RMACreditView struct {
 
 	ReservationID        string `json:"reservationId,omitempty"`
 	ReservationCommitted bool   `json:"reservationCommitted,omitempty"`
+	NeedsAttention       string `json:"needsAttention,omitempty"`
 }
 
 // RMACreditFilter narrows the operator list.
@@ -102,6 +103,7 @@ type RMACreditFilter struct {
 	LegalEntityID string
 	Status        string
 	ParkedOnly    bool
+	AttentionOnly bool
 	Limit         int
 }
 
@@ -121,7 +123,7 @@ type rmaCreditRow struct {
 	nextAttempt                                                                                                         *time.Time
 	parked, taxRecorded, committed                                                                                      bool
 	createdAt                                                                                                           time.Time
-	billingInvoiceID, reservationID                                                                                     string
+	billingInvoiceID, reservationID, attention                                                                          string
 	lines                                                                                                               []RMAInvoiceLine
 }
 
@@ -141,13 +143,13 @@ func (r rmaCreditRow) view() RMACreditView {
 		CreditOpenItemID: r.creditItemID, CustomerID: r.customerID, Currency: r.currency, PostingDate: r.postingDate,
 		Gross: r.gross, Restocking: r.restocking, Net: r.net, Tax: r.tax, Status: r.status, JournalPostingID: r.journal,
 		GLAttempts: r.attempts, GLNextAttemptAt: r.nextAttempt, GLParked: r.parked, CreatedAt: r.createdAt,
-		ReservationID: r.reservationID, ReservationCommitted: r.committed}
+		ReservationID: r.reservationID, ReservationCommitted: r.committed, NeedsAttention: r.attention}
 }
 
 const rmaCreditColumns = `id::text, legal_entity_id::text, rma_id::text, rma_number, credit_open_item_id::text, customer_id::text, currency::text,
 	posting_date::text, ledger_id::text, request_hash, status, journal_posting_id, gross::text, restocking::text, net::text, tax::text, gl_attempts,
 	gl_next_attempt_at, gl_parked, created_at, tax_recorded, coalesce(billing_invoice_id::text, ''), coalesce(reservation_lines::text, ''),
-	coalesce(billing_reservation_id::text, ''), reservation_committed`
+	coalesce(billing_reservation_id::text, ''), reservation_committed, coalesce(needs_attention, '')`
 
 // WithLedger sets the journal poster used by RMA credits.
 func (s *Postgres) WithLedger(l ledgerclient.Ledger) *Postgres {
@@ -363,7 +365,12 @@ func (s *Postgres) postRMAJournal(ctx context.Context, tenantID string, row rmaC
 	if row.nextAttempt != nil && row.nextAttempt.After(now) {
 		return row, httpx.NewProblem(http.StatusServiceUnavailable, CodeRMAUnavailable, "the journal post is backing off after a failure; retry later")
 	}
-	row, err := s.ensureReserved(ctx, tenantID, row, now)
+	row, claimed, err := s.claimPost(ctx, tenantID, row, now)
+	if err != nil || !claimed {
+		return row, err
+	}
+	defer s.releasePostLease(ctx, tenantID, row.id)
+	row, err = s.ensureReserved(ctx, tenantID, row, now)
 	if err != nil {
 		return row, err
 	}
@@ -384,9 +391,11 @@ func (s *Postgres) postRMAJournal(ctx context.Context, tenantID string, row rmaC
 		parked := ledgerclient.Rejected(err) || taxclient.Rejected(err)
 		next := now.Add(min(rmaGLBackoffBase<<min(row.attempts, 10), rmaGLBackoffMax))
 		slog.ErrorContext(ctx, "rma credit journal not posted", "rma", row.rmaNumber, "attempts", row.attempts+1, "parked", parked, "err", err, "correlationId", middleware.GetReqID(ctx))
-		s.recordRMAFailure(ctx, tenantID, row, next, parked)
+		recorded := s.recordRMAFailure(ctx, tenantID, row, next, parked)
 		if parked {
-			s.releaseReservation(ctx, row)
+			if recorded {
+				s.releaseReservation(ctx, row)
+			}
 			return row, rmaParked()
 		}
 		return row, httpx.NewProblem(http.StatusServiceUnavailable, CodeRMAUnavailable, "the journal could not be posted; retry later")
@@ -513,7 +522,7 @@ func (s *Postgres) ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMA
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+rmaCreditColumns+` from rma_credit
 			where tenant_id = $1 and ($2 = '' or legal_entity_id = nullif($2, '')::uuid) and ($3 = '' or status = $3) and (not $4 or gl_parked)
-			order by created_at desc, id desc limit $5`, p.TenantID, f.LegalEntityID, f.Status, f.ParkedOnly, f.Limit)
+			and (not $6 or needs_attention is not null) order by created_at desc, id desc limit $5`, p.TenantID, f.LegalEntityID, f.Status, f.ParkedOnly, f.Limit, f.AttentionOnly)
 		if err != nil {
 			return err
 		}
@@ -597,7 +606,7 @@ func (s *Postgres) RMASweepLegalEntities(ctx context.Context) ([]string, error) 
 	var out []string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select distinct legal_entity_id::text from rma_credit where tenant_id = $1
-			and ((status = 'PENDING' and not gl_parked) or (status = 'POSTED' and billing_reservation_id is not null and not reservation_committed))`, p.TenantID)
+			and ((status = 'PENDING' and not gl_parked) or (status = 'POSTED' and billing_reservation_id is not null and not reservation_committed and needs_attention is null))`, p.TenantID)
 		if err != nil {
 			return err
 		}
@@ -623,7 +632,7 @@ func scanRMACredit(row rowScanner) (rmaCreditRow, error) {
 	var gross, restocking, net, tax, lines string
 	if err := row.Scan(&r.id, &r.legalEntityID, &r.rmaID, &r.rmaNumber, &r.creditItemID, &r.customerID, &r.currency, &r.postingDate, &r.ledgerID,
 		&r.requestHash, &r.status, &r.journal, &gross, &restocking, &net, &tax, &r.attempts, &r.nextAttempt, &r.parked, &r.createdAt, &r.taxRecorded,
-		&r.billingInvoiceID, &lines, &r.reservationID, &r.committed); err != nil {
+		&r.billingInvoiceID, &lines, &r.reservationID, &r.committed, &r.attention); err != nil {
 		return rmaCreditRow{}, err
 	}
 	if lines != "" {
