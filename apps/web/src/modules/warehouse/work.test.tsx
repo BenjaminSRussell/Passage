@@ -32,7 +32,7 @@ function fill(label: string, value: string) {
 describe("WorkListPage", () => {
   it("lists work and opens a work", async () => {
     server.handler = (url) => {
-      if (url.pathname === "/api/v1/warehouse/work") return json(200, { items: [{ ...pick, lines: [] }] });
+      if (url.pathname === "/api/v1/warehouse/work") return json(200, { items: [pick] });
       if (url.pathname === `/api/v1/warehouse/work/${WORK}`) return json(200, pick);
       return undefined;
     };
@@ -42,8 +42,8 @@ describe("WorkListPage", () => {
     expect(table).toHaveTextContent("Assigned");
     expect(table).toHaveTextContent("picker");
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.click(within(table).getByRole("button", { name: "0190f0a0" }));
-    expect(await screen.findByRole("heading", { name: "Work 0190f0a0" })).toBeInTheDocument();
+    fireEvent.click(within(table).getByRole("button", { name: /Product BOLT/ }));
+    expect(await screen.findByRole("heading", { name: "Sales pick work" })).toBeInTheDocument();
   });
 
   it("filters by status and shows the empty state", async () => {
@@ -72,7 +72,7 @@ describe("WorkListPage", () => {
 
     next = pick;
     fireEvent.click(screen.getByRole("button", { name: "Assign next work to me" }));
-    expect(await screen.findByRole("heading", { name: "Work 0190f0a0" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Sales pick work" })).toBeInTheDocument();
     const assigns = server.calls.filter((c) => c.url.pathname.endsWith("work:assign"));
     expect(idempotencyKey(assigns[1])).not.toBe(idempotencyKey(assigns[0]));
   });
@@ -145,7 +145,7 @@ describe("NewWorkPage", () => {
     fill("Line 1 item", "BOLT");
     fill("Line 1 quantity", "1");
     fireEvent.click(screen.getByRole("button", { name: "Create work" }));
-    expect(await screen.findByText(/request failed validation \(COM-0001\): workType is not a warehouse work type/)).toBeInTheDocument();
+    expect(await screen.findByText(/aren't valid.*: workType is not a warehouse work type/)).toBeInTheDocument();
   });
 });
 
@@ -188,7 +188,7 @@ describe("WorkDetailPage", () => {
     fill("Reason", "EMPTY");
     fireEvent.click(screen.getByRole("button", { name: "Record short pick" }));
     expect(await screen.findByText(/Line 1 short picked at 6\./)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "0190f0a0" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "a new work" })).toHaveAttribute("href", `/warehouse/work/${REMAINDER}`);
     const post = server.calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe(`/api/v1/warehouse/work/${WORK}:exception`);
     expect(post?.body).toEqual({ action: "SHORT_PICK", lineNo: 1, confirmedQty: "6", reason: "EMPTY" });

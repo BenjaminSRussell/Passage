@@ -24,12 +24,13 @@ import type { ScanSource } from "./domain/scanRouting";
 import { appendTiming, type StepTiming } from "./domain/telemetry";
 import { useDeviceFlows } from "./useDeviceFlows";
 import "./deviceApp.css";
+import { apiFetch } from "../../shell/api/http";
 
 const REPLAY_URL = "/api/v1/mobile/offline:replay";
 
 /** Sends one queued confirmation. The server enforces ordering and idempotency per key. */
 export async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
-  const res = await fetch(REPLAY_URL, {
+  const res = await apiFetch(REPLAY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": tx.idempotencyKey },
     body: JSON.stringify({ idempotencyKey: tx.idempotencyKey, command: tx.command, payload: tx.payload, capturedAt: tx.capturedAt }),

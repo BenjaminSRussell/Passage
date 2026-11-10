@@ -1,15 +1,16 @@
 // Quality service (/api/v1/quality) for the demo: quality orders with their test groups, results and usage decisions.
-// The quality screens show the first eight characters of ids, so ids here are readable codes (QO-24007, CP-200).
-import type { Decision, DecisionLine, Instrument, Order, OrderView, Result, TestGroup } from "../../../modules/quality/api/client";
+// The quality screens show the first eight characters of order ids, so order ids here are readable codes (QO-24007);
+// items, sites and warehouses carry the real ids of company.ts.
+import type { Decision, DecisionLine, Instrument, NewOrder, Order, OrderView, Result, TestGroup } from "../../../modules/quality/api/client";
 import { reply, route } from "../../backend";
-import { USER, PLANT, WH_FG, WH_RAW } from "../../company";
-import { at, dec, table } from "../../store";
+import { USER, PLANT, WH_FG, WH_RAW, itemByNumber } from "../../company";
+import { at, dec, table, uid } from "../../store";
 
 const BASE = "/api/v1/quality";
 
 const GROUPS: Record<string, TestGroup> = {
   pump: {
-    id: "TG-PUMP",
+    id: uid(250, 1),
     code: "PUMP-FG-FINAL",
     version: 3,
     tests: [
@@ -19,7 +20,7 @@ const GROUPS: Record<string, TestGroup> = {
     ],
   },
   casting: {
-    id: "TG-CAST",
+    id: uid(250, 2),
     code: "CASTING-IN",
     version: 2,
     tests: [
@@ -29,7 +30,7 @@ const GROUPS: Record<string, TestGroup> = {
     ],
   },
   motor: {
-    id: "TG-MTR",
+    id: uid(250, 3),
     code: "MOTOR-IN",
     version: 1,
     tests: [
@@ -149,9 +150,9 @@ function build(s: Spec): { order: Order; view: OrderView } {
     id: `QO-${s.n}`,
     trigger: s.trigger,
     sourceRef: { type: s.ref[0], id: s.ref[1] },
-    itemId: s.item,
-    siteId: PLANT.code,
-    warehouseId: s.trigger === "PURCHASE_RECEIPT" ? WH_RAW.code : WH_FG.code,
+    itemId: itemByNumber(s.item).id,
+    siteId: PLANT.id,
+    warehouseId: s.trigger === "PURCHASE_RECEIPT" ? WH_RAW.id : WH_FG.id,
     dims: s.batch ? { batch: s.batch } : {},
     lotQty: dec(s.lot, 6),
     sampleQty: dec(s.sample, 6),
@@ -194,6 +195,41 @@ route("GET", `${BASE}/quality-orders`, (req) => {
   if (site) rows = rows.filter((v) => v.siteId === site);
   rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return { items: rows.map(asOrder) };
+});
+
+let nextOrder = 24010;
+route("POST", `${BASE}/quality-orders`, (req) => {
+  const input = req.body as NewOrder;
+  const group = Object.values(GROUPS).find((g) => g.id === input.testGroupId) ?? GROUPS.pump;
+  const lot = Number(input.lotQty);
+  const plan = input.samplingPlan;
+  const sample = Math.max(1, Math.min(lot, plan?.method === "FIXED" ? Number(plan.fixedQty ?? 5) : plan?.method === "PERCENT" ? Math.ceil((lot * Number(plan.percent ?? 10)) / 100) : Math.min(lot, 8)));
+  const order: Order = {
+    id: `QO-${nextOrder++}`,
+    trigger: input.trigger,
+    sourceRef: input.sourceRef,
+    itemId: input.itemId,
+    siteId: input.siteId,
+    warehouseId: input.warehouseId,
+    dims: input.dims ?? {},
+    lotQty: dec(lot, 6),
+    sampleQty: dec(sample, 6),
+    uom: input.uom,
+    testGroupId: group.id,
+    testGroupVersion: group.version,
+    samplingMethod: plan?.method ?? "AQL",
+    severity: plan?.severity ?? "NORMAL",
+    codeLetter: "D",
+    acceptNo: 1,
+    rejectNo: 2,
+    status: "OPEN",
+    version: 1,
+    createdAt: at(0),
+    certificateRequired: input.certificateRequired ?? "NONE",
+  };
+  const evaluation = evaluate(group, [], sample);
+  views.insert({ ...order, testGroup: group, results: [], evaluation, certificateStatus: input.certificateRequired && input.certificateRequired !== "NONE" ? "MISSING" : "NOT_REQUIRED" });
+  return reply.created(order, { ETag: '"1"' });
 });
 
 route("POST", `${BASE}/quality-orders/{id}/results`, (req) => {

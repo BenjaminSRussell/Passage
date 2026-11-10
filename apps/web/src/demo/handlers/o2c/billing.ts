@@ -17,7 +17,7 @@ function header({ lines: _lines, installments: _installments, credited: _credite
 route("GET", `${BASE}/invoices`, ({ query }) => {
   const rows = invoices
     .all()
-    .filter((i) => (!query.get("status") || i.status === query.get("status")) && (!query.get("type") || i.type === query.get("type")) && (!query.get("customerId") || i.customerId === query.get("customerId")) && !query.get("originalInvoiceId"))
+    .filter((i) => (!query.get("status") || i.status === query.get("status")) && (!query.get("type") || i.type === query.get("type")) && (!query.get("customerId") || i.customerId === query.get("customerId")) && !query.get("originalInvoiceId") && (!query.get("orderId") || i.orderId === query.get("orderId")) && (!query.get("packingSlipId") || i.lines.some((l) => l.packingSlipId === query.get("packingSlipId"))))
     .filter(() => query.get("type") !== "CREDIT_NOTE")
     .sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate) || (b.number ?? "~").localeCompare(a.number ?? "~"));
   const limit = Number(query.get("limit") ?? 100);

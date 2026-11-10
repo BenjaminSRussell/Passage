@@ -20,10 +20,10 @@ export function SetupMatricesPage() {
     const [rows, resources] = await Promise.all([listSetupMatrices(resourceId, signal), listResources(signal)]);
     return { rows, resources };
   }, resourceId);
-  const codes: Record<string, string> = Object.fromEntries((state.data?.resources ?? []).map((r) => [r.id, r.code]));
+  const codes: Record<string, string> = Object.fromEntries((state.data?.resources ?? []).map((r) => [r.id, `${r.name} (${r.code})`]));
 
   const columns: DataTableColumn<SetupMatrix>[] = [
-    { key: "resourceId", header: "Resource", mono: true, render: (m) => codes[m.resourceId] ?? shortId(m.resourceId) },
+    { key: "resourceId", header: "Resource", render: (m) => codes[m.resourceId] ?? shortId(m.resourceId) },
     { key: "version", header: "Version", align: "end" },
     { key: "activeFrom", header: "Active from" },
     { key: "currency", header: "Currency", mono: true },

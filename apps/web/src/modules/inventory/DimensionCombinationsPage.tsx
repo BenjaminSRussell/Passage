@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listDimensionCombinations, type DimensionCombination } from "./api/client";
-import { describeDimensions, shortId, UUID } from "./format";
+import { describeDimensions, UUID } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<DimensionCombination>[] = [
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "activeDimensions", header: "Active", render: (row) => row.activeDimensions.join(", ") },
   { key: "firstUse", header: "First use", mono: true },

@@ -3,10 +3,11 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { createPromise, describeProblem, listPromises, newKey, type PaymentPromise, type Problem, type PromiseInput } from "./api/client";
-import { DAY, DECIMAL, money, shortId, today, UUID } from "./format";
+import { DAY, DECIMAL, money, today, UUID } from "./format";
 import { CommandFailure, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 const GRACE_DAYS = 2;
@@ -28,7 +29,7 @@ export function PromisesPage() {
 
   const columns: DataTableColumn<PaymentPromise>[] = [
     { key: "documentNumber", header: "Document", mono: true },
-    { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+    { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
     { key: "amount", header: "Promised", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
     { key: "promiseDate", header: "Promise date", mono: true },
     {

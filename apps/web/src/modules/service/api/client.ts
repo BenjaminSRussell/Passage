@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the fieldservice service (services/fieldservice/api/openapi.yaml).
 // Browser calls use /api/v1/service/..., which the web BFF rewrites to /v1/service/...;
 // generic case calls use /api/v1/cases, /api/v1/case-categories, /api/v1/case-processes,
@@ -377,7 +378,7 @@ async function send(path: string, init: RequestInit = {}, signal?: AbortSignal, 
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${root}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${root}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }

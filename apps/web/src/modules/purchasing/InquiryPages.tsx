@@ -18,7 +18,7 @@ import {
   type PriceHistoryEntry,
   type VendorOpenOrders,
 } from "./api/client";
-import { LoadError, ShortId, datePattern, useResource, uuidPattern } from "./parts";
+import { LoadError, datePattern, useResource, uuidPattern, Named } from "./parts";
 import styles from "./pages.module.css";
 
 type Field = "vendorId" | "productId" | "asOf" | "from" | "to" | "withinDays" | "thresholdPct";
@@ -179,7 +179,7 @@ const money = (amount: string, currency: string) => `${amount} ${currency}`;
 /** Open orders by vendor (PRD 3.17.14): what each vendor still owes, and how much of it is late. */
 export function OpenOrdersByVendorPage() {
   const columns: DataTableColumn<VendorOpenOrders>[] = [
-    { key: "vendorId", header: "Vendor", render: (v) => <ShortId id={v.vendorId} /> },
+    { key: "vendorId", header: "Vendor", render: (v) => <Named entity="vendor" id={v.vendorId} /> },
     { key: "orderCount", header: "Orders", align: "end" },
     { key: "lineCount", header: "Open lines", align: "end" },
     { key: "openValue", header: "Open value", align: "end", render: (v) => money(v.openValue, v.currency) },
@@ -215,8 +215,8 @@ export function OverdueLinesPage() {
       ),
     },
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "vendorId", header: "Vendor", render: (l) => <ShortId id={l.vendorId} /> },
-    { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+    { key: "vendorId", header: "Vendor", render: (l) => <Named entity="vendor" id={l.vendorId} /> },
+    { key: "item", header: "Item", render: (l) => l.description || <Named entity="product" id={l.productId} /> },
     { key: "openQty", header: "Open quantity", align: "end", render: (l) => `${l.openQty} ${l.unit}` },
     { key: "openValue", header: "Open value", align: "end", render: (l) => money(l.openValue, l.currency) },
     { key: "dueDate", header: "Due", mono: true },
@@ -252,8 +252,8 @@ export function BackorderedLinesPage() {
       ),
     },
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "vendorId", header: "Vendor", render: (l) => <ShortId id={l.vendorId} /> },
-    { key: "item", header: "Item", render: (l) => l.description || <ShortId id={l.productId} /> },
+    { key: "vendorId", header: "Vendor", render: (l) => <Named entity="vendor" id={l.vendorId} /> },
+    { key: "item", header: "Item", render: (l) => l.description || <Named entity="product" id={l.productId} /> },
     { key: "qty", header: "Ordered", align: "end", render: (l) => `${l.qty} ${l.unit}` },
     { key: "receivedQty", header: "Received", align: "end", render: (l) => `${l.receivedQty} ${l.unit}` },
     { key: "openQty", header: "Backordered", align: "end", render: (l) => `${l.openQty} ${l.unit}` },
@@ -288,7 +288,7 @@ export function ExpiringAgreementsPage() {
         </Link>
       ),
     },
-    { key: "vendorId", header: "Vendor", render: (a) => <ShortId id={a.vendorId} /> },
+    { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
     { key: "status", header: "Status" },
     { key: "validTo", header: "Ends", mono: true },
     { key: "daysLeft", header: "Days left", align: "end", render: (a) => (a.lapsed ? `Lapsed ${-a.daysLeft} ${a.daysLeft === -1 ? "day" : "days"} ago` : a.daysLeft) },
@@ -324,9 +324,9 @@ export function NearLimitAgreementsPage() {
       ),
     },
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "vendorId", header: "Vendor", render: (l) => <ShortId id={l.vendorId} /> },
+    { key: "vendorId", header: "Vendor", render: (l) => <Named entity="vendor" id={l.vendorId} /> },
     { key: "commitmentType", header: "Commitment", render: (l) => l.commitmentType.replace(/_/g, " ").toLowerCase() },
-    { key: "item", header: "Item", render: (l) => l.category || (l.productId ? <ShortId id={l.productId} /> : "Whole agreement") },
+    { key: "item", header: "Item", render: (l) => l.category || (l.productId ? <Named entity="product" id={l.productId} /> : "Whole agreement") },
     { key: "maxEnforced", header: "Limit" },
     { key: "committed", header: "Committed", align: "end", render: (l) => measure(l, l.committed) },
     { key: "released", header: "Released", align: "end", render: (l) => measure(l, l.released) },
@@ -362,7 +362,7 @@ export function ChangeOrdersPage() {
         </Link>
       ),
     },
-    { key: "vendorId", header: "Vendor", render: (c) => <ShortId id={c.vendorId} /> },
+    { key: "vendorId", header: "Vendor", render: (c) => <Named entity="vendor" id={c.vendorId} /> },
     { key: "versions", header: "Version", align: "end", render: (c) => `${c.confirmedVersion} to ${c.pendingVersion}` },
     { key: "changeCount", header: "Changes", align: "end" },
     { key: "confirmedTotal", header: "Confirmed total", align: "end", render: (c) => money(c.confirmedTotal, c.currency) },
@@ -397,7 +397,7 @@ export function PriceHistoryPage() {
         </Link>
       ),
     },
-    { key: "vendorId", header: "Vendor", render: (e) => <ShortId id={e.vendorId} /> },
+    { key: "vendorId", header: "Vendor", render: (e) => <Named entity="vendor" id={e.vendorId} /> },
     { key: "qty", header: "Quantity", align: "end", render: (e) => `${e.qty} ${e.unit}` },
     { key: "unitPrice", header: "Unit price", align: "end", render: (e) => `${money(e.unitPrice, e.currency)} per ${e.priceUnit}` },
     { key: "discountPct", header: "Discount %", align: "end" },

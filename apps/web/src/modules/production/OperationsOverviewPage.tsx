@@ -15,6 +15,9 @@ import {
 import { dash, operStatusLabel, operStatusTone, statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { ResourceName, ResourceSelect } from "../mfg-shared/resources";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -30,8 +33,14 @@ const columns: DataTableColumn<OperationOverviewRow>[] = [
   {
     key: "resourceId",
     header: "Resource",
-    mono: true,
-    render: (row) => (row.subcontract ? `${row.resourceId} (vendor)` : row.resourceId),
+    render: (row) =>
+      row.subcontract ? (
+        <span>
+          <EntityName entity="vendor" id={row.resourceId} fallback={row.resourceId} /> (vendor)
+        </span>
+      ) : (
+        <ResourceName id={row.resourceId} />
+      ),
   },
   { key: "plannedHours", header: "Planned hours", align: "end" },
   { key: "hoursReported", header: "Reported hours", align: "end" },
@@ -81,11 +90,11 @@ export function validateOperationsFilter(f: Filter): FilterErrors {
   const errors: FilterErrors = {};
   const resource = f.resourceId.trim();
   if (resource !== "" && !uuidPattern.test(resource)) {
-    errors.resourceId = "Enter the resource's id (a UUID), or leave it empty.";
+    errors.resourceId = "Choose a resource, or leave it empty.";
   }
   const site = f.siteId.trim();
   if (site !== "" && !uuidPattern.test(site)) {
-    errors.siteId = "Enter the site's id (a UUID), or leave it empty.";
+    errors.siteId = "Choose a site, or leave it empty.";
   }
   if (f.dueFrom !== "" && f.dueTo !== "" && f.dueFrom > f.dueTo) {
     errors.dueTo = "The end of the due range must not be before its start.";
@@ -182,10 +191,10 @@ export function OperationsOverviewPage({ onOpenOrder }: OperationsOverviewPagePr
             )}
           </FormField>
           <FormField id="ops-resource" label="Resource" optional error={errors.resourceId}>
-            {(control) => <Input {...control} value={draft.resourceId} onChange={(e) => setDraft({ ...draft, resourceId: e.target.value })} />}
+            {(control) => <ResourceSelect {...control} emptyLabel="All resources" value={draft.resourceId} onChange={(v) => setDraft({ ...draft, resourceId: v })} />}
           </FormField>
           <FormField id="ops-site" label="Site" optional error={errors.siteId}>
-            {(control) => <Input {...control} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
+            {(control) => <EntityLookup {...control} entity="site" prefill={false} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
           </FormField>
           <FormField id="ops-due-from" label="Due from" optional>
             {(control) => <Input {...control} type="date" value={draft.dueFrom} onChange={(e) => setDraft({ ...draft, dueFrom: e.target.value })} />}

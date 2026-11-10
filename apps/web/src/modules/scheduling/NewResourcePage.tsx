@@ -5,6 +5,7 @@ import { createResource, describeProblem, newKey, type NewResource, type Problem
 import { parseClock, WEEK_ORDER, WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceSelect } from "../mfg-shared/resources";
 
 interface Values {
   code: string;
@@ -118,15 +119,8 @@ export function NewResourcePage() {
           <FormField id="resource-tz" label="Time zone" hint="IANA name of the site's zone." error={errors.timeZone}>
             {(control) => <Input {...control} value={values.timeZone} onChange={(event) => update({ timeZone: event.target.value })} invalid={Boolean(errors.timeZone)} />}
           </FormField>
-          <FormField id="resource-engineering" label="Engineering resource id" hint="Optional. The id production orders use for this resource." error={errors.engineeringResourceId}>
-            {(control) => (
-              <Input
-                {...control}
-                value={values.engineeringResourceId ?? ""}
-                onChange={(event) => update({ engineeringResourceId: event.target.value })}
-                invalid={Boolean(errors.engineeringResourceId)}
-              />
-            )}
+          <FormField id="resource-engineering" label="Engineering resource" hint="Optional. The resource production orders use for this one." error={errors.engineeringResourceId}>
+            {(control) => <ResourceSelect {...control} emptyLabel="None" value={values.engineeringResourceId ?? ""} onChange={(v) => update({ engineeringResourceId: v })} />}
           </FormField>
           <FormField id="resource-efficiency" label="Efficiency (%)" hint="100 books the planned minutes; 80 takes a quarter longer, 125 less." error={errors.efficiencyPct}>
             {(control) => <Input {...control} inputMode="numeric" value={values.efficiencyPct ?? ""} onChange={(event) => update({ efficiencyPct: event.target.value })} invalid={Boolean(errors.efficiencyPct)} />}

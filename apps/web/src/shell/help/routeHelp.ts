@@ -311,6 +311,27 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "ap-clerk.md#approve-a-payment-proposal",
   },
   {
+    patterns: ["/purchasing/procure-to-pay"],
+    title: "Procure to pay",
+    purpose: "The five steps from a purchase order to the vendor's payment, with how many documents wait at each.",
+    howTo: ["Select the button on a step to open the screen that does it.", "Select the link under a step for the full screen when your case is not the usual one."],
+    guide: "buyer.md#follow-an-order-to-payment",
+  },
+  {
+    patterns: ["/payables/runs/:id"],
+    title: "Payment run",
+    purpose: "Sends an approved proposal to the bank, one step at a time, and shows where the payment stands.",
+    howTo: ["Select the button for the next step: the bank file, the ledger posting, settling the invoices, completing the run.", "Select Download bank file to send it to your bank.", "Select Mark run as failed and give a reason if the bank refuses the file."],
+    guide: "ap-clerk.md#run-the-payment",
+  },
+  {
+    patterns: ["/sales/order-to-cash"],
+    title: "Order to cash",
+    purpose: "The five steps from a customer's order to their payment, with how many documents wait at each.",
+    howTo: ["Select the button on a step to open the screen that does it.", "Select the link under a step for the full screen when your case is not the usual one."],
+    guide: "order-desk.md#follow-an-order-to-payment",
+  },
+  {
     patterns: ["/sales/workspace"],
     title: "Sales workspace",
     purpose: "What needs attention in sales today, and how the open quotation pipeline is converting.",

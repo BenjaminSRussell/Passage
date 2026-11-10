@@ -22,10 +22,11 @@ import {
   type ResolvedDeliveryTolerance,
   type Versioned,
 } from "./api/client";
-import { dash, DECIMAL, formatDateTime, sentence, shortId, subtractDecimal, UUID } from "./format";
+import { dash, DECIMAL, formatDateTime, sentence, subtractDecimal, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /**
  * Reporting a delivery and reporting an invoice each need their own duty. The
@@ -320,7 +321,7 @@ export function NewOrderProgressPage() {
 
   const columns: DataTableColumn<(typeof lines)[number]>[] = [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "productId", header: "Product", mono: true, render: (l) => shortId(l.productId) },
+    { key: "productId", header: "Product", render: (l) => <EntityName entity="product" id={l.productId} /> },
     { key: "quantity", header: "Ordered", align: "end", render: (l) => `${l.quantity} ${l.unit}` },
     { key: "deliveredQty", header: "Delivered", align: "end", render: (l) => l.deliveredQty ?? "0" },
     { key: "invoicedQty", header: "Invoiced", align: "end", render: (l) => l.invoicedQty ?? "0" },

@@ -1,3 +1,4 @@
+import { apiFetch } from "./api/http";
 import { resolveHelp } from "./help/routeHelp";
 import { localPreferenceStorage, type PreferenceStorage } from "./preferenceStorage";
 
@@ -123,7 +124,7 @@ export class UxEventClient {
     const events = this.queue.splice(0, 50);
     if (events.length === 0) return;
     try {
-      await (this.options.fetchImpl ?? globalThis.fetch.bind(globalThis))(UX_EVENTS_PATH, {
+      await (this.options.fetchImpl ?? apiFetch)(UX_EVENTS_PATH, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ events }),

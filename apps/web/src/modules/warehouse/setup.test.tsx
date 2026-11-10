@@ -175,7 +175,7 @@ describe("NewLocationsPage", () => {
     fill("Zone", "A");
     fill("Name prefix", "A");
     fireEvent.click(screen.getByRole("button", { name: "Create locations" }));
-    expect(await screen.findByText(/already exists \(WMS-DUPLICATE\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already exists/)).toBeInTheDocument();
     expect(screen.getByLabelText("Zone")).toHaveValue("A");
     fireEvent.click(screen.getByRole("button", { name: "Create locations" }));
     await waitFor(() => expect(server.calls).toHaveLength(2));

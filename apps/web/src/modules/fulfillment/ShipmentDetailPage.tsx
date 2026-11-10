@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { getShipment, listPackingSlips, type AutoPackResult, type Container, type PackingSlipSummary, type Problem, type Shipment, type ShipmentLine } from "./api/client";
 import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
-import { compareDecimal, dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REASONS, subtractDecimal } from "./format";
+import { compareDecimal, dash, formatDate, formatDateTime, formatMoney, SHORT_PICK_REASONS, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
 import { canUnnest, NestForm, UnnestButton } from "./PalletForm";
@@ -13,15 +13,17 @@ import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemaind
 import { TrackingForm, trackableLines, trackingCover } from "./TrackingForm";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderLineNo, OrderNumber } from "../sales/OrderNumber";
 
 interface Detail {
   shipment: Shipment;
   slips: PackingSlipSummary[];
 }
 
-const lineColumns: DataTableColumn<ShipmentLine>[] = [
-  { key: "orderLineId", header: "Order line", mono: true, render: (row) => shortId(row.orderLineId) },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+const lineColumns = (orderId: string): DataTableColumn<ShipmentLine>[] => [
+  { key: "orderLineId", header: "Order line", render: (row) => <OrderLineNo orderId={orderId} lineId={row.orderLineId} /> },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
   { key: "unit", header: "Unit" },
   { key: "qtyPlanned", header: "Planned", align: "end" },
   { key: "qtyPicked", header: "Picked", align: "end", render: (row) => (row.pickConfirmed ? (compareDecimal(row.qtyPicked, row.qtyPlanned) > 0 ? `${row.qtyPicked} (+${subtractDecimal(row.qtyPicked, row.qtyPlanned)} over plan)` : row.qtyPicked) : "Not confirmed") },
@@ -53,7 +55,7 @@ function palletCell(row: Container, containers: Container[]): ReactNode {
 }
 
 function containerColumns(lines: ShipmentLine[], containers: Container[], label: (row: Container) => ReactNode): DataTableColumn<Container>[] {
-  const orderLine = (id: string) => shortId(lines.find((l) => l.id === id)?.orderLineId ?? id);
+  const orderLine = (id: string) => `Line ${lines.findIndex((l) => l.id === id) + 1}`;
   return [
     { key: "sscc", header: "SSCC", mono: true },
     { key: "containerType", header: "Type" },
@@ -125,17 +127,17 @@ export function ShipmentDetailPage() {
       <Card>
         <dl className={styles.details}>
           {[
-            ["Order", shipment.orderId],
-            ["Customer", shipment.customerId],
-            ["Warehouse", shipment.warehouseId],
-            ["Legal entity", shipment.legalEntityId],
+            ["Order", <OrderNumber id={shipment.orderId} />],
+            ["Customer", <EntityName entity="customer" id={shipment.customerId} />],
+            ["Warehouse", <EntityName entity="warehouse" id={shipment.warehouseId} />],
+            ["Legal entity", <EntityName entity="legalEntity" id={shipment.legalEntityId} />],
             ["Carrier", shipment.carrierCode ?? dash],
             ["Shipped", formatDateTime(shipment.actualShipDate)],
             ["Version", String(shipment.version)],
           ].map(([term, value]) => (
-            <div key={term} className={styles.entry}>
+            <div key={String(term)} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={`${styles.value} ${styles.mono}`}>{value}</dd>
+              <dd className={styles.value}>{value}</dd>
             </div>
           ))}
         </dl>
@@ -162,7 +164,7 @@ export function ShipmentDetailPage() {
           A packing slip has shipped part of this shipment. Pick the remainder below; the shipment is Shipped once every line has shipped its planned quantity. If the remainder will not ship, close it instead.
         </Alert>
       ) : null}
-      <DataTable label="Shipment lines" columns={lineColumns} rows={shipment.lines} getRowKey={(row) => row.id} />
+      <DataTable label="Shipment lines" columns={lineColumns(shipment.orderId)} rows={shipment.lines} getRowKey={(row) => row.id} />
       {trackableLines(shipment).length > 0 ? <TrackingForm key={`tracking-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {canPick ? <PickForm key={`pick-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {autoPacked ? (

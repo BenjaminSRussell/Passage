@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { Link } from "react-router-dom";
+import { UserMenu } from "./auth/account";
 import { copy } from "./copy";
 import type { PageMeta } from "./pageMeta";
 import { HelpButton } from "./help/HelpPanel";
@@ -56,6 +57,7 @@ export function TopBar({ page, titleRef, menuRef, drawerOpen, compact, showConte
         <Button variant="ghost" size="sm" aria-pressed={compact} className={styles.compactToggle} onClick={onToggleCompact}>
           {copy.buttons.compactView}
         </Button>
+        <UserMenu />
       </div>
     </div>
   );

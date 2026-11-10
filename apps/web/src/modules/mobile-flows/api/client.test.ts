@@ -24,7 +24,7 @@ describe("fetchMenu", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchMenu("wh-1")).resolves.toEqual(MENU);
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/mobile/menus/wh-1", {
-      headers: { Accept: "application/json" },
+      headers: expect.objectContaining({ Accept: "application/json" }),
       credentials: "same-origin",
       signal: undefined,
     });
@@ -35,7 +35,7 @@ describe("fetchMenu", () => {
     vi.stubGlobal("fetch", fetchMock);
     await fetchMenu();
     expect(fetchMock).toHaveBeenCalledWith(`/api/v1/mobile/menus/${DEFAULT_MENU_ID}`, {
-      headers: { Accept: "application/json" },
+      headers: expect.objectContaining({ Accept: "application/json" }),
       credentials: "same-origin",
       signal: undefined,
     });

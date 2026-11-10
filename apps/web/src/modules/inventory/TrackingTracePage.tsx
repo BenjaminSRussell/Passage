@@ -4,6 +4,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, t
 import { traceTracking, TRACE_DIRECTIONS, type TraceDirection, type TraceLine } from "./api/client";
 import { dash, describeDimensions, sentence, shortId, signed, UUID } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -11,7 +12,7 @@ const directionLabels: Record<TraceDirection, string> = { BOTH: "Every movement"
 
 const columns: DataTableColumn<TraceLine>[] = [
   { key: "physicalDate", header: "Date", mono: true },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "status", header: "Status", render: (row) => sentence(row.issueStatus ?? row.receiptStatus ?? "") },
   { key: "qty", header: "Quantity", align: "end", mono: true, render: (row) => `${signed(row.qty)} ${row.enteredUnit}` },
   { key: "running", header: "Balance", align: "end", mono: true, render: (row) => row.running ?? dash },

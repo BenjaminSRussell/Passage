@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 /** Browser client for the warehouse service, through the web BFF at /api/v1/warehouse (service routes /v1/warehouse/...). */
 export const base = "/api/v1/warehouse";
 
@@ -88,7 +89,7 @@ async function toError(res: Response): Promise<WarehouseApiError> {
 
 /** POST /v1/warehouse/location-directives:simulate (duty warehouse.setup.view). Nothing is saved. */
 export async function simulateDirectives(request: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
-  const res = await fetch(`${base}/location-directives:simulate`, {
+  const res = await apiFetch(`${base}/location-directives:simulate`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     credentials: "same-origin",
@@ -249,7 +250,7 @@ export function newKey(): string {
 
 async function send<T>(path: string, init: RequestInit & { key?: string; version?: number } = {}): Promise<T> {
   const { key, version, headers, ...rest } = init;
-  const res = await fetch(`${base}${path}`, {
+  const res = await apiFetch(`${base}${path}`, {
     ...rest,
     headers: {
       Accept: "application/json",

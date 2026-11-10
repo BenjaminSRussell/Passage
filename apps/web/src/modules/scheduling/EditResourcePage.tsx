@@ -6,6 +6,7 @@ import { clock, formatDateTime, parseClock, shortId, WEEK_ORDER, WEEKDAYS } from
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceSelect } from "../mfg-shared/resources";
 
 export interface ShiftRow {
   weekday: number;
@@ -133,18 +134,11 @@ function Form({ initial, onReload }: { initial: Resource; onReload: () => void }
         </FormField>
         <FormField
           id="edit-engineering"
-          label="Engineering resource id"
-          hint="The id production orders use for this resource. Leave empty to remove the mapping."
+          label="Engineering resource"
+          hint="The resource production orders use for this one. Choose None to remove the mapping."
           error={errors.engineeringResourceId}
         >
-          {(control) => (
-            <Input
-              {...control}
-              value={values.engineeringResourceId}
-              onChange={(event) => update({ engineeringResourceId: event.target.value })}
-              invalid={Boolean(errors.engineeringResourceId)}
-            />
-          )}
+          {(control) => <ResourceSelect {...control} emptyLabel="None" value={values.engineeringResourceId} onChange={(v) => update({ engineeringResourceId: v })} />}
         </FormField>
         <fieldset className={styles.groups} aria-describedby={errors.shifts ? "edit-shifts-error" : undefined}>
           <legend className={styles.groupsLegend}>Shifts (site-local times)</legend>

@@ -15,6 +15,7 @@ import { calendarLink, PagedTable } from "./resources";
 import { GenerateDays } from "./setup";
 import { errorText } from "./screens";
 import styles from "./pages.module.css";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const notFoundStatus = 404;
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -109,7 +110,7 @@ export function ResourceGroupDetailPage({ id, onBack }: { id: string; onBack?: (
             facts={[
               ["Code", group.code],
               ["Name", group.name],
-              ["Site", group.siteId],
+              ["Site", <EntityName entity="site" id={group.siteId} fallback={group.siteId} />],
               ["Calendar", calendarLink(group.calendarId)],
               ["Members", <Link key="m" to={`/engineering/resources?groupId=${encodeURIComponent(group.id)}`}>Resources in this group</Link>],
             ]}

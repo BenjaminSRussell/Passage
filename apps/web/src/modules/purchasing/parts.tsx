@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, Badge, Button, statusTone } from "../../shell/ui";
 import { describeProblem, type RankingRule } from "./api/client";
+import { formatOption, resolveOption, type LookupEntityKey } from "../../shell/lookup/entities";
+import { Named } from "./Named";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
 export const dash = "—";
+export { Named };
 
 export const rankingLabels: Record<RankingRule, string> = {
   LOWEST_PRICE: "Lowest price, then lead time",
@@ -119,6 +122,42 @@ export function ShortId({ id }: { id?: string }) {
       {id.slice(0, 8)}
     </span>
   );
+}
+
+/** The display text of an entity for places that cannot hold a component (button labels, notices). */
+export function useEntityText(entity: LookupEntityKey, id: string | undefined, fallback: string): string {
+  const [text, setText] = useState(fallback);
+  useEffect(() => {
+    let live = true;
+    setText(fallback);
+    if (id) {
+      void resolveOption(entity, id).then((found) => {
+        if (live && found) setText(formatOption(found));
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [entity, id, fallback]);
+  return text;
+}
+
+/** Display text for several entities at once, for labels built as strings; unresolved ids read as the fallback. */
+export function useEntityNames(entity: LookupEntityKey, ids: string[], fallback: string): (id: string) => string {
+  const [names, setNames] = useState<Record<string, string>>({});
+  const key = [...new Set(ids)].sort().join(",");
+  useEffect(() => {
+    let live = true;
+    for (const id of key === "" ? [] : key.split(",")) {
+      void resolveOption(entity, id).then((found) => {
+        if (live && found) setNames((prev) => (prev[id] ? prev : { ...prev, [id]: formatOption(found) }));
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [entity, key]);
+  return (id) => names[id] ?? fallback;
 }
 
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

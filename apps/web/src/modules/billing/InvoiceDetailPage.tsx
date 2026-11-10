@@ -1,5 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { DownloadPdfButton } from "../../shell/documents/pdfDocument";
+import { invoiceDocument } from "./invoiceDocument";
+import { OrderFlowPanel } from "../sales/documentFlow";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -17,6 +20,7 @@ import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const baseColumns: DataTableColumn<InvoiceLine>[] = [
   { key: "lineNo", header: "Line", mono: true, align: "end" },
@@ -177,6 +181,7 @@ export function InvoiceDetailPage() {
         meta={<StatusPill status={STATUS_LABELS[invoice.status] ?? invoice.status} />}
         actions={
           <div className={styles.actions}>
+            {invoice.status !== "PROPOSAL" ? <DownloadPdfButton build={() => invoiceDocument(invoice)} filename={`invoice-${invoice.number ?? invoice.id}.pdf`} /> : null}
             {invoice.status === "PROPOSAL" ? (
               <Button variant="primary" loading={posting} onClick={() => post(invoice)}>
                 {creditNote ? "Post credit note" : "Post invoice"}
@@ -216,6 +221,7 @@ export function InvoiceDetailPage() {
             : "Posting re-quotes the tax, assigns the next gap-free invoice number and publishes the invoice to receivables and the ledger. A tax change of more than 0.01 stops the post for review."}
         </p>
       ) : null}
+      {invoice.type !== "CREDIT_NOTE" ? <OrderFlowPanel anchor={{ kind: "invoice", id: invoice.id }} refreshKey={`${invoice.status}:${invoice.version}`} /> : null}
       <Card title="Totals">
         <dl className={styles.details}>
           <Detail term="Net" mono>{`${invoice.totals.net} ${currency}`}</Detail>
@@ -259,14 +265,14 @@ export function InvoiceDetailPage() {
           <Detail term="Posting date" mono>
             {invoice.postingDate ?? "Not posted"}
           </Detail>
-          <Detail term="Customer" mono>
-            {invoice.customerId}
+          <Detail term="Customer">
+            <EntityName entity="customer" id={invoice.customerId} />
           </Detail>
-          <Detail term="Invoice account" mono>
-            {invoice.invoiceAccountId}
+          <Detail term="Invoice account">
+            <EntityName entity="customer" id={invoice.invoiceAccountId} />
           </Detail>
-          <Detail term="Legal entity" mono>
-            {invoice.legalEntityId}
+          <Detail term="Legal entity">
+            <EntityName entity="legalEntity" id={invoice.legalEntityId} />
           </Detail>
         </dl>
       </Card>

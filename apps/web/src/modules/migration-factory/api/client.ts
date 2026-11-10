@@ -1,6 +1,7 @@
 // Client for the migration factory (tools/migration-factory/api/openapi.yaml). Every path is
 // under /api/v1; commands send an Idempotency-Key so a retried submit replays the first outcome.
 import type { ControlTotal, Pack, RunStatus, SourceSystem } from "../domain";
+import { apiFetch } from "../../../shell/api/http";
 
 /** Problem details as returned by the service (RFC 9457), reduced to what screens show. */
 export interface Problem {
@@ -645,7 +646,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`/api/v1${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`/api/v1${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }

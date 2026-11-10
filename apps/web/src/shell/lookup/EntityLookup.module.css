@@ -87,8 +87,30 @@
 }
 
 .details summary {
+  list-style: none;
+  padding-inline: 2px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+
+.details summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The copy-id menu stays out of the way until the name is hovered or the menu is focused or open. */
+.name:hover .details summary,
+.details summary:focus-visible,
+.details[open] summary {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .details summary {
+    opacity: 1;
+  }
 }
 
 .details[open] {

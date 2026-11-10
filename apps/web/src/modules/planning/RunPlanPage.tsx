@@ -5,6 +5,7 @@ import { runPlan, type PlanScope, type PlanVersion, type WorkCalendar } from "./
 import { describeError, PLAN_CODE, usePlanCode, withPlan, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -260,8 +261,8 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
           <FormField id="run-as-of" label="Plan date" hint="Day 0 of the plan; earlier demand is due today." error={errors.asOf}>
             {(a11y) => <Input {...a11y} type="date" value={draft.asOf} onChange={(e) => set("asOf")(e.target.value)} />}
           </FormField>
-          <FormField id="run-site" label="Site" hint="Site id (UUID) the snapshot belongs to." error={errors.siteId}>
-            {(a11y) => <Input {...a11y} value={draft.siteId} onChange={(e) => set("siteId")(e.target.value)} />}
+          <FormField id="run-site" label="Site" error={errors.siteId}>
+            {(a11y) => <EntityLookup {...a11y} entity="site" value={draft.siteId} onChange={(e) => set("siteId")(e.target.value)} />}
           </FormField>
           <FormField
             id="run-forecast"

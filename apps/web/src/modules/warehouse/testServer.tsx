@@ -4,6 +4,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { installLookupStub } from "../purchasing/lookupStub";
 import warehouse from "./module";
 
 export type Reply = { status: number; body: unknown };
@@ -24,6 +25,7 @@ export function json(status: number, body: unknown): Reply {
 /** Installs the fetch stub for the calling test file. */
 export function useFakeServer() {
   beforeEach(() => {
+    installLookupStub();
     server.calls = [];
     server.handler = () => undefined;
     vi.stubGlobal(

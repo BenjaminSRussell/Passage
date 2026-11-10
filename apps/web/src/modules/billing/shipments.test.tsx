@@ -231,7 +231,7 @@ describe("Invoice trace", () => {
     expect(slips).toHaveTextContent(SLIP);
     expect(slips).toHaveTextContent("2027-03-09");
     const lines = screen.getByRole("table", { name: "Trace lines" });
-    expect(lines).toHaveTextContent(ORDER_LINE);
+    expect(lines).toHaveTextContent("Order line");
     expect(lines).toHaveTextContent("px-1");
     expect(screen.getByRole("link", { name: "Open invoice" })).toHaveAttribute("href", `/billing/invoices/${INV}`);
     expect(pageViolations(container)).toEqual([]);

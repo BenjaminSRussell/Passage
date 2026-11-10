@@ -26,13 +26,13 @@ export function CampaignsPage() {
   const [status, setStatus] = useState<CampaignStatus | "">("");
   const state = useLoad<View>(async (signal) => {
     const [rows, resources] = await Promise.all([listCampaigns({ status }, signal), listResources(signal)]);
-    return { rows, codes: Object.fromEntries(resources.map((r) => [r.id, r.code])) };
+    return { rows, codes: Object.fromEntries(resources.map((r) => [r.id, `${r.name} (${r.code})`])) };
   }, status);
   const codes = state.data?.codes ?? {};
 
   const columns: DataTableColumn<Campaign>[] = [
     { key: "campaignKey", header: "Campaign key", mono: true },
-    { key: "resourceId", header: "Resource", mono: true, render: (row) => codes[row.resourceId] ?? shortId(row.resourceId) },
+    { key: "resourceId", header: "Resource", render: (row) => codes[row.resourceId] ?? shortId(row.resourceId) },
     { key: "status", header: "Status", render: (row) => <Badge tone={campaignTone[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
     { key: "plannedStart", header: "Planned start", render: (row) => formatDateTime(row.plannedStart) },
     { key: "orderCount", header: "Orders", align: "end" },

@@ -5,9 +5,46 @@
  */
 export const es: Readonly<Record<string, string>> = {
   "nav.home": "Inicio",
-  "nav.notes": "Notas",
   "nav.general": "General",
   "nav.allFeatures": "Todas las funciones",
+  "nav.myWork": "Mi trabajo",
+  "nav.glossary": "Glosario",
+
+  "account.menuLabel": "Cuenta",
+  "account.signedInAs": "Sesión iniciada como",
+  "account.signOut": "Cerrar sesión",
+  "account.expiredTitle": "Su sesión terminó",
+  "account.expiredBody": "Inicie sesión de nuevo para seguir trabajando. Lo que no haya guardado en esta página podría perderse.",
+  "account.signIn": "Iniciar sesión",
+
+  "announce.favouriteAdded": "{number} se agregó a favoritos",
+  "announce.favouriteRemoved": "{number} se quitó de favoritos",
+  "palette.favourites": "Registros favoritos",
+  "palette.recent": "Registros recientes",
+  "palette.favouriteState": "Favorito",
+  "palette.favourite": "Marcar {number} como favorito",
+  "palette.unfavourite": "Quitar {number} de favoritos",
+  "palette.recordsUnavailable": "Ahora no se pueden buscar documentos ni socios. Las páginas siguen funcionando.",
+
+  "home.shortcutsLabel": "Acciones frecuentes",
+  "home.switchTo": "Cambiar a {label}",
+  "home.otherWorkspaces": "Sus otros espacios de trabajo",
+  "home.recentTitle": "Recientes",
+  "home.recentEmpty": "Las páginas que abra aparecen aquí para que pueda volver a ellas rápidamente.",
+  "home.setupTitle": "Termine de configurar su empresa",
+  "home.setupBody": "{finished} de {total} pasos de configuración están terminados.",
+  "home.setupLink": "Continuar la configuración",
+
+  "myWork.tilesLabel": "Mi trabajo de un vistazo",
+  "myWork.tileWaiting": "Esperándome",
+  "myWork.tileApprovals": "Por aprobar",
+  "myWork.tileOverdue": "Vencidos",
+  "myWork.tileOldest": "Más antiguo, en días",
+  "myWork.badgeHint": ", {text} en espera",
+  "myWork.getStarted": "Las aprobaciones, retenciones y otras tareas asignadas a usted aparecerán aquí, con un botón para atender cada una.",
+
+  "notAvailable.featureOffTitle": "Esto no está activado para su empresa",
+  "notAvailable.featureOffDescription": "Su empresa no usa esta función. Un administrador puede activarla en Configuración de la empresa, luego Funciones.",
 
   "workspaces.switcherLabel": "Espacio de trabajo",
   "workspaces.chooseSummary": "Elegir mis espacios de trabajo",

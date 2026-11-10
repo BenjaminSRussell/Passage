@@ -10,6 +10,9 @@ import { emptyAgreement, validateAgreement } from "./NewAgreementPage";
 import { validateSimulation } from "./SimulatePage";
 
 const LE = "0190f0a0-0000-7000-8000-000000000001";
+const CUST = "22222222-0000-4000-8000-000000000002";
+const BOLTID = "33333333-0000-4000-8000-000000000003";
+const NUTID = "33333333-0000-4000-8000-000000000004";
 const R1 = "0190f0a0-0000-7000-8000-000000000201";
 const R2 = "0190f0a0-0000-7000-8000-000000000202";
 const R3 = "0190f0a0-0000-7000-8000-000000000203";
@@ -419,7 +422,7 @@ describe("Price simulation", () => {
     fill("Quantity", "0");
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
     expect(await screen.findByText("Enter a quantity above 0.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the product.")).toBeInTheDocument();
+    expect(screen.getByText("Choose the product.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
   });
 
@@ -427,13 +430,13 @@ describe("Price simulation", () => {
     handler = (url, init) => (init.method === "POST" && url.pathname.endsWith("/resolve") ? json(200, resolved) : undefined);
     const { container } = renderAt("/pricing/simulate");
     expect(screen.getByText("No simulation run yet")).toBeInTheDocument();
-    fill("Legal entity id", LE);
-    fill("Customer", "C1");
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
     fill("Pricing date", "2027-03-10");
-    fill("Product", "BOLT");
+    fill("Product", BOLTID);
     fill("Quantity", "3");
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
-    fireEvent.change(screen.getAllByLabelText("Product")[1], { target: { value: "NUT" } });
+    fireEvent.change(screen.getAllByLabelText("Product")[1], { target: { value: NUTID } });
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
     expect(await screen.findByRole("list", { name: "Simulation totals" })).toHaveTextContent("Order net 256.5 USD");
     const lines = screen.getByRole("table", { name: "Priced lines" });
@@ -445,12 +448,12 @@ describe("Price simulation", () => {
     expect(post?.url.search).toBe("?explain=true");
     expect(post?.body).toEqual({
       legalEntityId: LE,
-      customerId: "C1",
+      customerId: CUST,
       currency: "USD",
       pricingDate: "2027-03-10",
       lines: [
-        { productId: "BOLT", unit: "EA", quantity: "3" },
-        { productId: "NUT", unit: "EA", quantity: "1" },
+        { productId: BOLTID, unit: "EA", quantity: "3" },
+        { productId: NUTID, unit: "EA", quantity: "1" },
       ],
     });
     expect(pageViolations(container)).toEqual([]);
@@ -459,12 +462,12 @@ describe("Price simulation", () => {
   it("shows the service error and keeps the inputs", async () => {
     handler = () => json(422, { code: "PRC-0009", detail: "request exceeds 500 lines" });
     renderAt("/pricing/simulate");
-    fill("Legal entity id", LE);
-    fill("Customer", "C1");
-    fill("Product", "BOLT");
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
+    fill("Product", BOLTID);
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
     expect(await findAlert()).toHaveTextContent("request exceeds 500 lines");
-    expect(screen.getByLabelText("Product")).toHaveValue("BOLT");
+    expect(screen.getByLabelText("Product")).toHaveAttribute("data-value", BOLTID);
   });
 });
 

@@ -67,4 +67,11 @@ export const FUNCTION_MESSAGES: Readonly<Record<string, FunctionMessage>> = {
   },
   "format.days": { params: ["count"], en: "{count, plural, one {# day} other {# days}}", samples: [[1], [2], [30]] },
   "notes.saved": { params: ["title"], en: "{title} saved", samples: [["Call notes"]] },
+  "announce.favouriteAdded": { params: ["number"], en: "{number} added to favourites", samples: [["PO-048201"]] },
+  "announce.favouriteRemoved": { params: ["number"], en: "{number} removed from favourites", samples: [["PO-048201"]] },
+  "palette.favourite": { params: ["number"], en: "Favourite {number}", samples: [["SO-024185"]] },
+  "palette.unfavourite": { params: ["number"], en: "Remove {number} from favourites", samples: [["SO-024185"]] },
+  "home.switchTo": { params: ["label"], en: "Switch to {label}", samples: label },
+  "home.setupBody": { params: ["finished", "total"], en: "{finished} of {total} setup steps are finished.", samples: [[3, 10], [10, 10]] },
+  "myWork.badgeHint": { params: ["text"], en: ", {text} waiting", samples: [["5"], ["50+"]] },
 };

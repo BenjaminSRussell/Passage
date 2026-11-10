@@ -159,7 +159,7 @@ describe("Import lines on the journal page", () => {
     renderAt(`/inventory/journals/${JOURNAL_ID}`);
     fireEvent.change(await screen.findByLabelText("Rows"), { target: { value: `product,qty,site\n${PRODUCT_ID},12,S1` } });
     fireEvent.click(screen.getByRole("button", { name: "Import lines" }));
-    expect(await findAlert()).toHaveTextContent("journal exceeds 1000 lines (INV-JNL-001)");
+    expect(await findAlert()).toHaveTextContent("The journal has too many lines.");
   });
 
   it("sends every row in one request, so a refusal adds nothing, and a retry keeps the line keys", async () => {

@@ -142,7 +142,7 @@ describe("Net requirements page", () => {
     expect(fetchMock.mock.calls.some(([url]) => url.includes(`/planned-orders?planCode=MAIN&itemId=${item}&warehouseId=${wh}`))).toBe(true);
     expect(screen.getByRole("heading", { name: "Planned orders of this item in the warehouse" })).toBeInTheDocument();
     const orders = await findTable({ name: "Planned orders of the item" });
-    expect(await within(orders).findByText(`Warehouse ${wh}`)).toBeInTheDocument();
+    expect(await within(orders).findByText(wh)).toBeInTheDocument();
   });
 
   it("rejects a warehouse that is not a UUID and keeps the site scope without one", async () => {

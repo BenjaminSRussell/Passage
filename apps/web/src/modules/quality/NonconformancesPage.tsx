@@ -6,6 +6,7 @@ import {
   describeProblem,
   getNonconformance,
   listNonconformances,
+  listOrders,
   newKey,
   type NcrSeverity,
   type NcrSource,
@@ -29,11 +30,15 @@ import {
   CORRECTION_STATUS_LABELS,
   qty,
   shortId,
+  TRIGGER_LABELS,
   UUID,
 } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 
 export function NcrStatusBadge({ status }: { status: NcrStatus }) {
   const s = NCR_STATUS_LABELS[status] ?? { label: status, tone: "neutral" as const };
@@ -45,13 +50,15 @@ export function NcrSeverityBadge({ severity }: { severity: NcrSeverity }) {
   return <Badge tone={s.tone}>{s.label}</Badge>;
 }
 
+const LOOKUPS: Record<string, "product" | "vendor" | "customer" | undefined> = { itemId: "product", vendorId: "vendor", customerId: "customer" };
+
 const columns: DataTableColumn<Nonconformance>[] = [
   { key: "id", header: "NCR", mono: true, render: (row) => <Link to={`/quality/nonconformances/${row.id}`}>{`Open NCR ${shortId(row.id)}`}</Link> },
   { key: "createdAt", header: "Raised", render: (row) => formatDateTime(row.createdAt) },
   { key: "source", header: "Source", render: (row) => NCR_SOURCE_LABELS[row.source] ?? row.source },
   { key: "problemType", header: "Problem", mono: true },
   { key: "severity", header: "Severity", render: (row) => <NcrSeverityBadge severity={row.severity} /> },
-  { key: "itemId", header: "Item", mono: true, render: (row) => shortId(row.itemId) },
+  { key: "itemId", header: "Item", render: (row) => (row.itemId ? <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> : dash) },
   { key: "qty", header: "Quantity", align: "end", mono: true, render: (row) => `${qty(row.qty)} ${row.uom}` },
   {
     key: "qualityOrderId",
@@ -156,8 +163,8 @@ export function validateNcr(values: NcrValues): { errors: Errors; input?: NewNon
   const order = values.qualityOrderId.trim();
   const item = values.itemId.trim();
   const uom = values.uom.trim();
-  if (order && !UUID.test(order)) errors.qualityOrderId = "Enter the quality order id (a UUID), or leave it empty.";
-  if (item ? !UUID.test(item) : !order) errors.itemId = "Enter the item id (a UUID); it can be left empty when a quality order is given.";
+  if (order && !UUID.test(order)) errors.qualityOrderId = "Choose a quality order, or leave it empty.";
+  if (item ? !UUID.test(item) : !order) errors.itemId = "Choose an item; it can be left empty when a quality order is given.";
   if (!CODE.test(values.problemType.trim())) errors.problemType = "Enter a code of 2 to 32 capitals, digits, _ or -, such as DIMENSION.";
   const q = values.qty.trim();
   if (!DECIMAL.test(q) || /^0+(\.0+)?$/.test(q)) errors.qty = "Enter a quantity above 0 with up to 6 decimals.";
@@ -226,9 +233,16 @@ export function NewNonconformancePage() {
     }
   }
 
+  const inspections = useLoad((signal) => listOrders({ status: "", siteId: "" }, signal), "ncr-orders");
   const text = (id: keyof NcrValues, label: string, hint?: string, extra?: Record<string, unknown>) => (
     <FormField id={`ncr-${id}`} label={label} hint={hint} error={errors[id]}>
-      {(control) => <Input {...control} {...extra} value={values[id]} invalid={Boolean(errors[id])} onChange={(event) => update({ [id]: event.target.value })} />}
+      {(control) =>
+        LOOKUPS[id] ? (
+          <EntityLookup {...control} entity={LOOKUPS[id] as LookupEntityKey} value={values[id]} invalid={Boolean(errors[id])} onChange={(event) => update({ [id]: event.target.value })} />
+        ) : (
+          <Input {...control} {...extra} value={values[id]} invalid={Boolean(errors[id])} onChange={(event) => update({ [id]: event.target.value })} />
+        )
+      }
     </FormField>
   );
 
@@ -263,12 +277,21 @@ export function NewNonconformancePage() {
             )}
           </FormField>
           {text("problemType", "Problem type", "A code such as DIMENSION or CONTAMINATION.", { className: styles.mono, maxLength: 32 })}
-          {text("qualityOrderId", "Quality order id", "Optional.", { className: styles.mono })}
-          {text("itemId", "Item id", undefined, { className: styles.mono })}
+          <FormField id="ncr-qualityOrderId" label="Quality order" optional error={errors.qualityOrderId}>
+            {(control) => (
+              <Select {...control} value={values.qualityOrderId} onChange={(event) => update({ qualityOrderId: event.target.value })}>
+                <option value="">None</option>
+                {(inspections.data ?? []).map((o) => (
+                  <option key={o.id} value={o.id}>{`${shortId(o.id)} · ${TRIGGER_LABELS[o.trigger] ?? o.trigger}`}</option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          {text("itemId", "Item")}
           {text("qty", "Nonconforming quantity", undefined, { inputMode: "decimal" })}
           {text("uom", "Unit", undefined, { maxLength: 10 })}
-          {text("vendorId", "Vendor id", "Optional; the supplier scorecard counts vendor NCRs.", { className: styles.mono })}
-          {text("customerId", "Customer id", "Optional; for a customer complaint.", { className: styles.mono })}
+          {text("vendorId", "Vendor", "Optional; the supplier scorecard counts vendor NCRs.")}
+          {text("customerId", "Customer", "Optional; for a customer complaint.")}
           <div className={styles.wide}>
             <FormField id="ncr-description" label="Description" error={errors.description}>
               {(control) => (

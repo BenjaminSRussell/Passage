@@ -545,7 +545,7 @@ func lineField(detail string) string {
 func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.ListFilter{Status: q.Get("status"), Type: q.Get("type"), CustomerID: q.Get("customerId"),
-		OriginalInvoiceID: q.Get("originalInvoiceId"), Limit: defaultListLimit}
+		OriginalInvoiceID: q.Get("originalInvoiceId"), OrderID: q.Get("orderId"), PackingSlipID: q.Get("packingSlipId"), Limit: defaultListLimit}
 	fields := map[string]string{}
 	if f.Status != "" && !statuses[f.Status] {
 		fields["status"] = "must be PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED or REVERSED"
@@ -558,6 +558,12 @@ func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.OriginalInvoiceID != "" && !ids.Valid(f.OriginalInvoiceID) {
 		fields["originalInvoiceId"] = "must be a UUID"
+	}
+	if f.OrderID != "" && !ids.Valid(f.OrderID) {
+		fields["orderId"] = "must be a UUID"
+	}
+	if f.PackingSlipID != "" && !ids.Valid(f.PackingSlipID) {
+		fields["packingSlipId"] = "must be a UUID"
 	}
 	if raw := q.Get("cursor"); raw != "" {
 		b, err := base64.RawURLEncoding.DecodeString(raw)

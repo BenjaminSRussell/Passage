@@ -8,13 +8,14 @@ import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
 import { usePaged } from "./usePaged";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const LIMIT = 100;
 
 const columns: DataTableColumn<RevenueContractSummary>[] = [
   { key: "contractDate", header: "Contract date", mono: true },
   { key: "status", header: "Status", render: (c) => <StatusPill status={CONTRACT_STATUS_LABELS[c.status] ?? c.status} /> },
-  { key: "customerId", header: "Customer", mono: true },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "orderId", header: "Order", mono: true },
   { key: "transactionPrice", header: "Price", mono: true, align: "end", render: (c) => `${c.transactionPrice} ${c.currency}` },
   { key: "recognized", header: "Recognized", mono: true, align: "end", render: (c) => `${c.recognized} ${c.currency}` },
