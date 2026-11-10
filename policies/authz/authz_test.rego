@@ -141,6 +141,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/ers-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoices/i1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],

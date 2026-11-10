@@ -57,6 +57,10 @@ const receipt = {
 function api(invoices: (url: URL) => unknown) {
   server.handler = (url) => {
     if (url.pathname === "/api/v1/receiving/invoices") return json(200, invoices(url));
+    if (url.pathname.startsWith("/api/v1/receiving/invoices/")) {
+      const found = (invoices(url) as { items: Invoice[] }).items.find((i) => url.pathname.endsWith(`/${i.id}`));
+      return found ? json(200, found) : json(404, { code: "RCV-NF-005", detail: "vendor invoice not found" });
+    }
     if (url.pathname === `/api/v1/receiving/receipts/${RECEIPT}`) return json(200, receipt);
     return undefined;
   };
@@ -148,10 +152,11 @@ describe("vendor invoice detail", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("finds an invoice on a later page", async () => {
-    api((url) => (url.searchParams.get("cursor") === "next" ? { items: [invoice()] } : { items: [invoice({ id: "other" })], nextCursor: "next" }));
+  it("reads the invoice with one call", async () => {
+    api(() => ({ items: [invoice()] }));
     renderAt(`/ap-invoices/${INVOICE}`);
     expect(await screen.findByRole("heading", { name: "Invoice INV-1" })).toBeInTheDocument();
+    expect(server.calls.filter((c) => c.url.pathname.startsWith("/api/v1/receiving/invoices"))).toHaveLength(1);
   });
 
   it("explains a hold and says no ledger entry exists yet", async () => {

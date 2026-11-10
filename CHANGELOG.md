@@ -20,7 +20,7 @@ release may change public APIs.
 
 ### Added
 
-- Web: vendor invoice list (`/ap-invoices`, status and vendor filters, load more) and invoice detail (`/ap-invoices/:id`: lines, hold or rejection reason, ledger entry, links to the receipts and purchase orders) (#533).
+- Web: vendor invoice list (`/ap-invoices`, status and vendor filters, load more) and invoice detail (`/ap-invoices/:id`: lines, hold or rejection reason, ledger entry, links to the receipts and purchase orders) (#533); the detail reads `GET /v1/receiving/invoices/{id}`.
 - Billing credit reservations (#513): `POST /v1/billing/invoices/{id}/credit-reservations` (idempotent per RMA, line-level qty/net/tax) plus `POST /v1/billing/credit-reservations/{id}:commit` and `:release` (service duty `billing.credit-reservation.write` only; a released key can be retried under the bound) hold part of a posted invoice for a credit issued outside billing; reservations count with posted credit notes under the invoice's row lock, so the total credited can no longer exceed the invoiced amount (`BIL-0005`); the invoice read shows `credited.reserved` and `reservedQty`; receivables is granted `billing.credit-reservation.write` (receivables wiring follows).
 - Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 235 existing raw id fields in 134 files are allowlisted for conversion, including helper-built, template and placeholder labels the first version of the guard missed (#500).
 - Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org

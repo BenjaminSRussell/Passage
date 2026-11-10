@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -79,6 +80,53 @@ func TestListInvoices_RefusesBadFiltersAndMissingDuty(t *testing.T) {
 		t.Fatalf("without the inquire duty got %d %s", rec.Code, rec.Body)
 	}
 	if rec := doWith(rg.h, http.MethodGet, listInvoicesPath, "", headers{}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without a tenant got %d", rec.Code)
+	}
+}
+
+func TestGetInvoice_ReturnsTheInvoiceWithLinesAndLedgerEntry(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	r, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
+
+	got := decode[invoiceListJSON](t, rg.call(http.MethodGet, listInvoicesPath, "", rg.inquirer()), http.StatusOK).Items[0]
+	one := decode[struct {
+		ID            string `json:"id"`
+		LedgerEntryID string `json:"ledgerEntryId"`
+		Status        string `json:"status"`
+		Lines         []struct {
+			ReceiptID string `json:"receiptId"`
+		} `json:"lines"`
+	}](t, rg.call(http.MethodGet, listInvoicesPath+"/"+inv.ID, "", rg.inquirer()), http.StatusOK)
+	if one.ID != inv.ID || one.LedgerEntryID != got.LedgerEntryID || one.LedgerEntryID == "" || one.Status != "POSTED" || len(one.Lines) != 1 || one.Lines[0].ReceiptID != r.ID {
+		t.Fatalf("got %+v, want invoice %s with its ledger entry and line", one, inv.ID)
+	}
+}
+
+func TestGetInvoice_IsNotFoundOutsideTheCallersLegalEntityOrForAnUnknownId(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
+
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"other legal entity": rg.call(http.MethodGet, listInvoicesPath+"/"+inv.ID, "", rg.inquirer(entityHeader, otherEntityID)),
+		"unknown id":         rg.call(http.MethodGet, listInvoicesPath+"/"+otherPOID, "", rg.inquirer()),
+	} {
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "RCV-NF-005") {
+			t.Fatalf("%s: got %d %s, want 404 RCV-NF-005", name, rec.Code, rec.Body)
+		}
+	}
+	if rec := rg.call(http.MethodGet, listInvoicesPath+"/nope", "", rg.inquirer()); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad id got %d, want 400", rec.Code)
+	}
+}
+
+func TestGetInvoice_RefusesMissingDutyAndTenant(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
+
+	if rec := rg.call(http.MethodGet, listInvoicesPath+"/"+inv.ID, "", rg.maintain()); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("without the inquire duty got %d %s", rec.Code, rec.Body)
+	}
+	if rec := doWith(rg.h, http.MethodGet, listInvoicesPath+"/"+inv.ID, "", headers{}); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("without a tenant got %d", rec.Code)
 	}
 }

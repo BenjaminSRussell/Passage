@@ -132,20 +132,9 @@ export async function fetchInvoices(q: InvoiceQuery = {}, fetchImpl: FetchLike =
   return request("GET", `/invoices${query}`, invoicePageSchema, fetchImpl);
 }
 
-const DETAIL_PAGE_SIZE = 200;
-const DETAIL_MAX_PAGES = 10;
-
-// ponytail: the service has no read-one route, so the detail pages through the newest 2000 invoices; add GET /invoices/{id} and call it here.
+/** GET /invoices/{id}: one invoice with its lines; 404 outside the caller's legal entities. */
 export async function fetchInvoice(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Invoice> {
-  let cursor: string | undefined;
-  for (let page = 0; page < DETAIL_MAX_PAGES; page += 1) {
-    const result = await fetchInvoices({ cursor, limit: DETAIL_PAGE_SIZE }, fetchImpl);
-    const found = result.items.find((i) => i.id === id);
-    if (found) return found;
-    if (!result.nextCursor) break;
-    cursor = result.nextCursor;
-  }
-  throw new ApiError(404, "RCV-NF-005", "This invoice was not found.");
+  return request("GET", `/invoices/${encodeURIComponent(id)}`, invoiceSchema, fetchImpl);
 }
 
 /** POST /invoices:post. The caller keeps one Idempotency-Key per intended invoice so a retry replays. */
