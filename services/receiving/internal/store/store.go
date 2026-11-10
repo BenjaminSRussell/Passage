@@ -294,6 +294,8 @@ type InvoiceFilter struct {
 }
 
 type CaptureFilter struct {
+	// VendorID, when set, limits the list to documents that vendor submitted through the supplier portal.
+	VendorID        string
 	Status          string
 	CursorCreatedAt time.Time
 	CursorID        string

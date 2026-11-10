@@ -168,6 +168,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyAsnMaintain, dutyAsnReceive)).Get("/v1/receiving/asns", a.listAsns)
 	r.With(authz.RequireAnyDuty(dutyAsnMaintain, dutyAsnReceive)).Get("/v1/receiving/asns/{id}", a.getAsn)
 	r.With(authz.RequireDuty(dutyAsnReceive)).Post("/v1/receiving/asns/{id}:start-receipt", a.idempotent(a.startAsnReceipt))
+	a.registerVendorPortal(r)
 	r.With(authz.RequireDuty(dutyPayeeErase)).Post("/v1/receiving/one-time-payees:erase", a.idempotent(a.eraseOneTimePayees))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))

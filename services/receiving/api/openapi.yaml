@@ -461,6 +461,171 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-007' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/asns:
+    post:
+      operationId: vendorCreateAsn
+      x-passage-duty: receiving.vendor-portal.asn
+      description: >-
+        The supplier portal's advance ship notice. Same rules and body as POST /v1/receiving/asns, but the vendor is the one in the
+        caller's verified supplier-portal service token, and a purchase order of another vendor answers 404 RCV-NF-010 as if it did not exist.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AsnRequest' }
+      responses:
+        '201':
+          description: Recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asn' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-010 the purchase order does not belong to the vendor.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'SUP-ASN-002' }
+        '422': { $ref: '#/components/responses/Problem', description: 'SUP-ASN-001; RCV-PO-001; RCV-PO-002; RCV-PO-003' }
+    get:
+      operationId: vendorListAsns
+      x-passage-duty: receiving.vendor-portal.asn
+      description: The calling vendor's notices, newest first. A vendorId query parameter is ignored.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of notices.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsnPage' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/asns/{id}:
+    get:
+      operationId: vendorGetAsn
+      x-passage-duty: receiving.vendor-portal.asn
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The notice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asn' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-010 unknown, or it belongs to another vendor.' }
+  /v1/receiving/vendor/invoice-captures:
+    post:
+      operationId: vendorSubmitInvoiceDocument
+      x-passage-duty: receiving.vendor-portal.invoice
+      description: >-
+        The vendor submits an invoice document (UBL or OCR, as POST /v1/receiving/invoice-captures). The capture records the submitting
+        vendor and lands in the AP capture queue as a draft; nothing is posted. The same document already submitted by another vendor
+        answers 409 RCV-CAP-004 without naming it.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvoiceCaptureRequest' }
+      responses:
+        '200':
+          description: The vendor submitted this document before; the existing capture.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapture' }
+        '201':
+          description: Captured.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapture' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-CAP-004' }
+        '413': { $ref: '#/components/responses/Problem', description: 'COM-0413' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-CAP-001; RCV-CAP-002' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503' }
+    get:
+      operationId: vendorListInvoiceDocuments
+      x-passage-duty: receiving.vendor-portal.invoice
+      description: The documents the calling vendor submitted that AP has not yet posted, newest first.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapturePage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/invoice-captures/{id}:
+    get:
+      operationId: vendorGetInvoiceDocument
+      x-passage-duty: receiving.vendor-portal.invoice
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The document.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapture' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-007 unknown, or it belongs to another vendor.' }
+  /v1/receiving/vendor/invoices:
+    get:
+      operationId: vendorListInvoices
+      x-passage-duty: receiving.vendor-portal.invoice
+      description: >-
+        The calling vendor's posted invoices, newest first, in the vendor's view: number, date, currency, total and a status
+        (ACCEPTED, IN_REVIEW or REJECTED). Ledger entries, audit sampling and reviewers are not shown.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInvoicePage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/invoices/{id}:
+    get:
+      operationId: vendorGetInvoice
+      x-passage-duty: receiving.vendor-portal.invoice
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The invoice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInvoice' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-003 unknown, or it belongs to another vendor.' }
   /v1/receiving/ers-self-bills/{id}:
     get:
       operationId: getErsSelfBill
@@ -1663,6 +1828,23 @@ components:
               qty: { type: [number, string], exclusiveMinimum: 0 }
               unitPrice: { type: [number, string], minimum: 0 }
               standardCost: { type: boolean, default: false, description: Price difference posts to PPV instead of inventory. }
+    VendorInvoice:
+      type: object
+      required: [id, invoiceNumber, invoiceDate, currency, total, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        invoiceNumber: { type: string }
+        invoiceDate: { type: string, format: date }
+        currency: { type: string }
+        total: { type: string }
+        status: { type: string, enum: [ACCEPTED, IN_REVIEW, REJECTED] }
+        createdAt: { type: string, format: date-time }
+    VendorInvoicePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/VendorInvoice' } }
+        nextCursor: { type: string }
     InvoicePage:
       type: object
       required: [items]
