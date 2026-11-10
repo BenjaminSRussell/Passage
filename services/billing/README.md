@@ -49,6 +49,8 @@ charts/billing/         Helm chart (deployment, service with admin port, Service
 | GET | `/v1/billing/invoices` | `billing.invoice.view` (InvoiceView) | headers only, newest first; `status`, `type`, `customerId`, `originalInvoiceId`, `limit` (1 to 200, default 100), `cursor` (the previous page's `nextCursor`) |
 | GET | `/v1/billing/invoices/{id}` | `billing.invoice.view` (InvoiceView) | invoice or credit note; returns `ETag` (version); a creditable invoice carries `credited` and per-line `creditedQty` |
 | POST | `/v1/billing/invoices/{id}:post` | `billing.invoice.post` (InvoicePost) | tax re-quote; idempotent by state; optional `If-Match`; refuses credit notes (409 `BIL-0101`) |
+| GET | `/v1/billing/sales-reports` | `billing.invoice.view` | `?status=PENDING\|REPORTED\|PARKED`; the invoice reports to sales (#29), newest first, at most 200, a parked one with its reason in `lastError` |
+| POST | `/v1/billing/sales-reports/{id}:retry` | `billing.invoice.post` | Puts a PARKED report back in the queue (attempts from zero, same body and key); a PENDING one is returned as is, a REPORTED one is 409 `BIL-0111` |
 | POST | `/v1/billing/gl-postings` | `billing.invoice.post` | `{legalEntityId, retryParked?}`; books the invoice journal (FR-29.3) of every posted invoice and credit note without one: Dr receivable billed gross, Cr revenue per line account and Cr 2400 as the remaining revrec allocation of each (order, product) splits the lines (invoice lines, receivable and tax keep the contractual price; a credit note books the mirror in its original's proportions), the billed-versus-allocated difference to the order's contract position (Cr 2400 contract liability above, Dr `contractAssetAccount` 1250 below, netted per contract), Cr charges, Cr tax; an invoice with an order line waits (`BIL-0207`, backoff) until revrec (`REVREC_URL`) answers with the order's contract, and is parked (`BIL-0208`) for a deferred line the allocation does not cover or an allocation below what was booked; one run per entity (`BIL-0209`); ledger key `billing-invoice-<id>` / `billing-credit-note-<id>`, entry id in `invoice.journal_posting_id`; ledger, accounts and amounts come from `BILLING_GL_PROFILES`, the stored document and revrec; a ledger refusal is recorded (attempts, next attempt with backoff) and the document parked after 5 refusals, an outage without a verdict never parks; at most 200 per call, `more` when due documents remain beyond the page, `halted` (`BIL-0207`) when revrec did not answer and the rest of the page was not attempted |
 | POST | `/v1/billing/credit-notes` | `billing.invoice.maintain` (InvoiceMaintain) | `Idempotency-Key` required; whole remainder or `lines` by quantity; tax is the original's pro rata, never re-quoted |
 | POST | `/v1/billing/subscriptions` | `billing.invoice.maintain` | `Idempotency-Key` required; plan code and price per period, `periodMonths` 1, 3, 6 or 12, start date; 201, or 200 replay |
@@ -140,6 +142,9 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 | `BIL-0107` | 422 | A plan change or cancellation falls inside an invoiced period; correct it with a credit note |
 | `BIL-0108` | 422 | The subscription is cancelled (cancel again, or change plan) |
 | `BIL-0109` | 503 | Subscriptions are not available in this deployment |
+| `BIL-0110` | 404 | Sales report not found |
+| `BIL-0111` | 409 | The sales report is REPORTED; only a PARKED report is retried |
+| `BIL-0112` | 503 | Sales reports are not available in this deployment |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body |
 | `idempotency_in_progress` | 409 | A concurrent request holds the key |
 
@@ -165,13 +170,34 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 - The PRD's `passage.billing.credit-note.posted.v1` is published as
   `dev.passage.billing.creditnote.posted.v1` (the platform type grammar has no hyphens).
 - `journal_posting_id` holds the ledger entry of the document's invoice journal (FR-29.3)
-  once `POST /v1/billing/gl-postings` booked it; the event carries null because the journal
+  once `POST /v1/billing/gl-postings` or the auto-book worker booked it; the event carries null because the journal
   follows the post. `BILLING_GL_PROFILES` (a JSON array, one profile per entity: `legalEntityId`, `ledgerId`,
   `receivableAccount`, `taxAccount`, `chargeAccount`, `deferredRevenueAccounts`, `contractAssetAccount` (1250 Contract Asset when
   omitted; open it in the ledger chart); chart value `glProfiles`) is required when `LEDGER_URL` is set; the deferred account and
   the contract liability are 2400. `REVREC_URL` (chart value `revrecUrl`, required with `LEDGER_URL`) names the revrec service whose
   contract allocation splits the invoice journal; the call is signed with the `revrec.allocation.read` grant. The
   profile's ledger is checked against its entity at each call. `invoice.posted` carries `intercompany=false` until wave 40.
+- Auto-book (#29): with `BILLING_GL_AUTOBOOK_TENANT_IDS` (chart `autoBook.tenantIds`) set, a worker in every replica runs the same
+  posting run as `gl-postings` each `BILLING_GL_AUTOBOOK_INTERVAL` (default 1m, at least 5s; chart `autoBook.interval`) for each
+  legal entity of `BILLING_GL_PROFILES` whose profile names that tenant (`tenantId`, optional otherwise; startup fails for a listed tenant no profile names), under a system principal scoped to that tenant and entity, so a posted invoice or credit
+  note books without an API request. Idempotency is the run's: ledger key `billing-invoice-<id>` / `billing-credit-note-<id>`, the
+  held booking an unanswered call leaves, `journal_posting_id` set once, and the per-entity advisory lock (a replica that finds the
+  run held skips the tick). Refusals, backoff and parking apply as for the API call. Unset, nothing books until the API is called.
+- Order progress (#29): posting an invoice that bills order lines (shipment and consolidated invoices) queues one report per
+  (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014): kind `INVOICED`, `sourceRef` the invoice
+  number, each order line by `lineId` with the invoiced quantity (two invoice lines of one order line summed), key
+  `billing-invoice:<invoiceId>:<orderId>`. With `SALES_URL` (chart `salesUrl`; needs the service signing key, and sales must list
+  billing's public key) every replica runs a reporter each `BILLING_SALES_REPORT_INTERVAL` (default 30s, at least 1s; chart
+  `salesReportInterval`) that leases due reports (2 minutes), sends them to sales' `POST /v1/sales/orders/{id}:record-progress`
+  as billing for `service:billing-sales-report` with only `sales.order.record-invoice`, for the invoice's tenant and legal
+  entity, and records REPORTED, a retry with backoff (30s doubling to 1h; outage, 5xx, 408, 429, 401, 403) or PARKED with the
+  reason in `last_error` (sales refused the report with another 4xx, or 20 attempts ran out). `SLS-0058` and `SLS-0059` (order not shipped, invoice above the delivered quantity) are "not yet" answers, retried like an outage, because fulfillment's delivery report travels separately and may arrive later. A batch is `lease / (2 x client timeout)` reports (6), so a batch of slow calls never outlasts its 2-minute lease. Operators list reports with `GET /v1/billing/sales-reports?status=PARKED` (`billing.invoice.view`) and re-queue one with `POST /v1/billing/sales-reports/{id}:retry` (`billing.invoice.post`); the counter `billing_sales_reports_parked_total` counts reports this process parked. Sales being down never blocks a post.
+  Retries send the same body and key, so a repeat or a second replica never double counts. Unset, reports wait PENDING. Credit
+  notes are not reported (sales has no reversal of an invoice).
+- The `outbox-billing` Debezium connector (`deploy/kafka/connect.yaml`, database `passage_billing`, role `debezium_cdc_billing`,
+  publication `passage_outbox_billing`, migrations 0012 and 0013) relays the outbox to `passage.billing.invoice`, the one channel
+  billing's AsyncAPI declares; billing enqueues a single aggregate type (`invoice`), so the connector routes by aggregate type
+  without a filter, and a deploy test fails when a second type appears.
 - Booking a credit note's journal writes `dev.passage.billing.creditnote.booked.v1` to the outbox in the same transaction (#29):
   per line the order and product of the credited original line, the credited net, and the allocated amount and its deferred part
   the journal debited (the deferred part is the Dr 2400). `creditnote.posted` cannot carry them: it is published at the post,

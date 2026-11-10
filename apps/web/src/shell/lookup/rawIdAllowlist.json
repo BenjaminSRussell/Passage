@@ -596,6 +596,7 @@
     },
     "modules/purchasing/RequisitionPages.tsx": {
       "labels": [
+        "Operating unit id",
         "Operating unit id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."

@@ -2,8 +2,8 @@
 # billing's creditnote.booked and parks what it cannot apply on passage.revrec.creditnotes.dlq. The chart's
 # consumer.kafka.username names this user. Literal ACLs: the user reads only billing's invoice topic (billing routes its outbox
 # by aggregate, so invoices and credit notes share passage.billing.invoice; the consumer skips the other types) and writes only
-# its dead-letter topic. The billing outbox connector that creates passage.billing.invoice is not in connect.yaml yet; the
-# consumer is off in dev until it is.
+# its dead-letter topic. The outbox-billing connector in connect.yaml creates passage.billing.invoice; the consumer stays off in
+# dev until it is enabled in the revrec chart.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:

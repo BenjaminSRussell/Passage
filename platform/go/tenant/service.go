@@ -72,7 +72,11 @@ var serviceGrants = map[string]map[string][]string{
 		"carrier-gateway": {"carrier.rate.quote", "carrier.tracking.read"},
 	},
 	"batch": {
-		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
+		"product":    {"product.variants.explode", "product.released.read", "product.jobs.write"},
+		"purchasing": {"procurement.inbox.read"},
+		"party":      {"party.inbox.read"},
+		"ledger":     {"ledger.inbox.read"},
+		"payables":   {"payables.inbox.read"},
 	},
 	"receiving": {
 		"ledger":     {"ledger.entry.post", "ledger.journal.reverse"},
