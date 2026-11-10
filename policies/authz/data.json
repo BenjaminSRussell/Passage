@@ -1449,6 +1449,7 @@
       {"resource": "/api/v1/migration/parallel-runs", "methods": ["POST"]},
       {"resource": "/api/v1/migration/parallel-runs/replay", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/load", "methods": ["POST"]},
+      {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/quarantine/*/release", "methods": ["POST"]}
     ]},
     "migration.factory.view": {"permissions": [
@@ -1459,6 +1460,7 @@
       {"resource": "/api/v1/migration/runs", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/control-totals", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-rows", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]},

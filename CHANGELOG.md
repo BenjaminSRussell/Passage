@@ -19,6 +19,7 @@ release may change public APIs.
 
 ### Added
 
+- Migration factory: `POST /api/v1/migration/runs/{id}/opening-journal` posts the migrated GL balances of a gl_balances run to a legal entity's ledger through the ledger's posting API, one balanced journal per currency, refused whole with the difference named (MIG-1540) when a currency does not balance, idempotent by a fixed key per company, legal entity and currency (`gl_opening_posting`, migration 0024); `GET` lists what was posted, and a fully posted gl_balances pack no longer needs a go/no-go waiver (49-1, #49).
 - Receiving: `GET /v1/receiving/invoices` lists vendor invoices with their lines and ledger entry id, filtered by
   vendor, receipt, purchase order or status, keyset-paged and scoped to the caller's legal entities
   (`receiving.ap.inquire`); `GET /v1/receiving/receipts?purchaseOrderId=` already existed and now has an API test (#502).

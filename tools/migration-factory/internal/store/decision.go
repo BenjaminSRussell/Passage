@@ -22,7 +22,13 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 	for i, p := range plan.Packs {
 		packs[i] = string(p)
 	}
-	rows, err := tx.Query(ctx, `select distinct on (pack, source_company) pack, source_company, run_id::text, status, created_at, payables_staged, receivables_load from pack_run
+	rows, err := tx.Query(ctx, `select distinct on (pack, source_company) pack, source_company, run_id::text, status, created_at, payables_staged, receivables_load,
+		pack = 'gl_balances' and exists (select 1 from gl_opening_balance b where b.tenant_id = pack_run.tenant_id and b.source_system = pack_run.source_system
+			and b.source_company = pack_run.source_company and b.balance <> 0)
+		and not exists (select 1 from gl_opening_balance b where b.tenant_id = pack_run.tenant_id and b.source_system = pack_run.source_system
+			and b.source_company = pack_run.source_company and b.balance <> 0 and not exists (select 1 from gl_opening_posting g
+			where g.tenant_id = b.tenant_id and g.source_system = b.source_system and g.source_company = b.source_company and g.currency = b.currency))
+		from pack_run
 		where tenant_id = current_setting('passage.tenant_id', true)::uuid and pack = any($1) and source_company = any($2)
 		order by pack, source_company, created_at desc, run_id desc`, packs, plan.Entities)
 	if err != nil {
@@ -33,7 +39,7 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 		var pack, status string
 		var payables *int
 		var recv *string
-		if err := rows.Scan(&pack, &pf.Company, &pf.RunID, &status, &pf.CreatedAt, &payables, &recv); err != nil {
+		if err := rows.Scan(&pack, &pf.Company, &pf.RunID, &status, &pf.CreatedAt, &payables, &recv, &pf.GLPosted); err != nil {
 			rows.Close()
 			return f, err
 		}
