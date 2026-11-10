@@ -148,6 +148,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:post", a.idempotent(a.postReceipt))
 	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:correct", a.idempotent(a.correctReceipt))
 	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:cancel", a.idempotent(a.cancelReceipt))
+	r.With(authz.RequireDuty(dutyDocumentFlow)).Get("/v1/receiving/related-documents", a.relatedDocuments)
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/grir", a.listGrir)
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoices", a.listInvoices)
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoices/{id}", a.getInvoice)
