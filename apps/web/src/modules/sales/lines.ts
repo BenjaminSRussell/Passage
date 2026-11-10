@@ -21,7 +21,7 @@ export function emptyLine(date: string): LineValues {
 }
 
 export const lineFields: { name: keyof LineValues; label: string; mono?: boolean; type?: string; inputMode?: "decimal" }[] = [
-  { name: "productId", label: "Product", mono: true },
+  { name: "productId", label: "Product" },
   { name: "quantity", label: "Quantity", inputMode: "decimal" },
   { name: "unit", label: "Unit" },
   { name: "unitPrice", label: "Unit price", inputMode: "decimal" },
@@ -40,7 +40,7 @@ export function validateLines(lines: LineValues[], errors: Record<string, string
   if (lines.length === 0) errors.lines = "Add at least one line.";
   lines.forEach((l, i) => {
     const at = (name: string) => `lines[${i}].${name}`;
-    if (!UUID.test(l.productId.trim())) errors[at("productId")] = "Enter the product's UUID.";
+    if (!UUID.test(l.productId.trim())) errors[at("productId")] = "Choose a product.";
     if (!DECIMAL.test(l.quantity) || /^0+(\.0+)?$/.test(l.quantity)) errors[at("quantity")] = "Enter a quantity above 0 with up to 6 decimals.";
     if (l.unit.trim().length < 1 || l.unit.trim().length > 10) errors[at("unit")] = "Enter a unit of up to 10 characters.";
     if (!UUID.test(l.siteId.trim())) errors[at("siteId")] = "Enter the site's UUID.";

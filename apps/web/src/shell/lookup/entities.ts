@@ -13,6 +13,7 @@ export interface LookupOption {
   id: string;
   name: string;
   number?: string;
+  unit?: string;
 }
 
 export interface LookupScope {
@@ -206,8 +207,10 @@ function partyRole(
   };
 }
 
-const productOption = (row: Raw) =>
-  option(row, ["name", "Name"], ["productNumber", "ProductNumber"]);
+const productOption = (row: Raw): LookupOption | null => {
+  const found = option(row, ["name", "Name"], ["productNumber", "ProductNumber"]);
+  return found && { ...found, unit: text(row, "baseUom", "BaseUOM") };
+};
 
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
   legalEntity: orgEntity("legal entity", "legal-entities", () => ({})),

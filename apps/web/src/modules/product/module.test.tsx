@@ -40,6 +40,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const ID = "0195f0a0-0000-7000-8000-0000000000aa";
+const GROUP = "0195f0a0-0000-7000-8000-0000000000bb";
+const groupList = { items: [{ ID: GROUP, Code: "RAW", Name: "Raw material" }] };
+const isGroups = (call: Call) => call.url.pathname === "/api/v1/product/setup/item-groups";
 const row = (extra: Record<string, unknown> = {}) => ({
   ID,
   ProductNumber: "BOLT",
@@ -172,6 +175,16 @@ describe("product detail", () => {
     expect(violations(container)).toEqual([]);
   });
 
+  it("shows the base unit, item group and tracking flags", async () => {
+    handler = (call) => (isGroups(call) ? json(200, groupList) : json(200, row({ BaseUOM: "KG", ItemGroupID: GROUP, BatchTracked: true, CatchWeight: true })));
+    const { container } = renderAt(`/product/${ID}`);
+    await screen.findByRole("heading", { name: "Hex bolt" });
+    await waitFor(() => expect(container.querySelector("dl")).toHaveTextContent("Raw material"));
+    expect(container.querySelector("dl")).toHaveTextContent("KG");
+    expect(container.querySelector("dl")).toHaveTextContent("Batch tracking, Catch weight");
+    expect(violations(container)).toEqual([]);
+  });
+
   it("treats an old number-style address as not found without calling the service", async () => {
     renderAt("/product/BOLT");
     expect(await screen.findByRole("heading", { name: "Product not found" })).toBeInTheDocument();
@@ -194,7 +207,22 @@ describe("product detail", () => {
 
 describe("create product", () => {
   it("validates before sending anything", () => {
-    const errors = validate({ productNumber: "bad number", name: " ", description: "", baseUom: "", subtype: "product", productType: "item", lifecycleState: "draft" }, true);
+    const errors = validate(
+      {
+        productNumber: "bad number",
+        name: " ",
+        description: "",
+        baseUom: "",
+        subtype: "product",
+        productType: "item",
+        lifecycleState: "draft",
+        itemGroupId: "",
+        batchTracked: false,
+        serialTracked: false,
+        catchWeight: false,
+      },
+      true,
+    );
     expect(Object.keys(errors).sort()).toEqual(["baseUom", "name", "productNumber"]);
   });
 
@@ -213,13 +241,68 @@ describe("create product", () => {
     expect(post.headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("sets the item group and tracking flags under More options", async () => {
+    handler = (call) => {
+      if (isGroups(call)) return json(200, groupList);
+      return call.method === "POST" ? json(201, row()) : json(200, row());
+    };
+    const { container } = renderAt("/product/items/new");
+    expect(screen.getByText("More options")).toBeInTheDocument();
+    await screen.findByRole("option", { name: "Raw material (RAW)" });
+    expect(violations(container)).toEqual([]);
+    type("Product number", "bolt");
+    type("Name", "Hex bolt");
+    type("Base unit", "kg");
+    fireEvent.change(screen.getByLabelText(/Item group/), { target: { value: GROUP } });
+    fireEvent.click(screen.getByLabelText("Batch tracking"));
+    fireEvent.click(screen.getByLabelText("Catch weight"));
+    fireEvent.click(screen.getByRole("button", { name: "Create product" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/product/${ID}`));
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({
+      productNumber: "BOLT",
+      name: "Hex bolt",
+      baseUom: "KG",
+      subtype: "product",
+      productType: "item",
+      itemGroupId: GROUP,
+      batchTracked: true,
+      catchWeight: true,
+    });
+  });
+
+  it("does not offer tracking on a service and never sends it", async () => {
+    handler = (call) => (call.method === "POST" ? json(201, row()) : json(200, groupList));
+    renderAt("/product/items/new");
+    fireEvent.click(screen.getByLabelText("Batch tracking"));
+    type("Type", "service");
+    expect(screen.getByLabelText("Batch tracking")).toBeDisabled();
+    expect(screen.getByLabelText("Batch tracking")).not.toBeChecked();
+    type("Product number", "CONSULT");
+    type("Name", "Consulting");
+    type("Base unit", "H");
+    fireEvent.click(screen.getByRole("button", { name: "Create product" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    expect(calls.find((c) => c.method === "POST")!.body).not.toHaveProperty("batchTracked");
+  });
+
+  it("says so when the item groups can't be loaded and still lets the product be created", async () => {
+    handler = (call) => (call.method === "POST" ? json(201, row()) : json(503, { code: "COM-0503", detail: "down" }));
+    renderAt("/product/items/new");
+    expect(await screen.findByText("Item groups could not be loaded. Try again later.")).toBeInTheDocument();
+    type("Product number", "BOLT");
+    type("Name", "Hex bolt");
+    type("Base unit", "EA");
+    fireEvent.click(screen.getByRole("button", { name: "Create product" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/product/${ID}`));
+  });
+
   it("marks the fields that need fixing and sends nothing", () => {
     renderAt("/product/items/new");
     fireEvent.click(screen.getByRole("button", { name: "Create product" }));
     expect(screen.getByText("Enter a product number.")).toBeInTheDocument();
     expect(screen.getByText("Enter a name for the product.")).toBeInTheDocument();
     expect(screen.getByLabelText("Product number")).toHaveAttribute("aria-invalid", "true");
-    expect(calls).toEqual([]);
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 
   it("tells the person what to do when the number is already used", async () => {
@@ -256,7 +339,33 @@ describe("edit product", () => {
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/product/${ID}`));
     const patch = calls.find((c) => c.method === "PATCH")!;
     expect(patch.headers.get("If-Match")).toBe('"1"');
-    expect(patch.body).toEqual({ name: "Hex bolt M8", description: "M8 steel", lifecycleState: "active" });
+    expect(patch.body).toEqual({
+      name: "Hex bolt M8",
+      description: "M8 steel",
+      lifecycleState: "active",
+      itemGroupId: "",
+      batchTracked: false,
+      serialTracked: false,
+      catchWeight: false,
+    });
+  });
+
+  it("shows the item group and flags already set, and saves a change to them", async () => {
+    handler = (call) => {
+      if (isGroups(call)) return json(200, groupList);
+      return call.method === "PATCH" ? json(200, row({ ItemGroupID: GROUP, SerialTracked: true, Version: 2 })) : json(200, row({ ItemGroupID: GROUP, BatchTracked: true }));
+    };
+    renderAt(`/product/${ID}/edit`);
+    await screen.findByLabelText("Name");
+    await screen.findByRole("option", { name: "Raw material (RAW)" });
+    expect(screen.getByLabelText(/Item group/)).toHaveValue(GROUP);
+    expect(screen.getByLabelText("Batch tracking")).toBeChecked();
+    expect(screen.getByLabelText("Serial number tracking")).not.toBeChecked();
+    fireEvent.click(screen.getByLabelText("Serial number tracking"));
+    fireEvent.click(screen.getByLabelText("Batch tracking"));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/product/${ID}`));
+    expect(calls.find((c) => c.method === "PATCH")!.body).toMatchObject({ itemGroupId: GROUP, batchTracked: false, serialTracked: true, catchWeight: false });
   });
 
   it("explains a conflicting save in plain words", async () => {

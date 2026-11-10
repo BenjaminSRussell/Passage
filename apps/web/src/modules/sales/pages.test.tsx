@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { setLookupFetcher } from "../../shell/lookup/entities";
 import { promiseSummary, validateAtp } from "./AtpCheckPage";
 import { blankProfile, validateProfile } from "./CreditProfileFormPage";
 import sales from "./module";
@@ -237,8 +238,29 @@ describe("New sales order", () => {
     renderAt("/sales/orders/new");
     fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
     expect(await screen.findByText("Enter the customer's UUID.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the product's UUID.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a product.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
+  });
+
+  it("picks the product through the shared lookup and takes its base unit", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG" }] }), { status: 200 }));
+    renderAt("/sales/orders/new");
+    expect(screen.getByLabelText("Unit")).toHaveValue("EA");
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    expect(screen.getByLabelText("Product")).toHaveValue("Hex bolt (BOLT)");
+    expect(screen.getByLabelText("Product")).toHaveAttribute("data-value", PRODUCT);
+    expect(screen.getByLabelText("Unit")).toHaveValue("KG");
+    fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "BOX" } });
+    expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
+  });
+
+  it("asks for a product in plain words when none is chosen", async () => {
+    handler = () => ({ status: 500, body: {} });
+    renderAt("/sales/orders/new");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
+    expect(await screen.findByText("Choose a product.")).toBeInTheDocument();
   });
 
   it("creates the order with an Idempotency-Key and opens it", async () => {

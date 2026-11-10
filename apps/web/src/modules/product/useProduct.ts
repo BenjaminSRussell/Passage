@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getProduct, ProductApiError, type Product } from "./api/client";
+import { getProduct, listItemGroups, ProductApiError, type ItemGroup, type Product } from "./api/client";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,4 +31,19 @@ export function useProduct(id: string | undefined) {
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
   return { ...state, reload };
+}
+
+export function useItemGroups() {
+  const [state, setState] = useState<{ groups: ItemGroup[]; failed: boolean }>({ groups: [], failed: false });
+  useEffect(() => {
+    const controller = new AbortController();
+    listItemGroups(controller.signal).then(
+      (groups) => setState({ groups, failed: false }),
+      () => {
+        if (!controller.signal.aborted) setState({ groups: [], failed: true });
+      },
+    );
+    return () => controller.abort();
+  }, []);
+  return state;
 }

@@ -1,3 +1,4 @@
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Button, FormField, Input, Select } from "../../shell/ui";
 import { DELIVERY_DATE_CONTROLS, type DeliveryDateControl } from "./api/client";
 import { sentence } from "./format";
@@ -35,17 +36,26 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
             const path = `lines[${i}].${f.name}`;
             return (
               <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} error={errors[path]}>
-                {(control) => (
-                  <Input
-                    {...control}
-                    type={f.type ?? "text"}
-                    inputMode={f.inputMode}
-                    className={f.mono ? styles.mono : undefined}
-                    value={line[f.name]}
-                    onChange={(e) => updateLine(i, { [f.name]: e.target.value })}
-                    invalid={Boolean(errors[path])}
-                  />
-                )}
+                {(control) =>
+                  f.name === "productId" ? (
+                    <EntityLookup
+                      entity="product"
+                      {...control}
+                      value={line.productId}
+                      onChange={(e) => updateLine(i, { productId: e.target.value, ...(e.option?.unit ? { unit: e.option.unit } : {}) })}
+                    />
+                  ) : (
+                    <Input
+                      {...control}
+                      type={f.type ?? "text"}
+                      inputMode={f.inputMode}
+                      className={f.mono ? styles.mono : undefined}
+                      value={line[f.name]}
+                      onChange={(e) => updateLine(i, { [f.name]: e.target.value })}
+                      invalid={Boolean(errors[path])}
+                    />
+                  )
+                }
               </FormField>
             );
           })}

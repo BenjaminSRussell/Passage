@@ -353,7 +353,14 @@ function LinesCard({
             </div>
             <div className={styles.grid}>
               <FormField id={id("product")} label="Product" optional error={err("productId")}>
-                {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+                {(c) => (
+                  <EntityLookup
+                    entity="product"
+                    {...c}
+                    value={line.productId}
+                    onChange={(e) => update(i, { productId: e.target.value, ...(e.option?.unit && !fromRequisition ? { unit: e.option.unit } : {}) })}
+                  />
+                )}
               </FormField>
               <FormField id={id("description")} label="Description" optional error={err("description")}>
                 {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}
