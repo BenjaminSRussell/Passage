@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, vi } from "vitest";
@@ -119,15 +119,30 @@ describe("pages and navigation", () => {
     expect(screen.getByRole("link", { name: "Go to home" })).toHaveAttribute("href", "/");
   });
 
-  it("collapses and expands a workspace group", async () => {
+  it("starts with every area collapsed and expands an area, then a module", async () => {
     const user = userEvent.setup();
     renderShell();
     const nav = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    const area = nav.getByRole("button", { name: "Administration" });
+    expect(area).toHaveAttribute("aria-expanded", "false");
+    expect(nav.queryByRole("button", { name: "Admin" })).not.toBeInTheDocument();
+    await user.click(area);
+    expect(area).toHaveAttribute("aria-expanded", "true");
     const header = nav.getByRole("button", { name: "Admin" });
-    expect(header).toHaveAttribute("aria-expanded", "true");
-    await user.click(header);
     expect(header).toHaveAttribute("aria-expanded", "false");
     expect(nav.queryByRole("link", { name: "Audit" })).not.toBeInTheDocument();
+    await user.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(nav.getByRole("link", { name: "Audit" })).toHaveAttribute("href", "/admin/audit");
+    await user.click(header);
+    expect(nav.queryByRole("link", { name: "Audit" })).not.toBeInTheDocument();
+  });
+
+  it("opens the area and module that own the current page", () => {
+    renderShell("/admin/audit");
+    const nav = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    expect(nav.getByRole("button", { name: "Administration" })).toHaveAttribute("aria-expanded", "true");
+    expect(nav.getByRole("button", { name: "Admin" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("sets aria-pressed and data-density when compact view is toggled", async () => {
@@ -492,11 +507,13 @@ describe("duty gating", () => {
   }
 
   it("hides gated entries and empty workspaces from the sidebar and home cards, keeping ungated entries", () => {
-    renderGated("/", []);
+    renderGated("/ledger/open-items", []);
     const nav = screen.getByRole("navigation", { name: "Workspaces" });
     expect(within(nav).queryByRole("link", { name: "Journals" })).not.toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Open items" })).toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: /Treasury/ })).not.toBeInTheDocument();
+    cleanup();
+    renderGated("/", []);
     const cards = screen.getByRole("list", { name: "Workspaces" });
     expect(within(cards).queryByText("Treasury")).not.toBeInTheDocument();
     expect(within(cards).queryByRole("link", { name: "Journals" })).not.toBeInTheDocument();
@@ -504,7 +521,7 @@ describe("duty gating", () => {
   });
 
   it("shows gated entries to a principal holding the duty", () => {
-    renderGated("/", ["ledger.journal.read", "treasury.view"]);
+    renderGated("/ledger/journals", ["ledger.journal.read", "treasury.view"]);
     const nav = screen.getByRole("navigation", { name: "Workspaces" });
     expect(within(nav).getByRole("link", { name: "Journals" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: /Treasury/ })).toBeInTheDocument();
@@ -537,5 +554,45 @@ describe("duty gating", () => {
     first.unmount();
     renderGated("/ledger/open-items", []);
     expect(screen.getByText("Open items page")).toBeInTheDocument();
+  });
+});
+
+describe("long module navs", () => {
+  const long: PassageModule[] = [
+    {
+      id: "sales",
+      title: "Sales",
+      routes: [],
+      nav: Array.from({ length: 12 }, (_, i) => ({ label: `Page ${i + 1}`, to: `/sales/p${i + 1}` })),
+    },
+  ];
+
+  function renderLong(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route element={<Shell modules={long} />}>
+            <Route path="*" element={<p>Page</p>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("lists the first eight pages and reveals the rest on request", async () => {
+    const user = userEvent.setup();
+    renderLong("/sales/p1");
+    const nav = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    expect(nav.getByRole("link", { name: "Page 8" })).toBeInTheDocument();
+    expect(nav.queryByRole("link", { name: "Page 9" })).not.toBeInTheDocument();
+    await user.click(nav.getByRole("button", { name: "Show 4 more" }));
+    expect(nav.getByRole("link", { name: "Page 12" })).toBeInTheDocument();
+    expect(nav.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows every page when the current page is past the first eight", () => {
+    renderLong("/sales/p11");
+    const nav = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    expect(nav.getByRole("link", { name: "Page 11" })).toHaveAttribute("aria-current", "page");
   });
 });
