@@ -135,7 +135,7 @@ export function CatalogPage() {
             onRowOpen={(row) => navigate(`/product/${encodeURIComponent(row.id)}`)}
           />
           {listing.error ? <ProductProblem error={listing.error} title="Could not load more products" retry={loadMore} /> : null}
-          {listing.next ? (
+          {listing.next && !listing.error ? (
             <div>
               <Button onClick={loadMore} loading={listing.loadingMore}>
                 Show more products
@@ -169,7 +169,7 @@ export function ProductNotFound({ onBack }: { onBack(): void }) {
       <EmptyState
         icon="box"
         title="Product not found"
-        description="There is no product with that number. Check the address, or pick one from the catalog."
+        description="There is no product at this address. Check the link, or pick one from the catalog."
         action={<Button onClick={onBack}>Back to products</Button>}
       />
     </Card>

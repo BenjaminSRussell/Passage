@@ -432,7 +432,6 @@
     {"to": "/productcost/conversion", "module": "productcost", "label": "Standard cost conversion", "area": "finance", "decision": "advanced"},
     {"to": "/product", "module": "product", "label": "Overview", "area": "inventory-warehouse", "decision": "keep"},
     {"to": "/product/items", "module": "product", "label": "Products", "area": "inventory-warehouse", "decision": "keep"},
-    {"to": "/product/released", "module": "product", "label": "Released products", "area": "inventory-warehouse", "decision": "keep"},
     {"to": "/production", "module": "production", "label": "Production orders", "area": "manufacturing", "decision": "keep", "taskLabel": "Production orders"},
     {"to": "/production/new", "module": "production", "label": "New production order", "area": "manufacturing", "decision": "merge", "mergeInto": "/production"},
     {"to": "/production/planned-intake", "module": "production", "label": "Planned orders", "area": "manufacturing", "decision": "keep", "taskLabel": "Convert planned orders"},

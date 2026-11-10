@@ -4,7 +4,7 @@ import { ProductApiError } from "./api/client";
 
 const UNREACHABLE = "We couldn't reach the product service. Check your connection and try again.";
 
-export function ProductProblem({ error, title, retry }: { error: unknown; title: string; retry?: () => void }) {
+export function ProductProblem({ error, title, retry, retryLabel = "Try again" }: { error: unknown; title: string; retry?: () => void; retryLabel?: string }) {
   return (
     <Alert
       tone="danger"
@@ -13,7 +13,7 @@ export function ProductProblem({ error, title, retry }: { error: unknown; title:
       action={
         retry ? (
           <Button size="sm" onClick={retry}>
-            Try again
+            {retryLabel}
           </Button>
         ) : undefined
       }

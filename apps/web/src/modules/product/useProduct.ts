@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { getProduct, type Product } from "./api/client";
+import { getProduct, ProductApiError, type Product } from "./api/client";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface State {
   data: Product | null;
@@ -13,6 +15,10 @@ export function useProduct(id: string | undefined) {
 
   useEffect(() => {
     const controller = new AbortController();
+    if (!UUID.test(id ?? "")) {
+      setState({ data: null, error: new ProductApiError(404, "COM-0404", "product not found"), loading: false });
+      return;
+    }
     setState({ data: null, error: null, loading: true });
     getProduct(id ?? "", controller.signal).then(
       (data) => setState({ data, error: null, loading: false }),

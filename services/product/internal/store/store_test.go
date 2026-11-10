@@ -83,6 +83,12 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	if none, err := app.ListProducts(ctx, "%", "", 10); err != nil || len(none) != 0 {
 		t.Fatalf("a percent sign is literal text: %d %v", len(none), err)
 	}
+	if found, err := app.Search(ctx, "rls", 10); err != nil || len(found) != 1 {
+		t.Fatalf("search by text: %d %v", len(found), err)
+	}
+	if none, err := app.Search(ctx, "%", 10); err != nil || len(none) != 0 {
+		t.Fatalf("a percent sign in search is literal text: %d %v", len(none), err)
+	}
 	if past, err := app.ListProducts(ctx, "", "RLS1", 10); err != nil || len(past) != 0 {
 		t.Fatalf("after the last number: %d %v", len(past), err)
 	}

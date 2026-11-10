@@ -534,6 +534,13 @@ func TestListReleasedPagesByKeyset(t *testing.T) {
 	}
 }
 
+func TestGetProductRejectsAnIdThatIsNotAUUID(t *testing.T) {
+	r := newRouter(newFake())
+	if rec := do(r, http.MethodGet, "/v1/product/products/BOLT", "", "product.read"); rec.Code != http.StatusNotFound {
+		t.Fatalf("non-uuid id = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestListProductsPagesByKeysetAndFiltersByText(t *testing.T) {
 	f := newFake()
 	r := newRouter(f)

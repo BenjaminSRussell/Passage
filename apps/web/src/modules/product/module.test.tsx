@@ -126,6 +126,15 @@ describe("product list", () => {
     expect(screen.queryByRole("button", { name: "Show more products" })).toBeNull();
   });
 
+  it("offers a single retry when loading more fails", async () => {
+    handler = (call) => (call.url.searchParams.get("cursor") ? json(503, { code: "COM-0503", detail: "down" }) : json(200, { items: [row()], nextCursor: "c1" }));
+    renderAt("/product/items");
+    fireEvent.click(await screen.findByRole("button", { name: "Show more products" }));
+    expect(await screen.findByText("Could not load more products")).toBeInTheDocument();
+    expect(screen.getByText("Hex bolt")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Try again|Show more products/ })).toHaveLength(1);
+  });
+
   it("explains an empty catalog and offers to add a product", async () => {
     handler = () => json(200, { items: [] });
     renderAt("/product/items");
@@ -163,8 +172,14 @@ describe("product detail", () => {
     expect(violations(container)).toEqual([]);
   });
 
+  it("treats an old number-style address as not found without calling the service", async () => {
+    renderAt("/product/BOLT");
+    expect(await screen.findByRole("heading", { name: "Product not found" })).toBeInTheDocument();
+    expect(calls).toEqual([]);
+  });
+
   it("shows a not-found state for an unknown product", async () => {
-    renderAt("/product/NOPE");
+    renderAt(`/product/${ID}`);
     expect(await screen.findByRole("heading", { name: "Product not found" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to products" })).toBeInTheDocument();
   });
@@ -251,6 +266,10 @@ describe("edit product", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText(/Someone else changed this product after you opened it/)).toBeInTheDocument();
+    handler = () => json(200, row({ Name: "Hex bolt v2", Version: 2 }));
+    fireEvent.click(within(alert).getByRole("button", { name: /Reload product/ }));
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Hex bolt v2"));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("shows server field errors next to the field", async () => {

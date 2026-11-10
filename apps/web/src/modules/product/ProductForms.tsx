@@ -60,9 +60,10 @@ interface FormProps {
   id?: string;
   version?: number;
   submitLabel: string;
+  onReload?: () => void;
 }
 
-function ProductForm({ initial, creating, id, version, submitLabel }: FormProps) {
+function ProductForm({ initial, creating, id, version, submitLabel, onReload }: FormProps) {
   const navigate = useNavigate();
   const [values, setValues] = useState<Values>(initial);
   const [errors, setErrors] = useState<Errors>({});
@@ -185,7 +186,14 @@ function ProductForm({ initial, creating, id, version, submitLabel }: FormProps)
           </Button>
         </div>
       </form>
-      {failure ? <ProductProblem error={failure} title={creating ? "Could not create the product" : "Could not save the product"} /> : null}
+      {failure ? (
+        <ProductProblem
+          error={failure}
+          title={creating ? "Could not create the product" : "Could not save the product"}
+          retry={failure instanceof ProductApiError && failure.status === 412 ? onReload : undefined}
+          retryLabel="Reload product (your edits will be cleared)"
+        />
+      ) : null}
     </>
   );
 }
@@ -249,6 +257,7 @@ export function EditProductPage() {
         id={data.id}
         version={data.version}
         submitLabel="Save changes"
+        onReload={reload}
       />
     </div>
   );

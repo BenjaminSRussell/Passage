@@ -949,7 +949,7 @@ func (s *Postgres) Search(ctx context.Context, q string, limit int) ([]domain.Pr
 	if limit <= 0 || limit > 20 {
 		limit = 10
 	}
-	like := "%" + q + "%"
+	like := "%" + likeEscaper.Replace(q) + "%"
 	var out []domain.Product
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+productSelect+` from product where tenant_id=$1 and (product_number ilike $2 or search_name ilike $2 or name ilike $2

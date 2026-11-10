@@ -18,7 +18,6 @@ const product: PassageModule = {
   nav: [
     { label: "Overview", to: "/product", duty: "product.read" },
     { label: "Products", to: "/product/items", duty: "product.read" },
-    { label: "Released products", to: "/product/released", duty: "product.released.write" },
   ],
 };
 

@@ -428,6 +428,10 @@ func (a *API) getProduct(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
+	if !ids.Valid(chi.URLParam(r, "id")) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found"))
+		return
+	}
 	p, err := a.store.GetProduct(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.Fail(w, r, err)
