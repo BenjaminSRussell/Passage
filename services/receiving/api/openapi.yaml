@@ -255,6 +255,47 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoices:
+    get:
+      operationId: listInvoices
+      x-passage-duty: receiving.ap.inquire
+      description: Vendor invoices newest first, with their lines and the ledger entry id (empty while an invoice is held for audit). Find the invoices of one receipt (receiptId) or purchase order (purchaseOrderId), which is how a purchase order page links on to the invoices and ledger entries it produced. Only invoices inside the caller's tenant and legal entities are returned. Page with nextCursor.
+      parameters:
+        - { name: vendorId, in: query, schema: { type: string, format: uuid } }
+        - { name: receiptId, in: query, schema: { type: string, format: uuid }, description: Invoices with a line against this receipt. }
+        - { name: purchaseOrderId, in: query, schema: { type: string, format: uuid }, description: Invoices with a line against a receipt of this purchase order. }
+        - { name: status, in: query, schema: { type: string, enum: [POSTED, AUDIT_BLOCKED, AUDIT_REJECTED] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of invoices.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoicePage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoices/{id}:
+    get:
+      operationId: getInvoice
+      summary: Read one vendor invoice
+      x-passage-duty: receiving.ap.inquire
+      description: The invoice with its lines and the ledger entry id (empty while held for audit), in the same shape as an item of GET /v1/receiving/invoices. An invoice outside the caller's tenant or legal entities answers 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The invoice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-005' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/invoices:post:
     post:
       operationId: postVendorInvoice
@@ -1369,6 +1410,12 @@ components:
               qty: { type: [number, string], exclusiveMinimum: 0 }
               unitPrice: { type: [number, string], minimum: 0 }
               standardCost: { type: boolean, default: false, description: Price difference posts to PPV instead of inventory. }
+    InvoicePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Invoice' } }
+        nextCursor: { type: string, description: Absent on the last page. }
     Invoice:
       type: object
       required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, source, status, createdAt, lines]

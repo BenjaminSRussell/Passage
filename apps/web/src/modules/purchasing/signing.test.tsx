@@ -147,8 +147,8 @@ describe("signing limit requests", () => {
   it("posts the request with an Idempotency-Key and opens it", async () => {
     const mock = stubFetch(() => json(request, 201, { ETag: '"1"' }));
     const { router } = renderAt("/purchasing/signing-limit-requests/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.change(screen.getByLabelText("Document"), { target: { value: "REQUISITION" } });
     fireEvent.change(screen.getByLabelText("Spending limit"), { target: { value: "2500" } });
     fireEvent.change(screen.getByLabelText("Approval limit"), { target: { value: "7000.50" } });

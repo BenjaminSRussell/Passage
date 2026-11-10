@@ -232,7 +232,7 @@ describe("new RFQ from a type", () => {
       return json(base);
     });
     const { router } = renderAt("/purchasing/rfqs/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     const select = await screen.findByLabelText(/RFQ type/);
     fireEvent.change(select, { target: { value: TYPE_ID } });
     expect(screen.getByLabelText("Rank replies by")).toHaveValue("WEIGHTED_SCORE");

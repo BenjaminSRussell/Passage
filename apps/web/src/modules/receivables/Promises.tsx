@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { createPromise, describeProblem, listPromises, newKey, type PaymentPromise, type Problem, type PromiseInput } from "./api/client";
@@ -49,8 +50,8 @@ export function PromisesPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="pr-customer" label="Customer id" optional error={valid ? undefined : "Enter a customer id (a UUID)."}>
-          {(c) => <Input {...c} className={styles.mono} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={!valid} />}
+        <FormField id="pr-customer" label="Customer" optional error={valid ? undefined : "Choose a customer."}>
+          {(c) => <EntityLookup entity="customer" {...c} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={!valid} />}
         </FormField>
       </div>
       {state.error ? (
@@ -81,7 +82,7 @@ export interface PromiseDraft {
 
 export function validatePromise(v: PromiseDraft, day: string = today()): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!UUID.test(v.openItemId.trim())) errors.openItemId = "Enter the open item id (a UUID).";
   if (!DECIMAL.test(v.amount.trim()) || /^0+(\.0+)?$/.test(v.amount.trim())) errors.amount = "Enter an amount above zero, such as 800.00.";
   if (!DAY.test(v.promiseDate)) errors.promiseDate = "Enter the promise date.";
@@ -155,8 +156,8 @@ export function NewPromisePage() {
       ) : null}
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="np-entity" label="Legal entity id" error={errors.legalEntityId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
+          <FormField id="np-entity" label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
           <FormField id="np-item" label="Open item id" error={errors.openItemId}>
             {(c) => <Input {...c} className={styles.mono} value={values.openItemId} onChange={(e) => update({ openItemId: e.target.value })} invalid={Boolean(errors.openItemId)} />}

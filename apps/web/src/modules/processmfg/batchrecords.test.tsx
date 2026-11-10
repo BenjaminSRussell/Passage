@@ -131,7 +131,7 @@ describe("register batch", () => {
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeTruthy();
     expect(screen.getByText("Enter a batch number of 1 to 40 characters.")).toBeTruthy();
     expect(calls).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Batch number"), { target: { value: "B-100" } });
     fireEvent.click(screen.getByRole("button", { name: "Register batch" }));
     await screen.findByRole("heading", { name: "B-100" });
@@ -143,7 +143,7 @@ describe("register batch", () => {
   it("shows a duplicate batch number refusal", async () => {
     handler = () => ({ status: 409, body: { code: "PMF-0109", detail: "batch B-100 of item x already exists" } });
     renderAt("/processmfg/batches/new");
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Batch number"), { target: { value: "B-100" } });
     fireEvent.click(screen.getByRole("button", { name: "Register batch" }));
     const alert = await findAlert();
@@ -269,7 +269,7 @@ describe("attribute definitions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Define attribute" }));
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeTruthy();
     expect(screen.getByText("Enter a name of 1 to 40 characters.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Item id", { selector: "#def-item" }), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item", { selector: "#def-item" }), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "potency" } });
     fireEvent.change(screen.getByLabelText("Minimum"), { target: { value: "40" } });
     fireEvent.change(screen.getByLabelText("Maximum"), { target: { value: "60" } });
@@ -289,7 +289,7 @@ describe("attribute definitions", () => {
     renderAt("/processmfg/attribute-definitions");
     const table = await findTable({ name: "Batch attribute definitions" });
     expect(within(table).getByText("Potency")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Item id", { selector: "#def-item" }), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item", { selector: "#def-item" }), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "assay" } });
     fireEvent.change(screen.getByLabelText("Role"), { target: { value: "potency" } });
     fireEvent.click(screen.getByRole("button", { name: "Define attribute" }));
@@ -308,7 +308,7 @@ describe("attribute definitions", () => {
           : undefined;
     renderAt("/processmfg/attribute-definitions");
     expect(await screen.findByText("No attribute definitions")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Item id", { selector: "#def-item" }), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item", { selector: "#def-item" }), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "potency" } });
     fireEvent.click(screen.getByRole("button", { name: "Define attribute" }));
     const alert = await findAlert();

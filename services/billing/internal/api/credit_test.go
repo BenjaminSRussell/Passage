@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 )
 
 // postedInvoice creates and posts a 2-line EUR invoice: 3 × 33.33 and
@@ -271,5 +272,175 @@ func TestCreateProposal_InstallmentRefusals(t *testing.T) {
 	}
 	if s.creates != 0 {
 		t.Errorf("%d proposals stored by refused requests", s.creates)
+	}
+}
+
+func reservationBody(reference, extra string) string {
+	return fmt.Sprintf(`{"reference":%q%s}`, reference, extra)
+}
+
+func TestCreditReservation_ReserveThenCreditNote(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "19.00"})
+	orig := postedInvoice(t, h)
+	path := "/v1/billing/invoices/" + orig.ID + "/credit-reservations"
+
+	var cn invoiceDTO
+	decode(t, do(h, http.MethodPost, "/v1/billing/credit-notes", "cn-r-1", creditBody(orig.ID, "2027-03-20", `,"lines":[{"lineNo":1,"qty":"2"}]`)), &cn)
+
+	rec := do(h, http.MethodPost, path, "rma-1", reservationBody("rma-1", `,"lines":[{"lineNo":1,"qty":"2"}]`))
+	var res creditReservationDTO
+	decode(t, rec, &res)
+	if rec.Code != http.StatusCreated || res.Status != "RESERVED" || res.Totals.Net != "66.66" || res.Totals.Tax != "12.67" || len(res.Lines) != 1 || res.Lines[0].Qty != "2" {
+		t.Fatalf("reserve: status %d %+v", rec.Code, res)
+	}
+	replay := do(h, http.MethodPost, path, "rma-1", reservationBody("rma-1", `,"lines":[{"lineNo":1,"qty":"2"}]`))
+	var again creditReservationDTO
+	decode(t, replay, &again)
+	if replay.Code != http.StatusOK || replay.Header().Get("Idempotent-Replayed") != "true" || again.ID != res.ID || len(s.reservations) != 1 {
+		t.Fatalf("replay: status %d id %s want %s, %d stored", replay.Code, again.ID, res.ID, len(s.reservations))
+	}
+	var p httpx.Problem
+	reuse := do(h, http.MethodPost, path, "rma-1", reservationBody("rma-1", `,"lines":[{"lineNo":1,"qty":"1"}]`))
+	decode(t, reuse, &p)
+	if reuse.Code != http.StatusUnprocessableEntity || p.Code != "idempotency_key_reuse" {
+		t.Fatalf("same key, other body: status %d code %s", reuse.Code, p.Code)
+	}
+
+	var inv invoiceDTO
+	decode(t, do(h, http.MethodGet, "/v1/billing/invoices/"+orig.ID, "", ""), &inv)
+	if inv.Credited == nil || inv.Credited.Reserved != "79.33" || inv.Credited.Gross != "0.00" || inv.Lines[0].ReservedQty != "2" || inv.Lines[0].CreditedQty != "0" {
+		t.Fatalf("invoice read: %+v line %+v", inv.Credited, inv.Lines[0])
+	}
+
+	late := do(h, http.MethodPost, "/v1/billing/credit-notes/"+cn.ID+":post", "", "")
+	decode(t, late, &p)
+	if late.Code != http.StatusUnprocessableEntity || p.Code != "BIL-0005" {
+		t.Fatalf("credit note proposed before the reservation: status %d code %s, want 422 BIL-0005", late.Code, p.Code)
+	}
+	if next := do(h, http.MethodPost, "/v1/billing/credit-notes", "cn-r-2", creditBody(orig.ID, "2027-03-20", `,"lines":[{"lineNo":1,"qty":"2"}]`)); next.Code != http.StatusUnprocessableEntity {
+		t.Errorf("credit note over the reserved quantity: status %d, want 422", next.Code)
+	}
+}
+
+func TestCreditReservation_CreditNoteThenReserveAndRelease(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "19.00"})
+	orig := postedInvoice(t, h)
+	path := "/v1/billing/invoices/" + orig.ID + "/credit-reservations"
+	var cn invoiceDTO
+	decode(t, do(h, http.MethodPost, "/v1/billing/credit-notes", "cn-r-3", creditBody(orig.ID, "2027-03-20", `,"lines":[{"lineNo":1,"qty":"2"}]`)), &cn)
+	if rec := do(h, http.MethodPost, "/v1/billing/credit-notes/"+cn.ID+":post", "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("post credit note: %d %s", rec.Code, rec.Body)
+	}
+	var p httpx.Problem
+	over := do(h, http.MethodPost, path, "rma-2", reservationBody("rma-2", `,"lines":[{"lineNo":1,"qty":"2"}]`))
+	decode(t, over, &p)
+	if over.Code != http.StatusUnprocessableEntity || p.Code != "BIL-0005" || len(s.reservations) != 0 {
+		t.Fatalf("reserve beyond the credit note remainder: status %d code %s, %d stored", over.Code, p.Code, len(s.reservations))
+	}
+	var res creditReservationDTO
+	rec := do(h, http.MethodPost, path, "rma-3", reservationBody("rma-3", `,"lines":[{"lineNo":1,"qty":"1"}]`))
+	decode(t, rec, &res)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("reserve the last unit: %d %s", rec.Code, rec.Body)
+	}
+	if full := do(h, http.MethodPost, path, "rma-4", reservationBody("rma-4", `,"lines":[{"lineNo":1,"qty":"1"}]`)); full.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("reserve a unit that is already reserved: status %d, want 422", full.Code)
+	}
+	released := do(h, http.MethodPost, "/v1/billing/credit-reservations/"+res.ID+":release", "", "")
+	var freed creditReservationDTO
+	decode(t, released, &freed)
+	if released.Code != http.StatusOK || freed.Status != "RELEASED" || freed.ReleasedAt == "" {
+		t.Fatalf("release: status %d %+v", released.Code, freed)
+	}
+	if again := do(h, http.MethodPost, "/v1/billing/credit-reservations/"+res.ID+":release", "", ""); again.Code != http.StatusOK {
+		t.Errorf("second release: status %d, want 200", again.Code)
+	}
+	if retry := do(h, http.MethodPost, path, "rma-4", reservationBody("rma-4", `,"lines":[{"lineNo":1,"qty":"1"}]`)); retry.Code != http.StatusCreated {
+		t.Errorf("reserve after release: status %d, want 201", retry.Code)
+	}
+	if missing := do(h, http.MethodPost, "/v1/billing/credit-reservations/"+leID+":release", "", ""); missing.Code != http.StatusNotFound {
+		t.Errorf("release unknown: status %d, want 404", missing.Code)
+	}
+}
+
+func TestCreditReservation_ValidationAndDuties(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "19.00"})
+	orig := postedInvoice(t, h)
+	path := "/v1/billing/invoices/" + orig.ID + "/credit-reservations"
+	var p httpx.Problem
+	bad := do(h, http.MethodPost, path, "rma-v1", `{"reference":" ","chargeAmount":"-1","lines":[{"lineNo":0,"qty":"0"}]}`)
+	decode(t, bad, &p)
+	for _, f := range []string{"reference", "chargeAmount", "lines[0].lineNo", "lines[0].qty"} {
+		if bad.Code != http.StatusBadRequest || p.Errors[f] == "" {
+			t.Errorf("field %s: status %d errors %+v", f, bad.Code, p.Errors)
+		}
+	}
+	if none := do(h, http.MethodPost, path, "rma-v2", reservationBody("rma-v2", "")); none.Code != http.StatusBadRequest {
+		t.Errorf("no lines: status %d, want 400", none.Code)
+	}
+	if noKey := do(h, http.MethodPost, path, "", reservationBody("rma-v3", `,"lines":[{"lineNo":1,"qty":"1"}]`)); noKey.Code != http.StatusBadRequest {
+		t.Errorf("missing Idempotency-Key: status %d, want 400", noKey.Code)
+	}
+	if missing := do(h, http.MethodPost, "/v1/billing/invoices/"+leID+"/credit-reservations", "rma-v4", reservationBody("rma-v4", `,"lines":[{"lineNo":1,"qty":"1"}]`)); missing.Code != http.StatusNotFound {
+		t.Errorf("unknown invoice: status %d, want 404", missing.Code)
+	}
+	body := reservationBody("rma-v5", `,"lines":[{"lineNo":1,"qty":"1"}]`)
+	for _, person := range []string{"billing.invoice.view", "billing.invoice.view,billing.invoice.maintain,billing.invoice.post,billing.creditnote.post"} {
+		if rec := doAs(h, http.MethodPost, path, "rma-v5", body, person, nil); rec.Code != http.StatusForbidden {
+			t.Errorf("person duties %q: status %d, want 403", person, rec.Code)
+		}
+	}
+	if rec := doAs(h, http.MethodPost, path, "rma-v5", body, "billing.credit-reservation.write", nil); rec.Code != http.StatusCreated {
+		t.Errorf("service duty: status %d, want 201", rec.Code)
+	}
+	if len(s.reservations) != 1 {
+		t.Errorf("%d reservations stored, want 1", len(s.reservations))
+	}
+}
+
+func TestCreditReservation_CommitFinalAndReleaseCounter(t *testing.T) {
+	s := newFakeStore()
+	a, h := setupAPI(t, s, &fakeTax{perLine: "19.00"})
+	orig := postedInvoice(t, h)
+	path := "/v1/billing/invoices/" + orig.ID + "/credit-reservations"
+	var res creditReservationDTO
+	decode(t, do(h, http.MethodPost, path, "rma-c1", reservationBody("rma-c1", `,"lines":[{"lineNo":1,"qty":"1"}]`)), &res)
+	commit := "/v1/billing/credit-reservations/" + res.ID + ":commit"
+	if rec := doAs(h, http.MethodPost, commit, "", "", "billing.invoice.maintain", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("commit with a person duty: status %d, want 403", rec.Code)
+	}
+	var done creditReservationDTO
+	rec := do(h, http.MethodPost, commit, "", "")
+	decode(t, rec, &done)
+	if rec.Code != http.StatusOK || done.Status != "CONSUMED" {
+		t.Fatalf("commit: status %d %+v", rec.Code, done)
+	}
+	if again := do(h, http.MethodPost, commit, "", ""); again.Code != http.StatusOK {
+		t.Errorf("second commit: status %d, want 200", again.Code)
+	}
+	if rel := do(h, http.MethodPost, "/v1/billing/credit-reservations/"+res.ID+":release", "", ""); rel.Code != http.StatusConflict {
+		t.Errorf("release of a consumed reservation: status %d, want 409", rel.Code)
+	}
+	replay := do(h, http.MethodPost, path, "rma-c1", reservationBody("rma-c1", `,"lines":[{"lineNo":1,"qty":"1"}]`))
+	if replay.Code != http.StatusOK || replay.Header().Get("Idempotent-Replayed") != "true" {
+		t.Errorf("key on a consumed reservation: status %d, want 200 replay", replay.Code)
+	}
+
+	var other creditReservationDTO
+	decode(t, do(h, http.MethodPost, path, "rma-c2", reservationBody("rma-c2", `,"lines":[{"lineNo":1,"qty":"1"}]`)), &other)
+	relPath := "/v1/billing/credit-reservations/" + other.ID + ":release"
+	do(h, http.MethodPost, relPath, "", "")
+	do(h, http.MethodPost, relPath, "", "")
+	if got := s.reservations[other.ID].Status; got != store.StatusReleased {
+		t.Fatalf("status %s, want RELEASED", got)
+	}
+	if n := a.reservationsFreed.Load(); n != 1 {
+		t.Errorf("released counter %d after a repeat release, want 1", n)
+	}
+	if retry := do(h, http.MethodPost, path, "rma-c2", reservationBody("rma-c2", `,"lines":[{"lineNo":1,"qty":"1"}]`)); retry.Code != http.StatusOK || s.reservations[other.ID].Status != store.StatusReserved {
+		t.Errorf("retry of a released key: status %d state %s, want 200 RESERVED", retry.Code, s.reservations[other.ID].Status)
 	}
 }

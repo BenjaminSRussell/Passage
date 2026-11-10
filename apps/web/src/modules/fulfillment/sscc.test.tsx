@@ -56,7 +56,7 @@ describe("SSCC register", () => {
     expect(await screen.findByText("No SSCCs issued yet")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("GS1 company prefix", { exact: false }), { target: { value: "0614141" } });
-    fireEvent.change(screen.getByLabelText("Customer id", { exact: false }), { target: { value: CUSTOMER } });
+    fireEvent.change(screen.getByLabelText("Customer", { exact: false }), { target: { value: CUSTOMER } });
     fireEvent.change(screen.getByLabelText("Issued from", { exact: false }), { target: { value: "2026-10-01" } });
     fireEvent.change(screen.getByLabelText("Issued to", { exact: false }), { target: { value: "2026-10-31" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
@@ -80,13 +80,13 @@ describe("SSCC register", () => {
     const before = calls().length;
 
     fireEvent.change(screen.getByLabelText("GS1 company prefix", { exact: false }), { target: { value: "12345" } });
-    fireEvent.change(screen.getByLabelText("Customer id", { exact: false }), { target: { value: "nope" } });
+    fireEvent.change(screen.getByLabelText("Customer", { exact: false }), { target: { value: "nope" } });
     fireEvent.change(screen.getByLabelText("Issued from", { exact: false }), { target: { value: "2026-10-31" } });
     fireEvent.change(screen.getByLabelText("Issued to", { exact: false }), { target: { value: "2026-10-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
 
     expect(await screen.findByText("Enter a GS1 company prefix of 6 to 12 digits.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the customer id (a UUID), or leave it empty.")).toBeInTheDocument();
+    expect(screen.queryByText("Enter the customer id (a UUID), or leave it empty.")).toBeNull();
     expect(screen.getByText("The last date cannot be before the first.")).toBeInTheDocument();
     expect(calls()).toHaveLength(before);
   });

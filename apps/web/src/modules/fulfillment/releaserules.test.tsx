@@ -89,8 +89,8 @@ describe("release rules page (FR-28.1, FR-28.13)", () => {
     };
     const { unmount } = renderAt("/fulfillment/release-rules", SUPERVISOR);
     await findTable({ name: "Release rules" });
-    fireEvent.change(screen.getByLabelText(/Warehouse id/), { target: { value: WH2 } });
-    fireEvent.change(screen.getByLabelText(/Legal entity id/), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText(/Warehouse/), { target: { value: WH2 } });
+    fireEvent.change(screen.getByLabelText(/Legal entity/), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Save rule" }));
     await screen.findByText(/Saved:/);
     expect(header(calls("PUT", WH2)[0], "If-Match")).toBe('"3"');

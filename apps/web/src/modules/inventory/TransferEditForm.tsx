@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { describeProblem, editTransfer, type Problem, type TransferEditInput, type TransferOrder } from "./api/client";
 import { DECIMAL, UUID } from "./format";
@@ -134,8 +135,8 @@ export function TransferEditForm({ order, onDone, onError }: { order: TransferOr
             </span>
           </div>
         ))}
-        <FormField id="add-product" label="Add a line: product id" hint="Leave the four fields empty to add nothing." error={invalid.addProduct}>
-          {(control) => <Input {...control} value={v.add.productId} onChange={(e) => setV({ ...v, add: { ...v.add, productId: e.target.value } })} invalid={Boolean(invalid.addProduct)} />}
+        <FormField id="add-product" label="Add a line: product" hint="Leave the four fields empty to add nothing." error={invalid.addProduct}>
+          {(control) => <EntityLookup entity="product" {...control} value={v.add.productId} onChange={(e) => setV({ ...v, add: { ...v.add, productId: e.target.value } })} invalid={Boolean(invalid.addProduct)} />}
         </FormField>
         <FormField id="add-site" label="Add a line: site" error={invalid.addSite}>
           {(control) => <Input {...control} value={v.add.site} onChange={(e) => setV({ ...v, add: { ...v.add, site: e.target.value } })} invalid={Boolean(invalid.addSite)} />}

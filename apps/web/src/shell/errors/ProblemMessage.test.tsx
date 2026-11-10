@@ -124,7 +124,7 @@ describe("normalizeProblem and problemSummary", () => {
 
 const goSources = import.meta.glob(
   [
-    "../../../../../services/{fulfillment,billing,receivables,pricing,purchasing,receiving,payables,sales,inventory}/**/*.go",
+    "../../../../../services/{fulfillment,billing,receivables,pricing,purchasing,receiving,payables,sales,inventory,party,ledger,tax,product}/**/*.go",
     "!../../../../../services/**/*_test.go",
   ],
   { query: "?raw", import: "default", eager: true },
@@ -140,6 +140,10 @@ const orderToCashCodePatterns: Record<string, RegExp> = {
   payables: /^(?:AP-[A-Z]+-\d{3}|PAY-\d{4})$/,
   sales: /^SLS-\d{4}$/,
   inventory: /^INV-[A-Z]+-\d{3}$/,
+  party: /^PTY-[A-Z0-9-]+$/,
+  ledger: /^LEDGER_(?!IDEMPOTENCY_TTL_DAYS$)[A-Z_]+$/,
+  tax: /^TAX-\d{4}$/,
+  product: /^PRD-[A-Z0-9-]+$/,
 };
 
 describe("procure-to-pay and order-to-cash problem codes", () => {

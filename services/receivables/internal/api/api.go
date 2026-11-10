@@ -113,6 +113,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE receivables_payments_received_total counter\nreceivables_payments_received_total %d\n", a.received.Load())
 		fmt.Fprintf(w, "# TYPE receivables_payments_applied_total counter\nreceivables_payments_applied_total %d\n", a.applied.Load())
 		fmt.Fprintf(w, "# TYPE receivables_payment_matches_total counter\nreceivables_payment_matches_total %d\n", a.matched.Load())
+		fmt.Fprintf(w, "# TYPE receivables_rma_reservation_attention_total counter\nreceivables_rma_reservation_attention_total %d\n", store.ReservationAttention.Load())
 		fmt.Fprintf(w, "# TYPE receivables_failures_total counter\nreceivables_failures_total %d\n", a.failed.Load())
 	})
 }

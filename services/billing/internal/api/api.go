@@ -56,6 +56,7 @@ const (
 	dutyMaintain   = "billing.invoice.maintain"
 	dutyPost       = "billing.invoice.post"
 	dutyCreditPost = "billing.creditnote.post"
+	dutyReserve    = "billing.credit-reservation.write"
 	// CodeTaxUnavailable is BIL-0001: the tax engine did not answer, so nothing posts.
 	CodeTaxUnavailable = "BIL-0001"
 	// CodeTaxMoved is BIL-0002: the tax re-quote at post moved beyond tolerance.
@@ -84,12 +85,16 @@ type Store interface {
 	ListInvoices(ctx context.Context, f store.ListFilter) (store.InvoicePage, error)
 	PostProposal(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
 	PostCreditNote(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
+	ReserveCredit(ctx context.Context, res store.CreditReservation, req []domain.CreditQty, charges *decimal.Decimal) (store.CreditReservation, bool, error)
+	CommitCredit(ctx context.Context, id string) (store.CreditReservation, error)
+	ReleaseCredit(ctx context.Context, id string) (store.CreditReservation, bool, error)
 }
 
 // API holds the dependencies of the handlers and their counters.
 type API struct {
 	store         Store
 	subscriptions SubscriptionStore
+	salesReports  SalesReports
 	tax           TaxEngine
 	maxLines      int
 	now           func() time.Time
@@ -104,6 +109,8 @@ type API struct {
 	postsRefused       atomic.Int64
 	creditNotesCreated atomic.Int64
 	creditNotesPosted  atomic.Int64
+	reservationsMade   atomic.Int64
+	reservationsFreed  atomic.Int64
 	shipmentProposals  atomic.Int64
 
 	subscriptionsCreated atomic.Int64
@@ -128,6 +135,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/gl-postings", a.postGL)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)
 	r.With(authz.RequireDuty(dutyCreditPost)).Post("/v1/billing/credit-notes/{id}:post", a.postCreditNote)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/invoices/{id}/credit-reservations", a.createCreditReservation)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/credit-reservations/{id}:commit", a.commitCreditReservation)
+	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/credit-reservations/{id}:release", a.releaseCreditReservation)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/sales-reports", a.listSalesReports)
+	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/sales-reports/{id}:retry", a.retrySalesReport)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions", a.createSubscription)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/subscriptions/{id}", a.getSubscription)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:change-plan", a.changePlan)
@@ -144,6 +156,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP billing_posts_refused_total Posts refused because tax was unavailable, unknown or moved.\n# TYPE billing_posts_refused_total counter\nbilling_posts_refused_total %d\n", a.postsRefused.Load())
 		fmt.Fprintf(w, "# HELP billing_credit_notes_created_total Credit note proposals created; idempotent replays are not counted.\n# TYPE billing_credit_notes_created_total counter\nbilling_credit_notes_created_total %d\n", a.creditNotesCreated.Load())
 		fmt.Fprintf(w, "# HELP billing_credit_notes_posted_total Credit notes posted with a number.\n# TYPE billing_credit_notes_posted_total counter\nbilling_credit_notes_posted_total %d\n", a.creditNotesPosted.Load())
+		fmt.Fprintf(w, "# HELP billing_credit_reservations_created_total Credit reservations taken from invoices; replays and refusals are not counted.\n# TYPE billing_credit_reservations_created_total counter\nbilling_credit_reservations_created_total %d\n", a.reservationsMade.Load())
+		fmt.Fprintf(w, "# HELP billing_credit_reservations_released_total Credit reservations released.\n# TYPE billing_credit_reservations_released_total counter\nbilling_credit_reservations_released_total %d\n", a.reservationsFreed.Load())
 		fmt.Fprintf(w, "# HELP billing_shipment_proposals_created_total Shipment and consolidated invoice proposals created from packing slips; replays are not counted.\n# TYPE billing_shipment_proposals_created_total counter\nbilling_shipment_proposals_created_total %d\n", a.shipmentProposals.Load())
 		fmt.Fprintf(w, "# HELP billing_subscriptions_created_total Subscriptions created; idempotent replays are not counted.\n# TYPE billing_subscriptions_created_total counter\nbilling_subscriptions_created_total %d\n", a.subscriptionsCreated.Load())
 		fmt.Fprintf(w, "# HELP billing_subscription_invoices_created_total Prorated subscription invoice proposals created; replays are not counted.\n# TYPE billing_subscription_invoices_created_total counter\nbilling_subscription_invoices_created_total %d\n", a.subscriptionInvoices.Load())
@@ -211,6 +225,7 @@ type lineOutDTO struct {
 	OriginalLineNo int    `json:"originalLineNo,omitempty"`
 	CreditedQty    string `json:"creditedQty,omitempty"`
 	CreditedTax    string `json:"creditedTax,omitempty"`
+	ReservedQty    string `json:"reservedQty,omitempty"`
 	// Source references, set on shipment and consolidated invoice lines (FR-29.1).
 	PackingSlipID     string `json:"packingSlipId,omitempty"`
 	PackingSlipLineID string `json:"packingSlipLineId,omitempty"`
@@ -231,6 +246,7 @@ type installmentOutDTO struct {
 // creditedDTO is what posted credit notes took from an invoice and what is left.
 type creditedDTO struct {
 	Gross     string `json:"gross"`
+	Reserved  string `json:"reserved"`
 	Remaining string `json:"remaining"`
 }
 
@@ -293,8 +309,9 @@ func toDTO(inv store.Invoice) invoiceDTO {
 		if creditable {
 			line.CreditedQty = decimal.Zero.String()
 			if c, ok := inv.Credited.Lines[l.No]; ok {
-				line.CreditedQty = c.Qty.String()
-				line.CreditedTax = fixed(c.Tax, exp)
+				line.CreditedQty = c.Qty.Sub(c.ReservedQty).String()
+				line.CreditedTax = fixed(c.Tax.Sub(c.ReservedTax), exp)
+				line.ReservedQty = c.ReservedQty.String()
 			}
 		}
 		out.Lines = append(out.Lines, line)
@@ -304,8 +321,8 @@ func toDTO(inv store.Invoice) invoiceDTO {
 			Amount: fixed(in.Amount, exp), DueDate: in.DueDate.Format(dateLayout)})
 	}
 	if creditable {
-		gross := inv.Credited.Gross
-		out.Credited = &creditedDTO{Gross: fixed(gross, exp), Remaining: fixed(inv.Totals.Gross.Sub(gross), exp)}
+		used := inv.Credited
+		out.Credited = &creditedDTO{Gross: fixed(used.Gross.Sub(used.Reserved), exp), Reserved: fixed(used.Reserved, exp), Remaining: fixed(inv.Totals.Gross.Sub(used.Gross), exp)}
 	}
 	return out
 }

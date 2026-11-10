@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -226,8 +227,8 @@ function CodeFields({ id, form, set, errors, creating }: { id: string; form: Cod
     <div className={styles.grid}>
       {creating ? (
         <>
-          <FormField id={`${id}-legal-entity`} label="Legal entity id" error={errors.legalEntityId}>
-            {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+          <FormField id={`${id}-legal-entity`} label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
           </FormField>
           <FormField id={`${id}-code`} label="Code" hint="Upper case, for example FREIGHT" error={errors.code}>
             {(c) => <Input {...c} value={form.code} maxLength={20} onChange={(e) => set({ code: e.target.value.toUpperCase() })} />}
@@ -286,12 +287,12 @@ function CodeFields({ id, form, set, errors, creating }: { id: string; form: Cod
       {hasVendorSide(form) ? (
         <FormField
           id={`${id}-vendor`}
-          label="Vendor id"
+          label="Vendor"
           optional={form.debitType !== "VENDOR"}
           hint={form.debitType === "VENDOR" ? "The vendor the charge is passed on to" : "Blank is the order's vendor"}
           error={errors.vendorId}
         >
-          {(c) => <Input {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
+          {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: form.legalEntityId || undefined }} {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
         </FormField>
       ) : null}
       <FormField id={`${id}-allocation`} label="Allocated to lines by" hint="Applied when the vendor invoice is posted">
@@ -750,8 +751,8 @@ export function AutoChargeCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Auto charge">
           <div className={styles.grid}>
-            <FormField id="ac-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+            <FormField id="ac-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="ac-code" label="Charge code" error={errors.chargeCodeId}>
               {(c) => (
@@ -777,8 +778,14 @@ export function AutoChargeCreatePage() {
               )}
             </FormField>
             {form.accountCode !== "ALL" ? (
-              <FormField id="ac-account" label={form.accountCode === "GROUP" ? "Vendor group id" : "Vendor id"} error={errors.accountId}>
-                {(c) => <Input {...c} value={form.accountId} onChange={(e) => set({ accountId: e.target.value })} />}
+              <FormField id="ac-account" label={form.accountCode === "GROUP" ? "Vendor group id" : "Vendor"} error={errors.accountId}>
+                {(c) =>
+                  form.accountCode === "GROUP" ? (
+                    <Input {...c} value={form.accountId} onChange={(e) => set({ accountId: e.target.value })} />
+                  ) : (
+                    <EntityLookup entity="vendor" {...c} value={form.accountId} onChange={(e) => set({ accountId: e.target.value })} />
+                  )
+                }
               </FormField>
             ) : null}
             <FormField id="ac-item-key" label="Charged on" hint="A product or product group adds the charge to each matching line">

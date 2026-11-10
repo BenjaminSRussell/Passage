@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -244,8 +245,8 @@ function TypeFields({ id, form, set, errors, creating }: { id: string; form: Typ
         <div className={styles.grid}>
           {creating ? (
             <>
-              <FormField id={`${id}-legal-entity`} label="Legal entity id" error={errors.legalEntityId}>
-                {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+              <FormField id={`${id}-legal-entity`} label="Legal entity" error={errors.legalEntityId}>
+                {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
               </FormField>
               <FormField id={`${id}-code`} label="Code" hint="Upper case, for example SEALED" error={errors.code}>
                 {(c) => <Input {...c} value={form.code} maxLength={20} onChange={(e) => set({ code: e.target.value.toUpperCase() })} />}

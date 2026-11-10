@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,11 +28,13 @@ import (
 )
 
 const (
-	readyTimeout      = 500 * time.Millisecond
-	dutyView          = "product.read"
-	dutyMaintain      = "product.write"
-	dutyRelease       = "product.release"
-	dutyReleasedWrite = "product.released.write"
+	defaultProductPage = 50
+	maxProductPage     = 100
+	readyTimeout       = 500 * time.Millisecond
+	dutyView           = "product.read"
+	dutyMaintain       = "product.write"
+	dutyRelease        = "product.release"
+	dutyReleasedWrite  = "product.released.write"
 	// dutyImport is held by the migration loader service token; it opens only
 	// product create/update, attributes, identifiers, relations, release and the
 	// released-product patch; release and patch stay in its own legal entity.
@@ -347,12 +350,37 @@ func (a *API) listProducts(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	items, err := a.store.ListProducts(r.Context(), 100)
+	query := r.URL.Query()
+	after := ""
+	if raw := query.Get("cursor"); raw != "" {
+		b, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor must be a nextCursor returned by a previous page"))
+			return
+		}
+		after = string(b)
+	}
+	limit := defaultProductPage
+	if raw := query.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxProductPage {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("limit must be 1 to %d", maxProductPage)))
+			return
+		}
+		limit = n
+	}
+	items, err := a.store.ListProducts(r.Context(), query.Get("q"), after, limit+1)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	out := map[string]any{}
+	if len(items) > limit {
+		items = items[:limit]
+		out["nextCursor"] = base64.RawURLEncoding.EncodeToString([]byte(items[limit-1].ProductNumber))
+	}
+	out["items"] = items
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 // updateProduct patches name, description, searchName and lifecycleState under
@@ -398,6 +426,10 @@ func (a *API) updateProduct(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) getProduct(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
+		return
+	}
+	if !ids.Valid(chi.URLParam(r, "id")) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found"))
 		return
 	}
 	p, err := a.store.GetProduct(r.Context(), chi.URLParam(r, "id"))

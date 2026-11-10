@@ -47,6 +47,14 @@ type LegalEntityFilter struct {
 	Status   string
 	Country  string
 	Currency string
+	Query    string
+}
+
+func likePattern(q string) string {
+	if q == "" {
+		return ""
+	}
+	return "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(q) + "%"
 }
 
 func deref(s *string) string {

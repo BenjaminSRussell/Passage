@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -154,6 +155,34 @@ func TestPostgres_ListFiltersByStatusCountryAndCurrency(t *testing.T) {
 		page, err := s.ListLegalEntities(ctx, tc.filter, "", store.MaxPageSize)
 		if err != nil || len(page.Items) != 1 || page.Items[0].ID != tc.want {
 			t.Fatalf("filter %+v = %+v, %v; want only %s", tc.filter, page.Items, err, tc.want)
+		}
+	}
+}
+
+func TestPostgres_ListSearchesCodeAndNameAndEscapesWildcards(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	us := mustCreate(t, s, ctx, newEntity("US01"))
+	odd := newEntity("PCT01")
+	odd.Name = "100% Contoso_Ltd"
+	pct := mustCreate(t, s, ctx, odd)
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"us0", []string{us.ID}},
+		{"CONTOSO_L", []string{pct.ID}},
+		{"100%", []string{pct.ID}},
+		{"%", []string{pct.ID}},
+		{"_", []string{pct.ID}},
+		{"nothing-matches", nil},
+	} {
+		page, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{Query: tc.query}, "", store.MaxPageSize)
+		got := []string{}
+		for _, e := range page.Items {
+			got = append(got, e.ID)
+		}
+		if err != nil || !slices.Equal(got, append([]string{}, tc.want...)) {
+			t.Fatalf("query %q = %v, %v; want %v", tc.query, got, err, tc.want)
 		}
 	}
 }

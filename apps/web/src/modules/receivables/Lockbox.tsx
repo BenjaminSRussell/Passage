@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, importLockbox, listLockboxBatches, type LockboxBatch, type Payment, type Problem } from "./api/client";
@@ -65,7 +66,7 @@ export interface LockboxDraft {
 
 export function validateLockbox(v: LockboxDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!DAY.test(v.receivedDate)) errors.receivedDate = "Enter the date the checks arrived.";
   if (v.content.trim() === "") errors.content = "Choose the BAI2 file or paste its content.";
   else if (new Blob([v.content]).size > MAX_BYTES) errors.content = "The file is larger than 3 MB; split it.";
@@ -150,8 +151,8 @@ export function LockboxImportPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="lb-entity" label="Legal entity id" error={errors.legalEntityId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
+          <FormField id="lb-entity" label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
           <FormField id="lb-date" label="Received date" error={errors.receivedDate}>
             {(c) => <Input {...c} type="date" value={values.receivedDate} onChange={(e) => update({ receivedDate: e.target.value })} invalid={Boolean(errors.receivedDate)} />}

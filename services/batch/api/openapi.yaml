@@ -57,6 +57,30 @@ paths:
         - { name: status, in: query, schema: { type: string } }
       responses:
         '200': { description: Inbox. }
+  /v1/inbox:
+    get:
+      operationId: getInbox
+      x-passage-duty: inbox.read
+      summary: My work - what is waiting for the caller across requisition approvals, customer changes, journal batches and payment holds
+      description: >-
+        Merges the sources the caller is entitled to act on: a source is read only when the caller holds its approval duty
+        (procurement.requisition.approve, party.approve, ledger.journal.approve, payment-hold.manage). Each source is asked with a
+        service token that names the caller as the acting user, the one legal entity and only that source's inbox read duty, so a
+        source returns only what the caller may see in that entity; nothing is read service-wide and filtered afterwards.
+        Items the caller raised themselves are left out where the source forbids self-approval. Newest first, ties by source and id.
+        A source that is slow (INBOX_SOURCE_TIMEOUT, default 3s), failing or not set up does not fail the call: it is named in
+        unavailable and the rest is returned. A source with more than 100 waiting items contributes its newest 100 and is named in truncated.
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Required when the caller works in more than one legal entity; must be inside the caller's scope. }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string }, description: The nextCursor of the previous page. }
+      responses:
+        '200':
+          description: One page.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Inbox' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/workitems/{id}/actions:
     post:
       operationId: actOnWorkItem
@@ -259,6 +283,31 @@ components:
         recordId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         assignees: { type: array, items: { type: string, format: uuid } }
+    InboxItem:
+      type: object
+      required: [id, source, kind, reason, number, link, actions, createdAt]
+      properties:
+        id: { type: string }
+        source: { type: string, enum: [purchasing, party, ledger, payables] }
+        kind: { type: string }
+        reason: { type: string }
+        number: { type: string }
+        link: { type: string, description: Path of the screen that opens the item. }
+        actions: { type: array, items: { type: string, enum: [approve, reject, open] } }
+        createdAt: { type: string, format: date-time }
+    Inbox:
+      type: object
+      required: [items, unavailable, truncated]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InboxItem' } }
+        nextCursor: { type: string }
+        unavailable:
+          type: array
+          items:
+            type: object
+            required: [source, reason]
+            properties: { source: { type: string }, reason: { type: string } }
+        truncated: { type: array, items: { type: string }, description: Sources with more waiting items than were read. }
     Action:
       type: object
       additionalProperties: false

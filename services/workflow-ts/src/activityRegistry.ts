@@ -1,4 +1,5 @@
 import { createActivities, createPartyHttpClient } from "./activities.js";
+import { createBudgetPlanActivities } from "./budgetPlanActivities.js";
 import { createCapaActivities } from "./capaActivities.js";
 import { createEcoActivities } from "./ecoActivities.js";
 import { createPartyMergeActivities, createPartyMergeHttpClient } from "./partyMergeActivities.js";
@@ -19,6 +20,7 @@ export function buildActivities(env: Env, readFile: (path: string) => string, wa
       ...createTenderActivities(env.TRANSPORT_BASE_URL ?? "http://transport.passage.svc:8080", signer),
       ...createPaymentRunActivities(env.PAYABLES_BASE_URL ?? "http://payables.passage.svc:8080", signer),
       ...createEcoActivities(env.ENGINEERING_BASE_URL ?? "http://engineering.passage.svc:8080", signer),
+      ...createBudgetPlanActivities(env.BUDGETING_BASE_URL ?? "http://budgeting.passage.svc:8080", signer),
       ...createCapaActivities(env.QUALITY_BASE_URL ?? "http://quality.passage.svc:8080", signer),
     };
   } catch (error) {

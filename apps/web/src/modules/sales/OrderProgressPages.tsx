@@ -409,7 +409,7 @@ export function NewOrderProgressPage() {
         <Alert tone="warning" title="You cannot record this">
           {reportKinds(order.orderType, order.status).length === 0
             ? `A ${sentence(order.orderType)} order that is ${sentence(order.status)} takes no delivery or invoice.`
-            : `Recording a delivery needs the ${DUTY_RECORD_DELIVERY} duty and recording an invoice the ${DUTY_RECORD_INVOICE} duty.`}
+            : "Deliveries are recorded automatically when a packing slip posts and invoiced quantities when the invoice posts, so there is nothing to record here by hand."}
         </Alert>
       ) : null}
       <Card>

@@ -57,8 +57,8 @@ describe("Customer statement", () => {
   it("asks for the legal entity and customer before loading anything", async () => {
     const { container } = renderAt("/receivables/statements");
     expect(await screen.findByText("Choose a customer")).toBeInTheDocument();
-    fill("Customer id", "not-a-uuid");
-    expect(screen.getByText("Enter the customer id (a UUID).")).toBeInTheDocument();
+    fill("Customer", "not-a-uuid");
+    expect(screen.getByText("Choose a customer")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
   });
@@ -126,7 +126,7 @@ describe("Balance snapshots", () => {
     };
     const { container } = renderAt("/receivables/balance-snapshots");
     expect(await screen.findByText("Choose a legal entity")).toBeInTheDocument();
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     const table = await findTable({ name: "Balance snapshots for 2027-03-31" });
     expect(server.calls[0].url.searchParams.get("legalEntityId")).toBe(LE);
     expect(server.calls[0].url.searchParams.has("asOf")).toBe(false);
@@ -149,7 +149,7 @@ describe("Balance snapshots", () => {
       return undefined;
     };
     renderAt("/receivables/balance-snapshots");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Key date", "2027-03-30");
     expect(await screen.findByText("No snapshot")).toBeInTheDocument();
     const lists = server.calls.filter((c) => c.method === "GET").length;
@@ -167,7 +167,7 @@ describe("Balance snapshots", () => {
       return undefined;
     };
     const first = renderAt("/receivables/balance-snapshots");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     await screen.findByText("No snapshot");
     fireEvent.click(screen.getByRole("button", { name: "Run snapshot now" }));
     const refused = await findAlert();
@@ -176,7 +176,7 @@ describe("Balance snapshots", () => {
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/receivables/balance-snapshots");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     const failed = await findAlert();
     expect(failed).toHaveTextContent("Could not load the balance snapshots");
     expect(failed).toHaveTextContent("COM-0500");
@@ -222,7 +222,7 @@ describe("Record payment: payer identity", () => {
       return undefined;
     };
     renderAt("/receivables/payments/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Amount", "995.00");
     fill("Check or bank reference", "CHK-9");
     fill("Payer bank account", "DE89 3704 0044 0532 0130 00");

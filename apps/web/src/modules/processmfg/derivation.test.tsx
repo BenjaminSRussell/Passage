@@ -92,19 +92,19 @@ describe("inheritance rule list (slice 16)", () => {
     expect(within(table).getByText("Weighted average by quantity")).toBeInTheDocument();
     expect(within(table).getByText("Retired")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Define rule" })).toHaveAttribute("href", "/processmfg/inheritance-rules/new");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fireEvent.click(screen.getByLabelText(/Active rules only/));
     await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("itemId") === ITEM && c.url.searchParams.get("active") === "true")).toBe(true));
     await waitFor(() => expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]));
   });
 
-  it("shows the empty state, hides the define link without the duty and flags a bad filter", async () => {
+  it("shows the empty state, hides the define link without the duty and ignores a typed item that is not an id", async () => {
     handler = () => ({ status: 200, body: { items: [] } });
     renderAt("/processmfg/inheritance-rules", ["production.batch-order.read"]);
     expect(await screen.findByText("No inheritance rules yet")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Define rule" })).toBeNull();
-    fill("Item id", "nope");
-    expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
+    fill("Item", "nope");
+    expect(screen.queryByText("Enter the item id as a UUID.")).toBeNull();
   });
 
   it("shows a load failure with a retry", async () => {
@@ -123,7 +123,7 @@ describe("define an inheritance rule (slice 16)", () => {
       return undefined;
     };
     renderAt("/processmfg/inheritance-rules/new");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fill("Attribute", "potency");
     fill("Derived by", "weighted-average");
     fill("Decimals", "2");
@@ -143,7 +143,7 @@ describe("define an inheritance rule (slice 16)", () => {
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
     expect(screen.getByText("Enter the attribute, at most 40 characters.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fill("Attribute", "expiry");
     fill("Derived by", "fixed");
     fill("Fixed value is", "date");
@@ -159,7 +159,7 @@ describe("define an inheritance rule (slice 16)", () => {
   it("shows the service's refusal and refuses the page without the duty", async () => {
     handler = () => ({ status: 409, body: { code: "PMF-0127", detail: "item already has an active rule" } });
     const { unmount } = renderAt("/processmfg/inheritance-rules/new");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fill("Attribute", "potency");
     fireEvent.click(screen.getByRole("button", { name: "Define rule" }));
     expect(await findAlert()).toHaveTextContent("PMF-0127");
@@ -288,12 +288,12 @@ describe("derivation monitor (slice 16)", () => {
     await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("batchId") === RECV && c.url.searchParams.get("withMissing") === "true")).toBe(true));
   });
 
-  it("shows the empty state, a bad filter and a load failure", async () => {
+  it("shows the empty state, a typed item that is not an id and a load failure", async () => {
     handler = () => ({ status: 200, body: { items: [] } });
     const { unmount } = renderAt("/processmfg/derivations");
     expect(await screen.findByText("Nothing derived yet")).toBeInTheDocument();
-    fill("Item id", "nope");
-    expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
+    fill("Item", "nope");
+    expect(screen.queryByText("Enter the item id as a UUID.")).toBeNull();
     unmount();
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/derivations");

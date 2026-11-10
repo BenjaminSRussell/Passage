@@ -269,7 +269,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
     expect(await within(form).findByText("Enter the vendor's party id (a UUID).")).toBeInTheDocument();
     expect(sent("POST", "/warranties")).toHaveLength(0);
     fireEvent.change(within(form).getByLabelText("Warranty type"), { target: { value: "OEM" } });
-    fireEvent.change(within(form).getByLabelText("Vendor party id"), { target: { value: VENDOR } });
+    fireEvent.change(within(form).getByLabelText("Vendor party"), { target: { value: VENDOR } });
     fireEvent.change(within(form).getByLabelText("Start date"), { target: { value: "2025-11-01" } });
     fireEvent.click(within(form).getByRole("button", { name: "Add warranty" }));
     expect(await findStatus()).toHaveTextContent("Warranty OEM recorded.");

@@ -321,7 +321,7 @@ describe("model service specifications", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save model" }));
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit).method === "POST")).toBe(false);
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "maint" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Maintenance visit" } });
     const row = screen.getByRole("group", { name: "Outline row 1" });
@@ -347,7 +347,7 @@ describe("model service specifications", () => {
   it("shows the service's refusal of a duplicate code", async () => {
     stubFetch((_url, init) => (init.method === "POST" ? problem(409, "PRC-SRV-006", "the legal entity already has a model service specification MAINT") : json({ items: [] })));
     renderAt("/purchasing/model-service-specs/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "MAINT" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Maintenance visit" } });
     fireEvent.click(screen.getByRole("button", { name: "Remove row 1" }));
