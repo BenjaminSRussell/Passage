@@ -188,7 +188,7 @@ describe("check in", () => {
     };
     const { container } = renderAt("/transport/gate/check-in");
     expect(violations(container)).toEqual([]);
-    fill("Site id", SITE);
+    fill("Site", SITE);
     fill("Carrier SCAC", "abcd");
     fill("Trailer or container", "tr-1001");
     fill("Driver name", "Dana Driver");
@@ -203,7 +203,7 @@ describe("check in", () => {
   it("shows field errors from the service and a trailer already in the yard", async () => {
     handler = () => problem(409, "TMS-0118", "trailer TR-1001 of ABCD is already in the yard");
     renderAt("/transport/gate/check-in");
-    fill("Site id", SITE);
+    fill("Site", SITE);
     fill("Carrier SCAC", "ABCD");
     fill("Trailer or container", "TR-1001");
     fill("Driver name", "Dana");

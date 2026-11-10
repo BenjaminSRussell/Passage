@@ -90,9 +90,9 @@ function fill(label: string, value: string) {
 }
 
 function fillForm() {
-  fill("Legal entity id", LE);
-  fill("Customer id", CUST);
-  fill("Invoice account id", ACCT);
+  fill("Legal entity", LE);
+  fill("Customer", CUST);
+  fill("Invoice account", ACCT);
   fill("Invoice date", "2027-03-10");
   fill("Packing slip id", SLIP);
   fill("Sales order id", ORDER);
@@ -100,7 +100,7 @@ function fillForm() {
   fill("Slip charge", "12.50");
   fill("Slip line id", SLIP_LINE);
   fill("Order line id", ORDER_LINE);
-  fill("Product id", PRODUCT);
+  fill("Product", PRODUCT);
   fill("Description", "Widget");
   fill("Shipped quantity", "2");
   fill("Unit price", "50");

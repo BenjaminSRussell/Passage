@@ -151,8 +151,7 @@ describe("Transaction inquiry", () => {
     await waitFor(() => expect(screen.getByRole("table", { name: "Transactions" })).toHaveTextContent("-9 EA"));
     const before = calls.length;
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: "SHIRT" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Enter the product id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByLabelText("Product")).toHaveAttribute("data-value", "");
     expect(calls.length).toBe(before);
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT_ID } });
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "SOLD" } });

@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from "react";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, Card, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listDimensionCombinations, type DimensionCombination } from "./api/client";
 import { describeDimensions, UUID } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert } from "./parts";
 import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const columns: DataTableColumn<DimensionCombination>[] = [
   { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
@@ -43,16 +44,8 @@ export function DimensionCombinationsPage() {
       <PageHeader title="Dimension combinations" description="The site, warehouse, location, batch and other dimension sets each product has had stock movements in." />
       <Card title="Filter">
         <form onSubmit={apply} noValidate className={styles.form}>
-          <FormField id="combinations-product" label="Product" optional error={errors.productId}>
-            {(control) => (
-              <Input {...control} value={draft.productId} onChange={(event) => setDraft({ ...draft, productId: event.target.value })} placeholder="Product id" invalid={Boolean(errors.productId)} />
-            )}
-          </FormField>
-          <FormField id="combinations-entity" label="Legal entity" optional error={errors.legalEntityId}>
-            {(control) => (
-              <Input {...control} value={draft.legalEntityId} onChange={(event) => setDraft({ ...draft, legalEntityId: event.target.value })} placeholder="Legal entity id" invalid={Boolean(errors.legalEntityId)} />
-            )}
-          </FormField>
+          <LookupFormField id="combinations-product" label="Product" entity="product" optional prefill={false} value={draft.productId} error={errors.productId} onChange={(productId) => setDraft({ ...draft, productId })} />
+          <LookupFormField id="combinations-entity" label="Legal entity" entity="legalEntity" optional prefill={false} value={draft.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setDraft({ ...draft, legalEntityId })} />
           <div className={styles.formActions}>
             <Button type="submit" variant="primary">
               Apply filters

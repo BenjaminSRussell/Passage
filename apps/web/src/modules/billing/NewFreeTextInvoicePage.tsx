@@ -5,6 +5,7 @@ import { BillingApiError, createFreeTextInvoice, describeProblem, newKey, type F
 import { ACCOUNT, CURRENCY, DAY, DECIMAL, TAX_CODE, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -56,9 +57,9 @@ export function emptyFreeText(day = today()): FreeTextValues {
 /** Client checks that mirror the service (FR-29.4); the service has the last word. */
 export function validateFreeText(v: FreeTextValues): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID).";
-  if (!UUID.test(v.invoiceAccountId.trim())) errors.invoiceAccountId = "Enter the invoice account id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
+  if (!UUID.test(v.invoiceAccountId.trim())) errors.invoiceAccountId = "Choose the invoice account.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as EUR.";
   if (!DAY.test(v.invoiceDate)) errors.invoiceDate = "Enter the invoice date as YYYY-MM-DD.";
   const days = Number(v.paymentTermDays);
@@ -222,9 +223,26 @@ export function NewFreeTextInvoicePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {header("ft-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
-          {header("ft-customer", "customerId", "Customer id", { mono: true })}
-          {header("ft-account", "invoiceAccountId", "Invoice account id", { mono: true, hint: "The account that receives the invoice; often the customer itself." })}
+          <LookupFormField id="ft-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
+          <LookupFormField
+            id="ft-customer"
+            label="Customer"
+            entity="customer"
+            scope={{ legalEntityId: values.legalEntityId || undefined }}
+            value={values.customerId}
+            error={errors.customerId}
+            onChange={(customerId) => update({ customerId, ...(values.invoiceAccountId === "" || values.invoiceAccountId === values.customerId ? { invoiceAccountId: customerId } : {}) })}
+          />
+          <LookupFormField
+            id="ft-account"
+            label="Invoice account"
+            entity="customer"
+            hint="The customer account that receives the invoice; it starts as the customer itself."
+            scope={{ legalEntityId: values.legalEntityId || undefined }}
+            value={values.invoiceAccountId}
+            error={errors.invoiceAccountId}
+            onChange={(invoiceAccountId) => update({ invoiceAccountId })}
+          />
           {header("ft-currency", "currency", "Currency", { mono: true })}
           {header("ft-date", "invoiceDate", "Invoice date", { type: "date", mono: true })}
           {header("ft-terms", "paymentTermDays", "Payment terms (days)", { mono: true, hint: "Due date = invoice date + these days." })}

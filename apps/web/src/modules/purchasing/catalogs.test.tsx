@@ -252,7 +252,7 @@ describe("requisition catalog picker", () => {
     const search = await screen.findByRole("button", { name: "Search catalogs" });
     expect(search).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Operating unit id"), { target: { value: UNIT } });
+    fireEvent.change(screen.getByLabelText("Operating unit"), { target: { value: UNIT } });
     fireEvent.change(screen.getByLabelText("Search items"), { target: { value: "glove" } });
     fireEvent.click(screen.getByRole("button", { name: "Search catalogs" }));
     const results = await findTable({ name: "Catalog search results" });

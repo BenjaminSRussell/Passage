@@ -163,7 +163,7 @@ describe("edit party", () => {
 describe("vendor role", () => {
   const fill = () => {
     type("Vendor account number", "V-100");
-    type("Vendor group id", GROUP);
+    type("Vendor group", GROUP);
     type("Vendor currency", "eur");
   };
 
@@ -192,7 +192,7 @@ describe("vendor role", () => {
     await screen.findByRole("heading", { name: "Northwind" });
     click("Add vendor role");
     expect(await screen.findByText("Enter the account number.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the vendor group id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByText("Choose a vendor group.")).toBeInTheDocument();
     expect(screen.getByText(/three-letter currency code/)).toBeInTheDocument();
     expect(posts()).toHaveLength(0);
   });
@@ -373,7 +373,7 @@ describe("idempotency key follows the sent body", () => {
     renderAt(`/party/${PARTY}`);
     await screen.findByRole("heading", { name: "Northwind" });
     type("Vendor account number", "V-100");
-    type("Vendor group id", GROUP);
+    type("Vendor group", GROUP);
     type("Vendor currency", "EUR");
     click("Add vendor role");
     await screen.findByText(/offline/);

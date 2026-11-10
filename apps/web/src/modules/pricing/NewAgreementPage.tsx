@@ -16,6 +16,7 @@ import {
 import { amountLabel, DAY, DECIMAL, isOrderLevel, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Values = ConditionRecordInput;
 type Field = keyof Values | "validity";
@@ -48,7 +49,7 @@ export const emptyAgreement: Values = {
 /** Client checks that mirror the service (FR-26.2, BR-26.10); the service has the last word. */
 export function validateAgreement(v: Values): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.customerKind !== "all" && v.customerKey.trim() === "") errors.customerKey = "Enter the customer or customer group.";
   if (isOrderLevel(v.type) && v.productKind !== "all") errors.productKind = `A ${TYPE_LABELS[v.type].toLowerCase()} applies to the whole order: choose All products.`;
   else if (v.type === "MULTILINE_DISC" && v.productKind !== "product_group" && v.productKind !== "all")
@@ -194,7 +195,7 @@ export function NewAgreementPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("ta-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="ta-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           <FormField id="ta-new-type" label="Type">
             {(control) => (
               <Select {...control} value={values.type} onChange={(e) => update({ type: e.target.value as Values["type"] })}>

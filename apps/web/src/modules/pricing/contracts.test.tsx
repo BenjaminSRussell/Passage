@@ -164,13 +164,13 @@ describe("Broker contracts", () => {
     };
     const { container } = renderAt("/pricing/brokers/new");
     fireEvent.click(screen.getByRole("button", { name: "Save contract" }));
-    expect(await screen.findByText("Enter the broker's vendor id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the broker's vendor.")).toBeInTheDocument();
     expect(screen.getByText("Enter a percentage above 0 and up to 100.")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Contract name", "Agent Smith");
-    fill("Broker vendor id", V1);
+    fill("Broker vendor", V1);
     fireEvent.change(screen.getByLabelText("Products"), { target: { value: "group" } });
     fill("Product group", "BRANDED");
     fill("Rate %", "2.5");
@@ -187,9 +187,9 @@ describe("Broker contracts", () => {
     server.handler = (url, init) =>
       init.method === "POST" && url.pathname.endsWith("/broker-contracts") ? json(422, { code: "COM-0001", detail: "request is invalid", errors: { customer: "name at most one of customerId and customerGroupId" } }) : undefined;
     renderAt("/pricing/brokers/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Contract name", "Agent Smith");
-    fill("Broker vendor id", V1);
+    fill("Broker vendor", V1);
     fill("Rate %", "2.5");
     fill("Valid from", "2027-01-01");
     fill("Valid to", "2027-12-31");
@@ -305,12 +305,12 @@ describe("Royalty agreements", () => {
     };
     const { container } = renderAt("/pricing/royalties/new");
     fireEvent.click(screen.getByRole("button", { name: "Save agreement" }));
-    expect(await screen.findByText("Enter the licensor's vendor id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the licensor's vendor.")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Agreement name", "Brand licence");
-    fill("Licensor vendor id", V1);
+    fill("Licensor vendor", V1);
     fill("Product group", "BRANDED");
     fill("Minimum royalty per period", "5000");
     fill("Valid from", "2027-01-01");

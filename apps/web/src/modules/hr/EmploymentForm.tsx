@@ -13,6 +13,7 @@ import {
 import { DATE, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface Values {
   legalEntityId: string;
@@ -32,7 +33,7 @@ const FIELDS: Field[] = ["legalEntityId", "employmentType", "assignmentKind", "h
 export function validateEmployment(values: Values): { errors: Errors; input?: NewEmployment } {
   const errors: Errors = {};
   const legalEntityId = values.legalEntityId.trim();
-  if (!UUID.test(legalEntityId)) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(legalEntityId)) errors.legalEntityId = "Choose a legal entity.";
   if (!DATE.test(values.hireDate)) errors.hireDate = "Enter the hire date.";
   if (values.terminationDate && !DATE.test(values.terminationDate)) errors.terminationDate = "Enter a date or leave it empty.";
   else if (values.terminationDate && DATE.test(values.hireDate) && values.terminationDate < values.hireDate)
@@ -69,7 +70,7 @@ export function EmploymentForm({ workerId, onCreated, onCancel }: { workerId: st
   const key = useRef(newKey());
 
   function update(patch: Partial<Values>) {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     key.current = newKey();
   }
 
@@ -105,7 +106,7 @@ export function EmploymentForm({ workerId, onCreated, onCancel }: { workerId: st
 
   return (
     <form className={styles.form} onSubmit={submit} noValidate aria-label="Start employment">
-      {input("legalEntityId", "Legal entity id", "The legal entity that employs the worker.")}
+      <LookupFormField id="employment-legalEntityId" label="Legal entity" entity="legalEntity" hint="The legal entity that employs the worker." value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
       <FormField id="employment-employmentType" label="Employment type">
         {(control) => (
           <Select {...control} value={values.employmentType} onChange={(event) => update({ employmentType: event.target.value as EmploymentType })}>
@@ -125,7 +126,9 @@ export function EmploymentForm({ workerId, onCreated, onCancel }: { workerId: st
           </Select>
         )}
       </FormField>
-      {values.assignmentKind === "GLOBAL_HOST" ? input("homeLegalEntityId", "Home legal entity id", "Where the worker is employed at home.") : null}
+      {values.assignmentKind === "GLOBAL_HOST" ? (
+        <LookupFormField id="employment-homeLegalEntityId" label="Home legal entity" entity="legalEntity" prefill={false} hint="Where the worker is employed at home." value={values.homeLegalEntityId} error={errors.homeLegalEntityId} onChange={(homeLegalEntityId) => update({ homeLegalEntityId })} />
+      ) : null}
       {input("hireDate", "Hire date", undefined, false, "date")}
       {input("terminationDate", "Termination date", "The last day employed.", true, "date")}
       {input("plannedEndDate", "Planned end date", undefined, values.assignmentKind !== "GLOBAL_HOST", "date")}

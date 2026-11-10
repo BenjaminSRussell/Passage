@@ -352,7 +352,7 @@ describe("On-hand drill-down and export", () => {
     renderAt(`/inventory/transactions?product=${PRODUCT_ID}`);
     await screen.findByText(/No transactions|transactions/i);
     expect(calls[0].url.searchParams.get("product")).toBe(PRODUCT_ID);
-    expect((screen.getByLabelText(/^Product/) as HTMLInputElement).value).toBe(PRODUCT_ID);
+    expect(screen.getByLabelText(/^Product/)).toHaveAttribute("data-value", PRODUCT_ID);
   });
 
   it("ignores a malformed product in the link", async () => {

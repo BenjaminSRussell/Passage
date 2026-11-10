@@ -5,6 +5,7 @@ import { checkIn, describeProblem, newKey, VISIT_DIRECTIONS, type NewCheckIn, ty
 import { statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface CheckInValues {
   siteId: string;
@@ -53,7 +54,7 @@ function minutes(value: string, max: number): number | null {
 export function validateCheckIn(v: CheckInValues): { errors: Record<string, string>; input?: NewCheckIn } {
   const errors: Record<string, string> = {};
   const siteId = v.siteId.trim();
-  if (!UUID.test(siteId)) errors.siteId = "Enter the site id as a lower-case UUID.";
+  if (!UUID.test(siteId)) errors.siteId = "Choose the site.";
   const loadId = v.loadId.trim();
   if (loadId !== "" && !UUID.test(loadId)) errors.loadId = "Enter the load id as a lower-case UUID, or leave it empty.";
   const scac = v.carrierScac.trim().toUpperCase();
@@ -156,7 +157,7 @@ export function CheckInPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {field("siteId", "checkin-site", "Site id", "The site whose gate this is (UUID).", { mono: true })}
+          <LookupFormField id="checkin-site" label="Site" entity="site" hint="The site whose gate this is." value={values.siteId} error={errors.siteId} onChange={(siteId) => update({ siteId })} />
           <FormField id="checkin-direction" label="Direction" hint="Inbound delivers to the site; outbound collects a load.">
             {(control) => (
               <Select {...control} value={values.direction} onChange={(e) => update({ direction: e.target.value as VisitDirection })}>

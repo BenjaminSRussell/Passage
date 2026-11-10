@@ -182,7 +182,7 @@ describe("New free-text invoice", () => {
   it("checks the form before calling the service", async () => {
     const { container } = renderAt("/billing/free-text-invoices/new");
     fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
-    expect(await screen.findByText("Enter the customer id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a customer.")).toBeInTheDocument();
     expect(screen.getByText("Enter the tax code in capitals, for example DE19.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
@@ -195,9 +195,9 @@ describe("New free-text invoice", () => {
       return undefined;
     };
     renderAt("/billing/free-text-invoices/new");
-    fill("Legal entity id", LE);
-    fill("Customer id", CUST);
-    fill("Invoice account id", ACCT);
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
+    fill("Invoice account", ACCT);
     fill("Invoice date", "2027-03-10");
     fill("Description", "Consulting March");
     fill("Unit price", "100.00");
@@ -239,9 +239,9 @@ describe("New free-text invoice", () => {
 
     server.handler = () => json(400, { code: "COM-0001", detail: "request failed validation", errors: { "lines[0].taxCode": "must be a tax code" } });
     renderAt("/billing/free-text-invoices/new");
-    fill("Legal entity id", LE);
-    fill("Customer id", CUST);
-    fill("Invoice account id", ACCT);
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
+    fill("Invoice account", ACCT);
     fill("Description", "x");
     fill("Unit price", "1");
     fill("Revenue account", "4900");

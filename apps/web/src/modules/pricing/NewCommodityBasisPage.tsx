@@ -5,6 +5,7 @@ import { createCommodityBasis, describeProblem, newKey, type CommodityBasisInput
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -13,7 +14,7 @@ export const emptyBasis: CommodityBasisInput = { legalEntityId: "", code: "", na
 /** Client checks that mirror the service (FR-26.21); the service has the last word. */
 export function validateBasis(v: CommodityBasisInput): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!/^[A-Z0-9_-]{1,32}$/.test(v.code.trim())) errors.code = "Use capitals, digits, - and _ (up to 32 characters).";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name (up to 120 characters).";
   if (!/^[A-Z]{3}$/.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code in capitals.";
@@ -80,7 +81,7 @@ export function NewCommodityBasisPage() {
       <PageHeader title="New cost basis type" description="The thing a commodity index is quoted for, in a currency and unit." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("cb-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="cb-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("cb-code", "code", "Code", { mono: true, hint: "For example CU-LME. Unique in the legal entity." })}
           {text("cb-name", "name", "Name")}
           {text("cb-currency", "currency", "Currency", { mono: true, hint: "The currency the index is quoted in." })}
