@@ -19,6 +19,7 @@ release may change public APIs.
 
 ### Added
 
+- Dispatch optimization (#45): passage-dispatch solves a day with CP-SAT (greedy fallback on timeout or infeasible model) behind `POST /v1/dispatch/runs` and `GET /v1/dispatch/runs/{id}`, honoring skills, shifts, windows, due times, pinned visits and overtime. Fieldservice `POST /v1/service/dispatch/optimizations` snapshots a territory-day's open work orders, technicians and held visits, calls it over a duty-scoped service token (new fieldservice to dispatch grant in `platform/go/tenant` and `policies/authz/data.json`), backs off and parks failures, and `:accept` writes the plan back through the assignment path (migration 0011, codes `SVC-DSP-014` to `017`, `DISPATCH_URL`). The technician mobile app and a deployment chart for dispatch are still open.
 - EDI: an inbound 850 or ORDERS becomes a sales order (#35 P4a). Partner item cross-references (BP, VP, UP or EN to product,
   site and warehouse) and partner sales defaults under `edi.admin` with legal-entity RLS (migration 0010);
   `POST /edi/v1/messages/{id}:post` places the order with sales under the new service grant `edi` -> `sales`

@@ -266,7 +266,7 @@ jobs:
             ortools: true
             extras: dev
           - package: dispatch-py
-            ortools: false
+            ortools: true
             extras: dev
           - package: routing-py
             ortools: true

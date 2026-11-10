@@ -42,6 +42,7 @@ func (a *API) registerDispatch(r chi.Router) {
 	r.With(authz.RequireDuty(dutyDispatch)).Post("/v1/service/dispatch/publish", a.publishDispatch)
 	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/dispatch/runs", a.listDispatchRuns)
 	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/dispatch/runs/{id}", a.getDispatchRun)
+	a.registerOptimizations(r)
 }
 
 // normalizeSkills upper-cases, deduplicates and sorts skill codes; it reports a field

@@ -60,6 +60,11 @@ type API struct {
 	replayed    atomic.Int64
 	slaWarnings atomic.Int64
 	slaBreaches atomic.Int64
+
+	optimizer    Optimizer
+	optRequested atomic.Int64
+	optAccepted  atomic.Int64
+	optParked    atomic.Int64
 }
 
 // New returns the API over s.
@@ -104,6 +109,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP service_cases_opened_total Cases opened; idempotent replays are not counted.\n# TYPE service_cases_opened_total counter\nservice_cases_opened_total %d\n", a.opened.Load())
 		fmt.Fprintf(w, "# HELP service_workorders_posted_total Work orders posted; idempotent replays are not counted.\n# TYPE service_workorders_posted_total counter\nservice_workorders_posted_total %d\n", a.posted.Load())
 		fmt.Fprintf(w, "# HELP service_dispatch_published_total Territory-days published to technicians; idempotent replays are not counted.\n# TYPE service_dispatch_published_total counter\nservice_dispatch_published_total %d\n", a.published.Load())
+		fmt.Fprintf(w, "# HELP service_dispatch_optimizations_total Dispatch optimizations by outcome: requested, accepted, parked after repeated failures.\n# TYPE service_dispatch_optimizations_total counter\n")
+		fmt.Fprintf(w, "service_dispatch_optimizations_total{outcome=\"requested\"} %d\nservice_dispatch_optimizations_total{outcome=\"accepted\"} %d\nservice_dispatch_optimizations_total{outcome=\"parked\"} %d\n",
+			a.optRequested.Load(), a.optAccepted.Load(), a.optParked.Load())
 		fmt.Fprintf(w, "# HELP service_idempotent_replays_total Requests answered from a stored Idempotency-Key.\n# TYPE service_idempotent_replays_total counter\nservice_idempotent_replays_total %d\n", a.replayed.Load())
 		fmt.Fprintf(w, "# HELP service_sla_warnings_total SLA warnings emitted by the monitor.\n# TYPE service_sla_warnings_total counter\nservice_sla_warnings_total %d\n", a.slaWarnings.Load())
 		fmt.Fprintf(w, "# HELP service_sla_breaches_total SLA breaches emitted by the monitor (transitions that find a breach are not counted).\n# TYPE service_sla_breaches_total counter\nservice_sla_breaches_total %d\n", a.slaBreaches.Load())
