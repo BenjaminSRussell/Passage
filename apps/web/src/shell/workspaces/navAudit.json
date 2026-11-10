@@ -65,6 +65,7 @@
     {"to": "/billing/revenue-allocation", "module": "billing", "label": "Revenue allocation", "area": "finance", "decision": "advanced"},
     {"to": "/budgeting", "module": "budgeting", "label": "Budget control rules", "area": "finance", "decision": "advanced"},
     {"to": "/budgeting/check", "module": "budgeting", "label": "Budget check", "area": "finance", "decision": "keep", "taskLabel": "Check a budget"},
+    {"to": "/budgeting/cost-control", "module": "budgeting", "label": "Cost control", "area": "finance", "decision": "keep", "taskLabel": "Compare plan and actual cost"},
     {"to": "/budgeting/plans", "module": "budgeting", "label": "Budget plans", "area": "finance", "decision": "keep", "taskLabel": "Plan next year's budget"},
     {"to": "/budgeting/reservations", "module": "budgeting", "label": "Earmarked funds", "area": "finance", "decision": "keep"},
     {"to": "/budgeting/programs", "module": "budgeting", "label": "Investment programs", "area": "finance", "decision": "advanced"},
