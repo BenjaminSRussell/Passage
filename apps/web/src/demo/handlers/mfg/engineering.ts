@@ -2,7 +2,7 @@
 // Products, sites and resources carry the real ids of company.ts; the screens turn them into names.
 import type { BomLine, BomVersion, Resource, UsedBy } from "../../../modules/engineering/api/client";
 import { reply, route } from "../../backend";
-import { BOMS, ITEMS, PLANT, RESOURCES, itemByNumber } from "../../company";
+import { BOMS, PLANT, RESOURCES, itemByNumber } from "../../company";
 import { day, dec, table, uid } from "../../store";
 
 const BASE = "/api/v1/engineering";
@@ -106,16 +106,6 @@ route("POST", `${BASE}/bom-versions/{id}:activate`, (req) => {
 route("POST", `${BASE}/bom-versions/{id}:cancel`, (req) => {
   const b = boms.get(req.params.id);
   return b ? reply.ok(boms.update(b.id, { status: "cancelled" })) : reply.problem(404, "ENG-BOM-NOTFOUND", "This BOM version does not exist.");
-});
-
-// The product lookup of every manufacturing form (item, component, released product). It answers before the supply
-// area's route of the same path, which returns rows without an id the lookup can pick.
-route("GET", "/api/v1/product/products:search", ({ query }) => {
-  const q = (query.get("q") ?? "").trim().toLowerCase();
-  const rows = ITEMS.filter((i) => !q || i.number.toLowerCase().includes(q) || i.name.toLowerCase().includes(q));
-  return {
-    items: rows.slice(0, 20).map((i) => ({ id: i.id, productNumber: i.number, name: i.name, baseUom: i.unit, itemGroupId: i.kind, batchTracked: i.kind === "raw", serialTracked: i.kind === "finished", catchWeight: false })),
-  };
 });
 
 // The resource master, which production forms and screens read to show work center names.
