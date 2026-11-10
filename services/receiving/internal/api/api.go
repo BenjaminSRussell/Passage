@@ -156,6 +156,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/one-time-payees", a.idempotent(a.createOneTimePayee))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-captures", a.idempotent(a.createInvoiceCapture))
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoice-captures", a.listInvoiceCaptures)
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoice-captures/{id}", a.getInvoiceCapture)
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/ers-self-bills/{id}", a.getSelfBill)
 	r.With(authz.RequireDuty(dutySheetMaintain)).Post("/v1/receiving/service-entry-sheets", a.idempotent(a.createServiceSheet))

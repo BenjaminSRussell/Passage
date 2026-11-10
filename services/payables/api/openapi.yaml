@@ -133,6 +133,7 @@ paths:
         - { name: due_to, in: query, required: false, description: Due date on or before., schema: { type: string, format: date } }
         - { name: currency, in: query, required: false, schema: { type: string, pattern: '^[A-Z]{3}$' } }
         - { name: status, in: query, required: false, schema: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] } }
+        - { name: source_invoices, in: query, required: false, description: Comma-separated ids of at most 200 source invoices (the receiving invoice ids); keeps the open items created from them., schema: { type: string } }
         - { name: value_in, in: query, required: false, description: Currency to value each item in (normally the legal entity currency)., schema: { type: string, pattern: '^[A-Z]{3}$' } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
@@ -767,6 +768,7 @@ components:
         version: { type: integer }
         paymentHold: { type: boolean }
         paymentHoldReason: { type: string, description: Why the item is on payment hold; absent when it is not held or no reason was given. }
+        proposalId: { type: string, format: uuid, description: The payment proposal (draft or approved, not cancelled or released) that holds the item; absent when no proposal does. }
         payeeUnverified: { type: boolean, description: "True for an expense reimbursement whose worker the employee-vendor register does not map yet (vendorId is the worker id); with bank bindings on it is left out of proposals until the worker is registered." }
         openingReference: { type: string, description: "Legacy item reference of an item loaded at cutover; absent otherwise." }
         payeeWorkerId: { type: string, format: uuid, description: "The worker an expense reimbursement pays, once vendorId is the vendor the employee-vendor register maps them to." }

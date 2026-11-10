@@ -76,16 +76,17 @@ type OpenItem struct {
 }
 
 type Filter struct {
-	LegalEntityID string
-	VendorID      string
-	DueFrom       string
-	DueOnOrBy     string
-	Currency      string
-	Status        string
-	OpenOnly      bool
-	HeldOnly      bool
-	AfterDue      string
-	AfterID       string
+	LegalEntityID    string
+	VendorID         string
+	DueFrom          string
+	DueOnOrBy        string
+	Currency         string
+	Status           string
+	OpenOnly         bool
+	HeldOnly         bool
+	SourceInvoiceIDs []string
+	AfterDue         string
+	AfterID          string
 }
 
 type Postgres struct {
@@ -223,6 +224,36 @@ func nullable(s string) any {
 	return s
 }
 
+func nullableIDs(ids []string) any {
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
+func (s *Postgres) ProposalsOfItems(ctx context.Context, itemIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(itemIDs) == 0 {
+		return out, nil
+	}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select open_item_id::text, proposal_id::text from ap_payment_proposal_line where reserved and open_item_id = any($1::uuid[])`, itemIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item, proposal string
+			if err := rows.Scan(&item, &proposal); err != nil {
+				return err
+			}
+			out[item] = proposal
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, error) {
 	if limit <= 0 {
 		limit = defaultLimit
@@ -240,9 +271,10 @@ func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, e
 			and (not $7::bool or status not in ('SETTLED', 'REVERSED'))
 			and ($8::date is null or (due_date, id) > ($8::date, $9::uuid))
 			and (not $11::bool or payment_hold)
+			and ($12::uuid[] is null or source_invoice_id = any($12::uuid[]))
 			order by due_date, id limit $10`,
 			nullable(f.LegalEntityID), nullable(f.VendorID), nullable(f.DueFrom), nullable(f.DueOnOrBy), nullable(f.Currency), nullable(f.Status),
-			f.OpenOnly, nullable(f.AfterDue), nullable(f.AfterID), limit, f.HeldOnly)
+			f.OpenOnly, nullable(f.AfterDue), nullable(f.AfterID), limit, f.HeldOnly, nullableIDs(f.SourceInvoiceIDs))
 		if err != nil {
 			return err
 		}

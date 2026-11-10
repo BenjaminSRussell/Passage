@@ -293,6 +293,13 @@ type InvoiceFilter struct {
 	Limit           int
 }
 
+type CaptureFilter struct {
+	Status          string
+	CursorCreatedAt time.Time
+	CursorID        string
+	Limit           int
+}
+
 type RegisterFunc func(Receipt, map[domain.SerialKey]struct{}) ([]Line, error)
 
 type PostFunc func(Receipt) (PostOutcome, error)
@@ -319,6 +326,7 @@ type Store interface {
 	StartAsnReceipt(ctx context.Context, id string, rec Receipt) (Asn, Receipt, error)
 	GetSelfBill(ctx context.Context, invoiceID string) (SelfBill, error)
 	GetCapture(ctx context.Context, id string) (Capture, error)
+	ListCaptures(ctx context.Context, f CaptureFilter) ([]Capture, error)
 	FindCapture(ctx context.Context, legalEntityID, digest string) (Capture, bool, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
 	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)
