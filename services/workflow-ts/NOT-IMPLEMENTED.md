@@ -3,6 +3,10 @@
 | Deliverable | Status | Reason |
 |---|---|---|
 | Payment run workflow (#102) | built | `src/paymentRunWorkflow.ts`, `src/paymentRunActivities.ts`, `src/startPaymentRun.ts`; crash and re-run proof in `test/paymentRun.test.ts` |
+| Budget plan approval workflow (#38 P4) | built | `src/budgetPlanWorkflow.ts`, `src/budgetPlanActivities.ts`, `src/budgetPlanTriggers.ts`; stage owners, segregation of duties, reject, stale submission and lost-reply proof in `test/budgetPlan.test.ts` |
+| Kafka subscription that calls `handlePlanSubmitted` | built | `src/eventConsumer.ts` reads `passage.budget.plan` and starts `budgetPlanWorkflow` per submission (`deploy/kafka/workflow-ts-consumer.yaml` grants the topic); unit-tested against a fake Temporal client, not a live broker |
+| Cleanup of a workflow started by a late `plan.submitted` redelivery | not built | a redelivery after the plan was rejected or approved starts a workflow for a closed submission; budgeting refuses every signal it receives (BUD-0046 or BUD-0047), so it only idles |
+| Decisions dropped on a budgeting outage | partial | a decision whose retries ran out is listed in `droppedDecisions` of the workflow state for the decider to repeat; the list is not carried across a history restart and is capped at 50 |
 | ECO approval workflow (wave 09 AC3) | built | `src/ecoApprovalWorkflow.ts`, `src/ecoActivities.ts`; approve, reject, timeout, scheduled release and lost-reply proof in `test/ecoApproval.test.ts` |
 | CAPA workflow (wave 33 AC4) | built | `src/capaWorkflow.ts`, `src/capaActivities.ts`; effectiveness check, reopen, escalation and stall proof in `test/capa.test.ts` |
 | Tender cascade workflow (wave 34 AC4) | built | `src/tenderWorkflow.ts`, `src/tenderActivities.ts`; timeout, decline, accept, all-declined escalation and stalled-sweep proof in `test/tender.test.ts` against a stateful fake of the transport tender contract |

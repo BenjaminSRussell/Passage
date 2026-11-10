@@ -170,10 +170,10 @@ describe("new RFQ", () => {
   it("posts the lines with the deadline as an instant and opens the new RFQ", async () => {
     const fetchMock = stubFetch(() => json(draft, 201, { ETag: '"1"' }));
     const { router, container } = renderAt("/purchasing/rfqs/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Reply deadline"), { target: { value: "2099-11-01T17:00" } });
     fireEvent.change(screen.getByLabelText("Rank replies by"), { target: { value: "LEAD_TIME" } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
     const second = screen.getByRole("group", { name: "Line 2" });
@@ -199,7 +199,7 @@ describe("new RFQ", () => {
   it("shows field errors from the service", async () => {
     stubFetch(() => problem(422, "COM-0001", "replyDeadline must be in the future", { replyDeadline: "must be in the future" }));
     renderAt("/purchasing/rfqs/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Reply deadline"), { target: { value: "2099-11-01T17:00" } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Bolts" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });

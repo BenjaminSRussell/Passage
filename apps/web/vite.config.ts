@@ -4,7 +4,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { mobileDevStub } from "./src/modules/mobile-flows/api/devStub";
 import { federationRemotes } from "./src/shell/federation";
-import { devProxy } from "./src/shell/devProxy";
+import { devIdentityHeaders, devProxy } from "./src/shell/devProxy";
 
 /**
  * Wave 5 owns the shell host. Module federation remotes are declared in
@@ -23,6 +23,7 @@ export default defineConfig(({ mode, command }) => {
           : null,
       ),
       __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
+      __PASSAGE_DEV_IDENTITY__: JSON.stringify(command === "serve" && mode !== "test" ? `${devIdentityHeaders(env)["X-Passage-Tenant"]}.${devIdentityHeaders(env)["X-Passage-User"]}` : ""),
       __PASSAGE_DEV_SHOW_ALL_NAV__: JSON.stringify(command === "serve" && mode !== "test" && env.PASSAGE_DEV_SHOW_ALL_NAV === "1"),
     },
     server: {

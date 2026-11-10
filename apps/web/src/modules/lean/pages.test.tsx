@@ -230,7 +230,7 @@ describe("production flows", () => {
     const { container } = renderAt("/lean/flows/new");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sauce line" } });
     fireEvent.change(screen.getByLabelText("Value stream id"), { target: { value: STREAM } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: SITE } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.change(screen.getByLabelText("Activity name"), { target: { value: "Mix" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Create flow" }));
@@ -384,8 +384,8 @@ describe("kanban rules", () => {
     const { container } = renderAt(`/lean/rules/new?flowId=${FLOW}`);
     await screen.findByRole("option", { name: "Sauce line" });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "mix-a" } });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: SITE } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.change(screen.getByLabelText("Quantity per card"), { target: { value: "50" } });
     fireEvent.change(screen.getByLabelText("Lead time (hours)"), { target: { value: "48" } });
     fireEvent.change(screen.getByLabelText("Daily demand"), { target: { value: "100" } });

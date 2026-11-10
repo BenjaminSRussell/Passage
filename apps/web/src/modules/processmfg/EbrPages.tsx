@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -497,8 +498,8 @@ export function RecordProfilesPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="profile-filter-item" label="Item id" error={filterError ? "Enter the item id as a UUID." : undefined}>
-          {(c) => <Input {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={filterError} />}
+        <FormField id="profile-filter-item" label="Item" error={filterError ? "Enter the item id as a UUID." : undefined}>
+          {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={filterError} />}
         </FormField>
       </div>
       {failure ? (
@@ -578,8 +579,8 @@ export function NewRecordProfilePage() {
           <FormField id="profile-code" label="Code" error={errors.code}>
             {(c) => <Input {...c} value={code} onChange={(e) => on(setCode)(e.target.value)} invalid={Boolean(errors.code)} />}
           </FormField>
-          <FormField id="profile-item" label="Item id" error={errors.itemId}>
-            {(c) => <Input {...c} value={itemId} onChange={(e) => on(setItemId)(e.target.value)} invalid={Boolean(errors.itemId)} />}
+          <FormField id="profile-item" label="Item" error={errors.itemId}>
+            {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => on(setItemId)(e.target.value)} invalid={Boolean(errors.itemId)} />}
           </FormField>
           <div className={styles.lineChecks}>
             <label>

@@ -15,7 +15,7 @@ import {
 } from "./api/safety";
 import { DATE, UUID, dayOf, todayIso } from "./format";
 import styles from "./pages.module.css";
-import { BackLink, Entry, Facts, FormActions, humanize, ListPage, Loaded, opt, SelectField, Status, TextField, useAction, useSubmit, labelled } from "./parts";
+import { BackLink, Entry, Facts, FormActions, humanize, labelled, ListPage, Loaded, LookupField, opt, SelectField, Status, TextField, useAction, useSubmit } from "./parts";
 import { useLoad } from "./useLoad";
 
 type TaskAction = ReturnType<typeof useAction>;
@@ -132,9 +132,11 @@ function StartForm({ workerId, onStarted }: { workerId: string; onStarted(checkl
           />
         )}
         <TextField id="start-effectiveDate" label="Effective date" type="date" value={values.effectiveDate} error={form.errors.effectiveDate} onChange={(v) => set({ effectiveDate: v })} />
-        <TextField
+        <LookupField
+          entity="legalEntity"
+          prefill={false}
           id="start-legalEntityId"
-          label="Legal entity id"
+          label="Legal entity"
           optional
           hint="Needed when the worker is employed in several legal entities."
           value={values.legalEntityId}
@@ -266,9 +268,10 @@ export function TasksPage() {
       banner={action.feedback}
       toolbar={
         <>
-          <TextField
+          <LookupField
+            entity="worker"
             id="tasks-owner"
-            label="Owner's worker id"
+            label="Owner"
             value={rawOwner}
             error={rawOwner !== "" && owner === "" ? "Enter a worker id." : undefined}
             onChange={(v) => setParam("owner", v)}
