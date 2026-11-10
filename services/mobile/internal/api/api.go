@@ -143,7 +143,7 @@ func (a *API) Metrics() http.Handler {
 			{"mobile_offline_conflicts_total", "Offline transactions parked as CONFLICT.", &a.stats.conflicts},
 			{"mobile_offline_rejected_total", "Offline transactions rejected.", &a.stats.rejected},
 		} {
-			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", m.name, m.help, m.name, m.name, m.v.Load())
+			_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", m.name, m.help, m.name, m.name, m.v.Load())
 		}
 	})
 }

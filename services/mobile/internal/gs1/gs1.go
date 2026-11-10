@@ -132,7 +132,7 @@ func allDigits(s string) bool {
 func InSet82(s string) bool {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if !(isDigit(c) || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || strings.IndexByte(set82Specials, c) >= 0) {
+		if !isDigit(c) && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && strings.IndexByte(set82Specials, c) < 0 {
 			return false
 		}
 	}
@@ -215,7 +215,7 @@ func hasSymbologyID(raw string) bool {
 		return false
 	}
 	c := raw[1]
-	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
 		return false
 	}
 	m := raw[2]

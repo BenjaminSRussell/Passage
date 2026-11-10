@@ -254,7 +254,7 @@ func TestAC324PublishReachesTheNextMenuLoadAndTheEventStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Body.Close()
+	defer func() { _ = stream.Body.Close() }()
 	lines := make(chan string, 8)
 	go func() {
 		sc := bufio.NewScanner(stream.Body)

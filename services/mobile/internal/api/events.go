@@ -64,7 +64,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, ":\n\n")
+	_, _ = fmt.Fprint(w, ":\n\n")
 	fl.Flush()
 	tick := time.NewTicker(keepAlive)
 	defer tick.Stop()
@@ -74,10 +74,10 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case e := <-ch:
 			data, _ := json.Marshal(e)
-			fmt.Fprintf(w, "event: flow.published\ndata: %s\n\n", data)
+			_, _ = fmt.Fprintf(w, "event: flow.published\ndata: %s\n\n", data)
 			fl.Flush()
 		case <-tick.C:
-			fmt.Fprint(w, ":\n\n")
+			_, _ = fmt.Fprint(w, ":\n\n")
 			fl.Flush()
 		}
 	}

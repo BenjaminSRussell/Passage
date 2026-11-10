@@ -97,7 +97,7 @@ func plan(op string, p map[string]string) (route, error) {
 }
 
 func numberOrZero(s string) string {
-	var n json.Number = json.Number(strings.TrimSpace(s))
+	n := json.Number(strings.TrimSpace(s))
 	if _, err := n.Float64(); err != nil || s == "" {
 		return "0"
 	}
