@@ -58,6 +58,12 @@ spec:
               value: {{ .Values.ledgerUrl | quote }}
             - name: BILLING_GL_PROFILES
               value: {{ .Values.glProfiles | toJson | quote }}
+            {{- if .Values.autoBook.tenantIds }}
+            - name: BILLING_GL_AUTOBOOK_TENANT_IDS
+              value: {{ join "," .Values.autoBook.tenantIds | quote }}
+            - name: BILLING_GL_AUTOBOOK_INTERVAL
+              value: {{ .Values.autoBook.interval | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.revrecUrl }}
             - name: REVREC_URL
