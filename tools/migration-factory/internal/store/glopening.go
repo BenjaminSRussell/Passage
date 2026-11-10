@@ -201,8 +201,11 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 			return OpeningJournalResult{}, fmt.Errorf("%w: ledger %s belongs to another legal entity", ErrLedgerForeign, in.LedgerID)
 		}
 	}
+	// Only a pin this call created can be released again: an older pin may belong to a lost answer.
+	createdPin := false
 	if !pinned && len(journals) > 0 {
-		if err := s.pinOpeningTarget(ctx, run, in); err != nil {
+		var err error
+		if createdPin, err = s.pinOpeningTarget(ctx, run, in); err != nil {
 			return OpeningJournalResult{}, err
 		}
 	}
@@ -216,6 +219,11 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		entryID, err := ledger.Post(ctx, j.Entry)
 		if err != nil {
 			slog.ErrorContext(ctx, "opening journal not posted", "run", in.RunID, "legalEntity", in.LegalEntityID, "currency", j.Currency, "key", j.Key, "err", err)
+			// A definite refusal books nothing; free the company to be posted to another legal entity or ledger.
+			// A lost answer may have booked the journal, so that pin stays.
+			if createdPin && ledgerclient.Rejected(err) {
+				s.releaseOpeningTarget(ctx, run, in)
+			}
 			return res, fmt.Errorf("post the %s opening journal: %w", j.Currency, err)
 		}
 		if err := s.tx(ctx, func(tx pgx.Tx) error {
@@ -234,13 +242,31 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 	return res, nil
 }
 
-func (s *Postgres) pinOpeningTarget(ctx context.Context, run domain.PackRun, in OpeningJournalRequest) error {
-	return s.tx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `insert into gl_opening_target (tenant_id, source_system, source_company, target_legal_entity_id, ledger_id, pinned_by)
+// releaseOpeningTarget drops the company's pin when no posting row exists (the database refuses otherwise).
+func (s *Postgres) releaseOpeningTarget(ctx context.Context, run domain.PackRun, in OpeningJournalRequest) {
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from gl_opening_target t
+			where t.tenant_id = current_setting('passage.tenant_id', true)::uuid and t.source_system = $1 and t.source_company = $2
+			and t.target_legal_entity_id = $3 and t.ledger_id = $4
+			and not exists (select 1 from gl_opening_posting p where p.tenant_id = t.tenant_id and p.source_system = t.source_system and p.source_company = t.source_company)`,
+			string(run.SourceSystem), run.SourceCompany, in.LegalEntityID, in.LedgerID)
+		return err
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "opening target not released", "run", in.RunID, "legalEntity", in.LegalEntityID, "err", err)
+	}
+}
+
+// pinOpeningTarget reports whether this call created the pin.
+func (s *Postgres) pinOpeningTarget(ctx context.Context, run domain.PackRun, in OpeningJournalRequest) (created bool, err error) {
+	err = s.tx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `insert into gl_opening_target (tenant_id, source_system, source_company, target_legal_entity_id, ledger_id, pinned_by)
 			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5) on conflict do nothing`,
-			string(run.SourceSystem), run.SourceCompany, in.LegalEntityID, in.LedgerID, in.By); err != nil {
+			string(run.SourceSystem), run.SourceCompany, in.LegalEntityID, in.LedgerID, in.By)
+		if err != nil {
 			return fmt.Errorf("pin gl_opening_target: %w", err)
 		}
+		created = tag.RowsAffected() == 1
 		t, err := readOpeningTarget(ctx, tx, string(run.SourceSystem), run.SourceCompany)
 		if err != nil {
 			return err
@@ -250,6 +276,7 @@ func (s *Postgres) pinOpeningTarget(ctx context.Context, run domain.PackRun, in 
 		}
 		return nil
 	})
+	return created && err == nil, err
 }
 
 // openingPosted reports whether every currency the company holds a balance in is posted to the
