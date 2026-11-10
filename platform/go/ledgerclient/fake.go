@@ -26,6 +26,7 @@ type Fake struct {
 	byKey    map[string]int
 	reversed map[string]string
 	postErr  error
+	curErr   map[string]error
 	lostErr  error
 	ledgers  map[string]string
 	closedTo string
@@ -48,6 +49,16 @@ func (f *Fake) FailPosts(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.postErr = err
+}
+
+// FailPostsIn makes every Post in currency return err until it is called with nil.
+func (f *Fake) FailPostsIn(currency string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.curErr == nil {
+		f.curErr = map[string]error{}
+	}
+	f.curErr[currency] = err
 }
 
 // PostAs sets the service identity that the entries stored from now on are recorded with, as the ledger records the verified
@@ -92,6 +103,9 @@ func (f *Fake) Post(_ context.Context, e Entry) (string, error) {
 	defer f.mu.Unlock()
 	if f.postErr != nil {
 		return "", f.postErr
+	}
+	if err := f.curErr[e.Currency]; err != nil {
+		return "", err
 	}
 	if f.refusesClosed(e.PostingDate, e.PostClosed) {
 		return "", &Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: CodePeriodClosed}

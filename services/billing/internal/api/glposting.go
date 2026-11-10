@@ -36,6 +36,7 @@ const (
 	CodeGLRunInProgress       = "BIL-0209"
 
 	defaultGLBatch = 200
+	autoBookPages  = 10
 )
 
 type GLBooks interface {
@@ -58,7 +59,8 @@ func (a *API) WithAllocations(reader revrec.Reader) *API {
 	return a
 }
 
-// ParseGLProfiles reads BILLING_GL_PROFILES: a JSON array holding, per legal entity, the ledger and the accounts of the invoice journal.
+// ParseGLProfiles reads BILLING_GL_PROFILES: a JSON array holding, per legal entity, the ledger and the accounts of the invoice journal
+// and, for the auto-book worker, the optional tenantId the entity belongs to.
 // The deferred revenue and contract liability account is 2400, the account revrec recognizes from; the contract asset account
 // is contractAssetAccount, 1250 when omitted, and must differ from 2400 and the receivable.
 func ParseGLProfiles(raw string) (map[string]store.GLProfile, error) {
@@ -79,6 +81,13 @@ func ParseGLProfiles(raw string) (map[string]store.GLProfile, error) {
 		}
 		if slices.Contains(append([]string{store.DeferredGL, p.ReceivableAccount, p.TaxAccount, p.ChargeAccount}, p.DeferredRevenueAccounts...), p.ContractAssetAccount) {
 			return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %s: contractAssetAccount %s must be an account of its own", le, p.ContractAssetAccount)
+		}
+		if p.TenantID != "" {
+			tid, tidOK := ids.Canonical(p.TenantID)
+			if !tidOK {
+				return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %s: tenantId must be a UUID", le)
+			}
+			p.TenantID = tid
 		}
 		p.LegalEntityID, p.LedgerID = le, ledger
 		if _, dup := out[le]; dup {
@@ -372,8 +381,8 @@ func glEntry(p store.GLProfile, d store.GLDocument, b glBooking) (ledgerclient.E
 // same way and ends the run, so one document that always fails is skipped by the next call. A credit note waits for the entry of
 // its original (store.DueGLDocuments).
 func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
-	if a.ledger == nil || a.glBooks == nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeLedgerNotConfigured, "the general ledger is not configured for this service"))
+	if !a.glConfigured() {
+		httpx.Fail(w, r, errGLNotConfigured())
 		return
 	}
 	var req glPostingRequest
@@ -390,36 +399,78 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller is scoped to another legal entity"))
 		return
 	}
-	profile, ok := a.profiles[le]
-	if !ok {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerNotMapped, "no GL posting profile is configured for this legal entity"))
-		return
-	}
-	ctx, cid := r.Context(), middleware.GetReqID(r.Context())
-	owner, err := a.ledger.LegalEntity(ctx, le, profile.LedgerID)
-	if err != nil {
-		slog.ErrorContext(ctx, "general ledger lookup failed", "op", "ledger", "ledgerCode", ledgerclient.CodeOf(err), "err", err, "correlationId", cid)
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not confirm the configured ledger"))
-		return
-	}
-	if owner != le {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerMismatch, "the configured ledger belongs to another legal entity"))
-		return
-	}
-	unlock, locked, err := a.glBooks.LockGLRun(ctx, le)
+	run, err := a.runGL(r.Context(), le, req.RetryParked)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
+	out := map[string]any{"items": run.items, "failed": run.failed, "more": run.more}
+	if run.halted != "" {
+		out["halted"] = run.halted
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (a *API) glConfigured() bool { return a.ledger != nil && a.glBooks != nil }
+
+func errGLNotConfigured() error {
+	return httpx.NewProblem(http.StatusServiceUnavailable, CodeLedgerNotConfigured, "the general ledger is not configured for this service")
+}
+
+type glRun struct {
+	items  []glBookedOut
+	failed []glFailedOut
+	more   bool
+	halted string
+}
+
+// AutoBook is the posting run the auto-book worker drives for one legal entity under a principal scoped to it: the same run as
+// POST /v1/billing/gl-postings, with the same lock, backoff and ledger key per document, so a retry never books a document twice.
+// It continues while due documents remain beyond a page, at most autoBookPages pages per call, and counts what a run that
+// failed midway had already booked.
+func (a *API) AutoBook(ctx context.Context, legalEntityID string) (booked, failed int, err error) {
+	if !a.glConfigured() {
+		return 0, 0, errGLNotConfigured()
+	}
+	for range autoBookPages {
+		run, rerr := a.runGL(ctx, legalEntityID, false)
+		booked, failed = booked+len(run.items), failed+len(run.failed)
+		var problem *httpx.Problem
+		if errors.As(rerr, &problem) && problem.Code == CodeGLRunInProgress {
+			return booked, failed, nil
+		}
+		if rerr != nil || !run.more || run.halted != "" {
+			return booked, failed, rerr
+		}
+	}
+	return booked, failed, nil
+}
+
+func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, error) {
+	profile, ok := a.profiles[le]
+	if !ok {
+		return glRun{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerNotMapped, "no GL posting profile is configured for this legal entity")
+	}
+	cid := middleware.GetReqID(ctx)
+	owner, err := a.ledger.LegalEntity(ctx, le, profile.LedgerID)
+	if err != nil {
+		slog.ErrorContext(ctx, "general ledger lookup failed", "op", "ledger", "ledgerCode", ledgerclient.CodeOf(err), "err", err, "correlationId", cid)
+		return glRun{}, httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not confirm the configured ledger")
+	}
+	if owner != le {
+		return glRun{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerMismatch, "the configured ledger belongs to another legal entity")
+	}
+	unlock, locked, err := a.glBooks.LockGLRun(ctx, le)
+	if err != nil {
+		return glRun{}, err
+	}
 	if !locked {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeGLRunInProgress, "a journal posting run for this legal entity is in progress; retry when it ends"))
-		return
+		return glRun{}, httpx.NewProblem(http.StatusConflict, CodeGLRunInProgress, "a journal posting run for this legal entity is in progress; retry when it ends")
 	}
 	defer unlock()
-	if req.RetryParked {
+	if retryParked {
 		if n, err := a.glBooks.UnparkGL(ctx, le); err != nil {
-			httpx.Fail(w, r, err)
-			return
+			return glRun{}, err
 		} else if n > 0 {
 			slog.InfoContext(ctx, "parked GL postings offered again", "legalEntityId", le, "count", n, "correlationId", cid)
 		}
@@ -427,8 +478,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 	now := a.now().UTC()
 	pending, more, err := a.glBooks.DueGLDocuments(ctx, le, now, a.glBatch)
 	if err != nil {
-		httpx.Fail(w, r, err)
-		return
+		return glRun{}, err
 	}
 	items, failed, halted := make([]glBookedOut, 0, len(pending)), []glFailedOut{}, ""
 	for _, d := range pending {
@@ -443,8 +493,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 			if aerr != nil {
 				slog.ErrorContext(ctx, "revrec allocation not available; invoice not booked", "documentId", d.ID, "err", aerr, "correlationId", cid)
 				if _, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, CodeAllocationUnavailable, now, store.GLNoVerdict); rerr != nil && !errors.Is(rerr, store.ErrGLAlreadyBooked) {
-					httpx.Fail(w, r, rerr)
-					return
+					return glRun{}, rerr
 				}
 				failed = append(failed, glFailedOut{DocumentID: d.ID, Number: d.Number, LedgerCode: CodeAllocationUnavailable})
 				if !errors.Is(aerr, revrec.ErrNoContract) && !errors.Is(aerr, revrec.ErrAmbiguous) && !errors.Is(aerr, errAllocationsNotConfigured) {
@@ -455,8 +504,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 			}
 			balances, berr := a.glBooks.GLContractBalances(ctx, le, ordersOf(d))
 			if berr != nil {
-				httpx.Fail(w, r, berr)
-				return
+				return glRun{}, berr
 			}
 			booking, imbalance = glSplit(profile, d, allocs, balances)
 		}
@@ -468,8 +516,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 		if imbalance == "" && d.Held == nil {
 			held := store.GLHeld{Shares: shares, Contract: store.GLContractMove{Liability: booking.liability, Asset: booking.asset}}
 			if herr := a.glBooks.HoldGLBooking(ctx, d.ID, held); herr != nil {
-				httpx.Fail(w, r, herr)
-				return
+				return glRun{}, herr
 			}
 		}
 		var entryID string
@@ -489,8 +536,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if rerr != nil {
-				httpx.Fail(w, r, rerr)
-				return
+				return glRun{}, rerr
 			}
 			slog.WarnContext(ctx, "general ledger refused an invoice journal", "documentId", d.ID, "ledgerCode", code, "parked", parked, "err", err, "correlationId", cid)
 			failed = append(failed, glFailedOut{DocumentID: d.ID, Number: d.Number, LedgerCode: code, Parked: parked})
@@ -503,12 +549,10 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 			}
 			p := httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not answer")
 			p.Errors = map[string]string{"booked": strings.Join(bookedIDs(items), ",")}
-			httpx.Fail(w, r, p)
-			return
+			return glRun{items: items, failed: failed}, p
 		}
 		if newly, err := a.glBooks.MarkGLBooked(ctx, d.ID, entryID, shares); err != nil {
-			httpx.Fail(w, r, err)
-			return
+			return glRun{}, err
 		} else if newly {
 			a.glPostings.Add(1)
 		}
@@ -521,11 +565,7 @@ func (a *API) postGL(w http.ResponseWriter, r *http.Request) {
 	}
 	// more: due documents were left beyond this page; halted: the run stopped early (revrec did not answer) and the rest of
 	// the page was not attempted.
-	out := map[string]any{"items": items, "failed": failed, "more": more}
-	if halted != "" {
-		out["halted"] = halted
-	}
-	httpx.JSON(w, http.StatusOK, out)
+	return glRun{items: items, failed: failed, more: more, halted: halted}, nil
 }
 
 func bookedIDs(items []glBookedOut) []string {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -39,6 +40,7 @@ var creditLimitPattern = regexp.MustCompile(`^[0-9]{1,16}(\.[0-9]{1,2})?$`)
 type CreditStore interface {
 	RequestCreditLimit(ctx context.Context, customerID, limit string) (domain.CreditLimitResult, error)
 	GetPendingChange(ctx context.Context, changeID string) (domain.PendingChange, error)
+	ListPendingChanges(ctx context.Context, limit int, afterAt time.Time, afterID string) ([]domain.PendingChange, error)
 	DecidePendingChange(ctx context.Context, changeID string, approve bool, reason string) (domain.PendingChange, error)
 	ProtectedFields(ctx context.Context, legalEntityID string) ([]string, error)
 	SetProtectedFields(ctx context.Context, legalEntityID string, fields []string) ([]string, error)
@@ -161,6 +163,46 @@ func (s *Postgres) GetPendingChange(ctx context.Context, changeID string) (domai
 		return err
 	})
 	return change, err
+}
+
+func (s *Postgres) ListPendingChanges(ctx context.Context, limit int, afterAt time.Time, afterID string) ([]domain.PendingChange, error) {
+	caller, _ := tenant.FromContext(ctx)
+	if err := requireUser(caller); err != nil {
+		return nil, err
+	}
+	changes := []domain.PendingChange{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+changeColumns+` from pending_change
+			where tenant_id = $1 and status = 'pending' and ($2::timestamptz is null or (requested_at, id) < ($2::timestamptz, $3::uuid))
+			order by requested_at desc, id desc limit $4`, caller.TenantID, nullableTime(afterAt), nullableID(afterID), limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			change, err := scanChange(rows)
+			if err != nil {
+				return err
+			}
+			changes = append(changes, change)
+		}
+		return rows.Err()
+	})
+	return changes, err
+}
+
+func nullableTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
+func nullableID(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
 }
 
 func (s *Postgres) DecidePendingChange(ctx context.Context, changeID string, approve bool, reason string) (domain.PendingChange, error) {
