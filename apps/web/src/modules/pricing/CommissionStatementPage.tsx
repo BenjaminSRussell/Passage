@@ -7,6 +7,7 @@ import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -19,7 +20,7 @@ type Errors = Partial<Record<keyof Draft, string>>;
 
 export function validateStatement(v: Draft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   const rep = v.repId.trim();
   // The rep id is a path segment: the service refuses / and :, and . or .. would be resolved away.
   if (rep === "" || rep.length > 64) errors.repId = "Enter the rep id (up to 64 characters).";
@@ -105,7 +106,7 @@ export function CommissionStatementPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={show} noValidate>
-          {field("legalEntityId", "Legal entity id")}
+          <LookupFormField id="cst-legalEntityId" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setValues((v) => ({ ...v, legalEntityId }))} />
           {field("repId", "Rep id")}
           {field("period", "Invoice month", "For example 2027-03.")}
           <div className={styles.formActions}>

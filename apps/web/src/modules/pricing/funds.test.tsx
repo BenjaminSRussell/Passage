@@ -84,7 +84,7 @@ describe("New trade fund", () => {
       return undefined;
     };
     renderAt("/pricing/funds/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Fund name", "Spring TPM");
     fill("Owner", "tm-lead");
     fill("Budget per period", "1000");
@@ -99,7 +99,7 @@ describe("New trade fund", () => {
   it("shows the service's field errors", async () => {
     server.handler = () => json(422, { code: "COM-0001", detail: "request is invalid", errors: { currency: "must be three upper-case letters" } });
     renderAt("/pricing/funds/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Fund name", "x");
     fill("Owner", "o");
     fill("Budget per period", "1");

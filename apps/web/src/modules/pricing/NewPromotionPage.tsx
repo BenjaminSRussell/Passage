@@ -6,6 +6,7 @@ import { DECIMAL, UUID } from "./format";
 import { CURRENCY } from "./fundFormat";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 /** The baseline window (FR-26.20): the 13 weeks before the promotion. */
 export const BASELINE_WEEKS = 13;
@@ -58,7 +59,7 @@ export function baselineWeeks(text: string): string[] {
 /** Client checks that mirror the service (FR-26.20); the service has the last word. */
 export function validatePromotion(v: PromotionDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (v.fundId.trim() !== "" && !UUID.test(v.fundId.trim())) errors.fundId = "Enter the fund id (a UUID) or leave it empty.";
   if (v.campaignId.trim() !== "" && !UUID.test(v.campaignId.trim())) errors.campaignId = "Enter the campaign id (a UUID) or leave it empty.";
@@ -171,7 +172,7 @@ export function NewPromotionPage() {
       <PageHeader title="New promotion" description="The baseline is the average of the 13 weeks before the promotion; the forecast applies the lift to every week of the window." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("pp-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="pp-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("pp-name", "name", "Promotion name")}
           {text("pp-category", "eventCategory", "Event category", { optional: true, hint: "For example FEATURE or DISPLAY." })}
           {text("pp-type", "eventType", "Event type", { optional: true, hint: "For example TPR (temporary price reduction)." })}

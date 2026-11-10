@@ -5,7 +5,7 @@ import { SKILL_CODE } from "./api/client";
 import { submitPersonnelAction, type ActionPayload, type ActionType, type NewPersonnelAction } from "./api/personnel";
 import { DATE, UUID, employmentTypeLabel, validFte, validRate } from "./format";
 import styles from "./pages.module.css";
-import { FormActions, SelectField, TextAreaField, TextField, labelled, opt, useSubmit } from "./parts";
+import { FormActions, LookupField, SelectField, TextAreaField, TextField, labelled, opt, useSubmit } from "./parts";
 
 const TYPES: ActionType[] = ["HIRE", "TRANSFER", "TERMINATE", "COMP_CHANGE"];
 const EMPLOYMENT_TYPES = Object.entries(employmentTypeLabel);
@@ -49,7 +49,7 @@ const blank: ActionValues = {
 /** The service's action rules (FR-42.5): which details each action type takes, and the request the form sends. */
 export function validateAction(v: ActionValues): { errors: Errors; input?: NewPersonnelAction } {
   const errors: Errors = {};
-  if (!UUID.test(v.workerId.trim())) errors.workerId = "Enter the worker's id.";
+  if (!UUID.test(v.workerId.trim())) errors.workerId = "Choose the worker.";
   if (!DATE.test(v.effectiveDate)) errors.effectiveDate = "Choose the effective date.";
   if (v.reason.trim().length > 500) errors.reason = "Use up to 500 characters.";
   if (v.actionType !== "HIRE" && !UUID.test(v.employmentId.trim())) errors.employmentId = "Enter the employment's id.";
@@ -66,7 +66,7 @@ export function validateAction(v: ActionValues): { errors: Errors; input?: NewPe
     else details.fteShare = share;
   }
   if (v.actionType === "HIRE") {
-    if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity's id.";
+    if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose the legal entity.";
     else details.legalEntityId = v.legalEntityId.trim();
     details.employmentType = v.employmentType;
     if (v.assignmentKind !== "") details.assignmentKind = v.assignmentKind;
@@ -102,7 +102,7 @@ export function NewPersonnelActionPage() {
   const form = useSubmit({ "HCM-ACT-001": "effectiveDate", "HCM-ACT-006": "effectiveDate", "HCM-ACT-007": "effectiveDate", "HCM-CMP-004": "currency" });
 
   function update(patch: Partial<ActionValues>) {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     form.touch();
   }
 
@@ -137,12 +137,12 @@ export function NewPersonnelActionPage() {
             onChange={(v) => update({ actionType: v as ActionType })}
             options={labelled(TYPES)}
           />
-          {text("workerId", "Worker id")}
+          <LookupField entity="worker" id="action-workerId" label="Worker" value={values.workerId} error={form.errors.workerId} onChange={(workerId) => update({ workerId })} />
           {actionType !== "HIRE" ? text("employmentId", "Employment id") : null}
           {text("effectiveDate", "Effective date", { type: "date" })}
           {actionType === "HIRE" ? (
             <>
-              {text("legalEntityId", "Legal entity id")}
+              <LookupField entity="legalEntity" id="action-legalEntityId" label="Legal entity" value={values.legalEntityId} error={form.errors.legalEntityId ?? form.errors["details.legalEntityId"]} onChange={(legalEntityId) => update({ legalEntityId })} />
               <SelectField
                 id="action-employmentType"
                 label="Employment type"

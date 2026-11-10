@@ -5,7 +5,7 @@ import type { CycleKind, GuidelineRow, NewCompCycle } from "./api/recruitment";
 import { DATE, UUID, compareDecimal, validRate, validSigned } from "./format";
 import { createCompCycle } from "./api/recruitment";
 import styles from "./pages.module.css";
-import { CheckField, FormActions, SelectField, TextField, labelled, useSubmit } from "./parts";
+import { CheckField, FormActions, LookupField, SelectField, TextField, labelled, useSubmit } from "./parts";
 
 const RATIO = /^\d{1,8}(\.\d{1,4})?$/;
 const MAX_ROWS = 50;
@@ -64,7 +64,7 @@ export function validateCycle(v: CycleValues): { errors: Errors; input?: NewComp
       errors.budgets ??= `Budget ${i + 1}: ${message}`;
       errors[`budgets[${i}]`] = `Budget ${i + 1}: ${message}`;
     };
-    if (!UUID.test(department)) bad("enter the department's id.");
+    if (!UUID.test(department)) bad("choose the department.");
     else if (seen.has(department)) bad("this department is already listed.");
     else if (/^[A-Z]{3}$/.test(currency) && !validRate(b.budgetAmount, currency)) bad("enter an amount within the currency's decimals.");
     seen.add(department);
@@ -158,9 +158,10 @@ export function NewCompCyclePage() {
             <legend className={styles.legend}>Department budgets</legend>
             {values.budgets.map((b, i) => (
               <div key={i} className={styles.optionRow} role="group" aria-label={`Budget ${i + 1}`}>
-                <TextField
+                <LookupField
+                  entity="operatingUnit"
                   id={`cycle-budget-${i}-department`}
-                  label="Department id"
+                  label="Department"
                   error={form.errors[`budgets[${i}]`]}
                   value={b.departmentId}
                   onChange={(v) => set({ budgets: values.budgets.map((x, j) => (j === i ? { ...x, departmentId: v } : x)) })}

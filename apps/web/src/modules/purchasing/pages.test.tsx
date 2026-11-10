@@ -205,8 +205,14 @@ describe("new requisition", () => {
     expect(edited.defaultPrevented).toBe(true);
   });
 
-  it("opens More options and focuses the operating unit when it is invalid, and sends it when valid", async () => {
-    const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(requisition, 201) : json(requisition, 200, { ETag: '"1"' })));
+  it("takes no typed text as an operating unit, sends a chosen one, and opens More options on its field error", async () => {
+    let refuse = true;
+    const fetchMock = stubFetch((_url, init) => {
+      if (init.method !== "POST") return json(requisition, 200, { ETag: '"1"' });
+      if (!refuse) return json(requisition, 201);
+      refuse = false;
+      return json({ title: "Problem", status: 422, code: "COM-0001", detail: "validation failed", errors: { operatingUnitId: "is not an active operating unit" } }, 422);
+    });
     const { container } = renderAt("/purchasing/requisitions/new");
     fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Laptop" } });
@@ -214,15 +220,17 @@ describe("new requisition", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
     const details = container.querySelector("details")!;
     expect(details.open).toBe(false);
-    fireEvent.change(screen.getByLabelText("Operating unit id"), { target: { value: "nope" } });
+    fireEvent.change(screen.getByLabelText("Operating unit"), { target: { value: "nope" } });
+    expect(screen.getByLabelText("Operating unit")).toHaveAttribute("data-value", "");
+    fireEvent.change(screen.getByLabelText("Operating unit"), { target: { value: VENDOR } });
+    expect(screen.getByLabelText("Operating unit")).toHaveAttribute("data-value", VENDOR);
     fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
-    await waitFor(() => expect(screen.getByLabelText("Operating unit id")).toHaveFocus());
+    await waitFor(() => expect(screen.getByLabelText("Operating unit")).toHaveFocus());
     expect(details.open).toBe(true);
-    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("requisitions"), expect.objectContaining({ method: "POST" }));
+    expect(screen.getAllByText(/is not an active operating unit/).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getByLabelText("Operating unit id"), { target: { value: VENDOR } });
     fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "POST")).toBe(true));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "POST")).toHaveLength(2));
     const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "POST")!;
     expect(JSON.parse(String((post[1] as RequestInit).body)).operatingUnitId).toBe(VENDOR);
   });

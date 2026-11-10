@@ -8,7 +8,10 @@ export type LookupEntityKey =
   | "party"
   | "product"
   | "worker"
-  | "currency";
+  | "currency"
+  | "operatingUnit"
+  | "itemGroup"
+  | "vendorGroup";
 
 export interface LookupOption {
   id: string;
@@ -113,6 +116,49 @@ function option(
 
 function present(list: (LookupOption | null)[]): LookupOption[] {
   return list.filter((entry): entry is LookupOption => entry !== null);
+}
+
+const MAX_LIST_PAGES = 5;
+
+/** Every row of a list route that has no text search, following nextCursor for a bounded number of pages. */
+async function listRows(
+  path: string,
+  params: Record<string, string | undefined>,
+  signal?: AbortSignal,
+): Promise<Raw[]> {
+  const rows: Raw[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const body = await getJson(`${path}${query({ ...params, cursor })}`, signal);
+    rows.push(...items(body));
+    cursor = text((body ?? {}) as Raw, "nextCursor");
+    if (!cursor) {
+      break;
+    }
+  }
+  return rows;
+}
+
+/** The options whose name or number contains the typed text, for lists the service cannot search. */
+function narrow(all: LookupOption[], q: string): LookupOption[] {
+  const needle = q.trim().toLowerCase();
+  return all
+    .filter(
+      (entry) =>
+        needle === "" ||
+        entry.name.toLowerCase().includes(needle) ||
+        (entry.number ?? "").toLowerCase().includes(needle),
+    )
+    .slice(0, PAGE_SIZE);
+}
+
+/** An operating unit reads "Assembly (ASM · cost center)": departments, cost centers and the rest share one list. */
+function operatingUnitOption(row: Raw): LookupOption | null {
+  const hit = option(row, ["name"], ["code"]);
+  const type = text(row, "type")?.replace(/_/g, " ");
+  return hit && type
+    ? { ...hit, number: hit.number ? `${hit.number} · ${type}` : type }
+    : hit;
 }
 
 function orgEntity(
@@ -267,7 +313,77 @@ export function pickProductPatch(line: PickedLine, entry: LookupOption | null, k
   return { productHint: productHint(entry), ...(fillUnit ? { unit: entry?.unit ?? "", autoUnit: entry?.unit } : {}) };
 }
 
+const operatingUnitDef: LookupDef = {
+  noun: "operating unit",
+  search: async (q, _scope, signal) =>
+    narrow(
+      present(
+        (
+          await listRows(
+            "/api/v1/org/operating-units",
+            { status: "active", limit: "100" },
+            signal,
+          )
+        ).map(operatingUnitOption),
+      ),
+      q,
+    ),
+  resolve: async (id, signal) =>
+    operatingUnitOption(
+      (await getJson(
+        `/api/v1/org/operating-units/${encodeURIComponent(id)}`,
+        signal,
+      )) as Raw,
+    ),
+};
+
+async function itemGroupOptions(signal?: AbortSignal): Promise<LookupOption[]> {
+  return present(
+    items(await getJson("/api/v1/product/setup/item-groups", signal)).map(
+      (row) => option(row, ["name"], ["code"]),
+    ),
+  );
+}
+
+const itemGroupDef: LookupDef = {
+  noun: "item group",
+  createHref: "/product/setup/item-groups",
+  search: async (q, _scope, signal) => narrow(await itemGroupOptions(signal), q),
+  resolve: async (id, signal) =>
+    (await itemGroupOptions(signal)).find((entry) => entry.id === id) ?? null,
+};
+
+/** The party service lists vendor groups under `vendorGroups`. */
+function vendorGroupRows(body: unknown): Raw[] {
+  return items({ items: (body as { vendorGroups?: unknown } | null)?.vendorGroups });
+}
+
+const vendorGroupDef: LookupDef = {
+  noun: "vendor group",
+  search: async (q, _scope, signal) =>
+    narrow(
+      present(
+        vendorGroupRows(await getJson("/api/v1/party/vendor-groups", signal)).map(
+          (row) => option(row, ["name"], ["code"]),
+        ),
+      ),
+      q,
+    ),
+  resolve: async (id, signal) =>
+    option(
+      (await getJson(
+        `/api/v1/party/vendor-groups/${encodeURIComponent(id)}`,
+        signal,
+      )) as Raw,
+      ["name"],
+      ["code"],
+    ),
+};
+
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  operatingUnit: operatingUnitDef,
+  itemGroup: itemGroupDef,
+  vendorGroup: vendorGroupDef,
   legalEntity: orgEntity("legal entity", "legal-entities", () => ({})),
   site: orgEntity("site", "sites", (scope) => ({
     legalEntityId: scope.legalEntityId,
