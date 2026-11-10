@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Fixed
 
+- Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
 - Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
   so parked coexistence rows can be seen and retried (`hub.delivery.read`, `hub.subscription.write`); a replayed revrec
   credit-note line is acknowledged from its stored reversal after the contract was cancelled; the migration factory refuses a
@@ -20,6 +21,14 @@ release may change public APIs.
 ### Added
 
 - Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 235 existing raw id fields in 134 files are allowlisted for conversion, including helper-built, template and placeholder labels the first version of the guard missed (#500).
+- Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org
+  unit, up to 10 scenarios with copy-from, a plan grid (account x cost center x period) with bulk upsert under ETag and
+  If-Match, even and prior-year-actuals spreading, and RLS on the five new tables. workflow-ts runs the approval as a Temporal
+  workflow per submission; approval posts the scenario as the Original budget register entry that budget control reads.
+- Usability program (#510): persona task scripts, a baseline report template and a release usability gate in
+  `apps/web/docs`, and a "Usability gate" section in the release notes template.
+- Plain-language error messages (#501): the web problem catalog now covers every error code of the party, ledger, tax and
+  product services, and the coverage test reads their Go sources so a new code without a message fails it.
 - Receiving: `GET /v1/receiving/invoices` lists vendor invoices with their lines and ledger entry id, filtered by
   vendor, receipt, purchase order or status, keyset-paged and scoped to the caller's legal entities
   (`receiving.ap.inquire`); `GET /v1/receiving/receipts?purchaseOrderId=` already existed and now has an API test (#502).

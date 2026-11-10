@@ -18,9 +18,12 @@ import {
   type LoadReleasedEvent,
   type TenderOutcomeEvent,
 } from "./tenderTriggers.js";
+import { handlePlanSubmitted, planSubmittedType, type PlanSubmittedEvent } from "./budgetPlanTriggers.js";
 
 /** Topics of transport's outbox (platform/go/events.Topic): passage.<context>.<entity>. */
 export const TENDER_TOPICS = ["passage.tms.load", "passage.tms.tender"] as const;
+/** Topic of budgeting's outbox: plan.submitted starts budgetPlanWorkflow. */
+export const BUDGET_PLAN_TOPICS = ["passage.budget.plan"] as const;
 export const DEFAULT_GROUP = "workflow-ts-tender";
 export const DEFAULT_DLQ_TOPIC = "passage.workflow.tender.dlq";
 
@@ -42,12 +45,15 @@ export interface EventConsumerConfig {
 
 /** The consumer runs only when KAFKA_BROKERS is set; without it the worker starts no tender (as before #426). */
 export function eventConsumerConfigFromEnv(env: Record<string, string | undefined>): EventConsumerConfig | null {
-  const brokers = (env.KAFKA_BROKERS ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "");
+  const brokers = (env.KAFKA_BROKERS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
   if (brokers.length === 0) return null;
   return {
     brokers,
     group: env.KAFKA_GROUP || DEFAULT_GROUP,
-    topics: [...TENDER_TOPICS],
+    topics: [...TENDER_TOPICS, ...BUDGET_PLAN_TOPICS],
     dlqTopic: env.WORKFLOW_DLQ_TOPIC || DEFAULT_DLQ_TOPIC,
     ...(env.KAFKA_USERNAME ? { username: env.KAFKA_USERNAME } : {}),
     ...(env.KAFKA_PASSWORD_FILE ? { passwordFile: env.KAFKA_PASSWORD_FILE } : {}),
@@ -120,9 +126,14 @@ export function createEventHandler(options: EventHandlerOptions): (message: Even
     const { type, data } = event as { type?: unknown; data?: unknown };
     if (typeof type !== "string") return reject(message, "missing type");
     const isRelease = type === loadReleasedType;
-    if (!isRelease && !(tenderOutcomeTypes as readonly string[]).includes(type)) return { action: "ignored", type };
+    const isPlan = type === planSubmittedType;
+    if (!isRelease && !isPlan && !(tenderOutcomeTypes as readonly string[]).includes(type)) return { action: "ignored", type };
     if (typeof data !== "object" || data === null || Array.isArray(data)) return reject(message, "missing data");
     try {
+      if (isPlan) {
+        const { workflowId, started } = await handlePlanSubmitted(client, taskQueue, event as PlanSubmittedEvent);
+        return { action: started ? "started" : "already-running", workflowId };
+      }
       if (isRelease) {
         const { workflowId, started } = await handleLoadReleased(client, taskQueue, event as LoadReleasedEvent);
         return { action: started ? "started" : "already-running", workflowId };
@@ -141,7 +152,7 @@ export interface RunningEventConsumer {
   stop(): Promise<void>;
 }
 
-/** Connects to Kafka and feeds every message of the tender topics to the handler. */
+/** Connects to Kafka and feeds every message of the tender and budget plan topics to the handler. */
 export async function startEventConsumer(
   config: EventConsumerConfig,
   client: Pick<Client, "workflow">,

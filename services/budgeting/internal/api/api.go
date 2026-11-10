@@ -83,7 +83,9 @@ type Store interface {
 
 // API holds the handlers.
 type API struct {
-	store Store
+	store  Store
+	plans  PlanStore
+	ledger PriorActuals
 }
 
 // New returns the API over st.
@@ -113,6 +115,9 @@ func (a *API) Register(r chi.Router) {
 	view.Get("/v1/budget/reservations", a.listReservations)
 	view.Get("/v1/budget/reservations/{id}", a.getReservation)
 	a.registerPrograms(r)
+	if a.plans != nil {
+		a.registerPlans(r)
+	}
 }
 
 type createRuleRequest struct {
