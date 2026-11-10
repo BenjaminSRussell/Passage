@@ -8,7 +8,7 @@ release may change public APIs.
 
 ## [Unreleased]
 
-- Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 208 existing raw id fields are allowlisted for conversion (#500).
+- Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 235 existing raw id fields in 134 files are allowlisted for conversion, including helper-built, template and placeholder labels the first version of the guard missed (#500).
 
 ### Added
 
