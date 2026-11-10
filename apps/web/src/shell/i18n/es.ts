@@ -117,6 +117,7 @@ export const es: Readonly<Record<string, string>> = {
   "lists.viewSaved": "Vista {name} guardada",
   "lists.viewUpdated": "Vista {name} actualizada",
   "lists.viewDeleted": "Vista {name} eliminada",
+  "lists.viewRestored": "Vista {name} restaurada",
   "lists.viewApplied": "Mostrando la vista {name}",
   "lists.defaultSet": "{name} es ahora su vista predeterminada",
   "lists.defaultCleared": "Sin vista predeterminada",

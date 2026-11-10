@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { CatalogPage, ProductDetail, ProductHome, ReleasedPage } from "./pages";
+import { ItemGroupsPage } from "./ItemGroupsPage";
 import { EditProductPage, NewProductPage } from "./ProductForms";
 
 const product: PassageModule = {
@@ -12,6 +13,7 @@ const product: PassageModule = {
     { path: "/product/items", element: createElement(CatalogPage) },
     { path: "/product/items/new", element: createElement(NewProductPage), handle: { title: "New product", duty: "product.write" } },
     { path: "/product/released", element: createElement(ReleasedPage) },
+    { path: "/product/setup/item-groups", element: createElement(ItemGroupsPage), handle: { title: "Item groups" } },
     { path: "/product/:id", element: createElement(ProductDetail), handle: { title: "Product details" } },
     { path: "/product/:id/edit", element: createElement(EditProductPage), handle: { title: "Edit product", duty: "product.write" } },
   ],

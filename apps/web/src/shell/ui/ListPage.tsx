@@ -112,7 +112,7 @@ export function ListPage<T>({
     const store = loadViewStore(storage, storeKey);
     const preset = store.views.find((v) => v.id === store.defaultId);
     if (preset) {
-      return { store, ...reconcileView(preset, columns, filterKeys), activeId: preset.id };
+      return { store, ...reconcileView(preset, columns, filterKeys, filters), activeId: preset.id };
     }
     return { store, query: emptyQuery(), visible: defaultVisible(columns), activeId: null };
   });
@@ -122,6 +122,7 @@ export function ListPage<T>({
   const [visible, setVisible] = useState(start.visible);
   const [activeId, setActiveId] = useState(start.activeId);
   const [message, setMessage] = useState("");
+  const [undo, setUndo] = useState<{ view: SavedView; index: number; wasDefault: boolean; wasActive: boolean } | null>(null);
 
   const data = useRows(query);
   const nounFor = (count: number) => (count === 1 ? singular : noun);
@@ -134,17 +135,22 @@ export function ListPage<T>({
       return data.rows;
     }
     const column = columns.find((c) => c.key === query.sort?.key);
-    return sortRows(data.rows, query.sort, (row, key) => (column?.sortValue ? column.sortValue(row) : rawValue(row, key)));
+    // An amount with a currency column sorts within each currency, never across them.
+    const group = column?.csvWith;
+    return sortRows(data.rows, query.sort, (row, key) => (column?.sortValue ? column.sortValue(row) : rawValue(row, key)), group ? (row) => rawValue(row, group) : undefined);
   }, [data.rows, localSort, query.sort, columns]);
 
   const active = store.views.find((v) => v.id === activeId);
   const filtered = Object.keys(query.filters).length > 0;
-  const activeBaseline = active ? reconcileView(active, columns, filterKeys) : null;
+  const activeBaseline = active ? reconcileView(active, columns, filterKeys, filters) : null;
   const modified =
     activeBaseline !== null &&
     (!sameQuery(query, activeBaseline.query) || inOrder(columns, activeBaseline.visible).join() !== shownKeys.join());
 
-  function commitStore(next: ViewStore, said: string) {
+  function commitStore(next: ViewStore, said: string, keepUndo = false) {
+    if (!keepUndo) {
+      setUndo(null);
+    }
     setStore(next);
     setMessage(saveViewStore(storage, storeKey, next) ? said : copy.lists.storageFailed);
   }
@@ -188,7 +194,7 @@ export function ListPage<T>({
   }
 
   function applyView(view: SavedView) {
-    const resolved = reconcileView(view, columns, filterKeys);
+    const resolved = reconcileView(view, columns, filterKeys, filters);
     setQuery(resolved.query);
     setDraft(resolved.query.filters);
     setVisible(resolved.visible);
@@ -220,7 +226,9 @@ export function ListPage<T>({
         commitStore(
           { views: store.views.filter((v) => v.id !== viewId), defaultId: store.defaultId === viewId ? null : store.defaultId },
           copy.lists.viewDeleted(current.name),
+          true,
         );
+        setUndo({ view: current, index: store.views.indexOf(current), wasDefault: store.defaultId === viewId, wasActive: activeId === viewId });
         if (activeId === viewId) {
           setActiveId(null);
         }
@@ -231,6 +239,18 @@ export function ListPage<T>({
       commitStore({ ...store, defaultId: viewId }, current ? copy.lists.defaultSet(current.name) : copy.lists.defaultCleared);
     },
   };
+
+  function undoDelete() {
+    if (!undo) {
+      return;
+    }
+    const views = [...store.views];
+    views.splice(Math.min(undo.index, views.length), 0, undo.view);
+    commitStore({ views, defaultId: undo.wasDefault ? undo.view.id : store.defaultId }, copy.lists.viewRestored(undo.view.name));
+    if (undo.wasActive) {
+      setActiveId(undo.view.id);
+    }
+  }
 
   async function exportCsv() {
     if (rows.length === 0) {
@@ -298,6 +318,14 @@ export function ListPage<T>({
           </div>
           <p className={styles.status} role="status">
             {message}
+            {undo ? (
+              <>
+                {" "}
+                <Button size="sm" onClick={undoDelete}>
+                  {copy.lists.undoDelete}
+                </Button>
+              </>
+            ) : null}
           </p>
         </>
       )}

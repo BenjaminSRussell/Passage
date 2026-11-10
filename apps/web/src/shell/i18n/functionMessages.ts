@@ -38,6 +38,7 @@ export const FUNCTION_MESSAGES: Readonly<Record<string, FunctionMessage>> = {
   "lists.viewSaved": { params: ["name"], en: "Saved view {name}", samples: label },
   "lists.viewUpdated": { params: ["name"], en: "Updated view {name}", samples: label },
   "lists.viewDeleted": { params: ["name"], en: "Deleted view {name}", samples: label },
+  "lists.viewRestored": { params: ["name"], en: "Restored view {name}", samples: label },
   "lists.viewApplied": { params: ["name"], en: "Showing view {name}", samples: label },
   "lists.defaultSet": { params: ["name"], en: "{name} is now your default view", samples: label },
   "lists.exported": { params: ["count", "noun"], en: "Exported {count} {noun} to a CSV file.", samples: countNoun },

@@ -1125,7 +1125,8 @@ paths:
         For a transaction that is pending or held for a person (409 TRS-0522). It is stored as abandoned with the reason and the
         actor and written to the audit trail. The line stays unmatched and no longer blocks the close; check the general ledger
         by hand first, because an unanswered attempt may already have booked the entry. Then exclude the line or match it.
-        409 TRS-0523 when the line has no such transaction.
+        409 TRS-0523 when the line has no such transaction. A pending transaction is abandoned only after its ledger call went
+        unanswered (409 TRS-0516 otherwise: it may be posting right now), and never by the person who started it (403 TRS-0524).
       x-passage-duty: treasury.reconciliation.abandon
       parameters:
         - $ref: "#/components/parameters/Id"

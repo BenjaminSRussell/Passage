@@ -143,6 +143,17 @@ func TestMergeRemovesLosersAndReindexesTheSurvivor(t *testing.T) {
 	}
 }
 
+func TestMergeWithoutSurvivorDataStillRemovesTheLosers(t *testing.T) {
+	f := &fakeStore{}
+	data := map[string]any{"mergedPartyIds": []string{recordID, otherID}}
+	if err := handle(t, f, event(t, PartyMergedType, partySource, data)); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.got) != 2 || !f.got[0].rec.Removed || !f.got[1].rec.Removed {
+		t.Fatalf("applied %+v, want only the 2 removals", f.got)
+	}
+}
+
 func TestEverySubscribedTopicMatchesTheSourceOutboxAggregate(t *testing.T) {
 	for _, tc := range []struct{ topic, file, pattern string }{
 		{PartyTopic, "../../../party/internal/domain/merge.go", `AggregateParty\s*=\s*"([a-z_]+)"`},
@@ -182,7 +193,7 @@ func TestMalformedEventsAreDeadLettered(t *testing.T) {
 		"party bad id":      event(t, PartyUpdatedType, partySource, map[string]any{"party_id": "x", "party_number": "P"}),
 		"product no number": event(t, ProductCreatedType, productSource, map[string]any{"productId": recordID}),
 		"merge empty":       event(t, PartyMergedType, partySource, mergeData()),
-		"merge no survivor": event(t, PartyMergedType, partySource, map[string]any{"mergedPartyIds": []string{recordID}}),
+		"merge bad survivor": event(t, PartyMergedType, partySource, map[string]any{"survivorPartyId": "x", "mergedPartyIds": []string{recordID}}),
 		"merge bad id":      event(t, PartyMergedType, partySource, mergeData("x")),
 		"po no entity":      event(t, PurchaseOrderConfirmed, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-1"}),
 		"receipt no entity": event(t, ReceiptPostedType, receivingSource, map[string]any{"receipt_id": recordID, "receipt_number": "RC-1"}),

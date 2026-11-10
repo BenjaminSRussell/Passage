@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ProblemMessage } from "../../shell/errors";
@@ -85,6 +85,8 @@ function CapturedDocuments() {
     queryFn: ({ pageParam }) => fetchCaptures({ status: status || undefined, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor,
+    // Changing the filter keeps the card (and the focus in its select) mounted while the new list loads.
+    placeholderData: keepPreviousData,
   });
   const captured = result.data?.pages.flatMap((p) => p.items) ?? [];
   const forbidden = result.error instanceof ApiError && result.error.status === 403;

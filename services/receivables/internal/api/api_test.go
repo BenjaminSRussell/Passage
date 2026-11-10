@@ -76,6 +76,14 @@ func (f *fakeStore) Ping(context.Context) error { return nil }
 func (f *fakeStore) PostRMACredit(context.Context, store.RMACredit) (store.RMACreditNote, error) {
 	return store.RMACreditNote{}, nil
 }
+func (f *fakeStore) CancelRMACredit(_ context.Context, id string) (store.RMACreditView, error) {
+	f.rmaRetries = append(f.rmaRetries, id+"|cancel")
+	return store.RMACreditView{ID: id, Status: "CANCELLED"}, nil
+}
+func (f *fakeStore) BackfillRMAReservation(_ context.Context, id, invoiceID string, lines []store.RMAInvoiceLine) (store.RMACreditView, error) {
+	f.rmaRetries = append(f.rmaRetries, id+"|backfill|"+invoiceID)
+	return store.RMACreditView{ID: id, Status: "POSTED"}, nil
+}
 func (f *fakeStore) RetryRMACredit(_ context.Context, id, postingDate string) (store.RMACreditView, error) {
 	f.rmaRetries = append(f.rmaRetries, id+"|"+postingDate)
 	return store.RMACreditView{ID: id, Status: "POSTED", PostingDate: postingDate}, nil

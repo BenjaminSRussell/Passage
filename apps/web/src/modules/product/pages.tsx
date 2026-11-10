@@ -4,7 +4,7 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Badge, Button, Card, CardGrid, DataTable, EmptyState, Input, PageHeader, Skeleton, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { getProduct, listProducts, listReleasedProductIds, ProductApiError, type ItemGroup, type Product } from "./api/client";
-import { DUTY_WRITE, productTypeLabel, subtypeLabel, trackingFlags, trackingLabel } from "./labels";
+import { DUTY_SETUP, DUTY_WRITE, productTypeLabel, subtypeLabel, trackingFlags, trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProductProblem } from "./ProductProblem";
 import { useItemGroups, useProduct } from "./useProduct";
@@ -13,7 +13,9 @@ const PAGE_SIZE = 50;
 
 export function ProductHome() {
   const navigate = useNavigate();
-  const canWrite = holdsDuty(usePrincipalDuties(), DUTY_WRITE);
+  const duties = usePrincipalDuties();
+  const canWrite = holdsDuty(duties, DUTY_WRITE);
+  const canSetUp = holdsDuty(duties, DUTY_SETUP);
   const { groups } = useItemGroups();
   const [products, setProducts] = useState<Product[] | null>(null);
   useEffect(() => {
@@ -36,6 +38,7 @@ export function ProductHome() {
         actions={
           <>
             <Button onClick={() => navigate("/product/items")}>Open the catalog</Button>
+            {canSetUp ? <Button onClick={() => navigate("/product/setup/item-groups")}>Set up item groups</Button> : null}
             {canWrite ? (
               <Button variant="primary" onClick={() => navigate("/product/items/new")}>
                 New product

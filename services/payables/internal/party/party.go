@@ -24,7 +24,7 @@ const (
 	dutyBankReveal  = "party.vendor-bank.reveal"
 	revealPath      = "/v1/party/vendors/%s/bank-accounts:reveal"
 	vendorPath      = "/v1/party/vendors/%s"
-	dutyVendorRead  = "party.import.read"
+	dutyVendorRead  = "party.vendor.lookup"
 	maxResponseSize = 1 << 20
 )
 

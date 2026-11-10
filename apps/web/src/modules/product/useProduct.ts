@@ -34,16 +34,18 @@ export function useProduct(id: string | undefined) {
 }
 
 export function useItemGroups() {
-  const [state, setState] = useState<{ groups: ItemGroup[]; failed: boolean }>({ groups: [], failed: false });
+  const [state, setState] = useState<{ groups: ItemGroup[]; failed: boolean; loading: boolean }>({ groups: [], failed: false, loading: true });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     listItemGroups(controller.signal).then(
-      (groups) => setState({ groups, failed: false }),
+      (groups) => setState({ groups, failed: false, loading: false }),
       () => {
-        if (!controller.signal.aborted) setState({ groups: [], failed: true });
+        if (!controller.signal.aborted) setState({ groups: [], failed: true, loading: false });
       },
     );
     return () => controller.abort();
-  }, []);
-  return state;
+  }, [attempt]);
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  return { ...state, reload };
 }

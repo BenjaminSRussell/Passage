@@ -266,7 +266,7 @@ describe("New sales order", () => {
 
   it("picks the product through the shared lookup and takes its base unit", async () => {
     handler = () => ({ status: 500, body: {} });
-    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG" }] }), { status: 200 }));
+    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ id: PRODUCT, productNumber: "BOLT", name: "Hex bolt", baseUom: "KG" }] }), { status: 200 }));
     renderAt("/sales/orders/new");
     expect(screen.getByLabelText("Unit")).toHaveValue("EA");
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
@@ -284,8 +284,8 @@ describe("New sales order", () => {
       new Response(
         JSON.stringify(
           url.includes("item-groups")
-            ? { items: [{ ID: GROUP, Name: "Raw material" }] }
-            : { items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG", ItemGroupID: GROUP, BatchTracked: true, CatchWeight: true }] },
+            ? { items: [{ id: GROUP, name: "Raw material" }] }
+            : { items: [{ id: PRODUCT, productNumber: "BOLT", name: "Hex bolt", baseUom: "KG", itemGroupId: GROUP, batchTracked: true, catchWeight: true }] },
         ),
         { status: 200 },
       ),
@@ -300,7 +300,7 @@ describe("New sales order", () => {
 
   it("keeps a unit the person typed when a product is picked", async () => {
     handler = () => ({ status: 500, body: {} });
-    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG" }] }), { status: 200 }));
+    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ id: PRODUCT, productNumber: "BOLT", name: "Hex bolt", baseUom: "KG" }] }), { status: 200 }));
     renderAt("/sales/orders/new");
     fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "BOX" } });
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });

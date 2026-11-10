@@ -95,6 +95,8 @@ const english = {
     viewSaved: (name: string) => `Saved view ${name}`,
     viewUpdated: (name: string) => `Updated view ${name}`,
     viewDeleted: (name: string) => `Deleted view ${name}`,
+    undoDelete: "Undo",
+    viewRestored: (name: string) => `Restored view ${name}`,
     viewApplied: (name: string) => `Showing view ${name}`,
     defaultSet: (name: string) => `${name} is now your default view`,
     defaultCleared: "No default view",

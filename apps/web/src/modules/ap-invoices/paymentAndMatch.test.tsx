@@ -172,6 +172,19 @@ describe("captured invoices on the list", () => {
     expect(screen.getByRole("table", { name: "Vendor invoices" })).toBeInTheDocument();
   });
 
+  it("keeps the captured filter focused while the new list loads", async () => {
+    backend({ captures: [capture(), capture({ id: "66666666-6666-4666-8666-666666666666", status: "CAPTURED", invoiceNumber: "CAP-8", reviewReasons: [] })] });
+    renderAt("/ap-invoices", DUTIES);
+    await screen.findByRole("table", { name: "Captured vendor invoices" });
+    const select = screen.getByLabelText("Show captured documents");
+    select.focus();
+    fireEvent.change(select, { target: { value: "NEEDS_REVIEW" } });
+    expect(screen.getByLabelText("Show captured documents")).toBe(select);
+    expect(select).toHaveFocus();
+    await waitFor(() => expect(screen.queryByText("CAP-8")).toBeNull());
+    expect(select).toHaveFocus();
+  });
+
   it("says nothing matches when the captured filter finds none and offers all documents again", async () => {
     backend({ captures: [capture()] });
     renderAt("/ap-invoices", DUTIES);

@@ -821,6 +821,9 @@
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
     ]},
+    "party.vendor.lookup": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendors/*", "methods": ["GET"]}
+    ]},
     "party.import.read": {"service_only": true, "permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
       {"resource": "/v1/party/customers/*", "methods": ["GET"]},
@@ -907,6 +910,8 @@
       {"resource": "/v1/receivables/payments", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:apply", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:match", "methods": ["POST"]},
+      {"resource": "/v1/receivables/rma-credits/*:backfill-reservation", "methods": ["POST"]},
+      {"resource": "/v1/receivables/rma-credits/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:retry", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]}
     ]},
@@ -2034,7 +2039,8 @@
       {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
       {"resource": "/v1/billing/invoices/*:post", "methods": ["POST"]},
       {"resource": "/v1/billing/sales-reports/*:retry", "methods": ["POST"]},
-      {"resource": "/v1/billing/tax-reports/*:retry", "methods": ["POST"]}
+      {"resource": "/v1/billing/tax-reports/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/billing/tax-reports:backfill", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
       {"resource": "/v1/search", "methods": ["GET"]},
@@ -3658,7 +3664,7 @@
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],
       "tax": ["tax.withholding.calculate"],
-      "party": ["party.vendor-bank.reveal", "party.import.read"]
+      "party": ["party.vendor-bank.reveal", "party.vendor.lookup"]
     },
     "workflow-ts": {
       "payables": ["payment-run.execute"],

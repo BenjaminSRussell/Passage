@@ -15,6 +15,7 @@ import (
 type TaxReports interface {
 	ListTaxReports(ctx context.Context, status string, limit int) ([]store.TaxReport, error)
 	RetryTaxReport(ctx context.Context, id string) (store.TaxReport, error)
+	BackfillTaxReports(ctx context.Context, after string, limit int) (store.TaxBackfill, error)
 }
 
 func (a *API) WithTaxReports(s TaxReports) *API {
@@ -62,4 +63,22 @@ func (a *API) retryTaxReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, report)
+}
+
+// backfillTaxReports queues the tax reports of documents booked to the GL before reports existed.
+func (a *API) backfillTaxReports(w http.ResponseWriter, r *http.Request) {
+	if !a.taxReportsReady(w, r) {
+		return
+	}
+	after := r.URL.Query().Get("after")
+	if after != "" && !ids.Valid(after) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "after must be the next value of the previous pass"))
+		return
+	}
+	out, err := a.taxReports.BackfillTaxReports(r.Context(), after, maxListLimit)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }

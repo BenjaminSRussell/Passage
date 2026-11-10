@@ -276,9 +276,37 @@ func TestOpeningJournal_LostLedgerAnswerThenRetryPostsOnce(t *testing.T) {
 	if count(t, admin, `select count(*) from gl_opening_posting`) != 0 {
 		t.Fatal("a lost answer was recorded as posted")
 	}
+	// The journal may have been booked, so the company stays pinned to its target.
+	if n := count(t, admin, `select count(*) from gl_opening_target`); n != 1 {
+		t.Fatalf("pins after a lost answer: %d", n)
+	}
+	if rec := postOpeningAs(t, h, run.RunID, openingBody(le2, "L-OTHER"), le2); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeOpeningTarget {
+		t.Fatalf("another entity after a lost answer: %d %s", rec.Code, rec.Body)
+	}
 	fake.LoseAnswers(nil)
 	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusOK || len(fake.Entries()) != 1 {
 		t.Fatalf("retry: %d %s, ledger holds %d", rec.Code, rec.Body, len(fake.Entries()))
+	}
+}
+
+// A definite ledger refusal books nothing, so the company is not left pinned to the refused target and
+// can be posted to the right legal entity (#549). A pin with postings cannot be released.
+func TestOpeningJournal_RefusedFirstPostingReleasesTheTarget(t *testing.T) {
+	h, admin, _, fake, _ := ledgerServer(t)
+	run := startGL(t, h, "", cleanGL...)
+	fake.RefuseClosedThrough("2027-01-31")
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeOpeningRejected {
+		t.Fatalf("refused: %d %s", rec.Code, rec.Body)
+	}
+	if n := count(t, admin, `select count(*) from gl_opening_target`); n != 0 {
+		t.Fatalf("the refused target is still pinned: %d", n)
+	}
+	fake.RefuseClosedThrough("")
+	if rec := postOpeningAs(t, h, run.RunID, openingBody(le2, "L-OTHER"), le2); rec.Code != http.StatusOK {
+		t.Fatalf("the other legal entity after release: %d %s", rec.Code, rec.Body)
+	}
+	if n := count(t, admin, `select count(*) from gl_opening_target`); n != 1 {
+		t.Fatalf("pins after a posting: %d", n)
 	}
 }
 

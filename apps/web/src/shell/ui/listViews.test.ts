@@ -27,6 +27,12 @@ describe("sorting", () => {
     expect(compareValues("INV-9", "INV-10")).toBeLessThan(0);
   });
 
+  it("sorts amounts within each currency, never across them", () => {
+    const rows = [{ v: "5", c: "USD" }, { v: "900", c: "EUR" }, { v: "1", c: "USD" }, { v: "20", c: "EUR" }];
+    const sorted = sortRows(rows, { key: "v", direction: "descending" }, (r) => r.v, (r) => r.c);
+    expect(sorted.map((r) => `${r.c} ${r.v}`)).toEqual(["EUR 900", "EUR 20", "USD 5", "USD 1"]);
+  });
+
   it("keeps the original order of equal rows", () => {
     const rows = [{ k: "a", n: 1 }, { k: "a", n: 2 }, { k: "a", n: 3 }];
     expect(sortRows(rows, { key: "k", direction: "descending" }, (r) => r.k).map((r) => r.n)).toEqual([1, 2, 3]);
@@ -55,6 +61,13 @@ describe("reconcileView", () => {
     const result = reconcileView(view, columns, ["status"]);
     expect(result.visible).toEqual(["a", "b"]);
     expect(result.query).toEqual({ filters: { status: "OPEN" }, sort: null });
+  });
+
+  it("drops a saved select choice whose option no longer exists", () => {
+    const select = { kind: "select" as const, key: "status", label: "Status", options: [{ value: "OPEN", label: "Open" }] };
+    expect(reconcileView(view, [{ key: "a" }], ["status"], [select]).query.filters).toEqual({ status: "OPEN" });
+    const retired = { ...view, query: { ...view.query, filters: { status: "RETIRED" } } };
+    expect(reconcileView(retired, [{ key: "a" }], ["status"], [select]).query.filters).toEqual({});
   });
 
   it("falls back to the default columns when none of the saved ones remain", () => {

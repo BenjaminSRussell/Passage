@@ -79,6 +79,11 @@ func ParseGLProfiles(raw string) (map[string]store.GLProfile, error) {
 		if !leOK || !ledgerOK || len(p.DeferredRevenueAccounts) == 0 || slices.ContainsFunc(accounts, func(a string) bool { return !accountText.MatchString(a) }) {
 			return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %q needs legalEntityId and ledgerId UUIDs, receivableAccount, taxAccount, chargeAccount and deferredRevenueAccounts", p.LegalEntityID)
 		}
+		for code, account := range p.TaxAccounts {
+			if !taxCodeText.MatchString(code) || !accountText.MatchString(account) {
+				return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %s: taxAccounts maps a tax code to an account, got %q to %q", le, code, account)
+			}
+		}
 		if slices.Contains(append([]string{store.DeferredGL, p.ReceivableAccount, p.TaxAccount, p.ChargeAccount}, p.DeferredRevenueAccounts...), p.ContractAssetAccount) {
 			return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %s: contractAssetAccount %s must be an account of its own", le, p.ContractAssetAccount)
 		}
@@ -355,7 +360,16 @@ func glEntry(p store.GLProfile, d store.GLDocument, b glBooking) (ledgerclient.E
 	add(store.DeferredGL, b.liability)
 	add(contractAssetAccount(p), b.asset.Neg())
 	addOwnSide(p.ChargeAccount, d.Charges)
-	addOwnSide(p.TaxAccount, d.Tax)
+	booked := decimal.Zero
+	if len(p.TaxAccounts) > 0 {
+		for _, l := range d.Lines {
+			if account, ok := p.TaxAccounts[l.TaxCode]; ok && !l.Tax.IsZero() {
+				addOwnSide(account, l.Tax)
+				booked = booked.Add(l.Tax)
+			}
+		}
+	}
+	addOwnSide(p.TaxAccount, d.Tax.Sub(booked))
 	total := decimal.Zero
 	for _, account := range accounts {
 		amount := credit[account]

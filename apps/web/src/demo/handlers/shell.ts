@@ -68,15 +68,23 @@ route("GET", "/api/v1/party/parties:search", ({ query }) => ({
 
 // Products resolve by id or by item number, since some areas use readable item numbers as product ids.
 const ITEM_GROUPS = [
-  { id: "finished", name: "Finished pumps" },
-  { id: "subassembly", name: "Subassemblies" },
-  { id: "component", name: "Purchased components" },
-  { id: "raw", name: "Raw materials" },
+  { id: "finished", code: "FINISHED", name: "Finished pumps" },
+  { id: "subassembly", code: "SUBASSEMBLY", name: "Subassemblies" },
+  { id: "component", code: "COMPONENT", name: "Purchased components" },
+  { id: "raw", code: "RAW", name: "Raw materials" },
 ];
 function product(i: Item) {
   return { id: i.id, productNumber: i.number, name: i.name, baseUom: i.unit, itemGroupId: i.kind, batchTracked: i.kind === "raw", serialTracked: i.kind === "finished", catchWeight: false };
 }
 route("GET", "/api/v1/product/setup/item-groups", () => ({ items: ITEM_GROUPS }));
+route("POST", "/api/v1/product/setup/item-groups", ({ body }) => {
+  const input = (body ?? {}) as { code?: string; name?: string };
+  const code = (input.code ?? "").toUpperCase();
+  if (ITEM_GROUPS.some((g) => g.code === code)) return reply.problem(409, "PRD-NUM-FORMAT", "item group code already exists");
+  const group = { id: code.toLowerCase(), code, name: input.name ?? code };
+  ITEM_GROUPS.push(group);
+  return reply.created(group);
+});
 route("GET", "/api/v1/product/products/{id}", ({ params }) => {
   const i = ITEMS.find((it) => it.id === params.id || it.number === params.id);
   return i ? product(i) : reply.problem(404, "PRD-0404", "No product with that id");
