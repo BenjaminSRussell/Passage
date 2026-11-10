@@ -131,7 +131,7 @@ describe("release lines", () => {
     const line = { ...emptyLine(), orderId: ORDER, orderLineId: ORDER_LINE, customerId: ID, legalEntityId: ID, productId: ID, qty: "0" };
     const { errors, input } = validateRelease({ warehouseId: "nope", horizonDays: "31", requireFullAtp: true, lines: [line, { ...line, qty: "1.1234567" }] });
     expect(input).toBeUndefined();
-    expect(errors.warehouseId).toMatch(/UUID/);
+    expect(errors.warehouseId).toBe("Choose a warehouse.");
     expect(errors.horizonDays).toMatch(/0 to 30/);
     expect(errors["lines[0].qty"]).toMatch(/above 0/);
     expect(errors["lines[1].qty"]).toMatch(/6 decimals/);
@@ -144,12 +144,12 @@ describe("release lines", () => {
         ? json(201, { shipments: [shipment("RELEASED")], skipped: [{ orderLineId: ID, reason: "already_released" }] })
         : undefined;
     const { container } = renderAt("/fulfillment/release");
-    fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: WH } });
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: WH } });
     fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER } });
     fireEvent.change(screen.getByLabelText("Order line id"), { target: { value: ORDER_LINE } });
-    fireEvent.change(screen.getByLabelText("Customer id"), { target: { value: ID } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: ID } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: ID } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: ID } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: ID } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: ID } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Run release" }));
 
@@ -165,8 +165,8 @@ describe("release lines", () => {
   it("shows the service's field errors next to the fields", async () => {
     server.handler = () => json(400, { code: "FUL-0050", detail: "request failed validation", errors: { "lines[0].customerId": "differs from another line of the same order" } });
     renderAt("/fulfillment/release");
-    fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: WH } });
-    for (const label of ["Order id", "Order line id", "Customer id", "Legal entity id", "Product id"]) {
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: WH } });
+    for (const label of ["Order id", "Order line id", "Customer", "Legal entity", "Product"]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value: label === "Order line id" ? ORDER_LINE : ID } });
     }
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });

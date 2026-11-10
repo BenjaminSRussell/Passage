@@ -35,47 +35,24 @@
     "modules/ap-invoices/PostInvoicePage.tsx": {
       "labels": [
         "Ledger ID",
-        "Legal entity ID",
-        "Vendor ID",
         "receipt ID"
       ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/billing/DeferredRevenuePage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
-    "modules/billing/NewFreeTextInvoicePage.tsx": {
-      "labels": [
-        "Customer id",
-        "Invoice account id",
-        "Legal entity id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Vendor and legal entity are lookups. The ledger service has no list route to search yet, and receipt lines arrive from the GR/IR selection; neither has a lookup adapter."
     },
     "modules/billing/NewRevenueContractPage.tsx": {
       "labels": [
-        "Customer id",
-        "Legal entity id",
-        "Product id",
         "Sales order id"
       ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Legal entity, customer and product are lookups. Sales orders have no search route (the order list cannot filter by number), so there is no sales order lookup yet."
     },
     "modules/billing/NewShipmentProposalPage.tsx": {
       "labels": [
-        "Customer id",
-        "Invoice account id",
-        "Legal entity id",
         "Order line id",
         "Packing slip id",
-        "Product id",
         "Sales order id",
         "Slip line id"
       ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Legal entity, customers and products are lookups. Packing slips, their lines, sales orders and order lines have no search route or lookup adapter yet."
     },
     "modules/budgeting/CheckPage.tsx": {
       "labels": [
@@ -154,24 +131,11 @@
       ],
       "reason": "The ledger service has no list route to search yet."
     },
-    "modules/fulfillment/ReleasePage.tsx": {
-      "labels": [
-        "Warehouse id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
     "modules/fulfillment/ShipmentActions.tsx": {
       "labels": [
         "Cost snapshot id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/WorkbenchPage.tsx": {
-      "labels": [
-        "Customer id",
-        "Warehouse id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
     },
     "modules/hr/ChecklistsPage.tsx": {
       "labels": [
@@ -563,13 +527,6 @@
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
-    "modules/purchasing/PricingPage.tsx": {
-      "labels": [
-        "Product id",
-        "Vendor id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
     "modules/purchasing/PurchaseOrderPages.tsx": {
       "labels": [
         "Agreement line id"
@@ -582,15 +539,6 @@
         "Operating unit id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/SchedulingPages.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id",
-        "Site id",
-        "Vendor id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
     },
     "modules/purchasing/ServicePages.tsx": {
       "labels": [

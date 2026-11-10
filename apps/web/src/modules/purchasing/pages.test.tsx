@@ -598,8 +598,8 @@ describe("price lookup", () => {
       }),
     );
     renderAt("/purchasing/pricing");
-    fireEvent.change(await screen.findByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Price date"), { target: { value: "2026-03-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Find price" }));
     expect(await findStatus()).toHaveTextContent("10 USD per 1 EA");
@@ -614,8 +614,8 @@ describe("price lookup", () => {
   it("says when nothing matches", async () => {
     stubFetch(() => json({ winner: null, candidates: [] }));
     renderAt("/purchasing/pricing");
-    fireEvent.change(await screen.findByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.click(screen.getByRole("button", { name: "Find price" }));
     expect(await screen.findByRole("heading", { name: "No trade agreement matches" })).toBeInTheDocument();
   });

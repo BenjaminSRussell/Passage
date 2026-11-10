@@ -21,6 +21,7 @@ import {
 import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, RESIDUAL_SSP_HINT, SSP_SOURCE_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -69,16 +70,16 @@ export function emptyContract(day = today()): ContractValues {
 /** Client checks that mirror POST /revrec/contracts; the service has the last word. */
 export function validateContract(v: ContractValues): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!UUID.test(v.orderId.trim())) errors.orderId = "Enter the sales order id (a UUID).";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID).";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!DECIMAL.test(v.transactionPrice.trim())) errors.transactionPrice = "Enter the contract price as a number such as 10800.00.";
   if (!DAY.test(v.contractDate)) errors.contractDate = "Enter the contract date as YYYY-MM-DD.";
   let residual = 0;
   v.obligations.forEach((o, i) => {
     const at = (f: string) => `obligations[${i}].${f}`;
-    if (!UUID.test(o.productId.trim())) errors[at("productId")] = "Enter the product id (a UUID).";
+    if (!UUID.test(o.productId.trim())) errors[at("productId")] = "Choose a product.";
     // A residual SSP is derived by the service, so the form does not ask for it.
     if (o.sspSource === "RESIDUAL") residual += 1;
     else if (!DECIMAL.test(o.ssp.trim()) || Number(o.ssp) <= 0) errors[at("ssp")] = "Enter a standalone selling price above zero.";
@@ -115,7 +116,7 @@ export function toContractInput(v: ContractValues): RevenueContractInput {
 }
 
 type HeaderField = Exclude<keyof ContractValues, "obligations" | "residualRule" | "ratableBasis">;
-type ObligationText = "productId" | "ssp" | "termStart" | "termEnd" | "satisfiedOn";
+type ObligationText = "ssp" | "termStart" | "termEnd" | "satisfiedOn";
 
 /** Revenue contract (FR-29.7): allocate a contract price across its obligations by SSP and plan their recognition. */
 export function NewRevenueContractPage() {
@@ -201,9 +202,17 @@ export function NewRevenueContractPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {header("rc-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="rc-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {header("rc-order", "orderId", "Sales order id", { mono: true })}
-          {header("rc-customer", "customerId", "Customer id", { mono: true })}
+          <LookupFormField
+            id="rc-customer"
+            label="Customer"
+            entity="customer"
+            scope={{ legalEntityId: values.legalEntityId || undefined }}
+            value={values.customerId}
+            error={errors.customerId}
+            onChange={(customerId) => update({ customerId })}
+          />
           {header("rc-currency", "currency", "Currency", { mono: true })}
           {header("rc-price", "transactionPrice", "Contract price", { mono: true, decimal: true, hint: "The transaction price after any bundle discount." })}
           {header("rc-date", "contractDate", "Contract date", { type: "date", mono: true, hint: "The invoice date; deferred revenue starts here." })}
@@ -232,7 +241,14 @@ export function NewRevenueContractPage() {
           {values.obligations.map((o, i) => (
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Obligation ${i + 1}`}</legend>
-              {text(i, "productId", "Product id", { mono: true })}
+              <LookupFormField
+                id={`rc-ob-${i}-productId`}
+                label="Product"
+                entity="product"
+                value={o.productId}
+                error={errors[`obligations[${i}].productId`]}
+                onChange={(productId) => setObligation(i, { productId })}
+              />
               <FormField id={`rc-ob-${i}-source`} label="SSP source" hint={o.sspSource === "RESIDUAL" ? RESIDUAL_SSP_HINT : undefined}>
                 {(c) => (
                   <Select {...c} value={o.sspSource} onChange={(e) => setObligation(i, { sspSource: e.target.value as SspSource })}>
