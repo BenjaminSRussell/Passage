@@ -38,6 +38,24 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: TREASURY_MAX_FILE_MB
               value: {{ .Values.statement.maxFileMb | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: treasury
+            {{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+            {{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.serviceUrls.payables }}
+            - name: PAYABLES_URL
+              value: {{ .Values.serviceUrls.payables | quote }}
+            {{- end }}
+            {{- if .Values.serviceUrls.receivables }}
+            - name: RECEIVABLES_URL
+              value: {{ .Values.serviceUrls.receivables | quote }}
+            {{- end }}
             {{- with .Values.vault }}
             {{- if .bankChannels }}
             - name: TREASURY_BANK_CHANNELS
@@ -82,9 +100,18 @@ spec:
           # Multipart statement uploads above 1 MB spool to /tmp; the root file system is read-only.
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+            {{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.uploadSpoolSize | quote }}
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+        {{- end }}

@@ -206,6 +206,44 @@
     "tax.recommit.run": {"permissions": [{"resource": "/v1/tax/recommit:run", "methods": ["POST"]}]},
     "tax.saft.export": {"permissions": [{"resource": "/v1/tax/saft", "methods": ["GET"]}]},
     "tax.ledgerconfig.manage": {"permissions": [{"resource": "/v1/tax/ledger-config", "methods": ["PUT"]}]},
+    "tax.config.read": {"permissions": [
+      {"resource": "/v1/tax/jurisdictions", "methods": ["GET"]},
+      {"resource": "/v1/tax/codes", "methods": ["GET"]},
+      {"resource": "/v1/tax/groups/*", "methods": ["GET"]},
+      {"resource": "/v1/tax/config", "methods": ["GET"]},
+      {"resource": "/v1/tax/entity-settings", "methods": ["GET"]},
+      {"resource": "/v1/tax/vat-boxes", "methods": ["GET"]}
+    ]},
+    "tax.config.manage": {"permissions": [
+      {"resource": "/v1/tax/jurisdictions/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/tax/codes/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/tax/groups/*/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/tax/entity-settings", "methods": ["PUT"]},
+      {"resource": "/v1/tax/vat-boxes", "methods": ["PUT"]}
+    ]},
+    "tax.vatreturn.read": {"permissions": [
+      {"resource": "/v1/tax/vat-return", "methods": ["GET"]},
+      {"resource": "/v1/tax/esl", "methods": ["GET"]}
+    ]},
+    "tax.intrastat.read": {"permissions": [
+      {"resource": "/v1/tax/intrastat/master/*", "methods": ["GET"]},
+      {"resource": "/v1/tax/intrastat/journals", "methods": ["GET"]},
+      {"resource": "/v1/tax/intrastat/journals/*", "methods": ["GET"]}
+    ]},
+    "tax.intrastatmaster.manage": {"permissions": [
+      {"resource": "/v1/tax/intrastat/master/*/*", "methods": ["PUT", "DELETE"]}
+    ]},
+    "tax.intrastat.manage": {"permissions": [
+      {"resource": "/v1/tax/intrastat/journals", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/journals/*/transfer", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/journals/*/validate", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/journals/*/compress", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/journals/*/correct", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/journals/*/lines/*", "methods": ["PUT", "DELETE"]}
+    ]},
+    "tax.intrastat.export": {"permissions": [
+      {"resource": "/v1/tax/intrastat/journals/*/export", "methods": ["GET"]}
+    ]},
     "period.check": {"permissions": [
       {"resource": "/v1/close/period-statuses:check", "methods": ["POST"]},
       {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}
@@ -910,13 +948,19 @@
       {"resource": "/v1/receivables/payments", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:apply", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:match", "methods": ["POST"]},
+      {"resource": "/v1/receivables/remittance-advices", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:backfill-reservation", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:retry", "methods": ["POST"]},
-      {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]}
+      {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]},
+      {"resource": "/v1/receivables/gl-journals/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/receivables/gl-journals:sweep", "methods": ["POST"]}
     ]},
     "receivables.payment.refund": {"permissions": [{"resource": "/v1/receivables/down-payments/*:release", "methods": ["POST"]}]},
-    "receivables.payment.settle": {"permissions": [{"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}]},
+    "receivables.payment.settle": {"permissions": [
+      {"resource": "/v1/receivables/credit-settlements", "methods": ["POST"]},
+      {"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}
+    ]},
     "receivables.view": {"permissions": [
       {"resource": "/v1/receivables/aging", "methods": ["GET"]},
       {"resource": "/v1/receivables/aging-snapshots", "methods": ["GET"]},
@@ -942,6 +986,8 @@
       {"resource": "/v1/receivables/payments/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/promises", "methods": ["GET"]},
       {"resource": "/v1/receivables/rma-credits", "methods": ["GET"]},
+      {"resource": "/v1/receivables/gl-journals", "methods": ["GET"]},
+      {"resource": "/v1/receivables/gl-reconciliation", "methods": ["GET"]},
       {"resource": "/v1/receivables/statements", "methods": ["GET"]},
       {"resource": "/v1/receivables/worklist", "methods": ["GET"]}
     ]},
@@ -2031,9 +2077,11 @@
       {"resource": "/v1/billing/free-text-invoices", "methods": ["POST"]},
       {"resource": "/v1/billing/proposals", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions/*/usage", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions/*:bill", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]}
+      {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions:bill-due", "methods": ["POST"]}
     ]},
     "billing.invoice.post": {"permissions": [
       {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
@@ -2053,7 +2101,6 @@
     ]},
     "budget.check": {"permissions": [
       {"resource": "/v1/budget/checks", "methods": ["POST"]},
-      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:release", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:relieve", "methods": ["POST"]},
       {"resource": "/v1/budget/reservations/*:consume", "methods": ["POST"]}
@@ -2070,8 +2117,13 @@
       {"resource": "/v1/budget/plans/*/scenarios", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:generate", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
+    ]},
+    "budget.encumbrance.convert": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
+      {"resource": "/v1/budget/encumbrances:convert", "methods": ["POST"]}
     ]},
     "budget.plan.workflow": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
@@ -3076,9 +3128,11 @@
     ]},
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
-      {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]}
+      {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]},
+      {"resource": "/v1/revrec/recognition-templates/*", "methods": ["PUT"]}
     ]},
     "revrec.creditnote.reverse": {"flag": true, "permissions": []},
+    "revrec.contract.from-invoice": {"flag": true, "permissions": []},
     "receivables.openitem.from-billing": {"flag": true, "permissions": []},
     "revrec.post": {"permissions": [
       {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
@@ -3089,6 +3143,7 @@
       {"resource": "/v1/revrec/contracts", "methods": ["GET"]},
       {"resource": "/v1/revrec/contracts/*", "methods": ["GET"]},
       {"resource": "/v1/revrec/recognition-runs", "methods": ["GET"]},
+      {"resource": "/v1/revrec/recognition-templates", "methods": ["GET"]},
       {"resource": "/v1/revrec/roll-forward", "methods": ["GET"]},
       {"resource": "/v1/revrec/gl-reconciliation", "methods": ["GET"]}
     ]},
@@ -3459,6 +3514,12 @@
       {"resource": "/v1/treasury/reconciliation-rules/*:deactivate", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-runs", "methods": ["POST"]}
     ]},
+    "treasury.cashdesk.write": {"permissions": [
+      {"resource": "/v1/treasury/cash-desks", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/days/*:close", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]}
+    ]},
     "treasury.statement.import": {"permissions": [
       {"resource": "/v1/treasury/statements/import", "methods": ["POST"]},
       {"resource": "/v1/treasury/intraday-reports/import", "methods": ["POST"]}
@@ -3469,6 +3530,10 @@
       {"resource": "/v1/treasury/bank-accounts/*/statements", "methods": ["GET"]},
       {"resource": "/v1/treasury/cash-forecast", "methods": ["GET"]},
       {"resource": "/v1/treasury/cash-position", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-desks/*/days/*/entries", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/ebics-subscribers/*", "methods": ["GET"]},
@@ -3535,6 +3600,8 @@
     "procurement.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
     "party.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
     "ledger.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
+    "payables.forecast.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
+    "receivables.forecast.read": {"service_only": true, "permissions": [{"resource": "/v1/receivables/open-items", "methods": ["GET"]}]},
     "payables.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
@@ -3581,6 +3648,9 @@
       "party": ["party.inbox.read"],
       "ledger": ["ledger.inbox.read"],
       "payables": ["payables.inbox.read"]
+    },
+    "purchasing": {
+      "budgeting": ["budget.encumbrance.convert"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
@@ -3640,7 +3710,9 @@
       "ledger": ["ledger.entry.post"]
     },
     "treasury": {
-      "ledger": ["ledger.entry.post"]
+      "ledger": ["ledger.entry.post"],
+      "payables": ["payables.forecast.read"],
+      "receivables": ["receivables.forecast.read"]
     },
     "sales": {
       "product": ["product.configuration.read"],
@@ -3747,7 +3819,7 @@
     "production-shopfloor": ["production.jobcard.shopfloor"],
     "receiving-erasure": ["compliance.legal-hold.check"],
     "receivables-billing": ["receivables.openitem.from-billing"],
-    "revrec-creditnotes": ["revrec.creditnote.reverse"],
+    "revrec-creditnotes": ["revrec.creditnote.reverse", "revrec.contract.from-invoice"],
     "receiving-ers": ["receiving.vendor-invoice.post"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"],

@@ -82,6 +82,10 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger":     {"ledger.inbox.read"},
 		"payables":   {"payables.inbox.read"},
 	},
+	// purchasing converts a requisition line's budget pre-encumbrance when it creates a PO line from it (FR-38.5).
+	"purchasing": {
+		"budgeting": {"budget.encumbrance.convert"},
+	},
 	"receiving": {
 		"ledger":     {"ledger.entry.post", "ledger.journal.reverse"},
 		"close":      {"period.check"},
@@ -99,7 +103,7 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},
 		"tax":    {"tax.withholding.calculate"},
-		"party":  {"party.vendor-bank.reveal", "party.import.read"},
+		"party":  {"party.vendor-bank.reveal", "party.vendor.lookup"},
 	},
 	"close": {
 		"ledger": {"ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"},
@@ -151,8 +155,11 @@ var serviceGrants = map[string]map[string][]string{
 	"expense": {
 		"ledger": {"ledger.entry.post"},
 	},
+	// treasury reads the open items of payables and receivables to forecast cash (FR-36.9).
 	"treasury": {
-		"ledger": {"ledger.entry.post"},
+		"ledger":      {"ledger.entry.post"},
+		"payables":    {"payables.forecast.read"},
+		"receivables": {"receivables.forecast.read"},
 	},
 	"sales": {
 		"product":     {"product.configuration.read"},

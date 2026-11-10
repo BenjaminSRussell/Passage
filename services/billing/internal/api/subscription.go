@@ -30,7 +30,11 @@ type SubscriptionStore interface {
 	ChangeSubscription(ctx context.Context, id string, term domain.PlanTerm, expectedVersion int) (store.Subscription, error)
 	CancelSubscription(ctx context.Context, id string, lastServiceDay time.Time, expectedVersion int) (store.Subscription, error)
 	FindPeriodInvoice(ctx context.Context, subscriptionID string, periodFrom time.Time) (store.Invoice, bool, error)
-	BillSubscription(ctx context.Context, id string, expectedVersion int, periodFrom, periodTo time.Time, inv store.Invoice) (store.Invoice, bool, error)
+	BillSubscription(ctx context.Context, id string, expectedVersion int, periodFrom, periodTo time.Time, inv store.Invoice, usageIDs []string) (store.Invoice, bool, error)
+	RecordUsage(ctx context.Context, subscriptionID string, in store.Usage) (store.Usage, bool, error)
+	ListUnbilledUsage(ctx context.Context, subscriptionID string, upTo time.Time) ([]store.Usage, error)
+	DueSubscriptions(ctx context.Context, legalEntityID string, asOf time.Time, limit int) ([]string, error)
+	SubscriptionLegalEntities(ctx context.Context) ([]string, error)
 }
 
 func (a *API) WithSubscriptions(s SubscriptionStore) *API {
@@ -319,20 +323,6 @@ func ifMatchVersion(w http.ResponseWriter, r *http.Request) (int, bool) {
 	return expected, ok
 }
 
-func replaySubscriptionInvoice(w http.ResponseWriter, r *http.Request, existing store.Invoice, hash string) {
-	if existing.Type != domain.TypeSubscription {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodePeriodInvoiced, "this period is linked to an invoice that is not a subscription invoice"))
-		return
-	}
-	if existing.RequestHash != hash {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, "idempotency_key_reuse", "this period was already invoiced with a different invoice date"))
-		return
-	}
-	w.Header().Set("Idempotent-Replayed", "true")
-	w.Header().Set("ETag", etag(existing.Version))
-	httpx.JSON(w, http.StatusOK, toDTO(existing))
-}
-
 func (a *API) billSubscription(w http.ResponseWriter, r *http.Request) {
 	if !a.subscriptionsReady(w, r) {
 		return
@@ -360,48 +350,15 @@ func (a *API) billSubscription(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller is scoped to another legal entity"))
 		return
 	}
-	hash := hashOf(invoiceDate.Format(dateLayout))
-	if existing, found, err := a.subscriptions.FindPeriodInvoice(r.Context(), sub.ID, periodFrom); err != nil {
-		httpx.Fail(w, r, err)
-		return
-	} else if found {
-		replaySubscriptionInvoice(w, r, existing, hash)
-		return
-	}
-	billed, err := sub.Bill(periodFrom)
-	if err != nil {
-		httpx.Fail(w, r, problemFrom(err))
-		return
-	}
-	lines := make([]domain.Line, len(billed))
-	for i, b := range billed {
-		lines[i] = domain.Line{No: i + 1, Description: fmt.Sprintf("%s %s to %s", b.PlanCode, b.From.Format(dateLayout), b.To.Format(dateLayout)),
-			Qty: decimal.NewFromInt(1), UnitPrice: b.Amount, DiscountPct: decimal.Zero, RevenueAccount: sub.RevenueAccount, TaxCode: sub.TaxCode}
-	}
-	taxes, err := a.tax.Quote(r.Context(), sub.Currency, lines)
-	if err != nil {
-		httpx.Fail(w, r, taxProblem(err))
-		return
-	}
-	nets, totals, err := domain.Compute(sub.Currency, lines, taxes, decimal.Zero)
-	if err != nil {
-		httpx.Fail(w, r, problemFrom(err))
-		return
-	}
-	inv := store.Invoice{ID: ids.New(), LegalEntityID: sub.LegalEntityID, CustomerID: sub.CustomerID, InvoiceAccountID: sub.InvoiceAccountID,
-		Type: domain.TypeSubscription, Status: domain.StatusProposal, Currency: sub.Currency, InvoiceDate: invoiceDate,
-		DueDate: invoiceDate.AddDate(0, 0, sub.PaymentTermDays), PaymentTermDays: sub.PaymentTermDays, Totals: totals,
-		IdempotencyKey: subscriptionKeyPrefix + ids.New(), RequestHash: hash}
-	for i := range lines {
-		inv.Lines = append(inv.Lines, store.Line{Line: lines[i], Net: nets[i], Tax: taxes[i].RoundBank(money.MinorUnits(sub.Currency))})
-	}
-	created, replayed, err := a.subscriptions.BillSubscription(r.Context(), sub.ID, sub.Version, periodFrom, sub.PeriodEnd(periodFrom), inv)
+	created, replayed, err := a.billPeriod(r.Context(), sub, periodFrom, invoiceDate)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	if replayed {
-		replaySubscriptionInvoice(w, r, created, hash)
+		w.Header().Set("Idempotent-Replayed", "true")
+		w.Header().Set("ETag", etag(created.Version))
+		httpx.JSON(w, http.StatusOK, toDTO(created))
 		return
 	}
 	a.subscriptionInvoices.Add(1)

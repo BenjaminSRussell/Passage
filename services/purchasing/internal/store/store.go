@@ -219,6 +219,25 @@ type Idem struct {
 // Postgres implements Store on a pgx pool.
 type Postgres struct {
 	pool *pgxpool.Pool
+	// afterOrders runs after a transaction that created purchase orders commits (never inside it).
+	afterOrders OrderHook
+}
+
+// OrderHook is told about purchase orders a committed transaction created, so a port to another service (budget
+// control converting a requisition's pre-encumbrance, FR-38.5) is called outside the database transaction. It must
+// not fail the request: the order exists, and the hook's work is idempotent and logged.
+type OrderHook func(ctx context.Context, orders []PurchaseOrder)
+
+// WithOrderHook sets the hook; nil clears it.
+func (s *Postgres) WithOrderHook(h OrderHook) *Postgres {
+	s.afterOrders = h
+	return s
+}
+
+func (s *Postgres) created(ctx context.Context, orders ...PurchaseOrder) {
+	if s.afterOrders != nil && len(orders) > 0 {
+		s.afterOrders(ctx, orders)
+	}
 }
 
 // New returns a Postgres store.

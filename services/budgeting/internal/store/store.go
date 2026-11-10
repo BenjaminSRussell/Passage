@@ -721,7 +721,10 @@ func stageColumn(stage string) string {
 
 // ConvertRequest turns a requisition's pre-encumbrance into the encumbrance of a purchase order line.
 type ConvertRequest struct {
-	EncumbranceID       string
+	EncumbranceID string
+	// RequisitionLineID names the pre-encumbrance by the requisition line it was checked for, when the caller
+	// (purchasing) does not hold the encumbrance id. BUD-0002 when nothing was reserved for that line.
+	RequisitionLineID   string
 	PurchaseOrderID     string
 	PurchaseOrderLineID string
 }
@@ -742,7 +745,12 @@ func (s *Postgres) ConvertPreEncumbrance(ctx context.Context, key, hash string, 
 	p, _ := tenant.FromContext(ctx)
 	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
 		var balanceID string
-		err := tx.QueryRow(ctx, `select balance_id::text from encumbrance where tenant_id = $1 and id = $2`, p.TenantID, in.EncumbranceID).Scan(&balanceID)
+		var err error
+		if in.EncumbranceID == "" {
+			err = tx.QueryRow(ctx, `select id::text, balance_id::text from encumbrance where tenant_id = $1 and source_line_id = $2`, p.TenantID, in.RequisitionLineID).Scan(&in.EncumbranceID, &balanceID)
+		} else {
+			err = tx.QueryRow(ctx, `select balance_id::text from encumbrance where tenant_id = $1 and id = $2`, p.TenantID, in.EncumbranceID).Scan(&balanceID)
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil, httpx.NewProblem(http.StatusNotFound, CodeEncumbranceNotFound, "encumbrance not found")
 		}

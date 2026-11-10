@@ -311,6 +311,7 @@ func workedInPassage(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
 	var worked bool
 	err := tx.QueryRow(ctx, `select exists(select 1 from settlement where open_item_id = $1)
 		or exists(select 1 from down_payment_clearing where open_item_id = $1)
+		or exists(select 1 from credit_settlement where credit_item_id = $1 or debit_item_id = $1)
 		or exists(select 1 from deduction where open_item_id = $1)`, id).Scan(&worked)
 	return worked, err
 }

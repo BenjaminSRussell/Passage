@@ -122,6 +122,9 @@ func insertCAMTPayment(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 	if err != nil {
 		return Payment{}, false, err
 	}
+	if err := receiptJournal(ctx, tx, tenantID, saved); err != nil {
+		return Payment{}, false, err
+	}
 	err = enqueue(ctx, tx, "payment", saved.ID, rcvevents.PaymentReceived, tenantID, rcvevents.PaymentReceivedData{
 		PaymentID: saved.ID, LegalEntityID: saved.LegalEntityID, CustomerID: saved.CustomerID, Source: saved.Source,
 		Amount: saved.Amount, Currency: saved.Currency, Remittance: toEventRemittance(saved.Remittance),

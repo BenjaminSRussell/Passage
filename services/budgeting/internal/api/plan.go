@@ -58,6 +58,7 @@ type PlanStore interface {
 	GetPlan(ctx context.Context, id string) (store.PlanView, error)
 	GetGrid(ctx context.Context, planID, scenarioID string, f store.GridFilter) (store.Grid, error)
 	CompareScenarios(ctx context.Context, planID, baseID, otherID, groupBy string) (store.Comparison, error)
+	PriorPlanCells(ctx context.Context, planID string, accounts []string) ([]domain.PlanCell, error)
 	Replayed(ctx context.Context, key, hash string) (bool, error)
 }
 
@@ -79,6 +80,7 @@ func (a *API) registerPlans(r chi.Router) {
 	maintain.Post("/v1/budget/plans/{id}/scenarios", a.createScenario)
 	maintain.Put("/v1/budget/plans/{id}/scenarios/{sid}/grid", a.putGrid)
 	maintain.Post("/v1/budget/plans/{id}/scenarios/{sid}:spread", a.spreadGrid)
+	maintain.Post("/v1/budget/plans/{id}/scenarios/{sid}:generate", a.generateGrid)
 	maintain.Post("/v1/budget/plans/{id}:submit", a.submitPlan)
 
 	workflow := r.With(authz.RequireDuty(dutyPlanWorkflow))

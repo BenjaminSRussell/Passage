@@ -111,6 +111,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	subJob, err := newSubscriptionJob(getenv, a)
+	if err != nil {
+		return err
+	}
 	sales, err := salesreport.FromEnv(getenv)
 	if err != nil {
 		return fmt.Errorf("sales client: %w", err)
@@ -154,6 +158,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if subJob != nil {
+		go subJob.loop(ctx)
+	}
 	if autobook != nil {
 		go autobook.loop(ctx)
 	}

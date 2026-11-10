@@ -126,6 +126,11 @@ func hasMethod(c store.Contract, method string) bool {
 	return false
 }
 
+func (f *fakeStore) PutTemplate(_ context.Context, t store.Template) (store.Template, error) {
+	return t, nil
+}
+func (f *fakeStore) ListTemplates(context.Context) ([]store.Template, error) { return nil, nil }
+
 func (f *fakeStore) ContractRollForward(_ context.Context, contractID string, start, end time.Time) (store.ContractRoll, error) {
 	c, ok := f.contracts[contractID]
 	if !ok {

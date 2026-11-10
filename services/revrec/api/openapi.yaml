@@ -171,6 +171,57 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/recognition-templates:
+    get:
+      operationId: listRecognitionTemplates
+      summary: List how products are recognized when a contract is opened from a posted invoice (29-4).
+      x-passage-duty: revrec.view (RevRecView)
+      responses:
+        "200":
+          description: Templates by product.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecognitionTemplate" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/recognition-templates/{id}:
+    put:
+      operationId: putRecognitionTemplate
+      summary: Set how a product is recognized when a contract is opened from a posted invoice (29-4).
+      x-passage-duty: revrec.maintain (RevRecMaintain)
+      description: >
+        `id` is the product id. The revrec invoice consumer opens one contract per invoiced order with one
+        obligation per product, its invoiced net as the SSP. A RATABLE template spreads the obligation over
+        `termMonths` from the invoice posting date; a product with no template, or POINT_IN_TIME, is recognized
+        at the posting date. A contract that already exists is never changed.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              additionalProperties: false
+              properties:
+                method: { type: string, enum: [POINT_IN_TIME, RATABLE] }
+                termMonths: { type: integer, minimum: 1, maximum: 120, description: "Required for RATABLE, absent for POINT_IN_TIME." }
+      responses:
+        "200":
+          description: Stored template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecognitionTemplate" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/revrec/recognition-runs:
     post:
       operationId: runRecognition
@@ -368,6 +419,14 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    RecognitionTemplate:
+      type: object
+      required: [productId, method, updatedAt]
+      properties:
+        productId: { type: string, format: uuid }
+        method: { type: string, enum: [POINT_IN_TIME, RATABLE] }
+        termMonths: { type: integer }
+        updatedAt: { type: string, format: date-time }
     PreviewRequest:
       type: object
       required: [currency, transactionPrice, obligations]
