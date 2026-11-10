@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: org
-  version: 0.12.0
+  version: 0.13.0
   description: CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
 channels:
   passage.org.legalentity:
@@ -66,7 +66,16 @@ channels:
     messages:
       changed:
         $ref: '#/components/messages/currencyRoundingChanged'
+  passage.org.democompany:
+    address: passage.org.democompany
+    messages:
+      removed:
+        $ref: '#/components/messages/demoCompanyRemoved'
 operations:
+  onDemoCompanyRemoved:
+    action: send
+    channel: { $ref: '#/channels/passage.org.democompany' }
+    messages: [{ $ref: '#/channels/passage.org.democompany/messages/removed' }]
   onLegalEntityCreated:
     action: send
     channel: { $ref: '#/channels/passage.org.legalentity' }
@@ -350,3 +359,19 @@ components:
           unit: { type: string }
           method: { type: string }
       x-passage-type: dev.passage.org.currencyrounding.changed.v1
+    demoCompanyRemoved:
+      name: removed
+      title: Demo company removed
+      description: Emitted by POST /v1/org/demo-company:reset when it deletes the records the demo company loader created (keyed by the tenant id). It names who asked and the organization records removed; consumers that keep copies of them drop those copies. The reset then loads the demo again, which emits the usual created events with new ids. Nothing is emitted when there was no demo data to remove.
+      payload:
+        type: object
+        required: [actor, legal_entity_ids, operating_unit_ids, site_ids, warehouse_ids, location_ids, removed]
+        properties:
+          actor: { type: string }
+          legal_entity_ids: { type: array, items: { type: string, format: uuid } }
+          operating_unit_ids: { type: array, items: { type: string, format: uuid } }
+          site_ids: { type: array, items: { type: string, format: uuid } }
+          warehouse_ids: { type: array, items: { type: string, format: uuid } }
+          location_ids: { type: array, items: { type: string, format: uuid } }
+          removed: { type: integer, minimum: 1 }
+      x-passage-type: dev.passage.org.democompany.removed.v1

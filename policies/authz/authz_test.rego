@@ -1806,6 +1806,18 @@ test_org_demo_company_manage_reaches_only_the_demo_load if {
 	not allowed("org.read", "POST", "/v1/org/demo-company")
 }
 
+test_org_demo_company_manage_reaches_the_demo_reset_and_nothing_else_does if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company:reset")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company:reset")
+	not allowed("org.demo-company.manage", "DELETE", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/demo-company:purge")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/legal-entities/le-1:reset")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company:reset")
+	not allowed("org.legal-entity.write", "POST", "/v1/org/demo-company:reset")
+	not allowed("org.read", "POST", "/v1/org/demo-company:reset")
+	not allowed("tenant.administer", "POST", "/v1/org/demo-company:reset")
+}
+
 test_org_package_manage_reaches_only_export_and_import if {
 	allowed("org.package.manage", "POST", "/v1/org/export")
 	allowed("org.package.manage", "POST", "/v1/org/import")

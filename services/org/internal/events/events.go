@@ -22,10 +22,24 @@ var (
 
 	HierarchyVersionActivated = events.Type(Context, "hierarchyversion", "activated", 1)
 	TeamMembershipChanged     = events.Type(Context, "teammembership", "changed", 1)
+	DemoCompanyRemoved        = events.Type(Context, "democompany", "removed", 1)
 )
 
 func All() []string {
-	return []string{LegalEntityCreated, LegalEntityUpdated, LegalEntityCopied, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated, HierarchyVersionActivated, TeamMembershipChanged}
+	return []string{LegalEntityCreated, LegalEntityUpdated, LegalEntityCopied, OperatingUnitCreated, OperatingUnitUpdated, SiteCreated, SiteUpdated, WarehouseCreated, WarehouseUpdated, LocationCreated, LocationUpdated, CurrencyRoundingChanged, AddressChanged, FiscalCalendarGenerated, HierarchyVersionActivated, TeamMembershipChanged, DemoCompanyRemoved}
+}
+
+// DemoCompanyRemovedData is the removal half of a demo company reset: who asked for it and the organization
+// records it deleted. Consumers that keep copies of those records drop them; the reset then loads the demo again,
+// which emits the usual created events with new ids.
+type DemoCompanyRemovedData struct {
+	Actor            string   `json:"actor"`
+	LegalEntityIDs   []string `json:"legal_entity_ids"`
+	OperatingUnitIDs []string `json:"operating_unit_ids"`
+	SiteIDs          []string `json:"site_ids"`
+	WarehouseIDs     []string `json:"warehouse_ids"`
+	LocationIDs      []string `json:"location_ids"`
+	Removed          int      `json:"removed"`
 }
 
 type LegalEntityCreatedData struct {

@@ -85,10 +85,13 @@ route("GET", `${BASE}/open-items`, ({ query }) => {
   const status = query.get("status");
   const vendor = query.get("vendor");
   const dueTo = query.get("due_to");
+  const dueFrom = query.get("due_from");
+  const held = query.get("held") === "true";
   const ids = query.get("source_invoices");
   const items = openItems
     .all()
-    .filter((i) => (!status || i.status === status) && (!vendor || i.vendorId === vendor) && (!dueTo || i.dueDate <= dueTo) && (ids === null || ids.split(",").includes(i.sourceInvoiceId ?? "")))
+    .filter((i) => (!status || i.status === status) && (!vendor || i.vendorId === vendor) && (!dueTo || i.dueDate <= dueTo) && (!dueFrom || i.dueDate >= dueFrom) && (ids === null || ids.split(",").includes(i.sourceInvoiceId ?? "")))
+    .filter((i) => !held || (i.paymentHold && i.status !== "SETTLED" && i.status !== "REVERSED"))
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   return { items };
 });
