@@ -24,6 +24,7 @@ const ASK_ADMIN = "Ask an administrator for access if you need it.";
 
 const common: Record<string, ProblemCatalogEntry> = {
   "COM-0000": { message: "Something went wrong.", action: TRY_LATER },
+  "WFL-0412": { message: "Some of your work couldn't be loaded the same way as on the first page.", action: "Reload My work from the start." },
   "COM-0001": { message: "Some of the details you entered aren't valid.", action: "Check the fields marked in the form, correct them and try again." },
   "COM-0002": { message: "The request was missing information the service needs to accept it safely.", action: "Reload the page and try again." },
   "COM-0400": { message: "The service couldn't read the request.", action: "Reload the page and try again. If it keeps happening, contact support with the details below." },
