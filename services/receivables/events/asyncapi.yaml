@@ -48,6 +48,11 @@ channels:
         $ref: "#/components/messages/DownPaymentCleared"
       downPaymentReleased:
         $ref: "#/components/messages/DownPaymentReleased"
+  creditSettlementEvents:
+    address: passage.receivables.creditsettlement
+    messages:
+      creditSettled:
+        $ref: "#/components/messages/CreditSettled"
   deductionEvents:
     address: passage.receivables.deduction
     messages:
@@ -126,6 +131,11 @@ operations:
     channel: { $ref: "#/channels/downPaymentEvents" }
     messages:
       - { $ref: "#/channels/downPaymentEvents/messages/downPaymentCleared" }
+  publishCreditSettled:
+    action: send
+    channel: { $ref: "#/channels/creditSettlementEvents" }
+    messages:
+      - { $ref: "#/channels/creditSettlementEvents/messages/creditSettled" }
   publishDownPaymentReleased:
     action: send
     channel: { $ref: "#/channels/downPaymentEvents" }
@@ -224,6 +234,14 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/DownPaymentData"
+    CreditSettled:
+      name: dev.passage.receivables.creditsettlement.applied.v1
+      summary: >-
+        A credit item (credit note, adjustment, unapplied payment) was offset against debit items of the same customer and
+        currency (30-3). Both sides reduce by the amounts; nothing moves in the ledger.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CreditSettledData"
     DeductionOpened:
       name: dev.passage.receivables.deduction.opened.v1
       summary: >-
@@ -379,6 +397,24 @@ components:
         customer_balance: { type: string, description: "decimal string; our balance when AGREED" }
         difference: { type: string, description: "customer_balance minus our_balance, decimal string" }
         case_id: { type: [string, "null"], format: uuid, description: "the DISPUTE case a disagreement opened" }
+    CreditSettledData:
+      type: object
+      required: [batch_id, legal_entity_id, customer_id, currency, credit_item_id, total, debits]
+      properties:
+        batch_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        currency: { type: string }
+        credit_item_id: { type: string, format: uuid }
+        total: { type: string, description: "Decimal string; the credit consumed." }
+        debits:
+          type: array
+          items:
+            type: object
+            required: [open_item_id, amount]
+            properties:
+              open_item_id: { type: string, format: uuid }
+              amount: { type: string }
     DownPaymentData:
       type: object
       required: [downpayment_id, legal_entity_id, customer_id, sales_order_id, kind, amount, currency, remaining, open_item_id, postings]

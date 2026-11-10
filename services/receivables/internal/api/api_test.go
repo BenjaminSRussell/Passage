@@ -96,6 +96,9 @@ func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMAS
 	return store.RMASweepResult{Posted: 1}, nil
 }
 
+func (f *fakeStore) SettleCredit(context.Context, store.CreditSettlementRequest, string) (store.CreditSettlementResult, error) {
+	return store.CreditSettlementResult{}, nil
+}
 func (f *fakeStore) ListGLJournals(context.Context, store.GLJournalFilter) ([]store.GLJournalView, error) {
 	return []store.GLJournalView{}, nil
 }

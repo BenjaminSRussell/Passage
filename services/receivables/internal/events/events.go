@@ -118,7 +118,27 @@ var (
 	DownPaymentReceived = events.Type(Context, "downpayment", "received", 1)
 	DownPaymentCleared  = events.Type(Context, "downpayment", "cleared", 1)
 	DownPaymentReleased = events.Type(Context, "downpayment", "released", 1)
+	// CreditSettled is a credit item (credit note, adjustment, unapplied payment) offset against debit items (30-3).
+	CreditSettled = events.Type(Context, "creditsettlement", "applied", 1)
 )
+
+// CreditSettledData is the payload of dev.passage.receivables.creditsettlement.applied.v1. Amounts are positive
+// magnitudes; nothing moves in the ledger, both sides stay in 1200.
+type CreditSettledData struct {
+	BatchID       string               `json:"batch_id"`
+	LegalEntityID string               `json:"legal_entity_id"`
+	CustomerID    string               `json:"customer_id"`
+	Currency      string               `json:"currency"`
+	CreditItemID  string               `json:"credit_item_id"`
+	Total         decimal.Decimal      `json:"total"`
+	Debits        []CreditSettledDebit `json:"debits"`
+}
+
+// CreditSettledDebit is one debit item reduced by a credit settlement.
+type CreditSettledDebit struct {
+	OpenItemID string          `json:"open_item_id"`
+	Amount     decimal.Decimal `json:"amount"`
+}
 
 // CaseOpenedData is the payload of dev.passage.receivables.case.opened.v1.
 type CaseOpenedData struct {

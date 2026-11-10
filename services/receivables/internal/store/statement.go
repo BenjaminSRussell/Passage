@@ -26,6 +26,10 @@ const statementQuery = `with debits as (
 		o.amount
 		- coalesce((select sum(st.settled_amount + st.cash_discount_taken + st.write_off_amount) from settlement st
 			where st.tenant_id = o.tenant_id and st.open_item_id = o.id and st.settled_at::date <= $3::date), 0)
+		- coalesce((select sum(cs.amount) from credit_settlement cs
+			where cs.tenant_id = o.tenant_id and cs.debit_item_id = o.id and cs.settled_at::date <= $3::date), 0)
+		+ coalesce((select sum(cs.amount) from credit_settlement cs
+			where cs.tenant_id = o.tenant_id and cs.credit_item_id = o.id and cs.settled_at::date <= $3::date), 0)
 		- coalesce((select sum(c.amount) from down_payment_clearing c
 			where c.tenant_id = o.tenant_id and c.open_item_id = o.id and c.cleared_at::date <= $3::date), 0)
 		- coalesce((select sum(d.amount) from deduction d

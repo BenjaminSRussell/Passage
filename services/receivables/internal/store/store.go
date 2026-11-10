@@ -210,6 +210,7 @@ type Store interface {
 	BackfillRMAReservation(ctx context.Context, id, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error)
 	ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMACreditView, error)
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (RMASweepResult, error)
+	SettleCredit(ctx context.Context, req CreditSettlementRequest, idempotencyKey string) (CreditSettlementResult, error)
 	ListGLJournals(ctx context.Context, f GLJournalFilter) ([]GLJournalView, error)
 	PostDueJournals(ctx context.Context, now time.Time, limit int) (JournalSweepResult, error)
 	RetryGLJournal(ctx context.Context, id, postingDate string) (GLJournalView, error)

@@ -2217,6 +2217,12 @@ test_rma_credit_operator_routes_belong_to_the_payment_duty if {
 	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
 }
 
+test_credit_settlement_belongs_to_the_settle_duty if {
+	allowed("receivables.payment.settle", "POST", "/v1/receivables/credit-settlements")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/credit-settlements")
+	not allowed("receivables.view", "POST", "/v1/receivables/credit-settlements")
+}
+
 test_gl_journal_routes_split_between_view_and_payment_duties if {
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")

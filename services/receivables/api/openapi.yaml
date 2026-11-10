@@ -1470,6 +1470,72 @@ paths:
                   committed: { type: integer, description: Posted credits whose billing reservation the sweep committed }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/credit-settlements:
+    post:
+      operationId: settleCredit
+      summary: Settle a credit item against debit items (30-3)
+      description: |
+        Offsets one credit item (a credit note, an adjustment or an unapplied payment item, negative amount) against open
+        debit items of the same customer, legal entity and currency, in one transaction. Name the `debits` and the amount
+        of each, or set `againstOriginal` to settle a credit note against the open items of the invoice it credits, the
+        oldest due date and installment first, up to what the credit holds. Each debit is reduced by its amount and the
+        credit by the total, which may not exceed the credit's open amount (422 AR-SETTLE-INVALID); an item reaching zero
+        is SETTLED. Nothing is posted to the ledger: both sides are in 1200. Items are locked while the settlement runs
+        (409 AR-0002 if another user holds one). A repeat with the same `Idempotency-Key` and body replays the answer.
+        Applying a payment to a credit item stays refused (AR-CREDIT-ITEM); this is the operation for credits.
+      x-passage-duty: receivables.payment.settle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, creditItemId]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                creditItemId: { type: string, format: uuid }
+                againstOriginal: { type: boolean }
+                debits:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [openItemId, amount]
+                    additionalProperties: false
+                    properties:
+                      openItemId: { type: string, format: uuid }
+                      amount: { $ref: "#/components/schemas/Money" }
+      responses:
+        "200":
+          description: Settled (or replayed)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [batchId, creditItemId, creditOpenAfter, creditStatus, total, settlements]
+                properties:
+                  batchId: { type: string, format: uuid }
+                  creditItemId: { type: string, format: uuid }
+                  creditOpenAfter: { $ref: "#/components/schemas/Money" }
+                  creditStatus: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }
+                  total: { $ref: "#/components/schemas/Money" }
+                  settlements:
+                    type: array
+                    items:
+                      type: object
+                      required: [openItemId, documentNumber, amount, openAfter, itemStatus]
+                      properties:
+                        openItemId: { type: string, format: uuid }
+                        documentNumber: { type: string }
+                        amount: { $ref: "#/components/schemas/Money" }
+                        openAfter: { $ref: "#/components/schemas/Money" }
+                        itemStatus: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /v1/receivables/gl-journals:
     get:
       operationId: listGLJournals

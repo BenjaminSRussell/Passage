@@ -918,7 +918,10 @@
       {"resource": "/v1/receivables/gl-journals:sweep", "methods": ["POST"]}
     ]},
     "receivables.payment.refund": {"permissions": [{"resource": "/v1/receivables/down-payments/*:release", "methods": ["POST"]}]},
-    "receivables.payment.settle": {"permissions": [{"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}]},
+    "receivables.payment.settle": {"permissions": [
+      {"resource": "/v1/receivables/credit-settlements", "methods": ["POST"]},
+      {"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}
+    ]},
     "receivables.view": {"permissions": [
       {"resource": "/v1/receivables/aging", "methods": ["GET"]},
       {"resource": "/v1/receivables/aging-snapshots", "methods": ["GET"]},
