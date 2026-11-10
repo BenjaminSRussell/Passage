@@ -179,6 +179,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "AP-EMP-002": { message: "This worker is already mapped to another vendor.", action: "Change the existing mapping instead." },
   "AP-FIL-001": { message: "The payment file isn't valid.", action: "Check the payments in the run, then generate the file again." },
   "AP-FIL-002": { message: "The payment file failed the bank format check.", action: "Check the bank details of the payments listed, then generate the file again." },
+  "PRN-0008": { message: "The document has content the PDF layout cannot show.", action: "Check the document for unusual characters or empty required fields, then try again." },
   "AP-OPN-001": { message: "A settled or reversed open item can't be held or released.", action: "Reload the page to see the item's current state." },
   "AP-OPB-001": { message: "Some opening balance rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
   "AP-OPB-002": { message: "This opening balance batch was already loaded with different content.", action: "Use a new batch name, or send exactly what was loaded before." },

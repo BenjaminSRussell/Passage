@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { DownloadPdfButton } from "../../shell/documents/pdfDocument";
+import { invoiceDocument } from "./invoiceDocument";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -177,6 +179,7 @@ export function InvoiceDetailPage() {
         meta={<StatusPill status={STATUS_LABELS[invoice.status] ?? invoice.status} />}
         actions={
           <div className={styles.actions}>
+            {invoice.status !== "PROPOSAL" ? <DownloadPdfButton build={() => invoiceDocument(invoice)} filename={`invoice-${invoice.number ?? invoice.id}.pdf`} /> : null}
             {invoice.status === "PROPOSAL" ? (
               <Button variant="primary" loading={posting} onClick={() => post(invoice)}>
                 {creditNote ? "Post credit note" : "Post invoice"}

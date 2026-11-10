@@ -2133,3 +2133,10 @@ test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
 }
+
+test_print_document_render_is_its_own_duty if {
+	allowed("print.document.render", "POST", "/print/v1/documents:render")
+	not allowed("print.document.render", "POST", "/print/v1/jobs")
+	not allowed("print.job.submit", "POST", "/print/v1/documents:render")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}

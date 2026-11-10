@@ -109,9 +109,10 @@ async function dispatch(method: string, url: URL, headers: Headers, rawBody: str
 
 function toResponse(out: DemoResponse): Response {
   const noBody = out.status === 204 || out.body === undefined;
-  return new Response(noBody ? null : JSON.stringify(out.body), {
+  const binary = out.body instanceof Uint8Array || out.body instanceof Blob;
+  return new Response(noBody ? null : binary ? (out.body as BodyInit) : JSON.stringify(out.body), {
     status: out.status,
-    headers: { ...(noBody ? {} : { "Content-Type": "application/json" }), ...out.headers },
+    headers: { ...(noBody || binary ? {} : { "Content-Type": "application/json" }), ...out.headers },
   });
 }
 
