@@ -108,13 +108,18 @@ func TestCapture_ListLeavesOutADocumentOnceItsInvoiceIsPosted(t *testing.T) {
 	ctx := tenant.With(context.Background(), db.one)
 	posted := sampleCapture(payeeOne, db.one.LegalEntityID, "aaa")
 	posted.Invoice.InvoiceNumber, posted.Invoice.InvoiceDate, posted.Invoice.Currency = "inv-77", postDay(), "USD"
+	posted.Invoice.Total = decimal.NewFromInt(10)
 	waiting := sampleCapture(payeeOther, db.one.LegalEntityID, "bbb")
-	for _, c := range []store.Capture{posted, waiting} {
+	// Another vendor billed the same number, date and currency for another total: it is not the posted invoice.
+	sameKey := sampleCapture("00000000-0000-0000-0000-0000000000e3", db.one.LegalEntityID, "ccc")
+	sameKey.Invoice.InvoiceNumber, sameKey.Invoice.InvoiceDate, sameKey.Invoice.Currency = "inv-77", postDay(), "USD"
+	sameKey.Invoice.Total = decimal.NewFromInt(99)
+	for _, c := range []store.Capture{posted, waiting, sameKey} {
 		if _, _, err := st.CreateCapture(ctx, c); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got, err := st.ListCaptures(ctx, store.CaptureFilter{}); err != nil || len(got) != 2 {
+	if got, err := st.ListCaptures(ctx, store.CaptureFilter{}); err != nil || len(got) != 3 {
 		t.Fatalf("before posting %d %v", len(got), err)
 	}
 	in := fullInvoice(db, "00000000-0000-0000-0000-00000000c911", "INV-77", domain.InvoiceSourceManual)
@@ -122,7 +127,7 @@ func TestCapture_ListLeavesOutADocumentOnceItsInvoiceIsPosted(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := st.ListCaptures(ctx, store.CaptureFilter{})
-	if err != nil || len(got) != 1 || got[0].ID != payeeOther {
-		t.Fatalf("after posting %+v %v, want only the capture without an invoice", got, err)
+	if err != nil || len(got) != 2 || got[0].ID != sameKey.ID || got[1].ID != payeeOther {
+		t.Fatalf("after posting %+v %v, want the captures that are not the posted invoice", got, err)
 	}
 }
