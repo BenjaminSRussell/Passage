@@ -287,6 +287,23 @@ route("POST", `${BASE}/plans/{id}/scenarios/{sid}:spread`, ({ params, body, head
   });
 });
 
+route("POST", `${BASE}/plans/{id}/scenarios/{sid}:generate`, ({ params, body, headers }) => {
+  const input = body as { source: "prior-plan" | "gl-actuals"; adjustmentPct?: string; accounts?: string[]; costCenters?: { costCenter: string; weight: string }[] };
+  return write(params.id, params.sid, headers, (existing) => {
+    const factor = 1 + Number(input.adjustmentPct ?? 0) / 100;
+    const wanted = new Set(input.accounts ?? []);
+    const lastYear = (cells.get(uid(K_SCENARIO, 3)) ?? []).filter((c) => wanted.size === 0 || wanted.has(c.account));
+    if (lastYear.length === 0) return reply.problem(422, "BUD-0061", "no approved plan of the previous fiscal year holds amounts for these accounts");
+    if (input.source === "prior-plan") return upsert(existing, lastYear.map((c) => ({ ...c, period: `${YEAR}-${c.period.slice(5)}`, amount: dec(Math.round(units(c.amount) * factor)) })));
+    const centers = input.costCenters ?? [];
+    const sum = centers.reduce((s, c) => s + Number(c.weight), 0);
+    if (sum <= 0) return reply.problem(422, "BUD-0060", "the cost center weights sum to zero");
+    const byMonth = new Map<string, number>();
+    for (const c of lastYear) byMonth.set(`${c.account}|${c.period.slice(5)}`, (byMonth.get(`${c.account}|${c.period.slice(5)}`) ?? 0) + units(c.amount));
+    return upsert(existing, [...byMonth.entries()].flatMap(([k, total]) => centers.map((c) => ({ account: k.split("|")[0], costCenter: c.costCenter, period: `${YEAR}-${k.split("|")[1]}`, amount: dec(Math.round((total * factor * Number(c.weight)) / sum)) }))));
+  });
+});
+
 route("POST", `${BASE}/plans/{id}:submit`, ({ params }) => {
   const p = plan(params.id);
   if (!p) return notFound("budget plan");

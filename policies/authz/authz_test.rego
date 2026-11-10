@@ -1133,6 +1133,12 @@ test_treasury_forecast_reads_open_items_only if {
 	not allowed("receivables.forecast.read", "POST", "/v1/receivables/payments")
 }
 
+test_budget_plan_generation_needs_the_maintain_duty if {
+	allowed("budget.plan.maintain", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/scenarios/s1:generate")
+}
+
 test_budget_conversion_is_service_only_and_reaches_only_the_convert_routes if {
 	data.duties["budget.encumbrance.convert"].service_only
 	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert"]

@@ -2069,6 +2069,7 @@
       {"resource": "/v1/budget/plans/*/scenarios", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:generate", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
     ]},

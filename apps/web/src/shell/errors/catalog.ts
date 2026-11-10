@@ -921,6 +921,8 @@ const treasury: Record<string, ProblemCatalogEntry> = {
   "TRS-0544": { message: "The desk has no open day, so nothing can be booked.", action: "Open a day first." },
   "TRS-0545": { message: "A day must come after the last closed day.", action: "Pick a later business date." },
   "TRS-0550": { message: "A cash desk with this code already exists in the legal entity.", action: "Use another code." },
+  "BUD-0061": { message: "There is nothing to fill the plan from: last year's plan or ledger holds no amounts for those accounts.", action: "Check the accounts, or enter the amounts by hand." },
+  "BUD-0062": { message: "That would write more cells than one change can take.", action: "Name fewer accounts or cost centers and fill the grid in steps." },
   "BUD-0070": { message: "This budget line is a requisition's pre-encumbrance, so it cannot be checked or relieved as a purchase order.", action: "Convert it to the purchase order line first." },
   "BUD-0071": { message: "This budget line is not a pre-encumbrance, or it was already converted.", action: "Nothing to convert; check the purchase order line instead." },
   "BUD-0072": { message: "The purchase order line already carries a budget reservation.", action: "Use that reservation; do not convert a second one onto the line." },

@@ -182,3 +182,21 @@ export function spreadGrid(planId: string, scenarioId: string, version: number, 
 export function compareScenarios(planId: string, base: string, other: string, groupBy: CompareGroup, signal?: AbortSignal): Promise<Comparison> {
   return request(`${BASE}/plans/${encodeURIComponent(planId)}/scenarios:compare${query({ base, other, groupBy })}`, { signal });
 }
+
+export type GenerateSource = "prior-plan" | "gl-actuals";
+
+export interface GenerateInput {
+  source: GenerateSource;
+  adjustmentPct?: string;
+  accounts?: string[];
+  costCenters?: { costCenter: string; weight: string }[];
+}
+
+/** Fills a Draft scenario from last year's approved plan or last year's posted actuals (FR-38.14). */
+export function generateGrid(planId: string, scenarioId: string, version: number, input: GenerateInput, key: string): Promise<GridWritten> {
+  return request(`${BASE}/plans/${encodeURIComponent(planId)}/scenarios/${encodeURIComponent(scenarioId)}:generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "If-Match": `"${version}"`, "Idempotency-Key": key },
+    body: JSON.stringify(input),
+  });
+}
