@@ -26,7 +26,7 @@ Shared pieces live in `src/shell/ui` and are exported from `src/shell/ui/index.t
 ## Unsaved changes
 
 ```tsx
-const { prompt, release } = useUnsavedChanges(isDirty);
+const { prompt, release } = useUnsavedChanges(useFormBaseline(values));
 ...
 release();
 navigate(nextPage);
@@ -34,8 +34,7 @@ navigate(nextPage);
 return <div>...{prompt}</div>;
 ```
 
-- Start a legal-entity field from `useWorkContext().legalEntityId` (as the proof forms do): `EntityLookup` prefills it from the top bar, and a baseline taken before that would make an untouched form look edited.
-- Pass `true` once the form differs from its starting values (compare a JSON snapshot taken on mount).
+- Pass `useFormBaseline(values)` as `dirty`. It compares the form values with a baseline that follows every change made before the person first touches the page (key, pointer, click, input), so values the system fills in after mount, such as the top-bar legal entity from `EntityLookup` prefill or a late work-context pick, do not count as edits. After the first interaction the baseline freezes and any difference is a real edit. Do not hand-roll a snapshot comparison.
 - The browser warns on tab close or reload while dirty. Inside a data router (`createBrowserRouter`) in-app navigation also asks "Leave without saving?" in a dialog (pass a second argument to change its wording) with "Leave without saving" and "Keep editing". Outside a data router (some tests) only the tab-close guard applies.
 - Call `release()` right before the navigation that follows a successful save, or the guard blocks it.
 

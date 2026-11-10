@@ -1,9 +1,11 @@
 import { findStatus, findTable } from "../../test-utils";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { WorkContextProvider } from "../../shell/lookup/workContext";
+import { WorkContext } from "../../shell/lookup/workContextState";
 import purchasing from "./module";
 
 const LE = "11111111-1111-4111-8111-111111111111";
@@ -162,6 +164,37 @@ describe("new requisition", () => {
     renderAt("/purchasing/requisitions/new");
     const description = await screen.findByLabelText("Description");
     await new Promise((resolve) => setTimeout(resolve, 50));
+    const untouched = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const edited = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(edited);
+    expect(edited.defaultPrevented).toBe(true);
+  });
+
+  it("is not dirty when the working legal entity arrives after the form is open", async () => {
+    stubFetch(() => json({ id: LE, name: "Acme", code: "ACME" }));
+    let choose: (id: string) => void = () => undefined;
+    function Late() {
+      const [legalEntityId, setLegalEntityId] = useState("");
+      choose = setLegalEntityId;
+      return (
+        <WorkContext.Provider value={{ identity: "late", legalEntityId, siteId: "", setLegalEntityId, setSiteId: () => undefined }}>
+          <MemoryRouter initialEntries={["/purchasing/requisitions/new"]}>
+            <Routes>
+              {purchasing.routes.map((r) => (
+                <Route key={r.path} path={r.path} element={r.element} />
+              ))}
+            </Routes>
+          </MemoryRouter>
+        </WorkContext.Provider>
+      );
+    }
+    render(<Late />);
+    const description = await screen.findByLabelText("Description");
+    act(() => choose(LE));
+    await waitFor(() => expect(screen.getByLabelText("Legal entity")).not.toHaveValue(""));
     const untouched = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(untouched);
     expect(untouched.defaultPrevented).toBe(false);

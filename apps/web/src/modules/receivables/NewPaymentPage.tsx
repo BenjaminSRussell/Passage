@@ -1,9 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
-import { useWorkContext } from "../../shell/lookup/workContextState";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormErrorSummary, FormField, FormSection, Input, PageHeader, Select, summaryItems, useUnsavedChanges, type FormFieldTarget } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormErrorSummary, FormField, FormSection, Input, PageHeader, Select, summaryItems, useFormBaseline, useUnsavedChanges, type FormFieldTarget } from "../../shell/ui";
 import { copy } from "../../shell/copy";
 import { createPayment, describeProblem, newKey, PAYMENT_MODES, ReceivablesApiError, type PaymentInput, type PaymentMode, type Problem } from "./api/client";
 import { CURRENCY, DAY, DECIMAL, MODE_LABELS, today, UUID } from "./format";
@@ -114,15 +113,13 @@ export function toPaymentInput(v: PaymentDraft): PaymentInput {
 /** Record a manual payment (FR-30.2): check, ACH, wire, card or cash, with the payer's remittance references. */
 export function NewPaymentPage() {
   const navigate = useNavigate();
-  const work = useWorkContext();
-  const [values, setValues] = useState<PaymentDraft>(() => ({ ...emptyPayment(), legalEntityId: work.legalEntityId }));
+  const [values, setValues] = useState<PaymentDraft>(() => emptyPayment());
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
-  const initial = useRef(JSON.stringify(values));
   const [attempt, setAttempt] = useState(0);
-  const { prompt, release } = useUnsavedChanges(JSON.stringify(values) !== initial.current);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline(values));
 
   function update(patch: Partial<PaymentDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));

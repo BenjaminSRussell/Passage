@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { useWorkContext } from "../../shell/lookup/workContextState";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -19,6 +18,7 @@ import {
   Textarea,
   buttonClassName,
   summaryItems,
+  useFormBaseline,
   useUnsavedChanges,
   type DataTableColumn,
   type FormFieldTarget,
@@ -333,7 +333,7 @@ const LINE_FIELDS: Record<string, [string, string]> = {
 const HEADER_TARGETS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "req-legal-entity", label: "Legal entity" },
   currency: { id: "req-currency", label: "Currency" },
-  operatingUnitId: { id: "req-operating-unit", label: "Operating unit" },
+  operatingUnitId: { id: "req-operating-unit", label: "Operating unit id" },
   lines: { label: "Lines" },
 };
 
@@ -347,8 +347,7 @@ const requisitionErrorItems = (errors: Errors) => summaryItems(errors, HEADER_TA
 
 function RequisitionForm({ existing }: { existing?: Requisition }) {
   const navigate = useNavigate();
-  const work = useWorkContext();
-  const [legalEntityId, setLegalEntityId] = useState(existing?.legalEntityId ?? work.legalEntityId);
+  const [legalEntityId, setLegalEntityId] = useState(existing?.legalEntityId ?? "");
   const [operatingUnitId, setOperatingUnitId] = useState(existing?.operatingUnitId ?? "");
   const [currency, setCurrency] = useState(existing?.currency ?? "USD");
   const [lines, setLines] = useState<LineDraft[]>(() => (existing ? existing.lines.map(draftOf) : [emptyLine()]));
@@ -357,9 +356,8 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
   const [busy, setBusy] = useState(false);
   // One key per logical create so a retry after a network failure cannot duplicate it.
   const key = useMemo(() => newIdempotencyKey(), [legalEntityId, operatingUnitId, currency, lines]);
-  const initial = useRef(JSON.stringify([legalEntityId, operatingUnitId, currency, lines]));
   const [attempt, setAttempt] = useState(0);
-  const { prompt, release } = useUnsavedChanges(JSON.stringify([legalEntityId, operatingUnitId, currency, lines]) !== initial.current);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([legalEntityId, operatingUnitId, currency, lines]));
 
   const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 

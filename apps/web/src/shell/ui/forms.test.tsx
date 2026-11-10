@@ -1,10 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createMemoryRouter, Link, MemoryRouter, RouterProvider, useNavigate } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { FormErrorSummary, FormField, FormSection, Input, summaryItems, useUnsavedChanges } from "./index";
+import { FormErrorSummary, FormField, FormSection, Input, summaryItems, useFormBaseline, useUnsavedChanges } from "./index";
 
 function Demo() {
   const [name, setName] = useState("");
@@ -104,6 +104,31 @@ describe("inline validation summary", () => {
     screen.getByRole("button", { name: "Save" }).focus();
     await user.click(screen.getByRole("button", { name: "Name: Enter a name." }));
     expect(screen.getByLabelText("Name")).toHaveFocus();
+  });
+});
+
+function Baseline() {
+  const [value, setValue] = useState("");
+  const dirty = useFormBaseline(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setValue("filled in by the system"), 0);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <>
+      <input aria-label="Field" value={value} onChange={(e) => setValue(e.target.value)} />
+      <output>{dirty ? "dirty" : "clean"}</output>
+    </>
+  );
+}
+
+describe("form baseline", () => {
+  it("treats a value filled in by the system after mount as untouched, and a user edit as dirty", async () => {
+    render(<Baseline />);
+    await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
+    expect(screen.getByRole("status")).toHaveTextContent("clean");
+    fireEvent.change(screen.getByLabelText("Field"), { target: { value: "mine" } });
+    expect(screen.getByRole("status")).toHaveTextContent("dirty");
   });
 });
 

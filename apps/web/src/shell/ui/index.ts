@@ -7,7 +7,7 @@ export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { FormErrorSummary, focusField, summaryItems, type FormErrorItem, type FormErrorSummaryProps, type FormFieldTarget } from "./FormErrorSummary";
 export { FormField, type FormFieldControlProps, type FormFieldProps } from "./FormField";
 export { FormSection, type FormSectionProps } from "./FormSection";
-export { useUnsavedChanges } from "./useUnsavedChanges";
+export { useFormBaseline, useUnsavedChanges } from "./useUnsavedChanges";
 export { Icon, type IconName, type IconProps } from "./Icon";
 export { Input, type InputProps } from "./Input";
 export { PageHeader, type PageHeaderProps } from "./PageHeader";

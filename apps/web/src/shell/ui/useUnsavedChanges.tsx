@@ -31,6 +31,25 @@ function NavigationPrompt({ shouldBlock, dialog }: { shouldBlock: () => boolean;
   );
 }
 
+const USER_EVENTS = ["keydown", "pointerdown", "click", "input", "change"] as const;
+
+export function useFormBaseline(values: unknown): boolean {
+  const snapshot = JSON.stringify(values);
+  const baseline = useRef(snapshot);
+  const touched = useRef(false);
+  useEffect(() => {
+    const mark = () => {
+      touched.current = true;
+    };
+    USER_EVENTS.forEach((type) => document.addEventListener(type, mark, true));
+    return () => USER_EVENTS.forEach((type) => document.removeEventListener(type, mark, true));
+  }, []);
+  if (!touched.current) {
+    baseline.current = snapshot;
+  }
+  return snapshot !== baseline.current;
+}
+
 export function useUnsavedChanges(dirty: boolean, dialog: UnsavedChangesDialog = defaultDialog): { prompt: ReactNode; release: () => void } {
   const dirtyRef = useRef(dirty);
   const released = useRef(false);
