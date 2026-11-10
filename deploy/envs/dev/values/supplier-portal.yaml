@@ -1,0 +1,7 @@
+# supplier-portal in dev: the BFF for the supplier portal app, served from supplier.dev.passage.dev and signing in
+# against the dev realm on idp.dev.passage.dev. The client secret (supplier-portal-oidc) and the Ed25519 signing seed
+# (supplier-portal-signing) are created outside Git; the live wiring is tracked in #213.
+oidc:
+  issuer: https://idp.dev.passage.dev/realms/passage
+  redirectUri: https://supplier.dev.passage.dev/bff/callback
+appOrigin: https://supplier.dev.passage.dev

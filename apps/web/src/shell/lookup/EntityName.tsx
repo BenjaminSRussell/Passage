@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import styles from "./EntityLookup.module.css";
+import { useInsideControl } from "../ui/insideControl";
 import {
   formatOption,
   resolveOption,
@@ -18,6 +19,7 @@ export function EntityName({
 }) {
   const [entry, setEntry] = useState<LookupOption | null>(null);
   const [copied, setCopied] = useState(false);
+  const insideControl = useInsideControl();
 
   useEffect(() => {
     let live = true;
@@ -38,6 +40,9 @@ export function EntityName({
     return <span>{fallback ?? "None"}</span>;
   }
   const shown = entry ? formatOption(entry) : (fallback ?? "Not available");
+  if (insideControl) {
+    return <span>{shown}</span>;
+  }
 
   async function copy() {
     try {
