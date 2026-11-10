@@ -171,4 +171,41 @@ describe("demo company page", () => {
     await user.click(screen.getByRole("button", { name: "Load the demo company" }));
     expect(await screen.findByText(/permission/)).toBeInTheDocument();
   });
+
+  it("asks before resetting, and resets only after the person confirms", async () => {
+    const user = userEvent.setup();
+    server.handler = (url, init) => (url.pathname === "/api/v1/org/demo-company:reset" && init.method === "POST" ? json(200, { package: "demo-manufacturer", removed: 40, created: 40, present: 0 }) : undefined);
+    const { container } = render("/setup/demo-company", []);
+    await user.click(screen.getByRole("button", { name: "Reset the demo company" }));
+    const dialog = within(screen.getByRole("alertdialog", { name: "Reset the demo company?" }));
+    expect(dialog.getByText(/cannot be undone/)).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    await user.click(dialog.getByRole("button", { name: "Keep it as it is" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(server.calls).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Reset the demo company" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Reset the demo company" }));
+    expect(await screen.findByText("Removed 40 demo records and added 40 fresh ones.")).toBeInTheDocument();
+    expect(server.calls.map((c) => `${c.method} ${c.url.pathname}`)).toEqual(["POST /api/v1/org/demo-company:reset"]);
+  });
+
+  it("says why a reset was refused and that nothing was removed", async () => {
+    const user = userEvent.setup();
+    server.handler = () => json(409, { code: "ORG-DEMO-IN-USE", detail: "records that the demo company did not create are attached to it (1 site)" });
+    render("/setup/demo-company", []);
+    await user.click(screen.getByRole("button", { name: "Reset the demo company" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Reset the demo company" }));
+    expect(await screen.findByText(/wasn't reset, because records that are not part of the demo have been added under it. Nothing was removed./)).toBeInTheDocument();
+  });
+
+  it("says so when there was no demo company to remove", async () => {
+    const user = userEvent.setup();
+    server.handler = () => json(200, { package: "demo-manufacturer", removed: 0, created: 40, present: 0 });
+    render("/setup/demo-company", []);
+    await user.click(screen.getByRole("button", { name: "Reset the demo company" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Reset the demo company" }));
+    expect(await screen.findByText("There was no demo company to remove. Added 40 sample records.")).toBeInTheDocument();
+  });
 });
+

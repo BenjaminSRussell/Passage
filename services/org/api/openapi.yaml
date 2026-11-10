@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: org
-  version: 0.15.0
+  version: 0.16.0
   description: Organization service. Covers legal entities, operating units, sites, warehouses, locations, postal addresses with purposes, fiscal calendars with idempotent year generation and the period read, hierarchy types and draft hierarchy versions with validated node sets (error codes ORG-HIER-CYCLE, ORG-HIER-MULTI-ROOT, ORG-HIER-DUPLICATE-NODE, ORG-HIER-PARENT-UNKNOWN, ORG-HIER-DEPTH, ORG-HIER-SIZE, ORG-HIER-NODE-UNKNOWN, ORG-HIER-TYPE-NOT-FOUND, ORG-HIER-TYPE-CODE-DUPLICATE, ORG-HIER-VERSION-NOT-FOUND, ORG-HIER-DRAFT-EXISTS, ORG-HIER-VERSION-IMMUTABLE, ORG-HIER-OVERLAP, ORG-HIER-BACKDATE-DUTY, ORG-HIER-NO-VERSION, ORG-HIER-NODE-ABSENT, ORG-HIER-MAKER-CHECKER) with the version list, publish, supersede, the closure table, the as-of query and the version comparison, unit-of-measure conversion, the platform-owned reference sets (countries, currencies, regions, languages) with tenant-level deactivation, currency rounding rules with the round route and the rule delete (error codes ORG-CUR-ROUNDING-UNIT, ORG-CUR-ROUNDING-NOT-FOUND), name translations per owner with the base-name fallback route (error codes ORG-TRANSLATION-LANGUAGE-INVALID, ORG-TRANSLATION-NOT-FOUND), the organization model package export and import (error codes ORG-PKG-VERSION-UNSUPPORTED, ORG-PKG-INVALID, ORG-PKG-TOO-LARGE), and the unit conversions report with tenant-owned conversions (error codes ORG-UOM-CLASS-MISMATCH, ORG-UOM-CONVERSION-DUPLICATE, ORG-UOM-UNIT-INACTIVE).
 servers:
   - url: https://app.local.passage.dev
@@ -1412,6 +1412,26 @@ paths:
                   created: { type: integer }
                   present: { type: integer }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/demo-company:reset:
+    post:
+      operationId: resetDemoCompany
+      summary: Reset the demo company
+      description: Removes the records the demo company created in the caller's tenant and loads it again, so a trial or demo can start over. Demo records are the ones whose idempotency key is in the namespace only the demo loader writes (seed:demo-manufacturer:), plus each demo site's default warehouse; nothing else is deleted. Details that belong to a demo record alone (name history, translations, addresses, rounding rules, team memberships) go with it. If any other record hangs off a demo record (a site, warehouse, location, operating unit or team someone added under it, a hierarchy version or node, a legal entity copy) the reset is refused with 409 ORG-DEMO-IN-USE before anything is deleted. The removal is one transaction and emits dev.passage.org.democompany.removed.v1 naming the caller; the load after it is the same idempotent load as POST /v1/org/demo-company, so a repeat completes a load that stopped part way. Records other services keep about the demo company are not removed by this call. 403 ORG-0403 unless the caller holds tenant.administer and has no legal-entity claim.
+      x-passage-duty: org.demo-company.manage
+      responses:
+        '200':
+          description: How many demo records were removed, then created again, and how many were already there.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [package, removed, created, present]
+                properties:
+                  package: { type: string }
+                  removed: { type: integer }
+                  created: { type: integer }
+                  present: { type: integer }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/uom/convert:
     get:
       operationId: convertUnit
@@ -1541,6 +1561,7 @@ components:
     IdempotencyKey:
       name: Idempotency-Key
       in: header
+      description: At most 200 bytes. A key that starts with "seed:" is refused with 400 COM-0001, because that prefix marks the records the demo company loader created.
       schema: { type: string, maxLength: 200 }
     Language:
       name: language

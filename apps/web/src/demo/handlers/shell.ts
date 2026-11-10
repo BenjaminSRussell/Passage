@@ -165,6 +165,8 @@ route("PUT", "/api/v1/tenant/setup/steps/{step}", ({ params, body }) => {
 });
 route("GET", "/api/v1/tenant/workspace-config", () => ({ config: null }));
 route("POST", "/api/v1/org/demo-company", () => ({ package: "demo-manufacturer", created: 0, present: 42 }));
+// The demo has nothing stored to remove; the answer has the shape of a reset that removed and reloaded everything.
+route("POST", "/api/v1/org/demo-company:reset", () => ({ package: "demo-manufacturer", removed: 42, created: 42, present: 0 }));
 
 // Record search (GET /api/v1/search): customers, vendors and products from the company data, and the documents
 // the other areas hold, read back through their own list routes so the numbers always agree with those screens.

@@ -8,6 +8,7 @@ import {
   fetchFeatures,
   fetchSetup,
   loadDemoCompany,
+  resetDemoCompany,
   saveFeatures,
   saveSetupStep,
   type SetupStep,
@@ -15,7 +16,7 @@ import {
   type TenantFeature,
 } from "../../shell/tenant/api";
 import { useTenantSettings } from "../../shell/tenant/TenantSettings";
-import { Alert, Badge, Button, buttonClassName, Card, EmptyState, PageHeader, Skeleton, type BadgeTone } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, EmptyState, PageHeader, Skeleton, type BadgeTone } from "../../shell/ui";
 import { z } from "zod";
 import { checks, hasRows } from "./checks";
 import { stepGuides } from "./guides";
@@ -266,15 +267,26 @@ export function FeaturesPage() {
 
 export function DemoCompanyPage() {
   const load = useMutation({ mutationFn: () => loadDemoCompany() });
+  const reset = useMutation({ mutationFn: () => resetDemoCompany() });
+  const [confirming, setConfirming] = useState(false);
+  const busy = load.isPending || reset.isPending;
   return (
     <div className={styles.stack}>
       <PageHeader title="Demo company" description="Fill this tenant with a sample manufacturer (three legal entities, plants, warehouses and teams), for trials and sales demos." />
       <Alert tone="info">
         Loading the demo company adds sample records. It never deletes or changes what you already have, so it is safe to repeat. Use it on a trial or demo tenant, not on a live company.
       </Alert>
-      <Card>
+      <Card title="Load" headingLevel={2}>
         <div className={styles.actions}>
-          <Button variant="primary" loading={load.isPending} onClick={() => load.mutate()}>
+          <Button
+            variant="primary"
+            loading={load.isPending}
+            disabled={busy}
+            onClick={() => {
+              reset.reset();
+              load.mutate();
+            }}
+          >
             Load the demo company
           </Button>
         </div>
@@ -284,11 +296,48 @@ export function DemoCompanyPage() {
           </p>
         ) : null}
         {load.isError ? (
-          <Alert tone="danger" live="alert">
+          <Alert tone="danger" live="alert" title="Could not load the demo company">
             <ProblemMessage problem={load.error} fallback="The demo company could not be loaded." />
           </Alert>
         ) : null}
       </Card>
+      <Card title="Start over" headingLevel={2}>
+        <p>
+          Resetting deletes the records the demo company created, with any changes made to them, and loads them fresh. Your own records are never deleted. If your own records have been added under a demo record, for example a
+          warehouse at a demo site, nothing is reset and you are told what is in the way.
+        </p>
+        <div className={styles.actions}>
+          <Button variant="danger" loading={reset.isPending} disabled={busy} onClick={() => setConfirming(true)}>
+            Reset the demo company
+          </Button>
+        </div>
+        {reset.isSuccess ? (
+          <p role="status">
+            {reset.data.removed === 0
+              ? `There was no demo company to remove. Added ${reset.data.created} sample records.`
+              : `Removed ${reset.data.removed} demo records and added ${reset.data.created} fresh ones.`}
+          </p>
+        ) : null}
+        {reset.isError ? (
+          <Alert tone="danger" live="alert" title="Could not reset the demo company">
+            <ProblemMessage problem={reset.error} fallback="The demo company could not be reset." />
+          </Alert>
+        ) : null}
+      </Card>
+      {confirming ? (
+        <ConfirmDialog
+          title="Reset the demo company?"
+          description="This deletes the demo company's legal entities, sites, warehouses, locations, operating units and teams, with every change made to them, then loads them again. It cannot be undone. Records you created yourself are kept."
+          confirmLabel="Reset the demo company"
+          cancelLabel="Keep it as it is"
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            load.reset();
+            reset.mutate();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
