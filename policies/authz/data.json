@@ -481,6 +481,7 @@
     ]},
     "fulfillment.shipment.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/shipments/*", "methods": ["GET"]}]},
     "ar.rmacredit.post": {"service_only": true, "permissions": [{"resource": "/v1/receivables/rma-credits", "methods": ["POST"]}]},
+    "ar.rmacredit.backfill": {"service_only": true, "permissions": [{"resource": "/v1/receivables/rma-credits:backfill-reservation", "methods": ["POST"]}]},
     "inventory.return-receipt.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/return-receipts", "methods": ["POST"]}]},
     "fulfillment.packing-slip.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/packing-slips/*", "methods": ["GET"]}]},
     "billing.credit-reservation.write": {"service_only": true, "permissions": [
@@ -3295,6 +3296,7 @@
       {"resource": "/v1/sales/return-orders/*:inspect", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:disposition", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:credit", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders:backfill-reservations", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:reject", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [
@@ -3763,7 +3765,7 @@
       "billing": ["billing.invoice.read"],
       "fulfillment": ["fulfillment.packing-slip.read"],
       "inventory": ["inventory.read", "inventory.return-receipt.post"],
-      "receivables": ["ar.rmacredit.post"],
+      "receivables": ["ar.rmacredit.post", "ar.rmacredit.backfill"],
       "party": ["party.read"]
     },
     "receivables": {

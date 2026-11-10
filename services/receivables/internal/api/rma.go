@@ -163,6 +163,39 @@ type rmaBackfillRequest struct {
 	InvoiceLines []store.RMAInvoiceLine `json:"invoiceLines"`
 }
 
+type rmaBackfillForRequest struct {
+	RMAID         string                 `json:"rmaId"`
+	LegalEntityID string                 `json:"legalEntityId"`
+	InvoiceID     string                 `json:"invoiceId"`
+	InvoiceLines  []store.RMAInvoiceLine `json:"invoiceLines"`
+}
+
+// backfillRMAReservationFor is the service call sales makes to give a credit posted before billing reservations
+// existed the reservation it never took; it finds the credit by RMA instead of by receivables' own id.
+func (a *API) backfillRMAReservationFor(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) || !legalEntityScoped(w, r) {
+		return
+	}
+	var req rmaBackfillForRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if !ids.Valid(req.RMAID) || !ids.Valid(req.LegalEntityID) {
+		writeFields(w, r, map[string]string{"rmaId": "must be a UUID", "legalEntityId": "must be a UUID"})
+		return
+	}
+	if !scopeAllows(w, r, req.LegalEntityID) {
+		return
+	}
+	out, err := a.store.BackfillRMAReservationFor(r.Context(), req.LegalEntityID, req.RMAID, req.InvoiceID, req.InvoiceLines)
+	if err != nil {
+		a.fail("backfill rma reservation", w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
 type rmaRetryRequest struct {
 	PostingDate string `json:"postingDate"`
 }

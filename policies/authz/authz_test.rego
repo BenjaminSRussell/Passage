@@ -1359,6 +1359,15 @@ test_migration_service_grant_reaches_only_the_import_routes if {
 	}
 }
 
+test_sales_backfills_rma_reservations_only_through_its_service_duty if {
+	data.service_grants.sales.receivables == ["ar.rmacredit.post", "ar.rmacredit.backfill"]
+	data.duties["ar.rmacredit.backfill"].service_only
+	allowed("ar.rmacredit.backfill", "POST", "/v1/receivables/rma-credits:backfill-reservation")
+	not allowed("ar.rmacredit.backfill", "POST", "/v1/receivables/rma-credits")
+	not allowed("ar.rmacredit.backfill", "POST", "/v1/receivables/rma-credits/c1:cancel")
+	not allowed("ar.rmacredit.post", "POST", "/v1/receivables/rma-credits:backfill-reservation")
+}
+
 test_opening_target_release_is_its_own_duty if {
 	allowed("migration.opening-target.release", "POST", "/api/v1/migration/opening-targets/AX2012/USMF/release")
 	not allowed("migration.opening-target.release", "POST", "/api/v1/migration/runs/r1/opening-journal")

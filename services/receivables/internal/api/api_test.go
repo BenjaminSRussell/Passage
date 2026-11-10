@@ -84,6 +84,10 @@ func (f *fakeStore) BackfillRMAReservation(_ context.Context, id, invoiceID stri
 	f.rmaRetries = append(f.rmaRetries, id+"|backfill|"+invoiceID)
 	return store.RMACreditView{ID: id, Status: "POSTED"}, nil
 }
+func (f *fakeStore) BackfillRMAReservationFor(_ context.Context, legalEntityID, rmaID, invoiceID string, lines []store.RMAInvoiceLine) (store.RMACreditView, error) {
+	f.rmaRetries = append(f.rmaRetries, legalEntityID+"|"+rmaID+"|backfill-for|"+invoiceID)
+	return store.RMACreditView{RMAID: rmaID, Status: "POSTED"}, nil
+}
 func (f *fakeStore) RetryRMACredit(_ context.Context, id, postingDate string) (store.RMACreditView, error) {
 	f.rmaRetries = append(f.rmaRetries, id+"|"+postingDate)
 	return store.RMACreditView{ID: id, Status: "POSTED", PostingDate: postingDate}, nil
