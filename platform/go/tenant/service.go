@@ -60,6 +60,7 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
 		"revrec": {"revrec.allocation.read"},
 		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
+		"tax":    {"tax.transaction.record"},
 	},
 	// fulfillment and transport reach carriers only through carrier-gateway (#482); transport buys no labels.
 	// fulfillment reports posted packing slips to sales' :record-progress (#496) and may report nothing else there.

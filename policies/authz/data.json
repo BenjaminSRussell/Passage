@@ -199,7 +199,7 @@
     "production.jobcard.shopfloor": {"flag": true, "permissions": []},
     "sales.order.record-delivery": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "sales.order.record-invoice": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
-    "tax.transaction.record": {"permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
+    "tax.transaction.record": {"service_only": true, "permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
     "tax.settlement.run": {"permissions": [{"resource": "/v1/tax/settlements:run", "methods": ["POST"]}]},
     "tax.recommit.run": {"permissions": [{"resource": "/v1/tax/recommit:run", "methods": ["POST"]}]},
     "tax.saft.export": {"permissions": [{"resource": "/v1/tax/saft", "methods": ["GET"]}]},
@@ -1963,13 +1963,15 @@
     "billing.invoice.post": {"permissions": [
       {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
       {"resource": "/v1/billing/invoices/*:post", "methods": ["POST"]},
-      {"resource": "/v1/billing/sales-reports/*:retry", "methods": ["POST"]}
+      {"resource": "/v1/billing/sales-reports/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/billing/tax-reports/*:retry", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]},
       {"resource": "/v1/billing/sales-reports", "methods": ["GET"]},
+      {"resource": "/v1/billing/tax-reports", "methods": ["GET"]},
       {"resource": "/v1/billing/subscriptions/*", "methods": ["GET"]}
     ]},
     "budget.check": {"permissions": [
@@ -3462,7 +3464,8 @@
     "billing": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
       "revrec": ["revrec.allocation.read"],
-      "sales": ["sales.order.record-invoice", "sales.order.record-delivery"]
+      "sales": ["sales.order.record-invoice", "sales.order.record-delivery"],
+      "tax": ["tax.transaction.record"]
     },
     "fulfillment": {
       "sales": ["sales.order.record-delivery"],
@@ -3626,6 +3629,7 @@
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
     "billing-sales-report": ["sales.order.record-invoice"],
+    "billing-tax-report": ["tax.transaction.record"],
     "fulfillment-sales-report": ["sales.order.record-delivery"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "inventory-postings": ["inventory.transaction.apply"],

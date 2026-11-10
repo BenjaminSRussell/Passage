@@ -637,6 +637,23 @@ test_billing_sales_report_operator_routes_split_view_and_post if {
 	not allowed("sales.order.record-invoice", "POST", "/v1/billing/sales-reports/r1:retry")
 }
 
+test_billing_tax_report_holds_only_the_tax_transaction_duty if {
+	data.service_principals["billing-tax-report"] == ["tax.transaction.record"]
+	data.duties["tax.transaction.record"].service_only
+	"tax.transaction.record" in data.service_grants.billing.tax
+	allowed("tax.transaction.record", "POST", "/v1/tax/transactions")
+	not allowed("tax.transaction.record", "POST", "/v1/tax/settlements:run")
+}
+
+test_billing_tax_report_operator_routes_split_view_and_post if {
+	allowed("billing.invoice.view", "GET", "/v1/billing/tax-reports")
+	allowed("billing.invoice.post", "POST", "/v1/billing/tax-reports/r1:retry")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/tax-reports/r1:retry")
+	not allowed("billing.invoice.post", "GET", "/v1/billing/tax-reports")
+	not allowed("billing.invoice.maintain", "POST", "/v1/billing/tax-reports/r1:retry")
+	not allowed("tax.transaction.record", "POST", "/v1/billing/tax-reports/r1:retry")
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],
