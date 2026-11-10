@@ -2055,3 +2055,8 @@ test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
 	not principal_allowed("receivables-billing", "POST", "/v1/billing/invoices")
 	not allowed("receivables.openitem.from-billing", "POST", "/v1/receivables/open-items")
 }
+
+test_asn_duties_do_not_cross if {
+	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
+	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
+}

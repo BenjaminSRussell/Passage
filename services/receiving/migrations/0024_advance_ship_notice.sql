@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS receiving_asn (
   status text NOT NULL CHECK (status IN ('OPEN', 'RECEIVING')),
   carrier text,
   tracking_number text,
+  tracking_key text,
   ship_date date,
   expected_arrival date,
   lines jsonb NOT NULL,
@@ -14,12 +15,13 @@ CREATE TABLE IF NOT EXISTS receiving_asn (
   created_at timestamptz NOT NULL DEFAULT now(),
   receipt_id uuid,
   PRIMARY KEY (tenant_id, id),
-  CHECK ((status = 'OPEN') = (receipt_id IS NULL))
+  CHECK ((status = 'OPEN') = (receipt_id IS NULL)),
+  FOREIGN KEY (tenant_id, receipt_id) REFERENCES receiving_receipt (tenant_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS receiving_asn_po_ix ON receiving_asn (tenant_id, purchase_order_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS receiving_asn_vendor_ix ON receiving_asn (tenant_id, vendor_id, created_at DESC, id DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS receiving_asn_tracking_ux ON receiving_asn (tenant_id, vendor_id, tracking_number) WHERE tracking_number IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS receiving_asn_tracking_ux ON receiving_asn (tenant_id, legal_entity_id, vendor_id, tracking_key) WHERE tracking_key IS NOT NULL;
 
 DO $$
 DECLARE
@@ -36,13 +38,13 @@ $$;
 
 CREATE OR REPLACE FUNCTION receiving_asn_status_guard() RETURNS trigger AS $fn$
 BEGIN
-  IF OLD.status <> 'OPEN' THEN
-    RAISE EXCEPTION 'advance ship notice in status % cannot be updated', OLD.status USING ERRCODE = 'check_violation';
+  IF OLD.status = 'OPEN' AND NEW.status = 'RECEIVING' THEN
+    RETURN NEW;
   END IF;
-  IF NEW.status <> 'RECEIVING' THEN
-    RAISE EXCEPTION 'advance ship notice can only move to RECEIVING' USING ERRCODE = 'check_violation';
+  IF OLD.status = 'RECEIVING' AND NEW.status = 'OPEN' AND NEW.receipt_id IS NULL THEN
+    RETURN NEW;
   END IF;
-  RETURN NEW;
+  RAISE EXCEPTION 'advance ship notice cannot move from % to %', OLD.status, NEW.status USING ERRCODE = 'check_violation';
 END
 $fn$ LANGUAGE plpgsql;
 

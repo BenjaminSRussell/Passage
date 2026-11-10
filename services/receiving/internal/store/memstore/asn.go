@@ -26,18 +26,24 @@ func (t *tenantData) asnInScope(principal tenant.Principal, id string) (store.As
 	return a, valid && ok && tenant.InLegalEntityScope(principal, a.LegalEntityID)
 }
 
-func (s *Store) CreateAsn(ctx context.Context, in store.Asn, limits map[int]decimal.Decimal) (out store.Asn, err error) {
+func (s *Store) CreateAsn(ctx context.Context, in store.Asn, ordered map[int]decimal.Decimal) (out store.Asn, err error) {
+	in.TrackingNumber = strings.TrimSpace(in.TrackingNumber)
+	key := store.AsnTrackingKey(in.TrackingNumber)
 	err = s.with(ctx, func(t *tenantData) error {
-		var existing []store.Asn
+		var holding []store.Asn
 		for _, a := range t.asns {
-			if a.PurchaseOrderID == in.PurchaseOrderID {
-				existing = append(existing, a)
+			if a.PurchaseOrderID == in.PurchaseOrderID && (a.Status == domain.AsnOpen || t.receipts[a.ReceiptID].State == domain.Arrived) {
+				holding = append(holding, a)
 			}
-			if in.TrackingNumber != "" && a.VendorID == in.VendorID && a.TrackingNumber == in.TrackingNumber {
+			if key != "" && a.LegalEntityID == in.LegalEntityID && a.VendorID == in.VendorID && store.AsnTrackingKey(a.TrackingNumber) == key {
 				return store.AsnTrackingTaken(in.TrackingNumber, a.ID)
 			}
 		}
-		if err := store.CheckAsnLimits(in, existing, limits); err != nil {
+		received := map[int]decimal.Decimal{}
+		for no := range ordered {
+			received[no] = t.receivedOn("", in.PurchaseOrderID, no)
+		}
+		if err := store.CheckAsnLimits(in, holding, store.AsnOpenQuantities(ordered, received)); err != nil {
 			return err
 		}
 		in.Status, in.CreatedAt = domain.AsnOpen, time.Now().UTC()

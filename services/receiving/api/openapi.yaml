@@ -499,11 +499,12 @@ paths:
       operationId: startReceiptFromAsn
       x-passage-duty: receiving.asn.receive
       description: >-
-        Opens the receipt for an OPEN notice: creates an ARRIVED receipt (packing slip ASN-{id}) whose lines are the notice lines
+        Opens the receipt for an OPEN notice: creates an ARRIVED receipt (packing slip ASN-{id}-{suffix}) whose lines are the notice lines
         bound to the purchase order, marks the notice RECEIVING and records the receipt on it, in one transaction. The response carries
         the body to send to POST /v1/receiving/receipts/{id}:register as it stands (quantities, batches, serials, and the optional
-        locationId given here), so registration is one confirmation. Expiry dates are returned by line number in expiryDates;
-        receiving does not store them on the receipt. The body may be omitted. A notice yields one receipt (409 SUP-ASN-003).
+        locationId given here, and each line's expiryDate), so registration is one confirmation and stores batch and expiry.
+        The packing slip carries a per-attempt suffix because a cancelled receipt keeps its slip. Cancelling the ARRIVED receipt
+        returns the notice to OPEN. The body may be omitted. A notice yields one receipt (409 SUP-ASN-003).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -528,10 +529,11 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
-        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-010' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-010 unknown notice; RCV-NF-004 the purchase order is unknown.' }
         '409': { $ref: '#/components/responses/Problem', description: 'SUP-ASN-003 the notice already started a receipt; RCV-DUP-001.' }
-        '422': { $ref: '#/components/responses/Problem', description: 'INV-OVR-001 no open quantity left on a line; RCV-PO-002, RCV-PO-006, RCV-PO-007.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-PO-001, RCV-PO-003, RCV-PO-004, RCV-PO-005 purchase order not usable; INV-OVR-001 no open quantity left on a line; RCV-PO-002, RCV-PO-006, RCV-PO-007.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 the purchasing service is unavailable.' }
   /v1/receiving/service-entry-sheets:
     post:
       operationId: createServiceEntrySheet
@@ -1210,6 +1212,7 @@ components:
         serialTracked: { type: boolean }
         qty: { type: string }
         batch: { type: string }
+        expiryDate: { type: string, format: date, description: Expiry of the batch; absent when none was registered. }
         serials: { type: array, items: { type: string } }
         locationId: { type: string }
         inventoryStatus: { type: string }
@@ -1314,6 +1317,7 @@ components:
                   min: { type: [number, string] }
                   max: { type: [number, string] }
               batch: { type: string, maxLength: 128 }
+              expiryDate: { type: string, format: date, description: Expiry of the batch; stored on the receipt line. }
               serials: { type: array, maxItems: 1000, items: { type: string, minLength: 1, maxLength: 64 } }
               locationId: { type: string, format: uuid }
               inventoryStatus: { type: string, enum: [AVAILABLE, QUARANTINE, BLOCKED], default: AVAILABLE }
@@ -1537,9 +1541,9 @@ components:
                   lineNo: { type: integer }
                   qty: { type: string }
                   batch: { type: string }
+                  expiryDate: { type: string, format: date }
                   serials: { type: array, items: { type: string } }
                   locationId: { type: string, format: uuid }
-        expiryDates: { type: object, additionalProperties: { type: string, format: date }, description: Expiry date by receipt line number, for lines that carry one. }
     ServiceEntrySheet:
       type: object
       required: [id, legalEntityId, vendorId, purchaseOrderId, currency, status, total, createdBy, createdAt, lines]

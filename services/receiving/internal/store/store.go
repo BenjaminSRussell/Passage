@@ -66,6 +66,7 @@ type Line struct {
 	// book the receipt.
 	SiteID      string
 	WarehouseID string
+	ExpiryDate  time.Time
 }
 
 type Receipt struct {
@@ -312,7 +313,7 @@ type Store interface {
 	GetSheet(ctx context.Context, id string) (ServiceSheet, error)
 	DecideSheet(ctx context.Context, id, by string, accept bool, reason string, fn SheetDecisionFunc) (ServiceSheet, error)
 	AcceptSheet(ctx context.Context, id, by string, fn SheetAcceptFunc) (ServiceSheet, error)
-	CreateAsn(ctx context.Context, in Asn, limits map[int]decimal.Decimal) (Asn, error)
+	CreateAsn(ctx context.Context, in Asn, ordered map[int]decimal.Decimal) (Asn, error)
 	GetAsn(ctx context.Context, id string) (Asn, error)
 	ListAsns(ctx context.Context, f AsnFilter) ([]Asn, error)
 	StartAsnReceipt(ctx context.Context, id string, rec Receipt) (Asn, Receipt, error)

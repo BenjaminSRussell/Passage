@@ -75,6 +75,7 @@ type asnRegistrationLine struct {
 	Batch      string   `json:"batch,omitempty"`
 	Serials    []string `json:"serials,omitempty"`
 	LocationID string   `json:"locationId,omitempty"`
+	ExpiryDate string   `json:"expiryDate,omitempty"`
 }
 
 type asnRegistration struct {
@@ -82,10 +83,9 @@ type asnRegistration struct {
 }
 
 type asnReceiptBody struct {
-	Asn          asnBody           `json:"asn"`
-	Receipt      receiptBody       `json:"receipt"`
-	Registration asnRegistration   `json:"registration"`
-	ExpiryDates  map[string]string `json:"expiryDates,omitempty"`
+	Asn          asnBody         `json:"asn"`
+	Receipt      receiptBody     `json:"receipt"`
+	Registration asnRegistration `json:"registration"`
 }
 
 type asnPage struct {
@@ -123,8 +123,11 @@ func validateAsn(req asnRequest) (store.Asn, map[string]string) {
 		fields["trackingNumber"] = fmt.Sprintf("must be at most %d characters", maxTracking)
 	}
 	in := store.Asn{
-		LegalEntityID: req.LegalEntityID, PurchaseOrderID: req.PurchaseOrderID, Carrier: req.Carrier, TrackingNumber: req.TrackingNumber,
+		LegalEntityID: req.LegalEntityID, PurchaseOrderID: req.PurchaseOrderID, Carrier: req.Carrier, TrackingNumber: strings.TrimSpace(req.TrackingNumber),
 		ShipDate: optionalDate(fields, "shipDate", req.ShipDate), ExpectedArrival: optionalDate(fields, "expectedArrival", req.ExpectedArrival),
+	}
+	if !in.ShipDate.IsZero() && !in.ExpectedArrival.IsZero() && in.ExpectedArrival.Before(in.ShipDate) {
+		fields["expectedArrival"] = "must not be before the ship date"
 	}
 	if len(req.Lines) == 0 || len(req.Lines) > domain.MaxAsnLines {
 		fields["lines"] = fmt.Sprintf("must hold 1 to %d lines", domain.MaxAsnLines)
@@ -156,9 +159,15 @@ func validateAsn(req asnRequest) (store.Asn, map[string]string) {
 		} else if len(l.Serials) > 0 && !decimal.NewFromInt(int64(len(l.Serials))).Equal(line.Qty) {
 			fields[key("serials")] = "must hold one serial per unit shipped"
 		}
+		seenSerial := map[string]int{}
 		for j, s := range l.Serials {
+			name := fmt.Sprintf("lines[%d].serials[%d]", i, j)
 			if n := utf8.RuneCountInString(s); n < 1 || n > maxSerial {
-				fields[fmt.Sprintf("lines[%d].serials[%d]", i, j)] = fmt.Sprintf("must be 1 to %d characters", maxSerial)
+				fields[name] = fmt.Sprintf("must be 1 to %d characters", maxSerial)
+			} else if first, dup := seenSerial[s]; dup {
+				fields[name] = fmt.Sprintf("duplicates serials[%d]", first)
+			} else {
+				seenSerial[s] = j
 			}
 		}
 		optionalDate(fields, key("expiryDate"), l.ExpiryDate)
@@ -195,16 +204,11 @@ func (a *API) createAsn(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, poProblem(http.StatusUnprocessableEntity, "RCV-PO-003", "purchase order belongs to another legal entity"))
 		return
 	}
-	received, err := a.store.ReceivedOnPurchaseOrder(r.Context(), req.PurchaseOrderID)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	byNo := map[int]domain.PurchaseOrderLine{}
 	for _, l := range po.Lines {
 		byNo[l.LineNo] = l
 	}
-	limits := map[int]decimal.Decimal{}
+	ordered := map[int]decimal.Decimal{}
 	for i, l := range in.Lines {
 		line, found := byNo[l.POLineNo]
 		switch {
@@ -215,10 +219,10 @@ func (a *API) createAsn(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, poProblem(http.StatusUnprocessableEntity, "RCV-PO-002", "purchase order line %d is cancelled", l.POLineNo))
 			return
 		}
-		limits[l.POLineNo] = openQuantity(line.Qty, received[l.POLineNo])
+		ordered[l.POLineNo] = line.Qty
 	}
 	in.ID, in.VendorID, in.CreatedBy = ids.New(), po.VendorID, p.UserID
-	created, err := a.store.CreateAsn(r.Context(), in, limits)
+	created, err := a.store.CreateAsn(r.Context(), in, ordered)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -276,7 +280,7 @@ func (a *API) receiptFromAsn(r *http.Request, asn store.Asn, date time.Time) (st
 		byNo[l.LineNo] = l
 	}
 	rec := store.Receipt{
-		LegalEntityID: asn.LegalEntityID, VendorID: asn.VendorID, PurchaseOrderID: asn.PurchaseOrderID, PackingSlip: domain.AsnPackingPrefix + asn.ID,
+		LegalEntityID: asn.LegalEntityID, VendorID: asn.VendorID, PurchaseOrderID: asn.PurchaseOrderID, PackingSlip: domain.AsnPackingPrefix + asn.ID + "-" + ids.New()[:8],
 		Carrier: asn.Carrier, Date: date, Currency: po.Currency, ExchangeRate: decimal.NewFromInt(1),
 	}
 	for i, l := range asn.Lines {
@@ -345,23 +349,13 @@ func (a *API) startAsnReceipt(w http.ResponseWriter, r *http.Request) {
 	a.asnReceipts.Add(1)
 	a.arrived.Add(1)
 	w.Header().Set("Location", "/v1/receiving/receipts/"+created.ID)
-	httpx.JSON(w, http.StatusCreated, asnReceiptBody{Asn: toAsnBody(asn), Receipt: toReceiptBody(created), Registration: registrationFromAsn(asn, req.LocationID), ExpiryDates: expiryDates(asn)})
+	httpx.JSON(w, http.StatusCreated, asnReceiptBody{Asn: toAsnBody(asn), Receipt: toReceiptBody(created), Registration: registrationFromAsn(asn, req.LocationID)})
 }
 
 func registrationFromAsn(asn store.Asn, locationID string) asnRegistration {
 	out := asnRegistration{Lines: make([]asnRegistrationLine, 0, len(asn.Lines))}
 	for i, l := range asn.Lines {
-		out.Lines = append(out.Lines, asnRegistrationLine{LineNo: i + 1, Qty: l.Qty.String(), Batch: l.Batch, Serials: l.Serials, LocationID: locationID})
-	}
-	return out
-}
-
-func expiryDates(asn store.Asn) map[string]string {
-	out := map[string]string{}
-	for i, l := range asn.Lines {
-		if l.ExpiryDate != "" {
-			out[fmt.Sprint(i+1)] = l.ExpiryDate
-		}
+		out.Lines = append(out.Lines, asnRegistrationLine{LineNo: i + 1, Qty: l.Qty.String(), Batch: l.Batch, Serials: l.Serials, LocationID: locationID, ExpiryDate: l.ExpiryDate})
 	}
 	return out
 }

@@ -30,9 +30,8 @@ type asnJSON struct {
 }
 
 type asnReceiptJSON struct {
-	Asn         asnJSON           `json:"asn"`
-	Receipt     receiptJSON       `json:"receipt"`
-	ExpiryDates map[string]string `json:"expiryDates"`
+	Asn     asnJSON     `json:"asn"`
+	Receipt receiptJSON `json:"receipt"`
 }
 
 func asnPO() domain.PurchaseOrder {
@@ -172,17 +171,17 @@ func TestAsn_StartReceiptPrefillsRegistrationAndRecordsTheReceipt(t *testing.T) 
 	if got.Receipt.State != "ARRIVED" || len(got.Receipt.Lines) != 2 || got.Asn.Status != "RECEIVING" || got.Asn.ReceiptID != got.Receipt.ID {
 		t.Fatalf("started %+v", got)
 	}
-	if got.ExpiryDates["1"] != "2027-01-31" || got.ExpiryDates["2"] != "2027-03-15" {
-		t.Fatalf("expiry dates %v", got.ExpiryDates)
-	}
 
 	registered := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+got.Receipt.ID+":register", string(registrationOf(t, rec.Body.Bytes())), rg.maintain("If-Match", `"1"`)), http.StatusOK)
 	if registered.State != "REGISTERED" || registered.Lines[0].Qty != "30" || registered.Lines[1].Qty != "12" {
 		t.Fatalf("registered from the pre-filled body %+v", registered)
 	}
-	read := rg.call(http.MethodGet, receiptsPath+"/"+got.Receipt.ID, "", rg.maintain())
-	if !strings.Contains(read.Body.String(), `"batch":"LOT-A"`) || !strings.Contains(read.Body.String(), `"batch":"LOT-B"`) {
-		t.Fatalf("batches not carried to the receipt: %s", read.Body)
+	if registered.Lines[0].Expiry != "2027-01-31" || registered.Lines[1].Expiry != "2027-03-15" || registered.Lines[0].Batch != "LOT-A" || registered.Lines[1].Batch != "LOT-B" {
+		t.Fatalf("one confirmation must store batch and expiry for both lines %+v", registered.Lines)
+	}
+	read := decode[receiptJSON](t, rg.call(http.MethodGet, receiptsPath+"/"+got.Receipt.ID, "", rg.maintain()), http.StatusOK)
+	if read.Lines[0].Expiry != "2027-01-31" || read.Lines[1].Expiry != "2027-03-15" {
+		t.Fatalf("expiry not stored on the receipt: %+v", read.Lines)
 	}
 
 	replay := rg.call(http.MethodPost, path, fmt.Sprintf(`{"receiptDate":"2026-11-05","locationId":%q}`, locationID), duty("receiving.asn.receive", "start-1"))
@@ -208,4 +207,39 @@ func registrationOf(t *testing.T, body []byte) []byte {
 		t.Fatal(err)
 	}
 	return envelope.Registration
+}
+
+func TestAsn_TrackingNumberIsTrimmedAndCaseFolded(t *testing.T) {
+	rg := newSheetRig(asnPO())
+	rg.createAsn(t, "TRK-1", asnLine(1, "5", "", ""))
+	if r := rg.vendorAsn(asnBodyFor("  trk-1 ", asnLine(2, "5", "", ""))); r.code != http.StatusConflict || !strings.Contains(r.body, "SUP-ASN-002") {
+		t.Fatalf("padded lower-case duplicate: %d %s", r.code, r.body)
+	}
+}
+
+func TestAsn_StartReceiptNeedsTheReceiveDutyAndAPurchaseOrderInTheEntity(t *testing.T) {
+	rg := newSheetRig(asnPO())
+	asn := rg.createAsn(t, "TRK-1", asnLine(1, "5", "", ""))
+	path := asnsPath + "/" + asn.ID + ":start-receipt"
+	if rec := rg.call(http.MethodPost, path, "", duty("receiving.asn.maintain", rg.key())); rec.Code != http.StatusForbidden {
+		t.Fatalf("the vendor duty started a receipt: %d %s", rec.Code, rec.Body)
+	}
+	if rec := rg.call(http.MethodPost, asnsPath, asnBodyFor("TRK-9", asnLine(1, "1", "", "")), duty("receiving.asn.receive", rg.key())); rec.Code != http.StatusForbidden {
+		t.Fatalf("the receive duty created a notice: %d %s", rec.Code, rec.Body)
+	}
+
+	foreign := asnPO()
+	foreign.LegalEntityID = otherEntityID
+	if r := newSheetRig(foreign).vendorAsn(asnBodyFor("TRK-1", asnLine(1, "1", "", ""))); r.code != http.StatusUnprocessableEntity || !strings.Contains(r.body, "RCV-PO-003") {
+		t.Fatalf("purchase order of another legal entity: %d %s", r.code, r.body)
+	}
+}
+
+func TestAsn_ManualPackingSlipsCannotUseTheReservedPrefix(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	for _, slip := range []string{"ASN-1", "asn-2"} {
+		if rec := rg.call(http.MethodPost, "/v1/receiving/arrivals", arrivalJSON(slip, ""), rg.maintain()); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d %s", slip, rec.Code, rec.Body)
+		}
+	}
 }

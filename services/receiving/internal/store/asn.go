@@ -43,12 +43,11 @@ type AsnFilter struct {
 	Limit           int
 }
 
-func AsnCommitted(asns []Asn) map[int]decimal.Decimal {
+func AsnTrackingKey(tracking string) string { return strings.ToLower(strings.TrimSpace(tracking)) }
+
+func AsnCommitted(holding []Asn) map[int]decimal.Decimal {
 	committed := map[int]decimal.Decimal{}
-	for _, a := range asns {
-		if a.Status != domain.AsnOpen {
-			continue
-		}
+	for _, a := range holding {
 		for _, l := range a.Lines {
 			committed[l.POLineNo] = committed[l.POLineNo].Add(l.Qty)
 		}
@@ -56,8 +55,8 @@ func AsnCommitted(asns []Asn) map[int]decimal.Decimal {
 	return committed
 }
 
-func CheckAsnLimits(in Asn, existing []Asn, limits map[int]decimal.Decimal) error {
-	committed := AsnCommitted(existing)
+func CheckAsnLimits(in Asn, holding []Asn, limits map[int]decimal.Decimal) error {
+	committed := AsnCommitted(holding)
 	added := map[int]decimal.Decimal{}
 	for _, l := range in.Lines {
 		added[l.POLineNo] = added[l.POLineNo].Add(l.Qty)
@@ -71,6 +70,14 @@ func CheckAsnLimits(in Asn, existing []Asn, limits map[int]decimal.Decimal) erro
 	return nil
 }
 
+func AsnOpenQuantities(ordered, received map[int]decimal.Decimal) map[int]decimal.Decimal {
+	open := make(map[int]decimal.Decimal, len(ordered))
+	for no, qty := range ordered {
+		open[no] = decimal.Max(qty.Sub(received[no]), decimal.Zero)
+	}
+	return open
+}
+
 func AsnTrackingTaken(tracking, otherID string) error {
 	return &domain.Error{Code: domain.CodeAsnTracking, Detail: fmt.Sprintf("Tracking number %s already used on ASN %s", tracking, otherID)}
 }
@@ -79,8 +86,8 @@ func AsnConsumed(a Asn) error {
 	return &domain.Error{Code: domain.CodeAsnConsumed, Detail: fmt.Sprintf("ASN %s already started receipt %s", a.ID, a.ReceiptID)}
 }
 
-const asnColumns = `id::text, legal_entity_id::text, vendor_id::text, purchase_order_id::text, status, COALESCE(carrier, ''), COALESCE(tracking_number, ''),
-	ship_date, expected_arrival, lines, created_by, created_at, COALESCE(receipt_id::text, '')`
+const asnColumns = `a.id::text, a.legal_entity_id::text, a.vendor_id::text, a.purchase_order_id::text, a.status, COALESCE(a.carrier, ''), COALESCE(a.tracking_number, ''),
+	a.ship_date, a.expected_arrival, a.lines, a.created_by, a.created_at, COALESCE(a.receipt_id::text, '')`
 
 func scanAsn(row pgx.Row) (Asn, error) {
 	var a Asn
@@ -98,8 +105,9 @@ func scanAsn(row pgx.Row) (Asn, error) {
 	return a, json.Unmarshal(lines, &a.Lines)
 }
 
-func asnsOfOrder(ctx context.Context, tx pgx.Tx, tenantID, purchaseOrderID string) ([]Asn, error) {
-	rows, err := tx.Query(ctx, `SELECT `+asnColumns+` FROM receiving_asn WHERE tenant_id = $1 AND purchase_order_id = $2 AND status = 'OPEN'`, tenantID, purchaseOrderID)
+func asnsHoldingQuantity(ctx context.Context, tx pgx.Tx, tenantID, purchaseOrderID string) ([]Asn, error) {
+	rows, err := tx.Query(ctx, `SELECT `+asnColumns+` FROM receiving_asn a WHERE a.tenant_id = $1 AND a.purchase_order_id = $2 AND (a.status = 'OPEN'
+		OR EXISTS (SELECT 1 FROM receiving_receipt r WHERE r.tenant_id = a.tenant_id AND r.id = a.receipt_id AND r.state = 'ARRIVED'))`, tenantID, purchaseOrderID)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +123,7 @@ func asnsOfOrder(ctx context.Context, tx pgx.Tx, tenantID, purchaseOrderID strin
 	return out, rows.Err()
 }
 
-func (s *Postgres) CreateAsn(ctx context.Context, in Asn, limits map[int]decimal.Decimal) (Asn, error) {
+func (s *Postgres) CreateAsn(ctx context.Context, in Asn, ordered map[int]decimal.Decimal) (Asn, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return Asn{}, err
@@ -124,20 +132,26 @@ func (s *Postgres) CreateAsn(ctx context.Context, in Asn, limits map[int]decimal
 	if err != nil {
 		return Asn{}, err
 	}
+	in.TrackingNumber = strings.TrimSpace(in.TrackingNumber)
+	key := AsnTrackingKey(in.TrackingNumber)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.ToLower(tenantID+"|asns|"+in.PurchaseOrderID)); err != nil {
 			return err
 		}
-		existing, err := asnsOfOrder(ctx, tx, tenantID, in.PurchaseOrderID)
+		holding, err := asnsHoldingQuantity(ctx, tx, tenantID, in.PurchaseOrderID)
 		if err != nil {
 			return err
 		}
-		if err := CheckAsnLimits(in, existing, limits); err != nil {
+		received, err := receivedOnOrder(ctx, tx, tenantID, in.PurchaseOrderID)
+		if err != nil {
 			return err
 		}
-		if in.TrackingNumber != "" {
+		if err := CheckAsnLimits(in, holding, AsnOpenQuantities(ordered, received)); err != nil {
+			return err
+		}
+		if key != "" {
 			var other string
-			err := tx.QueryRow(ctx, `SELECT id::text FROM receiving_asn WHERE tenant_id = $1 AND vendor_id = $2 AND tracking_number = $3`, tenantID, in.VendorID, in.TrackingNumber).Scan(&other)
+			err := tx.QueryRow(ctx, `SELECT id::text FROM receiving_asn WHERE tenant_id = $1 AND legal_entity_id = $2 AND vendor_id = $3 AND tracking_key = $4`, tenantID, in.LegalEntityID, in.VendorID, key).Scan(&other)
 			if err == nil {
 				return AsnTrackingTaken(in.TrackingNumber, other)
 			}
@@ -145,9 +159,9 @@ func (s *Postgres) CreateAsn(ctx context.Context, in Asn, limits map[int]decimal
 				return err
 			}
 		}
-		return tx.QueryRow(ctx, `INSERT INTO receiving_asn (tenant_id, id, legal_entity_id, vendor_id, purchase_order_id, status, carrier, tracking_number, ship_date, expected_arrival, lines, created_by)
-			VALUES ($1, $2, $3, $4, $5, 'OPEN', NULLIF($6, ''), NULLIF($7, ''), $8, $9, $10, $11) RETURNING created_at`,
-			tenantID, in.ID, in.LegalEntityID, in.VendorID, in.PurchaseOrderID, in.Carrier, in.TrackingNumber, nullTime(in.ShipDate), nullTime(in.ExpectedArrival), lines, in.CreatedBy).Scan(&in.CreatedAt)
+		return tx.QueryRow(ctx, `INSERT INTO receiving_asn (tenant_id, id, legal_entity_id, vendor_id, purchase_order_id, status, carrier, tracking_number, tracking_key, ship_date, expected_arrival, lines, created_by)
+			VALUES ($1, $2, $3, $4, $5, 'OPEN', NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9, $10, $11, $12) RETURNING created_at`,
+			tenantID, in.ID, in.LegalEntityID, in.VendorID, in.PurchaseOrderID, in.Carrier, in.TrackingNumber, key, nullTime(in.ShipDate), nullTime(in.ExpectedArrival), lines, in.CreatedBy).Scan(&in.CreatedAt)
 	})
 	if isUnique(err, asnTrackingConstraint) {
 		return Asn{}, AsnTrackingTaken(in.TrackingNumber, "of another purchase order")
@@ -164,7 +178,7 @@ func (s *Postgres) GetAsn(ctx context.Context, id string) (Asn, error) {
 	var out Asn
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanAsn(tx.QueryRow(ctx, `SELECT `+asnColumns+` FROM receiving_asn WHERE tenant_id = $1 AND id = $2`, tenantID, id))
+		out, err = scanAsn(tx.QueryRow(ctx, `SELECT `+asnColumns+` FROM receiving_asn a WHERE a.tenant_id = $1 AND a.id = $2`, tenantID, id))
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -189,10 +203,10 @@ func (s *Postgres) ListAsns(ctx context.Context, f AsnFilter) ([]Asn, error) {
 	}
 	var out []Asn
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+asnColumns+` FROM receiving_asn
-			WHERE tenant_id = $1 AND ($2 = '' OR vendor_id = $2::uuid) AND ($3 = '' OR purchase_order_id = $3::uuid)
-			AND ($4::timestamptz IS NULL OR (created_at, id) < ($4::timestamptz, $5::uuid))
-			ORDER BY created_at DESC, id DESC LIMIT $6`,
+		rows, err := tx.Query(ctx, `SELECT `+asnColumns+` FROM receiving_asn a
+			WHERE a.tenant_id = $1 AND ($2 = '' OR a.vendor_id = $2::uuid) AND ($3 = '' OR a.purchase_order_id = $3::uuid)
+			AND ($4::timestamptz IS NULL OR (a.created_at, a.id) < ($4::timestamptz, $5::uuid))
+			ORDER BY a.created_at DESC, a.id DESC LIMIT $6`,
 			tenantID, f.VendorID, f.PurchaseOrderID, nullTime(f.CursorCreatedAt), cursorID, limit+1)
 		if err != nil {
 			return err
@@ -220,7 +234,7 @@ func (s *Postgres) StartAsnReceipt(ctx context.Context, id string, rec Receipt) 
 	var out Receipt
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		asn, err = scanAsn(tx.QueryRow(ctx, `SELECT `+asnColumns+` FROM receiving_asn WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, id))
+		asn, err = scanAsn(tx.QueryRow(ctx, `SELECT `+asnColumns+` FROM receiving_asn a WHERE a.tenant_id = $1 AND a.id = $2 FOR UPDATE`, tenantID, id))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrAsnNotFound
 		}
@@ -244,4 +258,9 @@ func (s *Postgres) StartAsnReceipt(ctx context.Context, id string, rec Receipt) 
 		return Asn{}, Receipt{}, s.mapWriteError(ctx, tenantID, rec, err)
 	}
 	return asn, out, nil
+}
+
+func reopenAsn(ctx context.Context, tx pgx.Tx, tenantID, receiptID string) error {
+	_, err := tx.Exec(ctx, `UPDATE receiving_asn SET status = 'OPEN', receipt_id = NULL WHERE tenant_id = $1 AND receipt_id = $2`, tenantID, receiptID)
+	return err
 }

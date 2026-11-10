@@ -219,7 +219,7 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 			if r.Lines[i].LineNo != l.LineNo {
 				continue
 			}
-			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID = l.Qty, l.Batch, l.LocationID
+			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID, r.Lines[i].ExpiryDate = l.Qty, l.Batch, l.LocationID, l.ExpiryDate
 			r.Lines[i].InventoryStatus = cmp.Or(l.InventoryStatus, "AVAILABLE")
 			r.Lines[i].Serials = slices.Sorted(slices.Values(l.Serials))
 			r.Lines[i].CWQty, r.Lines[i].CWNominal, r.Lines[i].CWMin, r.Lines[i].CWMax = l.CWQty, l.CWNominal, l.CWMin, l.CWMax
@@ -846,6 +846,12 @@ func (s *Store) Cancel(ctx context.Context, id string, fn store.AdjustFunc) (out
 		current.State = domain.Cancelled
 		current.Version++
 		t.receipts[id] = current
+		for key, a := range t.asns {
+			if a.ReceiptID == id {
+				a.Status, a.ReceiptID = domain.AsnOpen, ""
+				t.asns[key] = a
+			}
+		}
 		s.emit(adj)
 		out = cloneReceipt(current)
 		return nil
