@@ -200,7 +200,7 @@ paths:
   /v1/budget/encumbrances/{id}:convert:
     post:
       operationId: convertPreEncumbrance
-      x-passage-duty: budget.check
+      x-passage-duty: budget.encumbrance.convert
       description: >-
         A budget check of a Requisition reserves a pre-encumbrance (stage pre, in the balance's preEncumbrances). The confirmed
         purchase order converts it: the open amount moves from preEncumbrances to encumbrances and the line is re-keyed to the PO
@@ -213,6 +213,24 @@ paths:
       requestBody:
         required: true
         content: { application/json: { schema: { type: object, required: [purchaseOrderId, purchaseOrderLineId], additionalProperties: false, properties: { purchaseOrderId: { type: string, format: uuid }, purchaseOrderLineId: { type: string, format: uuid } } } } }
+      responses:
+        '200':
+          description: The amount that moved.
+          content: { application/json: { schema: { type: object, required: [encumbranceId, purchaseOrderId, purchaseOrderLineId, converted, status], properties: { encumbranceId: { type: string, format: uuid }, purchaseOrderId: { type: string, format: uuid }, purchaseOrderLineId: { type: string, format: uuid }, converted: { $ref: '#/components/schemas/Money' }, status: { type: string } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/encumbrances:convert:
+    post:
+      operationId: convertPreEncumbranceByLine
+      x-passage-duty: budget.encumbrance.convert
+      description: >-
+        Service-only (purchasing). The same conversion, naming the pre-encumbrance by the requisition line it was checked for
+        (the line id of the Requisition check). BUD-0002 (404) when nothing was reserved for that line, which purchasing treats as
+        "nothing to convert".
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [requisitionLineId, purchaseOrderId, purchaseOrderLineId], additionalProperties: false, properties: { requisitionLineId: { type: string, format: uuid }, purchaseOrderId: { type: string, format: uuid }, purchaseOrderLineId: { type: string, format: uuid } } } } }
       responses:
         '200':
           description: The amount that moved.

@@ -1109,8 +1109,14 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
-test_budget_check_converts_a_pre_encumbrance_and_view_cannot if {
-	allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
+test_budget_conversion_is_service_only_and_reaches_only_the_convert_routes if {
+	data.duties["budget.encumbrance.convert"].service_only
+	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert"]
+	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:convert")
+	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances:convert")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/checks")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:release")
+	not allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
 	not allowed("budget.view", "POST", "/v1/budget/encumbrances/e1:convert")
 }
 

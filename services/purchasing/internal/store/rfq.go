@@ -431,6 +431,9 @@ func (s *Postgres) AwardRFQ(ctx context.Context, id string, ifMatch int, awards 
 		out, err = loadRFQ(ctx, tx, id)
 		return err
 	})
+	if err == nil {
+		s.created(ctx, pos...)
+	}
 	return out, pos, err
 }
 

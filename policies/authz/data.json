@@ -2053,7 +2053,6 @@
     ]},
     "budget.check": {"permissions": [
       {"resource": "/v1/budget/checks", "methods": ["POST"]},
-      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:release", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:relieve", "methods": ["POST"]},
       {"resource": "/v1/budget/reservations/*:consume", "methods": ["POST"]}
@@ -2072,6 +2071,10 @@
       {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
+    ]},
+    "budget.encumbrance.convert": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
+      {"resource": "/v1/budget/encumbrances:convert", "methods": ["POST"]}
     ]},
     "budget.plan.workflow": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
@@ -3581,6 +3584,9 @@
       "party": ["party.inbox.read"],
       "ledger": ["ledger.inbox.read"],
       "payables": ["payables.inbox.read"]
+    },
+    "purchasing": {
+      "budgeting": ["budget.encumbrance.convert"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
