@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -15,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/api"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/revrec"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/salesreport"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 	"github.com/BenjaminSRussell/passage/services/billing/migrations"
 )
@@ -108,6 +110,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	sales, err := salesreport.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("sales client: %w", err)
+	}
+	salesInterval := salesreport.DefaultInterval
+	if raw := getenv("BILLING_SALES_REPORT_INTERVAL"); raw != "" {
+		if salesInterval, err = time.ParseDuration(raw); err != nil || salesInterval < salesreport.MinInterval {
+			return errors.New("BILLING_SALES_REPORT_INTERVAL must be a duration of at least 1s")
+		}
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -117,6 +129,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	defer cancel()
 	if autobook != nil {
 		go autobook.loop(ctx)
+	}
+	if sales != nil {
+		reporter := &salesreport.Reporter{Store: st, Sales: sales}
+		go salesreport.Run(ctx, salesInterval, reporter.RunOnce)
+		slog.Info("sales invoice reporter running", "interval", salesInterval)
+	} else {
+		slog.Warn("SALES_URL is unset: posted invoices are queued for sales but not reported")
 	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()

@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- Billing reports INVOICED to the sales order (#29): posting an invoice that bills order lines queues one report per (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014), and a leased reporter (`SALES_URL`, `BILLING_SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it to sales' `:record-progress` as `service:billing-sales-report` with only `sales.order.record-invoice` (now `service_only`), key `billing-invoice:{invoiceId}:{orderId}`, retrying with backoff and parking a refused report with its reason; credit notes are not reported (sales has no reversal of an invoice).
 - Billing: posted invoices and credit notes book their GL journal without an API request. An auto-book worker (`BILLING_GL_AUTOBOOK_TENANT_IDS`, `BILLING_GL_AUTOBOOK_INTERVAL`; chart `autoBook`) runs the `gl-postings` run per tenant and legal entity, idempotent per document and safe to retry after a lost ledger answer; the `outbox-billing` Debezium connector (CDC migrations 0012-0013, `debezium-cdc-billing` secret, `passage.billing.invoice` ACL) publishes billing's events, with a deploy test that checks the route against the AsyncAPI channel and ACLs (#29).
 
 ### Fixed

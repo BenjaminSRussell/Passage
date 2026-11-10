@@ -178,6 +178,17 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
   note books without an API request. Idempotency is the run's: ledger key `billing-invoice-<id>` / `billing-credit-note-<id>`, the
   held booking an unanswered call leaves, `journal_posting_id` set once, and the per-entity advisory lock (a replica that finds the
   run held skips the tick). Refusals, backoff and parking apply as for the API call. Unset, nothing books until the API is called.
+- Order progress (#29): posting an invoice that bills order lines (shipment and consolidated invoices) queues one report per
+  (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014): kind `INVOICED`, `sourceRef` the invoice
+  number, each order line by `lineId` with the invoiced quantity (two invoice lines of one order line summed), key
+  `billing-invoice:<invoiceId>:<orderId>`. With `SALES_URL` (chart `salesUrl`; needs the service signing key, and sales must list
+  billing's public key) every replica runs a reporter each `BILLING_SALES_REPORT_INTERVAL` (default 30s, at least 1s; chart
+  `salesReportInterval`) that leases due reports (2 minutes), sends them to sales' `POST /v1/sales/orders/{id}:record-progress`
+  as billing for `service:billing-sales-report` with only `sales.order.record-invoice`, for the invoice's tenant and legal
+  entity, and records REPORTED, a retry with backoff (30s doubling to 1h; outage, 5xx, 408, 429, 401, 403) or PARKED with the
+  reason in `last_error` (sales refused the report with another 4xx, or 20 attempts ran out). Sales being down never blocks a post.
+  Retries send the same body and key, so a repeat or a second replica never double counts. Unset, reports wait PENDING. Credit
+  notes are not reported (sales has no reversal of an invoice).
 - The `outbox-billing` Debezium connector (`deploy/kafka/connect.yaml`, database `passage_billing`, role `debezium_cdc_billing`,
   publication `passage_outbox_billing`, migrations 0012 and 0013) relays the outbox to `passage.billing.invoice`, the one channel
   billing's AsyncAPI declares; billing enqueues a single aggregate type (`invoice`), so the connector routes by aggregate type

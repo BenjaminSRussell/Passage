@@ -610,6 +610,20 @@ test_credit_reservation_routes_are_service_only if {
 	}
 }
 
+test_billing_sales_report_holds_only_the_service_only_invoice_duty if {
+	data.service_principals["billing-sales-report"] == ["sales.order.record-invoice"]
+	data.duties["sales.order.record-invoice"].service_only
+	"sales.order.record-invoice" in data.service_grants.billing.sales
+	not "sales.order.record-invoice" in data.service_grants.fulfillment.sales
+	allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:record-progress")
+	not allowed("sales.order.record-invoice", "PATCH", "/v1/sales/orders/o1")
+	not allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:confirm")
+	not allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:cancel")
+	not allowed("sales.order.record-invoice", "GET", "/v1/sales/order-progress")
+	not allowed("sales.order.read", "POST", "/v1/sales/orders/o1:record-progress")
+	not allowed("billing.invoice.post", "POST", "/v1/sales/orders/o1:record-progress")
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],
