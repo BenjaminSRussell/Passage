@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Intercompany events
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Events published by the intercompany service through the outbox, in the
     same transaction as the state change. CloudEvents 1.0 envelope from
@@ -14,6 +14,11 @@ info:
     events (mirror created and compensated, journal posted, reconciliation
     flagged, charge posted, planning completed) are added with the saga,
     posting and run slices (see NOT-IMPLEMENTED.md).
+
+    The posting, charge and reconciliation slices publish journal posted and
+    compensated, charge posted and reconciliation flagged. journal.compensated
+    is not in the PRD table: it tells consumers that a journal whose second side
+    was refused has been reversed.
 defaultContentType: application/cloudevents+json
 channels:
   partnerCreated:
@@ -26,6 +31,26 @@ channels:
     messages:
       partnerUpdated:
         $ref: "#/components/messages/PartnerUpdated"
+  journalPosted:
+    address: passage.interco.journal
+    messages:
+      journalPosted:
+        $ref: "#/components/messages/JournalPosted"
+  journalCompensated:
+    address: passage.interco.journal
+    messages:
+      journalCompensated:
+        $ref: "#/components/messages/JournalCompensated"
+  chargePosted:
+    address: passage.interco.charge
+    messages:
+      chargePosted:
+        $ref: "#/components/messages/ChargePosted"
+  reconciliationFlagged:
+    address: passage.interco.reconciliation
+    messages:
+      reconciliationFlagged:
+        $ref: "#/components/messages/ReconciliationFlagged"
 operations:
   publishPartnerCreated:
     action: send
@@ -33,8 +58,57 @@ operations:
   publishPartnerUpdated:
     action: send
     channel: { $ref: "#/channels/partnerUpdated" }
+  publishJournalPosted:
+    action: send
+    channel: { $ref: "#/channels/journalPosted" }
+  publishJournalCompensated:
+    action: send
+    channel: { $ref: "#/channels/journalCompensated" }
+  publishChargePosted:
+    action: send
+    channel: { $ref: "#/channels/chargePosted" }
+  publishReconciliationFlagged:
+    action: send
+    channel: { $ref: "#/channels/reconciliationFlagged" }
 components:
   messages:
+    JournalPosted:
+      name: dev.passage.interco.journal.posted.v1
+      title: IC journal posted to the ledgers of both entities (FR-40.5)
+      payload: { $ref: "#/components/schemas/Journal" }
+    JournalCompensated:
+      name: dev.passage.interco.journal.compensated.v1
+      title: IC journal reversed after a side was refused (FR-40.5)
+      payload: { $ref: "#/components/schemas/Journal" }
+    ChargePosted:
+      name: dev.passage.interco.charge.posted.v1
+      title: IC charge posted to both entities (FR-40.13)
+      payload:
+        type: object
+        required: [id, sourceId, version, lender, borrower, currency, cost, price, margin, journalId]
+        properties:
+          id: { type: string, format: uuid }
+          sourceId: { type: string }
+          version: { type: integer, minimum: 1 }
+          lender: { type: string }
+          borrower: { type: string }
+          currency: { type: string }
+          cost: { type: string }
+          price: { type: string }
+          margin: { type: string }
+          journalId: { type: string, format: uuid }
+    ReconciliationFlagged:
+      name: dev.passage.interco.reconciliation.flagged.v1
+      title: A reconciliation run left Timing or Mismatch items (FR-40.6)
+      payload:
+        type: object
+        required: [runId, period, currency, timing, mismatch]
+        properties:
+          runId: { type: string, format: uuid }
+          period: { type: string }
+          currency: { type: string }
+          timing: { type: integer }
+          mismatch: { type: integer }
     PartnerCreated:
       name: dev.passage.interco.partner.created.v1
       title: Trading-partner pairing created (FR-40.1)
@@ -65,3 +139,26 @@ components:
             type: array
             items: { type: string, enum: [customerAccount, vendorAccount, active, actions, pricing, markupPct, tolerance] }
           version: { type: integer, minimum: 2 }
+
+  schemas:
+    Journal:
+      type: object
+      required: [id, pairId, source, sourceRef, postingDate, status, entries]
+      properties:
+        id: { type: string, format: uuid }
+        pairId: { type: string, format: uuid }
+        source: { type: string, enum: [journal, charge] }
+        sourceRef: { type: string }
+        postingDate: { type: string, format: date }
+        status: { type: string, enum: [posted, compensated] }
+        failureCode: { type: string }
+        entries:
+          type: array
+          items:
+            type: object
+            required: [entity, legalEntityId]
+            properties:
+              entity: { type: string }
+              legalEntityId: { type: string, format: uuid }
+              ledgerEntryId: { type: string }
+              reversalEntryId: { type: string }
