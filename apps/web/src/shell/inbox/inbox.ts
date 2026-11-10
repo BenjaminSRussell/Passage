@@ -51,3 +51,15 @@ export function fetchInbox(
   if (query.cursor) params.set("cursor", query.cursor);
   return requestUrl("GET", `/api/v1/inbox?${params.toString()}`, inboxPage, fetchImpl, {}, undefined, signal);
 }
+
+export type InboxDecision = "approve" | "reject";
+
+const decisionDuties: Record<string, string> = { party: "party.approve" };
+
+export function decisionDuty(item: InboxItem): string | undefined {
+  return item.actions.includes("approve") ? decisionDuties[item.source] : undefined;
+}
+
+export async function decideInboxItem(item: InboxItem, decision: InboxDecision, fetchImpl: FetchLike = defaultFetch): Promise<void> {
+  await requestUrl("POST", `/api/v1/party/pending-changes/${encodeURIComponent(item.id)}:${decision}`, z.unknown(), fetchImpl);
+}

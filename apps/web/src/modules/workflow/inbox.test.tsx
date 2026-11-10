@@ -147,6 +147,25 @@ describe("My work inbox", () => {
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 
+  it("warns that a filter only covers the loaded pages", async () => {
+    const user = userEvent.setup();
+    server.handler = () => json(200, page({ nextCursor: "next-1" }));
+    mount();
+    await findTable();
+    await user.selectOptions(screen.getByLabelText("Type of work"), "Payment hold");
+    expect(screen.getByText(/More items may match/)).toBeInTheDocument();
+  });
+
+  it("stops a page load that is still running when the user leaves", async () => {
+    const user = userEvent.setup();
+    server.handler = (url) => json(200, page({ nextCursor: url.searchParams.get("cursor") ? undefined : "next-1" }));
+    const view = mount();
+    await findTable();
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    view.unmount();
+    expect((inboxCalls().at(-1)?.init.signal as AbortSignal).aborted).toBe(true);
+  });
+
   it("asks to reload from the start when the sources changed between pages", async () => {
     const user = userEvent.setup();
     server.handler = (url) =>
@@ -195,13 +214,36 @@ describe("My work inbox", () => {
 
     it("keeps the row and explains a failed decision", async () => {
       const user = userEvent.setup();
-      server.handler = (url) => (url.pathname === "/api/v1/inbox" ? json(200, page()) : json(409, { code: "TEST-409", detail: "Already decided" }));
+      server.handler = (url) => (url.pathname === "/api/v1/inbox" ? json(200, page()) : json(500, { code: "TEST-500", detail: "Service down" }));
       mount(["party.approve"]);
       await findTable();
       await user.click(screen.getByRole("button", { name: "Reject Customer change credit limit 5000" }));
       await user.click(screen.getByRole("button", { name: "Confirm rejection" }));
       expect(await screen.findByText("The decision failed")).toBeInTheDocument();
       expect(screen.getByRole("table")).toHaveTextContent("credit limit 5000");
+    });
+
+    it("falls back to all types when the last item of the filtered type is approved", async () => {
+      const user = userEvent.setup();
+      server.handler = (url) => (url.pathname === "/api/v1/inbox" ? json(200, page()) : json(200, { id: change.id }));
+      mount(["party.approve"]);
+      await findTable();
+      await user.selectOptions(screen.getByLabelText("Type of work"), "Customer change");
+      await user.click(screen.getByRole("button", { name: "Approve Customer change credit limit 5000" }));
+      await user.click(screen.getByRole("button", { name: "Confirm approval" }));
+      await waitFor(() => expect(screen.getByRole("table")).toHaveTextContent("PR-1042"));
+      expect(screen.getByLabelText("Type of work")).toHaveValue("");
+    });
+
+    it("takes a row off the list when someone else already decided it", async () => {
+      const user = userEvent.setup();
+      server.handler = (url) => (url.pathname === "/api/v1/inbox" ? json(200, page()) : json(409, { code: "TEST-409", detail: "Already decided" }));
+      mount(["party.approve"]);
+      await findTable();
+      await user.click(screen.getByRole("button", { name: "Approve Customer change credit limit 5000" }));
+      await user.click(screen.getByRole("button", { name: "Confirm approval" }));
+      expect(await screen.findByText("credit limit 5000 was already decided, so it has been taken off your list.")).toBeInTheDocument();
+      expect(screen.getByRole("table")).not.toHaveTextContent("Customer change");
     });
 
     it("does nothing when the confirmation is cancelled", async () => {

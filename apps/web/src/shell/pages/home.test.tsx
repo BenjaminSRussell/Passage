@@ -58,6 +58,12 @@ describe("role home", () => {
     expect(main().getByRole("link", { name: "See all my work" })).toHaveAttribute("href", "/workflow/inbox");
   });
 
+  it("shows a plus when more work is waiting than was read", async () => {
+    server.handler = () => json(200, { items: [item(1), item(2)], unavailable: [], truncated: ["ledger"] });
+    renderHome(["inbox.read"]);
+    expect(await main().findByText("2+ items are waiting for you.")).toBeInTheDocument();
+  });
+
   it("marks the active workspace and offers at most five shortcuts in it", () => {
     renderHome([]);
     expect(main().getByText("Current workspace")).toBeInTheDocument();

@@ -2,24 +2,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { copy } from "../../shell/copy";
 import { holdsDuty } from "../../shell/dutyGate";
+import { ApiError } from "../../shell/api/http";
 import { ProblemMessage } from "../../shell/errors";
 import { formatAge, formatDate, isPastDate } from "../../shell/format";
-import { sourceList, type InboxItem } from "../../shell/inbox/inbox";
+import { decideInboxItem, decisionDuty, sourceList, type InboxDecision, type InboxItem } from "../../shell/inbox/inbox";
 import { useInbox } from "../../shell/inbox/useInbox";
 import { useWorkContext } from "../../shell/lookup/workContextState";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, ConfirmDialog, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { decidePendingChange } from "../party/api/client";
-import { DUTY_APPROVE } from "../party/format";
 import styles from "./pages.module.css";
 
-type Decision = "approve" | "reject";
-type Outcome = { tone: "success"; text: string } | { tone: "danger"; failure: unknown };
+type Decision = InboxDecision;
+type Outcome = { tone: "success" | "warning"; text: string } | { tone: "danger"; failure: unknown };
 
 const ALL_KINDS = "";
 
 function canDecide(item: InboxItem, duties: readonly string[]): boolean {
-  return item.source === "party" && item.actions.includes("approve") && holdsDuty(duties, DUTY_APPROVE);
+  const duty = decisionDuty(item);
+  return duty !== undefined && holdsDuty(duties, duty);
 }
 
 export function InboxPage() {
@@ -37,17 +37,23 @@ export function InboxPage() {
   }, [outcome]);
 
   const kinds = useMemo(() => [...new Set(inbox.items.map((i) => i.kind))].sort(), [inbox.items]);
-  const rows = kind === ALL_KINDS ? inbox.items : inbox.items.filter((i) => i.kind === kind);
+  const activeKind = kinds.includes(kind) ? kind : ALL_KINDS;
+  const rows = activeKind === ALL_KINDS ? inbox.items : inbox.items.filter((i) => i.kind === activeKind);
 
   async function decide(item: InboxItem, action: Decision) {
     setOutcome(null);
     setBusy(`${item.source}:${item.id}`);
     try {
-      await decidePendingChange(item.id, action, "");
+      await decideInboxItem(item, action);
       inbox.remove(item);
       setOutcome({ tone: "success", text: `${action === "approve" ? "Approved" : "Rejected"}: ${item.number}.` });
     } catch (failure) {
-      setOutcome({ tone: "danger", failure });
+      if (failure instanceof ApiError && failure.status === 409) {
+        inbox.remove(item);
+        setOutcome({ tone: "warning", text: `${item.number} was already decided, so it has been taken off your list.` });
+      } else {
+        setOutcome({ tone: "danger", failure });
+      }
     } finally {
       setBusy("");
     }
@@ -122,7 +128,7 @@ export function InboxPage() {
     <div className={styles.stack}>
       <PageHeader title={copy.myWork.title} description={copy.myWork.description} />
       <div role="status" aria-live="polite" ref={statusRef} tabIndex={-1}>
-        {outcome?.tone === "success" ? <Alert tone="success">{outcome.text}</Alert> : null}
+        {outcome?.tone === "success" || outcome?.tone === "warning" ? <Alert tone={outcome.tone}>{outcome.text}</Alert> : null}
         {outcome?.tone === "danger" ? (
           <Alert tone="danger" title="The decision failed">
             <ProblemMessage problem={outcome.failure} />
@@ -155,11 +161,11 @@ export function InboxPage() {
           <ProblemMessage problem={inbox.problem} />
         </Alert>
       ) : null}
-      {kinds.length > 1 ? (
+      {kinds.length > 1 || activeKind !== ALL_KINDS ? (
         <div className={styles.filter}>
           <FormField id="inbox-kind" label="Type of work">
             {(control) => (
-              <Select {...control} value={kind} onChange={(event) => setKind(event.target.value)}>
+              <Select {...control} value={activeKind} onChange={(event) => setKind(event.target.value)}>
                 <option value={ALL_KINDS}>All types</option>
                 {kinds.map((k) => (
                   <option key={k} value={k}>
@@ -180,12 +186,13 @@ export function InboxPage() {
           getRowKey={(row) => `${row.source}:${row.id}`}
           empty={{
             title: copy.myWork.emptyTitle,
-            description: kind === ALL_KINDS ? copy.myWork.emptyDescription : "Nothing of this type is waiting for you.",
+            description: activeKind === ALL_KINDS ? copy.myWork.emptyDescription : "Nothing of this type is waiting for you.",
           }}
         />
       )}
       {inbox.status === "ready" && inbox.hasMore ? (
         <div>
+          {activeKind !== ALL_KINDS ? <p>The filter only covers what is loaded so far. More items may match.</p> : null}
           <Button loading={inbox.loadingMore} onClick={inbox.loadMore}>
             {copy.myWork.loadMore}
           </Button>

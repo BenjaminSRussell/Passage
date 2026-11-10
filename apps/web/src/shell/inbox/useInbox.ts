@@ -38,6 +38,7 @@ export function useInbox(legalEntityId: string, enabled: boolean): InboxState {
   const [attempt, setAttempt] = useState(0);
   const latest = useRef(0);
   const cursor = useRef<string | undefined>(undefined);
+  const moreController = useRef<AbortController | null>(null);
   cursor.current = data.nextCursor;
 
   useEffect(() => {
@@ -69,18 +70,23 @@ export function useInbox(legalEntityId: string, enabled: boolean): InboxState {
         setStatus("error");
       },
     );
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      moreController.current?.abort();
+    };
   }, [legalEntityId, enabled, attempt]);
 
   const loadMore = useCallback(() => {
     const next = cursor.current;
     if (!next) return;
     const token = latest.current;
+    const controller = new AbortController();
+    moreController.current = controller;
     setLoadingMore(true);
     setProblem(null);
-    fetchInbox({ legalEntityId, cursor: next }).then(
+    fetchInbox({ legalEntityId, cursor: next }, controller.signal).then(
       (page) => {
-        if (token !== latest.current) return;
+        if (token !== latest.current || controller.signal.aborted) return;
         setData((prev) => ({
           items: [...prev.items, ...page.items],
           unavailable: union(prev.unavailable, page.unavailable.map((u) => u.source)),
@@ -90,7 +96,7 @@ export function useInbox(legalEntityId: string, enabled: boolean): InboxState {
         setLoadingMore(false);
       },
       (failure: unknown) => {
-        if (token !== latest.current) return;
+        if (token !== latest.current || controller.signal.aborted) return;
         setLoadingMore(false);
         if (failure instanceof ApiError && failure.status === 409) setSourcesChanged(true);
         else setProblem(failure instanceof ApiError ? failure : new ApiError(0, "COM-0500", "The request failed"));

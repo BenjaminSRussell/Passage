@@ -45,7 +45,7 @@ function Summary() {
         ) : null
       ) : (
         <>
-          <p role="status">{copy.myWork.summary(inbox.items.length, inbox.hasMore)}</p>
+          <p role="status">{copy.myWork.summary(inbox.items.length, inbox.hasMore || inbox.truncated.length > 0)}</p>
           <ul className={styles.links} aria-label={copy.myWork.title}>
             {preview.map((item) => (
               <li key={`${item.source}:${item.id}`}>
