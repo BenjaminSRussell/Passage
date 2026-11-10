@@ -4,7 +4,8 @@
 //   node scripts/demo-check.mjs --port 4301 --out /some/dir /sales/orders /production ...
 //
 // Per path it prints one JSON line: unhandled API calls (misses), console and page errors, alert texts, whether a
-// loading skeleton is still showing, and the screenshot file. Paths are app paths, without the /Passage base.
+// loading skeleton is still showing, full UUIDs visible in the main area (uuids; reported, not failed), and the
+// screenshot file. Paths are app paths, without the /Passage base.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "@playwright/test";
@@ -38,11 +39,14 @@ for (const path of paths) {
   const alerts = await page.locator('[role="alert"]').allInnerTexts();
   const loading = await page.locator('[aria-busy="true"]').count();
   const h1 = (await page.locator("h1").first().innerText().catch(() => "")).trim();
+  // Full UUIDs a viewer can see in the page body.
+  const text = await page.locator("main").innerText().catch(() => "");
+  const uuids = [...new Set(text.match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) ?? [])];
   const file = join(out, `${path.replace(/^\//, "").replace(/[^a-zA-Z0-9]+/g, "_") || "home"}.png`);
   await page.screenshot({ path: file });
   const ok = misses !== null && misses.length === 0 && errors.length === 0 && alerts.filter((a) => a.trim()).length === 0 && loading === 0;
   if (!ok) failed++;
-  console.log(JSON.stringify({ path, ok, h1, misses, errors, alerts: alerts.filter((a) => a.trim()), loading, screenshot: file }));
+  console.log(JSON.stringify({ path, ok, h1, misses, errors, alerts: alerts.filter((a) => a.trim()), loading, uuids, screenshot: file }));
   await page.close();
 }
 await browser.close();
