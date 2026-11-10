@@ -263,7 +263,7 @@ export function DunningRunDetailPage() {
           <Detail term="Letters" mono>{run.letters.filter((l) => l.status !== "SKIPPED").length}</Detail>
           <Detail term="Items left out" mono>{run.exclusions.length}</Detail>
           <Detail term="Issued" mono>{run.issuedAt ? dateTime(run.issuedAt) : "Not yet"}</Detail>
-          <Detail term="Legal entity" mono>{run.legalEntityId}</Detail>
+          <Detail term="Legal entity"><EntityName entity="legalEntity" id={run.legalEntityId} /></Detail>
         </dl>
       </Card>
       {done ? (

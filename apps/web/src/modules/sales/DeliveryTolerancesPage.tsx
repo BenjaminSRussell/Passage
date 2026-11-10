@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { PlainName } from "./OrderNumber";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -22,7 +23,7 @@ import {
   type ResolvedDeliveryTolerance,
   type Versioned,
 } from "./api/client";
-import { DECIMAL, PERCENT, dash, formatDateTime, sentence, shortId, UUID } from "./format";
+import { DECIMAL, PERCENT, dash, formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -110,7 +111,7 @@ function FigureFields({ values, errors, readOnly, onChange }: FigureFieldsProps)
 }
 
 const columns: DataTableColumn<DeliveryTolerance>[] = [
-  { key: "productId", header: "Product", mono: true, render: (t) => <Link to={`/sales/delivery-tolerances/${t.id}`}>{shortId(t.productId)}</Link> },
+  { key: "productId", header: "Product", render: (t) => <Link to={`/sales/delivery-tolerances/${t.id}`}><PlainName short entity="product" id={t.productId} /></Link> },
   { key: "customerId", header: "Customer", render: (t) => (t.customerId ? <EntityName entity="customer" id={t.customerId} /> : "Every customer") },
   { key: "overdeliveryPct", header: "Over", align: "end", render: (t) => percentText(t.overdeliveryPct) },
   { key: "underdeliveryPct", header: "Under", align: "end", render: (t) => percentText(t.underdeliveryPct) },
