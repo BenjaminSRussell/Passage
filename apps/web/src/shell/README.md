@@ -6,6 +6,10 @@ Design system, tokens, primitives and accessibility rules: see `apps/web/docs/de
 
 User-facing text follows `apps/web/docs/ux-writing.md`. Server failures render through `ProblemMessage` (`src/shell/errors`), which maps problem codes to plain messages from `src/shell/errors/catalog.ts` and keeps the code and request id under "Details".
 
+A test (`errors/bareCode.test.ts`) fails when a module renders a failure's code as text, and `errors/catalogCoverage.test.ts` fails when a purchase-to-pay, order-to-cash or master-data service defines a problem code with no catalog message. Domain words get a tooltip from `<Term id="...">` (`src/shell/glossary`), and the full list is the Glossary page at `/glossary`.
+
+Command palette (#506): typing two or more characters also calls `GET /api/v1/search` and lists records by type (`src/shell/search`). Alt+F favourites the active record; recent and favourite records are kept per user in this browser. Those calls still use `fetch`; switch them to `apiFetch` once `shell/api/http.ts` from main is merged.
+
 ## Needs
 
 - `@module-federation/vite` and the OTel web SDK are still pending. Federation remotes are declared in `vite.config.ts` as `federationRemotes`.

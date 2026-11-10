@@ -145,7 +145,7 @@ describe("NewWorkPage", () => {
     fill("Line 1 item", "BOLT");
     fill("Line 1 quantity", "1");
     fireEvent.click(screen.getByRole("button", { name: "Create work" }));
-    expect(await screen.findByText(/request failed validation \(COM-0001\): workType is not a warehouse work type/)).toBeInTheDocument();
+    expect(await screen.findByText(/aren't valid.*: workType is not a warehouse work type/)).toBeInTheDocument();
   });
 });
 

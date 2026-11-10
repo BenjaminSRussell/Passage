@@ -3,7 +3,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platfo
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
 export const copy = {
-  nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features" },
+  nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features", glossary: "Glossary" },
   workspaces: {
     switcherLabel: "Workspace",
     chooseSummary: "Choose my workspaces",

@@ -22,7 +22,7 @@ import {
 import styles from "./pages.module.css";
 import { ChooseWarehouse, DECIMAL, Detail, INTEGER, LINE_STATUS_TONES, sentence, shortId, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const PAGE = 100;
 
@@ -288,7 +288,7 @@ export function NewWorkPage() {
           <div className={styles.formActions}>
             <Alert tone="danger" title={failure ? "The work was not created" : undefined} live="alert">
               {failure
-                ? `${failure.message} (${failure.code})${Object.keys(failure.fields).length > 0 ? `: ${Object.entries(failure.fields).map(([f, m]) => `${f} ${m}`).join("; ")}` : ""}`
+                ? `${problemSummary(failure)}${Object.keys(failure.fields).length > 0 ? `: ${Object.entries(failure.fields).map(([f, m]) => `${f} ${m}`).join("; ")}` : ""}`
                 : null}
             </Alert>
           </div>
