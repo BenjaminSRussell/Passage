@@ -22,6 +22,7 @@ export interface LookupScope {
 
 export interface LookupDef {
   noun: string;
+  cap?: number;
   createHref?: string;
   search(
     query: string,
@@ -45,13 +46,19 @@ export function setLookupFetcher(fetcher: LookupFetcher | null): void {
   lookupFetcher = fetcher ?? browserFetcher;
 }
 
+export class LookupError extends Error {
+  constructor(readonly status: number) {
+    super(`lookup failed with status ${status}`);
+  }
+}
+
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await lookupFetcher(url, {
     headers: { Accept: "application/json", [LOOKUP_HEADER]: "1" },
     signal,
   });
   if (!res.ok) {
-    throw new Error(`lookup failed with status ${res.status}`);
+    throw new LookupError(res.status);
   }
   return res.json();
 }
@@ -129,6 +136,23 @@ function orgEntity(
   };
 }
 
+async function entityCodes(
+  idList: (string | undefined)[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(idList.filter((id): id is string => Boolean(id)))];
+  const found = await Promise.all(
+    unique.map((id) => resolveOption("legalEntity", id)),
+  );
+  const codes = new Map<string, string>();
+  unique.forEach((id, at) => {
+    const code = found[at]?.number;
+    if (code) {
+      codes.set(id, code);
+    }
+  });
+  return codes;
+}
+
 function partyRole(
   noun: string,
   kind: "vendors" | "customers",
@@ -137,15 +161,26 @@ function partyRole(
   return {
     noun,
     createHref,
-    search: async (q, _scope, signal) =>
-      present(
-        items(
-          await getJson(
-            `/api/v1/party/${kind}:search${query({ q, limit: String(PAGE_SIZE) })}`,
-            signal,
-          ),
-        ).map((row) => option(row, ["name"], ["accountNumber", "partyNumber"])),
-      ),
+    search: async (q, scope, signal) => {
+      const rows = items(
+        await getJson(
+          `/api/v1/party/${kind}:search${query({ q, limit: String(PAGE_SIZE), legalEntityId: scope.legalEntityId })}`,
+          signal,
+        ),
+      );
+      const entities = scope.legalEntityId
+        ? new Map<string, string>()
+        : await entityCodes(rows.map((row) => text(row, "legalEntityId")));
+      return present(
+        rows.map((row) => {
+          const hit = option(row, ["name"], ["accountNumber", "partyNumber"]);
+          const code = entities.get(text(row, "legalEntityId") ?? "");
+          return hit && code
+            ? { ...hit, number: hit.number ? `${hit.number} · ${code}` : code }
+            : hit;
+        }),
+      );
+    },
     resolve: async (id, signal) => {
       const role = (await getJson(
         `/api/v1/party/${kind}/${encodeURIComponent(id)}`,
@@ -209,6 +244,7 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
   },
   product: {
     noun: "product",
+    cap: 10,
     search: async (q, _scope, signal) =>
       present(
         items(

@@ -11,7 +11,9 @@ import { Input } from "../ui";
 import styles from "./EntityLookup.module.css";
 import {
   formatOption,
+  LookupError,
   lookupDefs,
+  PAGE_SIZE,
   rememberOption,
   resolveOption,
   type LookupEntityKey,
@@ -39,6 +41,7 @@ export interface EntityLookupProps {
   allowCreate?: boolean;
   invalid?: boolean;
   disabled?: boolean;
+  readOnly?: boolean;
   compact?: boolean;
   prefill?: boolean;
   placeholder?: string;
@@ -50,6 +53,8 @@ export interface EntityLookupProps {
 
 type Phase = "idle" | "loading" | "error";
 
+const NOTHING_ACTIVE = -1;
+
 export function EntityLookup({
   entity,
   id,
@@ -60,6 +65,7 @@ export function EntityLookup({
   allowCreate = false,
   invalid,
   disabled,
+  readOnly,
   compact,
   prefill = true,
   placeholder,
@@ -74,8 +80,10 @@ export function EntityLookup({
   const [results, setResults] = useState<LookupOption[]>([]);
   const [recent, setRecent] = useState<LookupOption[]>([]);
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(NOTHING_ACTIVE);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [resultsFor, setResultsFor] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
   const requestId = useRef(0);
   const scopeKey = `${scope?.legalEntityId ?? ""}|${scope?.siteId ?? ""}`;
 
@@ -127,13 +135,15 @@ export function EntityLookup({
           (found) => {
             if (mine === requestId.current) {
               setResults(found);
-              setActive(0);
+              setResultsFor(query.trim());
+              setActive(NOTHING_ACTIVE);
               setPhase("idle");
             }
           },
-          () => {
+          (error: unknown) => {
             if (mine === requestId.current && !controller.signal.aborted) {
               setResults([]);
+              setDenied(error instanceof LookupError && error.status === 403);
               setPhase("error");
             }
           },
@@ -162,13 +172,15 @@ export function EntityLookup({
       : results;
 
   const openList = useCallback(() => {
-    setRecent(readRecent(entity));
+    setRecent(readRecent(work.identity, entity));
     setOpen(true);
-  }, [entity]);
+  }, [entity, work.identity]);
+
+  const fresh = phase === "idle" && resultsFor === query.trim();
 
   function choose(entry: LookupOption) {
     rememberOption(entity, entry);
-    pushRecent(entity, entry);
+    pushRecent(work.identity, entity, entry);
     setSelected(entry);
     setTyped(null);
     setOpen(false);
@@ -193,14 +205,16 @@ export function EntityLookup({
       }
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActive((index) => Math.max(index - 1, 0));
-    } else if (event.key === "Home" && open) {
-      event.preventDefault();
-      setActive(0);
-    } else if (event.key === "End" && open) {
-      event.preventDefault();
-      setActive(Math.max(listed.length - 1, 0));
-    } else if (event.key === "Enter" && open && listed[active]) {
+      if (!open) {
+        openList();
+      } else {
+        setActive((index) => Math.max(index - 1, 0));
+      }
+    } else if (event.key === "Enter" && open) {
+      if (!fresh || !listed[active]) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       choose(listed[active]);
     } else if (event.key === "Escape" && open) {
@@ -220,12 +234,20 @@ export function EntityLookup({
     phase === "loading"
       ? "Searching…"
       : phase === "error"
-        ? `Could not load ${def.noun} matches. Keep typing to try again.`
+        ? denied
+          ? `You can't search ${def.noun}s. Paste its id instead.`
+          : `Could not load ${def.noun} matches. Keep typing to try again, or paste its id.`
         : listed.length === 0
           ? `No ${def.noun} found.`
-          : `${listed.length} ${listed.length === 1 ? "match" : "matches"}.`;
+          : `${listed.length} ${listed.length === 1 ? "match" : "matches"}.${
+              results.length >= (def.cap ?? PAGE_SIZE)
+                ? " More results exist, keep typing to narrow them."
+                : ""
+            }`;
   const activeId =
-    open && listed[active] ? `${inputId}-option-${active}` : undefined;
+    open && fresh && listed[active]
+      ? `${inputId}-option-${active}`
+      : undefined;
 
   return (
     <div className={`${styles.root} ${compact ? styles.compact : ""}`}>
@@ -245,10 +267,14 @@ export function EntityLookup({
           data-value={value}
           invalid={invalid}
           disabled={disabled}
+          readOnly={readOnly}
           placeholder={placeholder ?? `Search ${def.noun}s by name or number`}
           value={typed ?? label}
-          onFocus={openList}
+          onFocus={readOnly ? undefined : openList}
           onChange={(e) => {
+            if (readOnly) {
+              return;
+            }
             const pasted = e.target.value.trim();
             if (PASTED_ID.test(pasted)) {
               setTyped(null);
@@ -269,7 +295,7 @@ export function EntityLookup({
           }}
           onKeyDown={onKeyDown}
         />
-        {value !== "" && !disabled ? (
+        {value !== "" && !disabled && !readOnly ? (
           <button
             type="button"
             className={styles.clear}

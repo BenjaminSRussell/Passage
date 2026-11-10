@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 
 export interface WorkContextValue {
+  identity: string;
   legalEntityId: string;
   siteId: string;
   setLegalEntityId(id: string): void;
@@ -8,6 +9,7 @@ export interface WorkContextValue {
 }
 
 const empty: WorkContextValue = {
+  identity: "",
   legalEntityId: "",
   siteId: "",
   setLegalEntityId: () => undefined,

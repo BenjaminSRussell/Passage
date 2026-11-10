@@ -9,7 +9,7 @@ import { demoNote } from "./metadata";
 import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
 import { WorkContextProvider } from "./lookup/workContext";
-import { devDuties, PrincipalProvider } from "./principal";
+import { devDuties, devIdentity, PrincipalProvider } from "./principal";
 import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
@@ -30,6 +30,7 @@ function isShown(el: HTMLElement): boolean {
 export interface ShellProps {
   modules: PassageModule[];
   duties?: readonly string[];
+  identity?: string;
 }
 
 function PageSkeleton() {
@@ -43,7 +44,7 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules: allModules, duties }: ShellProps) {
+export function Shell({ modules: allModules, duties, identity }: ShellProps) {
   const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
   const modules = useMemo(() => visibleModules(allModules, principalDuties), [allModules, principalDuties]);
   const navigate = useNavigate();
@@ -236,7 +237,7 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
 
   return (
     <PrincipalProvider duties={principalDuties}>
-      <WorkContextProvider>
+      <WorkContextProvider identity={identity ?? devIdentity()} enabled={principalDuties.includes("org.read")}>
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
           Skip to content

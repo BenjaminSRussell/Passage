@@ -2,12 +2,16 @@ import type { LookupEntityKey, LookupOption } from "./entities";
 
 const MAX_RECENT = 5;
 
-const keyFor = (entity: LookupEntityKey) => `passage.lookup.recent.${entity}`;
+const keyFor = (identity: string, entity: LookupEntityKey) =>
+  `passage.lookup.recent.${identity}.${entity}`;
 
-export function readRecent(entity: LookupEntityKey): LookupOption[] {
+export function readRecent(identity: string, entity: LookupEntityKey): LookupOption[] {
+  if (identity === "") {
+    return [];
+  }
   try {
     const parsed: unknown = JSON.parse(
-      window.localStorage.getItem(keyFor(entity)) ?? "[]",
+      window.localStorage.getItem(keyFor(identity, entity)) ?? "[]",
     );
     return Array.isArray(parsed)
       ? parsed
@@ -22,13 +26,16 @@ export function readRecent(entity: LookupEntityKey): LookupOption[] {
   }
 }
 
-export function pushRecent(entity: LookupEntityKey, entry: LookupOption): void {
+export function pushRecent(identity: string, entity: LookupEntityKey, entry: LookupOption): void {
+  if (identity === "") {
+    return;
+  }
   try {
     const next = [
       entry,
-      ...readRecent(entity).filter((other) => other.id !== entry.id),
+      ...readRecent(identity, entity).filter((other) => other.id !== entry.id),
     ].slice(0, MAX_RECENT);
-    window.localStorage.setItem(keyFor(entity), JSON.stringify(next));
+    window.localStorage.setItem(keyFor(identity, entity), JSON.stringify(next));
   } catch {
     return;
   }

@@ -6,22 +6,27 @@ import {
   type ReactNode,
 } from "react";
 import { EntityLookup } from "./EntityLookup";
-import { lookupDefs } from "./entities";
+import { lookupDefs, rememberOption, resolveOption } from "./entities";
 import { useWorkContext, WorkContext } from "./workContextState";
 
 export { useWorkContext };
 
-const STORAGE_KEY = "passage.workContext";
+const storageKey = (identity: string) => `passage.workContext.${identity}`;
 
 interface Stored {
   legalEntityId: string;
   siteId: string;
 }
 
-function read(): Stored {
+const none: Stored = { legalEntityId: "", siteId: "" };
+
+function read(identity: string): Stored {
+  if (identity === "") {
+    return none;
+  }
   try {
     const parsed = JSON.parse(
-      window.localStorage.getItem(STORAGE_KEY) ?? "{}",
+      window.localStorage.getItem(storageKey(identity)) ?? "{}",
     ) as Partial<Stored>;
     return {
       legalEntityId:
@@ -29,24 +34,43 @@ function read(): Stored {
       siteId: typeof parsed.siteId === "string" ? parsed.siteId : "",
     };
   } catch {
-    return { legalEntityId: "", siteId: "" };
+    return none;
   }
 }
 
-function write(value: Stored): void {
+function write(identity: string, value: Stored): void {
+  if (identity === "") {
+    return;
+  }
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    window.localStorage.setItem(storageKey(identity), JSON.stringify(value));
   } catch {
     return;
   }
 }
 
-export function WorkContextProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<Stored>(read);
-  const update = useCallback((next: Stored) => {
-    write(next);
-    setState(next);
-  }, []);
+export function WorkContextProvider({
+  identity = "",
+  enabled = true,
+  children,
+}: {
+  identity?: string;
+  enabled?: boolean;
+  children: ReactNode;
+}) {
+  const [state, setState] = useState<Stored>(() =>
+    enabled ? read(identity) : none,
+  );
+  useEffect(() => {
+    setState(enabled ? read(identity) : none);
+  }, [identity, enabled]);
+  const update = useCallback(
+    (next: Stored) => {
+      write(identity, next);
+      setState(next);
+    },
+    [identity],
+  );
   const setLegalEntityId = useCallback(
     (id: string) => update({ legalEntityId: id, siteId: "" }),
     [update],
@@ -56,8 +80,8 @@ export function WorkContextProvider({ children }: { children: ReactNode }) {
     [update, state],
   );
   const value = useMemo(
-    () => ({ ...state, setLegalEntityId, setSiteId }),
-    [state, setLegalEntityId, setSiteId],
+    () => ({ ...state, identity: enabled ? identity : "", setLegalEntityId, setSiteId }),
+    [state, enabled, identity, setLegalEntityId, setSiteId],
   );
   return <WorkContext.Provider value={value}>{children}</WorkContext.Provider>;
 }
@@ -74,6 +98,7 @@ export function ContextPicker() {
     lookupDefs.legalEntity.search("", {}, controller.signal).then(
       (found) => {
         if (found.length === 1) {
+          rememberOption("legalEntity", found[0]);
           setLegalEntityId(found[0].id);
         }
       },
@@ -81,6 +106,36 @@ export function ContextPicker() {
     );
     return () => controller.abort();
   }, [legalEntityId, setLegalEntityId]);
+
+  useEffect(() => {
+    if (legalEntityId === "") {
+      return;
+    }
+    let live = true;
+    void resolveOption("legalEntity", legalEntityId).then((entry) => {
+      if (live && entry === null) {
+        setLegalEntityId("");
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [legalEntityId, setLegalEntityId]);
+
+  useEffect(() => {
+    if (siteId === "") {
+      return;
+    }
+    let live = true;
+    void resolveOption("site", siteId).then((entry) => {
+      if (live && entry === null) {
+        setSiteId("");
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [siteId, setSiteId]);
 
   return (
     <div

@@ -10,6 +10,7 @@ import { clearResolvedOptions, formatOption, lookupDefs, setLookupFetcher } from
 import { ContextPicker, useWorkContext, WorkContextProvider } from "./workContext";
 
 const VENDOR_ID = "11111111-1111-4111-8111-111111111111";
+const IDENTITY = "tenant-1.user-1";
 const OTHER_ID = "22222222-2222-4222-8222-222222222222";
 
 const vendors = [
@@ -55,6 +56,7 @@ function Harness(props: Partial<EntityLookupProps> & { initial?: string; onValue
   const [value, setValue] = useState(props.initial ?? "");
   return (
     <MemoryRouter>
+      <WorkContextProvider identity={IDENTITY}>
       <label htmlFor="vendor-field">Vendor</label>
       <EntityLookup
         id="vendor-field"
@@ -67,6 +69,7 @@ function Harness(props: Partial<EntityLookupProps> & { initial?: string; onValue
           props.onValue?.(e.target.value);
         }}
       />
+      </WorkContextProvider>
     </MemoryRouter>
   );
 }
@@ -108,6 +111,8 @@ describe("EntityLookup", () => {
     const list = await screen.findByRole("listbox");
     expect(box).toHaveAttribute("aria-controls", list.id);
     await screen.findAllByRole("option");
+    expect(box).not.toHaveAttribute("aria-activedescendant");
+    await user.keyboard("{ArrowDown}");
     expect(box.getAttribute("aria-activedescendant")).toBe(screen.getAllByRole("option")[0].id);
     await user.keyboard("{ArrowDown}");
     expect(box.getAttribute("aria-activedescendant")).toBe(screen.getAllByRole("option")[1].id);
@@ -120,6 +125,49 @@ describe("EntityLookup", () => {
     await user.keyboard("{Escape}");
     expect(box).toHaveAttribute("aria-expanded", "false");
     expect(box).toHaveValue("Fabrikam Inc (V-00043)");
+  });
+
+  it("does not pick anything on Enter until the user has navigated to an option", async () => {
+    const user = userEvent.setup();
+    const seen: string[] = [];
+    render(<Harness onValue={(v) => seen.push(v)} />);
+    await user.click(screen.getByRole("combobox"));
+    await screen.findAllByRole("option");
+    await user.keyboard("{Enter}");
+    expect(seen).toEqual([]);
+  });
+
+  it("ignores Enter while a newer query is still loading, so a stale result is never picked", async () => {
+    const user = userEvent.setup();
+    const seen: string[] = [];
+    render(<Harness onValue={(v) => seen.push(v)} />);
+    const box = screen.getByRole("combobox");
+    await user.type(box, "c");
+    await screen.findByRole("option", { name: /Contoso/ });
+    await user.keyboard("{ArrowDown}");
+    handler = () => new Response(null, { status: 500 });
+    await user.type(box, "o{Enter}");
+    expect(seen).toEqual([]);
+  });
+
+  it("keeps Home and End for the text cursor", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const box = screen.getByRole("combobox");
+    await user.click(box);
+    await screen.findAllByRole("option");
+    await user.keyboard("{ArrowDown}{ArrowDown}{Home}");
+    expect(box.getAttribute("aria-activedescendant")).toBe(screen.getAllByRole("option")[1].id);
+    expect(box).toHaveFocus();
+  });
+
+  it("says when more results exist than are shown", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, partyId: `p${i}`, partyNumber: `P-${i}`, name: `Vendor ${i}`, accountNumber: `V-${i}` }));
+    handler = () => json({ items: many });
+    render(<Harness />);
+    await user.click(screen.getByRole("combobox"));
+    await waitFor(() => expect(screen.getAllByRole("status").some((s) => /More results exist/.test(s.textContent ?? ""))).toBe(true));
   });
 
   it("announces the number of matches in a live region", async () => {
@@ -176,6 +224,35 @@ describe("EntityLookup", () => {
     handler = () => json({ items: vendors });
     await user.type(screen.getByRole("combobox"), "c");
     expect(await screen.findByRole("option", { name: /Contoso/ })).toBeInTheDocument();
+  });
+
+  it("tells a user without search access to paste an id instead", async () => {
+    const user = userEvent.setup();
+    handler = () => json({}, 403);
+    render(<Harness />);
+    await user.click(screen.getByRole("combobox"));
+    expect((await screen.findAllByText("You can't search vendors. Paste its id instead.")).length).toBeGreaterThan(0);
+  });
+
+  it("does not edit or clear a read-only field, and keeps it focusable", async () => {
+    render(<Harness initial={VENDOR_ID} readOnly />);
+    const box = screen.getByRole("combobox");
+    await waitFor(() => expect(box).toHaveValue("Contoso Ltd (V-00042)"));
+    expect(box).toHaveAttribute("readonly");
+    expect(box).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Clear vendor" })).toBeNull();
+  });
+
+  it("adds the legal entity filter and shows the legal entity code on unscoped vendor hits", async () => {
+    const LE = "33333333-3333-4333-8333-333333333333";
+    handler = (url) => {
+      if (url.pathname === "/api/v1/party/vendors:search") return json({ items: [{ ...vendors[0], legalEntityId: LE }] });
+      if (url.pathname === `/api/v1/org/legal-entities/${LE}`) return json({ id: LE, code: "US01", name: "Acme US" });
+      return json({ items: [] });
+    };
+    expect((await lookupDefs.vendor.search("con", {})).map(formatOption)).toEqual(["Contoso Ltd (V-00042 · US01)"]);
+    expect((await lookupDefs.vendor.search("con", { legalEntityId: LE })).map(formatOption)).toEqual(["Contoso Ltd (V-00042)"]);
+    expect(calls).toContain(`/api/v1/party/vendors:search?q=con&limit=20&legalEntityId=${LE}`);
   });
 
   it("offers a create-new link only where asked", async () => {
@@ -255,7 +332,7 @@ describe("work context", () => {
     };
     render(
       <MemoryRouter>
-        <WorkContextProvider>
+        <WorkContextProvider identity={IDENTITY}>
           <ContextPicker />
           <Reader />
         </WorkContextProvider>
@@ -266,7 +343,7 @@ describe("work context", () => {
     await user.click(screen.getByRole("combobox", { name: "Current site" }));
     await user.click(await screen.findByRole("option", { name: /Head office/ }));
     expect(screen.getByLabelText("context")).toHaveTextContent("le-1|s-1");
-    expect(JSON.parse(window.localStorage.getItem("passage.workContext") ?? "{}")).toEqual({ legalEntityId: "le-1", siteId: "s-1" });
+    expect(JSON.parse(window.localStorage.getItem(`passage.workContext.${IDENTITY}`) ?? "{}")).toEqual({ legalEntityId: "le-1", siteId: "s-1" });
     await user.click(screen.getByRole("combobox", { name: "Current legal entity" }));
     await user.click(await screen.findByRole("option", { name: /Acme DE/ }));
     expect(screen.getByLabelText("context")).toHaveTextContent("le-2|");
@@ -276,7 +353,7 @@ describe("work context", () => {
     handler = () => json({ items: [{ id: "le-1", code: "US01", name: "Acme US" }] });
     render(
       <MemoryRouter>
-        <WorkContextProvider>
+        <WorkContextProvider identity={IDENTITY}>
           <ContextPicker />
           <Reader />
         </WorkContextProvider>
@@ -286,13 +363,89 @@ describe("work context", () => {
   });
 
   it("starts from the remembered choice", () => {
-    window.localStorage.setItem("passage.workContext", JSON.stringify({ legalEntityId: "le-9", siteId: "s-9" }));
+    window.localStorage.setItem(`passage.workContext.${IDENTITY}`, JSON.stringify({ legalEntityId: "le-9", siteId: "s-9" }));
     render(
-      <WorkContextProvider>
+      <WorkContextProvider identity={IDENTITY}>
         <Reader />
       </WorkContextProvider>,
     );
     expect(screen.getByLabelText("context")).toHaveTextContent("le-9|s-9");
+  });
+});
+
+describe("work context isolation", () => {
+  function Reader() {
+    const { legalEntityId } = useWorkContext();
+    return <output aria-label="context">{legalEntityId}</output>;
+  }
+
+  beforeEach(() => {
+    window.localStorage.setItem(`passage.workContext.${IDENTITY}`, JSON.stringify({ legalEntityId: "le-9", siteId: "" }));
+  });
+
+  it("does not hand one user's choice to another user on the same browser", () => {
+    render(
+      <WorkContextProvider identity="tenant-1.user-2">
+        <Reader />
+      </WorkContextProvider>,
+    );
+    expect(screen.getByLabelText("context")).toHaveTextContent("");
+  });
+
+  it("ignores the stored choice when the context picker is not available to the user", () => {
+    render(
+      <WorkContextProvider identity={IDENTITY} enabled={false}>
+        <Reader />
+      </WorkContextProvider>,
+    );
+    expect(screen.getByLabelText("context")).toHaveTextContent("");
+  });
+
+  it("does not store anything when the identity is unknown", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    handler = () => json({ items: [{ id: "le-1", code: "US01", name: "Acme US" }, { id: "le-2", code: "DE01", name: "Acme DE" }] });
+    render(
+      <MemoryRouter>
+        <WorkContextProvider>
+          <ContextPicker />
+        </WorkContextProvider>
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Current legal entity" }));
+    await user.click(await screen.findByRole("option", { name: /Acme US/ }));
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("drops a remembered legal entity that no longer resolves", async () => {
+    handler = () => json({}, 404);
+    render(
+      <MemoryRouter>
+        <WorkContextProvider identity={IDENTITY}>
+          <ContextPicker />
+          <Reader />
+        </WorkContextProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByLabelText("context")).toHaveTextContent(""));
+  });
+
+  it("keeps recent picks apart per user", async () => {
+    const user = userEvent.setup();
+    const first = render(<Harness />);
+    await user.type(screen.getByRole("combobox"), "fabrikam");
+    await user.click(await screen.findByRole("option", { name: /Fabrikam/ }));
+    first.unmount();
+    render(
+      <MemoryRouter>
+        <WorkContextProvider identity="tenant-1.user-2">
+          <EntityLookup entity="vendor" value="" onChange={() => undefined} />
+        </WorkContextProvider>
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("combobox"));
+    await screen.findAllByRole("option");
+    expect(screen.queryByText("Recent")).toBeNull();
   });
 });
 
@@ -309,12 +462,12 @@ describe("work context prefill", () => {
   }
 
   beforeEach(() => {
-    window.localStorage.setItem("passage.workContext", JSON.stringify({ legalEntityId: "le-9", siteId: "" }));
+    window.localStorage.setItem(`passage.workContext.${IDENTITY}`, JSON.stringify({ legalEntityId: "le-9", siteId: "" }));
   });
 
   it("fills an empty legal entity field from the working context", async () => {
     render(
-      <WorkContextProvider>
+      <WorkContextProvider identity={IDENTITY}>
         <Form />
       </WorkContextProvider>,
     );
@@ -323,7 +476,7 @@ describe("work context prefill", () => {
 
   it("leaves the field empty when prefill is off or the field is disabled", () => {
     render(
-      <WorkContextProvider>
+      <WorkContextProvider identity={IDENTITY}>
         <Form prefill={false} />
         <Form disabled />
       </WorkContextProvider>,
