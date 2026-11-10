@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Auth } from "./auth";
 import type { Session } from "./oidc";
 
@@ -6,6 +6,7 @@ type State = { status: "loading" } | { status: "ready"; session: Session } | { s
 
 export function AuthGate({ auth, children }: { auth: Auth; children: (session: Session) => ReactNode }) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const loginStarted = useRef(false);
 
   useEffect(() => {
     let live = true;
@@ -13,6 +14,8 @@ export function AuthGate({ auth, children }: { auth: Auth; children: (session: S
       .ensureSession()
       .then(async (session) => {
         if (session === null) {
+          if (loginStarted.current) return;
+          loginStarted.current = true;
           await auth.login();
         } else if (live) {
           setState({ status: "ready", session });

@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -135,6 +136,21 @@ describe("login flow", () => {
   });
 });
 
+describe("logout", () => {
+  it("sends the id token as a hint when this tab signed in", async () => {
+    const { env, store, assign } = envAt("/auth/callback", "?code=c&state=s", () =>
+      new Response(JSON.stringify({ access_token: tokenFor("u", ADMIN_DUTIES), id_token: "id.token.value", expires_in: 300 })),
+    );
+    store.set("passage.oidc.pending", JSON.stringify({ state: "s", verifier: "v", returnTo: "/" }));
+    const auth = createAuth(config, env);
+    await auth.ensureSession();
+    auth.logout();
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.searchParams.get("id_token_hint")).toBe("id.token.value");
+    expect(url.searchParams.get("post_logout_redirect_uri")).toBe(`${origin}/`);
+  });
+});
+
 describe("bearer fetch", () => {
   it("adds the token to same-origin API calls only", async () => {
     const seen: Array<{ url: string; auth: string | null }> = [];
@@ -207,6 +223,19 @@ describe("AuthGate", () => {
     render(<AuthGate auth={{ ensureSession: async () => null, accessToken: async () => null, login, logout: vi.fn() }}>{() => <p>app</p>}</AuthGate>);
     await waitFor(() => expect(login).toHaveBeenCalledOnce());
     expect(screen.queryByText("app")).not.toBeInTheDocument();
+  });
+
+  it("starts the login once when StrictMode mounts the gate twice", async () => {
+    const login = vi.fn(async () => undefined);
+    const auth = { ensureSession: async () => null, accessToken: async () => null, login, logout: vi.fn() };
+    render(
+      <StrictMode>
+        <AuthGate auth={auth}>{() => <p>app</p>}</AuthGate>
+      </StrictMode>,
+    );
+    await waitFor(() => expect(login).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(login).toHaveBeenCalledOnce();
   });
 
   it("reports a failed sign-in instead of rendering the app", async () => {

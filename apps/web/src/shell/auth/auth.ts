@@ -108,8 +108,10 @@ export function createAuth(config: OidcConfig, env: AuthEnv): Auth {
   }
 
   function logout() {
+    const idToken = session?.idToken;
     session = null;
     const query = new URLSearchParams({ client_id: config.clientId, post_logout_redirect_uri: `${env.location.origin}/` });
+    if (idToken !== undefined) query.set("id_token_hint", idToken);
     env.assign(`${endpoints(config.issuer).logout}?${query.toString()}`);
   }
 

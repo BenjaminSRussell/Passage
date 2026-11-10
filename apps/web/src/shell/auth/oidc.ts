@@ -8,6 +8,7 @@ export interface OidcConfig {
 export interface Session {
   accessToken: string;
   refreshToken: string | undefined;
+  idToken: string | undefined;
   expiresAt: number;
   subject: string;
   tenantId: string;
@@ -17,6 +18,7 @@ export interface Session {
 export interface TokenResponse {
   access_token: string;
   refresh_token?: string;
+  id_token?: string;
   expires_in: number;
 }
 
@@ -77,6 +79,7 @@ export function sessionFrom(response: TokenResponse, now: number): Session {
   return {
     accessToken: response.access_token,
     refreshToken: response.refresh_token,
+    idToken: response.id_token,
     expiresAt: now + response.expires_in * 1000,
     subject: text("sub"),
     tenantId: text("tid"),
