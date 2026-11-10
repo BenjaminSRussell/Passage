@@ -271,6 +271,9 @@ jobs:
           - package: routing-py
             ortools: true
             extras: dev
+          - package: prediction-py
+            ortools: false
+            extras: dev
     defaults:
       run:
         working-directory: services/${{ matrix.package }}

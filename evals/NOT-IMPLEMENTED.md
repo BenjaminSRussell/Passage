@@ -16,10 +16,20 @@ ask-the-data runner: a deterministic baseline predictor
 month with year and its real month end), the seed set
 `datasets/ask-data-seed.jsonl` (8 questions) with a guard that checks every
 clause of the expected query, and the `ask_data` verdict in the CLI against the
-FR-47.9 thresholds. The rows below are not built.
+FR-47.9 thresholds. Slice 5 (47-3) adds the grown datasets
+`datasets/ap-coding-v1.jsonl` (400 invoices, 40 vendors, 3 entities, with off-habit one-offs) and
+`datasets/cash-app-v1.jsonl` (300 payments: multi-invoice, short pay, unreferenced wires, distractor
+invoices), produced by the seeded generator `src/generate.ts` (`npm run generate`; a test fails when the
+committed bytes drift), and the replay predictor (`src/replay.ts`): recorded model outputs keyed by case id
+and prompt hash, a recorder that takes a `ModelProvider` interface (fakes in tests), and `run.js --replay
+<file>` which gates AP coding and cash application over the recording. A missing or stale recording is an
+error (exit 2). The checked-in recording `datasets/recordings/simulated-v1.jsonl` comes from a simulated
+model with seeded mistakes: it proves the path and the gate wiring and is not agent accuracy. The rows below
+are not built.
 
 | Deliverable / criterion | Status | Reason |
 |---|---|---|
+| Live recording of AP coding and cash application with claude-sonnet-5-5 (model id configurable; opus and haiku 5-5 supported by name) replacing the simulated fixture | handoff | Needs live LLM runs and a key; tracked in #213. Run the recorder with the agents-ts provider adapter and commit the recording; the gate then measures the real agent |
 | Full fixtures: `eval-ap-coding-v3` (2,000 invoices, 40 vendors, 3 entities), `eval-cash-app-v2` (1,500 payments, 12% partials, 5% multi-invoice) (AC-47.3, AC-47.4) | later slice of PSG-47 | Needs wave-19 fixtures and hand labels. Only small seed sets are checked in |
 | `eval-mrp-triage-v1` (800 action messages), `eval-anomaly-v1` (50k journals, 400 injected anomalies), `eval-ask-data-v1` (300 questions) | later slice of PSG-47 | Only the small seed sets (9 MRP action messages, 12 journals, 8 ask-the-data questions) are checked in. The full datasets are to be labelled with the owning domains. Gate thresholds and harnesses exist |
 | `adv-prompts-500`: the full 500-prompt adversarial set for refusal >= 0.99 (9.47.9) | later slice of PSG-47 | The 16-case seed set runs through the same gate; the 500 prompts need red-team authoring |
