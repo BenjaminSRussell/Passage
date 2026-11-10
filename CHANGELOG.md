@@ -19,6 +19,10 @@ release may change public APIs.
 
 ### Added
 
+- Wave 10 proof P4a (#10): the demo manufacturer's seven AX tables now migrate through the real `target.Loader`
+  (signed service tokens over HTTP to the owning services' import routes, read-back reconciliation) with the
+  cross-reference in Postgres, instead of the in-memory `MemLoader`
+  (`TestPostgres_AXDemoExtractMigratesThroughTheRealLoader`). The recorded demo stays a human step.
 - Plain-language copy and actionable errors in the web app (#501, part of #497): a UX writing guide
   (`apps/web/docs/ux-writing.md`), rendered strings free of spec, wave and slice references with a test that fails if one
   returns, and a user-facing message catalog keyed by problem code. `ProblemMessage` shows the message and what to do,
