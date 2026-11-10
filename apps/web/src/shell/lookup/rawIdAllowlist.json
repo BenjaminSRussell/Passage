@@ -512,6 +512,12 @@
       ],
       "reason": "Legal entity is a lookup. Main accounts are listed per chart of accounts by number, and there is no main account lookup adapter yet."
     },
+    "modules/treasury/CashDesks.tsx": {
+      "labels": [
+        "General ledger account id"
+      ],
+      "reason": "No ledger account lookup adapter exists yet (the same gap as the bank account's GL main account id); tracked with the follow-up to #500."
+    },
     "modules/vendorgroups/VendorGroupsPage.tsx": {
       "labels": [
         "Existing group ID"

@@ -41,7 +41,6 @@ orgList("warehouses", warehouses, (w, query) => !query.get("siteId") || w.siteId
 route("GET", `${ORG}/currencies`, () => ({ items: currencies }));
 
 // The setup checklist only asks whether each of these lists has a row; the demo company is fully set up.
-route("GET", `${ORG}/fiscal-calendars`, () => ({ items: [{ id: "fc-2026", code: "FY2026", name: "Fiscal year 2026", legalEntityId: LEGAL_ENTITY.id, status: "active" }] }));
 route("GET", "/api/v1/ledger/ledgers", () => ({ items: [{ id: "ledger-crp", legalEntityId: LEGAL_ENTITY.id, name: `${LEGAL_ENTITY.name} general ledger`, currency: LEGAL_ENTITY.currency }] }));
 route("GET", "/api/v1/numbering/sequences", () => ({ items: [{ code: "SO", name: "Sales orders", nextValue: "SO-024190" }, { code: "PO", name: "Purchase orders", nextValue: "PO-048214" }] }));
 
