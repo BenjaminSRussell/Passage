@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { ApiError, type BomCopyRequest } from "./api/client";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const forbiddenStatus = 403;
 
@@ -106,12 +107,12 @@ export function CopyVersionCard({
             </div>
             <div className={styles.field}>
               <FormField id="copy-product" label="Product" hint="Change it to copy to another product.">
-                {(control) => <Input {...control} value={product} onChange={(e) => setProduct(e.target.value)} required maxLength={64} />}
+                {(control) => <EntityLookup {...control} entity="product" prefill={false} value={product} onChange={(e) => setProduct(e.target.value)} />}
               </FormField>
             </div>
             <div className={styles.field}>
               <FormField id="copy-site" label="Site" hint={siteRequired ? "Change it to copy to another site." : "Change it to copy to another site; leave empty for all sites."}>
-                {(control) => <Input {...control} value={site} onChange={(e) => setSite(e.target.value)} required={siteRequired} maxLength={64} />}
+                {(control) => <EntityLookup {...control} entity="site" prefill={false} value={site} onChange={(e) => setSite(e.target.value)} />}
               </FormField>
             </div>
             {lines && lines.length > 0 ? (

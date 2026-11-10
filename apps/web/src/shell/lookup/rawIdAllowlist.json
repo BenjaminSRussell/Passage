@@ -619,21 +619,7 @@
     },
     "modules/quality/NewOrderPage.tsx": {
       "labels": [
-        "Item group id",
-        "Item id",
-        "Site id",
-        "Source id",
-        "Vendor or customer id",
-        "Warehouse id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/quality/NonconformancesPage.tsx": {
-      "labels": [
-        "Customer id",
-        "Item id",
-        "Quality order id",
-        "Vendor id"
+        "Item group id"
       ],
       "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
@@ -648,12 +634,6 @@
         "Test id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/quality/StabilityStudiesPage.tsx": {
-      "labels": [
-        "Item id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
     "modules/receivables/Cases.tsx": {
       "labels": [
@@ -692,49 +672,6 @@
         "Tax id"
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/scheduling/CampaignDetailPage.tsx": {
-      "labels": [
-        "Order id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/scheduling/EditResourcePage.tsx": {
-      "labels": [
-        "Engineering resource id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/scheduling/NewOperationPage.tsx": {
-      "labels": [
-        "Order id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/scheduling/NewResourcePage.tsx": {
-      "labels": [
-        "Engineering resource id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/shopfloor/NewMachinePage.tsx": {
-      "labels": [
-        "Resource id",
-        "Site id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/shopfloor/NewProcessMessagePage.tsx": {
-      "labels": [
-        "Order id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/shopfloor/NewWorkerPage.tsx": {
-      "labels": [
-        "Party id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
     },
     "modules/transport/BuildLoadsPage.tsx": {
       "labels": [

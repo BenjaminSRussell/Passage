@@ -1,7 +1,8 @@
 // The production orders of Cedar Ridge Pumps, shared by the production, scheduling and quality demo handlers.
-// Ids are the order numbers: the production screens show ids raw, and "MO-24611" reads better than a UUID.
-import type { Operation, OrderLine, ProductionOrder, ProductionStatus } from "../../../modules/production/api/client";
-import { BOMS, LEGAL_ENTITY, PLANT, ROUTES, WH_WIP, itemByNumber } from "../../company";
+// Order ids are the order numbers ("MO-24611" reads better in a link than a UUID); products, sites, warehouses and
+// resources carry the real ids of company.ts, which the shell lookups turn into names.
+import type { CreateOrderInput, Operation, OrderLine, ProductionOrder, ProductionStatus } from "../../../modules/production/api/client";
+import { BOMS, ITEMS, LEGAL_ENTITY, PLANT, ROUTES, WH_WIP, itemByNumber, resourceByCode, type Item } from "../../company";
 import { at, day, dec } from "../../store";
 
 export const LABOR_RATE = 38;
@@ -38,14 +39,20 @@ const SPECS: Spec[] = [
   { n: 24575, product: "SA-IMP-06", qty: 40, status: "Ended", due: -15, start: -22, raf: 40, opsDone: 2, origin: "Planned order" },
 ];
 
+/** An item by id or number. */
+export function findItem(idOrNumber: string): Item {
+  return ITEMS.find((i) => i.id === idOrNumber) ?? itemByNumber(idOrNumber);
+}
+
 const ORDINAL: ProductionStatus[] = ["Created", "Estimated", "Scheduled", "Released", "Started", "ReportedAsFinished", "Ended"];
 export const rank = (s: ProductionStatus) => ORDINAL.indexOf(s);
 
 function build(s: Spec): ProductionOrder {
-  const it = itemByNumber(s.product);
+  const it = findItem(s.product);
+  const key = it.number;
   const scheduled = rank(s.status) >= rank("Scheduled");
   const started = rank(s.status) >= rank("Started");
-  const bom = BOMS[s.product] ?? [];
+  const bom = BOMS[key] ?? [];
   const progress = s.status === "Started" ? Math.min(1, ((s.raf ?? 0) + s.qty * 0.35) / s.qty) : started ? 1 : 0;
   const lines: OrderLine[] = bom.map((b, i) => {
     const c = itemByNumber(b.component);
@@ -53,7 +60,7 @@ function build(s: Spec): ProductionOrder {
     const required = b.qty * s.qty * (1 + scrap / 100);
     return {
       lineNo: String((i + 1) * 10),
-      itemId: c.number,
+      itemId: c.id,
       qtyPer: dec(b.qty, 4),
       seriesSize: "1",
       scrapPct: dec(scrap),
@@ -64,7 +71,7 @@ function build(s: Spec): ProductionOrder {
       qtyConsumed: dec(required * progress, 4),
     };
   });
-  const route = ROUTES[s.product] ?? [];
+  const route = ROUTES[key] ?? [];
   let cursor = Date.parse(at(s.start));
   const operations: Operation[] = route.map((r, i) => {
     const hours = r.setupHours + r.runHours * s.qty;
@@ -75,7 +82,7 @@ function build(s: Spec): ProductionOrder {
     const running = s.status === "Started" && i === (s.opsDone ?? 0);
     const op: Operation = {
       operNumber: r.op,
-      resourceId: r.resource,
+      resourceId: resourceByCode(r.resource).id,
       setupTimeH: dec(r.setupHours, 2),
       runTimeHPer: dec(r.runHours, 4),
       scrapPct: "0.00",
@@ -92,7 +99,7 @@ function build(s: Spec): ProductionOrder {
       op.status = done || s.status !== "Started" ? "finished" : running ? "started" : "open";
       op.hoursReported = dec(op.status === "finished" ? hours * 1.04 : running ? hours * 0.4 : 0, 2);
       op.qtyGood = dec(op.status === "finished" ? s.qty : running ? (s.raf ?? 0) : 0, 0);
-      op.qtyError = dec(op.status === "finished" && i === 0 && s.product === "SA-IMP-06" ? 2 : 0, 0);
+      op.qtyError = dec(op.status === "finished" && i === 0 && key === "SA-IMP-06" ? 2 : 0, 0);
     }
     if (scheduled) {
       op.plannedStart = begin.toISOString();
@@ -104,14 +111,14 @@ function build(s: Spec): ProductionOrder {
     id: `MO-${s.n}`,
     legalEntityId: LEGAL_ENTITY.id,
     orderNumber: `MO-${s.n}`,
-    productId: it.number,
-    siteId: PLANT.code,
-    warehouseId: WH_WIP.code,
+    productId: it.id,
+    siteId: PLANT.id,
+    warehouseId: WH_WIP.id,
     currency: "USD",
     itemGroup: it.kind === "finished" ? "Finished pumps" : "Subassemblies",
     quantity: dec(s.qty, 0),
     qtyRaf: dec(s.raf ?? 0, 0),
-    qtyError: dec(s.product === "SA-IMP-06" && started ? 2 : 0, 0),
+    qtyError: dec(key === "SA-IMP-06" && started ? 2 : 0, 0),
     status: s.status,
     deliveryDate: day(s.due),
     originType: s.origin ?? "Manual",
@@ -166,4 +173,63 @@ let nextNumber = 24640;
 /** A new Created production order, for a planned order that was firmed in the demo. */
 export function newOrder(product: string, qty: number, dueInDays: number): ProductionOrder {
   return build({ n: nextNumber++, product, qty, status: "Created", due: dueInDays, start: Math.max(1, dueInDays - 5), origin: "Planned order" });
+}
+
+/**
+ * A Created order from the new-order form. Components and route come from the form; without components the
+ * product's bill of material is exploded, as the service would for a released product.
+ */
+export function orderFromInput(input: CreateOrderInput): ProductionOrder {
+  const it = findItem(input.productId);
+  const qty = Number(input.quantity ?? "1") || 1;
+  const due = input.deliveryDate ? Math.max(1, Math.round((Date.parse(input.deliveryDate) - Date.now()) / 86_400_000)) : 14;
+  const order = build({ n: nextNumber++, product: it.id, qty, status: "Created", due, start: Math.max(1, due - 5), origin: "Manual" });
+  order.siteId = input.siteId;
+  order.warehouseId = input.warehouseId;
+  order.currency = input.currency;
+  order.itemGroup = input.itemGroup || order.itemGroup;
+  order.deliveryDate = input.deliveryDate ?? order.deliveryDate;
+  order.createdAt = at(0);
+  order.updatedAt = at(0);
+  if (input.bom.length > 0) {
+    order.lines = input.bom.map((l, i) => {
+      const c = findItem(l.itemId);
+      const scrap = Number(l.scrapPct ?? "0");
+      return {
+        lineNo: l.lineNo || String((i + 1) * 10),
+        itemId: c.id,
+        qtyPer: dec(Number(l.qtyPer), 4),
+        seriesSize: l.seriesSize ?? "1",
+        scrapPct: dec(scrap),
+        roundUp: Boolean(l.roundUp),
+        qtyRequired: dec(Number(l.qtyPer) * qty * (1 + scrap / 100), 4),
+        unitCost: dec(l.unitCost ? Number(l.unitCost) : c.cost, 4),
+        flushing: l.flushing ?? "manual",
+        qtyConsumed: "0.0000",
+      };
+    });
+  }
+  if (input.operations.length > 0) {
+    const route = ROUTES[it.number] ?? [];
+    order.operations = input.operations.map((o) => {
+      const known = route.find((r) => resourceByCode(r.resource).id === o.resourceId);
+      return {
+        operNumber: o.operNumber,
+        resourceId: o.resourceId,
+        setupTimeH: dec(o.setupTimeH ? Number(o.setupTimeH) : (known?.setupHours ?? 0.5), 2),
+        runTimeHPer: dec(o.runTimeHPer ? Number(o.runTimeHPer) : (known?.runHours ?? 0.5), 4),
+        scrapPct: dec(Number(o.scrapPct ?? "0")),
+        laborRate: dec(o.laborRate ? Number(o.laborRate) : LABOR_RATE),
+        overheadRate: dec(o.overheadRate ? Number(o.overheadRate) : OVERHEAD_RATE),
+        subcontract: false,
+        subcontractPrice: "0.00",
+        processQty: "1",
+        queueBeforeH: dec(Number(o.queueBeforeH ?? "0"), 2),
+        queueAfterH: dec(Number(o.queueAfterH ?? "0"), 2),
+        transitH: dec(Number(o.transitH ?? "0"), 2),
+      };
+    });
+  }
+  order.costs = plannedRows(order);
+  return order;
 }

@@ -81,6 +81,7 @@ describe("BomVersionPage copy", () => {
 });
 
 describe("copy to another product or site", () => {
+  const EBIKE = "44444444-4444-4444-8444-444444444444";
   const twoLines = {
     ...bom,
     lines: [
@@ -93,16 +94,16 @@ describe("copy to another product or site", () => {
     const fetchMock = stub((url) => (url.endsWith(":copy") ? ok({ ...twoLines, id: "v2", status: "draft" }, 201) : ok(twoLines)));
     render(<BomVersionPage id="v1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Copy to new version" }));
-    expect(screen.getByLabelText("Product")).toHaveValue("BIKE");
-    expect(screen.getByLabelText("Site")).toHaveValue("S1");
+    expect(screen.getByLabelText("Product")).toHaveAttribute("data-value", "BIKE");
+    expect(screen.getByLabelText("Site")).toHaveAttribute("data-value", "S1");
     fireEvent.change(screen.getByLabelText("New effective from"), { target: { value: "2027-01-01" } });
-    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "EBIKE" } });
-    fireEvent.change(screen.getByLabelText("Site"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: EBIKE } });
+    fireEvent.click(screen.getByRole("button", { name: "Clear site" }));
     fireEvent.click(screen.getByLabelText("Line 20"));
     fireEvent.click(screen.getByRole("button", { name: "Create copy" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const [, init] = fetchMock.mock.calls.at(-1)!;
-    expect(JSON.parse(String(init?.body))).toEqual({ effectiveFrom: "2027-01-01", productId: "EBIKE", siteId: "", lineNos: [10] });
+    expect(JSON.parse(String(init?.body))).toEqual({ effectiveFrom: "2027-01-01", productId: EBIKE, siteId: "", lineNos: [10] });
   });
 
   it("refuses a copy with no lines ticked without calling the service", async () => {
@@ -129,7 +130,7 @@ describe("copy to another product or site", () => {
     render(<RouteVersionPage id="r1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Copy to new version" }));
     fireEvent.change(screen.getByLabelText("New effective from"), { target: { value: "2027-01-01" } });
-    fireEvent.change(screen.getByLabelText("Site"), { target: { value: " " } });
+    fireEvent.click(screen.getByRole("button", { name: "Clear site" }));
     fireEvent.click(screen.getByRole("button", { name: "Create copy" }));
     expect(await findAlert()).toHaveTextContent("Site is required");
     expect(fetchMock).toHaveBeenCalledTimes(1);

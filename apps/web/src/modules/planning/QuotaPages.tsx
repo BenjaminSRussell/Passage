@@ -30,6 +30,8 @@ import { compareQty } from "./ItemCoveragePage";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const LIST = "/planning/quota-arrangements";
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -221,8 +223,8 @@ function sourceSummary(s: QuotaSource): string {
 }
 
 const columns: DataTableColumn<QuotaArrangement>[] = [
-  { key: "itemId", header: "Item", mono: true },
-  { key: "siteId", header: "Site", mono: true },
+  { key: "itemId", header: "Item", render: (r) => <EntityName entity="product" id={r.itemId} fallback={r.itemId} /> },
+  { key: "siteId", header: "Site", render: (r) => <EntityName entity="site" id={r.siteId} fallback={r.siteId} /> },
   { key: "validity", header: "Valid", render: (a) => `${a.validFrom} to ${a.validTo}` },
   { key: "sources", header: "Sources (quota)", render: (a) => a.sources.map(sourceSummary).join(" · ") },
   {
@@ -392,10 +394,10 @@ function QuotaForm({ arrangement, onSaved, onReload }: FormProps) {
         </Alert>
       </div>
       <FormField id="qa-item" label="Item" error={errors.itemId}>
-        {(a11y) => <Input {...a11y} className={styles.mono} value={draft.itemId} onChange={(e) => set("itemId", e.target.value)} />}
+        {(a11y) => <EntityLookup {...a11y} entity="product" value={draft.itemId} onChange={(e) => set("itemId", e.target.value)} />}
       </FormField>
       <FormField id="qa-site" label="Site" error={errors.siteId}>
-        {(a11y) => <Input {...a11y} className={styles.mono} value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
+        {(a11y) => <EntityLookup {...a11y} entity="site" value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
       </FormField>
       <FormField id="qa-validFrom" label="Valid from" error={errors.validFrom}>
         {(a11y) => <Input {...a11y} type="date" value={draft.validFrom} onChange={(e) => set("validFrom", e.target.value)} />}

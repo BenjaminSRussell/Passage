@@ -15,6 +15,8 @@ function stub(handler: (url: string, init?: RequestInit) => unknown) {
   return fetchMock;
 }
 
+const BIKE = "11111111-1111-4111-8111-111111111111";
+
 describe("EcrsPage", () => {
   it("shows loading, rows and opens a row", async () => {
     stub(() => ok({ items: [ecr("a"), ecr("b", { state: "under_review" })] }));
@@ -52,9 +54,9 @@ describe("EcrsPage", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs?cursor=c1");
     fireEvent.change(screen.getByLabelText(/State/), { target: { value: "approved" } });
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs?state=approved"));
-    fireEvent.change(screen.getByLabelText(/Affected product/), { target: { value: " BIKE " } });
+    fireEvent.change(screen.getByLabelText(/Affected product/), { target: { value: BIKE } });
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs?state=approved&productId=BIKE"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith(`/api/v1/engineering/ecrs?state=approved&productId=${BIKE}`));
     fireEvent.click(screen.getByRole("button", { name: "New ECR" }));
     expect(created).toHaveBeenCalled();
   });
