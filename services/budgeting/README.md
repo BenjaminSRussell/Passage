@@ -71,11 +71,35 @@ investment programs.
   (`BUD-0011`), an invoice against it relieves nothing (its whole amount is `excess`), and a second release is
   `BUD-0010`. Revisions of a live line (raise or lower) still go through a re-check of the line (BR-38.3).
 
+## What slice 5 adds
+
+- **Budget planning (FR-38.2, Wave 38 P4)**: a plan is a process per legal entity, fiscal year and name on one control
+  rule version, with stages Draft, Submitted, Reviewed and Approved. Stage owners are set per org unit
+  (`PUT .../stage-owners`); a person cannot own both stages and the submitter cannot sign. A plan holds up to 10
+  scenarios (Baseline, Optimistic, Pessimistic, Custom); `POST .../scenarios` can copy another scenario with a
+  percentage adjustment.
+- **Plan grid**: account x cost center x period x scenario. `PUT .../scenarios/{sid}/grid` upserts up to 5000 cells under
+  `If-Match` (the scenario version is the ETag, returned by `GET` and by the write; 428 without it, 412 `BUD-0050` when
+  stale). `POST .../scenarios/{sid}:spread` allocates a total over cost centers by weight and over the 12 periods evenly
+  or by the prior year's posted ledger balances of the account (the ledger is read with the `ledger.balance.read`
+  service grant; weights are per account because the ledger balance has no cost center filter).
+- **Approval**: `POST /v1/budget/plans/{id}:submit` emits `plan.submitted`; workflow-ts runs one workflow per submission
+  and calls the service-only `:sign-off` and `:reject` routes (duty `budget.plan.workflow`) with the deciding person as
+  the acting user. Review completes when every org unit signed; Approve completes the same way and, in the same
+  transaction, posts the approved scenario as an Original register entry (one line per account, cost center and
+  period; dimension key `account|costCenter`, span key `YYYY-MM`), which is what budget control reads. A reject returns
+  the plan to Draft. The `submission` number ties each signal to its round, so a stale workflow cannot sign a newer one.
+  The approver may not have created the plan, set its owners or written any cell of the approved scenario (every
+  editor is recorded, and a copy inherits its source's editors). The approved plan is the year's budget, not an
+  addition to it: one approved plan per rule version and fiscal year (database unique index), and approval is refused
+  (`BUD-0059`) when an Original entry for that year (span key `FY<year>` or `<year>-..`) is already on the rule version.
+
 Money is `numeric(19,4)` with a currency. Every command requires `Idempotency-Key`. Commands emit outbox events
 (`dev.passage.budget.register.posted.v1`, `dev.passage.budget.check.completed.v1`,
 `dev.passage.budget.encumbrance.relieved.v1`, `dev.passage.budget.encumbrance.released.v1`,
 `dev.passage.budget.reservation.consumed.v1`,
-`dev.passage.budget.program.carriedforward.v1`).
+`dev.passage.budget.program.carriedforward.v1`, `dev.passage.budget.plan.submitted.v1`,
+`dev.passage.budget.plan.approved.v1`, `dev.passage.budget.plan.rejected.v1`).
 
 ## Run and test
 
@@ -107,6 +131,9 @@ Health: `GET /healthz`, `GET /readyz` (provided by `httpx.NewRouter`).
 | GET | `/v1/budget/reservations?rule=&type=&status=`, `/v1/budget/reservations/{id}` | `budget.view` |
 | POST | `/v1/budget/investment-programs`, `/v1/budget/investment-programs/{id}:distribute`, `:assign`, `:carry-forward` | `budget.program.maintain` (InvestmentProgramMaintain) |
 | GET | `/v1/budget/investment-programs?legalEntityId=`, `/v1/budget/investment-programs/{id}` | `budget.view` |
+| POST | `/v1/budget/plans`, `/v1/budget/plans/{id}/scenarios`, `.../stage-owners` (PUT), `.../scenarios/{sid}/grid` (PUT, If-Match), `.../scenarios/{sid}:spread`, `/v1/budget/plans/{id}:submit` | `budget.plan.maintain` |
+| POST | `/v1/budget/plans/{id}/stages/{review\|approve}:sign-off`, `/v1/budget/plans/{id}:reject` | `budget.plan.workflow` (service-only, workflow-ts) |
+| GET | `/v1/budget/plans?legalEntityId=`, `/v1/budget/plans/{id}`, `/v1/budget/plans/{id}/scenarios/{sid}/grid` | `budget.view` |
 
 Lists return `{"items": [...]}`, at most 500 rows, newest first.
 
@@ -139,6 +166,28 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | `BUD-0030` | Investment program not found |
 | `BUD-0031` | A program with this code exists for the legal entity and approval year (409) |
 | `BUD-0032` | Carry-forward goes to the program's approval year + 1 only |
+| `BUD-0040` | Budget plan not found |
+| `BUD-0041` | A plan with this name exists for the legal entity and fiscal year (409) |
+| `BUD-0042` | Only a Draft plan can be changed (409) |
+| `BUD-0043` | The acting user does not own the stage for the org unit (403) |
+| `BUD-0044` | Segregation of duties: one person in both stages, the submitter signing, or the reviewer approving (403 / 422) |
+| `BUD-0045` | Submit needs a Review owner, an Approve owner and an amount, or the approved scenario holds nothing (422) |
+| `BUD-0046` | The signal is for another submission than the plan's current one (409) |
+| `BUD-0047` | The stage is not open for the plan's status (409) |
+| `BUD-0048` | Another org unit already approved a different scenario (409) |
+| `BUD-0049` | Scenario not found in this plan |
+| `BUD-0050` | The grid ETag in If-Match is stale; nothing was written (412) |
+| `BUD-0051` | A plan holds at most 10 scenarios (409) |
+| `BUD-0052` | A scenario with this name exists in the plan (409) |
+| `BUD-0053` | The control rule version belongs to another legal entity (422) |
+| `BUD-0054` | Prior-year spreading needs a ledger on the plan and a configured general ledger (422 / 503) |
+| `BUD-0055` | The general ledger refused the balance read (422) |
+| `BUD-0056` | The general ledger could not be read (503) |
+| `BUD-0057` | Another plan is already approved for this control rule version and fiscal year (409) |
+| `BUD-0058` | A fiscal year that does not start in January is not supported (422) |
+| `BUD-0059` | An Original register entry already exists on the control rule version for the fiscal year; approving would double the budget (409) |
+| `BUD-0060` | The cost center weights of a spread sum to zero (422) |
+| `COM-0428` | If-Match is required on a grid write (428) |
 | `COM-0001` | Malformed request body |
 | `AUTH-0001` | No principal on the request |
 | `AUTH-0003` | Missing duty |

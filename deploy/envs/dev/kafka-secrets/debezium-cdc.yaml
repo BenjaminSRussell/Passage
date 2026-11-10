@@ -173,6 +173,31 @@ spec:
         key: passage/dev/fulfillment-postgres/cdc-password
         property: value
 ---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: debezium-cdc-budgeting
+  namespace: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: debezium-cdc-budgeting
+    creationPolicy: Owner
+    template:
+      data:
+        username: debezium_cdc_budgeting
+        password: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/budgeting-postgres/cdc-password
+        property: value
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -181,7 +206,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [debezium-cdc-metadata, debezium-cdc-batch, debezium-cdc-receiving, debezium-cdc-eam, debezium-cdc-transport, debezium-cdc-sales, debezium-cdc-fulfillment]
+    resourceNames: [debezium-cdc-metadata, debezium-cdc-batch, debezium-cdc-receiving, debezium-cdc-eam, debezium-cdc-transport, debezium-cdc-sales, debezium-cdc-fulfillment, debezium-cdc-budgeting]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

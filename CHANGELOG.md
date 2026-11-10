@@ -19,6 +19,10 @@ release may change public APIs.
 
 ### Added
 
+- Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org
+  unit, up to 10 scenarios with copy-from, a plan grid (account x cost center x period) with bulk upsert under ETag and
+  If-Match, even and prior-year-actuals spreading, and RLS on the five new tables. workflow-ts runs the approval as a Temporal
+  workflow per submission; approval posts the scenario as the Original budget register entry that budget control reads.
 - Usability program (#510): persona task scripts, a baseline report template and a release usability gate in
   `apps/web/docs`, and a "Usability gate" section in the release notes template.
 - Plain-language error messages (#501): the web problem catalog now covers every error code of the party, ledger, tax and

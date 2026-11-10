@@ -943,6 +943,51 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
 }
 
+test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject if {
+	data.duties["budget.plan.workflow"].service_only
+	data.service_grants["workflow-ts"].budgeting == ["budget.plan.workflow"]
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/review:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.workflow", "GET", "/v1/budget/plans/p1")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:submit")
+	not allowed("budget.plan.workflow", "PUT", "/v1/budget/plans/p1/scenarios/s1/grid")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
+}
+
+test_budget_plan_workflow_routes_are_refused_to_every_person_duty if {
+	routes := [
+		"/v1/budget/plans/p1/stages/review:sign-off",
+		"/v1/budget/plans/p1/stages/approve:sign-off",
+		"/v1/budget/plans/p1:reject",
+	]
+	every route in routes {
+		granting := granting_duties with input as {"action": "POST", "resource": route}
+		granting == {"budget.plan.workflow"}
+		person := person_duties with input as {"action": "POST", "resource": route}
+		person == set()
+		every duty in ["budget.plan.maintain", "budget.plan.decide", "budget.view", "budget.maintain", "budget.override"] {
+			not allowed(duty, "POST", route)
+		}
+	}
+}
+
+test_budget_plan_decide_routes_are_the_workflow_ts_decision_routes_only if {
+	not data.duties["budget.plan.decide"].service_only
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/review:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:reject")
+	not allowed("budget.plan.decide", "GET", "/v1/workflows/budget-plans/p1")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:submit")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/final:sign-off/extra")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/eco-approvals/e1:approve")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1:reject")
+}
+
 test_workflow_ts_transport_service_duty if {
 	data.service_grants["workflow-ts"].transport == ["transport.tender.execute"]
 	data.duties["transport.tender.execute"].service_only

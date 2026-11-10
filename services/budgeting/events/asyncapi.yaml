@@ -31,7 +31,28 @@ channels:
     messages:
       carriedforward:
         $ref: '#/components/messages/programCarriedForward'
+  passage.budget.plan:
+    address: passage.budget.plan
+    messages:
+      submitted:
+        $ref: '#/components/messages/planSubmitted'
+      approved:
+        $ref: '#/components/messages/planApproved'
+      rejected:
+        $ref: '#/components/messages/planRejected'
 operations:
+  onPlanSubmitted:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.plan' }
+    messages: [{ $ref: '#/channels/passage.budget.plan/messages/submitted' }]
+  onPlanApproved:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.plan' }
+    messages: [{ $ref: '#/channels/passage.budget.plan/messages/approved' }]
+  onPlanRejected:
+    action: send
+    channel: { $ref: '#/channels/passage.budget.plan' }
+    messages: [{ $ref: '#/channels/passage.budget.plan/messages/rejected' }]
   onRegisterPosted:
     action: send
     channel: { $ref: '#/channels/passage.budget.register' }
@@ -171,3 +192,50 @@ components:
                 code: { type: string }
                 amount: { type: string }
       x-passage-type: dev.passage.budget.program.carriedforward.v1
+
+    planSubmitted:
+      name: submitted
+      title: Budget plan submitted
+      description: >-
+        A Draft plan went to review (FR-38.2). submission counts the rounds; workflow-ts starts the approval workflow
+        budget-plan:<plan_id>:<submission> from it.
+      payload:
+        type: object
+        required: [plan_id, legal_entity_id, name, fiscal_year, submission, submitted_by]
+        properties:
+          plan_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          name: { type: string }
+          fiscal_year: { type: integer }
+          submission: { type: integer, minimum: 1 }
+          submitted_by: { type: string }
+      x-passage-type: dev.passage.budget.plan.submitted.v1
+    planApproved:
+      name: approved
+      title: Budget plan approved
+      description: >-
+        The last approving org unit signed. The approved scenario was posted as an Original register entry in the same
+        transaction, so it is now the budget that budget control reads. Lines are one per account, cost center and period.
+      payload:
+        type: object
+        required: [plan_id, scenario_id, register_entry_id, total]
+        properties:
+          plan_id: { type: string, format: uuid }
+          scenario_id: { type: string, format: uuid }
+          register_entry_id: { type: string, format: uuid }
+          total: { type: string }
+      x-passage-type: dev.passage.budget.plan.approved.v1
+    planRejected:
+      name: rejected
+      title: Budget plan rejected
+      description: An owner of the open stage sent the plan back to Draft; the sign-offs of the submission are cleared.
+      payload:
+        type: object
+        required: [plan_id, submission, stage, rejected_by, reason]
+        properties:
+          plan_id: { type: string, format: uuid }
+          submission: { type: integer, minimum: 1 }
+          stage: { type: string, enum: [Review, Approve] }
+          rejected_by: { type: string }
+          reason: { type: string }
+      x-passage-type: dev.passage.budget.plan.rejected.v1
