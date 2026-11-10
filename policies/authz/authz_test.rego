@@ -1109,6 +1109,17 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
+test_budget_check_converts_a_pre_encumbrance_and_view_cannot if {
+	allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
+	not allowed("budget.view", "POST", "/v1/budget/encumbrances/e1:convert")
+}
+
+test_budget_view_reads_the_scenario_comparison_and_cannot_write_it if {
+	allowed("budget.view", "GET", "/v1/budget/plans/p1/scenarios:compare")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios:compare")
+	not allowed("budget.plan.workflow", "GET", "/v1/budget/plans/p1/scenarios:compare")
+}
+
 test_budget_plan_workflow_routes_are_refused_to_every_person_duty if {
 	routes := [
 		"/v1/budget/plans/p1/stages/review:sign-off",
@@ -1628,6 +1639,13 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.view", "POST", "/v1/treasury/reconciliation-matches/m-1:unmatch")
 	not allowed("treasury.view", "POST", "/v1/treasury/reconciliation-rules/r-1:deactivate")
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
+}
+
+test_treasury_cash_position_import_and_read_are_separate if {
+	allowed("treasury.statement.import", "POST", "/v1/treasury/intraday-reports/import")
+	not allowed("treasury.view", "POST", "/v1/treasury/intraday-reports/import")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-position")
+	not allowed("treasury.statement.import", "GET", "/v1/treasury/cash-position")
 }
 
 test_treasury_bank_reconciliation_duties_are_distinct if {

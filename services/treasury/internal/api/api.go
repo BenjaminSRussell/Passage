@@ -53,10 +53,12 @@ type API struct {
 	ebics        EBICS
 	channels     bankconnect.Channels
 	recons       Reconciliations
+	cash         CashPositions
 	ledger       ledgerclient.Ledger
 	glProfiles   map[string]GLProfile
 
 	reconCounters
+	cashCounters
 	accountsCreated      atomic.Int64
 	accountsTransitioned atomic.Int64
 	statementsImported   atomic.Int64
@@ -141,6 +143,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-matches/{id}", a.getMatch)
 	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-matches/{id}:unmatch", a.unmatch)
 	a.registerBankReconciliation(r)
+	a.registerCashPosition(r)
 	a.registerEBICS(r)
 }
 
@@ -169,6 +172,10 @@ func (a *API) Metrics() http.Handler {
 			{"treasury_reconciliation_auto_matches_total", "Matches stored by reconciliation runs.", a.autoMatches.Load()},
 			{"treasury_reconciliation_manual_matches_total", "Manual matches stored.", a.manualMatches.Load()},
 			{"treasury_reconciliation_unmatches_total", "Matches dissolved.", a.unmatches.Load()},
+			{"treasury_intraday_reports_imported_total", "camt.052 reports stored as new.", a.reportsImported.Load()},
+			{"treasury_intraday_reports_replayed_total", "camt.052 uploads answered with an existing report.", a.reportsReplayed.Load()},
+			{"treasury_intraday_reports_rejected_total", "camt.052 uploads rejected by parsing or rules.", a.reportsRejected.Load()},
+			{"treasury_cash_positions_built_total", "Cash positions computed.", a.positionsBuilt.Load()},
 			{"treasury_bank_reconciliations_created_total", "Bank reconciliations opened.", a.reconCreated.Load()},
 			{"treasury_bank_reconciliations_closed_total", "Bank reconciliations closed.", a.reconClosed.Load()},
 			{"treasury_bank_reconciliations_reopened_total", "Bank reconciliations reopened.", a.reconReopened.Load()},

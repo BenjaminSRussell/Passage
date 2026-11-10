@@ -100,6 +100,11 @@ func (f *fakePlans) GetGrid(context.Context, string, string, store.GridFilter) (
 	return store.Grid{Scenario: store.Scenario{Version: 5}, Cells: []domain.PlanCell{}}, nil
 }
 
+func (f *fakePlans) CompareScenarios(_ context.Context, _, baseID, otherID, groupBy string) (store.Comparison, error) {
+	f.calls++
+	return store.Comparison{GroupBy: groupBy, Base: store.Scenario{ID: baseID}, Other: store.Scenario{ID: otherID}, Rows: []store.ComparisonRow{}}, nil
+}
+
 type fakeActuals struct {
 	byPeriod map[string]string
 	queries  []ledgerclient.BalanceQuery
@@ -430,5 +435,53 @@ func TestPlanCreate_ValidatesBody(t *testing.T) {
 func TestPlan_RoutesAbsentWithoutPlanning(t *testing.T) {
 	if rec := serve(t, &fakeStore{}, http.MethodGet, "/v1/budget/plans", ``, dutyView, ""); rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("plans route without a plan store: %d", rec.Code)
+	}
+}
+
+func TestPlanSpread_CustomKeyFollowsTheSeasonalWeights(t *testing.T) {
+	f := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027}}
+	body := `{"account":"6000","total":"1400","method":"custom","periodWeights":[3,1,1,1,1,1,1,1,1,1,1,1],"costCenters":[{"costCenter":"CC1","weight":"1"}]}`
+	rec := servePlan(t, f, nil, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"3"`})
+	if rec.Code != http.StatusOK || len(f.cells) != 12 {
+		t.Fatalf("custom spread: %d %s cells %d, want 12 cells", rec.Code, rec.Body, len(f.cells))
+	}
+	if !f.cells[0].Amount.Equal(decimal.NewFromInt(300)) || !f.cells[1].Amount.Equal(decimal.NewFromInt(100)) {
+		t.Fatalf("first periods %s and %s, want 300 and 100", f.cells[0].Amount, f.cells[1].Amount)
+	}
+}
+
+func TestPlanSpread_CustomKeyIsValidated(t *testing.T) {
+	cases := map[string]string{
+		"eleven weights":      `{"account":"6000","total":"10","method":"custom","periodWeights":[1,1,1,1,1,1,1,1,1,1,1],"costCenters":[{"costCenter":"CC1","weight":"1"}]}`,
+		"all zero":            `{"account":"6000","total":"10","method":"custom","periodWeights":[0,0,0,0,0,0,0,0,0,0,0,0],"costCenters":[{"costCenter":"CC1","weight":"1"}]}`,
+		"negative":            `{"account":"6000","total":"10","method":"custom","periodWeights":[-1,1,1,1,1,1,1,1,1,1,1,1],"costCenters":[{"costCenter":"CC1","weight":"1"}]}`,
+		"weights without key": `{"account":"6000","total":"10","method":"even","periodWeights":[1,1,1,1,1,1,1,1,1,1,1,1],"costCenters":[{"costCenter":"CC1","weight":"1"}]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &fakePlans{plan: store.Plan{ID: planID, Status: domain.PlanDraft, FiscalYear: 2027}}
+			rec := servePlan(t, f, nil, http.MethodPost, planPath+"/scenarios/"+scenarioID+":spread", body, dutyPlanMaintain, map[string]string{"If-Match": `"1"`})
+			if rec.Code != http.StatusBadRequest || len(f.cells) != 0 {
+				t.Fatalf("%d %s cells %d, want 400 and no write", rec.Code, rec.Body, len(f.cells))
+			}
+		})
+	}
+}
+
+func TestPlanCompare_ReadsTwoScenariosWithTheViewDuty(t *testing.T) {
+	other := "0196a6a4-0000-7000-8000-000000000099"
+	path := planPath + "/scenarios:compare?base=" + scenarioID + "&other=" + other + "&groupBy=costCenter"
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodGet, path, "", "budget.check", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the view duty: %d, want 403", rec.Code)
+	}
+	rec := servePlan(t, &fakePlans{}, nil, http.MethodGet, path, "", dutyView, nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"groupBy":"costCenter"`) {
+		t.Fatalf("compare: %d %s", rec.Code, rec.Body)
+	}
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodGet, planPath+"/scenarios:compare?base=x&other="+other, "", dutyView, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad base id: %d, want 400", rec.Code)
+	}
+	if rec := servePlan(t, &fakePlans{}, nil, http.MethodGet, planPath+"/scenarios:compare?base="+scenarioID+"&other="+other+"&groupBy=nope", "", dutyView, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad groupBy: %d, want 400", rec.Code)
 	}
 }

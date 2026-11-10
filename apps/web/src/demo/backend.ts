@@ -225,6 +225,8 @@ export function installDemoBackend(): void {
     const headers = new Headers(init?.headers ?? req?.headers);
     let rawBody: string | undefined;
     if (typeof init?.body === "string") rawBody = init.body;
+    // A multipart upload reaches the handler as its text fields; file parts are not read.
+    else if (init?.body instanceof FormData) rawBody = JSON.stringify(Object.fromEntries([...init.body.entries()].filter(([, v]) => typeof v === "string")));
     else if (init?.body == null && req && method !== "GET" && method !== "HEAD") rawBody = await req.clone().text();
     await sleep(80 + Math.random() * 120);
     if (init?.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");

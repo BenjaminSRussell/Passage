@@ -186,7 +186,9 @@ func TestCommand_IdempotencyReplayAndReuse(t *testing.T) {
 func assertEncumbranceInvariant(t *testing.T, ctx context.Context, st *Postgres, ruleID string) {
 	t.Helper()
 	err := dbx.WithTenantTx(ctx, st.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select b.control_dimension_key, b.encumbrances::text, coalesce(sum(e.reserved - e.relieved - e.released), 0)::text
+		rows, err := tx.Query(ctx, `select b.control_dimension_key, b.encumbrances::text, b.pre_encumbrances::text,
+			coalesce(sum(e.reserved - e.relieved - e.released) filter (where e.stage = 'encumbrance'), 0)::text,
+			coalesce(sum(e.reserved - e.relieved - e.released) filter (where e.stage = 'pre'), 0)::text
 			from budget_control_balance b left join encumbrance e on e.tenant_id = b.tenant_id and e.balance_id = b.id
 			where b.rule_version_id = $1 group by b.tenant_id, b.id`, ruleID)
 		if err != nil {
@@ -194,12 +196,15 @@ func assertEncumbranceInvariant(t *testing.T, ctx context.Context, st *Postgres,
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var dim, bal, open string
-			if err := rows.Scan(&dim, &bal, &open); err != nil {
+			var dim, bal, pre, open, openPre string
+			if err := rows.Scan(&dim, &bal, &pre, &open, &openPre); err != nil {
 				return err
 			}
 			if !d(bal).Equal(d(open)) {
 				t.Errorf("balance %s: encumbrances %s, open reservations %s", dim, bal, open)
+			}
+			if !d(pre).Equal(d(openPre)) {
+				t.Errorf("balance %s: pre-encumbrances %s, open pre-encumbrance lines %s", dim, pre, openPre)
 			}
 		}
 		return rows.Err()
