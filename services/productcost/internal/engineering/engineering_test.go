@@ -73,6 +73,36 @@ func TestActiveBOM_PicksTheCostingUsageOverProductionAndReadsItsLinesWithASigned
 	}
 }
 
+func TestActiveBOMProducts_PagesDistinctMaterialProductsAndStopsPastTheLimit(t *testing.T) {
+	var cursors []string
+	c, _ := clientFor(t, func(w http.ResponseWriter, r *http.Request) {
+		cursor := r.URL.Query().Get("cursor")
+		cursors = append(cursors, cursor)
+		if r.URL.Query().Get("category") != "material" || r.URL.Query().Get("siteId") != site || r.URL.Query().Get("status") != "active" || r.URL.Query().Get("asOf") != "2026-01-02" {
+			t.Errorf("filters %s", r.URL.RawQuery)
+		}
+		switch cursor {
+		case "":
+			_, _ = w.Write([]byte(`{"items":[{"id":"a1","productId":"p1","usage":"production","category":"material"},{"id":"a2","productId":"p1","usage":"costing","category":"material"},{"id":"d1","productId":"pdoc","usage":"production","category":"document"},{"id":"s1","productId":"psales","usage":"sales"}],"nextCursor":"c2"}`))
+		case "c2":
+			_, _ = w.Write([]byte(`{"items":[{"id":"b1","productId":"p2","usage":"production","category":"material"},{"id":"b2","productId":"p3","usage":"","category":""}]}`))
+		default:
+			t.Errorf("unexpected cursor %q", cursor)
+		}
+	})
+	got, err := c.ActiveBOMProducts(principalCtx(), entityID, site, "2026-01-02", 10)
+	if err != nil || len(got) != 3 || got[0] != "p1" || got[1] != "p2" || got[2] != "p3" || len(cursors) != 2 {
+		t.Fatalf("products %v err %v cursors %v", got, err, cursors)
+	}
+	cursors = nil
+	if got, err = c.ActiveBOMProducts(principalCtx(), entityID, site, "2026-01-02", 0); err != nil || len(got) != 1 || len(cursors) != 1 {
+		t.Fatalf("past the limit: %v %v cursors %v, want to stop on the first page", got, err, cursors)
+	}
+	if _, err = c.ActiveBOMProducts(context.Background(), entityID, site, "2026-01-02", 1); err == nil {
+		t.Fatal("no principal must fail the read")
+	}
+}
+
 func TestActiveRoute_AnUnknownRouteIsNilAndAnEngineeringFailureIsAnError(t *testing.T) {
 	status := http.StatusNotFound
 	c, _ := clientFor(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) })

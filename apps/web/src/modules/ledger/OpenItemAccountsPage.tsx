@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchOpenItemAccounts, putOpenItemAccount, type OpenItemAccount } from "./api/client";
@@ -15,7 +15,7 @@ export function OpenItemAccountsPage() {
   const [ledgerId, setLedgerId] = useLedgerParam();
   const [account, setAccount] = useState("");
   const [error, setError] = useState<string | undefined>();
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const result = useQuery({ queryKey: ["ledger", "open-item-accounts", ledgerId], queryFn: () => fetchOpenItemAccounts(ledgerId), enabled: ledgerId !== "" });
   const query = ledgerQuery(ledgerId);

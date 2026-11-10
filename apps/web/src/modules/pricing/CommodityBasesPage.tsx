@@ -3,6 +3,7 @@ import { Alert, Button, buttonClassName, DataTable, PageHeader, type DataTableCo
 import { listCommodityBases, type CommodityBasis } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<CommodityBasis>[] = [
   { key: "code", header: "Code", mono: true },
@@ -34,7 +35,7 @@ export function CommodityBasesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the cost basis types" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

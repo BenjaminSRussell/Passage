@@ -10,6 +10,7 @@ export interface PaletteEntry {
   label: string;
   to: string;
   icon?: IconName;
+  keywords?: string;
 }
 
 export interface CommandPaletteProps {
@@ -26,7 +27,7 @@ function filterEntries(entries: PaletteEntry[], query: string): PaletteEntry[] {
   if (!needle) {
     return entries;
   }
-  return entries.filter((e) => e.label.toLowerCase().includes(needle) || e.group.toLowerCase().includes(needle));
+  return entries.filter((e) => [e.label, e.group, e.keywords ?? ""].some((text) => text.toLowerCase().includes(needle)));
 }
 
 function groupEntries(visible: PaletteEntry[]): { group: string; items: { entry: PaletteEntry; index: number }[] }[] {

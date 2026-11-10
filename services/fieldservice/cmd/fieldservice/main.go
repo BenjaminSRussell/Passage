@@ -13,7 +13,9 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/api"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/optimizer"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/migrations"
 )
@@ -58,8 +60,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	if signer == nil || getenv("DISPATCH_URL") == "" {
+		slog.Warn("DISPATCH_URL or the service signing key is unset: dispatch optimizations are refused (SVC-DSP-017)")
+	}
 	s := store.New(pool)
-	a := api.New(s)
+	a := api.New(s).WithOptimizer(optimizer.New(getenv("DISPATCH_URL"), signer))
 	router := httpx.NewRouter()
 	a.Register(router)
 

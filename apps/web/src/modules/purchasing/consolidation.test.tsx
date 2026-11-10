@@ -56,7 +56,7 @@ describe("consolidation board", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(503, "COM-0503", "unavailable"));
     renderAt("/purchasing/consolidation");
-    expect(await screen.findByText(/unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/unavailable/)).toBeInTheDocument();
   });
 
   it("checks the selection before calling the service", async () => {
@@ -114,7 +114,7 @@ describe("consolidation board", () => {
     renderAt("/purchasing/consolidation");
     fireEvent.click(await screen.findByLabelText("Select PR-00000007 line 1"));
     fireEvent.click(screen.getByRole("button", { name: "Create purchase orders" }));
-    expect(await screen.findByText(/is CONSOLIDATED \(PRC-REQ-STATE\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/is CONSOLIDATED/)).toBeInTheDocument();
   });
 
   it("starts an RFQ from the selected lines and opens it", async () => {
@@ -172,7 +172,7 @@ describe("consolidation board", () => {
     expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method !== "POST")).toBe(true);
     fireEvent.change(screen.getByLabelText("RFQ reply deadline"), { target: { value: "2099-01-15T17:00" } });
     fireEvent.click(screen.getByRole("button", { name: "Start RFQ for selected lines" }));
-    expect(await screen.findByText(/already being sourced on RFQ-00000002 \(PRC-REQ-006\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already being sourced on RFQ-00000002/)).toBeInTheDocument();
   });
 
   it("refuses an RFQ for lines of two legal entities before the round trip", () => {
@@ -236,7 +236,7 @@ describe("consolidation board", () => {
       expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method !== "POST")).toBe(true);
       fireEvent.change(screen.getByLabelText("Quantities of the new lines"), { target: { value: "10" } });
       fireEvent.click(screen.getByRole("button", { name: "Split line" }));
-      expect(await screen.findByText(/being sourced on RFQ-00000002 \(PRC-REQ-006\)/)).toBeInTheDocument();
+      expect(await screen.findByText(/being sourced on RFQ-00000002/)).toBeInTheDocument();
     });
   });
 });

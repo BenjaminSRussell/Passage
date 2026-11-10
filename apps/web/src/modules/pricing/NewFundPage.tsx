@@ -5,6 +5,7 @@ import { createFund, describeProblem, newKey, type FundInput, type Problem } fro
 import { DECIMAL, UUID } from "./format";
 import { CURRENCY } from "./fundFormat";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -118,7 +119,7 @@ export function NewFundPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the fund" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

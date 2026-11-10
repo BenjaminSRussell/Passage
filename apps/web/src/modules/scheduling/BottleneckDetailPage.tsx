@@ -4,6 +4,7 @@ import { getBottleneck, type BottleneckWeek } from "./api/client";
 import { formatDateTime, hours } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One bottleneck episode with the weekly load of its resource from the first flagged week on (AC-23.6). */
 export function BottleneckDetailPage() {
@@ -20,7 +21,7 @@ export function BottleneckDetailPage() {
           <EmptyState title="Bottleneck not found" description="No bottleneck episode has this id." />
         ) : (
           <Alert tone="danger" title="Could not load the bottleneck" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>

@@ -4,6 +4,7 @@ import { describeProblem, getTargetLoad, loadRunTarget, type Problem, type Targe
 import { dash, formatDateTime, formatKey, loadNeedsAttention, money, type ControlTotal } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUS_LABELS: Record<TargetLoadStatus, { label: string; tone: BadgeTone }> = {
   STAGED: { label: "Ready to load", tone: "neutral" },
@@ -93,7 +94,7 @@ export function TargetLoadPanel({ initial, onChanged }: { initial: TargetLoad; o
         </p>
         {failure ? (
           <Alert tone="danger" title="The load did not run" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {loadNeedsAttention(load.status) ? (
@@ -119,7 +120,7 @@ export function TargetLoadPanel({ initial, onChanged }: { initial: TargetLoad; o
         </div>
         {state.error ? (
           <Alert tone="danger" title="Could not read the load" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <>

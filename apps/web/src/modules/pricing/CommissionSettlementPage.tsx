@@ -18,6 +18,7 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { saveCsv } from "./settlementFile";
 import { addDays, DAY, sumDecimals, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const TARGET_LABELS: Record<SettlementTarget, string> = { AP: "Accounts payable", PAYROLL: "Payroll" };
 
@@ -165,7 +166,7 @@ export function CommissionSettlementPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not complete the settlement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

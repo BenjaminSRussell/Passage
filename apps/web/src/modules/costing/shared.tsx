@@ -58,7 +58,7 @@ export function MethodField({ id, value, onChange }: { id: string; value: CostMe
 
 export function FallbackField({ id, value, onChange }: { id: string; value: Fallback; onChange(f: Fallback): void }) {
   return (
-    <FormField id={id} label="Unsettled issue fallback" hint="Values issue quantity that no receipt covers (BR-20.3).">
+    <FormField id={id} label="Unsettled issue fallback" hint="How to value an issued quantity that no receipt covers.">
       {(c) => (
         <Select {...c} value={value} onChange={(e) => onChange(e.target.value as Fallback)}>
           {FALLBACKS.map((f) => (

@@ -5,6 +5,7 @@ import { describeProblem, getLag, listRuns, type Problem, type RunPage, type Run
 import { periodLabel, shortHash, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<RunSummary>[] = [
   { key: "definitionCode", header: "Definition", mono: true, render: (r) => `${r.definitionCode} v${r.definitionVersion}` },
@@ -99,7 +100,7 @@ export function RunsPage() {
       </div>
       {first.error ? (
         <Alert tone="danger" title="Could not load the statement runs" live="alert" action={<Button size="sm" onClick={first.reload}>Try again</Button>}>
-          {first.error.message} ({first.error.code})
+          <ProblemMessage problem={first.error} />
         </Alert>
       ) : (
         <DataTable
@@ -126,7 +127,7 @@ export function RunsPage() {
       ) : null}
       {moreError ? (
         <Alert tone="danger" live="alert" title="Could not load more runs">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       <LagPanel />
@@ -141,7 +142,7 @@ export function LagPanel() {
     <Card title="Read-model lag">
       {lag.error ? (
         <Alert tone="danger" title="Lag is unavailable" live="alert" action={<Button size="sm" onClick={lag.reload}>Try again</Button>}>
-          {lag.error.message} ({lag.error.code})
+          <ProblemMessage problem={lag.error} />
         </Alert>
       ) : lag.loading && !lag.data ? (
         <div aria-busy="true">

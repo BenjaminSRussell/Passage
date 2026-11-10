@@ -163,7 +163,7 @@ describe("Pay agreements list", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [agreement] }));
     renderAt("/shopfloor/pay-agreements");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("US hourly")).toBeInTheDocument();
@@ -285,7 +285,7 @@ describe("Time profiles list", () => {
     first.unmount();
     handler = () => json(503, { code: "COM-0503", detail: "Service unavailable" });
     renderAt("/shopfloor/time-profiles");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
   });
 });
 

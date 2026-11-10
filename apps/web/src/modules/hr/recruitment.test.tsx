@@ -104,7 +104,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
 
     api.handler = routes({ [key]: problem(403, "AUTH-0003", "missing duty hr.recruiting.maintain") });
     const second = renderAt(path);
-    expect((await findAlert()).textContent).toContain("You don't have access to do this.");
+    expect((await findAlert()).textContent).toContain("You don't have the duty or the legal-entity access this action needs.");
     expect(pageViolations(second.container)).toEqual([]);
   });
 
@@ -269,7 +269,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     fireEvent.change(await screen.findByLabelText("Worker id"), { target: { value: id(2) } });
     fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
     fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
-    expect((await findAlert()).textContent).toContain("This offer has already been converted to a hire. (HCM-OFR-001)");
+    expect((await findAlert()).textContent).toContain("This offer has already been converted to a hire.");
   });
 
   it("hides the hire form once an offer has been converted", async () => {

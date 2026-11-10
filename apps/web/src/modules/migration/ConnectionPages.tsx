@@ -36,6 +36,7 @@ import styles from "./pages.module.css";
 import { SourceSystemField } from "./SourceSystemField";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 export const DUTY_CONNECTION_WRITE = "migration.connection.write";
 
@@ -95,7 +96,7 @@ export function ConnectionsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load connections" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -217,7 +218,7 @@ export function NewConnectionPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the connection" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -260,7 +261,7 @@ export function ConnectionDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Connection" />
         <Alert tone="danger" title="Could not load this connection" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/connections">
           Back to connections
@@ -325,7 +326,7 @@ export function ConnectionDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the connection" live="alert" action={<Button size="sm" onClick={state.reload}>Reload</Button>}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <TestResultCard result={result} failure={testFailure} testing={testing} />
@@ -391,7 +392,7 @@ function SettingsCard({ profile, canEdit, onSaved }: { profile: ConnectionProfil
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the settings" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -476,7 +477,7 @@ function SecretCard({ profile, canEdit, onSaved }: { profile: ConnectionProfile;
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={`Could not set the ${noun}`} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -527,7 +528,7 @@ function TestResultCard({ result, failure, testing }: { result: ConnectionTestRe
     return (
       <Card title="Connection test">
         <Alert tone="danger" title="The test could not run" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       </Card>
     );

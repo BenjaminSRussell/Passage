@@ -191,7 +191,7 @@ describe("operating unit import page", () => {
     await user.click(screen.getByRole("button", { name: "Check file" }));
     expect(
       await screen.findByText(
-        /an import takes at most 1000 rows \(ORG-OU-IMPORT-TOO-LARGE\)/,
+        /an import takes at most 1000 rows/,
       ),
     ).toBeInTheDocument();
     await waitFor(() =>

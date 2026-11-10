@@ -5,6 +5,7 @@ import { listPayments, PAYMENT_STATUSES, type Payment, type PaymentStatus } from
 import { MODE_LABELS, money, shortId, STATUS_LABELS, STATUS_TONES } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 500;
 
@@ -51,7 +52,7 @@ export function PaymentsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the payments" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

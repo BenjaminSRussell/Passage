@@ -5,6 +5,7 @@ import { HOLD_STATUSES, listScreeningHolds, type HoldStatus, type ScreeningHold 
 import { dash, formatDateTime, shortId, stateTone, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The parties that hold the load, such as "Northwind (potential match)". */
 export function heldPartiesText(hold: ScreeningHold): string {
@@ -49,7 +50,7 @@ export function ScreeningHoldsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the screening holds" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

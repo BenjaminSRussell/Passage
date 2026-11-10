@@ -23,6 +23,7 @@ import { StatusBadge } from "./badges";
 import { DECIMAL, money, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const CODE = /^[A-Z0-9][A-Z0-9_-]{0,19}$/;
 
@@ -79,7 +80,7 @@ export function GroupAssetsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load group assets" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -94,7 +95,7 @@ export function GroupAssetsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more group assets" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (
@@ -209,7 +210,7 @@ function MemberPicker({ legalEntityId, classCode, selected, onChange, error }: {
   } else if (state.error) {
     body = (
       <Alert tone="danger" title="Could not load the assets" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   } else if (state.loading && !state.data) {
@@ -239,7 +240,7 @@ function MemberPicker({ legalEntityId, classCode, selected, onChange, error }: {
           ))}
           {moreError ? (
             <Alert tone="danger" title="Could not load more assets" live="alert">
-              {moreError.message} ({moreError.code})
+              <ProblemMessage problem={moreError} />
             </Alert>
           ) : null}
           {cursor ? (
@@ -376,7 +377,7 @@ export function NewGroupAssetPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0535" ? "An asset is already in a group" : "Could not create the group asset"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -431,7 +432,7 @@ export function GroupAssetDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Group asset" />
         <Alert tone="danger" title="Could not load the group asset" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets/group-assets">
           Back to group assets

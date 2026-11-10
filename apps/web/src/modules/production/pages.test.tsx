@@ -81,7 +81,7 @@ describe("Production orders list", () => {
     renderAt("/production");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load production orders");
-    expect(alert).toHaveTextContent("missing duty production.order.read (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty production.order.read");
   });
 
   it("filters by status", async () => {

@@ -246,11 +246,11 @@ describe("transfer and split", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transfer asset" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("The asset changed since you opened it");
-    expect(alert).toHaveTextContent("(AST-0006)");
+    expect(alert).toHaveTextContent("AST-0006");
     reply = { status: 422, body: { code: "AST-0508", detail: "transfer date precedes the end of the last depreciated period 2026-01" } };
     fireEvent.click(screen.getByRole("button", { name: "Transfer asset" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not record the transfer"));
-    expect(screen.getByRole("alert")).toHaveTextContent("(AST-0508)");
+    expect(screen.getByRole("alert")).toHaveTextContent("AST-0508");
   });
 
   it("offers nothing to transfer on a transferred asset and reports a load failure", async () => {
@@ -263,7 +263,7 @@ describe("transfer and split", () => {
 
     handler = () => ({ status: 404, body: { code: "AST-0001", detail: "no asset" } });
     renderAt(`/assets/${ASSET}/transfer`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("no asset (AST-0001)");
+    expect(await screen.findByRole("alert")).toHaveTextContent("no asset");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -379,7 +379,7 @@ describe("group assets", () => {
     unmount();
     handler = () => ({ status: 403, body: { code: "AUTH-0002", detail: "missing duty assets.asset.view or assets.asset.configure" } });
     renderAt("/assets/group-assets");
-    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty assets.asset.view or assets.asset.configure (AUTH-0002)");
+    expect(await screen.findByRole("alert")).toHaveTextContent("missing duty assets.asset.view or assets.asset.configure");
   });
 
   it("picks open members of the class in the legal entity and creates the group", async () => {
@@ -452,7 +452,7 @@ describe("group assets", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create group asset" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("An asset is already in a group");
-    expect(alert).toHaveTextContent("(AST-0535)");
+    expect(alert).toHaveTextContent("AST-0535");
   });
 
   it("shows a group's basis, members and the projected yearly charge (AC-37.10)", async () => {
@@ -477,7 +477,7 @@ describe("group assets", () => {
   it("reports an unknown group asset", async () => {
     handler = () => ({ status: 404, body: { code: "AST-0032", detail: "no group asset with id x" } });
     renderAt(`/assets/group-assets/${GROUP}`);
-    expect(await screen.findByRole("alert")).toHaveTextContent("no group asset with id x (AST-0032)");
+    expect(await screen.findByRole("alert")).toHaveTextContent("no group asset with id x");
     expect(screen.getByRole("link", { name: "Back to group assets" })).toHaveAttribute("href", "/assets/group-assets");
   });
 });

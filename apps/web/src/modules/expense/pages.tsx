@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { describeProblem, evaluateReport, type EvaluationResponse, type Outcome, type PolicyResult, type Problem } from "./api/client";
 import { DECIMAL, splitList, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const OUTCOME_TONE: Record<Outcome, BadgeTone> = { BLOCK: "danger", REQUIRE_JUSTIFICATION: "warning", REQUIRE_RECEIPT: "warning", WARN: "info" };
 const OUTCOME_LABEL: Record<Outcome, string> = { BLOCK: "Blocked", REQUIRE_JUSTIFICATION: "Justification required", REQUIRE_RECEIPT: "Receipt required", WARN: "Warning" };
@@ -100,7 +101,7 @@ export function ExpenseHome() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The line could not be checked" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

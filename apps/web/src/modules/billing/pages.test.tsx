@@ -88,7 +88,7 @@ describe("Invoices", () => {
       url.searchParams.get("cursor") ? json(503, { code: "HTTP-503", detail: "billing unavailable" }) : json(200, { items: [proposal], nextCursor: "c1" });
     renderAt("/billing");
     fireEvent.click(await screen.findByRole("button", { name: "Load more invoices" }));
-    expect(await findAlert()).toHaveTextContent("billing unavailable (HTTP-503)");
+    expect(await findAlert()).toHaveTextContent("billing unavailable");
     expect(screen.getByRole("table", { name: "Invoices" })).toHaveTextContent("Proposal");
     server.handler = () => json(200, { items: [{ ...posted, id: "inv-3" }] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -99,7 +99,7 @@ describe("Invoices", () => {
   it("shows the error state with a retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
     renderAt("/billing");
-    expect(await findAlert()).toHaveTextContent("missing duty billing.invoice.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty billing.invoice.view");
     server.handler = () => json(200, { items: [proposal] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Invoices" })).toHaveTextContent("Proposal");
@@ -138,7 +138,7 @@ describe("Invoice detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Post invoice" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The tax engine is unavailable; nothing was posted");
-    expect(alert).toHaveTextContent("(BIL-0001)");
+    expect(alert).toHaveTextContent("BIL-0001");
     expect(screen.getByRole("button", { name: "Post invoice" })).toBeInTheDocument();
   });
 
@@ -161,7 +161,7 @@ describe("Invoice detail", () => {
   it("shows a load failure with a retry", async () => {
     server.handler = () => json(404, { code: "BIL-0100", detail: "invoice not found" });
     renderAt(`/billing/invoices/${INV}`);
-    expect(await findAlert()).toHaveTextContent("invoice not found (BIL-0100)");
+    expect(await findAlert()).toHaveTextContent("invoice not found");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -349,6 +349,6 @@ describe("Revenue allocation", () => {
     fill("Name", "a");
     fill("Standalone selling price", "1");
     fireEvent.click(screen.getByRole("button", { name: "Allocate" }));
-    expect(await findAlert()).toHaveTextContent("missing duty revrec.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty revrec.view");
   });
 });

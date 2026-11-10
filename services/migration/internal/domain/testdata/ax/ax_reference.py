@@ -490,6 +490,26 @@ def read_demo(entity):
         return list(csv.DictReader(fh))
 
 
+def real_loader_prediction(demo):
+    """What the real loader adds to the pipeline outcome: a customer or vendor whose AX party was rejected has no
+    Passage party to attach the role to, so it is refused MIG-REF-UNRESOLVED. The real-loader run keys parties by RecId."""
+    party_rejects = demo["party"]["rejects"]
+    by_recid = {}
+    for r in read_demo("party"):
+        if r["PartyNumber"].strip() in party_rejects:
+            by_recid[r["RecId"].strip()] = party_rejects[r["PartyNumber"].strip()]
+    unresolved = {}
+    for entity in ("customer", "vendor"):
+        _, key_cols, _ = TABLES[entity]
+        found = {}
+        for r in read_demo(entity):
+            k = "|".join(r[c].strip() for c in key_cols)
+            if k not in demo[entity]["rejects"] and r["Party"].strip() in by_recid:
+                found[k] = ["MIG-REF-UNRESOLVED"]
+        unresolved[entity] = dict(sorted(found.items()))
+    return {"partyRejectsByRecId": dict(sorted(by_recid.items())), "unresolvedParty": unresolved}
+
+
 def main():
     expected = {"demo": {}, "scale": {}}
     for entity, n in DEMO_SIZES.items():
@@ -500,6 +520,7 @@ def main():
         stats, rejects = migrate(entity, reread)
         stats["rejects"] = rejects
         expected["demo"][entity] = stats
+    expected["demoReal"] = real_loader_prediction(expected["demo"])
     for entity, n in SCALE_SIZES.items():
         expected["scale"][entity], _ = migrate(entity, generate(entity, n))
     with open(os.path.join(HERE, "expected.json"), "w", encoding="utf-8") as fh:

@@ -6,6 +6,7 @@ import { PROCEDURE_STATUSES, STEP_TYPE_LABELS } from "./campaignFormat";
 import styles from "./pages.module.css";
 import { cleanSteps, ProcedureStepsEditor, validateSteps } from "./ProcedureStepsEditor";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -36,7 +37,7 @@ export function ProcedureDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Pricing procedure" />
         <Alert tone="danger" title="Could not load the procedure" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -132,7 +133,7 @@ export function ProcedureDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.title} live="alert">
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       {proc.status === "DRAFT" ? (

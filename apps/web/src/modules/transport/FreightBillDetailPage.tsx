@@ -5,6 +5,7 @@ import { decideFreightBill, describeProblem, getFreightBill, newKey, type Decisi
 import { dash, fixed, formatDateTime, matchTone, money, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const expectedColumns = (currency: string): DataTableColumn<Line>[] => [
   { key: "chargeCode", header: "Charge", mono: true },
@@ -113,7 +114,7 @@ function DecisionCard({ bill, onDone }: { bill: FreightBillDetail; onDone(): voi
             live="alert"
             action={failure.code === "conflict_version" ? <Button size="sm" onClick={onDone}>Reload</Button> : undefined}
           >
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
       </div>
@@ -132,7 +133,7 @@ export function FreightBillDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Freight bill" />
         <Alert tone="danger" title="Could not load the freight bill" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/freight-bills">Back to freight bills</Link>
       </div>

@@ -35,6 +35,7 @@ import {
 import { count, dateTime, enumLabel, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const destinationLabel: Record<Schedule["destination"]["type"], string> = { EMAIL: "E-mail", SFTP: "SFTP", INBOX: "In-app inbox" };
 
@@ -70,7 +71,7 @@ export function SchedulesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load schedules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -257,7 +258,7 @@ export function ScheduleCreatePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The schedule was not created" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -327,7 +328,7 @@ export function ScheduleDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Schedule" />
         <Alert tone="danger" title="Could not load the schedule" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error?.message} ({state.error?.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -409,7 +410,7 @@ function Deliveries({ schedule }: { schedule: Schedule }) {
         </div>
         {state.error ? (
           <Alert tone="danger" title="Could not load deliveries" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable

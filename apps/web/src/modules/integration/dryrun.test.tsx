@@ -127,7 +127,7 @@ describe("punchout cart check", () => {
     renderAt("/integration/punchout");
     submit("Check cart");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("request failed validation (EDI-0001)");
+    expect(alert).toHaveTextContent("request failed validation");
     expect(within(alert).getByText("supplier.tolerancePct")).toBeInTheDocument();
   });
 

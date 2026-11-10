@@ -149,7 +149,7 @@ describe("send EDI document", () => {
       init.method === "POST" ? json(422, { code: "idempotency_key_reuse", detail: "Idempotency-Key was already used" }) : partnersOnly(url, init);
     renderAt(`/integration/interchanges/outbound?partnerId=${PARTNER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Generate document" }));
-    expect(await findAlert()).toHaveTextContent("Idempotency-Key was already used (idempotency_key_reuse)");
+    expect(await findAlert()).toHaveTextContent("Idempotency-Key was already used");
     fireEvent.click(screen.getByRole("button", { name: "Generate document" }));
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(header(posts()[1], "Idempotency-Key")).not.toBe(header(posts()[0], "Idempotency-Key"));
@@ -167,7 +167,7 @@ describe("send EDI document", () => {
     handler = (url, init) => (fail ? json(503, { code: "COM-0503", detail: "unavailable" }) : partnersOnly(url, init));
     renderAt("/integration/interchanges/outbound");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("unavailable (COM-0503)");
+    expect(alert).toHaveTextContent("unavailable");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByLabelText("Partner")).toBeInTheDocument();

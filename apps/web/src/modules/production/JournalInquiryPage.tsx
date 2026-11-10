@@ -11,6 +11,7 @@ import {
 } from "./api/client";
 import { amount, dash, journalTypeLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface JournalInquiryPageProps {
   /** Opens a production order from its row. */
@@ -172,7 +173,7 @@ export function JournalInquiryPage({ onOpenOrder }: JournalInquiryPageProps) {
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The production journals are not available" live="alert">
           {state.error.status === 403
             ? "You need the View production orders duty to see the production journals."
-            : `${state.error.message} (${state.error.code})`}
+            : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>
@@ -195,7 +196,7 @@ export function JournalInquiryPage({ onOpenOrder }: JournalInquiryPageProps) {
           />
           {state.moreError ? (
             <Alert tone="danger" title="More journals could not be loaded" live="alert">
-              {`${state.moreError.message} (${state.moreError.code})`}
+              {<ProblemMessage problem={state.moreError} />}
             </Alert>
           ) : null}
           {state.inquiry?.nextCursor && !state.loading ? (

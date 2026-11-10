@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface OutcomeValues {
   skillCode: string;
@@ -162,7 +163,7 @@ export function NewCoursePage() {
       />
       {skills.error ? (
         <Alert tone="danger" title="Could not load the skill catalog" live="alert" action={<Button size="sm" onClick={skills.reload}>Try again</Button>}>
-          {skills.error.message} ({skills.error.code})
+          <ProblemMessage problem={skills.error} />
         </Alert>
       ) : null}
       <Card>
@@ -257,7 +258,7 @@ export function NewCoursePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not add the course" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

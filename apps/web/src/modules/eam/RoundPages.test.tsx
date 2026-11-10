@@ -160,7 +160,7 @@ describe("round register", () => {
     unmount();
     handler = (url, init) => (isGet("/rounds")(url, init) ? json(503, { code: "COM-0503", detail: "down" }) : undefined);
     renderAt("/eam/rounds");
-    expect(await findAlert()).toHaveTextContent("(COM-0503)");
+    expect(await findAlert()).toHaveTextContent("COM-0503");
   });
 });
 
@@ -205,7 +205,7 @@ describe("round editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create round" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The round breaks a rule");
-    expect(alert).toHaveTextContent("HOT_WORK permit to work (EAM-RND-003)");
+    expect(alert).toHaveTextContent("HOT_WORK permit to work");
     reply = json(409, { code: "EAM-DUP-001", detail: "maintenance round WELDS already exists" });
     fireEvent.click(screen.getByRole("button", { name: "Create round" }));
     expect(await screen.findByText("A round with this code already exists.")).toBeInTheDocument();
@@ -332,7 +332,7 @@ describe("round stops on the work order", () => {
     fireEvent.click(screen.getByRole("button", { name: "Complete work order" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Record every round stop first");
-    expect(alert).toHaveTextContent("(EAM-RND-001)");
+    expect(alert).toHaveTextContent("EAM-RND-001");
   });
 
   it("asks to start the order before stops are recorded", async () => {

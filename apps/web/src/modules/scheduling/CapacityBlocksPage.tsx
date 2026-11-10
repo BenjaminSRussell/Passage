@@ -6,6 +6,7 @@ import { describeShifts, formatDateTime, shortId } from "./format";
 import { describeRecurrence } from "./NewCapacityBlockPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "color = white and grade >= 2"; an empty condition admits every job. */
 export function describeCondition(condition: Predicate[]): string {
@@ -69,7 +70,7 @@ export function CapacityBlocksPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load capacity blocks" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

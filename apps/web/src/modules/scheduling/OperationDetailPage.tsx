@@ -21,6 +21,7 @@ import { compareDecimal, decimalText, optionalWhole, positive, trimDecimal, whol
 import { describeAttributes } from "./OperationsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const statusTone: Record<OperationStatus, BadgeTone> = { open: "neutral", scheduled: "success", unplaced: "warning" };
 
@@ -267,7 +268,7 @@ function Panel({ op: initial, codes, onReload }: PanelProps) {
           live="alert"
           action={failure.code === "SCHED-0137" ? <Button size="sm" onClick={onReload}>Load the latest version</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
           {failure.code === "SCHED-0138" ? " Unfirm the job on the Gantt workspace first." : ""}
         </Alert>
       ) : null}
@@ -388,7 +389,7 @@ export function OperationDetailPage() {
       <PageHeader title="Operation" description="Change an operation's duration, dates, priority or candidates, take its order off the schedule, or delete it." />
       {state.error ? (
         <Alert tone="danger" title="Could not load the operation" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.data ? (
         <div aria-busy="true">

@@ -27,6 +27,7 @@ import {
 } from "./api/client";
 import { ledgerQuery, useLedgerParam } from "./LedgerPicker";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const NAME = /^[A-Za-z0-9_.-]{1,60}$/;
 const VALUE = /^[A-Za-z0-9._-]{1,20}$/;
@@ -172,9 +173,9 @@ export function toStructureDraft(s: Structure): StructureDraft {
   };
 }
 
-function failureText(error: unknown): { message: string; violations: Violation[] } {
-  if (error instanceof LedgerApiError) return { message: `${error.message} (${error.code})`, violations: error.violations };
-  return { message: (error as Error).message, violations: [] };
+function failureText(error: unknown): { problem: unknown; violations: Violation[] } {
+  if (error instanceof LedgerApiError) return { problem: error, violations: error.violations };
+  return { problem: error, violations: [] };
 }
 
 interface FormProps {
@@ -193,7 +194,7 @@ function StructureForm({ ledgerId, structureId, initial, status, lockVersion }: 
   const [values, setValues] = useState<StructureDraft>(initial);
   const [nextKey, setNextKey] = useState(initial.rules.length);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<{ message: string; violations: Violation[] } | null>(null);
+  const [failure, setFailure] = useState<{ problem: unknown; violations: Violation[] } | null>(null);
   const [busy, setBusy] = useState<Structure["status"] | null>(null);
   const locked = status === "active" || status === "retired";
   const query = ledgerQuery(ledgerId);
@@ -351,7 +352,7 @@ function StructureForm({ ledgerId, structureId, initial, status, lockVersion }: 
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the account structure" live="alert">
-              {failure.message}
+              <ProblemMessage problem={failure.problem} />
               {failure.violations.length > 0 ? (
                 <ul className={styles.problems}>
                   {failure.violations.map((v, i) => (

@@ -23,6 +23,7 @@ import {
 } from "./api/calculators";
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DECIMAL = /^\d+(\.\d{1,6})?$/;
 const SIGNED_DECIMAL = /^-?\d+(\.\d{1,6})?$/;
@@ -154,7 +155,7 @@ function useCalculation<I, R>(call: (input: I) => Promise<R>) {
 function Failure({ error, title }: { error: LoadError | null; title: string }) {
   return (
     <Alert tone="danger" title={error ? title : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }
@@ -285,7 +286,7 @@ export function BufferCalculator() {
     <Card title="DDMRP buffer">
       <div className={styles.stack}>
         <p className={styles.summary}>
-          Buffer zones, net-flow position and the replenishment order for one decoupled item. Filled in with the BR-22.11 example.
+          Buffer zones, net-flow position and the replenishment order for one decoupled item. Filled in with an example.
         </p>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="DDMRP buffer">
           <Field<BufferForm> id="ddmrp-adu" label="Average daily usage" field="adu" {...field} />
@@ -383,7 +384,7 @@ export function QuotaCalculator() {
     <Card title="Quota arrangement">
       <div className={styles.stack}>
         <p className={styles.summary}>
-          Which source a requirement goes to: the lowest (allocated + base) / quota wins. Filled in with the BR-22.12 example.
+          Which source a requirement goes to: the lowest (allocated + base) / quota wins. Filled in with an example.
         </p>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Quota arrangement">
           <Field<QuotaForm> id="quota-qty" label="Requirement qty" field="qty" {...field} />
@@ -484,7 +485,7 @@ export function ConsumptionCalculator() {
     <Card title="Forecast consumption">
       <div className={styles.stack}>
         <p className={styles.summary}>
-          How sales lines consume the forecast under assemble-to-order. Filled in with the AC-22.14 example.
+          How sales lines consume the forecast under assemble-to-order. Filled in with an example.
         </p>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Forecast consumption">
           <FormField id="consume-mode" label="Consumption mode">
@@ -729,7 +730,7 @@ export function ShelfLifeCalculator() {
     <Card title="Shelf-life check">
       <div className={styles.stack}>
         <p className={styles.summary}>
-          Batches serve a demand first-expiry-first, and only while they keep the required remaining shelf life. Filled in with the AC-22.15
+          Batches serve a demand first-expiry-first, and only while they keep the required remaining shelf life. Filled in with an
           example.
         </p>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Shelf-life check">

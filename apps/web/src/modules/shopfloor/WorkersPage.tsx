@@ -4,6 +4,7 @@ import { listWorkers, type Worker } from "./api/client";
 import { dash, fixed } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Worker>[] = [
   { key: "name", header: "Name" },
@@ -29,7 +30,7 @@ export function WorkersPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load workers" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

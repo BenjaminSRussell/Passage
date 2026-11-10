@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { checkExport, describeProblem, EXPORT_REGIMES, type ExportCheckInput, type ExportItem, type ExportLicense, type ExportLineDecision, type ExportRegime, type ExportResult, type Problem } from "./api/client";
 import { dash } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DECIMAL = /^\d+(\.\d+)?$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -223,7 +224,7 @@ export function ExportCheckPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The export check failed" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone={result?.blocked ? "danger" : result?.items.some((d) => d.warning) ? "warning" : "success"} live="status">
         {summary}

@@ -29,7 +29,11 @@ const (
 // is the catch-weight of a DELIVERED report (FR-24.7); absent, a catch-weight
 // line stays priced at cases × nominal.
 type ProgressLineInput struct {
-	LineNo       int
+	LineNo int
+	// LineID names the line by id instead of LineNo (fulfillment knows the
+	// order line ids of order.confirmed, not their numbers, #496); the store
+	// resolves it to the line's number.
+	LineID       string
 	Quantity     decimal.Decimal
 	ActualWeight *decimal.Decimal
 	// Tracking names the batches and serials a DELIVERED report took (#480),
@@ -129,6 +133,31 @@ func loadProgressBy(ctx context.Context, tx pgx.Tx, where string, args ...any) (
 	return &p, nil
 }
 
+// resolveLineIDs sets the number of each report line named by id, and
+// refuses an unknown id (404) and a line named twice, once by number and once
+// by id (400).
+func resolveLineIDs(order []Line, lines []ProgressLineInput) error {
+	byID := make(map[string]int, len(order))
+	for _, l := range order {
+		byID[l.ID] = l.LineNo
+	}
+	seen := make(map[int]bool, len(lines))
+	for i := range lines {
+		if lines[i].LineID != "" {
+			no, ok := byID[lines[i].LineID]
+			if !ok {
+				return problem(http.StatusNotFound, CodeLineNotFound, fmt.Sprintf("order line %s not found", lines[i].LineID))
+			}
+			lines[i].LineNo = no
+		}
+		if seen[lines[i].LineNo] {
+			return problem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("order line %d is named twice in this report", lines[i].LineNo))
+		}
+		seen[lines[i].LineNo] = true
+	}
+	return nil
+}
+
 // RecordProgress applies a delivery or invoice report to a CONFIRMED,
 // PARTIALLY_SHIPPED (or, for an invoice, SHIPPED) order under the order's row
 // lock: each line's delivered or invoiced quantity grows, its status follows
@@ -186,6 +215,9 @@ func (s *Postgres) RecordProgress(ctx context.Context, in NewProgress, now time.
 		byNo := make(map[int]*Line, len(o.Lines))
 		for i := range o.Lines {
 			byNo[o.Lines[i].LineNo] = &o.Lines[i]
+		}
+		if err := resolveLineIDs(o.Lines, in.Lines); err != nil {
+			return err
 		}
 		before := make([]domain.LineProgress, len(o.Lines))
 		for i, l := range o.Lines {

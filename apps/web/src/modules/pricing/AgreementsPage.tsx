@@ -5,6 +5,7 @@ import { CONDITION_TYPES, describeProblem, exportConditionRecords, listCondition
 import { describeCustomer, describePercent, describeProduct, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ConditionRecord>[] = [
   { key: "type", header: "Type", render: (row) => TYPE_LABELS[row.type] },
@@ -123,12 +124,12 @@ export function AgreementsPage() {
       </Alert>
       {exportFailure ? (
         <Alert tone="danger" title="Could not export the trade agreements" live="alert">
-          {exportFailure.message} ({exportFailure.code})
+          <ProblemMessage problem={exportFailure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load the trade agreements" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

@@ -33,6 +33,7 @@ import {
 import { dash, formatRate, formatUtc, registrationStatusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Entry({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -119,12 +120,12 @@ function RegisterForm({ session, onRegistered }: { session: CourseSession; onReg
       </Button>
       {workers.error ? (
         <Alert tone="danger" title="Could not load workers" live="alert" action={<Button size="sm" onClick={workers.reload}>Try again</Button>}>
-          {workers.error.message} ({workers.error.code})
+          <ProblemMessage problem={workers.error} />
         </Alert>
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not register the worker" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </form>
@@ -203,7 +204,7 @@ export function CourseSessionPage({ now = () => new Date() }: { now?: () => Date
           </Card>
         ) : (
           <Alert tone="danger" title="Could not load the session" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>
@@ -339,12 +340,12 @@ export function CourseSessionPage({ now = () => new Date() }: { now?: () => Date
           </Alert>
           {failure ? (
             <Alert tone="danger" title="That didn't work" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           {regs.error ? (
             <Alert tone="danger" title="Could not load the registrations" live="alert" action={<Button size="sm" onClick={regs.reload}>Try again</Button>}>
-              {regs.error.message} ({regs.error.code})
+              <ProblemMessage problem={regs.error} />
             </Alert>
           ) : (
             <DataTable

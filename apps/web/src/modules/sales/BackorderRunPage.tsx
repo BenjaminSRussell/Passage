@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { DECIMAL, dash, sentence } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -204,7 +205,7 @@ export function BackorderRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not preview the run" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -6,6 +6,7 @@ import { DUTY_HUB_CLIENT_WRITE, listClients, type ApiClient } from "./api/hubCli
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ApiClient>[] = [
   { key: "name", header: "Name" },
@@ -36,7 +37,7 @@ export function ClientsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load API clients" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

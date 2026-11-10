@@ -17,6 +17,7 @@ import {
   type Problem,
 } from "./api/print";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PrinterValues {
   code: string;
@@ -201,7 +202,7 @@ export function NewPrinterPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the printer" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

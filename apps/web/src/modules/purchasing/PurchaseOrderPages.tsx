@@ -58,6 +58,7 @@ import {
   type Failure,
 } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const APPROVAL_STATUSES: ApprovalStatus[] = ["DRAFT", "IN_REVIEW", "APPROVED", "REJECTED", "CONFIRMED", "FINALIZED", "CANCELLED"];
 const CALCS: { value: ChargeCalc; label: string }[] = [
@@ -677,7 +678,7 @@ export function PurchaseOrderCreatePage() {
           setApplyAuto={setApplyAuto}
         />
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -767,8 +768,8 @@ function EditForm({ po }: { po: PurchaseOrder }) {
       <Alert tone="danger" live="alert">
         {failure
           ? failure.code === "PRC-PO-009"
-            ? `Someone else changed this order. Reload it and make the change again. (${failure.code})`
-            : `${failure.message} (${failure.code})`
+            ? <ProblemMessage problem={failure} message="Someone else changed this order. Reload it and make the change again." />
+            : <ProblemMessage problem={failure} />
           : null}
       </Alert>
       <div className={styles.actions}>
@@ -1192,8 +1193,8 @@ export function PurchaseOrderDetailPage() {
       <Alert tone="danger" live="alert">
         {failure
           ? failure.code === "PRC-PO-009"
-            ? `Someone else changed this order. Reload the page and try again. (${failure.code})`
-            : `${failure.message} (${failure.code})`
+            ? <ProblemMessage problem={failure} message="Someone else changed this order. Reload the page and try again." />
+            : <ProblemMessage problem={failure} />
           : null}
       </Alert>
       <Alert tone="success" live="status">

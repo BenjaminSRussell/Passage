@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, S
 import { describeProblem, getVarianceReport, type Problem, type VarianceQuery, type VarianceReport, type VarianceRow, type VarianceType } from "./api/client";
 import { costGroupLabel, dash, varianceLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface VarianceReportPageProps {
   /** Opens a production order from its row. */
@@ -125,7 +126,7 @@ export function VarianceReportPage({ onOpenOrder }: VarianceReportPageProps) {
       </Card>
       {state.error ? (
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The variances are not available" live="alert">
-          {state.error.status === 403 ? "You need the View production costs duty to see variances." : `${state.error.message} (${state.error.code})`}
+          {state.error.status === 403 ? "You need the View production costs duty to see variances." : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>

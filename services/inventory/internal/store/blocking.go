@@ -311,7 +311,7 @@ func moveStock(ctx context.Context, tx pgx.Tx, tenantID string, doc document, fr
 			return err
 		}
 	}
-	return nil
+	return guardClaimedStock(ctx, tx, tenantID, doc.legalEntityID, []*row{from, to}, nil)
 }
 
 // ListBlockings returns blockings newest first, filtered by state and product.

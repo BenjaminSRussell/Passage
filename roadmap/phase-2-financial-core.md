@@ -46,6 +46,10 @@ GL service and journal workspace live; the demo manufacturer's chart of accounts
 - [Modern Treasury: double-entry ledgers](https://www.moderntreasury.com/journal/accounting-for-developers-part-i)
 - [Martin Fowler: Accounting patterns](https://martinfowler.com/apsupp/accounting.pdf)
 
+**Partly verified end to end by**
+
+- `tools/e2e/flow_test.go`
+
 **Depends on:** wave 10
 
 ---

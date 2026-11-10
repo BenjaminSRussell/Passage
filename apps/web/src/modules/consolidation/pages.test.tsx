@@ -156,7 +156,7 @@ describe("elimination entries page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview eliminations" }));
     await waitFor(() => expect(screen.getByText("The eliminations were not built")).toBeInTheDocument());
     expect(screen.getByText("The eliminations were not built").closest("[role=alert]")).toHaveTextContent(
-      "investment and NCI are below acquired equity by 6000.00 (CNS-0920)",
+      "investment and NCI are below acquired equity by 6000.00",
     );
     expect(screen.getByLabelText("Investment cost")).toHaveValue("1");
     expect(screen.queryByRole("table", { name: "Elimination entries" })).not.toBeInTheDocument();
@@ -227,7 +227,7 @@ describe("currency translation page", () => {
     renderAt("/consolidation/translation");
     fireEvent.click(screen.getByRole("button", { name: "Translate unit" }));
     await waitFor(() => expect(screen.getByText("The unit was not translated")).toBeInTheDocument());
-    expect(screen.getByText("The unit was not translated").closest("[role=alert]")).toHaveTextContent("missing duty consolidation.run (AUTH-0003)");
+    expect(screen.getByText("The unit was not translated").closest("[role=alert]")).toHaveTextContent("missing duty consolidation.run");
     expect(screen.queryByRole("table", { name: "Translated statement" })).not.toBeInTheDocument();
   });
 

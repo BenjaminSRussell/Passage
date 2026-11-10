@@ -3,6 +3,7 @@ import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, typ
 import { listColumnSets, listColumnTemplates, listRowSets, listTrees, type ColumnSet, type RowSet, type Tree } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const rowSetColumns: DataTableColumn<RowSet>[] = [
   { key: "code", header: "Code", mono: true },
@@ -43,7 +44,7 @@ export function TreesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the trees" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -77,7 +78,7 @@ export function RowSetsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the row sets" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -112,7 +113,7 @@ export function ColumnSetsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the column sets" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -129,7 +130,7 @@ export function ColumnSetsPage() {
         <p className={styles.note}>Shipped with the service. Copy one into a column set of your own to change it.</p>
         {templates.error ? (
           <Alert tone="danger" title="Could not load the templates" live="alert" action={<Button size="sm" onClick={templates.reload}>Try again</Button>}>
-            {templates.error.message} ({templates.error.code})
+            <ProblemMessage problem={templates.error} />
           </Alert>
         ) : (
           <DataTable

@@ -11,8 +11,12 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/domain"
+	billingevents "github.com/BenjaminSRussell/passage/services/billing/internal/events"
 )
 
 const (
@@ -192,7 +196,9 @@ func loadBookedOriginal(ctx context.Context, tx pgx.Tx, originalID string) (map[
 }
 
 // MarkGLBooked stores the ledger entry of a document, and the shares an allocation booked per line number (nil when the document
-// was booked at its billed nets), and reports whether this call was the one that did; a second call changes nothing.
+// was booked at its billed nets), and reports whether this call was the one that did; a second call changes nothing. Booking a
+// credit note enqueues creditnote.booked in the same transaction, with the allocated and deferred amounts the journal reversed per
+// line, so revrec reverses its schedules by what 2400 was actually debited.
 func (s *Postgres) MarkGLBooked(ctx context.Context, id, entryID string, shares map[int]GLShare) (bool, error) {
 	var split []byte
 	if len(shares) > 0 {
@@ -206,9 +212,53 @@ func (s *Postgres) MarkGLBooked(ctx context.Context, id, entryID string, shares 
 		tag, err := tx.Exec(ctx, `update invoice set journal_posting_id = $2::uuid, gl_split = $3::jsonb, gl_last_error = null, gl_next_attempt_at = null
 			where id = $1::uuid and journal_posting_id is null`, id, entryID, split)
 		done = err == nil && tag.RowsAffected() > 0
-		return err
+		if !done {
+			return err
+		}
+		return enqueueCreditNoteBooked(ctx, tx, id, entryID, shares)
 	})
 	return done, err
+}
+
+// enqueueCreditNoteBooked writes creditnote.booked for a credit note just booked; it does nothing for an invoice. A line without a
+// share was booked at its net with nothing deferred.
+func enqueueCreditNoteBooked(ctx context.Context, tx pgx.Tx, id, entryID string, shares map[int]GLShare) error {
+	cn, err := scanInvoice(tx.QueryRow(ctx, `select `+invoiceColumns+` from invoice where id = $1::uuid`, id))
+	if err != nil || cn.Type != domain.TypeCreditNote {
+		return err
+	}
+	lines, err := loadLines(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	originalLines, err := loadLines(ctx, tx, cn.OriginalInvoiceID)
+	if err != nil {
+		return err
+	}
+	exp := money.MinorUnits(cn.Currency)
+	data := billingevents.CreditNoteBookedData{
+		CreditNoteID: cn.ID, Number: cn.Number, OriginalInvoiceID: cn.OriginalInvoiceID, OriginalNumber: cn.OriginalNumber,
+		LegalEntityID: cn.LegalEntityID, Currency: cn.Currency, PostingDate: cn.PostingDate.Format(dateLayout), JournalEntryID: entryID,
+		Lines: make([]billingevents.CreditNoteBookedLine, 0, len(lines)),
+	}
+	for _, l := range lines {
+		share, ok := shares[l.No]
+		if !ok {
+			share = GLShare{Allocated: l.Net}
+		}
+		out := billingevents.CreditNoteBookedLine{LineNo: l.No, OriginalLineNo: l.OriginalLineNo, Net: l.Net.StringFixed(exp),
+			Allocated: share.Allocated.StringFixed(exp), Deferred: share.Deferred.StringFixed(exp)}
+		if i := slices.IndexFunc(originalLines, func(o Line) bool { return o.No == l.OriginalLineNo }); i >= 0 {
+			out.OrderID, out.Product = originalLines[i].Source.OrderID, originalLines[i].Source.ProductID
+		}
+		data.Lines = append(data.Lines, out)
+	}
+	p, _ := tenant.FromContext(ctx)
+	evt, err := events.New(billingevents.CreditNoteBooked, eventSource, cn.ID, p.TenantID, data)
+	if err != nil {
+		return err
+	}
+	return outbox.Enqueue(ctx, tx, "invoice", cn.ID, evt)
 }
 
 // HoldGLBooking stores the booking of a document about to be sent to the ledger (see GLDocument.Held).

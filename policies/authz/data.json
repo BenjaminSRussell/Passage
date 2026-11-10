@@ -195,7 +195,7 @@
     ]},
     "production.planned.intake": {"flag": true, "permissions": []},
     "production.jobcard.shopfloor": {"flag": true, "permissions": []},
-    "sales.order.record-delivery": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
+    "sales.order.record-delivery": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "sales.order.record-invoice": {"permissions": [{"resource": "/v1/sales/orders/*:record-progress", "methods": ["POST"]}]},
     "tax.transaction.record": {"permissions": [{"resource": "/v1/tax/transactions", "methods": ["POST"]}]},
     "tax.settlement.run": {"permissions": [{"resource": "/v1/tax/settlements:run", "methods": ["POST"]}]},
@@ -335,6 +335,7 @@
       {"resource": "/v1/hub/subscriptions/*", "methods": ["GET"]},
       {"resource": "/v1/hub/deliveries", "methods": ["GET"]},
       {"resource": "/v1/hub/dead-letters", "methods": ["GET"]},
+      {"resource": "/v1/hub/coexistence", "methods": ["GET"]},
       {"resource": "/v1/hub/clients", "methods": ["GET"]},
       {"resource": "/v1/hub/clients/*", "methods": ["GET"]},
       {"resource": "/v1/hub/clients/*/usage", "methods": ["GET"]},
@@ -352,6 +353,9 @@
       {"resource": "/v1/hub/catalog/*", "methods": ["PATCH"]},
       {"resource": "/v1/hub/catalog/*:deprecate", "methods": ["POST"]},
       {"resource": "/v1/hub/catalog/*:retire", "methods": ["POST"]}
+    ]},
+    "hub.coexistence.operate": {"permissions": [
+      {"resource": "/v1/hub/coexistence:retry-parked", "methods": ["POST"]}
     ]},
     "hub.client.consume": {"service_only": true, "permissions": [{"resource": "/v1/hub/clients:consume", "methods": ["POST"]}]},
     "inventory.read": {"permissions": [
@@ -699,6 +703,7 @@
     ]},
     "receiving.ap.inquire": {"permissions": [
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},
@@ -1060,6 +1065,7 @@
     ]},
     "productcost.variance.compute": {"permissions": [{"resource": "/v1/product-costing/variances/compute", "methods": ["POST"]}]},
     "productcost.view": {"permissions": [
+      {"resource": "/v1/product-costing/activations/*/revaluation-report", "methods": ["GET"]},
       {"resource": "/v1/product-costing/comparisons", "methods": ["POST"]},
       {"resource": "/v1/product-costing/cost-components", "methods": ["GET"]},
       {"resource": "/v1/product-costing/cost-groups", "methods": ["GET"]},
@@ -1102,7 +1108,10 @@
       {"resource": "/edi/v1/partners", "methods": ["GET", "POST"]},
       {"resource": "/edi/v1/partners/*", "methods": ["GET", "PATCH"]},
       {"resource": "/edi/v1/partners/*/trade-profile", "methods": ["PUT"]},
-      {"resource": "/edi/v1/partners/*/transport", "methods": ["GET", "PUT"]}
+      {"resource": "/edi/v1/partners/*/transport", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/item-xrefs", "methods": ["GET", "POST"]},
+      {"resource": "/edi/v1/partners/*/item-xrefs/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/edi/v1/partners/*/sales-defaults", "methods": ["GET", "PUT"]}
     ]},
     "edi.operate": {"permissions": [
       {"resource": "/edi/v1/inbound/edifact", "methods": ["POST"]},
@@ -1115,6 +1124,7 @@
       {"resource": "/edi/v1/interchanges:reprocess", "methods": ["POST"]},
       {"resource": "/edi/v1/messages", "methods": ["GET"]},
       {"resource": "/edi/v1/messages/*", "methods": ["GET"]},
+      {"resource": "/edi/v1/messages/*:post", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound:from-source", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/sla", "methods": ["GET"]}
@@ -1477,7 +1487,8 @@
     ]},
     "fulfillment.packing-slip.post": {"permissions": [
       {"resource": "/v1/fulfillment/packing-slips/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/fulfillment/shipments/*:post-packing-slip", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/shipments/*:post-packing-slip", "methods": ["POST"]},
+      {"resource": "/v1/fulfillment/sales-delivery-reports/*:retry", "methods": ["POST"]}
     ]},
     "compliance.privacy-request.create": {"permissions": [{"resource": "/v1/privacy/requests", "methods": ["POST"]}]},
     "compliance.privacy-request.process": {"permissions": [
@@ -1685,6 +1696,8 @@
       {"resource": "/v1/service/dispatch/board", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/runs", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/service/dispatch/optimizations", "methods": ["GET"]},
+      {"resource": "/v1/service/dispatch/optimizations/*", "methods": ["GET"]},
       {"resource": "/v1/service/work-orders/*/actions", "methods": ["GET"]}
     ]},
     "fieldservice.work-order.execute": {"permissions": [{"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]}]},
@@ -1693,8 +1706,14 @@
       {"resource": "/v1/service/technicians/*", "methods": ["PUT"]},
       {"resource": "/v1/service/work-orders/*:assign", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*:unassign", "methods": ["POST"]},
-      {"resource": "/v1/service/dispatch/publish", "methods": ["POST"]}
+      {"resource": "/v1/service/dispatch/publish", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations/*:sync", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/service/dispatch/optimizations/*:accept", "methods": ["POST"]}
     ]},
+    "dispatch.run.create": {"service_only": true, "permissions": [{"resource": "/v1/dispatch/runs", "methods": ["POST"]}]},
+    "dispatch.run.read": {"service_only": true, "permissions": [{"resource": "/v1/dispatch/runs/*", "methods": ["GET"]}]},
     "fieldservice.service-object.maintain": {"permissions": [
       {"resource": "/v1/service/service-objects", "methods": ["POST"]},
       {"resource": "/v1/service/service-objects/*:install", "methods": ["POST"]},
@@ -1784,7 +1803,13 @@
     ]},
     "warehouse.mobile-flow.admin": {"permissions": [
       {"resource": "/api/v1/mobile/flows", "methods": ["POST"]},
-      {"resource": "/api/v1/mobile/flows/*:publish", "methods": ["POST"]}
+      {"resource": "/api/v1/mobile/flows/*:publish", "methods": ["POST"]},
+      {"resource": "/v1/mobile/flows", "methods": ["GET", "POST"]},
+      {"resource": "/v1/mobile/flows:install-core", "methods": ["POST"]},
+      {"resource": "/v1/mobile/flows/*", "methods": ["GET"]},
+      {"resource": "/v1/mobile/flows/*:publish", "methods": ["POST"]},
+      {"resource": "/v1/mobile/menus", "methods": ["GET", "POST"]},
+      {"resource": "/v1/mobile/devices", "methods": ["GET", "POST"]}
     ]},
     "print.job.submit": {"permissions": [
       {"resource": "/print/v1/jobs", "methods": ["GET", "POST"]},
@@ -1800,7 +1825,9 @@
     ]},
     "warehouse.offline-conflict.resolve": {"permissions": [
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
-      {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]}
+      {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]},
+      {"resource": "/v1/mobile/offline/conflicts", "methods": ["GET"]},
+      {"resource": "/v1/mobile/offline/conflicts/**:resolve", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.pack": {"permissions": [
       {"resource": "/v1/fulfillment/shipments/*/containers", "methods": ["POST"]},
@@ -1843,6 +1870,7 @@
     ]},
     "fulfillment.warehouse.view": {"permissions": [
       {"resource": "/v1/fulfillment/backorders", "methods": ["GET"]},
+      {"resource": "/v1/fulfillment/sales-delivery-reports", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/container-types", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/delivered-not-invoiced", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/packing-rules", "methods": ["GET"]},
@@ -2936,6 +2964,7 @@
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]}
     ]},
+    "revrec.creditnote.reverse": {"flag": true, "permissions": []},
     "revrec.post": {"permissions": [
       {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
       {"resource": "/v1/revrec/journal-postings", "methods": ["POST"]}
@@ -3277,6 +3306,16 @@
       {"resource": "/v1/treasury/checks/*:stop", "methods": ["POST"]},
       {"resource": "/v1/treasury/checks/*:void", "methods": ["POST"]}
     ]},
+    "treasury.ebics.approve": {"permissions": [
+      {"resource": "/v1/treasury/ebics-subscribers/*:confirm-bank-keys", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:unpark", "methods": ["POST"]}
+    ]},
+    "treasury.ebics.keys": {"permissions": [
+      {"resource": "/v1/treasury/ebics-subscribers/*:fetch-bank-keys", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:send-hia", "methods": ["POST"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*:send-ini", "methods": ["POST"]}
+    ]},
+    "treasury.ebics.write": {"permissions": [{"resource": "/v1/treasury/ebics-subscribers", "methods": ["POST"]}]},
     "treasury.facility.override": {"flag": true, "permissions": []},
     "treasury.facility.write": {"permissions": [
       {"resource": "/v1/treasury/facilities", "methods": ["POST"]},
@@ -3300,6 +3339,8 @@
       {"resource": "/v1/treasury/cash-forecast", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*", "methods": ["GET"]},
+      {"resource": "/v1/treasury/ebics-subscribers/*/letters/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/facilities/*/instruments", "methods": ["GET"]},
@@ -3339,9 +3380,24 @@
     "warehouse.work.execute": {"permissions": [
       {"resource": "/v1/warehouse/work/*/lines/*:confirm", "methods": ["POST"]},
       {"resource": "/v1/warehouse/work/*:exception", "methods": ["POST"]},
-      {"resource": "/v1/warehouse/work:assign", "methods": ["POST"]}
+      {"resource": "/v1/warehouse/work:assign", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:heartbeat", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:end", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:assign-work", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*/runs", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*/runs/current/steps/*:submit", "methods": ["POST"]},
+      {"resource": "/v1/mobile/menus/*", "methods": ["GET"]},
+      {"resource": "/v1/mobile/scan:parse", "methods": ["POST"]},
+      {"resource": "/v1/mobile/offline:replay", "methods": ["POST"]},
+      {"resource": "/v1/mobile/events", "methods": ["GET"]}
     ]},
-    "warehouse.work.supervise": {"permissions": [{"resource": "/v1/warehouse/work", "methods": ["POST"]}]},
+    "warehouse.work.supervise": {"permissions": [
+      {"resource": "/v1/warehouse/work", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions", "methods": ["GET"]},
+      {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
+    ]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
       {"resource": "/v1/workitems/*/actions", "methods": ["POST"]}
@@ -3426,7 +3482,7 @@
       "audit": ["audit.write"]
     },
     "revrec": {
-      "ledger": ["ledger.entry.post", "ledger.balance.read"]
+      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "costacct": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup"]
@@ -3450,7 +3506,9 @@
       "party": ["party.read"]
     },
     "receivables": {
-      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"]
+      "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
+      "tax": ["tax.transaction.record"],
+      "billing": ["billing.invoice.read"]
     },
     "ledger": {
       "close": ["period.check"],
@@ -3460,7 +3518,7 @@
       "ledger": ["ledger.entry.lookup", "ledger.ledger.lookup"]
     },
     "tax": {
-      "ledger": ["ledger.balance.read"]
+      "ledger": ["ledger.balance.read", "ledger.entry.lookup", "ledger.ledger.lookup", "ledger.account.lookup"]
     },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
@@ -3485,6 +3543,9 @@
     "warehouse": {
       "inventory": ["inventory.issue.claim"]
     },
+    "mobile": {
+      "warehouse": ["warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"]
+    },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],
       "compliance": ["compliance.legal-hold.check"]
@@ -3508,20 +3569,26 @@
     "edi": {
       "fulfillment": ["fulfillment.shipment.read"],
       "billing": ["billing.invoice.read"],
-      "sales": ["sales.order.lookup"]
+      "sales": ["sales.order.lookup", "sales.channel.intake"]
+    },
+    "fieldservice": {
+      "dispatch": ["dispatch.run.create", "dispatch.run.read"]
     }
   },
   "service_principals": {
+    "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],
     "pricing-cache": ["pricing.cache.invalidate"],
     "purchasing-inbound": ["purchasing.inbound.apply"],
     "fulfillment-order": ["fulfillment.order.sync"],
+    "fulfillment-sales-report": ["sales.order.record-delivery"],
     "integration-hub": ["migration.outbound.render", "migration.xref.record"],
     "inventory-postings": ["inventory.transaction.apply"],
     "migration-loader": ["party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"],
     "production-planning": ["production.planned.intake"],
     "production-shopfloor": ["production.jobcard.shopfloor"],
     "receiving-erasure": ["compliance.legal-hold.check"],
+    "revrec-creditnotes": ["revrec.creditnote.reverse"],
     "receiving-ers": ["receiving.vendor-invoice.post"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"],

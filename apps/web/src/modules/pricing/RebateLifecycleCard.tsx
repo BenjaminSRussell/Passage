@@ -3,6 +3,7 @@ import { Alert, Button, Card, ConfirmDialog, FormField, Input, Select } from "..
 import { closeRebateAgreement, describeProblem, newKey, PricingApiError, reopenRebateAgreement, reviseRebateAgreement, type Problem, type RebateAgreement } from "./api/client";
 import { DAY, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** What a closed or revised agreement tells the planner, by service code. */
 function failureTitle(code: string): string {
@@ -53,7 +54,7 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
           </Alert>
           {failure ? (
             <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <p className={styles.note}>
@@ -167,7 +168,7 @@ export function RebateLifecycleCard({ agreement, onChange }: { agreement: Rebate
         </Alert>
         {failure ? (
           <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <form className={styles.form} onSubmit={submitRevise} noValidate>

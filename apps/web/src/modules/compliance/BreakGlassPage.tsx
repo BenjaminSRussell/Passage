@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, EmptyState, FormField, Input, PageHeader, S
 import { BREAK_GLASS_REASONS, describeProblem, planElevatedSession, type BreakGlassReason, type ElevatedPlan, type ElevatedPlanInput, type Problem } from "./api/client";
 import { formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const reasonLabel: Record<BreakGlassReason, string> = {
   INCIDENT_RESPONSE: "Incident response",
@@ -119,7 +120,7 @@ export function BreakGlassPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The request was refused" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="info" live="status">
         {plan ? `${plan.minutes}-minute session planned. ${approvalText(plan)}` : null}

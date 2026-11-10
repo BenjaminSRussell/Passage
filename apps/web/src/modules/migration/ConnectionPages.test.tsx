@@ -91,7 +91,7 @@ describe("connections list", () => {
   it("shows a failed load and loads again on retry", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/migration/connections");
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     handler = () => json(200, { items: [base] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Connections" })).toBeInTheDocument();
@@ -148,7 +148,7 @@ describe("new connection", () => {
     fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "ftp://x" } });
     fireEvent.click(screen.getByRole("button", { name: "Create connection" }));
     expect(await screen.findByText("must start with https://")).toBeInTheDocument();
-    expect(screen.getByText(/request failed validation \(COM-0001\)/)).toBeInTheDocument();
+    expect(screen.getByText(/request failed validation/)).toBeInTheDocument();
   });
 
   it("tells a caller without the write duty and does not post", async () => {
@@ -285,7 +285,7 @@ describe("connection detail", () => {
     renderAt(`/migration/connections/${CONN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Edit settings" }));
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
-    expect(await screen.findByText(/current version is 3 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/current version is 3/)).toBeInTheDocument();
   });
 
   it("disables and enables under the version", async () => {
@@ -309,7 +309,7 @@ describe("connection detail", () => {
   it("shows not-found and loading states", async () => {
     handler = () => json(404, { code: "AUTH-0404", detail: "connection profile not found" });
     renderAt(`/migration/connections/${CONN}`);
-    expect(await screen.findByText(/connection profile not found \(AUTH-0404\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/connection profile not found/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to connections" })).toBeInTheDocument();
   });
 });

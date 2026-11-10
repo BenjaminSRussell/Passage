@@ -695,6 +695,7 @@ type ReturnOrderData struct {
 	Gross            string            `json:"gross"`
 	Restocking       string            `json:"restocking"`
 	Net              string            `json:"net"`
+	Tax              string            `json:"tax"`
 	CreditNoteID     *string           `json:"credit_note_id,omitempty"`
 	JournalPostingID *string           `json:"journal_posting_id,omitempty"`
 	Lines            []ReturnOrderLine `json:"lines"`

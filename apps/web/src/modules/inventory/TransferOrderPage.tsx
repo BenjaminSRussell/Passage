@@ -18,6 +18,7 @@ import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
 import styles from "./pages.module.css";
 import { TransferEditForm } from "./TransferEditForm";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const lineColumns: DataTableColumn<TransferLine>[] = [
   { key: "lineNo", header: "Line", align: "end" },
@@ -383,7 +384,7 @@ export function TransferOrderPage() {
           live="alert"
           action={failure.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload order</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Details">

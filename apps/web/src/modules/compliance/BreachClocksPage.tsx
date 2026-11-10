@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const regimeLabel: Record<BreachRegime, string> = {
   GDPR: "EU GDPR",
@@ -155,7 +156,7 @@ export function BreachClocksPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The clocks could not be computed" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone={overdue > 0 ? "warning" : "success"} live="status">
         {summary}

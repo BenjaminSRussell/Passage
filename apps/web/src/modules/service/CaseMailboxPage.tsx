@@ -19,6 +19,7 @@ import { formatDateTime, shortId, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const EMAIL = /^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/;
 
@@ -121,7 +122,7 @@ export function CaseMailboxPage() {
       <Card title="Mailboxes" headingLevel={3}>
         {mailboxes.error ? (
           <Alert tone="danger" title="Could not load the mailboxes" live="alert" action={<Button size="sm" onClick={mailboxes.reload}>Try again</Button>}>
-            {mailboxes.error.message} ({mailboxes.error.code})
+            <ProblemMessage problem={mailboxes.error} />
           </Alert>
         ) : (
           <DataTable
@@ -138,7 +139,7 @@ export function CaseMailboxPage() {
       <Card title="Set up a mailbox" headingLevel={3}>
         {categories.error ? (
           <Alert tone="warning" title="Categories could not be loaded" live="alert">
-            {categories.error.message} ({categories.error.code})
+            <ProblemMessage problem={categories.error} />
           </Alert>
         ) : null}
         <form className={styles.form} onSubmit={save} noValidate aria-label="Set up a mailbox">
@@ -173,7 +174,7 @@ export function CaseMailboxPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the mailbox" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

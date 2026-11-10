@@ -202,7 +202,7 @@ describe("sealed RFQ pages", () => {
     });
     renderAt(`/purchasing/rfqs/${RFQ_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Save scores" }));
-    expect(await screen.findByText("missing duty procurement.rfq.award (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty procurement.rfq.award")).toBeInTheDocument();
   });
 
   it("marks sealed RFQs in the list", async () => {

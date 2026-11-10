@@ -47,6 +47,7 @@ import {
   type Failure,
 } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUSES: AgreementStatus[] = ["DRAFT", "EFFECTIVE", "ON_HOLD", "CLOSED"];
 
@@ -406,7 +407,7 @@ export function PurchaseAgreementCreatePage() {
           })}
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -580,7 +581,7 @@ export function PurchaseAgreementDetailPage() {
         }
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {changed ? `The agreement is now ${statusLabel(changed.status).toLowerCase()}.` : null}

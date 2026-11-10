@@ -925,6 +925,7 @@ components:
                   taxCode: { type: string }
                   originalLineNo: { type: integer, description: "On a credit note: the credited line of the original." }
                   creditedQty: { type: string, description: "On a creditable invoice: quantity credited by posted credit notes." }
+                  creditedTax: { type: string, description: "On a creditable invoice with credits: tax already reversed by posted credit notes." }
                   packingSlipId: { type: string, format: uuid, description: "Shipment and consolidated lines: the packing slip billed." }
                   packingSlipLineId: { type: string, format: uuid }
                   orderId: { type: string, format: uuid }

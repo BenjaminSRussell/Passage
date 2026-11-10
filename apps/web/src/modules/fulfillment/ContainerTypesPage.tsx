@@ -5,6 +5,7 @@ import { CONTAINER_CODE, dash, DECIMAL, MATERIAL_CODE } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ContainerType>[] = [
   { key: "code", header: "Code", mono: true },
@@ -73,7 +74,7 @@ export function ContainerTypesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load container types" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

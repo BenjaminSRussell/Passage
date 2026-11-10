@@ -605,9 +605,11 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [siteId, itemIds]
+              required: [siteId]
+              description: Name the items with itemIds (at most 200) or set selection to roll every stored BOM of the site; exactly one of the two
               properties:
                 siteId: { type: string, format: uuid }
+                selection: { type: string, enum: [allActive], description: "Roll every item with an active material BOM at the site on asOf, listed from the engineering service, so the request carries no item list (the 4 MiB body cap) - up to 50000 items; a larger site is refused (CST-0739)" }
                 itemIds: { type: array, minItems: 1, maxItems: 200, uniqueItems: true, items: { type: string, format: uuid }, description: The items to store; their components are rolled with them but not stored }
                 asOf: { type: string, format: date, description: The date the active BOM and route are read for; defaults to today }
                 prices: { type: object, additionalProperties: { type: string }, description: Unit price by item id for each purchased component (an item with no active BOM) }
@@ -637,6 +639,35 @@ paths:
         "422": { $ref: "#/components/responses/Problem", description: "CST-0709 the version is not Open or the site is outside its scope, CST-0702 a purchased component has no price or an operation no rate, CST-0739 an engineering BOM or route the roll cannot cost (alternative groups, constant scrap, malformed numbers, non-UUID components, too many items); the Idempotency-Key was used with a different request" }
         "502": { $ref: "#/components/responses/Problem", description: "CST-0737 engineering could not be read" }
         "503": { $ref: "#/components/responses/Problem", description: "CST-0737 no engineering service configured, or the store is unavailable" }
+  /v1/product-costing/activations/{id}/revaluation-report:
+    get:
+      operationId: getActivationRevaluationReport
+      summary: The value report of a standard cost activation (AC-39.4). Each stored line (quantity, old and new standard, amount) is set beside the inventory on-hand read again from the inventory service for the posting date (a replay before today, the live projection for today), with the difference. tiedToJournal is true when the line amounts sum to the activation total and the booked journal debits and credits equal it; tiedToOnHand is true when every line quantity equals the on-hand (null, with null per-line on-hand fields, for a reversal: its lines carry reversed quantities and inventory is not called). Read-only; inventory is called with the inventory.read duty only
+      x-passage-duty: productcost.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The activation, its lines with on-hand and difference, the lines total and the two tie-out flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activation: { type: object }
+                  lines: { type: array, items: { type: object } }
+                  linesTotal: { type: string }
+                  tiedToJournal: { type: boolean }
+                  tiedToOnHand: { type: boolean }
+                  onHandAsOf: { type: string, format: date }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem", description: "CST-0723 activation not found" }
+        "502": { $ref: "#/components/responses/Problem", description: "CST-0722 the inventory on-hand could not be read" }
+        "503": { $ref: "#/components/responses/Problem", description: "CST-0722 no inventory service configured, or the store is unavailable" }
   /v1/product-costing/activation-attempts:
     get:
       operationId: listActivationAttempts

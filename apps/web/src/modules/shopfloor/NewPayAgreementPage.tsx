@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { createPayAgreement, describeProblem, newKey, type NewPayAgreement, type Problem, type ShiftPremium } from "./api/client";
 import { WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   code: string;
@@ -221,7 +222,7 @@ export function NewPayAgreementPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the pay agreement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

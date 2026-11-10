@@ -6,6 +6,7 @@ import { StatusBadge } from "./badges";
 import { dash, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Asset>[] = [
   { key: "assetNumber", header: "Number", mono: true },
@@ -75,7 +76,7 @@ export function AssetsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load assets" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -90,7 +91,7 @@ export function AssetsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more assets" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (

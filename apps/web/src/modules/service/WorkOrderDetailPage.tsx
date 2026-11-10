@@ -25,6 +25,7 @@ import { Details } from "./Details";
 import { dash, duration, formatDateTime, money, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const lineColumns: DataTableColumn<Required<WorkLine>>[] = [
   { key: "kind", header: "Kind", render: (row) => sentence(row.kind) },
@@ -76,7 +77,7 @@ export function WorkOrderDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Service work order" />
         <Alert tone="danger" title="Could not load the work order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -166,7 +167,7 @@ export function WorkOrderDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.code === "conflict_version" ? "Someone else changed this work order" : "The action failed"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Work order" headingLevel={3}>

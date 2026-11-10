@@ -20,6 +20,7 @@ import {
 import styles from "./pages.module.css";
 import { ChooseWarehouse, DECIMAL, Detail, sentence, shortId, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 100;
 const LP_ID = /^[A-Za-z0-9._-]{1,40}$/;
@@ -86,7 +87,7 @@ export function ReceiptsPage() {
         <ChooseWarehouse />
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the receipts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -285,7 +286,7 @@ export function ReceiptDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Receipt" />
         <Alert tone="danger" title="Could not load the receipt" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
