@@ -49,7 +49,6 @@ import { CatalogPicker } from "./CatalogPages";
 import {
   Details,
   LoadError,
-  ShortId,
   StatusBadge,
   currencyPattern,
   datePattern,
@@ -60,6 +59,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -73,7 +73,7 @@ const listColumns: DataTableColumn<RequisitionSummary>[] = [
   { key: "status", header: "Status", render: (row) => <StatusBadge status={row.status} /> },
   { key: "lineCount", header: "Lines", align: "end" },
   { key: "total", header: "Estimated total", align: "end", render: (row) => money(row.total, row.currency) },
-  { key: "requesterId", header: "Requester", render: (row) => <ShortId id={row.requesterId} /> },
+  { key: "requesterId", header: "Requester", render: (row) => <Named entity="worker" id={row.requesterId} /> },
   { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10) },
 ];
 
@@ -552,7 +552,7 @@ const lineColumns = (
       const origin = l.splitFromLineId ? all.find((o) => o.id === l.splitFromLineId) : undefined;
       return (
         <>
-          {l.description || <ShortId id={l.productId} />}
+          {l.description || <Named entity="product" id={l.productId} />}
           {origin ? <span className={styles.muted}> (split from line {origin.lineNo})</span> : null}
         </>
       );
@@ -564,7 +564,7 @@ const lineColumns = (
   { key: "estimatedUnitPrice", header: "Estimate", align: "end", render: (l) => money(l.estimatedUnitPrice, currency) },
   { key: "amount", header: "Amount", align: "end", render: (l) => money(l.amount, currency) },
   { key: "requestedDate", header: "Requested", mono: true },
-  { key: "warehouseId", header: "Warehouse", render: (l) => <ShortId id={l.warehouseId} /> },
+  { key: "warehouseId", header: "Warehouse", render: (l) => <Named entity="warehouse" id={l.warehouseId} /> },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
   {
     key: "purchaseOrder",
@@ -609,7 +609,7 @@ const historyColumns = (lines: RequisitionLine[]): DataTableColumn<RequisitionHi
   { key: "createdAt", header: "When", mono: true, render: (h) => h.createdAt.slice(0, 16).replace("T", " ") },
   { key: "action", header: "Action", render: (h) => actionLabels[h.action] ?? h.action },
   { key: "stepNo", header: "Level", render: (h) => (h.stepNo ? `${h.stepNo}. ${roleLabels[h.role ?? ""] ?? h.role ?? ""}` : "—") },
-  { key: "actorId", header: "By", render: (h) => <ShortId id={h.actorId} /> },
+  { key: "actorId", header: "By", render: (h) => <Named entity="worker" id={h.actorId} /> },
   {
     key: "comment",
     header: "Comment",
@@ -848,8 +848,8 @@ export function RequisitionDetailPage() {
         <Details
           items={[
             { label: "Estimated total", value: money(req.total, req.currency), mono: true },
-            { label: "Legal entity", value: req.legalEntityId, mono: true },
-            { label: "Requester", value: req.requesterId, mono: true },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={req.legalEntityId} /> },
+            { label: "Requester", value: <Named entity="worker" id={req.requesterId} /> },
             { label: "Policy version", value: req.policyVersion ?? "" },
             { label: "Version", value: String(req.version), mono: true },
             { label: "Created", value: req.createdAt.slice(0, 10), mono: true },

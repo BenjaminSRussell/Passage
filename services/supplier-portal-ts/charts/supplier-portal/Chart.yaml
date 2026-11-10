@@ -1,0 +1,6 @@
+apiVersion: v2
+name: supplier-portal
+description: Passage supplier portal BFF (OIDC session, vendor-scoped service tokens; #511)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Typed client for the purchasing API (services/purchasing/api/openapi.yaml).
 // The browser calls /api/v1/procurement; the web BFF rewrites it to /v1/procurement.
 // Money and quantities stay decimal strings end to end; the client never parses them to numbers.
@@ -528,7 +529,7 @@ async function send<T>(
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(PROCUREMENT_BASE + path, {
+  const res = await apiFetch(PROCUREMENT_BASE + path, {
     method,
     headers,
     credentials: "same-origin",

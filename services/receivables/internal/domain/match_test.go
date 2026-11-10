@@ -152,12 +152,27 @@ func TestReferenced_MatchesWholeDocumentNumbersOnly(t *testing.T) {
 		{"XINV-1001", "INV-1001", false},
 		{"INV-1001-2", "INV-1001", false},
 		{"2INV-1001 and INV-1001", "INV-1001", true},
+		{"INV-1001", "INV-1001/2", true},
+		{"INV-1001/2", "INV-1001/2", true},
+		{"INV-1001/3", "INV-1001/2", false},
+		{"INV-10012", "INV-1001/2", false},
+		{"INV-1001", "INV-1001/x", false},
+		{"INV", "INV/1", false},
 	}
 	for _, tc := range tests {
 		p := Payment{Remittance: []RemittanceLine{{Reference: tc.ref}}}
 		if got := referenced(p, tc.doc); got != tc.want {
 			t.Errorf("referenced(%q, %q) = %v, want %v", tc.ref, tc.doc, got, tc.want)
 		}
+	}
+}
+
+func TestMatch_RemittanceNamingTheInvoiceSettlesAllItsInstallments(t *testing.T) {
+	p := Payment{Amount: amt("1000.00"), ValueDate: day("2027-04-30"), Remittance: []RemittanceLine{{Reference: "INV-20001"}}}
+	got := Match(p, []Item{item("i1", "INV-20001/1", "2027-04-30", "333.34"), item("i2", "INV-20001/2", "2027-05-30", "333.33"),
+		item("i3", "INV-20001/3", "2027-06-30", "333.33"), item("other", "INV-30001", "2027-04-30", "1000.00")})
+	if got.Decision != DecisionAutoApply || len(got.Top[0].ItemIDs) != 3 {
+		t.Fatalf("got %s top %+v, want auto-apply to the three installments of INV-20001", got.Decision, got.Top)
 	}
 }
 

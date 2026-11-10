@@ -14,7 +14,7 @@ function EntryList({ entries }: { entries: NavEntry[] }) {
           <Link to={e.to} className={styles.link} aria-label={`${e.label} — ${e.moduleTitle}`}>
             <span>
               {e.label}
-              <span className={styles.moduleHint}>{e.moduleTitle}</span>
+              <span className={styles.moduleHint}>{` — ${e.moduleTitle}`}</span>
             </span>
           </Link>
         </li>

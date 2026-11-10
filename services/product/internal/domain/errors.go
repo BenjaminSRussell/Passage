@@ -30,6 +30,7 @@ const (
 	CodeRelSelf                 = "PRD-REL-SELF"
 	CodeGrpChgOnHand            = "PRD-GRPCHG-ONHAND"
 	CodeSvcStocked              = "PRD-SVC-STOCKED"
+	CodeSvcTracked              = "PRD-SVC-TRACKED"
 	CodeDocOriginalLimit        = "PRD-DOC-ORIGINAL-LIMIT"
 	CodeLifecycleIllegal        = "PRD-LC-ILLEGAL"
 	CodeDimGroupFrozen          = "PRD-DIMGRP-FROZEN"

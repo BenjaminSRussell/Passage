@@ -1,0 +1,30 @@
+.menu {
+  position: relative;
+}
+
+.panel {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-end: 0;
+  z-index: 20;
+  display: grid;
+  gap: var(--space-2);
+  min-width: 14rem;
+  padding: var(--space-3);
+  background: var(--color-surface, Canvas);
+  color: var(--color-text, CanvasText);
+  border: 1px solid var(--color-border, currentColor);
+  border-radius: var(--radius-2, 6px);
+}
+
+.who {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.expired {
+  position: fixed;
+  inset-block-start: var(--space-3);
+  inset-inline: var(--space-3);
+  z-index: 100;
+}

@@ -1,53 +1,100 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Badge, Button, Card, DataTable, EmptyState, Input, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { listProducts, ProductApiError, type Product } from "./api/client";
-import { DUTY_WRITE, productTypeLabel, subtypeLabel } from "./labels";
+import { Badge, Button, Card, CardGrid, DataTable, EmptyState, Input, PageHeader, Skeleton, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { getProduct, listProducts, listReleasedProductIds, ProductApiError, type ItemGroup, type Product } from "./api/client";
+import { DUTY_WRITE, productTypeLabel, subtypeLabel, trackingFlags, trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProductProblem } from "./ProductProblem";
-import { useProduct } from "./useProduct";
+import { useItemGroups, useProduct } from "./useProduct";
 
 const PAGE_SIZE = 50;
 
 export function ProductHome() {
   const navigate = useNavigate();
   const canWrite = holdsDuty(usePrincipalDuties(), DUTY_WRITE);
+  const { groups } = useItemGroups();
+  const [products, setProducts] = useState<Product[] | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    listProducts({ q: "", limit: 200 }, controller.signal).then(
+      (page) => setProducts(page.items),
+      () => {
+        if (!controller.signal.aborted) setProducts([]);
+      },
+    );
+    return () => controller.abort();
+  }, []);
+  const byGroup = groups.map((group) => ({ group, count: (products ?? []).filter((p) => p.itemGroupId === group.id).length })).filter((g) => g.count > 0);
+  const tracked = (products ?? []).filter((p) => p.batchTracked || p.serialTracked).length;
   return (
-    <>
+    <div className={styles.stack}>
       <PageHeader
         title="Product information"
         description="Product information management: products, masters and what's released to each legal entity."
+        actions={
+          <>
+            <Button onClick={() => navigate("/product/items")}>Open the catalog</Button>
+            {canWrite ? (
+              <Button variant="primary" onClick={() => navigate("/product/items/new")}>
+                New product
+              </Button>
+            ) : null}
+          </>
+        }
       />
-      <Card>
-        <EmptyState
-          icon="box"
-          title="Find or create a product"
-          description="Search the catalog by number or name, or add a product so it can be used on purchase and sales order lines."
-          action={
-            <>
-              <Button onClick={() => navigate("/product/items")}>Open the catalog</Button>
-              {canWrite ? (
-                <Button variant="primary" onClick={() => navigate("/product/items/new")}>
-                  New product
-                </Button>
-              ) : null}
-            </>
-          }
-        />
-      </Card>
-    </>
+      {products === null ? (
+        <Card>
+          <Skeleton width="3/4" />
+        </Card>
+      ) : products.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon="box"
+            title="Find or create a product"
+            description="Search the catalog by number or name, or add a product so it can be used on purchase and sales order lines."
+          />
+        </Card>
+      ) : (
+        <>
+          <StatGroup label="Catalog tiles">
+            <StatTile label="Products" value={String(products.length)} />
+            {byGroup.map(({ group, count }) => (
+              <StatTile key={group.id} label={group.name} value={String(count)} />
+            ))}
+            <StatTile label="Batch or serial tracked" value={String(tracked)} />
+          </StatGroup>
+          <CardGrid as="ul" label="Product areas">
+            <li>
+              <Card title="Catalog">
+                <p className={styles.note}>Every product and master, searchable by number or name.</p>
+                <Link to="/product/items">Open the catalog</Link>
+              </Card>
+            </li>
+            <li>
+              <Card title="Released products">
+                <p className={styles.note}>What is released to your legal entity, with its item group and tracking.</p>
+                <Link to="/product/released">See released products</Link>
+              </Card>
+            </li>
+          </CardGrid>
+        </>
+      )}
+    </div>
   );
 }
 
-const catalogColumns: DataTableColumn<Product>[] = [
-  { key: "productNumber", header: "Number", mono: true },
-  { key: "name", header: "Name" },
-  { key: "subtype", header: "Kind", render: (row) => <Badge tone="neutral">{subtypeLabel[row.subtype]}</Badge> },
-  { key: "baseUom", header: "Unit", mono: true },
-  { key: "lifecycleState", header: "State", render: (row) => <StatusPill status={row.lifecycleState} /> },
-];
+function catalogColumns(groups: ItemGroup[]): DataTableColumn<Product>[] {
+  return [
+    { key: "productNumber", header: "Number", mono: true },
+    { key: "name", header: "Name" },
+    { key: "subtype", header: "Kind", render: (row) => <Badge tone="neutral">{subtypeLabel[row.subtype]}</Badge> },
+    { key: "itemGroupId", header: "Item group", render: (row) => groups.find((group) => group.id === row.itemGroupId)?.name ?? "" },
+    { key: "baseUom", header: "Unit", mono: true },
+    { key: "lifecycleState", header: "State", render: (row) => <StatusPill status={row.lifecycleState} /> },
+  ];
+}
 
 interface Listing {
   rows: Product[];
@@ -76,6 +123,8 @@ export function CatalogPage() {
     );
     return () => controller.abort();
   }, [query, attempt]);
+
+  const { groups } = useItemGroups();
 
   function loadMore() {
     const token = ++latest.current;
@@ -127,7 +176,7 @@ export function CatalogPage() {
         <>
           <DataTable
             label="Products"
-            columns={catalogColumns}
+            columns={catalogColumns(groups)}
             rows={listing.rows}
             getRowKey={(row) => row.id}
             loading={listing.loading}
@@ -149,17 +198,40 @@ export function CatalogPage() {
 }
 
 export function ReleasedPage() {
+  const navigate = useNavigate();
+  const [state, setState] = useState<{ rows: Product[]; loading: boolean; error: unknown }>({ rows: [], loading: true, error: null });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setState({ rows: [], loading: true, error: null });
+    listReleasedProductIds(controller.signal)
+      .then((ids) => Promise.all(ids.map((id) => getProduct(id, controller.signal))))
+      .then(
+        (rows) => setState({ rows: rows.sort((x, y) => x.productNumber.localeCompare(y.productNumber)), loading: false, error: null }),
+        (error: unknown) => {
+          if (!controller.signal.aborted) setState({ rows: [], loading: false, error });
+        },
+      );
+    return () => controller.abort();
+  }, [attempt]);
+  const { groups } = useItemGroups();
   return (
-    <>
-      <PageHeader title="Released products" />
-      <Card>
-        <EmptyState
-          icon="box"
-          title="No released products yet"
-          description="Products released to a legal entity appear here, with their item group, model group, default site and warehouse."
+    <div className={styles.stack}>
+      <PageHeader title="Released products" description="Products released to your legal entity, with their item group, unit and tracking." />
+      {state.error ? (
+        <ProductProblem error={state.error} title="Could not load the released products" retry={() => setAttempt((n) => n + 1)} />
+      ) : (
+        <DataTable
+          label="Released products"
+          columns={catalogColumns(groups)}
+          rows={state.rows}
+          getRowKey={(row) => row.id}
+          loading={state.loading}
+          empty={{ title: "No released products yet", description: "Products released to a legal entity appear here, with their item group, model group, default site and warehouse." }}
+          onRowOpen={(row) => navigate(`/product/${encodeURIComponent(row.id)}`)}
         />
-      </Card>
-    </>
+      )}
+    </div>
   );
 }
 
@@ -183,6 +255,11 @@ function Entry({ term, children, mono }: { term: string; children: string; mono?
       <dd className={mono ? `${styles.value} ${styles.mono}` : styles.value}>{children || "None"}</dd>
     </div>
   );
+}
+
+function ItemGroupEntry({ id }: { id: string }) {
+  const { groups, failed } = useItemGroups();
+  return <Entry term="Item group">{groups.find((group) => group.id === id)?.name ?? (failed ? "Not available" : "")}</Entry>;
 }
 
 export function ProductDetail() {
@@ -231,6 +308,8 @@ export function ProductDetail() {
           <Entry term="Base unit" mono>
             {data.baseUom}
           </Entry>
+          {data.itemGroupId !== "" ? <ItemGroupEntry id={data.itemGroupId} /> : <Entry term="Item group">{""}</Entry>}
+          <Entry term="Tracking">{trackingFlags.filter((flag) => data[flag]).map((flag) => trackingLabel[flag]).join(", ")}</Entry>
           <Entry term="Description">{data.description}</Entry>
         </dl>
       </Card>

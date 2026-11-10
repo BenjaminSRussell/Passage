@@ -7,6 +7,7 @@ import { CODE, compareDecimal, decimalText, optionalWhole, positive, wholeNumber
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderSelect } from "../mfg-shared/orders";
 
 /** The service books at most this many secondary resources per operation (BR-23.4). */
 export const MAX_SECONDARIES = 5;
@@ -243,8 +244,8 @@ export function NewOperationPage() {
           />
         ) : (
           <form className={styles.form} onSubmit={submit} noValidate>
-            <FormField id="operation-order" label="Order id" hint="The production order this operation belongs to." error={errors.orderId}>
-              {field("orderId")}
+            <FormField id="operation-order" label="Production order" hint="The production order this operation belongs to." error={errors.orderId}>
+              {(control) => <OrderSelect {...control} value={values.orderId} onChange={(v) => update({ orderId: v })} />}
             </FormField>
             <FormField id="operation-number" label="Operation number" error={errors.operNumber}>
               {field("operNumber", { inputMode: "numeric" })}

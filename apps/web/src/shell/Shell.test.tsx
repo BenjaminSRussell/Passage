@@ -1,19 +1,22 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 import type { PassageModule } from "../modules/registry";
 import { checkAxeAA } from "./a11y";
 import { FormRenderer } from "./forms";
 import { demoNote } from "./metadata";
 import { pageViolations } from "./testing/fakeServer";
 import { HomePage } from "./pages/HomePage";
-import { NotesPage } from "./pages/NotesPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { usePrincipalDuties } from "./principal";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import { Shell } from "./Shell";
 import { recordedErrors } from "./telemetry";
+
+beforeEach(() => {
+  window.localStorage.clear();
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -31,13 +34,12 @@ const modules: PassageModule[] = [
   },
 ];
 
-function renderShell(path = "/") {
+function renderShell(path = "/", identity?: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route element={<Shell modules={modules} />}>
+        <Route element={<Shell modules={modules} identity={identity} />}>
           <Route path="/" element={<HomePage />} />
-          <Route path="/notes" element={<NotesPage />} />
           <Route path="/admin/audit" element={<p>Audit page</p>} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
@@ -80,27 +82,20 @@ describe("shell a11y and keyboard", () => {
     expect(screen.getByText("Audit page")).toBeInTheDocument();
   });
 
-  it("applies a saved view from the keyboard-accessible control", async () => {
-    const user = userEvent.setup();
+  it("has no demo saved-view button in the top bar", () => {
     renderShell();
-    await user.click(screen.getByRole("button", { name: "Apply saved view" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Saved view applied");
+    expect(screen.queryByRole("button", { name: /saved view/i })).not.toBeInTheDocument();
   });
 });
 
 describe("pages and navigation", () => {
-  it("lists a workspace card with its top tasks on home, and keeps the note form on /notes", () => {
+  it("lists a workspace card with its top tasks on home", () => {
     const home = renderShell();
     const main = within(screen.getByRole("main"));
     expect(main.getByRole("heading", { level: 3, name: "Administration" })).toBeInTheDocument();
     expect(main.getByRole("link", { name: /Audit log/ })).toHaveAttribute("href", "/admin/audit");
     expect(main.getByRole("link", { name: "See all features" })).toHaveAttribute("href", "/features");
-    expect(screen.queryByRole("button", { name: "Save Note" })).not.toBeInTheDocument();
-    home.unmount();
-
-    const notes = renderShell("/notes");
-    expect(screen.getByRole("button", { name: "Save Note" })).toBeInTheDocument();
-    expect(checkAxeAA(notes.container)).toEqual([]);
+    expect(checkAxeAA(home.container)).toEqual([]);
   });
 
   it("shows the page title as the only h1, a breadcrumb and the current nav item", () => {
@@ -137,6 +132,21 @@ describe("pages and navigation", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(container.firstElementChild).toHaveAttribute("data-density", "compact");
   });
+
+  it("remembers the density for the same person only", async () => {
+    const user = userEvent.setup();
+    const first = renderShell("/", "ada");
+    await user.click(screen.getByRole("button", { name: "Compact view" }));
+    first.unmount();
+
+    const again = renderShell("/", "ada");
+    expect(screen.getByRole("button", { name: "Compact view" })).toHaveAttribute("aria-pressed", "true");
+    expect(again.container.firstElementChild).toHaveAttribute("data-density", "compact");
+    again.unmount();
+
+    renderShell("/", "grace");
+    expect(screen.getByRole("button", { name: "Compact view" })).toHaveAttribute("aria-pressed", "false");
+  });
 });
 
 describe("command palette", () => {
@@ -150,8 +160,8 @@ describe("command palette", () => {
     expect(input).toHaveAttribute("aria-activedescendant", second.id);
     expect(second).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("heading", { level: 1, name: "Notes" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Notes" })).toHaveFocus();
+    expect(screen.getByRole("heading", { level: 1, name: "All features" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "All features" })).toHaveFocus();
   });
 
   it("wraps the active option at both ends", async () => {
@@ -180,12 +190,15 @@ describe("command palette", () => {
   it("does not re-announce Search opened when it is already open", async () => {
     const user = userEvent.setup();
     renderShell();
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("You're offline");
     await user.keyboard("{Control>}k{/Control}");
     expect(screen.getByRole("status")).toHaveTextContent("Search opened");
-    await user.click(screen.getByRole("button", { name: "Apply saved view" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Saved view applied");
     await user.keyboard("{Control>}k{/Control}");
-    expect(screen.getByRole("status")).toHaveTextContent("Saved view applied");
+    expect(screen.getByRole("status")).toHaveTextContent("Search opened");
+    expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
 
   it("closes when the backdrop is pressed", async () => {
@@ -323,31 +336,21 @@ describe("generated form keyboard and validation", () => {
   });
 });
 
-describe("notes page", () => {
-  it("saves a valid note into the list and confirms it", async () => {
-    const user = userEvent.setup();
-    renderShell("/notes");
-    await user.type(screen.getByLabelText("Title"), "Kickoff");
-    await user.click(screen.getByRole("button", { name: "Save Note" }));
-    expect(within(screen.getByRole("table", { name: "Note list" })).getByRole("button", { name: "Kickoff" })).toBeInTheDocument();
-    expect(screen.getAllByRole("status").some((node) => node.textContent === "Note saved")).toBe(true);
-    expect(within(screen.getByRole("main")).getAllByRole("heading", { level: 2 })).toHaveLength(1);
-  });
-});
-
 describe("shell feedback", () => {
-  it("keeps the current density when applying the saved view, and shows a toast that hides itself", async () => {
+  it("shows a toast that hides itself, without changing the density", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const { container } = renderShell();
     await user.click(screen.getByRole("button", { name: "Compact view" }));
-    await user.click(screen.getByRole("button", { name: "Apply saved view" }));
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
     expect(container.firstElementChild).toHaveAttribute("data-density", "compact");
-    expect(screen.getAllByText("Saved view applied")).toHaveLength(2);
+    expect(screen.getAllByText("You're offline")).toHaveLength(2);
     act(() => {
       vi.advanceTimersByTime(4000);
     });
-    expect(screen.getAllByText("Saved view applied")).toHaveLength(1);
+    expect(screen.getAllByText("You're offline")).toHaveLength(1);
   });
 
   it("keeps search announcements in the live region only", async () => {
@@ -362,12 +365,13 @@ describe("shell feedback", () => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
     const user = userEvent.setup();
     renderShell();
-    await user.click(screen.getByRole("button", { name: "Apply saved view" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Saved view applied");
-    await user.click(screen.getByRole("button", { name: "Apply saved view" }));
+    await user.keyboard("{Control>}k{/Control}");
+    expect(screen.getByRole("status")).toHaveTextContent("Search opened");
+    await user.keyboard("{Escape}");
+    await user.keyboard("{Control>}k{/Control}");
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
     act(() => frames.forEach((frame) => frame(0)));
-    expect(screen.getByRole("status")).toHaveTextContent("Saved view applied");
+    expect(screen.getByRole("status")).toHaveTextContent("Search opened");
   });
 
   it("shows the offline banner and announces the change", () => {
@@ -498,7 +502,8 @@ describe("duty gating", () => {
     const cards = screen.getByRole("list", { name: "Workspaces" });
     expect(within(cards).queryByRole("link", { name: "Post a journal" })).not.toBeInTheDocument();
     expect(within(cards).queryByRole("link", { name: "Print and track checks" })).not.toBeInTheDocument();
-    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(2);
+    expect(within(cards).getAllByRole("link", { name: "Review open items" })).toHaveLength(1);
+    expect(within(cards).getAllByRole("button", { name: /^Switch to / }).length).toBeGreaterThan(0);
   });
 
   it("shows gated entries to a principal holding the duty", () => {

@@ -3,15 +3,18 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { setLookupFetcher } from "../../shell/lookup/entities";
 import { promiseSummary, validateAtp } from "./AtpCheckPage";
 import { blankProfile, validateProfile } from "./CreditProfileFormPage";
 import sales from "./module";
 import { emptyLine, validateOrder } from "./NewOrderPage";
+import { nameLookups } from "./testLookup";
 
 const LE = "11111111-0000-4000-8000-000000000001";
 const CUSTOMER = "22222222-0000-4000-8000-000000000002";
 const PRODUCT = "33333333-0000-4000-8000-000000000003";
 const SITE = "44444444-0000-4000-8000-000000000004";
+const GROUP = "88888888-0000-4000-8000-000000000008";
 const WAREHOUSE = "55555555-0000-4000-8000-000000000005";
 const ORDER_ID = "66666666-0000-4000-8000-000000000006";
 const HOLD_ID = "77777777-0000-4000-8000-000000000007";
@@ -182,9 +185,10 @@ describe("Sales orders list", () => {
 describe("Sales order detail", () => {
   it("confirms at the current ETag and explains a credit hold with the failing rule", async () => {
     handler = (_url, init) => (init.method === "POST" ? { status: 200, body: { ...heldOrder, confirmed: false }, etag: '"2"' } : { status: 200, body: order(), etag: '"1"' });
+    nameLookups({ [PRODUCT]: "Hex bolt" });
     const { container } = renderAt(`/sales/orders/${ORDER_ID}`);
     expect(await screen.findByRole("heading", { name: "Sales order SO-0000042" })).toBeInTheDocument();
-    expect(within(screen.getByRole("table", { name: "Order lines" })).getByText(PRODUCT)).toBeInTheDocument();
+    expect(await within(screen.getByRole("table", { name: "Order lines" })).findByText("Hex bolt")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm order" }));
@@ -219,8 +223,11 @@ describe("Sales order detail", () => {
     renderAt(`/sales/orders/${ORDER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Confirm order" }));
     expect(await screen.findByText("Someone else changed this order")).toBeInTheDocument();
+    // The document flow panel reads the order too, so count the reads before and after the click.
+    const reads = () => calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/sales/orders/${ORDER_ID}`).length;
+    const before = reads();
     fireEvent.click(screen.getByRole("button", { name: "Reload order" }));
-    await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/sales/orders/${ORDER_ID}`)).toHaveLength(2));
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 
   it("shows the error when the order cannot be loaded", async () => {
@@ -236,9 +243,84 @@ describe("New sales order", () => {
     handler = () => ({ status: 500, body: {} });
     renderAt("/sales/orders/new");
     fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
-    expect(await screen.findByText("Enter the customer's UUID.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the product's UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the customer.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a product.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
+  });
+
+  it("picks the customer, site and warehouse by name instead of asking for ids", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async (url) => {
+      const rows = url.includes("/party/customers:search") ? [{ id: CUSTOMER, name: "Summit Mining Supply", accountNumber: "C-10055" }] : url.includes("/org/sites") ? [{ id: SITE, name: "Cedar Rapids plant", code: "CR" }] : [];
+      return new Response(JSON.stringify({ items: rows }), { status: 200 });
+    });
+    renderAt("/sales/orders/new");
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "summit" } });
+    fireEvent.click(await screen.findByText("Summit Mining Supply"));
+    expect(screen.getByLabelText("Customer")).toHaveAttribute("data-value", CUSTOMER);
+    expect(screen.getByLabelText("Customer")).toHaveValue("Summit Mining Supply (C-10055)");
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: "cedar" } });
+    fireEvent.click(await screen.findByText("Cedar Rapids plant"));
+    expect(screen.getByLabelText("Site")).toHaveAttribute("data-value", SITE);
+  });
+
+  it("picks the product through the shared lookup and takes its base unit", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG" }] }), { status: 200 }));
+    renderAt("/sales/orders/new");
+    expect(screen.getByLabelText("Unit")).toHaveValue("EA");
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    expect(screen.getByLabelText("Product")).toHaveValue("Hex bolt (BOLT)");
+    expect(screen.getByLabelText("Product")).toHaveAttribute("data-value", PRODUCT);
+    expect(screen.getByLabelText("Unit")).toHaveValue("KG");
+    fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "BOX" } });
+    expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
+  });
+
+  it("explains tracking and the item group under the product, tied to the field", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async (url) =>
+      new Response(
+        JSON.stringify(
+          url.includes("item-groups")
+            ? { items: [{ ID: GROUP, Name: "Raw material" }] }
+            : { items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG", ItemGroupID: GROUP, BatchTracked: true, CatchWeight: true }] },
+        ),
+        { status: 200 },
+      ),
+    );
+    renderAt("/sales/orders/new");
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    const hint = "Item group: Raw material. Batch tracked: the batch is recorded at receipt. Catch weight: the actual weight is recorded at receipt.";
+    const note = await screen.findByText(hint);
+    expect(screen.getByLabelText("Product").getAttribute("aria-describedby")).toContain(note.id);
+  });
+
+  it("keeps a unit the person typed when a product is picked", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async () => new Response(JSON.stringify({ items: [{ ID: PRODUCT, ProductNumber: "BOLT", Name: "Hex bolt", BaseUOM: "KG" }] }), { status: 200 }));
+    renderAt("/sales/orders/new");
+    fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "BOX" } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
+  });
+
+  it("marks the product invalid when none is chosen", async () => {
+    handler = () => ({ status: 500, body: {} });
+    renderAt("/sales/orders/new");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
+    await screen.findByText("Choose a product.");
+    expect(screen.getByLabelText("Product")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("asks for a product in plain words when none is chosen", async () => {
+    handler = () => ({ status: 500, body: {} });
+    renderAt("/sales/orders/new");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
+    expect(await screen.findByText("Choose a product.")).toBeInTheDocument();
   });
 
   it("creates the order with an Idempotency-Key and opens it", async () => {

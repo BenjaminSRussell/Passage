@@ -2470,6 +2470,7 @@ Open questions:
 | SUP-ACK-001 | error | Only the latest PO version {version} can be acknowledged | BR-20.9 | Open the latest version | FR-20.9 |
 | SUP-ASN-001 | error | ASN quantity {qty} exceeds remaining {remaining} plus tolerance | BR-20.10 | Correct quantity | FR-20.10 |
 | SUP-ASN-002 | error | Tracking number {tracking} already used on ASN {asn} | BR-20.10 | Use the correct tracking number | FR-20.10 |
+| SUP-ASN-003 | error | ASN {asn} already started receipt {receipt} | BR-20.10 | Open the existing receipt | FR-20.10 |
 | SUP-INV-001 | error | Invoice price {price} differs from PO price {po_price}; price override not enabled | BR-20.11 | Contact the buyer | FR-20.11 |
 | SUP-AUTH-001 | error | Not found | Cross-vendor access attempt (404 by design) | None | FR-20.12 |
 | SUP-RATE-001 | error | Too many requests; retry after {seconds} s | Rate limit | Retry later | FR-20.12 |

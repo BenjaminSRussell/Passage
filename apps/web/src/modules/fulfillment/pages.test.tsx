@@ -90,7 +90,7 @@ describe("shipments list", () => {
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "PACKED" } });
     await waitFor(() => expect(within(screen.getByRole("table", { name: "Shipments" })).queryByText("SH-0000001")).toBeNull());
-    expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("PACKED");
+    expect(server.calls.filter((c) => !c.url.pathname.includes("/sales/")).at(-1)?.url.searchParams.get("status")).toBe("PACKED");
 
     fireEvent.click(within(screen.getByRole("table", { name: "Shipments" })).getByRole("button", { name: "SH-0000002" }));
     expect(await screen.findByRole("heading", { name: "Shipment SH-0000042" })).toBeInTheDocument();

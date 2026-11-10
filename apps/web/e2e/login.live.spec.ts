@@ -21,14 +21,18 @@ async function apiStatus(page: Page, path: string): Promise<number> {
 
 test("an admin signs in through Keycloak, sees admin navigation and may call admin routes", async ({ page }) => {
   await signIn(page, "admin", "passage-admin-dev");
+  // The workspace navigation lists the admin entries once the admin area is open.
+  await page.goto(`${LIVE_URL}/admin`);
   await expect(page.getByRole("link", { name: "Audit" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Users" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sequences" })).toBeVisible();
   expect([401, 403]).not.toContain(await apiStatus(page, "/api/v1/numbering/sequences/PARTY"));
 });
 
 test("a clerk signs in, sees no admin navigation and is refused by the API with 403", async ({ page }) => {
   await signIn(page, "clerk", "passage-clerk-dev");
+  await page.goto(`${LIVE_URL}/admin`);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.getByRole("link", { name: "Audit" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Users" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Sequences" })).toHaveCount(0);
   expect(await apiStatus(page, "/api/v1/numbering/sequences/PARTY")).toBe(403);
 });

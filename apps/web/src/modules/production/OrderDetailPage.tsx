@@ -72,6 +72,8 @@ import {
 } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { ResourceName } from "../mfg-shared/resources";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 
@@ -94,7 +96,7 @@ const reworkColumns: DataTableColumn<OrderSummary>[] = [
 
 const lineColumns: DataTableColumn<OrderLine>[] = [
   { key: "lineNo", header: "Line", mono: true },
-  { key: "itemId", header: "Item", mono: true },
+  { key: "itemId", header: "Item", render: (row) => <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> },
   { key: "qtyPer", header: "Per unit", align: "end" },
   { key: "scrapPct", header: "Scrap %", align: "end" },
   { key: "qtyRequired", header: "Required", align: "end" },
@@ -106,7 +108,7 @@ const lineColumns: DataTableColumn<OrderLine>[] = [
 const coProductColumns: DataTableColumn<CoProduct>[] = [
   { key: "lineNo", header: "Line", mono: true },
   { key: "type", header: "Type", render: (row) => coProductTypeLabel[row.type] ?? row.type },
-  { key: "itemId", header: "Item", mono: true },
+  { key: "itemId", header: "Item", render: (row) => <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> },
   { key: "qtyPer", header: "Per unit", align: "end" },
   { key: "qtyPlanned", header: "Planned", align: "end" },
   { key: "qtyReported", header: "Received", align: "end" },
@@ -114,7 +116,7 @@ const coProductColumns: DataTableColumn<CoProduct>[] = [
 
 const operationColumns: DataTableColumn<Operation>[] = [
   { key: "operNumber", header: "Operation", align: "end" },
-  { key: "resourceId", header: "Resource", mono: true },
+  { key: "resourceId", header: "Resource", render: (row) => <ResourceName id={row.resourceId} /> },
   { key: "setupTimeH", header: "Setup h", align: "end" },
   { key: "runTimeHPer", header: "Run h per unit", align: "end" },
   { key: "processQty", header: "Process qty", align: "end" },
@@ -138,7 +140,21 @@ const operationColumns: DataTableColumn<Operation>[] = [
 
 const costColumns: DataTableColumn<CostRow>[] = [
   { key: "group", header: "Cost group", render: (row) => costGroupLabel[row.group] },
-  { key: "key", header: "Item or operation", mono: true },
+  {
+    key: "key",
+    header: "Item or operation",
+    render: (row) => {
+      if (row.group === "material") return <EntityName entity="product" id={row.key} fallback={row.key} />;
+      const [oper, ...rest] = row.key.split(" ");
+      return rest.length > 0 ? (
+        <span>
+          {oper} <ResourceName id={rest.join(" ")} />
+        </span>
+      ) : (
+        row.key
+      );
+    },
+  },
   { key: "qty", header: "Planned qty", align: "end" },
   { key: "amount", header: "Planned amount", align: "end" },
   { key: "fixed", header: "Fixed (setup)", align: "end" },
@@ -523,24 +539,27 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
 
       <Card title="Order">
         <dl className={styles.details}>
-          <Detail term="Product" mono>
-            {current.productId}
+          <Detail term="Product">
+            <EntityName entity="product" id={current.productId} fallback={current.productId} />
           </Detail>
           <Detail term="Quantity">{current.quantity}</Detail>
           <Detail term="Reported as finished">{current.qtyRaf}</Detail>
           <Detail term="Error quantity">{current.qtyError}</Detail>
           <Detail term="Delivery date">{current.deliveryDate ?? dash}</Detail>
           <Detail term="Scheduled">{current.startDate && current.endDate ? `${current.startDate} to ${current.endDate}` : dash}</Detail>
-          <Detail term="Site" mono>
-            {current.siteId}
+          <Detail term="Legal entity">
+            <EntityName entity="legalEntity" id={current.legalEntityId} fallback="Not available" />
           </Detail>
-          <Detail term="Warehouse" mono>
-            {current.warehouseId}
+          <Detail term="Site">
+            <EntityName entity="site" id={current.siteId} fallback={current.siteId} />
+          </Detail>
+          <Detail term="Warehouse">
+            <EntityName entity="warehouse" id={current.warehouseId} fallback={current.warehouseId} />
           </Detail>
           <Detail term="Origin">{current.originType}</Detail>
           {current.releasedProductId ? (
-            <Detail term="Released product" mono>
-              {current.releasedProductId}
+            <Detail term="Released product">
+              <EntityName entity="product" id={current.releasedProductId} fallback={current.releasedProductId} />
             </Detail>
           ) : null}
           {current.quotaArrangementId ? (

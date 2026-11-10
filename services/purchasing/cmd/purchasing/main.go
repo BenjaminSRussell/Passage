@@ -71,7 +71,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-	a := api.New(store.New(pool))
+	a := api.New(store.New(pool)).WithVendorPrincipal(api.PortalVendorPrincipal{})
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

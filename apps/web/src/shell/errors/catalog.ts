@@ -10,6 +10,8 @@
  * tables (purchasing, receiving, payables, sales, inventory, ledger, party, tax and product).
  * A code without an entry falls back to the server's title or detail.
  */
+import { translateProblem } from "../i18n/problemMessages";
+
 export interface ProblemCatalogEntry {
   /** What happened and why, in one or two plain sentences. */
   message: string;
@@ -27,6 +29,7 @@ const common: Record<string, ProblemCatalogEntry> = {
   "COM-0002": { message: "The request was missing information the service needs to accept it safely.", action: "Reload the page and try again." },
   "COM-0400": { message: "The service couldn't read the request.", action: "Reload the page and try again. If it keeps happening, contact support with the details below." },
   "COM-0403": { message: "You don't have permission to do this.", action: ASK_ADMIN },
+  "FEAT-0001": { message: "This feature isn't turned on for your company.", action: "An administrator can turn it on under Company setup, then Features." },
   "COM-0404": { message: "We couldn't find that record. It may have been deleted, or the link is out of date.", action: "Go back to the list and open the record again." },
   "COM-0409": { message: "This request was already sent once with different details.", action: "Reload the page and start the action again." },
   "COM-0410": { message: "The same request is still being processed.", action: "Wait a moment, then reload the page to see the result." },
@@ -156,6 +159,8 @@ const receiving: Record<string, ProblemCatalogEntry> = {
   "RCV-SVC-001": { message: "A receipt created by an accepted service entry sheet can't be corrected or cancelled.", action: "Correct the service entry sheet instead." },
   "RCV-CW-001": { message: "The catch weight is outside the allowed range for this quantity.", action: "Weigh the goods again and enter the actual weight." },
   "RCV-CW-002": { message: "A catch-weight line must be received in a weight unit.", action: "Change the unit to a weight unit." },
+  "RCV-CAP-004": { message: "This invoice document was already sent.", action: "Check your sent invoices before sending it again." },
+  "RCV-VND-001": { message: "This account isn't a supplier account.", action: "Sign in with a supplier account." },
   "RCV-CAP-001": { message: "The invoice document isn't in a format we can read.", action: "Upload the original e-invoice file." },
   "RCV-CAP-002": { message: "The invoice document couldn't be read.", action: "Upload a clearer copy, or enter the invoice by hand." },
   "INV-SER-001": { message: "A serial number is empty or has already been recorded.", action: "Enter a serial number that hasn't been used." },
@@ -179,8 +184,13 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "AP-EMP-002": { message: "This worker is already mapped to another vendor.", action: "Change the existing mapping instead." },
   "AP-FIL-001": { message: "The payment file isn't valid.", action: "Check the payments in the run, then generate the file again." },
   "AP-FIL-002": { message: "The payment file failed the bank format check.", action: "Check the bank details of the payments listed, then generate the file again." },
+  "PRN-0008": { message: "The document has content the PDF layout cannot show.", action: "Check the document for unusual characters or empty required fields, then try again." },
   "AP-OPN-001": { message: "A settled or reversed open item can't be held or released.", action: "Reload the page to see the item's current state." },
-  "AP-PRP-001": { message: "This run id was already used for a different payment proposal.", action: "Use a new run id." },
+  "AP-OPB-001": { message: "Some opening balance rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
+  "AP-OPB-002": { message: "This opening balance batch was already loaded with different content.", action: "Use a new batch name, or send exactly what was loaded before." },
+  "AP-OPB-003": { message: "The opening balance rows don't add up to the total you gave for the batch.", action: "Check the rows and the total for each currency, then send the batch again." },
+  "AP-OPB-004": { message: "Some of these opening balance items were already loaded in another batch.", action: "Remove the items listed, then send the batch again." },
+  "AP-PRP-001": { message: "The proposal changed: an invoice was paid, put on hold or changed, or the run id was already used.", action: "Create a new proposal." },
   "AP-PRP-002": { message: "Only a draft payment proposal can be changed.", action: "Create a new proposal." },
   "AP-PRP-003": { message: "A payment proposal must be approved by someone other than its creator.", action: "Ask another approver to approve it." },
   "AP-PRP-004": { message: "The run date has passed.", action: "Create a new proposal." },
@@ -426,6 +436,9 @@ const billing: Record<string, ProblemCatalogEntry> = {
   "BIL-0110": { message: "We couldn't find that sales report.", action: "Go back to the list and open it again." },
   "BIL-0111": { message: "Only a report that was set aside can be sent again, and this one isn't.", action: "Check the report's status in the list." },
   "BIL-0112": { message: "Sales reports aren't turned on for your organization.", action: ASK_ADMIN },
+  "BIL-0120": { message: "We couldn't find that tax report.", action: "Go back to the list and open it again." },
+  "BIL-0121": { message: "Only a report that was set aside can be sent again, and this one isn't.", action: "Check the report's status in the list." },
+  "BIL-0122": { message: "Tax reports aren't turned on for your organization.", action: ASK_ADMIN },
   "BIL-0200": { message: "The general ledger isn't set up for this service.", action: ASK_ADMIN },
   "BIL-0201": { message: "The general ledger didn't answer.", action: TRY_LATER },
   "BIL-0202": { message: "No ledger posting profile is set up for this legal entity.", action: "Ask finance to set up the posting profile." },
@@ -510,6 +523,9 @@ const receivingGaps: Record<string, ProblemCatalogEntry> = {
   "RCV-CRY-001": { message: "Field encryption isn't set up, so one-time payees can't be stored.", action: ASK_ADMIN },
   "RCV-DUP-001": { message: "This packing slip was already used on another receipt.", action: "Check for a duplicate receipt." },
   "RCV-HLD-001": { message: "The compliance hold check isn't set up, so nothing was erased.", action: ASK_ADMIN },
+  "SUP-ASN-001": { message: "The shipped quantity is more than is still open on the order.", action: "Lower the quantity to what is still open, or ask the buyer to raise the order." },
+  "SUP-ASN-002": { message: "That tracking number is already used on another ship notice.", action: "Check the tracking number and use the one for this shipment." },
+  "SUP-ASN-003": { message: "A receipt was already started from this ship notice.", action: "Open the receipt instead of starting a new one." },
   "RCV-NF-001": { message: "We couldn't find that receipt.", action: "Go back to the list and open it again." },
   "RCV-NF-002": { message: "The receipt line has no open goods-received, invoice-not-yet-received item.", action: "Check that the line has not been invoiced already." },
   "RCV-NF-003": { message: "We couldn't find that pending posting.", action: "Reload the page to see the current list." },
@@ -519,6 +535,7 @@ const receivingGaps: Record<string, ProblemCatalogEntry> = {
   "RCV-NF-007": { message: "We couldn't find that invoice capture.", action: "Go back to the list and open it again." },
   "RCV-NF-008": { message: "We couldn't find that service entry sheet.", action: "Go back to the list and open it again." },
   "RCV-NF-009": { message: "We couldn't find that self-billing document.", action: "Go back to the list and open it again." },
+  "RCV-NF-010": { message: "We couldn't find that ship notice.", action: "Go back to the list and open it again." },
   "RCV-PO-001": { message: "The purchase order isn't approved or confirmed.", action: "Get the order approved or confirmed first." },
   "RCV-PO-002": { message: "A purchase order line is cancelled.", action: "Remove the line from the receipt." },
   "RCV-PO-003": { message: "The purchase order belongs to another legal entity.", action: "Choose an order of the same legal entity." },
@@ -621,6 +638,11 @@ const ledgerPostingGaps: Record<string, ProblemCatalogEntry> = {
 
 const party: Record<string, ProblemCatalogEntry> = {
   "PTY-0001": { message: "The tax registration number isn't valid for its country.", action: "Check the number and the country, then try again." },
+  "PTY-SUP-INVALID": { message: "Some of the details aren't valid.", action: "Check the highlighted fields, then try again." },
+  "PTY-SUP-NOT-FOUND": { message: "That request, document or supplier can't be found.", action: "Reload the list and try again." },
+  "PTY-SUP-SCOPE": { message: "This account isn't a supplier account.", action: "Sign in with a supplier account." },
+  "PTY-SUP-SOD": { message: "You invited this supplier, so someone else has to approve it.", action: "Ask a colleague to approve the onboarding." },
+  "PTY-SUP-STATE": { message: "The request has already moved on.", action: "Reload and check its current status." },
   "PTY-BANK-ENCRYPTION-UNAVAILABLE": { message: "Bank details can't be saved until the encryption keys are set up.", action: ASK_ADMIN },
   "PTY-BANK-INVALID": { message: "Some of the bank account details aren't valid.", action: "Check the account number, bank code and currency, then try again." },
   "PTY-CHANGE-DECIDED": { message: "Someone has already approved or rejected this change.", action: "Reload the page to see the decision." },
@@ -698,6 +720,7 @@ const product: Record<string, ProblemCatalogEntry> = {
   "PRD-RELEASE-DRAFT": { message: "A draft product can't be released.", action: "Finish and approve the product first." },
   "PRD-RELEASE-SITE-INVALID": { message: "The site you chose doesn't exist or belongs to another legal entity.", action: "Choose a site from the list." },
   "PRD-RELEASE-WAREHOUSE-INVALID": { message: "The warehouse you chose doesn't exist, belongs to another legal entity, or isn't in the chosen site.", action: "Choose a warehouse from the list." },
+  "PRD-SVC-TRACKED": { message: "A service can't be tracked by batch, serial number or catch weight.", action: "Turn off the tracking options, or choose a stocked item type." },
   "PRD-SVC-STOCKED": { message: "A service product can't be kept in stock.", action: "Turn off stocking, or choose a stocked product type." },
   "PRD-UOM-UNDERFLOW": { message: "The quantity can't be converted between those units: there is no conversion, or it rounds to zero.", action: "Add a unit conversion, or use a larger quantity." },
   "PRD-VAR-CAP": { message: "That would create more variants than the limit allows.", action: "Choose fewer dimension values." },
@@ -777,6 +800,107 @@ const ledgerSetup: Record<string, ProblemCatalogEntry> = {
   LEDGER_VALIDATION_RULE_NOT_FOUND: { message: "We couldn't find that validation rule.", action: "Go back to the list and open it again." },
 };
 
+/** Self-billing, period checks and RFQ types: the last codes of the purchase-to-pay services without a message. */
+const p2pGaps: Record<string, ProblemCatalogEntry> = {
+  "AP-ERS-002": { message: "The unit price is different from the price on the purchase order.", action: "Confirm the price you were billed, or change the purchase order price first." },
+  "AP-ERS-003": { message: "Only a posted receipt can have its price confirmed.", action: "Post the receipt first, then confirm the price." },
+  "AP-ERS-004": { message: "The person who posted a receipt can't confirm its price.", action: "Ask a colleague to confirm the price." },
+  "AP-ERS-005": { message: "The self-billing document can't be issued yet.", action: "Check the vendor's self-billing setup and the receipt lines, then try again." },
+  "CLOSE-0005": { message: "No fiscal period covers this posting date.", action: "Choose a date inside an open fiscal period, or ask the controller to set up the period." },
+  "CLOSE-0006": { message: "More than one fiscal period covers this posting date.", action: "Ask the controller to correct the period calendar, then try again." },
+  "LEDGER-0013": { message: "The fiscal period for this posting date is closed.", action: "Choose a date in an open period, or ask the controller to reopen the period." },
+  "LEDGER-0014": { message: "The fiscal period for this posting date is on hold.", action: "Choose a date in an open period, or ask the controller to release the hold." },
+  "PRC-RFQ-TYPE-001": { message: "This request for quotation type can't be used here. It is inactive or belongs to another legal entity.", action: "Choose an active type of this legal entity." },
+  "PRC-RFQ-TYPE-002": { message: "This legal entity already has a request for quotation type with that code.", action: "Change the existing type, or use a different code." },
+  "PRC-RFQ-TYPE-003": { message: "Someone else changed this request for quotation type after you opened it.", action: RELOAD_AND_REDO },
+  "PRC-RFQ-TYPE-NOT-FOUND": { message: "We couldn't find that request for quotation type.", action: "Go back to the list and open the type again." },
+};
+
+/** Purchasing, receivables and inventory codes named for what they refuse; most are 'not found' and 'wrong status' refusals. */
+const p2pMore: Record<string, ProblemCatalogEntry> = {
+  "AR-AMOUNT-RANGE": { message: "The amount isn't allowed here.", action: "Enter an amount above zero that doesn't exceed the open balance." },
+  "AR-BILLING-MISMATCH": { message: "The billing document doesn't match the open item it was linked to.", action: "Check the invoice number, customer and amounts, then try again." },
+  "AR-BILLING-NUMBER-TAKEN": { message: "A billing document with this number already exists.", action: "Use the existing document, or give the new one a different number." },
+  "AR-CASE-MISMATCH": { message: "An open item belongs to another customer or legal entity, or is in another currency than the case.", action: "Add only open items of the case's customer, legal entity and currency." },
+  "AR-CASE-NOT-FOUND": { message: "We couldn't find that collection case. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-CASE-STATE": { message: "This collection case can't be changed in its current status.", action: "Reload the case to see its current status." },
+  "AR-CONFIRMATION-NOT-FOUND": { message: "We couldn't find that balance confirmation. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-CONFIRMATION-REPLIED": { message: "The customer's reply is already recorded and can't be changed.", action: "Create a new balance confirmation if the balance needs to be confirmed again." },
+  "AR-CONFIRMATION-REPLY": { message: "The reply can't be recorded as entered.", action: "A disagreed reply needs the customer's balance. Add it and try again." },
+  "AR-CREDIT-ITEM": { message: "This open item is a credit, and this action doesn't settle credits.", action: "Choose a debit open item, or apply the credit to an invoice instead." },
+  "AR-DEDUCTION-MISMATCH": { message: "The open item belongs to another legal entity or customer than the deduction.", action: "Choose an open item of the same customer and legal entity." },
+  "AR-DEDUCTION-NOT-FOUND": { message: "We couldn't find that deduction. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-DEDUCTION-SPLIT": { message: "The deduction can't be split that way.", action: "Split it into at least two parts, each above zero, that add up to the deduction." },
+  "AR-DEDUCTION-STATE": { message: "This deduction can't be changed in its current status.", action: "Reload the deduction to see its current status." },
+  "AR-DISPUTE-EXISTS": { message: "This open item already has an active dispute.", action: "Resolve the current dispute first, then try again." },
+  "AR-DISPUTE-NOT-FOUND": { message: "We couldn't find that dispute. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-DISPUTE-STATE": { message: "This dispute can't be changed in its current status.", action: "Reload the dispute to see its current status." },
+  "AR-DOWN-PAYMENT-MISMATCH": { message: "The down payment doesn't match the invoice or customer it was applied to.", action: "Check the customer, currency and legal entity of both documents." },
+  "AR-DOWN-PAYMENT-NOT-FOUND": { message: "We couldn't find that down payment. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-DOWN-PAYMENT-STATE": { message: "This down payment can't be changed in its current status.", action: "Reload the down payment to see its current status." },
+  "AR-DUNNING-RUN-NOT-FOUND": { message: "We couldn't find that dunning run. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-DUNNING-STATE": { message: "This dunning run can't be changed in its current status.", action: "Reload the run to see its current status." },
+  "AR-INTEREST-RATE": { message: "The interest rate isn't valid.", action: "Enter a rate of zero or more." },
+  "AR-OPEN-ITEM-NOT-FOUND": { message: "We couldn't find that open item. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-OPENING-DOCUMENT-EXISTS": { message: "A document with this number already exists in the open items.", action: "Remove the row from the import, or correct its document number." },
+  "AR-OPENING-DUPLICATE-KEY": { message: "This opening balance import was already started with different rows.", action: "Reload the import to see what was loaded, or start a new one." },
+  "AR-OPENING-IDENTITY": { message: "The customer or legal entity on an opening row isn't known.", action: "Correct the customer number or legal entity on the row." },
+  "AR-OPENING-IN-COLLECTION": { message: "This open item is already in collection.", action: "Leave the row out of the import, or close the collection case first." },
+  "AR-OPENING-INVALID": { message: "A row of the opening balance import has invalid values.", action: "Correct the fields named for the row, then import again." },
+  "AR-OPENING-REJECTED": { message: "This row wasn't stored because another row of the same import was refused.", action: "Fix the refused rows, then import all of them again." },
+  "AR-OPENING-SETTLED": { message: "This open item is already settled.", action: "Leave the row out of the import." },
+  "AR-PAYMENT-DUPLICATE": { message: "A payment or open item with this reference already exists.", action: "Check whether the payment was already recorded before entering it again." },
+  "AR-PAYMENT-NOT-FOUND": { message: "We couldn't find that payment. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-PAYMENT-STATE": { message: "This payment can't be changed in its current status.", action: "Reload the payment to see its current status." },
+  "AR-PROMISE-EXISTS": { message: "This open item already has a promise to pay that hasn't been broken.", action: "Update the existing promise, or wait until it is broken." },
+  "AR-PROMISE-STATE": { message: "This promise to pay can't be changed in its current status.", action: "Reload the open item to see the promise as it is now." },
+  "AR-RMA-CREDIT": { message: "The credit amounts or tax lines don't add up.", action: "Check the credit lines and tax, then try again." },
+  "AR-RMA-GL": { message: "Billing couldn't hold the invoice amount for this credit, so it wasn't posted.", action: "Try again in a few minutes. If it keeps happening, contact support with the details below." },
+  "AR-RMA-INVOICE": { message: "The original invoice isn't an open item of this legal entity.", action: "Check the invoice on the return, then try again." },
+  "AR-RMA-NOT-FOUND": { message: "We couldn't find that return credit. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-RMA-PARKED": { message: "The ledger or billing refused this credit, so it is parked until someone retries it.", action: "Ask an operator to retry the credit once the cause is fixed." },
+  "AR-RMA-STATE": { message: "This return credit can't be changed in its current status.", action: "Reload the credit to see its current status." },
+  "CGW-UNKNOWN": { message: "The carrier service didn't give a usable answer.", action: "Try again in a few minutes. If it keeps happening, contact support with the details below." },
+  "INV-JNL-NOT-FOUND": { message: "We couldn't find that inventory journal. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "INV-JNLN-NOT-FOUND": { message: "We couldn't find that journal name. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "INV-RETURN-RECEIPT": { message: "The inventory journal under this key isn't this return receipt.", action: "Reload the return and try again. If it keeps happening, contact support with the details below." },
+  "PRC-AGR-NOT-FOUND": { message: "We couldn't find that purchase agreement. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-AGR-STATE": { message: "This purchase agreement can't be changed in its current status.", action: "Reload the agreement to see its current status." },
+  "PRC-CAT-ENTRY-NOT-FOUND": { message: "We couldn't find that catalog entry. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-CAT-IMPORT-DUPLICATE": { message: "This catalog file was already imported.", action: "Open the earlier import instead, or change the file and import it again." },
+  "PRC-CAT-IMPORT-NOT-FOUND": { message: "We couldn't find that catalog import. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-CAT-IMPORT-ROW-NOT-FOUND": { message: "We couldn't find that catalog import row. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-CAT-IMPORT-STATE": { message: "This catalog import can't be changed in its current status.", action: "Reload the import to see its current status." },
+  "PRC-CAT-MANAGER-NOT-FOUND": { message: "We couldn't find that category manager. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-CAT-NOT-FOUND": { message: "We couldn't find that catalog. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-CAT-STATE": { message: "This catalog can't be changed in its current status.", action: "Reload the catalog to see its current status." },
+  "PRC-CAT-VENDOR-NOT-FOUND": { message: "We couldn't find that category vendor. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-CHG-AUTO-NOT-FOUND": { message: "We couldn't find that automatic charge. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-CHG-NOT-FOUND": { message: "We couldn't find that charge code. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-DS-NOT-FOUND": { message: "We couldn't find that delivery schedule. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-INB-NOT-FOUND": { message: "We couldn't find that change from another service. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-IP-NOT-FOUND": { message: "We couldn't find that invoicing plan. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-PO-LINE-NOT-FOUND": { message: "We couldn't find that purchase order line. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-PO-NOT-FOUND": { message: "We couldn't find that purchase order. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-PO-STATE": { message: "This purchase order can't be changed in its current status.", action: "Reload the purchase order to see its current status." },
+  "PRC-PO-VERSION-NOT-FOUND": { message: "We couldn't find that purchase order version. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-REL-NOT-FOUND": { message: "We couldn't find that release run. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-REQ-LINE-NOT-FOUND": { message: "We couldn't find that requisition line. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-REQ-NOT-FOUND": { message: "We couldn't find that requisition. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-REQ-STATE": { message: "This requisition can't be changed in its current status.", action: "Reload the requisition to see its current status." },
+  "PRC-RFQ-AMENDMENT-NOT-FOUND": { message: "We couldn't find that request for quotation amendment. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-RFQ-NOT-FOUND": { message: "We couldn't find that request for quotation. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-RFQ-STATE": { message: "This request for quotation can't be changed in its current status.", action: "Reload the request to see its current status." },
+  "PRC-SA-NOT-FOUND": { message: "We couldn't find that scheduling agreement. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-SA-REL-NOT-FOUND": { message: "We couldn't find that scheduling agreement release. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-SL-LIMIT-NOT-FOUND": { message: "We couldn't find that signing limit. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-SL-REQUEST-NOT-FOUND": { message: "We couldn't find that signing request. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-SRV-MODEL-NOT-FOUND": { message: "We couldn't find that model service specification. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-SRV-NOT-FOUND": { message: "We couldn't find that service specification. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-TA-NOT-FOUND": { message: "We couldn't find that trade agreement. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "PRC-VERSION-CONFLICT": { message: "Someone else changed this record after you opened it.", action: RELOAD_AND_REDO },
+};
+
 const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
 };
@@ -801,11 +925,15 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...tax,
   ...product,
   ...ledgerSetup,
+  ...p2pGaps,
+  ...p2pMore,
   ...shared,
 });
 
 /** The catalog entry for a problem code, if there is one. */
 export function lookupProblem(code: string | undefined | null): ProblemCatalogEntry | undefined {
   if (!code) return undefined;
-  return Object.prototype.hasOwnProperty.call(problemCatalog, code) ? problemCatalog[code] : undefined;
+  if (!Object.prototype.hasOwnProperty.call(problemCatalog, code)) return undefined;
+  const entry = problemCatalog[code];
+  return entry === undefined ? undefined : translateProblem(code, entry);
 }

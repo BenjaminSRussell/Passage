@@ -37,6 +37,7 @@ import { PLAN_CODE, useLoad, usePlanCode, withPlan, type LoadError } from "./hoo
 import { MaintainOrderCard } from "./MaintainOrder";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 export { DEFAULT_PLAN_CODE } from "./hooks";
 
@@ -46,7 +47,14 @@ export const PAGE_LIMIT = 500;
 export const dash = "—";
 
 /** Planning scope of an order or message: the site, or the warehouse that is planned and netted on its own (FR-22.18). */
-export const scopeLabel = (x: { warehouseId?: string | null }) => (x.warehouseId ? `Warehouse ${x.warehouseId}` : "Site");
+export const scopeLabel = (x: { warehouseId?: string | null }): ReactNode =>
+  x.warehouseId ? (
+    <>
+      Warehouse <EntityName entity="warehouse" id={x.warehouseId} fallback={x.warehouseId} />
+    </>
+  ) : (
+    "Site"
+  );
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
 const MESSAGE_STATUS_FILTERS = ["open", "applied", "dismissed", "all"] as const;
@@ -292,8 +300,8 @@ export function PlannedOrdersPage() {
   };
   const columns: DataTableColumn<PlannedOrder>[] = [
     { key: "number", header: "Number", mono: true },
-    { key: "itemId", header: "Item", mono: true },
-    { key: "warehouseId", header: "Scope", mono: true, render: scopeLabel },
+    { key: "itemId", header: "Item", render: (o) => <EntityName entity="product" id={o.itemId} fallback={o.itemId} /> },
+    { key: "warehouseId", header: "Scope", render: scopeLabel },
     { key: "orderType", header: "Type", render: (o) => <Badge tone="neutral">{orderTypeLabel[o.orderType]}</Badge> },
     { key: "qty", header: "Quantity", align: "end" },
     { key: "orderDate", header: "Order date" },
@@ -519,7 +527,7 @@ export function PlannedOrderPage() {
           <Details
             entries={[
               ["Number", o.number, true],
-              ["Item", o.itemId, true],
+              ["Item", <EntityName entity="product" id={o.itemId} fallback={o.itemId} />],
               ["Scope", scopeLabel(o)],
               ["Type", o.warehouseId && o.orderType === "transfer" ? "Transfer from the site" : orderTypeLabel[o.orderType]],
               ["Quantity", o.qty],
@@ -529,7 +537,7 @@ export function PlannedOrderPage() {
               ["Delay", o.delayDays > 0 ? `${o.delayDays} days` : dash],
               ["Lot rule", o.lotRule],
               ...(o.planningPriority ? ([["Buffer priority", bufferPriority(o)]] as [string, ReactNode][]) : []),
-              ...(o.orderType === "purchase" ? ([["Vendor", o.vendorId ?? dash, true]] as [string, ReactNode, boolean][]) : []),
+              ...(o.orderType === "purchase" ? ([["Vendor", o.vendorId ? <EntityName entity="vendor" id={o.vendorId} fallback={o.vendorId} /> : dash]] as [string, ReactNode][]) : []),
               ...(o.quotaArrangementId
                 ? ([
                     ["Quota arrangement", <Link to={`/planning/quota-arrangements/${o.quotaArrangementId}`}>{o.quotaArrangementId}</Link>, true],
@@ -576,8 +584,8 @@ export function MessagesPage() {
     { key: "action", header: "Action", render: (m) => <Badge tone={actionTone[m.action]}>{sentence(m.action)}</Badge> },
     { key: "status", header: "Status", render: (m) => <StatusPill status={m.status} /> },
     { key: "text", header: "Message", render: (m) => (m.text ? `${m.code ? `${m.code} ` : ""}${m.text}` : dash) },
-    { key: "itemId", header: "Item", mono: true },
-    { key: "warehouseId", header: "Scope", mono: true, render: scopeLabel },
+    { key: "itemId", header: "Item", render: (o) => <EntityName entity="product" id={o.itemId} fallback={o.itemId} /> },
+    { key: "warehouseId", header: "Scope", render: scopeLabel },
     { key: "supplyRef", header: "Supply", mono: true, render: (m) => m.supplyRef || dash },
     { key: "demandRef", header: "Demand", mono: true, render: (m) => m.demandRef || dash },
     { key: "suggestedDate", header: "Suggested date", render: (m) => m.suggestedDate || dash },

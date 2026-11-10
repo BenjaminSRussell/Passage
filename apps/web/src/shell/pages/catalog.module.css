@@ -1,0 +1,42 @@
+.catalogNav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.catalogSection {
+  margin-block-end: var(--space-4);
+  scroll-margin-block-start: var(--space-4);
+}
+
+.catalogExample {
+  margin-block-start: var(--space-3);
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.catalogRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.catalogStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.catalogStatuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}

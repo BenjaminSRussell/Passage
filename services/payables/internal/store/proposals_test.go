@@ -457,6 +457,9 @@ func TestCancelProposal_ReleasesItemsForANewProposal(t *testing.T) {
 	if got := candidateIDs(t, s, alice, leA, runDay); len(got) != 0 {
 		t.Fatalf("candidates while reserved = %v", got)
 	}
+	if held, err := s.ProposalsOfItems(alice, []string{item.ID}); err != nil || held[item.ID] != first.ID {
+		t.Fatalf("proposal holding the item = %v err=%v, want %s", held, err, first.ID)
+	}
 	cancelled, err := s.CancelProposal(alice, first.ID, "carol")
 	if err != nil || cancelled.Status != domain.ProposalCancelled || cancelled.CancelledBy == nil || *cancelled.CancelledBy != "carol" || cancelled.CancelledAt == nil {
 		t.Fatalf("cancelled = %+v err=%v", cancelled, err)
@@ -466,6 +469,9 @@ func TestCancelProposal_ReleasesItemsForANewProposal(t *testing.T) {
 	}
 	if got := candidateIDs(t, s, alice, leA, runDay); len(got) != 1 || got[0] != item.ID {
 		t.Fatalf("candidates after cancel = %v, want the released item", got)
+	}
+	if held, err := s.ProposalsOfItems(alice, []string{item.ID}); err != nil || len(held) != 0 {
+		t.Fatalf("a cancelled proposal still holds the item: %v err=%v", held, err)
 	}
 	second, isNew, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-2"))
 	if err != nil || !isNew || len(second.Groups) != 1 {

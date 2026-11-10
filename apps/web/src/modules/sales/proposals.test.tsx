@@ -210,9 +210,9 @@ describe("Proposals on the new order form", () => {
     fireEvent.click(within(table).getByRole("button", { name: `Add a line for ${ACCESSORY}` }));
     expect(await screen.findByRole("group", { name: "Line 2" })).toBeInTheDocument();
     const added = within(screen.getByRole("group", { name: "Line 2" }));
-    expect(added.getByLabelText("Product")).toHaveValue(ACCESSORY);
-    expect(added.getByLabelText("Site")).toHaveValue(SITE);
-    expect(added.getByLabelText("Warehouse")).toHaveValue(WAREHOUSE);
+    expect(added.getByLabelText("Product")).toHaveAttribute("data-value", ACCESSORY);
+    expect(added.getByLabelText("Site")).toHaveAttribute("data-value", SITE);
+    expect(added.getByLabelText("Warehouse")).toHaveAttribute("data-value", WAREHOUSE);
     expect(added.getByLabelText("Unit price")).toHaveValue("");
     await waitFor(() => expect(calls.filter((c) => c.url.pathname.endsWith(":respond"))).toHaveLength(1));
     const accepted = calls.find((c) => c.url.pathname.endsWith(":respond"))!;

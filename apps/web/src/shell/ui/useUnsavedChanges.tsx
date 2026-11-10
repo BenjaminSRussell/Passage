@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
 import { UNSAFE_DataRouterContext, useBlocker } from "react-router-dom";
 import { copy } from "../copy";
+import { trackFormAbandoned } from "../uxEvents";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface UnsavedChangesDialog {
@@ -25,24 +26,44 @@ function NavigationPrompt({ shouldBlock, dialog }: { shouldBlock: () => boolean;
   return (
     <ConfirmDialog
       {...dialog}
-      onConfirm={blocker.proceed}
+      onConfirm={() => {
+        trackFormAbandoned();
+        blocker.proceed();
+      }}
       onCancel={blocker.reset}
     />
   );
 }
 
-const USER_EVENTS = ["keydown", "pointerdown", "click", "input", "change"] as const;
+const FORM_EDIT_EVENTS = ["input", "change", "click", "keydown"] as const;
+const EDIT_KEYS = new Set(["Enter", " ", "Delete"]);
+
+function isEditInsideForm(event: Event): boolean {
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest("form")) {
+    return false;
+  }
+  if (event.type === "click") {
+    return target.closest("button, [role='option']") !== null;
+  }
+  if (event.type === "keydown") {
+    return EDIT_KEYS.has((event as KeyboardEvent).key);
+  }
+  return true;
+}
 
 export function useFormBaseline(values: unknown): boolean {
   const snapshot = JSON.stringify(values);
   const baseline = useRef(snapshot);
   const touched = useRef(false);
   useEffect(() => {
-    const mark = () => {
-      touched.current = true;
+    const mark = (event: Event) => {
+      if (isEditInsideForm(event)) {
+        touched.current = true;
+      }
     };
-    USER_EVENTS.forEach((type) => document.addEventListener(type, mark, true));
-    return () => USER_EVENTS.forEach((type) => document.removeEventListener(type, mark, true));
+    FORM_EDIT_EVENTS.forEach((type) => document.addEventListener(type, mark, true));
+    return () => FORM_EDIT_EVENTS.forEach((type) => document.removeEventListener(type, mark, true));
   }, []);
   if (!touched.current) {
     baseline.current = snapshot;

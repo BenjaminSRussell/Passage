@@ -4,8 +4,9 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, endConsignment, getConsignment, receiveConsignment, type ConsignmentLine, type ConsignmentOrder, type Problem } from "./api/client";
-import { DECIMAL, describeDimensions, formatDateTime, sentence, shortId, today } from "./format";
+import { DECIMAL, describeDimensions, formatDateTime, sentence, today } from "./format";
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -16,7 +17,7 @@ const LINE_ONLY = ALL_DIMENSIONS.filter((name) => name !== "site" && name !== "w
 function lineColumns(currency: string): DataTableColumn<ConsignmentLine>[] {
   return [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+    { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
     { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, LINE_ONLY) },
     { key: "qty", header: "Ordered", align: "end", mono: true, render: (row) => `${row.qty} ${row.unit}` },
     { key: "receivedQty", header: "Received", align: "end", mono: true },

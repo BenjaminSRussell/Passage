@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -143,6 +143,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices/i1"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
@@ -150,6 +151,12 @@ segregation_grants := [
 	["receiving.service-entry.accept", "GET", "/v1/receiving/service-entry-sheets/s1"],
 	["receiving.service-entry.accept", "POST", "/v1/receiving/service-entry-sheets/s1:accept"],
 	["receiving.service-entry.accept", "POST", "/v1/receiving/service-entry-sheets/s1:reject"],
+	["receiving.asn.maintain", "POST", "/v1/receiving/asns"],
+	["receiving.asn.maintain", "GET", "/v1/receiving/asns"],
+	["receiving.asn.maintain", "GET", "/v1/receiving/asns/a1"],
+	["receiving.asn.receive", "GET", "/v1/receiving/asns"],
+	["receiving.asn.receive", "GET", "/v1/receiving/asns/a1"],
+	["receiving.asn.receive", "POST", "/v1/receiving/asns/a1:start-receipt"],
 	["receiving.invoice-audit.release", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
 	["receiving.invoice-audit.release", "POST", "/v1/receiving/invoices/i1:reject-audit-block"],
 	["receiving.ers-price.confirm", "PUT", "/v1/receiving/receipts/r1/lines/1/ers-price-confirmation"],
@@ -637,6 +644,23 @@ test_billing_sales_report_operator_routes_split_view_and_post if {
 	not allowed("sales.order.record-invoice", "POST", "/v1/billing/sales-reports/r1:retry")
 }
 
+test_billing_tax_report_holds_only_the_tax_transaction_duty if {
+	data.service_principals["billing-tax-report"] == ["tax.transaction.record"]
+	data.duties["tax.transaction.record"].service_only
+	"tax.transaction.record" in data.service_grants.billing.tax
+	allowed("tax.transaction.record", "POST", "/v1/tax/transactions")
+	not allowed("tax.transaction.record", "POST", "/v1/tax/settlements:run")
+}
+
+test_billing_tax_report_operator_routes_split_view_and_post if {
+	allowed("billing.invoice.view", "GET", "/v1/billing/tax-reports")
+	allowed("billing.invoice.post", "POST", "/v1/billing/tax-reports/r1:retry")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/tax-reports/r1:retry")
+	not allowed("billing.invoice.post", "GET", "/v1/billing/tax-reports")
+	not allowed("billing.invoice.maintain", "POST", "/v1/billing/tax-reports/r1:retry")
+	not allowed("tax.transaction.record", "POST", "/v1/billing/tax-reports/r1:retry")
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],
@@ -828,8 +852,6 @@ awaiting_service_caller := {
 	"inventory.transaction.apply",
 	"pricing.contract.accrue",
 	"hub.client.consume",
-	"procurement.vendor-portal.read",
-	"procurement.vendor-portal.acknowledge",
 }
 
 test_vendor_portal_duties_are_service_only_and_open_only_their_routes if {
@@ -846,6 +868,60 @@ test_vendor_portal_duties_are_service_only_and_open_only_their_routes if {
 	not allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/vendor/purchase-orders")
 	not allowed("procurement.purchase-order.confirm", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
 	not allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
+}
+
+# The supplier portal service (#511) acts for one vendor, and holds only vendor-portal duties on the services it calls.
+test_supplier_portal_holds_only_service_only_vendor_duties if {
+	every _, duties in data.service_grants["supplier-portal"] {
+		every duty in duties {
+			data.duties[duty].service_only
+			contains(duty, "vendor-portal")
+		}
+	}
+	data.service_grants["supplier-portal"].purchasing == ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"]
+	data.service_grants["supplier-portal"].receiving == ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"]
+	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write"]
+}
+
+test_receiving_vendor_portal_duties_open_only_vendor_routes if {
+	allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/vendor/asns")
+	allowed("receiving.vendor-portal.asn", "GET", "/v1/receiving/vendor/asns/a1")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-captures")
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoices/i1")
+	not allowed("receiving.vendor-portal.asn", "GET", "/v1/receiving/asns")
+	not allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/asns/a1:start-receipt")
+	not allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/vendor/invoice-captures")
+	not allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/invoices")
+	not allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/invoices:post")
+	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/vendor/asns")
+	not allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/vendor/invoice-captures")
+}
+
+test_party_vendor_portal_duties_are_service_only_and_open_only_their_routes if {
+	data.duties["party.vendor-portal.read"].service_only
+	data.duties["party.vendor-portal.write"].service_only
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/requests")
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/documents/d1/content")
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/distributions/d1/content")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/requests/r1:submit")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/documents")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/distributions/d1:acknowledge")
+	not allowed("party.vendor-portal.read", "POST", "/v1/party/vendor-portal/documents")
+	not allowed("party.vendor-portal.write", "GET", "/v1/party/vendor-portal/documents")
+	not allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-requests")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-requests/r1:approve")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/controlled-documents/c1:distribute")
+}
+
+test_party_vendor_requests_are_decided_by_their_own_duty if {
+	allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-requests/r1:approve")
+	allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-requests/r1:reject")
+	not allowed("party.approve", "POST", "/v1/party/vendor-requests/r1:approve")
+	not allowed("party.write", "POST", "/v1/party/vendor-requests/r1:approve")
+	allowed("party.write", "POST", "/v1/party/controlled-documents/c1:distribute")
+	allowed("party.read", "GET", "/v1/party/vendor-documents/d1/content")
+	allowed("party.read", "GET", "/v1/party/vendor-requests")
+	not allowed("party.read", "POST", "/v1/party/vendor-questionnaires")
 }
 
 test_buyer_acknowledgement_routes if {
@@ -1252,10 +1328,18 @@ test_integration_hub_reaches_only_render_and_xref_record if {
 }
 
 test_migration_factory_grant_reaches_only_the_receivables_import if {
-	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
+	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
 	allowed("receivables.view", "GET", "/v1/receivables/open-item-imports")
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
+}
+
+test_opening_item_duties_are_service_only_and_cover_only_their_route if {
+	allowed("opening-item.import", "POST", "/v1/payables/opening-batches")
+	not allowed("opening-item.import", "GET", "/v1/payables/opening-batches")
+	allowed("opening-item.import.read", "GET", "/v1/payables/opening-batches")
+	not allowed("opening-item.import.read", "POST", "/v1/payables/opening-batches")
+	not allowed("opening-item.import", "POST", "/v1/payables/payment-proposals")
 }
 
 test_migration_loader_principal_holds_only_the_import_duties if {
@@ -1546,6 +1630,38 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
 }
 
+test_treasury_bank_reconciliation_duties_are_distinct if {
+	allowed("treasury.reconciliation.view", "GET", "/v1/treasury/bank-reconciliations")
+	allowed("treasury.reconciliation.view", "GET", "/v1/treasury/bank-reconciliations/r-1")
+	allowed("treasury.reconciliation.close", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	allowed("treasury.reconciliation.reopen", "POST", "/v1/treasury/bank-reconciliations/r-1:reopen")
+	allowed("treasury.reconciliation.post", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	allowed("treasury.reconciliation.abandon", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:abandon")
+	not allowed("treasury.reconciliation.post", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:abandon")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:abandon")
+	not allowed("treasury.reconciliation.abandon", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1:set-balances")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:exclude")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:include")
+	not allowed("treasury.reconciliation.close", "POST", "/v1/treasury/bank-reconciliations/r-1:reopen")
+	not allowed("treasury.reconciliation.reopen", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	not allowed("treasury.reconciliation.close", "GET", "/v1/treasury/bank-reconciliations/r-1")
+	not allowed("treasury.reconciliation.close", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1:reopen")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	not allowed("treasury.reconciliation.post", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:exclude")
+	not allowed("treasury.reconciliation.view", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	not allowed("treasury.reconciliation.view", "DELETE", "/v1/treasury/bank-reconciliations/r-1")
+	not allowed("treasury.view", "GET", "/v1/treasury/bank-reconciliations")
+	not allowed("treasury.view", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+}
+
+test_treasury_service_posts_to_the_ledger_only if {
+	data.service_grants.treasury == {"ledger": ["ledger.entry.post"]}
+}
+
 test_treasury_ebics_duties_split_ceremony_from_confirmation if {
 	allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers")
 	not allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
@@ -1662,6 +1778,14 @@ test_reporting_balance_verification_routes if {
 	allowed("reporting.audit.view", "GET", "/v1/reporting/balance-verifications")
 	allowed("reporting.audit.view", "GET", "/v1/reporting/balance-verifications/v1")
 	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
+}
+
+test_org_demo_company_manage_reaches_only_the_demo_load if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/import")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.read", "POST", "/v1/org/demo-company")
 }
 
 test_org_package_manage_reaches_only_export_and_import if {
@@ -1912,6 +2036,26 @@ test_mobile_service_routes if {
 	not allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/flows")
 }
 
+test_global_search_route_is_open_to_each_source_read_duty_only if {
+	allowed("party.read", "GET", "/v1/search")
+	allowed("product.read", "GET", "/v1/search")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/search")
+	allowed("receiving.receipt.maintain", "GET", "/v1/search")
+	allowed("receiving.ap.inquire", "GET", "/v1/search")
+	allowed("sales.order.read", "GET", "/v1/search")
+	allowed("fulfillment.warehouse.view", "GET", "/v1/search")
+	allowed("billing.invoice.view", "GET", "/v1/search")
+	not allowed("party.read", "POST", "/v1/search")
+	not allowed("party.write", "GET", "/v1/search")
+	not allowed("inbox.read", "GET", "/v1/search")
+	not allowed("ledger.journal.read", "GET", "/v1/search")
+	not allowed("search.index.write", "GET", "/v1/search")
+	not principal_allowed("search-index", "GET", "/v1/search")
+	data.duties["search.index.write"].flag
+	count(data.duties["search.index.write"].permissions) == 0
+	data.service_principals["search-index"] == ["search.index.write"]
+}
+
 # Issue #495: the dev seed (deploy/local/seed.json) holds an admin and a clerk; admin routes are the admin's alone.
 dev_seed_assignments := {"tenant-1": {
 	"admin": [
@@ -1975,6 +2119,22 @@ test_tenant_features_are_not_reachable_through_other_identity_duties if {
 	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
 }
 
+test_tenant_setup_view_reads_only if {
+	allowed("identity.setup.view", "GET", "/v1/tenant/setup")
+	allowed("identity.setup.view", "GET", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/workspace-config")
+}
+
+test_tenant_setup_maintain_reads_and_writes_setup_only if {
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "DELETE", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.maintain", "GET", "/v1/tenants")
+}
+
 test_dev_seed_every_user_reads_features_but_cannot_change_them if {
 	dev_seed_decision("admin", "GET", "/v1/tenant/features").allow
 	dev_seed_decision("clerk", "GET", "/v1/tenant/features").allow
@@ -2032,4 +2192,53 @@ test_inbox_read_reaches_only_the_inbox if {
 	not allowed("inbox.read", "GET", "/v1/inbox/item-1")
 	not allowed("inbox.read", "GET", "/v1/ledger/journal-batches")
 	not allowed("ledger.journal.read", "GET", "/v1/inbox")
+}
+
+test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
+	data.service_principals["receivables-billing"] == ["receivables.openitem.from-billing"]
+	data.duties["receivables.openitem.from-billing"].flag
+	count(data.duties["receivables.openitem.from-billing"].permissions) == 0
+	every _, targets in data.service_grants {
+		not "receivables.openitem.from-billing" in object.get(targets, "receivables", [])
+	}
+	not principal_allowed("receivables-billing", "POST", "/v1/receivables/open-items")
+	not principal_allowed("receivables-billing", "POST", "/v1/receivables/open-items:batch")
+	not principal_allowed("receivables-billing", "POST", "/v1/receivables/payments")
+	not principal_allowed("receivables-billing", "GET", "/v1/receivables/open-items")
+	not principal_allowed("receivables-billing", "POST", "/v1/ledger/journal-entries")
+	not principal_allowed("receivables-billing", "POST", "/v1/billing/invoices")
+	not allowed("receivables.openitem.from-billing", "POST", "/v1/receivables/open-items")
+}
+
+test_asn_duties_do_not_cross if {
+	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
+	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
+}
+
+test_analytics_ux_record_writes_events_and_cannot_read_funnels if {
+	allowed("analytics.ux.record", "POST", "/v1/analytics/ux-events")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/ux-funnels")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/ux-signals")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/metrics")
+}
+
+test_analytics_ux_view_reads_funnels_and_cannot_write_events if {
+	allowed("analytics.ux.view", "GET", "/v1/analytics/ux-funnels")
+	allowed("analytics.ux.view", "GET", "/v1/analytics/ux-signals")
+	not allowed("analytics.ux.view", "POST", "/v1/analytics/ux-events")
+	not allowed("analytics.ux.view", "POST", "/v1/analytics/query")
+}
+
+test_print_document_render_is_its_own_duty if {
+	allowed("print.document.render", "POST", "/print/v1/documents:render")
+	not allowed("print.document.render", "POST", "/print/v1/jobs")
+	not allowed("print.job.submit", "POST", "/print/v1/documents:render")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
+test_receiving_document_flow_is_read_only_and_separate if {
+	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
+	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
 }

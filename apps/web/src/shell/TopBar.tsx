@@ -1,7 +1,9 @@
 import type { RefObject } from "react";
 import { Link } from "react-router-dom";
+import { UserMenu } from "./auth/account";
 import { copy } from "./copy";
 import type { PageMeta } from "./pageMeta";
+import { HelpButton } from "./help/HelpPanel";
 import { ContextPicker } from "./lookup/workContext";
 import styles from "./Shell.module.css";
 import { Button, Icon } from "./ui";
@@ -14,11 +16,10 @@ export interface TopBarProps {
   compact: boolean;
   showContext?: boolean;
   onOpenDrawer(): void;
-  onApplyView(): void;
   onToggleCompact(): void;
 }
 
-export function TopBar({ page, titleRef, menuRef, drawerOpen, compact, showContext = false, onOpenDrawer, onApplyView, onToggleCompact }: TopBarProps) {
+export function TopBar({ page, titleRef, menuRef, drawerOpen, compact, showContext = false, onOpenDrawer, onToggleCompact }: TopBarProps) {
   const workspace = page.workspace && page.workspace.title !== page.title ? page.workspace : undefined;
   return (
     <div className={styles.topbar}>
@@ -52,12 +53,11 @@ export function TopBar({ page, titleRef, menuRef, drawerOpen, compact, showConte
       </h1>
       <div className={styles.topbarActions}>
         {showContext ? <ContextPicker /> : null}
-        <Button variant="ghost" size="sm" onClick={onApplyView}>
-          {copy.buttons.applySavedView}
-        </Button>
+        <HelpButton />
         <Button variant="ghost" size="sm" aria-pressed={compact} className={styles.compactToggle} onClick={onToggleCompact}>
           {copy.buttons.compactView}
         </Button>
+        <UserMenu />
       </div>
     </div>
   );

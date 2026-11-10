@@ -5,6 +5,7 @@ import { PROCEDURE_STATUSES, STEP_TYPE_LABELS } from "./campaignFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const columns: DataTableColumn<Procedure>[] = [
   { key: "name", header: "Procedure", mono: true },
@@ -18,7 +19,7 @@ const columns: DataTableColumn<Procedure>[] = [
     },
   },
   { key: "steps", header: "Steps", render: (row) => row.steps.map((s) => STEP_TYPE_LABELS[s.conditionType] ?? s.conditionType).join(" → ") },
-  { key: "legalEntityId", header: "Legal entity", mono: true },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
 ];
 
 /** Procedure designer (FR-26.1, §5.26.6): versions of each pricing procedure per legal entity. */

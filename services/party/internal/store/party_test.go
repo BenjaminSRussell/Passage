@@ -92,7 +92,7 @@ func TestCreateParty_WritesPartyAndOneCreatedEvent(t *testing.T) {
 		t.Fatalf("got %+v", created)
 	}
 	rows := outboxRows(t, ctx, app)
-	if len(rows) != 1 || rows[0].typ != "dev.passage.party.party.created.v1" || !strings.Contains(rows[0].payload, created.ID) {
+	if len(rows) != 1 || rows[0].typ != "dev.passage.party.party.created.v1" || !strings.Contains(rows[0].payload, created.ID) || !strings.Contains(rows[0].payload, `"version": 1`) {
 		t.Fatalf("got %+v", rows)
 	}
 }
@@ -340,6 +340,11 @@ func TestUpdateParty_NameChangeRecomputesAndEmitsSortedFields(t *testing.T) {
 	last := rows[len(rows)-1]
 	if last.typ != "dev.passage.party.party.updated.v1" || !strings.Contains(last.payload, `"changed_fields": ["familyName", "givenName", "timeZone"]`) || !strings.Contains(last.payload, `"version": 2`) {
 		t.Fatalf("got %+v", last)
+	}
+	for _, want := range []string{`"party_number": "` + updated.PartyNumber + `"`, `"name": "Grace Hopper"`, `"party_type": "` + updated.PartyType + `"`, `"status": "`} {
+		if !strings.Contains(last.payload, want) {
+			t.Fatalf("updated event lacks %s for the search index: %s", want, last.payload)
+		}
 	}
 }
 

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { CreateProductionOrderPage, initialValues, toInput, validateOrder } from "./CreateOrderPage";
@@ -31,10 +31,14 @@ describe("Released product order rules (FR-21.1)", () => {
     expect(validateOrder({ ...filled(), quantity: "0", releasedProductId: uuid(9) })).toHaveProperty("quantity");
   });
 
-  it("shows the field on the form and flags a malformed id", async () => {
+  it("shows the field on the form, takes a pasted id and flags a malformed id", async () => {
     render(<CreateProductionOrderPage />);
-    await userEvent.type(screen.getByLabelText(/released product/i), "FG-100");
-    await userEvent.click(screen.getByRole("button", { name: /^create/i }));
-    expect(await screen.findByText(/released product's id/i)).toBeInTheDocument();
+    const field = screen.getByLabelText(/released product/i);
+    // A lookup only takes a chosen or pasted id; typed text just searches.
+    await userEvent.type(field, "FG-100");
+    expect(field).toHaveAttribute("data-value", "");
+    fireEvent.change(field, { target: { value: uuid(9) } });
+    expect(field).toHaveAttribute("data-value", uuid(9));
+    expect(validateOrder({ ...filled(), releasedProductId: "FG-100" }).releasedProductId).toBe("Choose the released product, or leave it empty.");
   });
 });

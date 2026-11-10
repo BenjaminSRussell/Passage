@@ -1,11 +1,14 @@
 package memstore
 
 import (
+	"cmp"
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
@@ -54,4 +57,32 @@ func (s *Store) FindCapture(ctx context.Context, legalEntityID, digest string) (
 		return nil
 	})
 	return out, found, err
+}
+
+func (s *Store) ListCaptures(ctx context.Context, f store.CaptureFilter) (out []store.Capture, err error) {
+	limit := pageLimit(f.Limit)
+	principal, _ := tenant.FromContext(ctx)
+	err = s.with(ctx, func(t *tenantData) error {
+		for _, c := range t.captures {
+			if !tenant.InLegalEntityScope(principal, c.LegalEntityID) || (f.Status != "" && c.Status != f.Status) || (f.VendorID != "" && c.VendorID != f.VendorID) || skipForCursor(c.CreatedAt, c.ID, f.CursorCreatedAt, f.CursorID) || t.captureIsPosted(c) {
+				continue
+			}
+			out = append(out, cloneCapture(c))
+		}
+		slices.SortFunc(out, func(a, b store.Capture) int {
+			return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.ID, a.ID))
+		})
+		out = out[:min(len(out), limit+1)]
+		return nil
+	})
+	return out, err
+}
+
+func (t *tenantData) captureIsPosted(c store.Capture) bool {
+	for _, inv := range t.invoiceDocs {
+		if inv.LegalEntityID == c.LegalEntityID && strings.EqualFold(inv.InvoiceNumber, c.Invoice.InvoiceNumber) && inv.InvoiceDate.Equal(c.Invoice.InvoiceDate) && inv.Currency == c.Invoice.Currency {
+			return true
+		}
+	}
+	return false
 }

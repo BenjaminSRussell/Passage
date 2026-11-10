@@ -9,6 +9,7 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const DUTY_SHIP = "fulfillment.warehouse.ship";
 /** Carrier codes are lowercase letters, digits and hyphens (the label's provider). */
@@ -27,7 +28,7 @@ const columns: DataTableColumn<Manifest>[] = [
   { key: "manifestNumber", header: "Manifest", mono: true },
   { key: "status", header: "Status", render: (row) => <ManifestStatusBadge status={row.status} /> },
   { key: "carrier", header: "Carrier", mono: true },
-  { key: "warehouseId", header: "Warehouse", mono: true, render: (row) => shortId(row.warehouseId) },
+  { key: "warehouseId", header: "Warehouse", render: (row) => <EntityName entity="warehouse" id={row.warehouseId} /> },
   { key: "pickupDate", header: "Pickup", render: (row) => formatDate(row.pickupDate) },
   { key: "parcelCount", header: "Parcels", align: "end" },
   { key: "shipmentCount", header: "Shipments", align: "end" },
@@ -38,7 +39,7 @@ const candidateColumns: DataTableColumn<ManifestCandidate>[] = [
   { key: "shipmentNumber", header: "Shipment", mono: true },
   { key: "carrier", header: "Carrier", mono: true },
   { key: "trackingNumber", header: "Tracking number", mono: true },
-  { key: "warehouseId", header: "Warehouse", mono: true, render: (row) => shortId(row.warehouseId) },
+  { key: "warehouseId", header: "Warehouse", render: (row) => <EntityName entity="warehouse" id={row.warehouseId} /> },
   { key: "labelledAt", header: "Labelled", render: (row) => formatDateTime(row.labelledAt) },
   { key: "ready", header: "Ready", render: (row) => (row.ready ? <Badge tone="success">Shipped</Badge> : <Badge tone="warning">Waiting for packing slip</Badge>) },
 ];

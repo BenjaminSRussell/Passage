@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ProblemMessage } from "../../shell/errors";
 import { holdsDuty } from "../../shell/dutyGate";
 import { EntityName } from "../../shell/lookup/EntityName";
+import { useWorkContext } from "../../shell/lookup/workContextState";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, ConfirmDialog, DataTable, PageHeader, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
-import { approveProposal, cancelProposal, getOpenItem, getProposal, type Proposal, type ProposalGroup, type ProposalLine } from "./api/client";
+import { approveProposal, cancelProposal, getOpenItem, getProposal, startRun, type Proposal, type ProposalGroup, type ProposalLine } from "./api/client";
 import { EXCLUDED_REASON, formatAmount, METHOD_LABELS, PROPOSAL_LABELS } from "./format";
 
 function InvoiceNumber({ id }: { id: string }) {
@@ -26,6 +27,8 @@ function counts(proposal: Proposal) {
 export function ProposalDetailPage() {
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { legalEntityId } = useWorkContext();
   const duties = usePrincipalDuties();
   const canReadItems = holdsDuty(duties, "open-item.read");
   const [confirm, setConfirm] = useState<"approve" | "cancel" | null>(null);
@@ -46,7 +49,14 @@ export function ProposalDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["payables", "proposal", id] });
     },
   });
-  const busy = decide.isPending;
+  const start = useMutation({
+    mutationFn: () => startRun(legalEntityId, id),
+    onSuccess: (run) => {
+      void queryClient.invalidateQueries({ queryKey: ["payables", "proposal", id] });
+      navigate(`/payables/runs/${run.id}`);
+    },
+  });
+  const busy = decide.isPending || start.isPending;
 
   function submitDecision() {
     if (confirm === null || busy) return;
@@ -70,6 +80,7 @@ export function ProposalDetailPage() {
   const draft = p.status === "DRAFT";
   const canApprove = draft && holdsDuty(duties, "payment-proposal.approve");
   const canCancel = draft && holdsDuty(duties, "payment-proposal.write");
+  const canRun = (p.status === "APPROVED" || p.status === "EXECUTING") && holdsDuty(duties, "payment-run.execute");
   const { payments, invoices } = counts(p);
   const withheld = Object.entries(p.totalWithheld ?? {});
   const open = p.groups.find((g) => g.id === shown);
@@ -128,6 +139,11 @@ export function ProposalDetailPage() {
               All proposals
             </Link>
             {canCancel ? <Button disabled={busy} onClick={() => { decide.reset(); setConfirm("cancel"); }}>Cancel proposal</Button> : null}
+            {canRun ? (
+              <Button variant="primary" disabled={busy} loading={start.isPending} onClick={() => start.mutate()}>
+                {p.status === "EXECUTING" ? "Open payment run" : "Start payment run"}
+              </Button>
+            ) : null}
             {canApprove ? <Button variant="primary" disabled={busy} onClick={() => { decide.reset(); setConfirm("approve"); }}>Approve proposal</Button> : null}
           </>
         }
@@ -140,6 +156,11 @@ export function ProposalDetailPage() {
       {decide.isError ? (
         <Alert tone="danger" title={`Could not ${decide.variables === "cancel" ? "cancel" : "approve"} the proposal`} live="alert">
           <ProblemMessage problem={decide.error} />
+        </Alert>
+      ) : null}
+      {start.isError ? (
+        <Alert tone="danger" title="Could not start the payment run" live="alert">
+          <ProblemMessage problem={start.error} />
         </Alert>
       ) : null}
       {draft && !canApprove ? <p className={styles.note}>You don't have approval rights for payment proposals. Ask an approver to approve this one.</p> : null}

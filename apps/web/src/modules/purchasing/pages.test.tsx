@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { setLookupFetcher } from "../../shell/lookup/entities";
 import { WorkContextProvider } from "../../shell/lookup/workContext";
 import { WorkContext } from "../../shell/lookup/workContextState";
 import purchasing from "./module";
@@ -366,6 +367,35 @@ describe("purchase orders", () => {
     expect(await screen.findByRole("heading", { name: "No purchase orders yet" })).toBeInTheDocument();
   });
 
+  it("drops loaded pages and the cursor when the filter changes, then when it is cleared", async () => {
+    const summary = (id: string, number: string) => ({
+      id, number, legalEntityId: LE, vendorId: VENDOR, currency: "USD", approvalStatus: "DRAFT", documentStatus: "OPEN", total: "10.00", lineCount: 1, rowVersion: 1, createdAt: "2026-10-26T10:00:00Z",
+    });
+    const fetchMock = stubFetch((url) => {
+      if (url.includes("approvalStatus=APPROVED")) return json({ items: [summary("c", "PO-C")] });
+      if (url.includes("cursor=next")) return json({ items: [summary("b", "PO-B")] });
+      return json({ items: [summary("a", "PO-A")], nextCursor: "next" });
+    });
+    renderAt("/purchasing/purchase-orders");
+    expect(await screen.findByText("PO-A")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more purchase orders" }));
+    expect(await screen.findByText("PO-B")).toBeInTheDocument();
+    expect(screen.getByText("PO-A")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Approval status"), { target: { value: "APPROVED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("PO-C")).toBeInTheDocument();
+    expect(screen.queryByText("PO-A")).toBeNull();
+    expect(screen.queryByText("PO-B")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load more purchase orders" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all filters" }));
+    expect(await screen.findByText("PO-A")).toBeInTheDocument();
+    expect(screen.queryByText("PO-B")).toBeNull();
+    expect(screen.queryByText("PO-C")).toBeNull();
+    expect(screen.getByRole("button", { name: "Load more purchase orders" })).toBeInTheDocument();
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls[urls.length - 1]).not.toContain("cursor=");
+  });
+
   it("creates an order with a trade-agreement-priced line and a charge", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(purchaseOrder, 201) : json(purchaseOrder)));
     const { router } = renderAt("/purchasing/purchase-orders/new");
@@ -381,6 +411,45 @@ describe("purchase orders", () => {
     expect(body.lines[0]).toMatchObject({ productId: PRODUCT, qty: "100", unit: "EA", priceUnit: "1" });
     expect(body.lines[0].unitPrice).toBeUndefined();
     expect(body.charges).toEqual([{ calc: "FIXED", value: "25" }]);
+  });
+
+  it("takes the unit from the picked product's base unit and still lets the person change it", async () => {
+    setLookupFetcher(async () => json({ items: [{ id: PRODUCT, productNumber: "BOLT", name: "Hex bolt", baseUom: "KG" }] }));
+    const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(purchaseOrder, 201) : json(purchaseOrder)));
+    const { router } = renderAt("/purchasing/purchase-orders/new");
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    expect(screen.getByLabelText("Unit")).toHaveValue("EA");
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    expect(screen.getByLabelText("Unit")).toHaveValue("KG");
+    fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "BOX" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/purchase-orders/${PO_ID}`));
+    const body = JSON.parse(String((fetchMock.mock.calls.find(([, i]) => (i as RequestInit).method === "POST") as [string, RequestInit])[1].body));
+    expect(body.lines[0]).toMatchObject({ productId: PRODUCT, unit: "BOX" });
+  });
+
+  it("keeps a typed unit when a product is picked, and explains tracking under the product", async () => {
+    setLookupFetcher(async (url) =>
+      json(url.includes("item-groups") ? { items: [{ id: "g1", name: "Raw material" }] } : { items: [{ id: PRODUCT, productNumber: "BOLT", name: "Hex bolt", baseUom: "KG", itemGroupId: "g1", serialTracked: true }] }),
+    );
+    stubFetch(() => json({}));
+    renderAt("/purchasing/purchase-orders/new");
+    fireEvent.change(await screen.findByLabelText("Unit"), { target: { value: "BOX" } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "bolt" } });
+    fireEvent.click(await screen.findByText("Hex bolt"));
+    expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
+    const note = await screen.findByText("Item group: Raw material. Serial tracked: serial numbers are recorded at receipt.");
+    expect(screen.getByLabelText("Product").getAttribute("aria-describedby")).toContain(note.id);
+  });
+
+  it("keeps the typed unit when the product is pasted by id", async () => {
+    stubFetch(() => json({}));
+    renderAt("/purchasing/purchase-orders/new");
+    fireEvent.change(await screen.findByLabelText("Unit"), { target: { value: "BOX" } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
+    expect(screen.getByLabelText("Unit")).toHaveValue("BOX");
   });
 
   it("requires a unit price on a line without a product", async () => {

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the compliance service (services/compliance/api/openapi.yaml) and
 // the localization service (services/localization/api/openapi.yaml). Browser
 // calls use /api/v1/sod/..., /api/v1/compliance/..., /api/v1/security/...,
@@ -378,7 +379,7 @@ async function send(url: string, init: RequestInit = {}, signal?: AbortSignal): 
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(url, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(url, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return res;
 }

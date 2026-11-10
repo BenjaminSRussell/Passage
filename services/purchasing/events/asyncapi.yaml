@@ -1345,11 +1345,12 @@ components:
         resulting_version_no: { type: integer, description: the purchase order version an approval wrote, when it changed the order }
     POCancelledData:
       type: object
-      required: [po_id, number, version_no, prior_status, lines]
+      required: [po_id, number, legal_entity_id, version_no, prior_status, lines]
       additionalProperties: false
       properties:
         po_id: { type: string, format: uuid }
         number: { type: string, example: PO-00000001 }
+        legal_entity_id: { type: string, format: uuid }
         version_no: { type: integer, description: confirmed version at cancellation; 0 when never confirmed }
         prior_status: { type: string, enum: [DRAFT, IN_REVIEW, APPROVED, REJECTED, CONFIRMED] }
         lines:

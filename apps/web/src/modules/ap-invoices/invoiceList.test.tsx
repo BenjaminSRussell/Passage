@@ -85,10 +85,10 @@ describe("vendor invoice list", () => {
     expect(within(table).getByText("Posted")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Load more invoices" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load more vendor invoices" }));
     expect(await screen.findByRole("link", { name: "INV-2" })).toBeInTheDocument();
     expect(within(table).getByText("Held for audit")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Load more invoices" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load more vendor invoices" })).toBeNull();
   });
 
   it("filters by status and sends no vendor filter from typed text", async () => {
@@ -140,7 +140,7 @@ describe("vendor invoice list", () => {
       return attempts === 1 ? json(500, { code: "COM-0500", detail: "boom" }) : json(200, { items: [invoice()] });
     };
     renderAt("/ap-invoices");
-    expect(await screen.findByText("Could not load the vendor invoices")).toBeInTheDocument();
+    expect(await screen.findByText("Could not load vendor invoices")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("link", { name: "INV-1" })).toBeInTheDocument();
   });

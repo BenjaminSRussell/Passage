@@ -1,6 +1,7 @@
 // Flow designer API client. Paths follow the mobile service OpenAPI (wave 32, §6.32.5)
 // as exposed to the browser through the BFF at /api/v1/mobile.
 import type { FlowDraft } from "../domain/flowGraph";
+import { apiFetch } from "../../../shell/api/http";
 
 export const base = "/api/v1/mobile";
 
@@ -42,7 +43,7 @@ async function failure(res: Response): Promise<FlowApiError> {
 
 /** Creates or updates a DRAFT flow. Requires warehouse.mobile-flow.admin. */
 export async function saveDraft(flow: FlowDraft, idempotencyKey: string): Promise<SavedFlow> {
-  const res = await fetch(`${base}/flows`, {
+  const res = await apiFetch(`${base}/flows`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(flow),
@@ -72,7 +73,7 @@ export type ConflictResolution = "reapply" | "reject";
  * shape the browser expects.
  */
 export async function listConflicts(signal?: AbortSignal): Promise<OfflineConflict[]> {
-  const res = await fetch(`${base}/offline/conflicts`, { headers: { Accept: "application/json" }, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}/offline/conflicts`, { headers: { Accept: "application/json" }, credentials: "same-origin", signal });
   if (!res.ok) throw await failure(res);
   const body = (await res.json()) as { items?: OfflineConflict[] };
   if (!Array.isArray(body.items)) throw new FlowApiError(res.status, "COM-0001", "The response has no items");
@@ -85,7 +86,7 @@ export async function listConflicts(signal?: AbortSignal): Promise<OfflineConfli
  * conflict version so two supervisors cannot both resolve it.
  */
 export async function resolveConflict(conflict: OfflineConflict, action: ConflictResolution, idempotencyKey: string): Promise<void> {
-  const res = await fetch(`${base}/offline/conflicts/${encodeURIComponent(conflict.idempotencyKey)}:resolve`, {
+  const res = await apiFetch(`${base}/offline/conflicts/${encodeURIComponent(conflict.idempotencyKey)}:resolve`, {
     method: "POST",
     credentials: "same-origin",
     headers: {
@@ -114,7 +115,7 @@ export function describeConflictError(error: unknown): { code: string; message: 
 
 /** Validates on the server and publishes. Devices pick the version up on the next menu load. */
 export async function publishFlow(flowId: string, idempotencyKey: string, ifMatch: string): Promise<SavedFlow> {
-  const res = await fetch(`${base}/flows/${encodeURIComponent(flowId)}:publish`, {
+  const res = await apiFetch(`${base}/flows/${encodeURIComponent(flowId)}:publish`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey, "If-Match": ifMatch },
   });
@@ -152,7 +153,7 @@ function asMenu(value: unknown): MobileMenu | null {
 
 /** Loads a device menu. A 404 without a catalog code means the mobile service is not deployed. */
 export async function fetchMenu(menuId: string = DEFAULT_MENU_ID, signal?: AbortSignal): Promise<MobileMenu> {
-  const res = await fetch(`${base}/menus/${encodeURIComponent(menuId)}`, {
+  const res = await apiFetch(`${base}/menus/${encodeURIComponent(menuId)}`, {
     headers: { Accept: "application/json" },
     credentials: "same-origin",
     signal,

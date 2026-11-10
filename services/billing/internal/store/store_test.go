@@ -179,6 +179,36 @@ func TestListInvoices_Filters(t *testing.T) {
 	}
 }
 
+// The document flow query (issue #534): invoices billed from one sales order or packing slip.
+func TestListInvoices_ByOrderAndPackingSlip(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := New(pool)
+	t1 := ctxAllEntities(testkit.TenantID(1))
+	le := ids.New()
+	billed := newProposal(t, le)
+	order, slip := ids.New(), ids.New()
+	billed.Lines[0].Source = domain.Source{PackingSlipID: slip, PackingSlipLineID: ids.New(), PackingSlipDate: time.Date(2027, 3, 9, 0, 0, 0, 0, time.UTC), OrderID: order, OrderLineID: ids.New(), ProductID: ids.New()}
+	if _, err := s.CreateProposal(t1, billed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateProposal(t1, newProposal(t, le)); err != nil {
+		t.Fatal(err)
+	}
+	for name, f := range map[string]ListFilter{"order": {OrderID: order, Limit: 10}, "packing slip": {PackingSlipID: slip, Limit: 10}} {
+		page, err := s.ListInvoices(t1, f)
+		if err != nil || len(page.Items) != 1 || page.Items[0].ID != billed.ID {
+			t.Fatalf("by %s: %+v, err %v, want only the billed invoice", name, page.Items, err)
+		}
+	}
+	if page, err := s.ListInvoices(t1, ListFilter{OrderID: ids.New(), Limit: 10}); err != nil || len(page.Items) != 0 {
+		t.Fatalf("unknown order: %+v, err %v", page.Items, err)
+	}
+}
+
 // TestRLS_TenantAndLegalEntityIsolation runs as the application role, where
 // row-level security applies (the admin role bypasses it).
 func TestRLS_TenantAndLegalEntityIsolation(t *testing.T) {

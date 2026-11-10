@@ -187,6 +187,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerCurrencyRounding(r)
 	a.registerTranslations(r)
 	a.registerPackage(r)
+	a.registerDemoCompany(r)
 	r.Get("/v1/org/uom/convert", a.convert)
 	a.registerUnits(r)
 	for _, c := range referenceCollections {

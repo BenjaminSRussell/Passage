@@ -1,32 +1,17 @@
 import { readProblem } from "../../../shell/api/http";
+import { OPEN_ITEM_STATUSES, type OpenItem, type OpenItemStatus } from "../../../shell/api/openItems";
+import { apiFetch } from "../../../shell/api/http";
 
 export { ApiError } from "../../../shell/api/http";
+export { OPEN_ITEM_STATUSES, type OpenItem, type OpenItemStatus };
 
 const BASE = "/api/v1/payables";
-
-export const OPEN_ITEM_STATUSES = ["OPEN", "PARTIALLY_SETTLED", "SETTLED", "REVERSED"] as const;
-export type OpenItemStatus = (typeof OPEN_ITEM_STATUSES)[number];
 
 export const PROPOSAL_STATUSES = ["DRAFT", "APPROVED", "CANCELLED", "EXECUTING", "EXECUTED", "FAILED"] as const;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 
 export const PAYMENT_METHODS = ["TRANSFER", "ACH", "CHECK", "CARD", "WIRE"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
-
-export interface OpenItem {
-  id: string;
-  legalEntityId: string;
-  vendorId: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-  dueDate: string;
-  currency: string;
-  amount: string;
-  openAmount: string;
-  status: OpenItemStatus;
-  paymentHold: boolean;
-  paymentHoldReason?: string;
-}
 
 export interface Page<T> {
   items: T[];
@@ -117,7 +102,7 @@ function query(params: Record<string, string | undefined>): string {
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiFetch(`${BASE}${path}`, {
     method,
     headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -160,4 +145,62 @@ export function approveProposal(id: string): Promise<Proposal> {
 
 export function cancelProposal(id: string): Promise<Proposal> {
   return send("POST", `/payment-proposals/${encodeURIComponent(id)}:cancel`, {});
+}
+
+export const RUN_STATUSES = ["RUNNING", "COMPLETED", "FAILED"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export interface RunPayment {
+  id?: string;
+  groupId: string;
+  vendorId: string;
+  currency: string;
+  paymentMethod: PaymentMethod;
+  endToEndId: string;
+  amount: string;
+  valuedAmount: string;
+}
+
+export interface PaymentRun {
+  id: string;
+  legalEntityId: string;
+  proposalId: string;
+  status: RunStatus;
+  requestedBy: string;
+  fileNumber?: string;
+  fileSha256?: string;
+  paymentCount?: number;
+  fileGeneratedAt?: string;
+  journalRequestedAt?: string;
+  journalEntryId?: string;
+  journalPostedAt?: string;
+  settledAt?: string;
+  failureReason?: string;
+  createdAt: string;
+  completedAt?: string;
+  payments: RunPayment[];
+}
+
+export function startRun(legalEntityId: string | undefined, proposalId: string): Promise<PaymentRun> {
+  return send("POST", "/payment-runs", { ...(legalEntityId ? { legalEntityId } : {}), proposalId });
+}
+
+export function getRun(id: string): Promise<PaymentRun> {
+  return send("GET", `/payment-runs/${encodeURIComponent(id)}`);
+}
+
+export type RunStep = "generate-file" | "post-journal" | "settle" | "complete";
+
+export function runStep(id: string, step: RunStep): Promise<PaymentRun> {
+  return send("POST", `/payment-runs/${encodeURIComponent(id)}:${step}`, {});
+}
+
+export function failRun(id: string, reason: string): Promise<PaymentRun> {
+  return send("POST", `/payment-runs/${encodeURIComponent(id)}:fail`, { reason });
+}
+
+export async function downloadRunFile(id: string): Promise<Blob> {
+  const res = await apiFetch(`${BASE}/payment-runs/${encodeURIComponent(id)}/file`, { headers: { Accept: "application/xml" } });
+  if (!res.ok) throw await readProblem(res);
+  return res.blob();
 }

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the assets service (services/assets/api/openapi.yaml).
 // Browser calls use /api/v1/..., which the web BFF rewrites to /v1/....
 
@@ -778,7 +779,7 @@ async function send(path: string, init: RequestInit = {}, signal?: AbortSignal):
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return res;
 }
