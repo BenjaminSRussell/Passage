@@ -1,6 +1,10 @@
 /**
  * What the setup checklist looks for. Each check reads one list from the service that owns it and asks whether
  * it holds anything. A check that cannot be read shows as "could not check", never as missing.
+ *
+ * The checks run here, with the person's own token, on purpose: no service owns all nine lists, and the
+ * architecture keeps cross-context reads out of the services (docs/adr/0003-setup-checklist-reads.md). When the
+ * web BFF gains its read gateway they move there as one query.
  */
 export interface SetupCheck {
   id: string;
