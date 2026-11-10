@@ -84,6 +84,7 @@ type fakeSales struct {
 	verifier *tenant.ServiceVerifier
 	mu       sync.Mutex
 	statuses []int
+	code     string
 	calls    []call
 }
 
@@ -111,7 +112,7 @@ func (f *fakeSales) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case status >= 500:
 		_, _ = w.Write([]byte(`{"code":"COM-0500","detail":"sales is down"}`))
 	case status >= 400:
-		_, _ = w.Write([]byte(`{"code":"SLS-0059","detail":"invoice quantity is above what was delivered"}`))
+		_, _ = w.Write([]byte(`{"code":"` + cmp.Or(f.code, "SLS-0063") + `","detail":"the order cannot take this report"}`))
 	default:
 		_, _ = w.Write([]byte(`{"id":"` + ids.New() + `"}`))
 	}
@@ -125,6 +126,11 @@ func (f *fakeSales) seen() []call {
 
 func newReporter(t *testing.T, s *store.Postgres, statuses ...int) (*salesreport.Reporter, *fakeSales) {
 	t.Helper()
+	return newReporterWithCode(t, s, "", statuses...)
+}
+
+func newReporterWithCode(t *testing.T, s *store.Postgres, code string, statuses ...int) (*salesreport.Reporter, *fakeSales) {
+	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +139,7 @@ func newReporter(t *testing.T, s *store.Postgres, statuses ...int) (*salesreport
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := &fakeSales{t: t, verifier: tenant.NewServiceVerifier("sales", map[string]ed25519.PublicKey{"billing": pub}), statuses: statuses}
+	fake := &fakeSales{t: t, verifier: tenant.NewServiceVerifier("sales", map[string]ed25519.PublicKey{"billing": pub}), statuses: statuses, code: code}
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
 	client, err := salesreport.New(srv.URL, signer, srv.Client())
@@ -281,7 +287,7 @@ func TestReporter_ParksRefusalsAndRunsOutOfAttempts(t *testing.T) {
 		t.Fatalf("refusal run made %d attempts", n)
 	}
 	for _, got := range reports(t, admin, refused.ID) {
-		if got.status != store.SalesReportParked || got.attempts != 1 || !strings.Contains(got.lastError, "sales refused the invoice report (422): SLS-0059 invoice quantity is above what was delivered") {
+		if got.status != store.SalesReportParked || got.attempts != 1 || !strings.Contains(got.lastError, "sales refused the invoice report (422): SLS-0063 the order cannot take this report") {
 			t.Fatalf("after a 422 = %+v", got)
 		}
 	}
@@ -368,5 +374,55 @@ func TestFromEnv(t *testing.T) {
 		return ""
 	}); err == nil || !strings.Contains(err.Error(), "SIGNING_KEY") {
 		t.Fatalf("SALES_URL without a signing key = %v", err)
+	}
+}
+
+// #29: sales answers 422 SLS-0059 (above what was delivered) or SLS-0058 (order not shipped yet) when the invoice report
+// arrives before fulfillment's delivery report. That is "not yet": the report is retried with backoff and sent again when the
+// delivery is in; it parks only when the attempts run out, with a plain reason, and an operator retry re-queues it.
+func TestReporter_NotYetAnswersAreRetriedUntilTheDeliveryArrives(t *testing.T) {
+	for _, code := range []string{"SLS-0059", "SLS-0058"} {
+		t.Run(code, func(t *testing.T) {
+			s, admin, ctx := setup(t)
+			inv := postInvoice(t, s, ctx, ids.New(), billed{ids.New(), ids.New(), "1"})
+			r, fake := newReporterWithCode(t, s, code, http.StatusUnprocessableEntity, http.StatusUnprocessableEntity, http.StatusCreated)
+			for i, want := range []string{store.SalesReportPending, store.SalesReportPending, store.SalesReportReported} {
+				makeDue(t, admin)
+				if n := runOnce(t, r, ctx); n != 1 {
+					t.Fatalf("run %d made %d attempts", i, n)
+				}
+				for _, got := range reports(t, admin, inv.ID) {
+					if got.status != want || got.attempts != i+1 {
+						t.Fatalf("after run %d = %+v, want %s", i, got, want)
+					}
+				}
+			}
+			if len(fake.seen()) != 3 {
+				t.Fatalf("sales got %d calls, want 3", len(fake.seen()))
+			}
+
+			exhausted := postInvoice(t, s, ctx, ids.New(), billed{ids.New(), ids.New(), "2"})
+			r, _ = newReporterWithCode(t, s, code, http.StatusUnprocessableEntity)
+			for range 3 {
+				makeDue(t, admin)
+				runOnce(t, r, ctx)
+			}
+			for _, got := range reports(t, admin, exhausted.ID) {
+				if got.status != store.SalesReportParked || got.attempts != 3 || !strings.HasPrefix(got.lastError, "gave up after 3 attempts: sales answered 422: "+code) {
+					t.Fatalf("after three %s = %+v", code, got)
+				}
+			}
+			var out strings.Builder
+			r.WriteMetrics(&out)
+			if !strings.Contains(out.String(), "billing_sales_reports_parked_total 1\n") {
+				t.Errorf("metrics = %q, want one parked report", out.String())
+			}
+		})
+	}
+}
+
+func TestDefaultBatchFitsTheLease(t *testing.T) {
+	if time.Duration(salesreport.DefaultBatch)*10*time.Second > salesreport.DefaultLease {
+		t.Fatalf("a batch of %d reports at the 10s client timeout outlasts the %v lease", salesreport.DefaultBatch, salesreport.DefaultLease)
 	}
 }

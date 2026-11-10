@@ -624,6 +624,17 @@ test_billing_sales_report_holds_only_the_service_only_invoice_duty if {
 	not allowed("billing.invoice.post", "POST", "/v1/sales/orders/o1:record-progress")
 }
 
+test_billing_sales_report_operator_routes_split_view_and_post if {
+	allowed("billing.invoice.view", "GET", "/v1/billing/sales-reports")
+	allowed("billing.invoice.post", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.post", "GET", "/v1/billing/sales-reports")
+	not allowed("billing.invoice.maintain", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.maintain", "GET", "/v1/billing/sales-reports")
+	not allowed("billing.invoice.post", "POST", "/v1/billing/sales-reports/r1:post")
+	not allowed("sales.order.record-invoice", "POST", "/v1/billing/sales-reports/r1:retry")
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],

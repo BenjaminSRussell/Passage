@@ -1944,12 +1944,14 @@
     ]},
     "billing.invoice.post": {"permissions": [
       {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
-      {"resource": "/v1/billing/invoices/*:post", "methods": ["POST"]}
+      {"resource": "/v1/billing/invoices/*:post", "methods": ["POST"]},
+      {"resource": "/v1/billing/sales-reports/*:retry", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]},
+      {"resource": "/v1/billing/sales-reports", "methods": ["GET"]},
       {"resource": "/v1/billing/subscriptions/*", "methods": ["GET"]}
     ]},
     "budget.check": {"permissions": [

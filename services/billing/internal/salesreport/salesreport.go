@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -34,8 +35,8 @@ const (
 )
 
 const (
-	DefaultBatch       = 20
 	DefaultLease       = 2 * time.Minute
+	DefaultBatch       = int(DefaultLease / (2 * defaultTimeout))
 	DefaultMaxAttempts = 20
 	DefaultInterval    = 30 * time.Second
 	MinInterval        = time.Second
@@ -163,6 +164,13 @@ type Reporter struct {
 	Lease       time.Duration
 	MaxAttempts int
 	Now         func() time.Time
+
+	parked atomic.Int64
+}
+
+// WriteMetrics appends the reporter's counters to a Prometheus text response.
+func (r *Reporter) WriteMetrics(w io.Writer) {
+	fmt.Fprintf(w, "# HELP billing_sales_reports_parked_total Invoice reports to sales parked by this process: refused by sales or out of attempts.\n# TYPE billing_sales_reports_parked_total counter\nbilling_sales_reports_parked_total %d\n", r.parked.Load())
 }
 
 func (r *Reporter) now() time.Time {
@@ -218,6 +226,9 @@ func (r *Reporter) RunOnce(ctx context.Context) (int, error) {
 			if o.Status != store.SalesReportReported {
 				level = slog.LevelWarn
 			}
+			if o.Status == store.SalesReportParked {
+				r.parked.Add(1)
+			}
 			slog.Log(ctx, level, "sales invoice report", "tenant", tid, "report", c.ID, "order", c.OrderID, "sourceRef", c.SourceRef,
 				"attempt", c.Attempts, "status", o.Status, "httpStatus", o.HTTPStatus, "err", o.Error)
 			n++
@@ -238,7 +249,7 @@ func (r *Reporter) attempt(ctx context.Context, tid string, c store.ClaimedSales
 	switch {
 	case err == nil && ans.Status >= 200 && ans.Status < 300:
 		return store.SalesReportOutcome{Status: store.SalesReportReported, HTTPStatus: ans.Status}
-	case err == nil && refused(ans.Status):
+	case err == nil && refused(ans):
 		return store.SalesReportOutcome{Status: store.SalesReportParked, HTTPStatus: ans.Status, Error: fmt.Sprintf("sales refused the invoice report (%d): %s", ans.Status, ans.Detail)}
 	}
 	msg := ""
@@ -254,17 +265,19 @@ func (r *Reporter) attempt(ctx context.Context, tid string, c store.ClaimedSales
 }
 
 // refused reports the answers a retry of the same body cannot change: sales understood the report and refused it (validation,
-// unknown order or line, an invoice above what was delivered). A refused token (401, 403), a timeout (408) and throttling
-// (429) pass once the deployment is fixed or the load falls, and 5xx is an outage; those are retried.
-func refused(status int) bool {
-	if status < 400 || status >= 500 {
+// unknown order or line). Not yet: SLS-0058 (the order is not shipped) and SLS-0059 (the invoice is above what was delivered)
+// pass once fulfillment's delivery report arrives, which travels separately and may come later. A refused token (401, 403), a
+// timeout (408) and throttling (429) pass once the deployment is fixed or the load falls, and 5xx is an outage; those are
+// retried with backoff and park only when the attempts run out.
+func refused(ans Answer) bool {
+	if ans.Status < 400 || ans.Status >= 500 {
 		return false
 	}
-	switch status {
+	switch ans.Status {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
 		return false
 	}
-	return true
+	return !strings.HasPrefix(ans.Detail, "SLS-0058") && !strings.HasPrefix(ans.Detail, "SLS-0059")
 }
 
 // Run calls once every interval until ctx ends.

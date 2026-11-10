@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
@@ -170,4 +172,80 @@ func (s *Postgres) FinishSalesReport(ctx context.Context, id string, attempts in
 		}
 		return nil
 	})
+}
+
+const (
+	CodeSalesReportNotFound = "BIL-0110"
+	CodeSalesReportState    = "BIL-0111"
+)
+
+type SalesReport struct {
+	ID            string     `json:"id"`
+	LegalEntityID string     `json:"legalEntityId"`
+	InvoiceID     string     `json:"invoiceId"`
+	SourceRef     string     `json:"sourceRef"`
+	OrderID       string     `json:"orderId"`
+	Status        string     `json:"status"`
+	Attempts      int        `json:"attempts"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+	LastStatus    *int       `json:"lastStatus,omitempty"`
+	LastError     *string    `json:"lastError,omitempty"`
+	ReportedAt    *time.Time `json:"reportedAt,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+}
+
+const salesReportCols = `id::text, legal_entity_id::text, invoice_id::text, source_ref, order_id::text, status, attempts,
+	case when status = 'PENDING' then next_attempt_at end, last_status, last_error, reported_at, created_at`
+
+func scanSalesReport(row pgx.Row) (SalesReport, error) {
+	var r SalesReport
+	err := row.Scan(&r.ID, &r.LegalEntityID, &r.InvoiceID, &r.SourceRef, &r.OrderID, &r.Status, &r.Attempts, &r.NextAttemptAt, &r.LastStatus, &r.LastError, &r.ReportedAt, &r.CreatedAt)
+	return r, err
+}
+
+// ListSalesReports lists the reports newest first; an empty status does not filter.
+func (s *Postgres) ListSalesReports(ctx context.Context, status string, limit int) ([]SalesReport, error) {
+	out := []SalesReport{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+salesReportCols+` from sales_invoice_report where ($1 = '' or status = $1) order by created_at desc, id limit $2`, status, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			r, err := scanSalesReport(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// RetrySalesReport puts a PARKED report back in the queue, due now with its attempts counted from zero; a PENDING one is left
+// as it is. A REPORTED one is refused (BIL-0111). Body and key do not change, so sales answers a report it holds from its copy.
+func (s *Postgres) RetrySalesReport(ctx context.Context, id string) (SalesReport, error) {
+	var out SalesReport
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		r, err := scanSalesReport(tx.QueryRow(ctx, `select `+salesReportCols+` from sales_invoice_report where id = $1 for update`, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, CodeSalesReportNotFound, "sales report not found")
+		}
+		if err != nil {
+			return err
+		}
+		switch r.Status {
+		case SalesReportPending:
+			out = r
+			return nil
+		case SalesReportParked:
+			out, err = scanSalesReport(tx.QueryRow(ctx, `update sales_invoice_report set status = 'PENDING', attempts = 0, next_attempt_at = now(), updated_at = now()
+				where id = $1 returning `+salesReportCols, id))
+			return err
+		}
+		return httpx.NewProblem(http.StatusConflict, CodeSalesReportState, "the sales report is "+r.Status+"; only a PARKED report is retried")
+	})
+	return out, err
 }

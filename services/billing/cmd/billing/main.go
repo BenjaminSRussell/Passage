@@ -80,7 +80,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	st := store.New(pool)
-	a := api.New(st, tax, maxLines).WithSubscriptions(st)
+	a := api.New(st, tax, maxLines).WithSubscriptions(st).WithSalesReports(st)
 	var glProfiles map[string]store.GLProfile
 	ledger, err := ledgerclient.FromEnv(getenv, "billing")
 	if err != nil {
@@ -123,15 +123,23 @@ func run(ctx context.Context, getenv func(string) string) error {
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", a.Metrics())
+	var reporter *salesreport.Reporter
+	if sales != nil {
+		reporter = &salesreport.Reporter{Store: st, Sales: sales}
+	}
+	admin.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		a.Metrics().ServeHTTP(w, r)
+		if reporter != nil {
+			reporter.WriteMetrics(w)
+		}
+	})
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if autobook != nil {
 		go autobook.loop(ctx)
 	}
-	if sales != nil {
-		reporter := &salesreport.Reporter{Store: st, Sales: sales}
+	if reporter != nil {
 		go salesreport.Run(ctx, salesInterval, reporter.RunOnce)
 		slog.Info("sales invoice reporter running", "interval", salesInterval)
 	} else {
