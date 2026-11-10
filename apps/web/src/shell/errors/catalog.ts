@@ -417,6 +417,9 @@ const billing: Record<string, ProblemCatalogEntry> = {
   "BIL-0107": { message: "The effective date falls in a period that is already invoiced.", action: "Choose a later effective date." },
   "BIL-0108": { message: "The subscription is cancelled.", action: "Create a new subscription instead." },
   "BIL-0109": { message: "Subscriptions aren't available in this deployment.", action: ASK_ADMIN },
+  "BIL-0110": { message: "We couldn't find that sales report.", action: "Go back to the list and open it again." },
+  "BIL-0111": { message: "Only a report that was set aside can be sent again, and this one isn't.", action: "Check the report's status in the list." },
+  "BIL-0112": { message: "Sales reports aren't available in this deployment.", action: ASK_ADMIN },
   "BIL-0200": { message: "The general ledger isn't set up for this service.", action: ASK_ADMIN },
   "BIL-0201": { message: "The general ledger didn't answer.", action: TRY_LATER },
   "BIL-0202": { message: "No ledger posting profile is set up for this legal entity.", action: "Ask finance to set up the posting profile." },
@@ -495,6 +498,11 @@ const pricing: Record<string, ProblemCatalogEntry> = {
   "PRC-0069": { message: "The promotion campaign has been stopped.", action: "Create a new campaign." },
   "PRC-0070": { message: "The invoice line isn't of the agreement's product or product group.", action: "Choose a matching agreement." },
   "PRC-0071": { message: "The product scope can't change once the agreement has accruals.", action: "Create a new agreement for the new scope." },
+  "PRC-ACK-001": { message: "The order changed after the response was prepared, so it no longer fits the current version.", action: "Reload the order and respond to the current version." },
+  "PRC-ACK-002": { message: "This order isn't open for a response right now. The buyer may be changing it, or it may be closed.", action: "Check the order's status, then try again later." },
+  "PRC-ACK-003": { message: "An earlier proposal for this order is still waiting for the buyer.", action: "Wait for the buyer to answer it before sending another response." },
+  "PRC-ACK-004": { message: "This version of the order has already been answered.", action: "Reload the order to see the response." },
+  "PRC-ACK-005": { message: "This proposal has already been answered.", action: "Reload the order to see the outcome." },
 };
 
 const receivingGaps: Record<string, ProblemCatalogEntry> = {
