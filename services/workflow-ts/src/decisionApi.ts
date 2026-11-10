@@ -2,6 +2,9 @@ import type { IncomingMessage, RequestListener, ServerResponse } from "node:http
 import { WorkflowNotFoundError, type Client } from "@temporalio/client";
 import {
   approvalDecisionSignal,
+  budgetPlanDecisionSignal,
+  budgetPlanStateQuery,
+  budgetPlanWorkflowId,
   approvalStateQuery,
   approvalWorkflowId,
   capaEffectivenessSignal,
@@ -16,6 +19,7 @@ import {
 import { inLegalEntityScope } from "./serviceToken.js";
 
 export const ECO_DECIDE_DUTY = "engineering.eco.approve";
+export const BUDGET_PLAN_DECIDE_DUTY = "budget.plan.decide";
 export const CAPA_DECIDE_DUTY = "quality.capa.maintain";
 export const PARTY_DECIDE_DUTY = "party.approve";
 export const PARTY_MERGE_DECIDE_DUTY = "party.merge.approve";
@@ -30,6 +34,7 @@ const MAX_BODY_BYTES = 8192;
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ECO_ROUTE = /^\/v1\/workflows\/eco-approvals\/([^/:]+):(approve|reject)$/;
+const PLAN_ROUTE = /^\/v1\/workflows\/budget-plans\/([^/:]+)(?:\/stages\/(review|approve):sign-off|:(reject))$/;
 const CAPA_ROUTE = /^\/v1\/workflows\/capa\/([^/:]+):(step-done|effectiveness)$/;
 const PARTY_ROUTE = /^\/v1\/workflows\/party-changes\/([^/:]+):(approve|reject|delegate)$/;
 const MERGE_ROUTE = /^\/v1\/workflows\/party-merges\/([^/:]+):(approve|reject|delegate)$/;
@@ -62,15 +67,17 @@ async function handle(client: Pick<Client, "workflow">, request: IncomingMessage
   if (path === "/healthz" || path === "/readyz") return void response.writeHead(200).end();
   const eco = ECO_ROUTE.exec(path);
   const capa = CAPA_ROUTE.exec(path);
+  const plan = PLAN_ROUTE.exec(path);
   const party = PARTY_ROUTE.exec(path);
   const merge = MERGE_ROUTE.exec(path);
-  if (!eco && !capa && !party && !merge) return reply(response, new Refusal(404, "COM-0404", "no such route"));
+  if (!eco && !capa && !party && !merge && !plan) return reply(response, new Refusal(404, "COM-0404", "no such route"));
   if (request.method !== "POST") return reply(response, new Refusal(405, "COM-0405", "POST only"));
   try {
     const principal = principalOf(request);
     const body = await readJson(request);
     if (party) await decidePartyChange(client, principal, party[1]!, party[2] as "approve" | "reject" | "delegate", body);
     else if (merge) await decidePartyMerge(client, principal, merge[1]!, merge[2] as "approve" | "reject" | "delegate", body);
+    else if (plan) await decideBudgetPlan(client, principal, plan[1]!, plan[2] as "review" | "approve" | undefined, body);
     else if (eco) await decideEco(client, principal, eco[1]!, eco[2] as "approve" | "reject", body);
     else await advanceCapa(client, principal, capa![1]!, capa![2] as "step-done" | "effectiveness", body);
     response.writeHead(202, { "Content-Type": "application/json" }).end(JSON.stringify({ accepted: true }));
@@ -142,6 +149,27 @@ async function decideEco(client: Pick<Client, "workflow">, principal: Principal,
   if (state.status !== "awaiting_approval") throw new Refusal(409, "WF-0409", `the ECO approval is ${state.status}`);
   if (state.requester === principal.userId) throw new Refusal(403, "ENG-ECO-SELF-APPROVAL", "the user who created the ECO cannot decide it");
   await handle.signal(ecoDecisionSignal, { decision: action === "approve" ? "approved" : "rejected", actor: principal.userId, scope: principal.scope, ...(reason ? { reason } : {}) });
+}
+
+async function decideBudgetPlan(client: Pick<Client, "workflow">, principal: Principal, planId: string, stage: "review" | "approve" | undefined, body: Record<string, unknown>): Promise<void> {
+  requireDuty(principal, BUDGET_PLAN_DECIDE_DUTY);
+  const submission = body.submission;
+  if (!Number.isInteger(submission) || (submission as number) < 1) throw new Refusal(400, "COM-0001", "submission must be the plan's current submission number");
+  const handle = client.workflow.getHandle(budgetPlanWorkflowId(planId, submission as number));
+  const state = await stateOf(() => handle.query(budgetPlanStateQuery), principal);
+  if (state.status === "approved" || state.status === "rejected") throw new Refusal(409, "WF-0409", `the budget plan submission is ${state.status}`);
+  if (state.requester === principal.userId) throw new Refusal(403, "BUD-0044", "the user who submitted the plan cannot decide it");
+  if (!stage) {
+    const reason = text(body, "reason", 500, true)!;
+    await handle.signal(budgetPlanDecisionSignal, { decision: "reject", reason, actor: principal.userId, scope: principal.scope });
+    return;
+  }
+  const orgUnitId = String(body.orgUnitId ?? "");
+  if (!UUID.test(orgUnitId)) throw new Refusal(400, "COM-0001", "orgUnitId must be a UUID");
+  const scenarioId = body.scenarioId === undefined ? undefined : String(body.scenarioId);
+  if (stage === "approve" && !(scenarioId && UUID.test(scenarioId))) throw new Refusal(400, "COM-0001", "scenarioId must be the UUID of the scenario being approved");
+  if (stage === "review" && scenarioId !== undefined) throw new Refusal(400, "COM-0001", "scenarioId applies to the approve stage only");
+  await handle.signal(budgetPlanDecisionSignal, { decision: "sign-off", stage, orgUnitId, ...(scenarioId ? { scenarioId } : {}), actor: principal.userId, scope: principal.scope });
 }
 
 async function advanceCapa(client: Pick<Client, "workflow">, principal: Principal, ncrId: string, action: "step-done" | "effectiveness", body: Record<string, unknown>): Promise<void> {

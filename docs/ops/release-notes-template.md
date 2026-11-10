@@ -55,6 +55,15 @@ Release criteria: 0 critical, and 0 high older than 30 days (PRD 9.50.1).
 
 None
 
+## Usability gate
+
+<!--
+One line, see apps/web/docs/usability-gate.md: `Not in scope: no screen on a task path changed.`, or
+`Passed: tasks <ids>, report <link>.`, or `Waived: <measure>, <cause>, <issue>, approved by <name>.`
+-->
+
+Not in scope: no screen on a task path changed.
+
 ## Rollback
 
 <!-- State the previous version to roll back to, and whether the rollback needs a contract step reverted. -->

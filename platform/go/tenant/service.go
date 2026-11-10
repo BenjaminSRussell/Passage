@@ -106,6 +106,9 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":   {"inventory.read"},
 		"engineering": {"engineering.read"},
 	},
+	"budgeting": {
+		"ledger": {"ledger.balance.read"},
+	},
 	"costing": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
@@ -164,6 +167,7 @@ var serviceGrants = map[string]map[string][]string{
 	"workflow-ts": {
 		"payables":    {"payment-run.execute"},
 		"engineering": {"engineering.eco.workflow"},
+		"budgeting":   {"budget.plan.workflow"},
 		"quality":     {"quality.capa.execute"},
 		"transport":   {"transport.tender.execute"},
 		"party":       {"party.approve", "party.merge.execute"},
