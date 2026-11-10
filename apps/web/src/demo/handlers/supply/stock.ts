@@ -402,7 +402,7 @@ const journals = table<Journal>([
   journal(14, "MOVEMENT", "DRAFT", 0.05, []),
 ]);
 
-function countJournal(s: CountSheet, variances: CountLine[]): Journal {
+function countJournal(_sheet: CountSheet, variances: CountLine[]): Journal {
   const n = 100 + journals.all().length;
   const lines = variances.map((l, i): JournalLine => {
     const it = ITEMS.find((x) => x.id === l.productId)!;
