@@ -43,9 +43,46 @@ spec:
               value: {{ .Values.config.adminAddr | quote }}
             - name: IOT_BUFFER_HOURS
               value: {{ .Values.config.bufferHours | quote }}
+{{- if .Values.shopfloor.url }}
+            - name: EDGE_SHOPFLOOR_URL
+              value: {{ .Values.shopfloor.url | quote }}
+            - name: EDGE_NODE_ID
+              value: {{ required "shopfloor.nodeId is required with shopfloor.url" .Values.shopfloor.nodeId | quote }}
+            - name: EDGE_SOURCE
+              value: {{ .Values.shopfloor.source | quote }}
+            - name: EDGE_SIM_MACHINES
+              value: {{ .Values.shopfloor.simMachines | quote }}
+            - name: IOT_BUFFER_CAPACITY
+              value: {{ .Values.shopfloor.bufferCapacity | quote }}
+            - name: EDGE_SEQ_STATE_FILE
+              value: /var/lib/iot-edge/seq.json
+{{- if .Values.shopfloor.tokenSecret }}
+            - name: EDGE_TOKEN_FILE
+              value: /var/run/passage/edge/token
+{{- end }}
+{{- end }}
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/iot-edge }
+{{- if .Values.shopfloor.tokenSecret }}
+            - { name: token, mountPath: /var/run/passage/edge, readOnly: true }
+{{- end }}
           securityContext:
             runAsNonRoot: true
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: state
+{{- if .Values.state.claimName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.state.claimName | quote }}
+{{- else }}
+          emptyDir: {}
+{{- end }}
+{{- if .Values.shopfloor.tokenSecret }}
+        - name: token
+          secret:
+            secretName: {{ .Values.shopfloor.tokenSecret | quote }}
+            items: [{ key: token, path: token }]
+{{- end }}

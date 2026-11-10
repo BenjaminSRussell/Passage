@@ -16,12 +16,12 @@ as JSON and published.
 | MQTT subscription (3.1.1/5.0, TLS, QoS 1, per-edge credentials) | later slice of PSG-25 | Same as OPC-UA. |
 | Persistent SQLite ring (24 h, survives restart and reboot) | later slice of PSG-25 | Slice 1 has the in-memory `domain.Buffer` with the same rules. The SQLite store is an infrastructure adapter, added once the store choice is approved for the edge image. The publisher must use `Peek` and `Ack` (Wave 25 proof): `Drain` removes payloads before the broker acknowledges them, so a broker restart would lose them (`TestPublisher_BrokerRestartLosesNothingWithPeekAck`). |
 | Kafka idempotent producer, topic `shopfloor.machine-events`, ingest through the shopfloor gateway over HTTPS/2 or Kafka TLS | later slice of PSG-25 | Needs the Kafka client decision (`@confluentinc/kafka-javascript` is the TS choice; the Go client is not yet approved) and the ingest gateway. |
-| Heartbeat every 30 s with buffer fill and per-machine status | later slice of PSG-25 | The shopfloor endpoint `POST edge-nodes/{id}:heartbeat` exists since slice 14. The connector does not call it yet; it needs the mTLS client. |
+| Heartbeat every 30 s with buffer fill and per-machine status | built (25-3), identity open | `internal/runtime` calls `POST edge-nodes/{id}:heartbeat` at the interval the server answers with (default 30 s) and reports buffer fill, per-machine state and the applied configuration version. It authenticates with a bearer token file (dev); the mTLS client is 25-4. |
 | Token enrollment and mTLS client certificate issuance (cert-manager, 90-day) | later slice of PSG-25 | Needs the platform certificate issuer and the enrollment endpoint. Enrollment must also set the shopfloor node's `connectorSubject` from the issued certificate: since slice 14 the configuration pull and heartbeat accept only the identity bound to the node, and that binding is set by hand until then. The renewal decision (BR-25.14, `DecideCert`) is built; the renewal call and the SF-0018 page are not. |
-| Versioned configuration: the document, validation and apply rule are built (`EdgeConfig`, `NextApplied`); pulling it from the shopfloor service is not | later slice of PSG-25 | The shopfloor `GET edge-nodes/{id}/config` endpoint exists since slice 14 (versioned, validated like `EdgeConfig`); the connector does not pull it yet. |
+| Versioned configuration: the document, validation and apply rule are built (`EdgeConfig`, `NextApplied`); the runtime pulls a newer version when the heartbeat answer names one and applies it (25-3) | built (25-3) | The shopfloor `GET edge-nodes/{id}/config` endpoint exists since slice 14 (versioned, validated like `EdgeConfig`); the connector does not pull it yet. |
 | Ringed rollout and automatic rollback: ring order, 24 h promotion and the 5 min rollback rule are built (`NextRing`, `CanPromote`, `RollbackDue`); A/B binary swap and the fleet API are not | later slice of PSG-25 | Needs heartbeat and the fleet API. The chart pins `ring` as a label only. |
 | Allowlisted write-back for control recipe setpoints: guard and readback check are built (`CheckWrite`, `ReadbackMatches`); transport and per-write audit row are not | later slice of PSG-25 | Needs control recipes (D6) and the OPC-UA client. |
-| Local admin page for diagnostics on localhost | partial | `/healthz` exists on the loopback admin address. The diagnostics page and a `/metrics` endpoint (dropped-event, seq-gap and buffer metrics) are not built. |
+| Local admin page for diagnostics on localhost | partial | `/healthz` and, with the runtime on, `/metrics` (dropped-event, seq-gap, send-failure and buffer metrics) exist on the loopback admin address. The diagnostics page is not built. |
 | Static single binary for Windows and Linux industrial PCs | later slice of PSG-25 | Build targets and signing are in the deployment pipeline (not in this owned path). |
 | Signed OCI image (amd64/arm64) | handoff | Image build and cosign signing belong to the deployment-cicd pipeline (not in this owned path). Chart references `ghcr.io/benjaminsrussell/passage/iot-edge`. |
 | Liveness and readiness probes in the chart | handoff | The admin endpoint is bound to loopback, so kubelet probes cannot reach it. Needs a probe design (for example an exec probe or a node-local sidecar), agreed with the deployment owner. |
@@ -41,3 +41,23 @@ as JSON and published.
 | Ring promotion window | FR-25.19 names the rings (canary → ring 1 → all) but no promotion rule. `CanPromote` uses 24 h of healthy heartbeats as a placeholder; the requirements owner should set the window (and whether promotion is manual). |
 | Setpoint limits (BR-25.15) | BR-25.15 checks the value against "the instruction's limits" (process instruction characteristic limits, FR-25.15). Until control recipes exist the limits come from the write allowlist entry in the config document. Confirm that the allowlist limits stay as an outer bound once instruction limits exist. |
 | Readback tolerance | BR-25.15 does not say how close a readback must be. `ReadbackMatches` takes an absolute tolerance from the caller; the default per node type is open. |
+
+## Runtime (25-3)
+
+`internal/runtime` runs the connector: a `Source` produces readings, the runtime turns a count reading into the delta
+since the previous one (`CounterDelta`, rollover included), gives each event the machine's next seq (reserved in blocks
+of 1000 in `EDGE_SEQ_STATE_FILE`, so a restart resumes above everything issued and costs a gap, not dropped events),
+normalizes it through the configuration, applies the stale check, and pushes the CloudEvent to the buffer. The publisher
+sends batches of up to 500 to `POST /v1/shopfloor/machine-events` with `Peek` and `Ack`, backing off 1 s doubling to
+30 s while the server is unreachable; a 4xx answer that is not auth or rate limiting drops the batch and counts it
+(`ErrRejected`) so an invalid event cannot block the queue. Tests cover the 10,000 events in a minute run with a broker
+outage and a lost answer (nothing lost, the resend de-duplicated by seq), counter rollover, restart seq resume, the
+rejected batch, heartbeat plus configuration application and a simulator end to end. Enable it with
+`EDGE_SHOPFLOOR_URL`, `EDGE_NODE_ID`, `EDGE_SOURCE=simulator` (chart `shopfloor.*`).
+
+| Item | Status | Reason |
+|---|---|---|
+| OPC-UA and MQTT `Source` adapters | open | The runtime takes any `Source`; only the simulator exists. Real adapters need `gopcua` and an MQTT client approved for the edge image and a real machine or broker to test against (#213). |
+| Sequence gap replay by seq range | open | The server's gaps are counted (`iotedge_seq_gaps_total`) and logged; replaying from the buffer needs the persistent ring. |
+| Persistent ring | open | Events wait in memory (capacity `IOT_BUFFER_CAPACITY`, default 200,000); a connector restart loses what was unsent. Only the sequence state is on disk. |
+| Kafka producer | open | Events go to the shopfloor ingest over HTTPS, the option FR-25.9 names; Kafka stays with the client decision above. |
