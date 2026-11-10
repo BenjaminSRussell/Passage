@@ -1,7 +1,19 @@
 // Print service document rendering (/api/v1/print/documents:render) for the demo. Answers with a small
 // one-page PDF that lists the document's text, so "Download PDF" works on the order, invoice, packing slip and payment run pages.
-import type { DocumentRequest } from "../../shell/documents/pdfDocument";
+// The real service lays the document out and prints Unicode; this stand-in prints plain lines in ASCII.
+import type { DocumentParty, DocumentRequest } from "../../shell/documents/pdfDocument";
 import { DemoResponse, route } from "../backend";
+import { CUSTOMERS, VENDORS } from "../company";
+
+// The addresses of the demo's customers and vendors (GET /api/v1/org/addresses?ownerType=party), which the documents print.
+route("GET", "/api/v1/org/addresses", ({ query }) => {
+  const party = query.get("ownerType") === "party" ? [...CUSTOMERS, ...VENDORS].find((p) => p.id === query.get("ownerId")) : undefined;
+  if (!party) return { items: [] };
+  const formatted = `${party.city}, ${party.state}\nUS`;
+  return {
+    items: [{ id: `addr-${party.id}`, versionId: `addr-${party.id}-1`, ownerType: "party", ownerId: party.id, countryCode: "US", regionCode: party.state, city: party.city, street1: "", geoStatus: "unverified", formatted, purposes: [{ purpose: "business", primary: true }], validFrom: "2026-01-01", createdAt: "2026-01-01T00:00:00Z" }],
+  };
+});
 
 const escape = (s: string) => s.replace(/[\\()]/g, (c) => `\\${c}`).replace(/[^ -~]/g, "?");
 
@@ -26,13 +38,16 @@ function pdf(lines: string[]): Uint8Array {
   return new TextEncoder().encode(out);
 }
 
+const partyLines = (p: DocumentParty, fallbackLabel: string) => [`${p.label ?? fallbackLabel}: ${p.name}`, ...(p.address ?? []).map((a) => `    ${a}`)];
+
 route("POST", "/api/v1/print/documents:render", ({ body }) => {
   const d = body as DocumentRequest;
   const title = { PURCHASE_ORDER: "Purchase order", CUSTOMER_INVOICE: "Invoice", PACKING_SLIP: "Packing slip", REMITTANCE_ADVICE: "Remittance advice" }[d.documentType];
   const lines = [
     `${d.legalEntity.name} - ${title} ${d.number}`,
     ...(d.legalEntity.address ?? []),
-    ...(d.counterparty ? [`${d.counterparty.label ?? "To"}: ${d.counterparty.name}`] : []),
+    ...(d.counterparty ? partyLines(d.counterparty, "To") : []),
+    ...(d.additionalParties ?? []).flatMap((p) => partyLines(p, "Party")),
     ...(d.fields ?? []).map((f) => `${f.label}: ${f.value}`),
     d.columns.map((c) => c.header).join(" | "),
     ...d.lines.map((l) => l.join(" | ")),
