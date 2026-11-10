@@ -257,7 +257,7 @@ function accountsIn(row: DefinitionRow): string[] {
 }
 
 /** Signed so that a row shows positive in its normal balance: contra accounts (accumulated depreciation) show negative. */
-function rowAccountValue(d: Definition, row: DefinitionRow, account: string, column: DefinitionColumn, p: Period): number {
+function rowAccountValue(d: Definition, _row: DefinitionRow, account: string, column: DefinitionColumn, p: Period): number {
   const v = accountValue(d, account, column, p);
   return CONTRA.has(account) ? -v : v;
 }
