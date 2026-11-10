@@ -20,6 +20,8 @@ create table bank_reconciliation (
   closing_balance numeric(20,6) not null,
   book_balance numeric(20,6) not null,
   outstanding_amount numeric(20,6) not null default 0,
+  book_balance_stated_by text not null,
+  book_balance_stated_at timestamptz not null default now(),
   state text not null default 'open' check (state in ('open', 'closed', 'reopened')),
   closed_by text,
   closed_at timestamptz,
@@ -46,9 +48,10 @@ create table bank_reconciliation_event (
   id uuid not null,
   legal_entity_id uuid not null,
   reconciliation_id uuid not null,
-  event text not null check (event in ('created', 'closed', 'reopened')),
+  event text not null check (event in ('created', 'balances_set', 'closed', 'reopened', 'line_abandoned')),
   actor text not null check (actor <> ''),
   reason text,
+  detail jsonb,
   created_at timestamptz not null default now(),
   primary key (tenant_id, id),
   foreign key (tenant_id, reconciliation_id) references bank_reconciliation (tenant_id, id)
@@ -82,8 +85,11 @@ create table bank_line_transaction (
   amount numeric(20,6) not null,
   currency char(3) not null check (currency ~ '^[A-Z]{3}$'),
   posting_date date not null,
-  status text not null default 'pending' check (status in ('pending', 'posted', 'refused')),
+  status text not null default 'pending' check (status in ('pending', 'posted', 'refused', 'conflict', 'abandoned')),
   refusal_code text,
+  attempt_unanswered boolean not null default false,
+  abandoned_by text,
+  abandon_reason text,
   ledger_entry_id text,
   match_id uuid,
   created_by text not null,
@@ -99,7 +105,20 @@ create table bank_line_transaction (
 
 create function reconciliation_closed_guard() returns trigger language plpgsql as $$
 begin
+  perform 1 from bank_reconciliation where tenant_id = new.tenant_id and statement_id = new.statement_id for share;
   if exists (select 1 from bank_reconciliation where tenant_id = new.tenant_id and statement_id = new.statement_id and state = 'closed') then
+    raise exception 'the reconciliation of this statement is closed' using errcode = 'TRC01';
+  end if;
+  return new;
+end
+$$;
+
+create function reconciliation_item_closed_guard() returns trigger language plpgsql as $$
+begin
+  perform 1 from bank_reconciliation r join reconciliation_match m on m.tenant_id = r.tenant_id and m.statement_id = r.statement_id
+    where m.tenant_id = new.tenant_id and m.id = new.match_id for share of r;
+  if exists (select 1 from bank_reconciliation r join reconciliation_match m on m.tenant_id = r.tenant_id and m.statement_id = r.statement_id
+    where m.tenant_id = new.tenant_id and m.id = new.match_id and r.state = 'closed') then
     raise exception 'the reconciliation of this statement is closed' using errcode = 'TRC01';
   end if;
   return new;
@@ -108,19 +127,44 @@ $$;
 
 create function reconciliation_pending_guard() returns trigger language plpgsql as $$
 begin
-  if exists (select 1 from bank_line_transaction where tenant_id = new.tenant_id and statement_id = new.statement_id and line_no = new.line_no and status = 'pending') then
+  if exists (select 1 from bank_line_transaction where tenant_id = new.tenant_id and statement_id = new.statement_id and line_no = new.line_no and status in ('pending', 'conflict')) then
     raise exception 'a transaction is being created from this statement line' using errcode = 'TRC02';
   end if;
   return new;
 end
 $$;
 
-create trigger bank_statement_line_closed_guard before update on bank_statement_line
+create function reconciliation_header_guard() returns trigger language plpgsql as $$
+begin
+  if old.state = 'closed' then
+    if new.state <> 'reopened'
+       or new.reopened_by is null or new.reopened_by = old.closed_by
+       or new.reopen_reason is null or length(new.reopen_reason) = 0
+       or new.statement_id <> old.statement_id or new.bank_account_id <> old.bank_account_id
+       or new.opening_balance <> old.opening_balance or new.closing_balance <> old.closing_balance
+       or new.book_balance <> old.book_balance or new.outstanding_amount <> old.outstanding_amount
+       or new.book_balance_stated_by <> old.book_balance_stated_by or new.book_balance_stated_at <> old.book_balance_stated_at
+       or new.closed_by is distinct from old.closed_by or new.closed_at is distinct from old.closed_at then
+      raise exception 'a closed reconciliation can only be reopened by another person with a reason' using errcode = 'TRC01';
+    end if;
+  end if;
+  if new.state = 'closed' and old.state <> 'closed' and new.closed_by = new.book_balance_stated_by then
+    raise exception 'the person who stated the book balance cannot close the reconciliation' using errcode = 'TRC01';
+  end if;
+  return new;
+end
+$$;
+
+create trigger bank_reconciliation_header_guard before update on bank_reconciliation
+  for each row execute function reconciliation_header_guard();
+create trigger bank_statement_line_closed_guard before insert or update on bank_statement_line
   for each row execute function reconciliation_closed_guard();
 create trigger reconciliation_match_closed_guard before insert or update on reconciliation_match
   for each row execute function reconciliation_closed_guard();
 create trigger reconciliation_match_line_closed_guard before insert or update on reconciliation_match_line
   for each row execute function reconciliation_closed_guard();
+create trigger reconciliation_match_item_closed_guard before insert or update on reconciliation_match_item
+  for each row execute function reconciliation_item_closed_guard();
 create trigger reconciliation_line_exclusion_closed_guard before insert or update on reconciliation_line_exclusion
   for each row execute function reconciliation_closed_guard();
 create trigger bank_line_transaction_closed_guard before insert or update on bank_line_transaction

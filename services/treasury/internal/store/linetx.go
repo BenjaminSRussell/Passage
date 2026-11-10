@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 )
@@ -20,6 +22,8 @@ const (
 	TransactionPending = "pending"
 	TransactionPosted  = "posted"
 	TransactionRefused = "refused"
+	TransactionHeld    = "conflict"
+	TransactionAbandon = "abandoned"
 )
 
 type NewLineTransaction struct {
@@ -44,16 +48,22 @@ type LineTransaction struct {
 	MatchID          *string `json:"matchId,omitempty"`
 	Version          int     `json:"version"`
 
-	Replayed bool `json:"-"`
+	Replayed          bool `json:"-"`
+	AttemptUnanswered bool `json:"-"`
 }
 
 const lineTransactionColumns = `id, reconciliation_id, legal_entity_id, bank_account_id, statement_id, line_no, kind, amount::text, currency,
-	posting_date::text, status, ledger_entry_id, match_id::text, version`
+	posting_date::text, status, ledger_entry_id, match_id::text, version, attempt_unanswered`
 
 func scanLineTransaction(row pgx.Row) (LineTransaction, error) {
 	var t LineTransaction
 	err := row.Scan(&t.ID, &t.ReconciliationID, &t.LegalEntityID, &t.BankAccountID, &t.StatementID, &t.LineNo, &t.Kind, &t.Amount, &t.Currency,
-		&t.PostingDate, &t.Status, &t.LedgerEntryID, &t.MatchID, &t.Version)
+		&t.PostingDate, &t.Status, &t.LedgerEntryID, &t.MatchID, &t.Version, &t.AttemptUnanswered)
+	if err == nil {
+		if amount, perr := decimal.NewFromString(t.Amount); perr == nil {
+			t.Amount = amount.StringFixed(money.MinorUnits(t.Currency))
+		}
+	}
 	return t, err
 }
 
@@ -86,7 +96,7 @@ func lockedReconciliationStatement(ctx context.Context, tx pgx.Tx, tenantID, id 
 
 func hasPostingInFlight(ctx context.Context, tx pgx.Tx, tenantID, statementID string, lineNo int) (bool, error) {
 	var n int
-	err := tx.QueryRow(ctx, `select count(*) from bank_line_transaction where tenant_id = $1 and statement_id = $2 and line_no = $3 and status in ('pending', 'posted')`,
+	err := tx.QueryRow(ctx, `select count(*) from bank_line_transaction where tenant_id = $1 and statement_id = $2 and line_no = $3 and status in ('pending', 'posted', 'conflict')`,
 		tenantID, statementID, lineNo).Scan(&n)
 	return n > 0, err
 }
@@ -196,7 +206,10 @@ func (s *Postgres) BeginLineTransaction(ctx context.Context, in NewLineTransacti
 			where tenant_id = $1 and statement_id = $2 and line_no = $3 for update`, p.TenantID, statementID, in.LineNo))
 		switch {
 		case err == nil:
-			if existing.Kind != in.Kind {
+			if existing.Status == TransactionHeld || existing.Status == TransactionAbandon {
+				return httpx.NewProblem(http.StatusConflict, CodeLineConflict, "an earlier attempt to post this statement line went unanswered and the general ledger then refused it; a person must check the general ledger before it is retried")
+			}
+			if existing.Kind != in.Kind && existing.Status != TransactionRefused {
 				return httpx.NewProblem(http.StatusConflict, CodeLinePosting, "this statement line already has a "+strings.ReplaceAll(existing.Kind, "_", " ")+" transaction")
 			}
 			if existing.Status == TransactionPosted {
@@ -205,11 +218,19 @@ func (s *Postgres) BeginLineTransaction(ctx context.Context, in NewLineTransacti
 				return nil
 			}
 			if existing.Status == TransactionRefused {
-				if _, err := tx.Exec(ctx, `update bank_line_transaction set status = 'pending', refusal_code = null, version = version + 1, updated_at = now()
-					where tenant_id = $1 and id = $2`, p.TenantID, existing.ID); err != nil {
+				amount, err := decimal.NewFromString(amountText)
+				if err != nil {
+					return err
+				}
+				if !domain.LineKindFits(in.Kind, amount) {
+					return unprocessable(CodeLineKind, "a "+strings.ReplaceAll(in.Kind, "_", " ")+" does not fit a statement line of "+amount.String()+" "+currency)
+				}
+				if _, err := tx.Exec(ctx, `update bank_line_transaction set status = 'pending', kind = $3, refusal_code = null, version = version + 1, updated_at = now()
+					where tenant_id = $1 and id = $2`, p.TenantID, existing.ID, in.Kind); err != nil {
 					return err
 				}
 				existing.Status = TransactionPending
+				existing.Kind = in.Kind
 				existing.Version++
 			}
 			out = existing
@@ -281,11 +302,62 @@ func (s *Postgres) FinishLineTransaction(ctx context.Context, id, ledgerEntryID 
 	return out, AsGuardError(err)
 }
 
+func (s *Postgres) MarkLineAttempt(ctx context.Context, id string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update bank_line_transaction set attempt_unanswered = true, updated_at = now()
+			where tenant_id = $1 and id = $2 and status = 'pending' and not attempt_unanswered`, p.TenantID, id)
+		return err
+	})
+}
+
 func (s *Postgres) RefuseLineTransaction(ctx context.Context, id, code string) error {
 	p, _ := tenant.FromContext(ctx)
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `update bank_line_transaction set status = 'refused', refusal_code = $3, version = version + 1, updated_at = now()
+		_, err := tx.Exec(ctx, `update bank_line_transaction set status = 'refused', refusal_code = $3, attempt_unanswered = false, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2 and status = 'pending'`, p.TenantID, id, code)
 		return err
 	})
+}
+
+func (s *Postgres) HoldLineTransaction(ctx context.Context, id, code string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update bank_line_transaction set status = 'conflict', refusal_code = $3, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2 and status = 'pending'`, p.TenantID, id, code)
+		return err
+	})
+}
+
+func (s *Postgres) AbandonLineTransaction(ctx context.Context, reconciliationID string, lineNo int, reason string) (LineTransaction, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out LineTransaction
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		statementID, err := lockedReconciliationStatement(ctx, tx, p.TenantID, reconciliationID)
+		if err != nil {
+			return err
+		}
+		t, err := scanLineTransaction(tx.QueryRow(ctx, `select `+lineTransactionColumns+` from bank_line_transaction
+			where tenant_id = $1 and statement_id = $2 and line_no = $3 for update`, p.TenantID, statementID, lineNo))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusConflict, CodeNothingToAbandon, "this statement line has no unfinished bank transaction to abandon")
+		}
+		if err != nil {
+			return err
+		}
+		if t.Status != TransactionPending && t.Status != TransactionHeld {
+			return httpx.NewProblem(http.StatusConflict, CodeNothingToAbandon, "only a bank transaction that is pending or held for a person can be abandoned")
+		}
+		if _, err := tx.Exec(ctx, `update bank_line_transaction set status = 'abandoned', abandoned_by = $3, abandon_reason = $4, version = version + 1, updated_at = now()
+			where tenant_id = $1 and id = $2`, p.TenantID, t.ID, createdBy(p), reason); err != nil {
+			return err
+		}
+		if err := recordReconEvent(ctx, tx, p.TenantID, t.LegalEntityID, reconciliationID, "line_abandoned", createdBy(p), &reason,
+			map[string]string{"lineNo": strconv.Itoa(lineNo), "kind": t.Kind, "amount": t.Amount, "previousStatus": t.Status}); err != nil {
+			return err
+		}
+		out, err = scanLineTransaction(tx.QueryRow(ctx, `select `+lineTransactionColumns+` from bank_line_transaction where tenant_id = $1 and id = $2`, p.TenantID, t.ID))
+		return err
+	})
+	return out, AsGuardError(err)
 }

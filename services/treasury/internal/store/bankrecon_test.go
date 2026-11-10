@@ -11,13 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 )
 
-const closerUser, reopenerUser = "user-test", "user-reopener"
+const closerUser, reopenerUser = "user-closer", "user-reopener"
 
 func ctxAs(n int, legalEntityID, user string) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: legalEntityID, UserID: user, Duties: testkit.ScopeDuties(legalEntityID)})
@@ -39,7 +40,8 @@ func camtOn(id, date string, amounts ...string) []byte {
 
 type bankFixture struct {
 	*reconFixture
-	rec Reconciliation
+	rec    Reconciliation
+	closer context.Context
 }
 
 func newBankFixture(t *testing.T) *bankFixture {
@@ -49,7 +51,7 @@ func newBankFixture(t *testing.T) *bankFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &bankFixture{reconFixture: f, rec: rec}
+	return &bankFixture{reconFixture: f, rec: rec, closer: ctxAs(1, f.le, closerUser)}
 }
 
 func (f *bankFixture) matchLine(t *testing.T, lineNo int, amount string) Match {
@@ -109,7 +111,7 @@ func TestCreateReconciliation_CarriesStatementBalancesAndReplays(t *testing.T) {
 
 func TestCloseReconciliation_RefusesUnmatchedLinesAndANonZeroDifference(t *testing.T) {
 	f := newBankFixture(t)
-	if _, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, f.rec.Version); problemCode(t, err) != CodeReconOpenLines {
+	if _, err := f.s.CloseReconciliation(f.closer, f.rec.ID, f.rec.Version); problemCode(t, err) != CodeReconOpenLines {
 		t.Fatalf("close with 4 unmatched lines: err = %v; want %s", err, CodeReconOpenLines)
 	}
 	f.matchLines123(t)
@@ -120,24 +122,27 @@ func TestCloseReconciliation_RefusesUnmatchedLinesAndANonZeroDifference(t *testi
 	if rec.Summary.UnmatchedCount != 0 || rec.Summary.ExcludedCount != 1 || rec.Summary.MatchedCount != 3 || rec.Difference != "-7.00" {
 		t.Fatalf("summary = %+v difference %s; want everything accounted for and a difference of -7.00", rec.Summary, rec.Difference)
 	}
-	if _, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version); problemCode(t, err) != domain.CodeReconcileDifference {
+	if _, err := f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version); problemCode(t, err) != domain.CodeReconcileDifference {
 		t.Fatalf("close with a difference: err = %v; want %s", err, domain.CodeReconcileDifference)
 	}
 	if got := f.reload(t); got.State != StateOpen || got.ClosedBy != nil {
 		t.Fatalf("a refused close left the reconciliation %+v", got)
 	}
+	if _, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version); problemCode(t, err) != CodeBalanceStater {
+		t.Fatalf("close by the person who stated the balance: err = %v; want %s", err, CodeBalanceStater)
+	}
 	rec, err := f.s.SetReconciliationBalances(f.ctx, f.rec.ID, rec.Version, decimal.RequireFromString("1450.00"), decimal.Zero)
 	if err != nil || rec.Difference != "0.00" {
 		t.Fatalf("set balances = %+v, %v; want a zero difference", rec, err)
 	}
-	if _, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version-1); problemCode(t, err) != CodeVersionConflict {
+	if _, err := f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version-1); problemCode(t, err) != CodeVersionConflict {
 		t.Fatalf("close with a stale version: err = %v; want %s", err, CodeVersionConflict)
 	}
-	closed, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version)
+	closed, err := f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version)
 	if err != nil || closed.State != StateClosed || closed.ClosedBy == nil || *closed.ClosedBy != closerUser || closed.ClosedAt == nil {
 		t.Fatalf("close = %+v, %v; want closed by %s with a time", closed, err, closerUser)
 	}
-	again, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version)
+	again, err := f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version)
 	if err != nil || again.Version != closed.Version || !again.ClosedAt.Equal(*closed.ClosedAt) {
 		t.Fatalf("second close = %+v, %v; want the closed reconciliation unchanged", again, err)
 	}
@@ -156,7 +161,7 @@ func TestCloseReconciliation_ConcurrentClosesCloseOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i], errs[i] = f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version)
+			results[i], errs[i] = f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version)
 		}()
 	}
 	wg.Wait()
@@ -180,7 +185,7 @@ func TestClosedReconciliation_RefusesEveryChangeToItsLinesAndMatches(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version); err != nil {
+	if _, err := f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version); err != nil {
 		t.Fatal(err)
 	}
 	refused := func(name string, err error) {
@@ -219,11 +224,11 @@ func TestReopenReconciliation_NeedsAnotherPersonAReasonAndNoLaterClosedPeriod(t 
 	if _, err := f.s.ReopenReconciliation(ctxAs(1, f.le, reopenerUser), f.rec.ID, rec.Version, "not closed yet"); problemCode(t, err) != CodeReconNotClosed {
 		t.Fatalf("reopen of an open reconciliation: err = %v; want %s", err, CodeReconNotClosed)
 	}
-	closed, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version)
+	closed, err := f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.ReopenReconciliation(f.ctx, f.rec.ID, closed.Version, "late invoice"); problemCode(t, err) != CodeReopenFourEyes {
+	if _, err := f.s.ReopenReconciliation(f.closer, f.rec.ID, closed.Version, "late invoice"); problemCode(t, err) != CodeReopenFourEyes {
 		t.Fatalf("reopen by the closer: err = %v; want %s", err, CodeReopenFourEyes)
 	}
 
@@ -242,7 +247,7 @@ func TestReopenReconciliation_NeedsAnotherPersonAReasonAndNoLaterClosedPeriod(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	laterClosed, err := f.s.CloseReconciliation(f.ctx, laterRec.ID, laterRec.Version)
+	laterClosed, err := f.s.CloseReconciliation(f.closer, laterRec.ID, laterRec.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +268,7 @@ func TestReopenReconciliation_NeedsAnotherPersonAReasonAndNoLaterClosedPeriod(t 
 	if _, err := f.s.ExcludeLine(f.ctx, f.rec.ID, 4, "changed after reopen"); err != nil {
 		t.Fatalf("a reopened reconciliation must accept changes: %v", err)
 	}
-	recloseable, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, f.reload(t).Version)
+	recloseable, err := f.s.CloseReconciliation(f.closer, f.rec.ID, f.reload(t).Version)
 	if err != nil || recloseable.State != StateClosed {
 		t.Fatalf("close after reopen = %+v, %v; want closed", recloseable, err)
 	}
@@ -296,8 +301,10 @@ func TestCreateLineTransaction_IsOncePerLineAndMatchesTheLineWhenFinished(t *tes
 	if _, err := f.s.ExcludeLine(f.ctx, f.rec.ID, 4, "should not"); problemCode(t, err) != CodeLinePosting {
 		t.Fatalf("exclude of a line being posted: err = %v; want %s", err, CodeLinePosting)
 	}
-	if _, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, rec.Version); problemCode(t, err) != CodePostingPending {
-		t.Fatalf("close with a pending transaction: err = %v; want %s", err, CodePostingPending)
+	_, err = f.s.CloseReconciliation(f.closer, f.rec.ID, rec.Version)
+	var pending *httpx.Problem
+	if !errors.As(err, &pending) || pending.Code != CodePostingPending || pending.Errors["pendingLines"] != "4" {
+		t.Fatalf("close with a pending transaction: err = %v; want %s naming pendingLines 4", err, CodePostingPending)
 	}
 	if err := f.s.RefuseLineTransaction(f.ctx, first.ID, "LED-0001"); err != nil {
 		t.Fatal(err)
@@ -308,9 +315,9 @@ func TestCreateLineTransaction_IsOncePerLineAndMatchesTheLineWhenFinished(t *tes
 	if got := lineStatuses(t, f.reconFixture); got[4] != "unmatched" {
 		t.Fatalf("line 4 is %s after a refusal; want unmatched", got[4])
 	}
-	retry, err := begin(domain.LineUnknownReceipt)
-	if err != nil || retry.ID != first.ID || retry.Status != TransactionPending {
-		t.Fatalf("begin after a refusal = %+v, %v; want the same transaction pending again", retry, err)
+	retry, err := begin(domain.LineInterest)
+	if err != nil || retry.ID != first.ID || retry.Status != TransactionPending || retry.Kind != domain.LineInterest {
+		t.Fatalf("begin after a refusal with another kind = %+v, %v; want the same transaction pending as interest", retry, err)
 	}
 	done, err := f.s.FinishLineTransaction(f.ctx, first.ID, "ENTRY-A1")
 	if err != nil || done.Status != TransactionPosted || done.Replayed || done.LedgerEntryID == nil || *done.LedgerEntryID != "entry-a1" || done.MatchID == nil {
@@ -320,7 +327,7 @@ func TestCreateLineTransaction_IsOncePerLineAndMatchesTheLineWhenFinished(t *tes
 	if err != nil || !replay.Replayed {
 		t.Fatalf("finish again = %+v, %v; want a replay", replay, err)
 	}
-	replayed, err := begin(domain.LineUnknownReceipt)
+	replayed, err := begin(domain.LineInterest)
 	if err != nil || !replayed.Replayed || replayed.ID != first.ID {
 		t.Fatalf("begin after finish = %+v, %v; want the posted transaction as a replay", replayed, err)
 	}
@@ -334,7 +341,7 @@ func TestCreateLineTransaction_IsOncePerLineAndMatchesTheLineWhenFinished(t *tes
 	if n := count(t, f.admin, `select count(*) from reconciliation_match_item where item_id = 'entry-a1' and active`); n != 1 {
 		t.Fatalf("active match items for the entry = %d; want 1", n)
 	}
-	if _, err := f.s.CloseReconciliation(f.ctx, f.rec.ID, after.Version); err != nil {
+	if _, err := f.s.CloseReconciliation(f.closer, f.rec.ID, after.Version); err != nil {
 		t.Fatalf("close after the transaction: %v", err)
 	}
 }

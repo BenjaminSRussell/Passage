@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -22,17 +23,21 @@ import (
 )
 
 const (
-	CodeReconExists       = "TRS-0504"
-	CodeReconNotFound     = "TRS-0505"
-	CodeReconClosed       = "TRS-0506"
-	CodeReconOpenLines    = "TRS-0507"
-	CodeReopenLaterClosed = "TRS-0508"
-	CodeReopenFourEyes    = "TRS-0509"
-	CodeReconNotClosed    = "TRS-0510"
-	CodeLineNotFound      = "TRS-0511"
-	CodeLineKind          = "TRS-0512"
-	CodeLinePosting       = "TRS-0516"
-	CodePostingPending    = "TRS-0517"
+	CodeReconExists          = "TRS-0504"
+	CodeReconNotFound        = "TRS-0505"
+	CodeReconClosed          = "TRS-0506"
+	CodeReconOpenLines       = "TRS-0507"
+	CodeReopenLaterClosed    = "TRS-0508"
+	CodeReopenFourEyes       = "TRS-0509"
+	CodeReconNotClosed       = "TRS-0510"
+	CodeLineNotFound         = "TRS-0511"
+	CodeLineKind             = "TRS-0512"
+	CodeLinePosting          = "TRS-0516"
+	CodePostingPending       = "TRS-0517"
+	CodeBalanceStater        = "TRS-0520"
+	CodeMatchFromTransaction = "TRS-0521"
+	CodeLineConflict         = "TRS-0522"
+	CodeNothingToAbandon     = "TRS-0523"
 
 	StateOpen     = "open"
 	StateClosed   = "closed"
@@ -55,31 +60,36 @@ type LineSummary struct {
 }
 
 type Reconciliation struct {
-	ID                string      `json:"id"`
-	LegalEntityID     string      `json:"legalEntityId"`
-	BankAccountID     string      `json:"bankAccountId"`
-	StatementID       string      `json:"statementId"`
-	Currency          string      `json:"currency"`
-	PeriodFrom        string      `json:"periodFrom"`
-	PeriodTo          string      `json:"periodTo"`
-	State             string      `json:"state"`
-	OpeningBalance    string      `json:"openingBalance"`
-	ClosingBalance    string      `json:"closingBalance"`
-	BookBalance       string      `json:"bookBalance"`
-	OutstandingAmount string      `json:"outstandingAmount"`
-	Difference        string      `json:"difference"`
-	Summary           LineSummary `json:"summary"`
-	ClosedBy          *string     `json:"closedBy,omitempty"`
-	ClosedAt          *time.Time  `json:"closedAt,omitempty"`
-	ReopenedBy        *string     `json:"reopenedBy,omitempty"`
-	ReopenedAt        *time.Time  `json:"reopenedAt,omitempty"`
-	ReopenReason      *string     `json:"reopenReason,omitempty"`
-	Version           int         `json:"version"`
-	CreatedBy         string      `json:"createdBy"`
-	CreatedAt         time.Time   `json:"createdAt"`
-	UpdatedAt         time.Time   `json:"updatedAt"`
+	ID                  string      `json:"id"`
+	LegalEntityID       string      `json:"legalEntityId"`
+	BankAccountID       string      `json:"bankAccountId"`
+	StatementID         string      `json:"statementId"`
+	Currency            string      `json:"currency"`
+	PeriodFrom          string      `json:"periodFrom"`
+	PeriodTo            string      `json:"periodTo"`
+	State               string      `json:"state"`
+	OpeningBalance      string      `json:"openingBalance"`
+	ClosingBalance      string      `json:"closingBalance"`
+	BookBalance         string      `json:"bookBalance"`
+	OutstandingAmount   string      `json:"outstandingAmount"`
+	BookBalanceSource   string      `json:"bookBalanceSource"`
+	BookBalanceStatedBy string      `json:"bookBalanceStatedBy"`
+	BookBalanceStatedAt time.Time   `json:"bookBalanceStatedAt"`
+	Difference          string      `json:"difference"`
+	Summary             LineSummary `json:"summary"`
+	ClosedBy            *string     `json:"closedBy,omitempty"`
+	ClosedAt            *time.Time  `json:"closedAt,omitempty"`
+	ReopenedBy          *string     `json:"reopenedBy,omitempty"`
+	ReopenedAt          *time.Time  `json:"reopenedAt,omitempty"`
+	ReopenReason        *string     `json:"reopenReason,omitempty"`
+	Version             int         `json:"version"`
+	CreatedBy           string      `json:"createdBy"`
+	CreatedAt           time.Time   `json:"createdAt"`
+	UpdatedAt           time.Time   `json:"updatedAt"`
 
 	closing, book, outstanding, excluded decimal.Decimal
+
+	Replayed bool `json:"-"`
 }
 
 type NewReconciliation struct {
@@ -104,7 +114,7 @@ type ReconciliationPage struct {
 }
 
 const reconSelect = `select r.id, r.legal_entity_id, r.bank_account_id, r.statement_id, r.currency, r.period_from::text, r.period_to::text, r.state,
-	r.opening_balance::text, r.closing_balance::text, r.book_balance::text, r.outstanding_amount::text,
+	r.opening_balance::text, r.closing_balance::text, r.book_balance::text, r.outstanding_amount::text, r.book_balance_stated_by, r.book_balance_stated_at,
 	r.closed_by, r.closed_at, r.reopened_by, r.reopened_at, r.reopen_reason, r.version, r.created_by, r.created_at, r.updated_at,
 	s.lines, s.matched_count, s.matched_total::text, s.excluded_count, s.excluded_total::text, s.unmatched_count, s.unmatched_total::text
 	from bank_reconciliation r
@@ -121,7 +131,7 @@ func scanReconciliation(row pgx.Row) (Reconciliation, error) {
 	var r Reconciliation
 	var opening, closing, book, outstanding string
 	if err := row.Scan(&r.ID, &r.LegalEntityID, &r.BankAccountID, &r.StatementID, &r.Currency, &r.PeriodFrom, &r.PeriodTo, &r.State,
-		&opening, &closing, &book, &outstanding,
+		&opening, &closing, &book, &outstanding, &r.BookBalanceStatedBy, &r.BookBalanceStatedAt,
 		&r.ClosedBy, &r.ClosedAt, &r.ReopenedBy, &r.ReopenedAt, &r.ReopenReason, &r.Version, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt,
 		&r.Summary.Lines, &r.Summary.MatchedCount, &r.Summary.MatchedTotal, &r.Summary.ExcludedCount, &r.Summary.ExcludedTotal,
 		&r.Summary.UnmatchedCount, &r.Summary.UnmatchedTotal); err != nil {
@@ -139,6 +149,7 @@ func scanReconciliation(row pgx.Row) (Reconciliation, error) {
 	places := int32(money.MinorUnits(r.Currency))
 	format := func(text string) string { return decimal.RequireFromString(text).StringFixed(places) }
 	r.OpeningBalance, r.ClosingBalance, r.BookBalance, r.OutstandingAmount = format(opening), format(closing), format(book), format(outstanding)
+	r.BookBalanceSource = "stated"
 	r.Summary.MatchedTotal, r.Summary.ExcludedTotal, r.Summary.UnmatchedTotal = format(r.Summary.MatchedTotal), format(r.Summary.ExcludedTotal), format(r.Summary.UnmatchedTotal)
 	r.Difference = domain.Difference(r.closing, r.book, r.outstanding.Add(r.excluded)).StringFixed(places)
 	return r, nil
@@ -173,18 +184,31 @@ func scaleProblem(field string, places int32) error {
 
 const validationDetail = "request failed validation"
 
-func recordReconEvent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, reconciliationID, event, actor string, reason *string) error {
-	_, err := tx.Exec(ctx, `insert into bank_reconciliation_event (tenant_id, id, legal_entity_id, reconciliation_id, event, actor, reason)
-		values ($1, $2, $3, $4, $5, $6, $7)`, tenantID, ids.New(), legalEntityID, reconciliationID, event, actor, reason)
+func recordReconEvent(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, reconciliationID, event, actor string, reason *string, detail map[string]string) error {
+	var detailJSON []byte
+	if detail != nil {
+		var err error
+		if detailJSON, err = json.Marshal(detail); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(ctx, `insert into bank_reconciliation_event (tenant_id, id, legal_entity_id, reconciliation_id, event, actor, reason, detail)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, ids.New(), legalEntityID, reconciliationID, event, actor, reason, detailJSON)
 	return err
 }
 
 func loadReconciliation(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Reconciliation, error) {
-	query := reconSelect + `where r.tenant_id = $1 and r.id = $2`
 	if lock {
-		query += ` for update of r`
+		var locked string
+		err := tx.QueryRow(ctx, `select id::text from bank_reconciliation where tenant_id = $1 and id = $2 for update`, tenantID, id).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Reconciliation{}, notFound(CodeReconNotFound, "reconciliation not found")
+		}
+		if err != nil {
+			return Reconciliation{}, err
+		}
 	}
-	r, err := scanReconciliation(tx.QueryRow(ctx, query, tenantID, id))
+	r, err := scanReconciliation(tx.QueryRow(ctx, reconSelect+`where r.tenant_id = $1 and r.id = $2`, tenantID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, notFound(CodeReconNotFound, "reconciliation not found")
 	}
@@ -227,8 +251,8 @@ func (s *Postgres) CreateReconciliation(ctx context.Context, in NewReconciliatio
 			}
 			id := ids.New()
 			_, err = tx.Exec(ctx, `insert into bank_reconciliation (tenant_id, id, legal_entity_id, bank_account_id, statement_id, currency, period_from, period_to,
-				opening_balance, closing_balance, book_balance, outstanding_amount, created_by)
-				select tenant_id, $3, legal_entity_id, bank_account_id, id, currency, opening_date, closing_date, opening_amount, closing_amount, $4, $5, $6
+				opening_balance, closing_balance, book_balance, outstanding_amount, book_balance_stated_by, created_by)
+				select tenant_id, $3, legal_entity_id, bank_account_id, id, currency, opening_date, closing_date, opening_amount, closing_amount, $4, $5, $6, $6
 				from bank_statement where tenant_id = $1 and id = $2`, p.TenantID, in.StatementID, id, in.BookBalance.String(), in.OutstandingAmount.String(), createdBy(p))
 			var pg *pgconn.PgError
 			if errors.As(err, &pg) && pg.Code == uniqueViolation {
@@ -237,7 +261,8 @@ func (s *Postgres) CreateReconciliation(ctx context.Context, in NewReconciliatio
 			if err != nil {
 				return Reconciliation{}, err
 			}
-			if err := recordReconEvent(ctx, tx, p.TenantID, legalEntityID, id, "created", createdBy(p), nil); err != nil {
+			if err := recordReconEvent(ctx, tx, p.TenantID, legalEntityID, id, "created", createdBy(p), nil,
+				map[string]string{"bookBalance": in.BookBalance.String(), "outstandingAmount": in.OutstandingAmount.String()}); err != nil {
 				return Reconciliation{}, err
 			}
 			return loadReconciliation(ctx, tx, p.TenantID, id, false)
@@ -356,8 +381,13 @@ func (s *Postgres) SetReconciliationBalances(ctx context.Context, id string, ver
 		if err := checkScale(cur.Currency, map[string]decimal.Decimal{"bookBalance": book, "outstandingAmount": outstanding}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `update bank_reconciliation set book_balance = $3, outstanding_amount = $4, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2`, p.TenantID, id, book.String(), outstanding.String()); err != nil {
+		if _, err := tx.Exec(ctx, `update bank_reconciliation set book_balance = $3, outstanding_amount = $4, book_balance_stated_by = $5, book_balance_stated_at = now(),
+			version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, book.String(), outstanding.String(), createdBy(p)); err != nil {
+			return err
+		}
+		if err := recordReconEvent(ctx, tx, p.TenantID, cur.LegalEntityID, id, "balances_set", createdBy(p), nil, map[string]string{
+			"oldBookBalance": cur.book.String(), "newBookBalance": book.String(),
+			"oldOutstandingAmount": cur.outstanding.String(), "newOutstandingAmount": outstanding.String(), "previouslyStatedBy": cur.BookBalanceStatedBy}); err != nil {
 			return err
 		}
 		out, err = loadReconciliation(ctx, tx, p.TenantID, id, false)
@@ -378,19 +408,38 @@ func (s *Postgres) CloseReconciliation(ctx context.Context, id string, version i
 			return err
 		}
 		if cur.State == StateClosed {
+			cur.Replayed = true
 			out = cur
 			return nil
 		}
 		if cur.Version != version {
 			return versionMismatch()
 		}
-		var pending int
-		if err := tx.QueryRow(ctx, `select count(*) from bank_line_transaction where tenant_id = $1 and statement_id = $2 and status = 'pending'`,
-			p.TenantID, cur.StatementID).Scan(&pending); err != nil {
+		if cur.BookBalanceStatedBy == createdBy(p) {
+			return httpx.NewProblem(http.StatusForbidden, CodeBalanceStater, "the person who last stated the book balance cannot close the reconciliation; another person must")
+		}
+		pendingRows, err := tx.Query(ctx, `select line_no from bank_line_transaction where tenant_id = $1 and statement_id = $2 and status in ('pending', 'conflict') order by line_no`,
+			p.TenantID, cur.StatementID)
+		if err != nil {
 			return err
 		}
-		if pending > 0 {
-			return httpx.NewProblem(http.StatusConflict, CodePostingPending, strconv.Itoa(pending)+" bank transactions from statement lines are still being posted; repeat their requests to finish them")
+		var pendingLines []string
+		for pendingRows.Next() {
+			var n int
+			if err := pendingRows.Scan(&n); err != nil {
+				pendingRows.Close()
+				return err
+			}
+			pendingLines = append(pendingLines, strconv.Itoa(n))
+		}
+		pendingRows.Close()
+		if err := pendingRows.Err(); err != nil {
+			return err
+		}
+		if len(pendingLines) > 0 {
+			problem := httpx.NewProblem(http.StatusConflict, CodePostingPending, "bank transactions from statement lines are still being posted or need a person; repeat their requests or abandon them")
+			problem.Errors = map[string]string{"pendingLines": strings.Join(pendingLines, ",")}
+			return problem
 		}
 		if cur.Summary.UnmatchedCount > 0 {
 			return unprocessable(CodeReconOpenLines, strconv.Itoa(cur.Summary.UnmatchedCount)+" statement lines are neither matched nor excluded")
@@ -402,7 +451,7 @@ func (s *Postgres) CloseReconciliation(ctx context.Context, id string, version i
 			where tenant_id = $1 and id = $2`, p.TenantID, id, createdBy(p)); err != nil {
 			return err
 		}
-		if err := recordReconEvent(ctx, tx, p.TenantID, cur.LegalEntityID, id, "closed", createdBy(p), nil); err != nil {
+		if err := recordReconEvent(ctx, tx, p.TenantID, cur.LegalEntityID, id, "closed", createdBy(p), nil, nil); err != nil {
 			return err
 		}
 		out, err = loadReconciliation(ctx, tx, p.TenantID, id, false)
@@ -432,8 +481,8 @@ func (s *Postgres) ReopenReconciliation(ctx context.Context, id string, version 
 			return httpx.NewProblem(http.StatusForbidden, CodeReopenFourEyes, "the person who closed the reconciliation cannot reopen it; another person must")
 		}
 		var later int
-		if err := tx.QueryRow(ctx, `select count(*) from bank_reconciliation where tenant_id = $1 and bank_account_id = $2 and state = 'closed' and period_to > $3::date`,
-			p.TenantID, cur.BankAccountID, cur.PeriodTo).Scan(&later); err != nil {
+		if err := tx.QueryRow(ctx, `select count(*) from bank_reconciliation where tenant_id = $1 and bank_account_id = $2 and state = 'closed' and period_to >= $3::date and id <> $4`,
+			p.TenantID, cur.BankAccountID, cur.PeriodTo, id).Scan(&later); err != nil {
 			return err
 		}
 		if later > 0 {
@@ -443,7 +492,7 @@ func (s *Postgres) ReopenReconciliation(ctx context.Context, id string, version 
 			where tenant_id = $1 and id = $2`, p.TenantID, id, createdBy(p), reason); err != nil {
 			return err
 		}
-		if err := recordReconEvent(ctx, tx, p.TenantID, cur.LegalEntityID, id, "reopened", createdBy(p), &reason); err != nil {
+		if err := recordReconEvent(ctx, tx, p.TenantID, cur.LegalEntityID, id, "reopened", createdBy(p), &reason, nil); err != nil {
 			return err
 		}
 		out, err = loadReconciliation(ctx, tx, p.TenantID, id, false)
