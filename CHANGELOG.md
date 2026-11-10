@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- Billing reports INVOICED to the sales order (#29): posting an invoice that bills order lines queues one report per (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014), and a leased reporter (`SALES_URL`, `BILLING_SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it to sales' `:record-progress` as `service:billing-sales-report` with only `sales.order.record-invoice` (now `service_only`), key `billing-invoice:{invoiceId}:{orderId}`, retrying with backoff and parking a refused report with its reason; credit notes are not reported (sales has no reversal of an invoice). `SLS-0058`/`SLS-0059` answers are retried as "not yet" until the delivery report arrives; `GET /v1/billing/sales-reports` and `POST /v1/billing/sales-reports/{id}:retry` list and re-queue parked reports, the counter `billing_sales_reports_parked_total` counts them, and a batch is sized to fit the lease. The web record form now says deliveries and invoices are recorded automatically.
 - batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
   approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
   source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
