@@ -67,7 +67,7 @@ export function MyProfilePage() {
       </div>
     );
   }
-  if (state.loading || !state.data) {
+  if (!state.data) {
     return (
       <div className={styles.stack} aria-busy="true">
         <PageHeader title="My profile" />

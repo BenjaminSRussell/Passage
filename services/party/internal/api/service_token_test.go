@@ -38,7 +38,12 @@ func newPartyRig(t *testing.T) *partyRig {
 
 func (r *partyRig) call(t *testing.T, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, strings.NewReader(""))
+	return r.do(t, http.MethodGet, path, token)
+}
+
+func (r *partyRig) do(t *testing.T, method, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
 	req.Header.Set(tenant.HeaderServiceToken, token)
 	rec := httptest.NewRecorder()
 	r.handler.ServeHTTP(rec, req)
@@ -65,13 +70,18 @@ func TestServiceToken_ReceivingReadsAVendorButCannotRevealBankAccounts(t *testin
 	}
 }
 
-func TestServiceToken_PayablesRevealsButCannotReadOrWrite(t *testing.T) {
+// Payables holds party.vendor-bank.reveal and, for the opening-item import (#49),
+// party.import.read, which admits a vendor read; it holds no party write duty.
+func TestServiceToken_PayablesRevealsAndReadsButCannotWrite(t *testing.T) {
 	r := newPartyRig(t)
 	if rec := r.call(t, vendorLookupPath+"/bank-accounts:reveal", mintFor(t, r.payables, "party")); rec.Code != http.StatusOK {
 		t.Fatalf("signed payables reveal: %d %s", rec.Code, rec.Body)
 	}
-	if rec := r.call(t, vendorLookupPath, mintFor(t, r.payables, "party")); rec.Code != http.StatusForbidden {
-		t.Fatalf("payables holds the reveal duty only, vendor read = %d", rec.Code)
+	if rec := r.call(t, vendorLookupPath, mintFor(t, r.payables, "party")); rec.Code != http.StatusOK {
+		t.Fatalf("payables holds party.import.read, vendor read = %d %s", rec.Code, rec.Body)
+	}
+	if rec := r.do(t, http.MethodPost, vendorLookupPath+"/bank-accounts", mintFor(t, r.payables, "party")); rec.Code != http.StatusForbidden {
+		t.Fatalf("payables holds no party write duty, bank account write = %d", rec.Code)
 	}
 }
 
