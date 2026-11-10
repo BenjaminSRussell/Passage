@@ -831,3 +831,115 @@ func TestGLPostings_RefusalOfADocumentBookedMeanwhileIsNotAnError(t *testing.T) 
 		t.Errorf("%+v, want a document booked by a concurrent call skipped, not reported", out)
 	}
 }
+
+func (g *glRig) autoBook(t *testing.T) (booked, failed int, err error) {
+	t.Helper()
+	ctx := tenant.With(testkit.Ctx(testkit.TenantID(1)), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: leID, UserID: "system:billing-autobook"})
+	return g.api.AutoBook(ctx, leID)
+}
+
+func TestAutoBook_BooksPostedInvoicesOnceWithoutARequest(t *testing.T) {
+	g := newGLRig(t, true)
+	first := g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	second := g.invoice(t, gridLine{"20.00", "4000", "", ""})
+	if booked, failed, err := g.autoBook(t); err != nil || booked != 2 || failed != 0 {
+		t.Fatalf("auto-book booked %d, failed %d, err %v; want both invoices", booked, failed, err)
+	}
+	if got, want := lineAmounts(g.entryFor(t, first)), map[string]string{"Dr 1200": "10.00", "Cr 4000": "10.00"}; !sameAmounts(got, want) {
+		t.Errorf("first entry %v, want %v", got, want)
+	}
+	if got, want := lineAmounts(g.entryFor(t, second)), map[string]string{"Dr 1200": "20.00", "Cr 4000": "20.00"}; !sameAmounts(got, want) {
+		t.Errorf("second entry %v, want %v", got, want)
+	}
+	if booked, _, err := g.autoBook(t); err != nil || booked != 0 || len(g.fake.Entries()) != 2 {
+		t.Errorf("second tick booked %d (err %v) with %d entries, want nothing more", booked, err, len(g.fake.Entries()))
+	}
+	if out := g.book(t, http.StatusOK, ""); len(out.Items) != 0 || len(g.fake.Entries()) != 2 {
+		t.Errorf("manual run after auto-book booked %d, entries %d; want none more", len(out.Items), len(g.fake.Entries()))
+	}
+}
+
+func TestAutoBook_LostLedgerAnswerRetriesWithoutPostingTwice(t *testing.T) {
+	g := newGLRig(t, true)
+	id := g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	g.fake.LoseAnswers(errors.New("timeout"))
+	if _, _, err := g.autoBook(t); err == nil {
+		t.Fatal("a lost ledger answer must surface as an error")
+	}
+	if len(g.fake.Entries()) != 1 {
+		t.Fatalf("%d entries after the lost answer, want the one the ledger accepted", len(g.fake.Entries()))
+	}
+	g.fake.LoseAnswers(nil)
+	if booked, _, err := g.autoBook(t); err != nil || booked != 0 {
+		t.Fatalf("tick inside the backoff booked %d (err %v), want it skipped", booked, err)
+	}
+	g.clock = g.clock.Add(time.Hour)
+	if booked, _, err := g.autoBook(t); err != nil || booked != 1 {
+		t.Fatalf("retry booked %d (err %v), want the invoice", booked, err)
+	}
+	if b := g.balance(t, "1200"); len(g.fake.Entries()) != 1 || b.Debit.StringFixed(2) != "10.00" {
+		t.Errorf("%d entries, 1200 debited %s; want one entry and the gross debited once", len(g.fake.Entries()), b.Debit)
+	}
+	if got, want := lineAmounts(g.entryFor(t, id)), map[string]string{"Dr 1200": "10.00", "Cr 4000": "10.00"}; !sameAmounts(got, want) {
+		t.Errorf("entry %v, want %v", got, want)
+	}
+}
+
+func TestAutoBook_SkipsARunAnotherReplicaHolds(t *testing.T) {
+	g := newGLRig(t, true)
+	g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	unlock, ok, err := g.api.glBooks.(*store.Postgres).LockGLRun(testkit.Ctx(testkit.TenantID(1)), leID)
+	if err != nil || !ok {
+		t.Fatalf("lock: ok %v err %v", ok, err)
+	}
+	if booked, failed, err := g.autoBook(t); err != nil || booked != 0 || failed != 0 || len(g.fake.Entries()) != 0 {
+		t.Errorf("auto-book against a held run: booked %d failed %d err %v entries %d; want a quiet skip", booked, failed, err, len(g.fake.Entries()))
+	}
+	unlock()
+	if booked, _, err := g.autoBook(t); err != nil || booked != 1 {
+		t.Errorf("after the other run ended booked %d (err %v), want the invoice", booked, err)
+	}
+}
+
+func TestAutoBook_NotConfiguredAndUnmappedEntityAreErrors(t *testing.T) {
+	if _, _, err := newGLRig(t, false).autoBook(t); err == nil {
+		t.Error("auto-book without a ledger must fail")
+	}
+	g := newGLRig(t, true)
+	if _, _, err := g.api.AutoBook(testkit.Ctx(testkit.TenantID(1)), ids.New()); err == nil {
+		t.Error("auto-book for an entity without a profile must fail")
+	}
+}
+
+func TestAutoBook_ContinuesPastAPageAndCountsWhatAFailedRunBooked(t *testing.T) {
+	g := newGLRig(t, true)
+	g.api.glBatch = 1
+	g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	g.invoice(t, gridLine{"20.00", "4000", "", ""})
+	if booked, _, err := g.autoBook(t); err != nil || booked != 2 {
+		t.Fatalf("booked %d (err %v) with a page of 1, want both documents in one call", booked, err)
+	}
+	g.api.glBatch = defaultGLBatch
+	g.invoice(t, gridLine{"30.00", "4000", "", ""})
+	g.invoice(t, gridLine{"40.00", "4000", "", ""})
+	third := g.invoice(t, gridLine{"50.00", "4000", "", ""})
+	g.ledger.refuse[third] = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable}
+	if booked, _, err := g.autoBook(t); err == nil || booked != 2 {
+		t.Errorf("outage midway: booked %d, err %v; want the 2 already booked reported with the error", booked, err)
+	}
+}
+
+func TestParseGLProfiles_TenantIDIsOptionalAndMustBeAUUID(t *testing.T) {
+	entry := func(tenantField string) string {
+		return `[{"legalEntityId":"` + leID + `","ledgerId":"` + ids.New() + `","receivableAccount":"1200","taxAccount":"2300","chargeAccount":"4800","deferredRevenueAccounts":["4100"]` + tenantField + `}]`
+	}
+	if got, err := ParseGLProfiles(entry(``)); err != nil || got[leID].TenantID != "" {
+		t.Errorf("no tenantId: %+v %v", got, err)
+	}
+	if got, err := ParseGLProfiles(entry(`,"tenantId":"` + testkit.TenantID(1) + `"`)); err != nil || got[leID].TenantID != testkit.TenantID(1) {
+		t.Errorf("tenantId: %+v %v", got, err)
+	}
+	if _, err := ParseGLProfiles(entry(`,"tenantId":"acme"`)); err == nil {
+		t.Error("a tenantId that is not a UUID was accepted")
+	}
+}

@@ -32,6 +32,7 @@ const (
 var ErrGLAlreadyBooked = errors.New("the document already has a ledger entry")
 
 type GLProfile struct {
+	TenantID                string   `json:"tenantId,omitempty"`
 	LegalEntityID           string   `json:"legalEntityId"`
 	LedgerID                string   `json:"ledgerId"`
 	ReceivableAccount       string   `json:"receivableAccount"`

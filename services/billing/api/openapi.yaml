@@ -301,6 +301,8 @@ paths:
       summary: Book the invoice journal (FR-29.3) of posted invoices and credit notes in the general ledger.
       x-passage-duty: billing.invoice.post (InvoicePost)
       description: >
+        The auto-book worker (BILLING_GL_AUTOBOOK_TENANT_IDS) runs this same posting on a timer; calling it books what the worker has
+        not reached yet, and a document booked by either is never booked again (ledger key per document).
         Books one balanced entry per posted invoice not yet booked: Dr receivable
         (billed gross), Cr revenue per line account, Cr 2400, Cr / Dr contract position,
         Cr charges, Cr tax. The invoice lines, the receivable and the tax keep the contractual

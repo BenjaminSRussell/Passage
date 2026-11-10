@@ -8,6 +8,10 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Added
+
+- Billing: posted invoices and credit notes book their GL journal without an API request. An auto-book worker (`BILLING_GL_AUTOBOOK_TENANT_IDS`, `BILLING_GL_AUTOBOOK_INTERVAL`; chart `autoBook`) runs the `gl-postings` run per tenant and legal entity, idempotent per document and safe to retry after a lost ledger answer; the `outbox-billing` Debezium connector (CDC migrations 0012-0013, `debezium-cdc-billing` secret, `passage.billing.invoice` ACL) publishes billing's events, with a deploy test that checks the route against the AsyncAPI channel and ACLs (#29).
+
 ### Fixed
 
 - Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
