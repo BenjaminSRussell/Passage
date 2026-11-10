@@ -31,6 +31,8 @@ const (
 	// dutyImportRead lets the migration loader read back what it loaded (parties, customer and vendor roles) for
 	// reconciliation. It carries no pii.read, so a date of birth stays masked.
 	dutyImportRead = "party.import.read"
+	// dutyVendorLookup is the one read a vendor-checking service (payables) needs: a vendor role by id, nothing else.
+	dutyVendorLookup = "party.vendor.lookup"
 	codeInvalid    = "PTY-0001"
 )
 

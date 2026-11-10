@@ -344,7 +344,7 @@ paths:
     get:
       operationId: getVendor
       x-passage-duty: party.read
-      x-passage-duty-alternatives: [party.import.read]
+      x-passage-duty-alternatives: [party.import.read, party.vendor.lookup]
       description: The vendor role, including vendorGroupId.
       responses:
         '200': { description: The vendor role., content: { application/json: { schema: { $ref: '#/components/schemas/Vendor' } } } }

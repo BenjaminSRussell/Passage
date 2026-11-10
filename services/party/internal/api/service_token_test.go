@@ -65,13 +65,13 @@ func TestServiceToken_ReceivingReadsAVendorButCannotRevealBankAccounts(t *testin
 	}
 }
 
-func TestServiceToken_PayablesRevealsButCannotReadOrWrite(t *testing.T) {
+func TestServiceToken_PayablesRevealsAndLooksUpAVendor(t *testing.T) {
 	r := newPartyRig(t)
 	if rec := r.call(t, vendorLookupPath+"/bank-accounts:reveal", mintFor(t, r.payables, "party")); rec.Code != http.StatusOK {
 		t.Fatalf("signed payables reveal: %d %s", rec.Code, rec.Body)
 	}
-	if rec := r.call(t, vendorLookupPath, mintFor(t, r.payables, "party")); rec.Code != http.StatusForbidden {
-		t.Fatalf("payables holds the reveal duty only, vendor read = %d", rec.Code)
+	if rec := r.call(t, vendorLookupPath, mintFor(t, r.payables, "party")); rec.Code != http.StatusOK {
+		t.Fatalf("payables holds the vendor lookup duty, vendor read = %d", rec.Code)
 	}
 }
 
