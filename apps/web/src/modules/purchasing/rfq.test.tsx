@@ -275,9 +275,9 @@ describe("RFQ detail", () => {
       return json(open);
     });
     const { container } = renderAt(`/purchasing/rfqs/${RFQ_ID}`);
-    const best = await screen.findByLabelText(/^#1 vendor 33333333: 9\.5 USD each, 12 days, total 95 USD$/);
+    const best = await screen.findByLabelText(/^#1 vendor Vendor 33333333: 9\.5 USD each, 12 days, total 95 USD$/);
     expect(best).toBeChecked();
-    expect(screen.getByLabelText(/^Late, excluded from ranking: vendor 44444444/)).not.toBeChecked();
+    expect(screen.getByLabelText(/^Late, excluded from ranking: vendor Vendor 44444444/)).not.toBeChecked();
     expect(screen.getByText("No replies to this line.")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 

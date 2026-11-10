@@ -5,10 +5,11 @@ import { signedPct } from "./fundFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const columns: DataTableColumn<Promotion>[] = [
   { key: "name", header: "Promotion" },
-  { key: "productId", header: "Product", mono: true },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
   { key: "window", header: "Window", mono: true, render: (row) => `${row.startDate} – ${row.endDate}` },
   { key: "plannedSpend", header: "Planned spend", mono: true, align: "end", render: (row) => `${row.plannedSpend} ${row.currency}` },
   { key: "effectivenessPct", header: "Actual lift", mono: true, align: "end", render: (row) => (row.effectivenessPct ? signedPct(row.effectivenessPct) : "Awaiting actuals") },

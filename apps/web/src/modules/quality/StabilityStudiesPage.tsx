@@ -21,6 +21,8 @@ import { dash, formatDate, formatDateTime, PULL_STATUS_LABELS, shortId, STUDY_ST
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 /** ICH Q1A(R2) storage conditions offered on the form; any other condition can be typed. */
 export const ICH_CONDITIONS = ["25C/60RH", "30C/65RH", "30C/75RH", "40C/75RH", "5C", "-20C"] as const;
@@ -40,7 +42,7 @@ export function nextPull(study: Study): Pull | undefined {
 
 const columns: DataTableColumn<Study>[] = [
   { key: "id", header: "Study", mono: true, render: (row) => <Link to={`/quality/stability/${row.id}`}>{`Open study ${shortId(row.id)}`}</Link> },
-  { key: "itemId", header: "Item", mono: true, render: (row) => shortId(row.itemId) },
+  { key: "itemId", header: "Item", render: (row) => <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> },
   { key: "batchId", header: "Batch", mono: true },
   { key: "condition", header: "Condition" },
   { key: "startDate", header: "Start", render: (row) => formatDate(row.startDate) },
@@ -133,7 +135,7 @@ type Errors = Partial<Record<keyof StudyValues, string>>;
 /** Checks that mirror the service's ValidateStudy, and the request the form sends. */
 export function validateStudy(values: StudyValues): { errors: Errors; input?: NewStudy } {
   const errors: Errors = {};
-  if (!UUID.test(values.itemId.trim())) errors.itemId = "Enter the item id (a UUID).";
+  if (!UUID.test(values.itemId.trim())) errors.itemId = "Choose an item.";
   const batch = values.batchId.trim();
   if (batch === "" || batch.length > 60) errors.batchId = "Enter the batch, up to 60 characters.";
   const protocol = values.protocol.trim();
@@ -219,7 +221,13 @@ export function NewStudyPage() {
 
   const text = (id: keyof StudyValues, label: string, hint?: string, extra?: Record<string, unknown>) => (
     <FormField id={`study-${id}`} label={label} hint={hint} error={errors[id]}>
-      {(control) => <Input {...control} {...extra} value={values[id]} invalid={Boolean(errors[id])} onChange={(event) => update({ [id]: event.target.value })} />}
+      {(control) =>
+        id === "itemId" ? (
+          <EntityLookup {...control} entity="product" value={values.itemId} invalid={Boolean(errors.itemId)} onChange={(event) => update({ itemId: event.target.value })} />
+        ) : (
+          <Input {...control} {...extra} value={values[id]} invalid={Boolean(errors[id])} onChange={(event) => update({ [id]: event.target.value })} />
+        )
+      }
     </FormField>
   );
 
@@ -233,7 +241,7 @@ export function NewStudyPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Plan a stability study">
-          {text("itemId", "Item id", undefined, { className: styles.mono })}
+          {text("itemId", "Item")}
           {text("batchId", "Batch", undefined, { maxLength: 60 })}
           {text("protocol", "Protocol", undefined, { maxLength: 120 })}
           <FormField id="study-condition" label="Storage condition" hint="ICH Q1A(R2): 25C/60RH long term, 40C/75RH accelerated." error={errors.condition}>

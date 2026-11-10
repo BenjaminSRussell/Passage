@@ -1,5 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { lookupDefs } from "../../shell/lookup/entities";
+import { useWorkContext } from "../../shell/lookup/workContext";
+import { listLocations } from "./api/client";
 import { useSearchParams } from "react-router-dom";
 import { Card, EmptyState, FormField, type BadgeTone } from "../../shell/ui";
 import type { Capacity, LineStatus, Location, LocationStatus, WorkStatus } from "./api/client";
@@ -27,6 +30,20 @@ export function useWarehouse(): [string, (id: string) => void] {
   const [params, setParams] = useSearchParams();
   const [remembered] = useState(stored);
   const value = params.get("warehouse") ?? remembered;
+  const { legalEntityId, siteId } = useWorkContext();
+  useEffect(() => {
+    // With nothing chosen or remembered, start in the first warehouse of the working context.
+    if (value !== "" || legalEntityId === "") return;
+    const controller = new AbortController();
+    lookupDefs.warehouse.search("", { legalEntityId, siteId: siteId || undefined }, controller.signal).then(
+      (found) => {
+        if (found.length > 0) set(found[0].id);
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, legalEntityId, siteId]);
   const set = (id: string) => {
     const next = new URLSearchParams(params);
     next.set("warehouse", id);
@@ -50,6 +67,25 @@ export function WarehouseField({ value, onChange, id = "wh-warehouse", error }: 
     </FormField>
   );
 }
+
+/** Bin location names of a warehouse, by id; an id that is not found reads as "a location". */
+export function useLocationNames(warehouseId: string | undefined): (id: string | undefined) => string {
+  const [names, setNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!warehouseId || !UUID.test(warehouseId)) return;
+    let live = true;
+    listLocations({ warehouseId, limit: 200 }).then(
+      (page) => live && setNames(Object.fromEntries((page.items ?? []).map((l) => [l.id, l.name]))),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [warehouseId]);
+  return (id) => (id ? (names[id] ?? "—") : "—");
+}
+
+export { Named } from "../purchasing/Named";
 
 export function ChooseWarehouse() {
   return (

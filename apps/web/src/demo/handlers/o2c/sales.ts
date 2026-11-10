@@ -11,12 +11,12 @@ import type {
   Order,
   OrderLine,
   OrderSummary,
-  SalesSummary,
   UtilizationStatus,
 } from "../../../modules/sales/api/client";
-import { CUSTOMERS, LEGAL_ENTITY, PLANT, WH_FG, itemByNumber } from "../../company";
+import { LEGAL_ENTITY, PLANT, SITES, WAREHOUSES, WH_FG, itemByNumber } from "../../company";
 import { reply, route } from "../../backend";
 import { at, day, dec, filterBy, uid } from "../../store";
+import { setBackorderCount } from "./quotations";
 import { K, SALES_ACTOR, balanceOf, creditProfiles, customerById, evaluateCredit, exposureOf, itemById, orderNumber, orderSeq, orders, progress, r2, recordVersion, scheduleLines, versions } from "./model";
 
 const BASE = "/api/v1/sales";
@@ -79,11 +79,11 @@ route("POST", `${BASE}/orders`, ({ body }) => {
   const input = body as NewOrder;
   const errors: Record<string, string> = {};
   const customer = customerById(input.customerId);
-  // Any legal entity, site or warehouse id is accepted and mapped to the demo company's, so only the customer and products need real ids.
-  if (!customer) errors.customerId = `Unknown customer. Try ${CUSTOMERS[0].id} (${CUSTOMERS[0].name}), or copy one from an order's detail page.`;
+  // The legal entity is always the demo company's; sites and warehouses fall back to the plant when an id is not known.
+  if (!customer) errors.customerId = "Choose a customer from the list.";
   const lines: OrderLine[] = (input.lines ?? []).map((l, i) => {
     const item = itemById(l.productId);
-    if (!item) errors[`lines[${i}].productId`] = `Unknown product. Try ${itemByNumber("CP-200").id} (CP-200), or copy one from an order's line table.`;
+    if (!item) errors[`lines[${i}].productId`] = "Choose a product from the list.";
     const qty = Number(l.quantity);
     const disc = Number(l.discPct ?? 0);
     return {
@@ -92,8 +92,8 @@ route("POST", `${BASE}/orders`, ({ body }) => {
       productId: l.productId,
       quantity: l.quantity,
       unit: l.unit,
-      siteId: PLANT.id,
-      warehouseId: WH_FG.id,
+      siteId: SITES.some((x) => x.id === l.siteId) ? l.siteId : PLANT.id,
+      warehouseId: WAREHOUSES.some((x) => x.id === l.warehouseId) ? l.warehouseId : WH_FG.id,
       unitPrice: l.unitPrice,
       discPct: dec(disc),
       lineNet: dec(r2(qty * Number(l.unitPrice) * (1 - disc / 100))),
@@ -368,38 +368,6 @@ route("GET", `${BASE}/credit-profiles/{customerId}`, ({ params }) => {
 
 // ---- Workspace ----
 
-/** Open quotations are fixed sample figures; the other tiles count the live tables. */
-let lapsed = 1;
-route("GET", `${BASE}/summary`, ({ query }) => {
-  const windowDays = Number(query.get("windowDays") ?? 90);
-  const status = query.get("status");
-  const pipeline = status === "SENT" ? { openCount: 3, openNet: "152880.00", weightedNet: "91728.00" } : status === "DRAFT" ? { openCount: 2, openNet: "58640.00", weightedNet: "23456.00" } : { openCount: 5, openNet: "211520.00", weightedNet: "115184.00" };
-  const body: SalesSummary = {
-    activeHolds: orders.all().reduce((n, o) => n + o.holds.filter((h) => h.status === "ACTIVE").length, 0),
-    backorderLines: backorders().length,
-    quotationsExpiring: 2,
-    quotationsLapsed: lapsed,
-    openIntakeErrors: 0,
-    pipeline: [{ currency: "USD", ...pipeline }],
-    windowDays,
-    won: Math.round((windowDays / 90) * 11),
-    lost: Math.round((windowDays / 90) * 4),
-    expired: Math.round((windowDays / 90) * 3),
-    conversionRatePct: "61.1",
-  };
-  return body;
-});
-
-route("POST", `${BASE}/quotations:expire`, () => {
-  const count = lapsed;
-  lapsed = 0;
-  return {
-    count,
-    more: false,
-    expired: count > 0 ? [{ id: uid(112, 7), quotationNumber: "SQ-004417", legalEntityId: LEGAL_ENTITY.id, customerId: CUSTOMERS[2].id, validUntil: day(-3), previousStatus: "SENT", version: 2 }] : [],
-  };
-});
-
 function backorders(): BackorderItem[] {
   return orders
     .all()
@@ -431,6 +399,7 @@ function backorders(): BackorderItem[] {
     );
 }
 route("GET", `${BASE}/backorders`, () => ({ items: backorders() }));
+setBackorderCount(() => backorders().length);
 
 // ---- Order entry helpers ----
 

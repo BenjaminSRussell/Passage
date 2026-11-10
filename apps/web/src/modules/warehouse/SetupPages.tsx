@@ -27,7 +27,6 @@ import {
   INTEGER,
   LOCATION_STATUS_TONES,
   sentence,
-  shortId,
   stockText,
   usedText,
   useWarehouse,
@@ -366,7 +365,6 @@ const directiveColumns: DataTableColumn<Directive>[] = [
         : "Every line",
   },
   { key: "lines", header: "Quantity bands and actions", render: (d) => [...d.lines].sort((a, b) => a.seq - b.seq).map(bandText).join("; ") },
-  { key: "id", header: "Id", mono: true, render: (d) => <span title={d.id}>{shortId(d.id)}</span> },
 ];
 
 /** Location directives of a warehouse in evaluation order (FR-31.3). */

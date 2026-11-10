@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, type DataTableColumn } from "../../shell/ui";
 import { assignWave, closeWave, describeProblem, type Problem, type Wave, type WaveLine } from "./api/client";
-import { compareDecimal, dash, shortId } from "./format";
+import { compareDecimal, dash } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** A stale wave version gets a message that names the wave, not the shipment. */
 function explainWave(problem: Problem): Problem {
@@ -160,7 +161,7 @@ export function pickListOrder(lines: WaveLine[]): WaveLine[] {
 
 const listColumns: DataTableColumn<WaveLine>[] = [
   { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
   { key: "shipmentNumber", header: "Shipment", mono: true },
   { key: "qtyPlanned", header: "To pick", align: "end", render: (row) => `${row.qtyPlanned} ${row.unit}` },
   {

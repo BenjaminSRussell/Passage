@@ -50,6 +50,7 @@ import { CODE, CURRENCY, decimalText, mapFields, positive, wholeNumber, WEEK_MIN
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderSelect } from "../mfg-shared/orders";
 
 interface Detail {
   campaign: Campaign;
@@ -114,7 +115,7 @@ export function CampaignDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad<Detail>(async (signal) => {
     const [campaign, resources] = await Promise.all([getCampaign(id, signal), listResources(signal)]);
-    return { campaign, codes: Object.fromEntries(resources.map((r) => [r.id, r.code])) };
+    return { campaign, codes: Object.fromEntries(resources.map((r) => [r.id, `${r.name} (${r.code})`])) };
   }, id);
   const [updated, setUpdated] = useState<Campaign | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -417,8 +418,8 @@ function AddOrderForm({ disabled, onAdd }: { disabled: boolean; onAdd(order: New
 
   return (
     <form className={styles.form} onSubmit={submit} noValidate aria-label="Add an order">
-      <FormField id="campaign-order-id" label="Order id" error={errors.orderId}>
-        {text("orderId")}
+      <FormField id="campaign-order-id" label="Production order" error={errors.orderId}>
+        {(control) => <OrderSelect {...control} value={values.orderId} onChange={(v) => update({ orderId: v })} />}
       </FormField>
       <FormField id="campaign-order-group" label="Setup group" hint="From the product or formula." error={errors.setupGroup}>
         {text("setupGroup", { upper: true })}

@@ -271,7 +271,7 @@ describe("stability studies", () => {
     };
     const { container } = renderAt("/quality/stability/new");
     await screen.findByRole("option", { name: "STAB-LT v1" });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Batch"), { target: { value: "B-1" } });
     fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2026-01-31" } });
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });
@@ -303,7 +303,7 @@ describe("stability studies", () => {
     };
     renderAt("/quality/stability/new");
     await screen.findByRole("option", { name: "STAB-LT v1" });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Batch"), { target: { value: "B-1" } });
     fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2026-01-31" } });
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });

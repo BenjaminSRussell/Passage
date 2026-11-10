@@ -52,7 +52,7 @@ describe("Returnable packaging movements", () => {
     const table = await findTable({ name: "Returnable packaging movements" });
     const rows = within(table).getAllByRole("row").slice(1);
     const cells = rows.map((row) => Array.from(row.querySelectorAll("td, th")).map((cell) => cell.textContent));
-    expect(cells[0]).toEqual(["2026-10-26 08:00 UTC", "0195f0a0", "PALLET", "Corrected", "-3", "7", "sheet 9", "Lost in transit", "0195f0a0"]);
+    expect(cells[0]).toEqual(["2026-10-26 08:00 UTC", "Not available⋯Copy id", "PALLET", "Corrected", "-3", "7", "sheet 9", "Lost in transit", "0195f0a0"]);
     expect(cells[1].slice(3, 6)).toEqual(["Shipped", "+10", "10"]);
     expect(within(rows[1]).getByRole("link", { name: "Packing slip" })).toHaveAttribute("href", `/fulfillment/packing-slips/${SLIP}`);
     expect(calls(MOVEMENTS)[0].url.searchParams.get("limit")).toBe(String(MOVEMENT_LIMIT));

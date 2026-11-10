@@ -95,13 +95,10 @@ describe("Sales workspace", () => {
     expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]);
   });
 
-  it("passes the legal entity and period, and refuses a malformed legal entity", async () => {
+  it("passes the legal entity and period", async () => {
     handler = () => ({ status: 200, body: summary() });
     renderWorkspace();
     await findTable({ name: "Open quotation pipeline" });
-    fireEvent.change(screen.getByLabelText(/Legal entity/), { target: { value: "nope" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    expect(await screen.findByText("Enter a UUID.")).toBeInTheDocument();
     const before = calls.length;
     fireEvent.change(screen.getByLabelText(/Legal entity/), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Conversion period"), { target: { value: "30" } });

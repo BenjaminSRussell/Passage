@@ -11,6 +11,8 @@ import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer }
 useFakeServer();
 
 const LE = "0190f0a0-0000-7000-8000-000000000001";
+const CUST = "22222222-0000-4000-8000-000000000002";
+const BOLTID = "33333333-0000-4000-8000-000000000003";
 const FG = "0190f0a0-0000-7000-8000-000000000f01";
 const day = today();
 
@@ -311,13 +313,13 @@ describe("Simulation with free goods", () => {
       orderNet: "207",
       applied: [],
       explainRef: "sha256:" + "a".repeat(64),
-      freeGoods: [{ lineNo: 1, productId: "BOLT", unit: "EA", ruleId: FG, kind: "INCLUSIVE", orderedQuantity: "25", pricedQuantity: "23", freeQuantity: "2" }],
+      freeGoods: [{ lineNo: 1, productId: BOLTID, unit: "EA", ruleId: FG, kind: "INCLUSIVE", orderedQuantity: "25", pricedQuantity: "23", freeQuantity: "2" }],
     };
     server.handler = (url, init) => (init.method === "POST" && url.pathname.endsWith("/resolve") ? json(200, resolved) : undefined);
     renderAt("/pricing/simulate");
-    fill("Legal entity id", LE);
-    fill("Customer", "C1");
-    fill("Product", "BOLT");
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
+    fill("Product", BOLTID);
     fill("Quantity", "25");
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
     const table = await findTable({ name: "Free goods proposals" });

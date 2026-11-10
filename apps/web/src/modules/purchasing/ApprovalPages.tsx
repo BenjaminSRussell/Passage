@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listRequisitionApprovals, type RequisitionApproval } from "./api/client";
-import { LoadError, ShortId, money, useResource } from "./parts";
+import { LoadError, money, useResource, Named } from "./parts";
 import styles from "./pages.module.css";
 
 export const approverRoleLabels: Record<string, string> = {
@@ -20,7 +20,7 @@ const columns: DataTableColumn<RequisitionApproval>[] = [
   { key: "approvedSteps", header: "Level", align: "end", render: (row) => `${row.approvedSteps + 1} of ${row.chainLength}` },
   { key: "total", header: "Estimated total", align: "end", render: (row) => money(row.total, row.currency) },
   { key: "lineCount", header: "Lines", align: "end" },
-  { key: "requesterId", header: "Requester", render: (row) => <ShortId id={row.requesterId} /> },
+  { key: "requesterId", header: "Requester", render: (row) => <Named entity="worker" id={row.requesterId} /> },
   { key: "submittedAt", header: "Last change", mono: true, render: (row) => row.submittedAt.slice(0, 10) },
 ];
 

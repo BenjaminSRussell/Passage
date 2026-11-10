@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listExceptions, type ExceptionStatus, type WarehouseException } from "./api/client";
-import { EXCEPTION_KIND_LABELS, formatDateTime, shortId } from "./format";
+import { EXCEPTION_KIND_LABELS, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../sales/OrderNumber";
 
 export function ExceptionStatusBadge({ status }: { status: ExceptionStatus }) {
   return status === "OPEN" ? <Badge tone="warning">Open</Badge> : <Badge tone="neutral">Resolved</Badge>;
@@ -18,7 +19,7 @@ const columns: DataTableColumn<WarehouseException>[] = [
     render: (row) => <Link to={`/fulfillment/exceptions/${row.id}`}>{EXCEPTION_KIND_LABELS[row.kind] ?? row.kind}</Link>,
   },
   { key: "status", header: "Status", render: (row) => <ExceptionStatusBadge status={row.status} /> },
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
   { key: "qty", header: "Quantity beyond", align: "end" },
   { key: "keptQty", header: "Order line keeps", align: "end" },
   { key: "createdAt", header: "Raised", render: (row) => formatDateTime(row.createdAt) },

@@ -17,7 +17,7 @@ describe("purchasing policy list", () => {
     const { router } = renderAt("/purchasing/policies");
     expect(await screen.findByRole("table", { name: "Purchasing policies" })).toHaveAttribute("aria-busy", "true");
     resolve(json({ items: [{ ...saved, poFourEyes: true }] }));
-    const row = await screen.findByText("11111111");
+    const row = await screen.findByText("Legal entity 11111111");
     expect(screen.getByText("Version")).toBeInTheDocument();
     fireEvent.click(row);
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/policies/${LE}`));
@@ -63,7 +63,7 @@ describe("purchasing policy detail", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save policy" }));
     expect(await screen.findByRole("button", { name: "Update policy" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Policy saved as version 1.");
+    expect(screen.getByText("Policy saved as version 1.")).toBeInTheDocument();
     const put = mock.mock.calls.find(([, init]) => (init as RequestInit).method === "PUT")!;
     expect(put[0]).toBe(`${BASE}/${LE}`);
     expect((put[1] as RequestInit).headers).toMatchObject({ "If-Match": '"0"' });

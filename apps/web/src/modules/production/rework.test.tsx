@@ -2,7 +2,7 @@ import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import {
   assignAsBuilt,
@@ -13,6 +13,7 @@ import {
   type AsBuiltRecord,
   type PostingProfile,
 } from "./api/client";
+import { resetResourceCache } from "../mfg-shared/resources";
 import { emptyAsBuilt, toAsBuiltInput } from "./AsBuiltPanel";
 import { formKey, initialValues, toInput, validateOrder } from "./CreateOrderPage";
 import { describeReference, varianceLabel } from "./labels";
@@ -20,6 +21,7 @@ import production, { reworkValues } from "./module";
 import { blankProfile, validateProfile } from "./PostingProfilesPage";
 import { json, order, orderId, problem, summary } from "./testData";
 
+beforeEach(() => resetResourceCache());
 afterEach(() => vi.unstubAllGlobals());
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -172,6 +174,9 @@ describe("Production order detail: rework and as-built", () => {
 
   function detailFetch(current: ReturnType<typeof order>, extra?: Extra) {
     return stubFetch((url, init) => {
+      if (url.includes("/engineering/resources")) {
+        return json({ items: [{ id: uuid(5), code: "CNC-1", name: "CNC mill" }] });
+      }
       const handled = extra?.(url, init);
       if (handled) {
         return handled;
@@ -200,17 +205,19 @@ describe("Production order detail: rework and as-built", () => {
     expect(screen.getByLabelText("Order type")).toHaveValue("rework");
     expect(screen.getByLabelText("Rework of")).toHaveValue("order");
     expect(screen.getByLabelText("Reference")).toHaveValue(orderId);
-    expect(screen.getByLabelText("Product")).toHaveValue(order().productId);
+    expect(screen.getByLabelText("Product")).toHaveAttribute("data-value", order().productId);
 
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "5" } });
     const component = screen.getByRole("group", { name: "Component 1" });
-    expect(within(component).getByLabelText("Item")).toHaveValue(order().productId);
+    expect(within(component).getByLabelText("Item")).toHaveAttribute("data-value", order().productId);
     // The test data's ids are not UUIDs; the service needs them to be.
     for (const [label, value] of [["Product", uuid(1)], ["Site", uuid(2)], ["Warehouse", uuid(3)]]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
     }
     fireEvent.change(within(component).getByLabelText("Item"), { target: { value: uuid(1) } });
-    fireEvent.change(within(screen.getByRole("group", { name: "Operation 1" })).getByLabelText("Resource"), { target: { value: uuid(5) } });
+    const operation = screen.getByRole("group", { name: "Operation 1" });
+    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), uuid(5));
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     await waitFor(() => expect(location.pathname).toBe(`/production/${reworkId}`));
     const post = calls(fetchMock).find(([, init]) => init?.method === "POST");
@@ -221,8 +228,10 @@ describe("Production order detail: rework and as-built", () => {
   });
 
   it("shows a refused rework order with its code and maps the reference error to the field", async () => {
-    stubFetch(() =>
-      problem(400, "COM-0001", "request failed validation", { "reworkReference.id": "must be the id of the original production order" }),
+    stubFetch((url) =>
+      url.includes("/engineering/resources")
+        ? json({ items: [{ id: uuid(5), code: "CNC-1", name: "CNC mill" }] })
+        : problem(400, "COM-0001", "request failed validation", { "reworkReference.id": "must be the id of the original production order" }),
     );
     renderAt("/production/new");
     await userEvent.selectOptions(screen.getByLabelText("Order type"), "rework");
@@ -230,10 +239,13 @@ describe("Production order detail: rework and as-built", () => {
     for (const [label, value] of [["Product", uuid(1)], ["Site", uuid(2)], ["Warehouse", uuid(3)], ["Quantity", "5"], ["Reference", "S-0042"]]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
     }
+    await userEvent.click(screen.getByRole("button", { name: "Add component" }));
     const component = screen.getByRole("group", { name: "Component 1" });
     fireEvent.change(within(component).getByLabelText("Item"), { target: { value: uuid(4) } });
     fireEvent.change(within(component).getByLabelText("Quantity per unit"), { target: { value: "1" } });
-    fireEvent.change(within(screen.getByRole("group", { name: "Operation 1" })).getByLabelText("Resource"), { target: { value: uuid(5) } });
+    const operation = screen.getByRole("group", { name: "Operation 1" });
+    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), uuid(5));
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     await waitFor(() => expect(screen.getByLabelText("Reference")).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByLabelText("Reference")).toHaveAccessibleDescription(/must be the id of the original production order/);
@@ -249,7 +261,7 @@ describe("Production order detail: rework and as-built", () => {
     fireEvent.change(screen.getByLabelText("Reference"), { target: { value: "PO-000001" } });
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     expect(await screen.findByText("Enter the original production order's id (a UUID).")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(calls(fetchMock).filter(([, init]) => init?.method === "POST")).toEqual([]);
   });
 
   it("shows the reference of a rework order and the rework orders of an original", async () => {

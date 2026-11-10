@@ -10,6 +10,8 @@ import { DropShipStatusBadge } from "./DropShipsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderNumber } from "../sales/OrderNumber";
 
 /** Section 5.28.5: the vendor confirmation is a purchasing duty (seeded as procurement.purchase-order.confirm). */
 const DUTY_CONFIRM = "procurement.purchase-order.confirm";
@@ -242,14 +244,14 @@ export function DropShipDetailPage() {
       <Card>
         <dl className={styles.details}>
           {[
-            ["Order", d.orderId],
+            ["Order", <OrderNumber id={d.orderId} />],
             ["Order line", d.orderLineId],
-            ["Customer", d.customerId],
-            ["Product", d.productId],
-            ["Vendor", d.vendorId],
+            ["Customer", <EntityName entity="customer" id={d.customerId} />],
+            ["Product", <EntityName entity="product" id={d.productId} />],
+            ["Vendor", <EntityName entity="vendor" id={d.vendorId} />],
             ["Purchase order", d.purchaseOrderId],
             ["Purchase order line", d.purchaseOrderLineId],
-            ["Legal entity", d.legalEntityId],
+            ["Legal entity", <EntityName entity="legalEntity" id={d.legalEntityId} />],
             ["Confirmed by the vendor", `${d.qtyConfirmed} ${d.unit}`],
             ["Still open", `${d.qtyOpen} ${d.unit}`],
             ["Closed without shipping", `${d.qtyClosed} ${d.unit}`],
@@ -259,9 +261,9 @@ export function DropShipDetailPage() {
             ["Created", formatDateTime(d.createdAt)],
             ["Version", String(d.version)],
           ].map(([term, value]) => (
-            <div key={term} className={styles.entry}>
+            <div key={String(term)} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={`${styles.value} ${styles.mono}`}>{value}</dd>
+              <dd className={styles.value}>{value}</dd>
             </div>
           ))}
         </dl>

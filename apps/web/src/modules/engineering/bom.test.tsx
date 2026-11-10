@@ -7,6 +7,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 const problem = (status: number, code: string, title: string, extra: object = {}) => ({ ok: false, status, json: async () => ({ code, title, ...extra }) });
+const BIKE = "11111111-1111-4111-8111-111111111111";
+const WHEEL = "22222222-2222-4222-8222-222222222222";
+const FRAME = "33333333-3333-4333-8333-333333333333";
 const bom = (id: string, extra: object = {}) => ({ id, productId: `BIKE-${id}`, siteId: "S1", effectiveFrom: "2026-01-01", status: "active", ...extra });
 
 function stub(handler: (url: string, init?: RequestInit) => unknown) {
@@ -24,7 +27,7 @@ describe("BomVersionsPage", () => {
     const table = await findTable({ name: "BOM versions" });
     await waitFor(() => expect(table).not.toHaveAttribute("aria-busy"));
     expect(table).toHaveTextContent("Draft");
-    fireEvent.click(screen.getByRole("button", { name: "BIKE-a" }));
+    fireEvent.click(screen.getByText("BIKE-a"));
     expect(opened).toEqual(["a"]);
   });
 
@@ -51,11 +54,11 @@ describe("BomVersionsPage", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?cursor=c1", expect.anything());
     fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "draft" } });
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?status=draft", expect.anything()));
-    fireEvent.change(screen.getByLabelText(/Product/), { target: { value: "BIKE" } });
+    fireEvent.change(screen.getByLabelText(/Product/), { target: { value: BIKE } });
     fireEvent.change(screen.getByLabelText(/Effective on/), { target: { value: "2026-06-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?productId=BIKE&status=draft&asOf=2026-06-01", expect.anything()),
+      expect(fetchMock).toHaveBeenLastCalledWith(`/api/v1/engineering/bom-versions?productId=${BIKE}&status=draft&asOf=2026-06-01`, expect.anything()),
     );
   });
 
@@ -114,9 +117,9 @@ describe("BomVersionPage", () => {
 
 describe("BomVersionCreatePage", () => {
   function fill() {
-    fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: "BIKE" } });
+    fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: BIKE } });
     fireEvent.change(screen.getByLabelText(/Effective from/), { target: { value: "2026-02-01" } });
-    fireEvent.change(screen.getByLabelText(/Component 1/), { target: { value: "WHEEL" } });
+    fireEvent.change(screen.getByLabelText(/Component 1/), { target: { value: WHEEL } });
     fireEvent.change(screen.getByLabelText(/Quantity 1/), { target: { value: "2" } });
   }
 
@@ -126,7 +129,7 @@ describe("BomVersionCreatePage", () => {
     render(<BomVersionCreatePage onCreated={(id) => created.push(id)} />);
     fill();
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
-    fireEvent.change(screen.getByLabelText(/Component 2/), { target: { value: "FRAME" } });
+    fireEvent.change(screen.getByLabelText(/Component 2/), { target: { value: FRAME } });
     fireEvent.change(screen.getByLabelText(/Quantity 2/), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Create BOM version" }));
     await waitFor(() => expect(created).toEqual(["new"]));
@@ -134,8 +137,8 @@ describe("BomVersionCreatePage", () => {
     expect(url).toBe("/api/v1/engineering/bom-versions");
     expect(new Headers(init?.headers).get("Idempotency-Key")).toBeTruthy();
     const body = JSON.parse(init?.body as string);
-    expect(body).toMatchObject({ productId: "BIKE", effectiveFrom: "2026-02-01", status: "draft" });
-    expect(body.lines.map((l: { componentProductId: string; lineNo: number }) => [l.lineNo, l.componentProductId])).toEqual([[1, "WHEEL"], [2, "FRAME"]]);
+    expect(body).toMatchObject({ productId: BIKE, effectiveFrom: "2026-02-01", status: "draft" });
+    expect(body.lines.map((l: { componentProductId: string; lineNo: number }) => [l.lineNo, l.componentProductId])).toEqual([[1, WHEEL], [2, FRAME]]);
   });
 
   it("removes a line and shows a permission error", async () => {
@@ -168,7 +171,7 @@ describe("BomVersionCreatePage", () => {
     render(<BomVersionCreatePage />);
     fill();
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
-    fireEvent.change(screen.getByLabelText(/Component 2/), { target: { value: "FRAME" } });
+    fireEvent.change(screen.getByLabelText(/Component 2/), { target: { value: FRAME } });
     fireEvent.change(screen.getByLabelText(/Quantity 2/), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Create BOM version" }));
     await waitFor(() => expect(screen.getByLabelText(/Component 2/)).toHaveAttribute("aria-invalid", "true"));

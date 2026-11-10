@@ -14,11 +14,12 @@ import {
   type StatementLine,
   type StatementSection,
 } from "./api/client";
-import { compareDecimals, DAY, money, shortId, today, UUID } from "./format";
+import { compareDecimals, DAY, money, today, UUID } from "./format";
 import { CommandFailure, Detail, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { agingColumns, agingRows } from "./WorkspacePage";
+import { PlainName } from "../sales/OrderNumber";
 
 const SOURCE_LABELS: Record<string, string> = {
   INVOICE: "Invoice",
@@ -141,7 +142,7 @@ export function StatementPage() {
 }
 
 const snapshotColumns: DataTableColumn<BalanceSnapshot>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "currency", header: "Currency", mono: true },
   { key: "riskScore", header: "Risk score", mono: true, align: "end" },
   { key: "totalOpen", header: "Balance", mono: true, align: "end", render: (row) => money(row.totalOpen, row.currency) },

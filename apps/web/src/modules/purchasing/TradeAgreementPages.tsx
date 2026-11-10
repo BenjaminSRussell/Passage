@@ -27,6 +27,7 @@ import {
 import {
   Details,
   LoadError,
+  Named,
   ShortId,
   StatusBadge,
   currencyPattern,
@@ -38,16 +39,17 @@ import {
   uuidPattern,
   type Failure,
 } from "./parts";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
 const accountLabels: Record<AccountCode, string> = { VENDOR: "Vendor", GROUP: "Vendor group", ALL: "All vendors" };
 const itemLabels: Record<ItemCode, string> = { PRODUCT: "Product", GROUP: "Product group", ALL: "All products" };
 
-function level(label: string, id?: string) {
+function level(label: string, id?: string, entity?: LookupEntityKey) {
   return id ? (
     <>
-      {label} <ShortId id={id} />
+      {entity ? <Named entity={entity} id={id} /> : <>{label} <ShortId id={id} /></>}
     </>
   ) : (
     label
@@ -60,8 +62,8 @@ export function quantityBreak(t: Pick<TradeAgreement, "fromQty" | "toQty">): str
 }
 
 const listColumns: DataTableColumn<TradeAgreement>[] = [
-  { key: "account", header: "Vendor", render: (t) => level(accountLabels[t.accountCode], t.accountId) },
-  { key: "item", header: "Item", render: (t) => level(itemLabels[t.itemCode], t.itemId) },
+  { key: "account", header: "Vendor", render: (t) => level(accountLabels[t.accountCode], t.accountId, t.accountCode === "VENDOR" ? "vendor" : undefined) },
+  { key: "item", header: "Item", render: (t) => level(itemLabels[t.itemCode], t.itemId, t.itemCode === "PRODUCT" ? "product" : undefined) },
   { key: "price", header: "Price", align: "end", render: (t) => `${money(t.price, t.currency)} / ${t.priceUnit} ${t.unit}` },
   { key: "break", header: "Quantity", render: quantityBreak },
   { key: "validFrom", header: "Valid from", mono: true },
@@ -340,20 +342,19 @@ export function TradeAgreementDetailPage() {
   }
   return (
     <div className={styles.stack}>
-      <PageHeader title={`Price row ${t.id.slice(0, 8)}`} meta={<StatusBadge status={t.status} />} />
+      <PageHeader title="Price row" meta={<StatusBadge status={t.status} />} />
       <Card title="Details">
         <Details
           items={[
             { label: "Vendor level", value: accountLabels[t.accountCode] },
-            { label: "Vendor or group", value: t.accountId ?? "", mono: true },
+            { label: "Vendor or group", value: t.accountCode === "VENDOR" ? <Named entity="vendor" id={t.accountId} /> : (t.accountId ?? "") },
             { label: "Item level", value: itemLabels[t.itemCode] },
-            { label: "Product or group", value: t.itemId ?? "", mono: true },
+            { label: "Product or group", value: t.itemCode === "PRODUCT" ? <Named entity="product" id={t.itemId} /> : (t.itemId ?? "") },
             { label: "Price", value: `${money(t.price, t.currency)} per ${t.priceUnit} ${t.unit}`, mono: true },
             { label: "Quantity", value: quantityBreak(t) },
             { label: "Valid from", value: t.validFrom, mono: true },
             { label: "Valid to", value: t.validTo ?? "Open-ended", mono: true },
             { label: "Consignment", value: t.consignment ? "Yes" : "No" },
-            { label: "Id", value: t.id, mono: true },
           ]}
         />
       </Card>

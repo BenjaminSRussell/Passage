@@ -6,6 +6,7 @@ import { Alert, Badge, Button, buttonClassName, ConfirmDialog, DataTable, FormFi
 import { describeProblem, escalateBlocking, listBlockings, releaseBlocking, type Blocking, type BlockingState, type Problem } from "./api/client";
 import { dash, describeDimensions, sentence, shortId } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert, RowAction, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -43,7 +44,7 @@ export function BlockingsPage() {
 
   const columns: DataTableColumn<Blocking>[] = [
     { key: "physicalDate", header: "Blocked on", mono: true },
-    { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+    { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
     { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
     { key: "qty", header: "Quantity", align: "end", mono: true, render: (row) => `${row.qty} ${row.unit}` },
     { key: "targetStatus", header: "Status", render: (row) => <Badge tone={stateTones[row.targetStatus] ?? "neutral"}>{sentence(row.targetStatus)}</Badge> },

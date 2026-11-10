@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import type { CapacityBlock, GanttBar, MoveResponse, Operation, OrderPeg, Resource } from "./api/client";
 import { dayStart, today } from "./format";
+import { resetOrderCache } from "../mfg-shared/orders";
 import scheduling from "./module";
 import { describeRecurrence, ruleError, validateBlock, type BlockValues } from "./NewCapacityBlockPage";
 import { ordersOf, validatePeg } from "./NewOrderPegPage";
@@ -33,12 +34,14 @@ function json(status: number, body?: unknown): Reply {
 
 beforeEach(() => {
   calls = [];
+  resetOrderCache();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
       calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
-      const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+      const orderNumber = ({ [PARENT]: "MO-1001", [DEPENDENT]: "MO-2002" } as Record<string, string>)[url.pathname.split("/production/orders/")[1] ?? ""];
+      const reply = handler(url, init) ?? (orderNumber ? json(200, { id: url.pathname.split("/").pop(), orderNumber, productId: "" }) : undefined) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
       return new Response(reply.body === undefined ? null : JSON.stringify(reply.body), {
         status: reply.status,
         headers: { "Content-Type": "application/json" },
@@ -108,14 +111,14 @@ describe("Moves that propagate to pegged orders (FR-23.8)", () => {
     const { container } = renderAt("/scheduling");
     const table = await findTable({ name: "Jobs in window" });
     fireEvent.click(screen.getByLabelText("Move pegged orders too"));
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.change(screen.getByLabelText("New start (UTC)"), { target: { value: at(12).slice(0, 16) } });
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
 
     const pegged = await findTable({ name: "Pegged orders that move" });
     expect(within(pegged).getAllByRole("row")).toHaveLength(2);
-    expect(pegged).toHaveTextContent("b2000000");
+    expect(pegged).toHaveTextContent("MO-2002");
     expect(pegged).toHaveTextContent("4 h");
     expect(screen.getByText(/Propagation stopped at 500 orders or 5 pegging levels \(SCHED-0007\)/)).toBeInTheDocument();
     expect(lastCall("POST", ":move")?.body).toEqual({ start: at(12), resourceId: MIX, dryRun: true, propagate: true });
@@ -130,8 +133,8 @@ describe("Moves that propagate to pegged orders (FR-23.8)", () => {
     handler = workspace();
     renderAt("/scheduling");
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     await findTable({ name: "Affected operations" });
     expect(screen.queryByRole("table", { name: "Pegged orders that move" })).toBeNull();
@@ -182,7 +185,7 @@ describe("Order pegs", () => {
     };
     const { container } = renderAt("/scheduling/order-pegs");
     const table = await findTable({ name: "Order pegs" });
-    await waitFor(() => expect(table).toHaveTextContent("b2000000"));
+    await waitFor(() => expect(table).toHaveTextContent("MO-2002"));
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Order"), { target: { value: DEPENDENT } });

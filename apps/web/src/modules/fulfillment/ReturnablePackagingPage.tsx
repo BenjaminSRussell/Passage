@@ -8,9 +8,10 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<ReturnableBalance>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "containerType", header: "Container type", mono: true },
   { key: "balance", header: "Held by customer", align: "end" },
   { key: "lastShippedAt", header: "Last shipped", render: (row) => formatDateTime(row.lastShippedAt) },

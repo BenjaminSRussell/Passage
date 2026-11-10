@@ -7,6 +7,7 @@ import type { Campaign, CapacityBlock, CleanoutRule, Network, Resource, SetupMat
 import { editable, validateAllocation, validateCampaignOrder } from "./CampaignDetailPage";
 import { describeCondition } from "./CapacityBlocksPage";
 import { describeTriggers } from "./CleanoutRulesPage";
+import { resetOrderCache } from "../mfg-shared/orders";
 import scheduling from "./module";
 import { validateCampaign } from "./NewCampaignPage";
 import { parseCondition, validateBlock, type BlockValues } from "./NewCapacityBlockPage";
@@ -41,12 +42,13 @@ function json(status: number, body: unknown): Reply {
 
 beforeEach(() => {
   calls = [];
+  resetOrderCache();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
       calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
-      const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+      const reply = handler(url, init) ?? (url.pathname.endsWith("/production/orders") ? json(200, { items: [{ id: ORDER_D, orderNumber: "MO-4004" }] }) : undefined) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
   );
@@ -403,7 +405,9 @@ describe("Campaign detail", () => {
     });
     renderAt(`/scheduling/campaigns/${CAMPAIGN}`);
     const form = await screen.findByRole("form", { name: "Add an order" });
-    fireEvent.change(within(form).getByLabelText("Order id"), { target: { value: ORDER_D.toUpperCase() } });
+    const orderSelect = within(form).getByLabelText("Production order");
+    await waitFor(() => expect(within(orderSelect).getByRole("option", { name: "MO-4004" })).toBeInTheDocument());
+    fireEvent.change(orderSelect, { target: { value: ORDER_D } });
     fireEvent.change(within(form).getByLabelText("Setup group"), { target: { value: "b" } });
     fireEvent.change(within(form).getByLabelText("Quantity"), { target: { value: "5.5" } });
     fireEvent.change(within(form).getByLabelText("Run minutes"), { target: { value: "30" } });
