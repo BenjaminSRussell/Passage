@@ -166,7 +166,6 @@
     {"id": "controller", "label": "Accounting and close", "persona": "Accountant or controller", "description": "Post journals, close the period and report on the books.", "entries": [
       "/ledger/journal-batches",
       "/ledger/trial-balance",
-      "/close",
       "/finreport",
       "/ledger/transactions",
       "/ledger/recurring-journals",
@@ -208,6 +207,9 @@
       "/workflow/inbox"
     ]},
     {"id": "tenant-admin", "label": "Administration", "persona": "Tenant admin", "description": "Set up the company, manage who can do what, and keep the system healthy.", "entries": [
+      "/setup",
+      "/setup/checklist",
+      "/setup/features",
       "/admin/security/users",
       "/admin/security/assignments",
       "/admin/security/roles",
@@ -221,9 +223,6 @@
       "/org/teams",
       "/admin/import",
       "/admin/audit",
-      "/admin/alerts",
-      "/admin",
-      "/admin/documents",
       "/compliance",
       "/compliance/sod/conflicts",
       "/migration",

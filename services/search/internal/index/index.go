@@ -18,9 +18,14 @@ import (
 const (
 	ConsumerName = "search-index"
 
-	PartyTopic         = "passage.party.party"
-	ProductTopic       = "passage.product.product"
-	PurchaseOrderTopic = "passage.procurement.purchase_order"
+	PartyTopic          = "passage.party.party"
+	ProductTopic        = "passage.product.product"
+	PurchaseOrderTopic  = "passage.procurement.purchase_order"
+	ReceiptTopic        = "passage.receiving.receipt"
+	VendorInvoiceTopic  = "passage.receiving.vendorinvoice"
+	SalesOrderTopic     = "passage.sales.order"
+	ShipmentTopic       = "passage.fulfillment.shipment"
+	BillingInvoiceTopic = "passage.billing.invoice"
 
 	PartyCreatedType       = "dev.passage.party.party.created.v1"
 	PartyUpdatedType       = "dev.passage.party.party.updated.v1"
@@ -29,6 +34,23 @@ const (
 	ProductUpdatedType     = "dev.passage.product.product.updated.v1"
 	PurchaseOrderConfirmed = "dev.passage.procurement.po.confirmed.v1"
 	PurchaseOrderCancelled = "dev.passage.procurement.po.cancelled.v1"
+
+	ReceiptPostedType         = "dev.passage.receiving.receipt.posted.v1"
+	ReceiptCorrectedType      = "dev.passage.receiving.receipt.corrected.v1"
+	VendorInvoicePostedType   = "dev.passage.payables.invoice.posted.v1"
+	SalesOrderConfirmedType   = "dev.passage.sales.order.confirmed.v1"
+	PackingSlipPostedType     = "dev.passage.fulfillment.packingslip.posted.v1"
+	PackingSlipCancelledType  = "dev.passage.fulfillment.packingslip.cancelled.v1"
+	CustomerInvoicePostedType = "dev.passage.billing.invoice.posted.v1"
+	CreditNotePostedType      = "dev.passage.billing.creditnote.posted.v1"
+
+	receivingSource   = "/passage/receiving/receiving"
+	salesSource       = "sales"
+	fulfillmentSource = "fulfillment"
+	billingSource     = "billing"
+	statusPosted      = "POSTED"
+	statusCancelled   = "CANCELLED"
+	statusConfirmed   = "CONFIRMED"
 
 	partySource         = "/passage/party/party"
 	productSource       = "passage://product"
@@ -93,13 +115,21 @@ func Handlers(s Applier) map[string]eventing.Handler {
 		return eventing.HandlerFunc(func(ctx context.Context, _ pgx.Tx, evt events.Event) error { return f(ctx, s, evt) })
 	}
 	return map[string]eventing.Handler{
-		PartyCreatedType:       h(indexParty),
-		PartyUpdatedType:       h(indexParty),
-		PartyMergedType:        h(removeMergedParties),
-		ProductCreatedType:     h(indexProduct),
-		ProductUpdatedType:     h(indexProduct),
-		PurchaseOrderConfirmed: h(indexPurchaseOrder),
-		PurchaseOrderCancelled: h(indexPurchaseOrder),
+		PartyCreatedType:          h(indexParty),
+		PartyUpdatedType:          h(indexParty),
+		PartyMergedType:           h(removeMergedParties),
+		ProductCreatedType:        h(indexProduct),
+		ProductUpdatedType:        h(indexProduct),
+		PurchaseOrderConfirmed:    h(indexPurchaseOrder),
+		PurchaseOrderCancelled:    h(indexPurchaseOrder),
+		ReceiptPostedType:         h(indexReceiptPosted),
+		ReceiptCorrectedType:      h(indexReceiptCorrected),
+		VendorInvoicePostedType:   h(indexVendorInvoice),
+		SalesOrderConfirmedType:   h(indexSalesOrder),
+		PackingSlipPostedType:     h(indexPackingSlipPosted),
+		PackingSlipCancelledType:  h(indexPackingSlipCancelled),
+		CustomerInvoicePostedType: h(indexBillingDocument),
+		CreditNotePostedType:      h(indexBillingDocument),
 	}
 }
 
@@ -191,4 +221,139 @@ func indexPurchaseOrder(ctx context.Context, s Applier, evt events.Event) error 
 		r.Subtitle = d.Currency + " " + d.Total
 	}
 	return apply(tenant.With(ctx, scoped), s, evt, r)
+}
+
+// scoped indexes one record of a legal-entity-scoped type under a service
+// principal limited to that entity. Version is zero for these types: the
+// source events carry none, so the event time orders them.
+func scoped(ctx context.Context, s Applier, evt events.Event, r store.Record) error {
+	if !ids.Valid(r.ID) || !ids.Valid(r.LegalEntityID) || r.Number == "" {
+		return eventing.Permanent(fmt.Errorf("%s needs an id, a legal entity and a number", evt.Type))
+	}
+	p, err := tenant.ServicePrincipal(ConsumerName, evt.TenantID, r.LegalEntityID)
+	if err != nil {
+		return eventing.Permanent(err)
+	}
+	return apply(tenant.With(ctx, p), s, evt, r)
+}
+
+func subtitle(currency, amount string) string {
+	if currency == "" || amount == "" {
+		return ""
+	}
+	return currency + " " + amount
+}
+
+func indexReceiptPosted(ctx context.Context, s Applier, evt events.Event) error {
+	var d struct {
+		ReceiptID     string `json:"receipt_id"`
+		ReceiptNumber string `json:"receipt_number"`
+		LegalEntityID string `json:"legal_entity_id"`
+		PostingDate   string `json:"posting_date"`
+	}
+	if err := decode(evt, receivingSource, &d); err != nil {
+		return err
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypeReceipt, ID: d.ReceiptID, LegalEntityID: d.LegalEntityID, Number: d.ReceiptNumber,
+		Title: d.ReceiptNumber, Subtitle: d.PostingDate, Status: statusPosted})
+}
+
+// indexReceiptCorrected marks a cancelled receipt; a correction leaves the
+// row as it is.
+func indexReceiptCorrected(ctx context.Context, s Applier, evt events.Event) error {
+	var d struct {
+		ReceiptID     string `json:"receipt_id"`
+		ReceiptNumber string `json:"receipt_number"`
+		LegalEntityID string `json:"legal_entity_id"`
+		Kind          string `json:"kind"`
+	}
+	if err := decode(evt, receivingSource, &d); err != nil {
+		return err
+	}
+	if d.Kind != "CANCELLATION" {
+		return nil
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypeReceipt, ID: d.ReceiptID, LegalEntityID: d.LegalEntityID, Number: d.ReceiptNumber,
+		Status: statusCancelled, UpdateOnly: true})
+}
+
+func indexVendorInvoice(ctx context.Context, s Applier, evt events.Event) error {
+	var d struct {
+		InvoiceID     string `json:"invoice_id"`
+		InvoiceNumber string `json:"invoice_number"`
+		LegalEntityID string `json:"legal_entity_id"`
+		Currency      string `json:"currency"`
+		Total         string `json:"total"`
+	}
+	if err := decode(evt, receivingSource, &d); err != nil {
+		return err
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypeVendorInvoice, ID: d.InvoiceID, LegalEntityID: d.LegalEntityID, Number: d.InvoiceNumber,
+		Title: d.InvoiceNumber, Subtitle: subtitle(d.Currency, d.Total), Status: statusPosted})
+}
+
+func indexSalesOrder(ctx context.Context, s Applier, evt events.Event) error {
+	var d struct {
+		OrderID       string `json:"order_id"`
+		OrderNumber   string `json:"order_number"`
+		LegalEntityID string `json:"legal_entity_id"`
+		Currency      string `json:"currency"`
+		NetTotal      string `json:"net_total"`
+		Version       int    `json:"version"`
+	}
+	if err := decode(evt, salesSource, &d); err != nil {
+		return err
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypeSalesOrder, ID: d.OrderID, LegalEntityID: d.LegalEntityID, Number: d.OrderNumber,
+		Title: d.OrderNumber, Subtitle: subtitle(d.Currency, d.NetTotal), Status: statusConfirmed, Version: d.Version})
+}
+
+type packingSlipData struct {
+	PackingSlipID     string `json:"packing_slip_id"`
+	PackingSlipNumber string `json:"packing_slip_number"`
+	LegalEntityID     string `json:"legal_entity_id"`
+	PostingDate       string `json:"posting_date"`
+}
+
+func indexPackingSlipPosted(ctx context.Context, s Applier, evt events.Event) error {
+	var d packingSlipData
+	if err := decode(evt, fulfillmentSource, &d); err != nil {
+		return err
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypePackingSlip, ID: d.PackingSlipID, LegalEntityID: d.LegalEntityID, Number: d.PackingSlipNumber,
+		Title: d.PackingSlipNumber, Subtitle: d.PostingDate, Status: statusPosted})
+}
+
+func indexPackingSlipCancelled(ctx context.Context, s Applier, evt events.Event) error {
+	var d packingSlipData
+	if err := decode(evt, fulfillmentSource, &d); err != nil {
+		return err
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypePackingSlip, ID: d.PackingSlipID, LegalEntityID: d.LegalEntityID, Number: d.PackingSlipNumber,
+		Status: statusCancelled, UpdateOnly: true})
+}
+
+// indexBillingDocument indexes a posted customer invoice or credit note. A
+// credit note carries credit_note_id and its own number; both are customer
+// documents opened on the invoice page.
+func indexBillingDocument(ctx context.Context, s Applier, evt events.Event) error {
+	var d struct {
+		InvoiceID     string `json:"invoice_id"`
+		CreditNoteID  string `json:"credit_note_id"`
+		Number        string `json:"number"`
+		LegalEntityID string `json:"legal_entity_id"`
+		Currency      string `json:"currency"`
+		Totals        struct {
+			Gross string `json:"gross"`
+		} `json:"totals"`
+	}
+	if err := decode(evt, billingSource, &d); err != nil {
+		return err
+	}
+	id := d.InvoiceID
+	if id == "" {
+		id = d.CreditNoteID
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypeCustomerInvoice, ID: id, LegalEntityID: d.LegalEntityID, Number: d.Number,
+		Title: d.Number, Subtitle: subtitle(d.Currency, d.Totals.Gross), Status: statusPosted})
 }

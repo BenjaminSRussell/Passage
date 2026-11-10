@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./CommandPalette.module.css";
 import { copy } from "./copy";
 import { useFocusTrap } from "./hooks/useFocusTrap";
+import { isFavourite, pushRecent, readFavourites, readRecent, toggleFavourite } from "./search/recentRecords";
+import { MIN_RECORD_QUERY, RECORD_TYPE_LABEL, RECORD_TYPE_NOUN, searchRecords as defaultSearchRecords, type RecordHit, type RecordSearch, type RecordType } from "./search/records";
 import { Button, Icon, type IconName } from "./ui";
 
 export interface PaletteEntry {
@@ -11,6 +13,10 @@ export interface PaletteEntry {
   to: string;
   icon?: IconName;
   keywords?: string;
+  /** Set on a record result: the document or master record the entry opens. */
+  record?: RecordHit;
+  /** Status and key fields shown after the label, for a record result. */
+  detail?: string;
 }
 
 export interface CommandPaletteProps {
@@ -18,6 +24,50 @@ export interface CommandPaletteProps {
   onSelect(entry: PaletteEntry): void;
   onClose(): void;
   announce(message: string): void;
+  /** Whose recent and favourite records are kept; empty keeps none. */
+  identity?: string;
+  /** Finds records by number or name. Defaults to the search service. */
+  searchRecords?: RecordSearch;
+}
+
+const SEARCH_DELAY_MS = 200;
+
+const RECORD_ICON: Record<RecordType, IconName> = {
+  party: "database",
+  product: "box",
+  purchase_order: "note",
+  receipt: "receipt",
+  vendor_invoice: "receipt",
+  sales_order: "note",
+  packing_slip: "box",
+  customer_invoice: "receipt",
+};
+
+const statusWord = (status: string) => status.charAt(0).toUpperCase() + status.slice(1).toLowerCase().replace(/_/g, " ");
+
+function recordEntry(hit: RecordHit, group: string): PaletteEntry {
+  const label = hit.title && hit.title !== hit.number ? `${hit.number} ${hit.title}` : hit.number;
+  const detail = [hit.status ? statusWord(hit.status) : "", hit.subtitle ?? ""].filter(Boolean).join(" · ");
+  return { id: `record:${hit.type}:${hit.id}`, group, label, to: hit.link, icon: RECORD_ICON[hit.type], record: hit, detail: detail || undefined };
+}
+
+/** Result entries ordered so the entries of one type sit together, types in the order the service ranked them. */
+function recordEntries(hits: RecordHit[]): PaletteEntry[] {
+  const order: RecordType[] = [];
+  for (const hit of hits) {
+    if (!order.includes(hit.type)) {
+      order.push(hit.type);
+    }
+  }
+  return order.flatMap((type) => hits.filter((h) => h.type === type).map((h) => recordEntry(h, RECORD_TYPE_LABEL[type])));
+}
+
+function optionLabel(entry: PaletteEntry, favourites: RecordHit[]): string {
+  if (!entry.record) {
+    return `${entry.label}, ${entry.group}`;
+  }
+  const parts = [`${RECORD_TYPE_NOUN[entry.record.type]} ${entry.label}`, entry.detail ?? "", isFavourite(favourites, entry.record) ? copy.palette.favouriteState : ""];
+  return parts.filter(Boolean).join(", ");
 }
 
 const ANNOUNCE_DELAY_MS = 250;
@@ -43,16 +93,61 @@ function groupEntries(visible: PaletteEntry[]): { group: string; items: { entry:
   return groups;
 }
 
-export function CommandPalette({ entries, onSelect, onClose, announce }: CommandPaletteProps) {
+export function CommandPalette({ entries, onSelect, onClose, announce, identity = "", searchRecords = defaultSearchRecords }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [hits, setHits] = useState<RecordHit[]>([]);
+  const [searchFailed, setSearchFailed] = useState(false);
+  const [favourites, setFavourites] = useState<RecordHit[]>(() => readFavourites(identity));
+  const [recent] = useState<RecordHit[]>(() => readRecent(identity));
   const panelRef = useRef<HTMLDivElement>(null);
   const announcedQuery = useRef("");
-  const visible = useMemo(() => filterEntries(entries, query), [entries, query]);
+  const needle = query.trim();
+  const searching = needle.length >= MIN_RECORD_QUERY;
+  const visible = useMemo(() => {
+    const pages = filterEntries(entries, query);
+    if (searching) {
+      return [...recordEntries(hits), ...pages];
+    }
+    if (needle !== "") {
+      return pages;
+    }
+    const recents = recent.filter((r) => !isFavourite(favourites, r));
+    return [...favourites.map((h) => recordEntry(h, copy.palette.favourites)), ...recents.map((h) => recordEntry(h, copy.palette.recent)), ...pages];
+  }, [entries, query, searching, needle, hits, favourites, recent]);
   const groups = useMemo(() => groupEntries(visible), [visible]);
   const hasResults = visible.length > 0;
 
   useFocusTrap(panelRef, true);
+
+  useEffect(() => {
+    if (!searching) {
+      setHits([]);
+      setSearchFailed(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      searchRecords(needle, controller.signal).then(
+        (found) => {
+          if (!controller.signal.aborted) {
+            setHits(found);
+            setSearchFailed(false);
+          }
+        },
+        () => {
+          if (!controller.signal.aborted) {
+            setHits([]);
+            setSearchFailed(true);
+          }
+        },
+      );
+    }, SEARCH_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [needle, searching, searchRecords]);
 
   useEffect(() => {
     if (query === announcedQuery.current) {
@@ -68,6 +163,25 @@ export function CommandPalette({ entries, onSelect, onClose, announce }: Command
   useEffect(() => {
     document.getElementById(`palette-option-${active}`)?.scrollIntoView?.({ block: "nearest" });
   }, [active, visible]);
+
+  const activeEntry = hasResults ? visible[Math.min(active, visible.length - 1)] : undefined;
+  const activeRecord = activeEntry?.record;
+
+  function choose(entry: PaletteEntry) {
+    if (entry.record) {
+      pushRecent(identity, entry.record);
+    }
+    onSelect(entry);
+  }
+
+  function toggleActiveFavourite() {
+    if (!activeRecord || identity === "") {
+      return;
+    }
+    const next = toggleFavourite(identity, activeRecord);
+    setFavourites(next);
+    announce(isFavourite(next, activeRecord) ? copy.announce.favouriteAdded(activeRecord.number) : copy.announce.favouriteRemoved(activeRecord.number));
+  }
 
   function move(delta: number) {
     if (!hasResults) {
@@ -123,8 +237,11 @@ export function CommandPalette({ entries, onSelect, onClose, announce }: Command
               } else if (e.key === "Enter") {
                 e.preventDefault();
                 if (hasResults) {
-                  onSelect(visible[active]);
+                  choose(visible[active]);
                 }
+              } else if (e.altKey && e.key.toLowerCase() === "f") {
+                e.preventDefault();
+                toggleActiveFavourite();
               } else if (e.key === "Escape") {
                 e.stopPropagation();
                 onClose();
@@ -155,16 +272,22 @@ export function CommandPalette({ entries, onSelect, onClose, announce }: Command
                   key={entry.id}
                   role="option"
                   id={`palette-option-${index}`}
-                  aria-label={`${entry.label}, ${entry.group}`}
+                  aria-label={optionLabel(entry, favourites)}
                   aria-selected={index === active}
                   className={styles.option}
                   onMouseMove={() => setActive(index)}
-                  onClick={() => onSelect(entry)}
+                  onClick={() => choose(entry)}
                 >
                   <span className={styles.optionIcon}>
                     <Icon name={entry.icon ?? "grid"} />
                   </span>
                   <span className={styles.optionLabel}>{entry.label}</span>
+                  {entry.detail ? <span className={styles.optionDetail}>{entry.detail}</span> : null}
+                  {entry.record && isFavourite(favourites, entry.record) ? (
+                    <span className={styles.favourite} aria-hidden="true">
+                      ★
+                    </span>
+                  ) : null}
                   {index === active ? (
                     <span className={styles.enterHint} aria-hidden="true">
                       ↵
@@ -175,6 +298,18 @@ export function CommandPalette({ entries, onSelect, onClose, announce }: Command
             </div>
           ))}
         </div>
+        {searchFailed ? (
+          <p className={styles.note} role="status">
+            {copy.palette.recordsUnavailable}
+          </p>
+        ) : null}
+        {activeRecord && identity !== "" ? (
+          <div className={styles.actions}>
+            <Button variant="ghost" size="sm" onMouseDown={(e) => e.preventDefault()} onClick={toggleActiveFavourite}>
+              {isFavourite(favourites, activeRecord) ? copy.palette.unfavourite(activeRecord.number) : copy.palette.favourite(activeRecord.number)}
+            </Button>
+          </div>
+        ) : null}
         {hasResults ? null : (
           <div className={styles.empty}>
             <Icon name="search" size={20} />
@@ -189,6 +324,11 @@ export function CommandPalette({ entries, onSelect, onClose, announce }: Command
           <span>
             <kbd>↵</kbd> to open
           </span>
+          {activeRecord && identity !== "" ? (
+            <span>
+              <kbd>Alt</kbd> <kbd>F</kbd> to favourite
+            </span>
+          ) : null}
           <span>
             <kbd>Esc</kbd> to close
           </span>

@@ -67,6 +67,7 @@ export function MyProfilePage() {
       </div>
     );
   }
+  // Keep the page (and the "updated" notice inside it) mounted while a reload runs; skeleton only on the first load.
   if (!state.data) {
     return (
       <div className={styles.stack} aria-busy="true">

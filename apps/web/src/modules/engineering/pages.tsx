@@ -12,6 +12,8 @@ import {
 } from "../../shell/ui";
 import { whereUsed, type UsedBy } from "./api/client";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 export function EngineeringHome({
   onOpenWhereUsed,
@@ -116,19 +118,18 @@ const columns: DataTableColumn<UsedBy>[] = [
   {
     key: "productId",
     header: "Product",
-    mono: true,
     render: (row) => (
       <span className={styles.product}>
         {Array.from({ length: Math.max(row.level - 1, 0) }, (_, i) => (
           <span key={i} className={styles.indent} aria-hidden="true" />
         ))}
-        {row.productId}
+        <EntityName entity="product" id={row.productId} fallback={row.productId} />
       </span>
     ),
   },
   { key: "level", header: "Level", align: "end" },
   { key: "versionId", header: "BOM version", mono: true },
-  { key: "siteId", header: "Site" },
+  { key: "siteId", header: "Site", render: (row) => (row.siteId ? <EntityName entity="site" id={row.siteId} fallback={row.siteId} /> : "All sites") },
 ];
 
 export function WhereUsedPage({ initialComponent = "" }: { initialComponent?: string }) {
@@ -167,7 +168,7 @@ export function WhereUsedPage({ initialComponent = "" }: { initialComponent?: st
           <div className={styles.field}>
             <FormField id="where-used-component" label="Component">
               {(control) => (
-                <Input {...control} value={component} onChange={(e) => setComponent(e.target.value)} required />
+                <EntityLookup {...control} entity="product" prefill={false} value={component} onChange={(e) => setComponent(e.target.value)} />
               )}
             </FormField>
           </div>

@@ -11,10 +11,10 @@ function EntryList({ entries }: { entries: NavEntry[] }) {
     <ul className={styles.links}>
       {entries.map((e) => (
         <li key={e.to}>
-          <Link to={e.to} className={styles.link}>
+          <Link to={e.to} className={styles.link} aria-label={`${e.label} — ${e.moduleTitle}`}>
             <span>
-              {e.label} <span className="visually-hidden">—</span>{" "}
-              <span className={styles.moduleHint}>{e.moduleTitle}</span>
+              {e.label}
+              <span className={styles.moduleHint}>{` — ${e.moduleTitle}`}</span>
             </span>
           </Link>
         </li>

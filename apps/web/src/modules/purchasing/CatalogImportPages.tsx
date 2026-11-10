@@ -34,12 +34,12 @@ import {
 import {
   Details,
   LoadError,
-  ShortId,
   StatusBadge,
   statusLabel,
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -79,7 +79,7 @@ const listColumns: DataTableColumn<CatalogImport>[] = [
   {
     key: "vendorId",
     header: "Vendor",
-    render: (i) => <ShortId id={i.vendorId} />,
+    render: (i) => <Named entity="vendor" id={i.vendorId} />,
   },
 ];
 
@@ -541,7 +541,7 @@ export function CatalogImportDetailPage() {
               value: String(imp.entriesAdded),
               mono: true,
             },
-            { label: "Vendor", value: imp.vendorId, mono: true },
+            { label: "Vendor", value: <Named entity="vendor" id={imp.vendorId} /> },
             { label: "Catalog", value: imp.catalogId, mono: true },
           ]}
         />

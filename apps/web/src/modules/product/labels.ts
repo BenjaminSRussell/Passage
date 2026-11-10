@@ -26,4 +26,11 @@ export const trackingLabel: Record<keyof TrackingFlags, string> = {
   catchWeight: "Catch weight",
 };
 
+/** The tenant feature that owns each tracking flag; the field is hidden while the feature is off. */
+export const trackingFeature: Record<keyof TrackingFlags, string> = {
+  batchTracked: "batch-tracking",
+  serialTracked: "serial-tracking",
+  catchWeight: "catch-weight",
+};
+
 export const trackingFlags = Object.keys(trackingLabel) as (keyof TrackingFlags)[];

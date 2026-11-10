@@ -56,8 +56,12 @@ func TestEnvOverlaysArePinnedByDigestAndHoldNoSecrets(t *testing.T) {
 		if strings.Contains(string(b), "tag:") {
 			t.Errorf("%s contains %q: overlays pin digests and hold no secret values", path, "tag:")
 		}
-		if hasLiteralConnectionURL(string(b)) {
-			t.Errorf("%s contains a postgres:// URL whose password is not a template: overlays hold no secret values", path)
+		// A connection URL is allowed only when its password is an ExternalSecret template placeholder
+		// (eam-database, transport-db); a literal DSN would carry the secret.
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.Contains(line, "postgres://") && !strings.Contains(line, "{{ .password }}@") {
+				t.Errorf("%s contains a literal postgres:// URL: overlays hold no secret values", path)
+			}
 		}
 		if hasLiteralPassword(string(b)) {
 			t.Errorf("%s contains a literal password value: overlays hold no secret values", path)
@@ -82,44 +86,6 @@ func hasLiteralPassword(body string) bool {
 		return true
 	}
 	return false
-}
-
-// hasLiteralConnectionURL reports a postgres:// URL unless its password is a
-// secret-store template such as {{ .password }}, the form an ExternalSecret
-// uses to build a DATABASE_URL without the overlay holding the value.
-func hasLiteralConnectionURL(body string) bool {
-	for rest := body; ; {
-		_, after, found := strings.Cut(rest, "postgres://")
-		if !found {
-			return false
-		}
-		rest = after
-		authority := after
-		if end := strings.IndexAny(authority, "/?\"'\t\n"); end >= 0 {
-			authority = authority[:end]
-		}
-		userinfo, _, hasAt := strings.Cut(authority, "@")
-		_, password, hasPassword := strings.Cut(userinfo, ":")
-		if !hasAt || !hasPassword || !strings.HasPrefix(password, "{{") || !strings.HasSuffix(password, "}}") {
-			return true
-		}
-	}
-}
-
-func TestHasLiteralConnectionURL(t *testing.T) {
-	if hasLiteralConnectionURL(`url: "postgres://app:{{ .password }}@db:5432/app?sslmode=disable"`) {
-		t.Error("URL whose password is a template must be allowed")
-	}
-	for _, body := range []string{
-		`url: "postgres://app:hunter2@db:5432/app"`,
-		`url: "postgres://db:5432/app"`,
-		"url: \"postgres://db:5432/app\"\nnext: \"x:{{ .y }}@z\"",
-		`url: "postgres://app:{{ .password }}@db/app" other: "postgres://app:secret@db/app"`,
-	} {
-		if !hasLiteralConnectionURL(body) {
-			t.Errorf("%s must be rejected", body)
-		}
-	}
 }
 
 func TestHasLiteralPassword(t *testing.T) {

@@ -2,6 +2,8 @@ import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { ApiError, bomCategories, bomUsages, getBomVersion, updateBomVersion, type BomLine, type BomVersion } from "./api/client";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { useNames } from "../mfg-shared/names";
 
 const conflictCode = "ENG-BOM-VERSION-CONFLICT";
 const notFoundCode = "ENG-BOM-NOTFOUND";
@@ -143,6 +145,7 @@ function headerDiffs(yours: Header, saved: Header): string[] {
  */
 export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSaved?: (id: string) => void; onCancel?: () => void }) {
   const [loaded, setLoaded] = useState<BomVersion | null>(null);
+  const names = useNames("product", loaded ? [loaded.productId] : []);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [baseVersion, setBaseVersion] = useState(1);
@@ -288,7 +291,7 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
 
   return (
     <>
-      <PageHeader title={loaded ? `Edit BOM ${loaded.productId}` : "Edit BOM draft"} description="Change the header and lines of a draft. Active versions change through an ECO." />
+      <PageHeader title={loaded ? `Edit BOM ${names[loaded.productId] ?? loaded.productId}` : "Edit BOM draft"} description="Change the header and lines of a draft. Active versions change through an ECO." />
       <div className={styles.alertSlot}>
         <Alert
           tone="danger"
@@ -368,7 +371,7 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
             </div>
             <div className={styles.field}>
               <FormField id="edit-bom-site" label="Site" optional error={fieldErrors.siteId}>
-                {(control) => <Input {...control} value={header.siteId} onChange={(e) => setHeader({ ...header, siteId: e.target.value })} maxLength={64} />}
+                {(control) => <EntityLookup {...control} entity="site" prefill={false} value={header.siteId} onChange={(e) => setHeader({ ...header, siteId: e.target.value })} />}
               </FormField>
             </div>
             <div className={styles.field}>
@@ -396,7 +399,7 @@ export function BomVersionEditPage({ id, onSaved, onCancel }: { id: string; onSa
                 <div className={styles.field}>
                   <FormField id={`edit-bom-component-${line.key}`} label={`Component ${index + 1}`} error={fieldErrors[`lines[${index}]`]}>
                     {(control) => (
-                      <Input {...control} value={line.componentProductId} onChange={(e) => updateLine(line.key, { componentProductId: e.target.value })} required maxLength={64} />
+                      <EntityLookup {...control} entity="product" prefill={false} value={line.componentProductId} onChange={(e) => updateLine(line.key, { componentProductId: e.target.value })} />
                     )}
                   </FormField>
                 </div>

@@ -210,7 +210,7 @@ describe("price change run", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Apply to these orders" }));
     expect(await screen.findByText("1 order repriced, 1 failed; open an order to see why.")).toBeInTheDocument();
-    expect(screen.getByText("Failed: PRC-PO-009")).toBeInTheDocument();
+    expect(screen.getByText("Failed: Someone else changed this purchase order after you opened it. Reload the page to see the latest version, then make your change again.")).toBeInTheDocument();
     expect(bodies[1]).toEqual({ apply: true, tradeAgreementId: T1 });
     expect(keys[1]).toMatch(/.+/);
     expect(screen.queryByRole("button", { name: "Apply to these orders" })).not.toBeInTheDocument();

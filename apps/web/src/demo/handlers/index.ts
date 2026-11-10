@@ -2,4 +2,5 @@
 import "./mfg";
 import "./supply";
 import "./o2c";
+import "./documents";
 import "./shell";

@@ -13,7 +13,7 @@ import {
   type ReleaseStatus,
   type ReleasedOrder,
 } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, money, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
+import { Details, LoadError, StatusBadge, money, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
 import { formatInstant } from "./RfqPages";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -43,7 +43,7 @@ export function validateRelease(legalEntityId: string, windowDays: string, maxLi
 
 const columns: DataTableColumn<ReleaseRun>[] = [
   { key: "createdAt", header: "Run", mono: true, render: (r) => formatInstant(r.createdAt) },
-  { key: "legalEntityId", header: "Legal entity", render: (r) => <ShortId id={r.legalEntityId} /> },
+  { key: "legalEntityId", header: "Legal entity", render: (r) => <Named entity="legalEntity" id={r.legalEntityId} /> },
   { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
   { key: "linesConsidered", header: "Lines read", align: "end" },
   { key: "linesReleased", header: "Released", align: "end" },
@@ -206,7 +206,7 @@ const orderColumns: DataTableColumn<ReleasedOrder>[] = [
       </Link>
     ),
   },
-  { key: "vendorId", header: "Vendor", render: (o) => <ShortId id={o.vendorId} /> },
+  { key: "vendorId", header: "Vendor", render: (o) => <Named entity="vendor" id={o.vendorId} /> },
   { key: "lineCount", header: "Lines", align: "end" },
   { key: "total", header: "Total", align: "end", mono: true, render: (o) => money(o.total, o.currency) },
 ];
@@ -221,7 +221,7 @@ const skipColumns: DataTableColumn<ReleaseSkip>[] = [
       </Link>
     ),
   },
-  { key: "vendorId", header: "Vendor", render: (s) => <ShortId id={s.vendorId} /> },
+  { key: "vendorId", header: "Vendor", render: (s) => <Named entity="vendor" id={s.vendorId} /> },
   { key: "code", header: "Code", mono: true },
   { key: "reason", header: "Why it was left" },
 ];
@@ -261,7 +261,7 @@ export function ReleaseRunDetailPage() {
           <Details
             items={[
               { label: "Status", value: <StatusBadge status={run.status} /> },
-              { label: "Legal entity", value: run.legalEntityId, mono: true },
+              { label: "Legal entity", value: <Named entity="legalEntity" id={run.legalEntityId} /> },
               { label: "Delivery window", value: `${run.windowDays} days` },
               { label: "Most lines to read", value: String(run.maxLines), mono: true },
               { label: "Lines read", value: String(run.linesConsidered), mono: true },

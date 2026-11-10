@@ -71,8 +71,8 @@ describe("KPI filter and formatting", () => {
     const base = { groupBy: "" as const, siteId: "", productId: "", from: "", to: "", asOf: "" };
     expect(validateKpiFilter(base)).toEqual({});
     expect(validateKpiFilter({ ...base, siteId: "x", productId: "y", from: "2026-11-01", to: "2026-10-01" })).toEqual({
-      siteId: "Enter the site's id (a UUID), or leave it empty.",
-      productId: "Enter the product's id (a UUID), or leave it empty.",
+      siteId: "Choose a site, or leave it empty.",
+      productId: "Choose a product, or leave it empty.",
       to: "The end of the period must not be before its start.",
     });
   });
@@ -121,9 +121,10 @@ describe("production KPIs page (4.21.14)", () => {
     renderPage();
     await findTable({ name: "KPIs" });
     const form = screen.getByRole("form", { name: "Filter the KPIs" });
-    await userEvent.type(within(form).getByLabelText(/Product/), "bolt");
+    fireEvent.change(within(form).getByLabelText(/Ended from/), { target: { value: "2026-11-01" } });
+    fireEvent.change(within(form).getByLabelText(/Ended to/), { target: { value: "2026-10-01" } });
     await userEvent.click(within(form).getByRole("button", { name: "Show" }));
-    expect(await screen.findByText("Enter the product's id (a UUID), or leave it empty.")).toBeInTheDocument();
+    expect(await screen.findByText("The end of the period must not be before its start.")).toBeInTheDocument();
     expect(calls(fetchMock)).toHaveLength(1);
   });
 

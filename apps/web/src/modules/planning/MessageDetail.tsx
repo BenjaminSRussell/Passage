@@ -38,6 +38,7 @@ import {
 } from "./pages";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 export const MAX_NOTE = 500;
 
@@ -300,7 +301,7 @@ export function MessageDetailPage() {
                 "Message",
                 m.text ? `${m.code ? `${m.code} ` : ""}${m.text}` : dash,
               ],
-              ["Item", m.itemId, true],
+              ["Item", <EntityName entity="product" id={m.itemId} fallback={m.itemId} />],
               ["Scope", scopeLabel(m)],
               ["Supply", m.supplyRef || dash, true],
               ["Demand", m.demandRef || dash, true],

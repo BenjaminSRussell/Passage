@@ -9,6 +9,8 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderNumber } from "../sales/OrderNumber";
 
 const DUTY_CREATE = "fulfillment.warehouse.release";
 
@@ -22,8 +24,8 @@ export function DropShipStatusBadge({ status }: { status: DropShipStatus }) {
 const columns: DataTableColumn<DropShip>[] = [
   { key: "dropShipNumber", header: "Drop-ship", mono: true },
   { key: "status", header: "Status", render: (row) => <DropShipStatusBadge status={row.status} /> },
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
-  { key: "vendorId", header: "Vendor", mono: true, render: (row) => shortId(row.vendorId) },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
+  { key: "vendorId", header: "Vendor", render: (row) => <EntityName entity="vendor" id={row.vendorId} /> },
   { key: "purchaseOrderId", header: "Purchase order", mono: true, render: (row) => shortId(row.purchaseOrderId) },
   { key: "qty", header: "Quantity", align: "end", render: (row) => `${row.qty} ${row.unit}` },
   { key: "qtyConfirmed", header: "Qty shipped", align: "end", render: (row) => `${row.qtyConfirmed} ${row.unit}` },

@@ -32,23 +32,28 @@ const (
 
 	codeValidation = "COM-0001"
 	codeTenant     = "AUTH-0001"
-
-	DutyPartyRead         = "party.read"
-	DutyProductRead       = "product.read"
-	DutyPurchaseOrderRead = "procurement.purchase-order.inquire"
 )
 
+// source is one searchable record type: the duties that let a caller search it
+// (any one of them) and the web route of its record.
 type source struct {
 	recordType string
-	duty       string
+	duties     []string
 	link       string
 	byNumber   bool
 }
 
+func (s source) allows(p tenant.Principal) bool { return slices.ContainsFunc(s.duties, p.HasDuty) }
+
 var sources = []source{
-	{store.TypeParty, DutyPartyRead, "/party/%s", false},
-	{store.TypeProduct, DutyProductRead, "/product/%s", true},
-	{store.TypePurchaseOrder, DutyPurchaseOrderRead, "/purchasing/purchase-orders/%s", false},
+	{store.TypeParty, []string{"party.read"}, "/party/%s", false},
+	{store.TypeProduct, []string{"product.read"}, "/product/%s", true},
+	{store.TypePurchaseOrder, []string{"procurement.purchase-order.inquire"}, "/purchasing/purchase-orders/%s", false},
+	{store.TypeReceipt, []string{"receiving.receipt.maintain"}, "/receiving/receipts/%s", false},
+	{store.TypeVendorInvoice, []string{"receiving.ap.inquire"}, "/ap-invoices/%s", false},
+	{store.TypeSalesOrder, []string{"sales.order.read"}, "/sales/orders/%s", false},
+	{store.TypePackingSlip, []string{"fulfillment.warehouse.view"}, "/fulfillment/packing-slips/%s", false},
+	{store.TypeCustomerInvoice, []string{"billing.invoice.view"}, "/billing/invoices/%s", false},
 }
 
 type Searcher interface {
@@ -63,9 +68,9 @@ type API struct {
 func New(st Searcher) *API { return &API{st: st} }
 
 func (a *API) Register(r chi.Router) {
-	duties := make([]string, len(sources))
-	for i, s := range sources {
-		duties[i] = s.duty
+	var duties []string
+	for _, s := range sources {
+		duties = append(duties, s.duties...)
 	}
 	r.With(requireTenant, authz.RequireAnyDuty(duties...)).Get("/v1/search", a.search)
 }
@@ -178,7 +183,7 @@ func parseTypes(raw string, p tenant.Principal) ([]string, string) {
 	}
 	var allowed []string
 	for _, s := range sources {
-		if (len(requested) == 0 || requested[s.recordType]) && p.HasDuty(s.duty) {
+		if (len(requested) == 0 || requested[s.recordType]) && s.allows(p) {
 			allowed = append(allowed, s.recordType)
 		}
 	}

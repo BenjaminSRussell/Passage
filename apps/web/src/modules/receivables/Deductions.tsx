@@ -55,6 +55,7 @@ import {
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 const ZERO = /^0+(\.0+)?$/;
@@ -73,7 +74,7 @@ function worked(d: Deduction): boolean {
 const columns: DataTableColumn<Deduction>[] = [
   { key: "documentNumber", header: "Item", mono: true },
   { key: "type", header: "Type", render: (row) => DEDUCTION_TYPE_LABELS[row.type] ?? row.type },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "amount", header: "Amount", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
   { key: "createdAt", header: "Age (days)", mono: true, align: "end", render: (row) => (worked(row) ? ageDays(row.createdAt) : "Closed") },
   { key: "claimRef", header: "Claim", mono: true, render: (row) => row.claimRef ?? "None" },

@@ -265,25 +265,17 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		return RMACreditNote{}, err
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		// existing reports whether this RMA already has its credit, which a repeat replays.
-		existing := func() (bool, error) {
-			var err error
-			row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return false, nil
-			}
-			if err != nil {
-				return false, err
-			}
+		var err error
+		row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID)
+		if err == nil {
 			if row.requestHash != hash {
-				return false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "this RMA was already credited with different amounts or references")
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "this RMA was already credited with different amounts or references")
 			}
-			return true, nil
+			return nil
 		}
-		if found, err := existing(); found || err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		var err error
 		if taxAccounts, err = s.rmaTaxAccountsFor(in); err != nil {
 			return err
 		}
@@ -294,9 +286,14 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		if err != nil {
 			return err
 		}
-		// A concurrent repeat may have committed this RMA's credit while we waited for the invoice lock; replay it
-		// rather than counting it against the invoice or meeting its credit note's document number.
-		if found, err := existing(); found || err != nil {
+		// A concurrent repeat of this RMA may have committed while we waited for the invoice lock: replay it here, not as a
+		// duplicate open item or an over-credit.
+		if row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID); err == nil {
+			if row.requestHash != hash {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "this RMA was already credited with different amounts or references")
+			}
+			return nil
+		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		// The invoice row locks above serialize RMA credits of one invoice, so this sum sees every earlier credit.

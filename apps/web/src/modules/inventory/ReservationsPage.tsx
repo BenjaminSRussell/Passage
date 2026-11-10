@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { dash, describeDimensions, formatDateTime, sentence, shortId } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert, RowAction, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -73,7 +74,7 @@ export function ReservationsPage() {
 
   const columns: DataTableColumn<Reservation>[] = [
     { key: "createdAt", header: "Reserved", render: (row) => formatDateTime(row.createdAt) },
-    { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+    { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
     { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
     { key: "qty", header: "Quantity", align: "end", mono: true },
     {

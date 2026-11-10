@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listBackorders, type BackorderFilter, type BackorderItem } from "./api/client";
-import { dash, sentence, shortId, UUID } from "./format";
+import { dash, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -36,8 +37,8 @@ export function lateness(item: BackorderItem): string {
 const columns: DataTableColumn<BackorderItem>[] = [
   { key: "orderNumber", header: "Order", mono: true, render: (b) => <Link to={`/sales/orders/${b.orderId}`}>{b.orderNumber}</Link> },
   { key: "lineNo", header: "Line", align: "end" },
-  { key: "customerId", header: "Customer", mono: true, render: (b) => shortId(b.customerId) },
-  { key: "productId", header: "Product", mono: true, render: (b) => shortId(b.productId) },
+  { key: "customerId", header: "Customer", render: (b) => <EntityName entity="customer" id={b.customerId} /> },
+  { key: "productId", header: "Product", render: (b) => <EntityName entity="product" id={b.productId} /> },
   { key: "quantity", header: "Quantity", align: "end" },
   { key: "requestedShipDate", header: "Requested", mono: true },
   { key: "promisedDate", header: "Promised", mono: true, render: (b) => b.promisedDate ?? "Not promised" },

@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   BillingApiError,
@@ -186,7 +186,8 @@ type FieldOpts = { hint?: string; optional?: boolean; mono?: boolean; decimal?: 
 /** Invoice shipments (FR-29.1, FR-29.2): turn posted packing slips into invoice proposals, one per order or consolidated. */
 export function NewShipmentProposalPage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<ShipmentValues>(() => emptyShipment());
+  const carried = useSearchParams()[0].get("customerId") ?? "";
+  const [values, setValues] = useState<ShipmentValues>(() => ({ ...emptyShipment(), customerId: carried }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);

@@ -3,13 +3,14 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { buttonClassName, DataTable, EmptyState, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchWorklist, type CustomerRisk, type WorklistResponse } from "./api/client";
-import { DAY, money, shortId, today, UUID } from "./format";
+import { DAY, money, today, UUID } from "./format";
 import { LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<CustomerRisk>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "riskScore", header: "Risk score", mono: true, align: "end" },
   { key: "overdue", header: "Overdue", mono: true, align: "end", render: (row) => money(row.overdue, row.currency) },
   { key: "totalOpen", header: "Total open", mono: true, align: "end", render: (row) => money(row.totalOpen, row.currency) },

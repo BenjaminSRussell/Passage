@@ -31,6 +31,7 @@ import {
 import { errorText } from "./screens";
 import { ResourceActions } from "./resourceEdit";
 import styles from "./pages.module.css";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const resourceTypes = ["machine", "tool", "labor", "vendor", "location"];
 const notFoundStatus = 404;
@@ -142,7 +143,7 @@ const resourceColumns: DataTableColumn<Resource>[] = [
   { key: "code", header: "Code", mono: true },
   { key: "name", header: "Name" },
   { key: "type", header: "Type" },
-  { key: "siteId", header: "Site" },
+  { key: "siteId", header: "Site", render: (row) => <EntityName entity="site" id={row.siteId} fallback={row.siteId} /> },
   { key: "groupId", header: "Group", mono: true },
   { key: "exclusive", header: "Exclusive", render: (row) => (row.exclusive ? "Yes" : "No") },
 ];
@@ -243,10 +244,10 @@ export function ResourceDetailPage({ id, onBack, onDeleted, canWrite }: { id: st
         ["Code", resource.code],
         ["Name", resource.name],
         ["Type", resource.type],
-        ["Site", resource.siteId],
+        ["Site", <EntityName entity="site" id={resource.siteId} fallback={resource.siteId} />],
         ["Efficiency %", resource.efficiencyPct],
         ["Capacity per day (h)", resource.capacityPerDayH],
-        ["Vendor party", resource.vendorPartyId],
+        ["Vendor party", resource.vendorPartyId ? <EntityName entity="party" id={resource.vendorPartyId} fallback={resource.vendorPartyId} /> : undefined],
         ["Exclusive", resource.exclusive ? "Yes" : "No"],
         [
           "Group",
@@ -313,7 +314,7 @@ const groupColumns: DataTableColumn<ResourceGroup>[] = [
     render: (row) => <Link to={`/engineering/resource-groups/${encodeURIComponent(row.id)}`}>{row.code}</Link>,
   },
   { key: "name", header: "Name" },
-  { key: "siteId", header: "Site" },
+  { key: "siteId", header: "Site", render: (row) => <EntityName entity="site" id={row.siteId} fallback={row.siteId} /> },
   { key: "calendarId", header: "Calendar", render: (row) => calendarLink(row.calendarId) },
 ];
 

@@ -17,6 +17,7 @@ test("My work lists what is waiting and Open goes to the document", async ({ pag
   const shell = new ShellPage(page);
 
   await shell.goto("/workflow/inbox");
+  // The top bar h1 carries the navigation label ("Inbox"); the page header is an h2.
   await expect(page.getByRole("heading", { level: 2, name: "My work" })).toBeVisible();
   const table = page.getByRole("table", { name: "Work waiting for you" });
   await expect(table).toContainText("PR-1042");

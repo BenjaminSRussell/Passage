@@ -49,9 +49,9 @@ describe("EcosPage", () => {
     render(<EcosPage onCreate={created} />);
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await screen.findByText("ECO-b");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecos?cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecos?cursor=c1", expect.anything());
     fireEvent.change(screen.getByLabelText(/State/), { target: { value: "released" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecos?state=released"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecos?state=released", expect.anything()));
     fireEvent.click(screen.getByRole("button", { name: "New ECO" }));
     expect(created).toHaveBeenCalled();
   });

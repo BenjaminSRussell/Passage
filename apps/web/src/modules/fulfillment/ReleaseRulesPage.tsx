@@ -9,12 +9,13 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { PlainName } from "../sales/OrderNumber";
 
 /** Saving a rule needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
 const DUTY_SAVE = "fulfillment.warehouse.release";
 
 const columns: DataTableColumn<ReleaseRule>[] = [
-  { key: "warehouseId", header: "Warehouse", mono: true },
+  { key: "warehouseId", header: "Warehouse", render: (row) => <PlainName entity="warehouse" id={row.warehouseId} /> },
   { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => row.legalEntityId ?? dash },
   { key: "horizonDays", header: "Horizon (days)", align: "end" },
   { key: "requireFullAtp", header: "ATP", render: (row) => <Badge tone={row.requireFullAtp ? "neutral" : "info"}>{row.requireFullAtp ? "Full ATP only" : "Partial ATP allowed"}</Badge> },

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the lean service (services/lean/api/openapi.yaml). Browser calls
 // use /api/v1/lean/..., which the web BFF routes to the service. Quantities
 // travel as decimal strings.
@@ -247,7 +248,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
@@ -559,7 +560,7 @@ export function previewBackflush(flowId: string, periodId: string, rates: Activi
 
 /** The flow costing period report as CSV text, oldest period first. */
 export async function exportPeriods(flowId: string): Promise<string> {
-  const res = await fetch(`${base}/flows/${encodeURIComponent(flowId)}/costing-periods:export`, {
+  const res = await apiFetch(`${base}/flows/${encodeURIComponent(flowId)}/costing-periods:export`, {
     headers: { Accept: "text/csv" },
     credentials: "same-origin",
   });

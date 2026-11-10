@@ -2,13 +2,14 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listNegativeOnHand, type NegativeOnHandLine } from "./api/client";
-import { dash, describeDimensions, shortId, UUID } from "./format";
+import { dash, describeDimensions, UUID } from "./format";
 import { ALL_DIMENSIONS, money, ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<NegativeOnHandLine>[] = [
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "physicalInvent", header: "Physical", align: "end", mono: true },
   { key: "shortfallQty", header: "Shortfall", align: "end", mono: true },

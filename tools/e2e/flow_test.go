@@ -3,10 +3,12 @@ package e2e_test
 import (
 	"context"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +92,18 @@ func (b trialBalance) net(account string) string {
 	return "absent"
 }
 
+// delta is the change in an account's net balance since before, as a two-decimal string.
+func (b trialBalance) delta(before trialBalance, account string) string {
+	value := func(tb trialBalance) *big.Rat {
+		r, ok := new(big.Rat).SetString(strings.TrimSpace(tb.net(account)))
+		if !ok {
+			return new(big.Rat) // "absent": the account has no postings yet
+		}
+		return r
+	}
+	return new(big.Rat).Sub(value(b), value(before)).FloatString(2)
+}
+
 type entry struct {
 	DocumentID string `json:"documentId"`
 	Source     struct {
@@ -147,21 +161,26 @@ func TestVendorPurchaseOrderReceiptInvoiceLedgerFlow(t *testing.T) {
 func runFlow(t *testing.T, c flowClients, purchasingURL string) {
 	t.Helper()
 	party, purchasing, approving, receiving, clerkReceiving, ledger := c.party, c.purchasing, c.approving, c.receiving, c.clerkReceiving, c.ledger
-	group := must(t, party, http.MethodPost, "/v1/party/vendor-groups", map[string]any{"code": "TRADE", "name": "Trade vendors"}, nil, http.StatusCreated)
-	partyRec := must(t, party, http.MethodPost, "/v1/party/parties", map[string]any{"partyType": "organization", "legalName": "Acme Supplies Ltd"}, nil, http.StatusCreated)
-	if partyRec.String("partyNumber") != "P-000001" {
-		t.Fatalf("party number %q, want the first PARTY sequence value from numbering", partyRec.String("partyNumber"))
+	// A suffix per run keeps the flow repeatable against a stack that already holds an earlier run's documents.
+	run := strings.ToUpper(stack.NewKey()[:6])
+	before := decode[trialBalance](t, must(t, ledger, http.MethodGet, "/v1/ledger/balances?ledger="+c.ledgerID, nil, nil, http.StatusOK))
+	group := must(t, party, http.MethodPost, "/v1/party/vendor-groups", map[string]any{"code": "T" + run, "name": "Trade vendors " + run}, nil, http.StatusCreated)
+	partyRec := must(t, party, http.MethodPost, "/v1/party/parties", map[string]any{"partyType": "organization", "legalName": "Acme Supplies " + run}, nil, http.StatusCreated)
+	if !strings.HasPrefix(partyRec.String("partyNumber"), "P-") {
+		t.Fatalf("party number %q, want a PARTY sequence value from numbering", partyRec.String("partyNumber"))
 	}
 	vendor := must(t, party, http.MethodPost, "/v1/party/parties/"+partyRec.String("id")+"/vendor", map[string]any{
-		"accountNumber": "V-1000", "vendorGroupId": group.String("id"), "currencyCode": stack.Currency,
+		"accountNumber": "V-" + run, "vendorGroupId": group.String("id"), "currencyCode": stack.Currency,
 	}, nil, http.StatusCreated)
 	vendorID := vendor.String("id")
 	must(t, party, http.MethodGet, "/v1/party/vendors/"+vendorID, nil, nil, http.StatusOK)
 
 	today := time.Now().UTC().Format("2006-01-02")
 	productID := "7d1c0b9e-3a55-4c1b-9d6e-0a1f6a1d0c11"
-	if err := stack.GrantPurchaseOrderLimit(context.Background(), purchasingURL, c.approverID); err != nil {
-		t.Fatal(err)
+	if purchasingURL != "" { // the live stack grants the seeded users their limits when it starts
+		if err := stack.GrantPurchaseOrderLimit(context.Background(), purchasingURL, c.approverID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	po := must(t, purchasing, http.MethodPost, "/v1/procurement/purchase-orders", map[string]any{
 		"legalEntityId": stack.LegalEntity, "vendorId": vendorID, "currency": stack.Currency,
@@ -179,7 +198,7 @@ func runFlow(t *testing.T, c flowClients, purchasingURL string) {
 	}
 
 	receipt := must(t, receiving, http.MethodPost, "/v1/receiving/receipts", map[string]any{
-		"vendorId": vendorID, "purchaseOrderId": poID, "legalEntityId": stack.LegalEntity, "packingSlip": "PS-1", "receiptDate": today, "currency": stack.Currency,
+		"vendorId": vendorID, "purchaseOrderId": poID, "legalEntityId": stack.LegalEntity, "packingSlip": "PS-" + run, "receiptDate": today, "currency": stack.Currency,
 		"lines": []map[string]any{{"poLineNo": 1, "productId": productID, "unit": "EA", "qty": "10", "locationId": "5b1f3c2e-7a44-4d0f-8a62-1c9b8d2e4f10"}},
 	}, nil, http.StatusCreated)
 	receiptID := receipt.String("id")
@@ -198,17 +217,17 @@ func runFlow(t *testing.T, c flowClients, purchasingURL string) {
 			"lines": []map[string]any{{"receiptId": receiptID, "receiptLineNo": 1, "qty": qty, "unitPrice": "25.00"}},
 		}
 	}
-	if code := rejected(t, clerkReceiving, "/v1/receiving/invoices:post", invoiceBody("INV-DENIED", "10"), http.StatusForbidden); code != "AUTH-0003" {
+	if code := rejected(t, clerkReceiving, "/v1/receiving/invoices:post", invoiceBody("INV-DENIED-"+run, "10"), http.StatusForbidden); code != "AUTH-0003" {
 		t.Fatalf("a user without receiving.vendor-invoice.post got %s, want AUTH-0003", code)
 	}
-	if code := rejected(t, receiving, "/v1/receiving/invoices:post", invoiceBody("INV-OVER", "11"), http.StatusUnprocessableEntity); code != "AP-QTY-001" {
+	if code := rejected(t, receiving, "/v1/receiving/invoices:post", invoiceBody("INV-OVER-"+run, "11"), http.StatusUnprocessableEntity); code != "AP-QTY-001" {
 		t.Fatalf("invoicing more than was received got %s, want AP-QTY-001", code)
 	}
-	invoice := must(t, receiving, http.MethodPost, "/v1/receiving/invoices:post", invoiceBody("INV-1001", "10"), nil, http.StatusCreated)
+	invoice := must(t, receiving, http.MethodPost, "/v1/receiving/invoices:post", invoiceBody("INV-"+run, "10"), nil, http.StatusCreated)
 	if invoice.String("status") != "POSTED" || invoice.String("total") != "250.00" || invoice.String("ledgerEntryId") == "" {
 		t.Fatalf("invoice after posting: %s", invoice.Body)
 	}
-	if code := rejected(t, receiving, "/v1/receiving/invoices:post", invoiceBody("inv-1001", "10"), http.StatusConflict); code != "AP-DUP-001" {
+	if code := rejected(t, receiving, "/v1/receiving/invoices:post", invoiceBody(strings.ToLower("INV-"+run), "10"), http.StatusConflict); code != "AP-DUP-001" {
 		t.Fatalf("a repeated invoice number got %s, want AP-DUP-001", code)
 	}
 
@@ -221,8 +240,8 @@ func runFlow(t *testing.T, c flowClients, purchasingURL string) {
 	}
 
 	tb := decode[trialBalance](t, must(t, ledger, http.MethodGet, "/v1/ledger/balances?ledger="+c.ledgerID, nil, nil, http.StatusOK))
-	if !tb.Balanced || tb.net("1400") != "250.00" || tb.net("2000") != "-250.00" || tb.net("2100") != "0.00" {
-		t.Fatalf("trial balance after the flow: %+v", tb)
+	if !tb.Balanced || tb.delta(before, "1400") != "250.00" || tb.delta(before, "2000") != "-250.00" || tb.delta(before, "2100") != "0.00" {
+		t.Fatalf("trial balance after the flow: %+v (before: %+v)", tb, before)
 	}
 }
 

@@ -8,6 +8,7 @@ import { dash, durationMinutes, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceName, formatResource, useResources } from "../mfg-shared/resources";
 
 const SEVERITY: Record<Andon["severity"], { label: string; tone: BadgeTone }> = {
   info: { label: "Info", tone: "info" },
@@ -29,9 +30,14 @@ export function AndonPage() {
   const [clearing, setClearing] = useState<Andon | null>(null);
   const [cleared, setCleared] = useState<string | null>(null);
   const rows = state.data ?? [];
+  const resources = useResources();
+  const resourceText = (id: string) => {
+    const found = resources.find((r) => r.id === id || r.code === id);
+    return found ? formatResource(found) : "the resource";
+  };
 
   const columns: DataTableColumn<Andon>[] = [
-    { key: "resourceId", header: "Resource", mono: true },
+    { key: "resourceId", header: "Resource", render: (row) => <ResourceName id={row.resourceId} /> },
     { key: "kind", header: "Condition", render: (row) => CONDITION[row.kind] ?? row.kind },
     { key: "detail", header: "Detail", render: (row) => row.detail ?? dash },
     { key: "severity", header: "Severity", render: (row) => <Badge tone={SEVERITY[row.severity].tone}>{SEVERITY[row.severity].label}</Badge> },
@@ -106,7 +112,7 @@ export function AndonPage() {
           alert={clearing}
           onCancel={() => setClearing(null)}
           onDone={() => {
-            setCleared(`The quality-fail alert on resource ${clearing.resourceId} is cleared.`);
+            setCleared(`The quality-fail alert on ${resourceText(clearing.resourceId)} is cleared.`);
             setClearing(null);
             state.reload();
           }}

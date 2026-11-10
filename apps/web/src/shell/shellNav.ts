@@ -9,6 +9,6 @@ export interface ShellNavItem extends NavItem {
 
 export const shellNav: ShellNavItem[] = [
   { label: copy.nav.home, to: "/", icon: "home" },
-  { label: copy.nav.notes, to: "/notes", icon: "note" },
   { label: copy.nav.allFeatures, to: ALL_FEATURES_PATH, icon: "grid" },
+  { label: copy.nav.glossary, to: "/glossary", icon: "info" },
 ];

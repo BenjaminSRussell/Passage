@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
 import { Alert, Badge, buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listInTransit, type InTransitItem } from "./api/client";
-import { describeDimensions, shortId } from "./format";
+import { describeDimensions } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -13,7 +14,7 @@ const columns: DataTableColumn<InTransitItem>[] = [
     mono: true,
     render: (row) => <Link to={`/inventory/transfer-orders/${row.orderId}`}>{row.number}</Link>,
   },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "route", header: "Route", mono: true, render: (row) => `${row.fromWarehouseId} → ${row.transitWarehouseId} → ${row.toWarehouseId}` },
   { key: "shipDate", header: "Shipped", mono: true },

@@ -24,7 +24,7 @@ import {
   type ChargeSide,
   type ChargeStatus,
 } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, currencyPattern, datePattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure } from "./parts";
+import { Details, LoadError, ShortId, StatusBadge, currencyPattern, datePattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -462,7 +462,7 @@ export function ChargeCodeDetailPage() {
             <Details
               items={[
                 { label: "Code", value: saved.code, mono: true },
-                { label: "Legal entity", value: saved.legalEntityId, mono: true },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={saved.legalEntityId} /> },
                 { label: "Default", value: calcLabel(saved.calc, saved.defaultValue) },
                 { label: "Status", value: <StatusBadge status={saved.status} /> },
                 { label: "Version", value: String(saved.version), mono: true },
@@ -517,10 +517,10 @@ export function ChargeCodeDetailPage() {
 }
 
 const keyLabel = (a: AutoCharge) =>
-  a.accountCode === "ALL" ? "Every vendor" : `${a.accountCode === "GROUP" ? "Vendor group" : "Vendor"} ${(a.accountId ?? "").slice(0, 8)}`;
+  a.accountCode === "ALL" ? "Every vendor" : a.accountCode === "GROUP" ? `Vendor group ${(a.accountId ?? "").slice(0, 8)}` : <Named entity="vendor" id={a.accountId} />;
 
 const itemLabel = (a: AutoCharge) =>
-  a.itemCode === "PRODUCT" ? `Product ${(a.itemId ?? "").slice(0, 8)}` : a.itemCode === "GROUP" ? `Product group ${(a.itemId ?? "").slice(0, 8)}` : "Whole order";
+  a.itemCode === "PRODUCT" ? <Named entity="product" id={a.itemId} /> : a.itemCode === "GROUP" ? `Product group ${(a.itemId ?? "").slice(0, 8)}` : "Whole order";
 
 function autoColumns(codes: Map<string, ChargeCode>): DataTableColumn<AutoCharge>[] {
   return [
@@ -905,7 +905,7 @@ export function AutoChargeDetailPage() {
                 { label: "Charge code", value: code.data ? `${code.data.code} - ${code.data.name}` : saved.chargeCodeId, mono: !code.data },
                 { label: "Applies to", value: keyLabel(saved) },
                 { label: "Charged on", value: itemLabel(saved) },
-                { label: "Legal entity", value: saved.legalEntityId, mono: true },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={saved.legalEntityId} /> },
                 { label: "Status", value: <StatusBadge status={saved.status} /> },
                 { label: "Version", value: String(saved.version), mono: true },
               ]}

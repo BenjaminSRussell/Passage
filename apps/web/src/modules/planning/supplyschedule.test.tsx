@@ -75,7 +75,7 @@ describe("Supply schedule page", () => {
     const fetchMock = vi.fn(async (_url: string) => json(projection));
     vi.stubGlobal("fetch", fetchMock);
     renderAt(`/planning/supply-schedule?plan=MAIN&items=${fg},${ghost}&bucket=week&horizon=14&cost=2.5&currency=EUR`);
-    const table = await findTable({ name: `Supply schedule of ${fg}` });
+    const table = await findTable({ name: "Supply schedule" });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(2);
     expect(within(rows[0]).getAllByRole("cell")[0]).toHaveTextContent("2026-11-02 to 2026-11-08");
@@ -85,7 +85,8 @@ describe("Supply schedule page", () => {
     expect(within(rows[1]).getAllByRole("cell")[4]).toHaveTextContent("-5.5");
     expect(within(rows[1]).getAllByRole("cell")[1]).toHaveTextContent("120");
     expect(screen.getByText(/Opening on-hand 20; 1 period short\./)).toBeInTheDocument();
-    expect(screen.getByText(/for site 00000000-0000-0000-0000-0000000000a1, as of 2026-11-02/)).toBeInTheDocument();
+    expect(screen.getByText("00000000-0000-0000-0000-0000000000a1")).toBeInTheDocument();
+    expect(screen.getByText(/as of 2026-11-02/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Not in this plan" })).toBeInTheDocument();
     expect(fetchMock.mock.calls[0][0]).toBe(
       `/api/v1/planning/plans/MAIN/projection?itemId=${fg}&itemId=${ghost}&bucket=week&horizonDays=14&unitCost=2.5&currency=EUR`,

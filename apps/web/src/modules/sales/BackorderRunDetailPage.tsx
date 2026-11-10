@@ -3,10 +3,11 @@ import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { commitBackorderRun, describeProblem, getBackorderRun, type BackorderRun, type BackorderRunLine, type Problem, type Versioned } from "./api/client";
 import { RunStatusBadge } from "./BackorderRunsPage";
-import { dash, formatDateTime, sentence, shortId, subtractDecimal } from "./format";
+import { dash, formatDateTime, sentence, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** "kept", "gains 20", "loses 20": what the run does to a line's promised quantity. */
 export function lineEffect(line: BackorderRunLine): string {
@@ -18,7 +19,7 @@ export function lineEffect(line: BackorderRunLine): string {
 const columns: DataTableColumn<BackorderRunLine>[] = [
   { key: "seq", header: "#", align: "end" },
   { key: "orderNumber", header: "Order", mono: true, render: (l) => <Link to={`/sales/orders/${l.orderId}`}>{`${l.orderNumber} line ${l.lineNo}`}</Link> },
-  { key: "customerId", header: "Customer", mono: true, render: (l) => shortId(l.customerId) },
+  { key: "customerId", header: "Customer", render: (l) => <EntityName entity="customer" id={l.customerId} /> },
   { key: "priorityClass", header: "Priority", align: "end" },
   { key: "requestedDate", header: "Requested", mono: true },
   { key: "demand", header: "Quantity", align: "end" },
@@ -78,9 +79,9 @@ export function BackorderRunDetailPage() {
   const facts: [string, ReactNode][] = [
     ["Status", <RunStatusBadge key="s" status={run.status} />],
     ["Strategy", sentence(run.strategy)],
-    ["Product", run.productId],
-    ["Site", run.siteId],
-    ["Warehouse", run.warehouseId],
+    ["Product", <EntityName entity="product" id={run.productId} />],
+    ["Site", <EntityName entity="site" id={run.siteId} />],
+    ["Warehouse", <EntityName entity="warehouse" id={run.warehouseId} />],
     ["Supply", `${run.supply} available on ${run.supplyDate}`],
     ["Promised after the run", run.allocated],
     ["Lines changed", `${run.changedCount} of ${lines.length}`],

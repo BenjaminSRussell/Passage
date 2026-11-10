@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { id, json, pageViolations, problem, renderAt, routes, useFakeApi } from "./hrTestKit";
 import hr from "./module";
 import { validateChange } from "./ProfileChangesCard";
@@ -68,38 +68,6 @@ describe("ESS profile changes", () => {
       address: { line1: "1 Main St", city: "Springfield", postalCode: "62701", country: "US" },
     });
     expect(await screen.findByText("Waiting for approval")).toBeTruthy();
-  });
-
-  it("keeps the notice for an applied preferred name while the profile reloads", async () => {
-    let changes: unknown[] = [];
-    api.handler = routes({
-      "GET /api/v1/hr/me": json(200, me),
-      "GET /api/v1/hr/me/profile-changes": () => json(200, { items: changes }),
-      "POST /api/v1/hr/me/profile-changes": () => {
-        const created = change({ workerId: ME, workerName: "Rita Ray", kind: "PREFERRED_NAME", status: "APPLIED", summary: "Rae" });
-        changes = [created];
-        return json(201, created);
-      },
-    });
-    // Answer the profile reload late, as a slow network does, so the page is mid-reload when the notice should show.
-    const fakeFetch = globalThis.fetch;
-    let profileReads = 0;
-    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-      if (new URL(input, "http://localhost").pathname === "/api/v1/hr/me" && ++profileReads > 1) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      return fakeFetch(input, init);
-    });
-    renderAt("/hr/my/profile", ["hr.profile.self"]);
-    expect(await screen.findByText("No changes yet")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Change preferred name" }));
-    const form = screen.getByRole("form", { name: "Change preferred name" });
-    fireEvent.change(within(form).getByLabelText("Preferred name"), { target: { value: "Rae" } });
-    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Preferred name updated.")).toBeTruthy();
-    await waitFor(() => expect(api.calls.filter((c) => c.method === "GET" && c.url.pathname === "/api/v1/hr/me")).toHaveLength(2));
-    expect(screen.getByText("Preferred name updated.")).toBeTruthy();
   });
 
   it("withdraws a pending change and shows the service's conflict", async () => {

@@ -11,7 +11,7 @@ import {
   type PurchasingPolicy,
   type PurchasingPolicyInput,
 } from "./api/client";
-import { Details, LoadError, ShortId, uuidPattern, useResource, type Failure } from "./parts";
+import { Details, LoadError, uuidPattern, useResource, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -24,7 +24,7 @@ const accessModes: Record<CategoryAccessMode, { label: string; hint: string }> =
 };
 
 const columns: DataTableColumn<PurchasingPolicy>[] = [
-  { key: "legalEntityId", header: "Legal entity", render: (p) => <ShortId id={p.legalEntityId} /> },
+  { key: "legalEntityId", header: "Legal entity", render: (p) => <Named entity="legalEntity" id={p.legalEntityId} /> },
   { key: "changeManagementDefault", header: "Change management by default", render: (p) => yesNo(p.changeManagementDefault) },
   { key: "poFourEyes", header: "Purchase order four-eyes", render: (p) => yesNo(p.poFourEyes) },
   { key: "allowInvoiceBeforeReceipt", header: "Invoice before receipt", render: (p) => yesNo(p.allowInvoiceBeforeReceipt) },
@@ -150,7 +150,7 @@ export function PolicyDetailPage() {
           <Card>
             <Details
               items={[
-                { label: "Legal entity", value: legalEntityId, mono: true },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={legalEntityId} /> },
                 { label: "Saved version", value: saved.version === 0 ? "Not saved yet (defaults)" : String(saved.version) },
               ]}
             />

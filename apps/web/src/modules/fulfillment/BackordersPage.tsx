@@ -4,10 +4,11 @@ import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listBackorders, type BackorderRow } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
-import { dash, formatDateTime, shortId, SHORT_PICK_REASONS, UUID } from "./format";
+import { dash, formatDateTime, SHORT_PICK_REASONS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** Rows per page of the report. */
 export const BACKORDER_PAGE = 100;
@@ -20,8 +21,8 @@ const columns: DataTableColumn<BackorderRow>[] = [
     render: (row) => <Link to={`/fulfillment/shipments/${row.shipmentId}`}>{row.shipmentNumber}</Link>,
   },
   { key: "status", header: "Shipment status", render: (row) => <ShipmentStatusBadge status={row.status} /> },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "qtyPlanned", header: "Planned", align: "end", render: (row) => `${row.qtyPlanned} ${row.unit}` },
   { key: "qtyPicked", header: "Picked", align: "end", render: (row) => `${row.qtyPicked} ${row.unit}` },
   { key: "qtyRemainder", header: "Backorder", align: "end", render: (row) => `${row.qtyRemainder} ${row.unit}` },
