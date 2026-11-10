@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Typed client for services/expense (contract: services/expense/api/openapi.yaml).
 // The browser calls /api/v1/...; the BFF rewrites the path and attaches the session.
 // The report calls (slice 4) and the cash advance, travel requisition and card feed
@@ -237,36 +238,36 @@ export function evaluateReport(
   submitDate: string,
   lines: ExpenseLineInput[],
   gate?: RequisitionGate,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = apiFetch,
 ): Promise<EvaluationResponse> {
   return post("/api/v1/expense/report-evaluations", { submitDate, lines, ...gate }, fetchImpl);
 }
 
-export function computePerDiem(input: PerDiemInput, fetchImpl: typeof fetch = fetch): Promise<PerDiemResult> {
+export function computePerDiem(input: PerDiemInput, fetchImpl: typeof fetch = apiFetch): Promise<PerDiemResult> {
   return post("/api/v1/expense/per-diem-computations", input, fetchImpl);
 }
 
-export function checkAdvanceAging(input: AgingInput, fetchImpl: typeof fetch = fetch): Promise<AgingResult> {
+export function checkAdvanceAging(input: AgingInput, fetchImpl: typeof fetch = apiFetch): Promise<AgingResult> {
   return post("/api/v1/expense/cash-advance-aging", input, fetchImpl);
 }
 
-export function checkRequisition(input: RequisitionCheckInput, fetchImpl: typeof fetch = fetch): Promise<RequisitionCheckResult> {
+export function checkRequisition(input: RequisitionCheckInput, fetchImpl: typeof fetch = apiFetch): Promise<RequisitionCheckResult> {
   return post("/api/v1/expense/travel-requisition-checks", input, fetchImpl);
 }
 
-export function parseCardFeed(format: FeedFormat, content: string, fetchImpl: typeof fetch = fetch): Promise<CardFeedResult> {
+export function parseCardFeed(format: FeedFormat, content: string, fetchImpl: typeof fetch = apiFetch): Promise<CardFeedResult> {
   return post("/api/v1/expense/card-transactions:parse", { format, content }, fetchImpl);
 }
 
-export function checkLodging(input: LodgingInput, fetchImpl: typeof fetch = fetch): Promise<LodgingResult> {
+export function checkLodging(input: LodgingInput, fetchImpl: typeof fetch = apiFetch): Promise<LodgingResult> {
   return post("/api/v1/expense/lodging-checks", input, fetchImpl);
 }
 
-export function computeMileage(input: MileageInput, fetchImpl: typeof fetch = fetch): Promise<MileageResult> {
+export function computeMileage(input: MileageInput, fetchImpl: typeof fetch = apiFetch): Promise<MileageResult> {
   return post("/api/v1/expense/mileage-computations", input, fetchImpl);
 }
 
-export function matchCards(input: CardMatchInput, fetchImpl: typeof fetch = fetch): Promise<CardMatchResult> {
+export function matchCards(input: CardMatchInput, fetchImpl: typeof fetch = apiFetch): Promise<CardMatchResult> {
   return post("/api/v1/expense/card-matches", input, fetchImpl);
 }
 
@@ -344,7 +345,7 @@ export function newIdempotencyKey(): string {
   return crypto.randomUUID();
 }
 
-export function listReports(query: ReportQuery = {}, fetchImpl: typeof fetch = fetch): Promise<ReportPage> {
+export function listReports(query: ReportQuery = {}, fetchImpl: typeof fetch = apiFetch): Promise<ReportPage> {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
     if (v !== undefined && v !== "") params.set(k, String(v));
@@ -353,25 +354,25 @@ export function listReports(query: ReportQuery = {}, fetchImpl: typeof fetch = f
   return request("GET", qs ? `${REPORTS}?${qs}` : REPORTS, undefined, fetchImpl);
 }
 
-export function getReport(id: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+export function getReport(id: string, fetchImpl: typeof fetch = apiFetch): Promise<ExpenseReport> {
   return request("GET", `${REPORTS}/${encodeURIComponent(id)}`, undefined, fetchImpl);
 }
 
-export function createReport(input: NewReportInput, key: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+export function createReport(input: NewReportInput, key: string, fetchImpl: typeof fetch = apiFetch): Promise<ExpenseReport> {
   return request("POST", REPORTS, input, fetchImpl, { "Idempotency-Key": key });
 }
 
-export function addReportLine(reportId: string, line: NewLineInput, key: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+export function addReportLine(reportId: string, line: NewLineInput, key: string, fetchImpl: typeof fetch = apiFetch): Promise<ExpenseReport> {
   return request("POST", `${REPORTS}/${encodeURIComponent(reportId)}/lines`, line, fetchImpl, { "Idempotency-Key": key });
 }
 
-export function deleteReportLine(reportId: string, lineId: string, version: number, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+export function deleteReportLine(reportId: string, lineId: string, version: number, fetchImpl: typeof fetch = apiFetch): Promise<ExpenseReport> {
   return request("DELETE", `${REPORTS}/${encodeURIComponent(reportId)}/lines/${encodeURIComponent(lineId)}`, undefined, fetchImpl, {
     "If-Match": `"${version}"`,
   });
 }
 
-export function submitReport(reportId: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<ExpenseReport> {
+export function submitReport(reportId: string, version: number, key: string, fetchImpl: typeof fetch = apiFetch): Promise<ExpenseReport> {
   return request("POST", `${REPORTS}/${encodeURIComponent(reportId)}/submit`, undefined, fetchImpl, {
     "Idempotency-Key": key,
     "If-Match": `"${version}"`,
@@ -516,54 +517,54 @@ function command<T>(path: string, body: unknown, key: string, version: number | 
   return request("POST", path, body, fetchImpl, headers);
 }
 
-export function listAdvances(query: ListQuery<AdvanceStatus> = {}, fetchImpl: typeof fetch = fetch): Promise<Page<CashAdvance>> {
+export function listAdvances(query: ListQuery<AdvanceStatus> = {}, fetchImpl: typeof fetch = apiFetch): Promise<Page<CashAdvance>> {
   return request("GET", withQuery(ADVANCES, query), undefined, fetchImpl);
 }
 
-export function getAdvance(id: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+export function getAdvance(id: string, fetchImpl: typeof fetch = apiFetch): Promise<CashAdvance> {
   return request("GET", `${ADVANCES}/${encodeURIComponent(id)}`, undefined, fetchImpl);
 }
 
-export function requestAdvance(input: NewAdvanceInput, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+export function requestAdvance(input: NewAdvanceInput, key: string, fetchImpl: typeof fetch = apiFetch): Promise<CashAdvance> {
   return command(ADVANCES, input, key, undefined, fetchImpl);
 }
 
-export function decideAdvance(id: string, decision: Decision, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+export function decideAdvance(id: string, decision: Decision, version: number, key: string, fetchImpl: typeof fetch = apiFetch): Promise<CashAdvance> {
   return command(`${ADVANCES}/${encodeURIComponent(id)}/decide`, { decision }, key, version, fetchImpl);
 }
 
-export function payAdvance(id: string, prepaymentId: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+export function payAdvance(id: string, prepaymentId: string, version: number, key: string, fetchImpl: typeof fetch = apiFetch): Promise<CashAdvance> {
   return command(`${ADVANCES}/${encodeURIComponent(id)}/pay`, { prepaymentId }, key, version, fetchImpl);
 }
 
-export function returnAdvance(id: string, amount: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+export function returnAdvance(id: string, amount: string, version: number, key: string, fetchImpl: typeof fetch = apiFetch): Promise<CashAdvance> {
   return command(`${ADVANCES}/${encodeURIComponent(id)}/return`, { amount }, key, version, fetchImpl);
 }
 
-export function listRequisitions(query: ListQuery<RequisitionStatus> = {}, fetchImpl: typeof fetch = fetch): Promise<Page<TravelRequisition>> {
+export function listRequisitions(query: ListQuery<RequisitionStatus> = {}, fetchImpl: typeof fetch = apiFetch): Promise<Page<TravelRequisition>> {
   return request("GET", withQuery(REQUISITIONS, query), undefined, fetchImpl);
 }
 
-export function getRequisition(id: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+export function getRequisition(id: string, fetchImpl: typeof fetch = apiFetch): Promise<TravelRequisition> {
   return request("GET", `${REQUISITIONS}/${encodeURIComponent(id)}`, undefined, fetchImpl);
 }
 
-export function createRequisition(input: NewRequisitionInput, key: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+export function createRequisition(input: NewRequisitionInput, key: string, fetchImpl: typeof fetch = apiFetch): Promise<TravelRequisition> {
   return command(REQUISITIONS, input, key, undefined, fetchImpl);
 }
 
-export function submitRequisition(id: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+export function submitRequisition(id: string, version: number, key: string, fetchImpl: typeof fetch = apiFetch): Promise<TravelRequisition> {
   return command(`${REQUISITIONS}/${encodeURIComponent(id)}/submit`, undefined, key, version, fetchImpl);
 }
 
-export function decideRequisition(id: string, decision: Decision, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+export function decideRequisition(id: string, decision: Decision, version: number, key: string, fetchImpl: typeof fetch = apiFetch): Promise<TravelRequisition> {
   return command(`${REQUISITIONS}/${encodeURIComponent(id)}/decide`, { decision }, key, version, fetchImpl);
 }
 
-export function listCardTransactions(query: ListQuery<CardTxnStatus> = {}, fetchImpl: typeof fetch = fetch): Promise<Page<StoredCardTransaction>> {
+export function listCardTransactions(query: ListQuery<CardTxnStatus> = {}, fetchImpl: typeof fetch = apiFetch): Promise<Page<StoredCardTransaction>> {
   return request("GET", withQuery(CARDS, query), undefined, fetchImpl);
 }
 
-export function importCardFeed(input: CardImportInput, key: string, fetchImpl: typeof fetch = fetch): Promise<CardImport> {
+export function importCardFeed(input: CardImportInput, key: string, fetchImpl: typeof fetch = apiFetch): Promise<CardImport> {
   return command(`${CARDS}/import`, input, key, undefined, fetchImpl);
 }

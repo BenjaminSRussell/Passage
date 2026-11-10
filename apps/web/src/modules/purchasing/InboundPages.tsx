@@ -11,7 +11,7 @@ import {
   type InboundSource,
   type InboundStatus,
 } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, dash, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
+import { Details, LoadError, StatusBadge, dash, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -294,7 +294,7 @@ export function InboundChangeDetailPage() {
               { label: "From", value: sourceLabel(c.source) },
               { label: "Action", value: actionLabel(c.action) },
               { label: "Purchase order", value: <Target c={c} /> },
-              { label: "Product", value: <ShortId id={c.productId} />, mono: true },
+              { label: "Product", value: <Named entity="product" id={c.productId} />, mono: true },
               { label: "Effect", value: effectOf(c) },
               { label: "Requested quantity", value: c.requestedQty ?? "", mono: true },
               { label: "Requested date", value: c.requestedDate ?? "", mono: true },

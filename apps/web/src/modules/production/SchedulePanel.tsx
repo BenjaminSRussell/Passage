@@ -14,6 +14,7 @@ import {
 import { dash, directionLabel, instant, jobTypeLabel, scheduleBasisLabel, schedulingMethodLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceName } from "../mfg-shared/resources";
 
 export interface SchedulePanelProps {
   order: ProductionOrder;
@@ -25,7 +26,7 @@ export interface SchedulePanelProps {
 const columns: DataTableColumn<ProductionJob>[] = [
   { key: "operNumber", header: "Operation", align: "end" },
   { key: "jobType", header: "Job", render: (row) => jobTypeLabel[row.jobType] ?? row.jobType },
-  { key: "resourceId", header: "Resource", mono: true },
+  { key: "resourceId", header: "Resource", render: (row) => <ResourceName id={row.resourceId} /> },
   { key: "plannedStart", header: "Start", mono: true, render: (row) => instant(row.plannedStart) },
   { key: "plannedEnd", header: "End", mono: true, render: (row) => instant(row.plannedEnd) },
   { key: "plannedHours", header: "Hours", align: "end" },

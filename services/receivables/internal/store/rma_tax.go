@@ -82,13 +82,13 @@ func (s *Postgres) billedTax(ctx context.Context, in RMACredit) (map[string]deci
 	return basis.Remaining, nil
 }
 
-func checkTaxAgainstInvoice(ctx context.Context, tx pgx.Tx, tenantID, invoiceItemID string, billed map[string]decimal.Decimal, lines []RMATaxLine) error {
+func checkTaxAgainstInvoice(ctx context.Context, tx pgx.Tx, tenantID string, invoiceItemIDs []string, billed map[string]decimal.Decimal, lines []RMATaxLine) error {
 	if len(lines) == 0 {
 		return nil
 	}
 	rows, err := tx.Query(ctx, `select t.tax_code, sum(t.amount)::text from rma_credit_tax t
 		join rma_credit c on c.tenant_id = t.tenant_id and c.id = t.rma_credit_id
-		where c.tenant_id = $1 and c.invoice_open_item_id = $2 group by t.tax_code`, tenantID, invoiceItemID)
+		where c.tenant_id = $1 and c.invoice_open_item_id = any($2::uuid[]) group by t.tax_code`, tenantID, invoiceItemIDs)
 	if err != nil {
 		return err
 	}

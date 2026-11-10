@@ -1,14 +1,16 @@
 import { findAlert, findTable } from "../../test-utils";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { canCommandOperations, runOperationCommand, STATUSES, type Operation } from "./api/client";
+import { resetResourceCache } from "../mfg-shared/resources";
 import { initialValues, toInput, validateOrder } from "./CreateOrderPage";
 import production from "./module";
 import { json, order, orderId, problem } from "./testData";
 
+beforeEach(() => resetResourceCache());
 afterEach(() => vi.unstubAllGlobals());
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -173,21 +175,25 @@ describe("Order quantity rules on the create form", () => {
 
   it("puts the service's quantity refusal on the quantity field", async () => {
     const uuid = (n: number) => `0195d6a0-0000-7000-8000-${String(n).padStart(12, "0")}`;
-    const fetchMock = stubFetch(() => problem(422, "PRODUCTION_ORDER_QUANTITY", "quantity 121 is not a multiple of 12"));
+    const fetchMock = stubFetch((url) =>
+      url.includes("/engineering/resources") ? json({ items: [{ id: uuid(5), code: "CNC-1", name: "CNC mill" }] }) : problem(422, "PRODUCTION_ORDER_QUANTITY", "quantity 121 is not a multiple of 12"),
+    );
     renderAt("/production/new");
     const form = await screen.findByRole("form", { name: "New production order" });
-    await userEvent.type(within(form).getByLabelText("Product"), uuid(1));
+    fireEvent.change(within(form).getByLabelText("Product"), { target: { value: uuid(1) } });
     await userEvent.type(within(form).getByLabelText("Quantity"), "121");
-    await userEvent.type(within(form).getByLabelText("Site"), uuid(2));
-    await userEvent.type(within(form).getByLabelText("Warehouse"), uuid(3));
+    fireEvent.change(within(form).getByLabelText("Site"), { target: { value: uuid(2) } });
+    fireEvent.change(within(form).getByLabelText("Warehouse"), { target: { value: uuid(3) } });
     await userEvent.type(within(form).getByLabelText(/Order multiple/), "12");
-    await userEvent.type(within(form).getByLabelText("Item"), uuid(4));
+    await userEvent.click(within(form).getByRole("button", { name: "Add component" }));
+    fireEvent.change(within(form).getByLabelText("Item"), { target: { value: uuid(4) } });
     await userEvent.type(within(form).getByLabelText("Quantity per unit"), "1");
-    await userEvent.type(within(form).getByLabelText("Resource"), uuid(5));
+    await within(form).findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(within(form).getByLabelText("Resource"), uuid(5));
     await userEvent.click(within(form).getByRole("button", { name: "Create production order" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(String(calls(fetchMock)[0][1]?.body)) as Record<string, unknown>;
+    await waitFor(() => expect(calls(fetchMock).some(([, init]) => init?.method === "POST")).toBe(true));
+    const body = JSON.parse(String(calls(fetchMock).find(([, init]) => init?.method === "POST")![1]?.body)) as Record<string, unknown>;
     expect(body.multiple).toBe("12");
     expect(body).not.toHaveProperty("minimumQty");
     await waitFor(() => expect(screen.getByText(/The order was not created/)).toBeInTheDocument());

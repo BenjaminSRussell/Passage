@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GanttBar, Resource } from "./api/client";
 import { dayStart, today } from "./format";
+import { resetOrderCache } from "../mfg-shared/orders";
 import scheduling from "./module";
 
 const MIX = "3f1c0000-0000-4000-8000-000000000001";
@@ -29,6 +30,7 @@ const bars = [bar(JOB1, 10, at(8), at(9), { placementVersion: "v1hash" }), bar(J
 
 beforeEach(() => {
   moves = [];
+  resetOrderCache();
   ifMatches = [];
   ganttCalls = 0;
   vi.stubGlobal(
@@ -45,6 +47,7 @@ beforeEach(() => {
       const reply =
         (url.pathname.endsWith("/resources") ? { status: 200, body: { items: resources } } : undefined) ??
         (url.pathname.endsWith("/gantt") ? { status: 200, body: { items: bars } } : undefined) ??
+        (url.pathname.endsWith(`/production/orders/${ORDER}`) ? { status: 200, body: { id: ORDER, orderNumber: "MO-1001", productId: "" } } : undefined) ??
         handler(url, body) ?? { status: 404, body: { code: "TEST-404", detail: `no fake for ${url.pathname}` } };
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
@@ -83,8 +86,8 @@ describe("Stale placement on moves and firms", () => {
     handler = (url, body) => (url.pathname.endsWith(":move") && body ? { status: 200, body: preview(Boolean(body.dryRun)) } : undefined);
     renderWorkspace();
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm move" }));
     expect(await screen.findByText(/Move saved\./)).toBeInTheDocument();
@@ -95,8 +98,8 @@ describe("Stale placement on moves and firms", () => {
     handler = (url, body) => (url.pathname.endsWith(":move") && body ? (body.dryRun ? { status: 200, body: preview(true) } : stale) : undefined);
     renderWorkspace();
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     const before = ganttCalls;
     fireEvent.click(await screen.findByRole("button", { name: "Confirm move" }));
@@ -110,8 +113,8 @@ describe("Stale placement on moves and firms", () => {
     handler = (url) => (url.pathname.endsWith(":firm") ? stale : undefined);
     renderWorkspace();
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Firm order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Firm order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Firm order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Firm order MO-1001 operation 10" }));
     expect(await screen.findByText(/Another change moved this order after the Gantt loaded/)).toBeInTheDocument();
     expect(ifMatches).toEqual(['"v1hash"']);
   });

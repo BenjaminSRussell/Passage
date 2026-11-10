@@ -41,6 +41,10 @@ type Product struct {
 	DimensionGroupID         string
 	StorageDimensionGroupID  string
 	TrackingDimensionGroupID string
+	ItemGroupID              string
+	BatchTracked             bool
+	SerialTracked            bool
+	CatchWeight              bool
 	LifecycleState           string
 	DimensionValues          map[string]string
 	VariantHash              string
@@ -54,6 +58,10 @@ type ProductPatch struct {
 	Description    *string `json:"description"`
 	SearchName     *string `json:"searchName"`
 	LifecycleState *string `json:"lifecycleState"`
+	ItemGroupID    *string `json:"itemGroupId"`
+	BatchTracked   *bool   `json:"batchTracked"`
+	SerialTracked  *bool   `json:"serialTracked"`
+	CatchWeight    *bool   `json:"catchWeight"`
 }
 
 // Dimension describes one product dimension and its allowed values.

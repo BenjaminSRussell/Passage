@@ -17,9 +17,10 @@ import {
   type WavesResult,
   type WorkbenchInput,
 } from "./api/client";
-import { GROUP_LABELS, LOGISTICS_CODE, shortId, UUID } from "./format";
+import { GROUP_LABELS, LOGISTICS_CODE, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 export interface WorkbenchValues {
   warehouseId: string;
@@ -71,7 +72,7 @@ const planColumns: DataTableColumn<WavePlan>[] = [
   { key: "lineCount", header: "Lines", align: "end" },
   { key: "orderCount", header: "Orders", align: "end" },
   { key: "shipments", header: "Shipments", render: (row) => row.shipments.map((s) => s.shipmentNumber).join(", ") },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => shortId(row.legalEntityId) },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
 ];
 
 const waveColumns: DataTableColumn<Wave>[] = [

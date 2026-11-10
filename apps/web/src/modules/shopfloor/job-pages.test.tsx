@@ -7,6 +7,8 @@ import { PrincipalProvider } from "../../shell/principal";
 import type { Job } from "./api/client";
 import { toFeedbackInput, validateFeedback } from "./JobDetailPage";
 import { qty } from "./JobsPage";
+import { resetOrderCache } from "../mfg-shared/orders";
+import { resetResourceCache } from "../mfg-shared/resources";
 import shopfloor from "./module";
 
 const JOB = "0195f0a0-0000-7000-8000-000000000050";
@@ -20,19 +22,30 @@ function pageViolations(container: HTMLElement) {
   return checkAxeAA(container).filter((v) => !shellRules.has(v.id));
 }
 
+const isExtra = (url: URL) => url.pathname.endsWith("/engineering/resources") || url.pathname.includes("/production/orders");
+function extra(url: URL): Reply | undefined {
+  if (url.pathname.endsWith("/engineering/resources")) return { status: 200, body: { items: [{ id: RESOURCE, code: "MIX-1", name: "Mixer" }] } };
+  if (url.pathname.endsWith("/production/orders")) return { status: 200, body: { items: [{ id: ORDER, orderNumber: "MO-77" }] } };
+  if (url.pathname.endsWith(`/production/orders/${ORDER}`)) return { status: 200, body: { id: ORDER, orderNumber: "MO-77", productId: "" } };
+  return undefined;
+}
+const ORDER = "0195f0a0-0000-7000-8000-000000000040";
+
 let handler: Handler;
 let calls: { method: string; url: URL; body: unknown }[];
 const json = (status: number, body: unknown): Reply => ({ status, body });
 
 beforeEach(() => {
   calls = [];
+  resetResourceCache();
+  resetOrderCache();
   handler = () => undefined;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
-      calls.push({ method: init.method ?? "GET", url, body: init.body ? JSON.parse(String(init.body)) : undefined });
-      const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+      if (!isExtra(url)) calls.push({ method: init.method ?? "GET", url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      const reply = handler(url, init) ?? extra(url) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
   );
@@ -60,6 +73,11 @@ function renderAt(path: string, duties: readonly string[] = OPERATOR) {
 }
 
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+const pick = async (label: string, value: string) => {
+  const select = screen.getByLabelText(label);
+  await waitFor(() => expect(select.querySelector(`option[value="${value}"]`)).not.toBeNull());
+  fireEvent.change(select, { target: { value } });
+};
 const posts = () => calls.filter((c) => c.method === "POST");
 
 const job = (extra: Partial<Job> = {}): Job => ({
@@ -98,14 +116,11 @@ describe("dispatch list", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("filters by resource and status, and refuses a resource that is not a UUID", async () => {
-    handler = () => json(200, { items: [] });
+  it("filters by resource (picked by name) and status", async () => {
+    handler = (url) => (url.pathname.endsWith("/engineering/resources") ? undefined : json(200, { items: [] }));
     renderAt("/shopfloor/jobs");
     expect(await screen.findByText("No open jobs")).toBeInTheDocument();
-    fill("Resource", "press 4");
-    fireEvent.click(screen.getByRole("button", { name: "Show jobs" }));
-    expect(await screen.findByText(/Enter the resource id/)).toBeInTheDocument();
-    fill("Resource", RESOURCE);
+    await pick("Resource", RESOURCE);
     fireEvent.click(screen.getByRole("button", { name: "Show jobs" }));
     fill("Status", "finished");
     await waitFor(() => expect(calls.at(-1)?.url.search).toBe(`?resourceId=${RESOURCE}&status=finished`));

@@ -4,6 +4,7 @@ import { describeProblem, getOrderKpis, type KpiGroupBy, type OrderKpiGroup, typ
 import { dash } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -26,10 +27,10 @@ interface FilterErrors {
 export function validateKpiFilter(f: Filter): FilterErrors {
   const errors: FilterErrors = {};
   if (f.siteId.trim() !== "" && !uuidPattern.test(f.siteId.trim())) {
-    errors.siteId = "Enter the site's id (a UUID), or leave it empty.";
+    errors.siteId = "Choose a site, or leave it empty.";
   }
   if (f.productId.trim() !== "" && !uuidPattern.test(f.productId.trim())) {
-    errors.productId = "Enter the product's id (a UUID), or leave it empty.";
+    errors.productId = "Choose a product, or leave it empty.";
   }
   if (f.from !== "" && f.to !== "" && f.from > f.to) {
     errors.to = "The end of the period must not be before its start.";
@@ -127,10 +128,10 @@ export function KpiPage() {
             )}
           </FormField>
           <FormField id="kpi-site" label="Site" optional error={errors.siteId}>
-            {(control) => <Input {...control} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
+            {(control) => <EntityLookup {...control} entity="site" prefill={false} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
           </FormField>
           <FormField id="kpi-product" label="Product" optional error={errors.productId}>
-            {(control) => <Input {...control} value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })} />}
+            {(control) => <EntityLookup {...control} entity="product" prefill={false} value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })} />}
           </FormField>
           <FormField id="kpi-from" label="Ended from" optional>
             {(control) => <Input {...control} type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />}

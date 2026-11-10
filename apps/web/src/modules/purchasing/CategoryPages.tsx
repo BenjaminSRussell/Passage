@@ -16,7 +16,7 @@ import {
   type CategoryManager,
   type CategoryVendorAssignment,
 } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, datePattern, statusLabel, todayIso, useResource, uuidPattern, type Failure } from "./parts";
+import { Details, LoadError, StatusBadge, datePattern, statusLabel, todayIso, useResource, uuidPattern, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -28,10 +28,10 @@ const window_ = (a: { validFrom: string; validTo?: string }) => (a.validTo ? `${
 
 const columns: DataTableColumn<CategoryVendorAssignment>[] = [
   { key: "category", header: "Category" },
-  { key: "vendorId", header: "Vendor", render: (a) => <ShortId id={a.vendorId} /> },
+  { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
   { key: "status", header: "Status", render: (a) => <StatusBadge status={a.status} /> },
   { key: "window", header: "Valid", mono: true, render: window_ },
-  { key: "legalEntityId", header: "Legal entity", render: (a) => <ShortId id={a.legalEntityId} /> },
+  { key: "legalEntityId", header: "Legal entity", render: (a) => <Named entity="legalEntity" id={a.legalEntityId} /> },
 ];
 
 /** Category vendor assignments with status and category filters and load-more paging (FR-17.20). */
@@ -306,8 +306,8 @@ export function CategoryVendorDetailPage() {
             <Details
               items={[
                 { label: "Category", value: saved.category },
-                { label: "Vendor", value: saved.vendorId, mono: true },
-                { label: "Legal entity", value: saved.legalEntityId, mono: true },
+                { label: "Vendor", value: <Named entity="vendor" id={saved.vendorId} /> },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={saved.legalEntityId} /> },
                 { label: "Status", value: <StatusBadge status={saved.status} /> },
                 { label: "Valid", value: window_(saved), mono: true },
                 { label: "Version", value: String(saved.version), mono: true },
@@ -371,8 +371,8 @@ export function CategoryVendorDetailPage() {
 
 const managerColumns = (onRemove: (m: CategoryManager) => void, removing: string | null): DataTableColumn<CategoryManager>[] => [
   { key: "category", header: "Category" },
-  { key: "workerId", header: "Worker", render: (m) => <ShortId id={m.workerId} /> },
-  { key: "legalEntityId", header: "Legal entity", render: (m) => <ShortId id={m.legalEntityId} /> },
+  { key: "workerId", header: "Worker", render: (m) => <Named entity="worker" id={m.workerId} /> },
+  { key: "legalEntityId", header: "Legal entity", render: (m) => <Named entity="legalEntity" id={m.legalEntityId} /> },
   {
     key: "remove",
     header: "Actions",

@@ -4,6 +4,7 @@ import { STATUSES, describeProblem, getWIPBalances, type Problem, type Productio
 import { statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -68,7 +69,7 @@ export function WIPReportPage({ onOpenOrder }: WIPReportPageProps) {
   const apply = (event: FormEvent) => {
     event.preventDefault();
     if (draft.siteId !== "" && !uuidPattern.test(draft.siteId)) {
-      setErrors({ siteId: "Enter the site's id (a UUID), or leave it empty." });
+      setErrors({ siteId: "Choose a site, or leave it empty." });
       return;
     }
     setErrors({});
@@ -112,7 +113,7 @@ export function WIPReportPage({ onOpenOrder }: WIPReportPageProps) {
             {(control) => <Input {...control} type="date" value={draft.asOf} onChange={(e) => setDraft({ ...draft, asOf: e.target.value })} />}
           </FormField>
           <FormField id="wip-site" label="Site" optional error={errors.siteId}>
-            {(control) => <Input {...control} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
+            {(control) => <EntityLookup {...control} entity="site" prefill={false} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
           </FormField>
           <Button type="submit" variant="primary" loading={state.loading}>
             Show

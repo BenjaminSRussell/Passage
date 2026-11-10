@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the productcost service (services/productcost/api/openapi.yaml).
 // Browser calls use /api/v1/product-costing/..., which the web BFF rewrites to the
 // service and signs with the user's tenant and duties. Amounts are decimal
@@ -213,7 +214,7 @@ async function toError(res: Response): Promise<CostingApiError> {
 }
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`${base}${path}`, {
+  const res = await apiFetch(`${base}${path}`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -654,7 +655,7 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown, opt
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
-  const res = await fetch(`${base}${path}`, {
+  const res = await apiFetch(`${base}${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),

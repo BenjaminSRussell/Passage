@@ -32,7 +32,7 @@ describe("BOM usage and alternative groups", () => {
     expect(table).toHaveTextContent("costing");
     fireEvent.change(screen.getByLabelText(/Usage/), { target: { value: "costing" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?usage=costing"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?usage=costing", expect.anything()));
   });
 
   it("shows usage, category, groups and discontinuation on the detail", async () => {

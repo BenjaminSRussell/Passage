@@ -1,12 +1,18 @@
 package api_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
 const (
@@ -102,6 +108,54 @@ func TestGetInvoice_ReturnsTheInvoiceWithLinesAndLedgerEntry(t *testing.T) {
 	}
 }
 
+type matchJSON struct {
+	Match *struct {
+		Status          string `json:"status"`
+		WithinTolerance bool   `json:"withinTolerance"`
+		Lines           []struct {
+			LineNo        int    `json:"lineNo"`
+			Status        string `json:"status"`
+			ReceivedQty   string `json:"receivedQty"`
+			PriceVariance struct {
+				Amount   string `json:"amount"`
+				Currency string `json:"currency"`
+			} `json:"priceVariance"`
+		} `json:"lines"`
+	} `json:"match"`
+}
+
+func TestGetInvoice_ShowsTheMatchAgainstTheReceiptUnderStandardTolerances(t *testing.T) {
+	for name, tc := range map[string]struct {
+		price, status, variance string
+		within                  bool
+	}{
+		"same price":                        {"2.5", "MATCHED", "0.00", true},
+		"small difference inside tolerance": {"2.6", "MATCHED", "4.00", true},
+		"price far above the receipt":       {"40", "PRICE_VARIANCE", "1500.00", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rg := newRig(domain.PeriodOpen)
+			_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, tc.price, "")
+			got := decode[matchJSON](t, rg.call(http.MethodGet, listInvoicesPath+"/"+inv.ID, "", rg.inquirer()), http.StatusOK).Match
+			if got == nil || got.Status != tc.status || got.WithinTolerance != tc.within || len(got.Lines) != 1 {
+				t.Fatalf("match %+v, want %s within=%v", got, tc.status, tc.within)
+			}
+			line := got.Lines[0]
+			if line.LineNo != 1 || line.Status != tc.status || line.PriceVariance.Amount != tc.variance || line.PriceVariance.Currency != "USD" || line.ReceivedQty != "100" {
+				t.Fatalf("line %+v, want %s with variance %s on 100 received", line, tc.status, tc.variance)
+			}
+		})
+	}
+}
+
+func TestListInvoices_LeavesTheMatchToTheDetailRead(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
+	if rec := rg.call(http.MethodGet, listInvoicesPath, "", rg.inquirer()); strings.Contains(rec.Body.String(), `"match"`) {
+		t.Fatalf("list carries a match: %s", rec.Body)
+	}
+}
+
 func TestGetInvoice_IsNotFoundOutsideTheCallersLegalEntityOrForAnUnknownId(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
 	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
@@ -146,5 +200,37 @@ func TestListReceipts_FiltersByPurchaseOrder(t *testing.T) {
 	}](t, rg.call(http.MethodGet, receiptsPath+"?purchaseOrderId="+otherPOID, "", rg.maintain()), http.StatusOK)
 	if len(none.Items) != 0 {
 		t.Fatalf("other purchase order %+v, want none", none)
+	}
+}
+
+type receiptReadFails struct {
+	*memstore.Store
+	failing bool
+}
+
+func (r *receiptReadFails) GetReceipt(ctx context.Context, id string) (store.Receipt, error) {
+	if r.failing {
+		return store.Receipt{}, errors.New("receipt store unavailable")
+	}
+	return r.Store.GetReceipt(ctx, id)
+}
+
+func TestGetInvoice_OmitsTheMatchWhenAReceiptCannotBeReadInsteadOfFailing(t *testing.T) {
+	mem := memstore.New()
+	flaky := &receiptReadFails{Store: mem}
+	rg := &rig{st: mem, ledger: &domain.FakeLedger{}}
+	a := api.New(flaky, api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: rg.ledger,
+		Profile: domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
+	})
+	router := httpx.NewRouter()
+	a.Register(router)
+	rg.h, rg.api = router, a
+	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
+	flaky.failing = true
+	rec := rg.call(http.MethodGet, listInvoicesPath+"/"+inv.ID, "", rg.inquirer())
+	got := decode[invoiceJSON](t, rec, http.StatusOK)
+	if got.ID != inv.ID || strings.Contains(rec.Body.String(), `"match"`) {
+		t.Fatalf("got %s, want the invoice without a match", rec.Body)
 	}
 }

@@ -1,0 +1,166 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-4);
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.toolsGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.grow {
+  flex: 1 1 auto;
+}
+
+.status {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.disclosure {
+  position: relative;
+}
+
+.panel {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: calc(100% + var(--space-1));
+  inset-inline-start: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-inline-size: 16rem;
+  max-inline-size: min(26rem, 90vw);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.panel:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+
+.panelHelp {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.checkList,
+.viewList,
+.chipList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checkList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.checkRow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.viewList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.viewRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.defaultMark {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+}
+
+.saveForm {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: var(--space-2);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-block: var(--space-1);
+  padding-inline: var(--space-3) var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.chipRemove {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chipRemove:hover {
+  background: var(--color-border);
+}
+
+.chipRemove:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}

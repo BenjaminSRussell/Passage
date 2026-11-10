@@ -22,6 +22,8 @@ import { DECIMAL, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { PlainName } from "./OrderNumber";
 
 const PRICE = /^\d+(\.\d{1,4})?$/;
 const ZERO = /^0+(\.0+)?$/;
@@ -76,7 +78,7 @@ const requirementBadge = (r: SupplementaryRequirement) => <Badge tone={r === "MA
 const priceText = (pricing: SupplementaryPricing | undefined, price: string) => (pricing === "FREE" || ZERO.test(price) ? "Free" : price);
 
 const evaluationColumns: DataTableColumn<SupplementaryLine>[] = [
-  { key: "productId", header: "Supplementary product", mono: true },
+  { key: "productId", header: "Supplementary product", render: (row) => <PlainName entity="product" id={row.productId} /> },
   { key: "quantity", header: "Quantity", align: "end", render: (l) => `${l.quantity} ${l.unit}` },
   { key: "requirement", header: "Added", render: (l) => (l.requirement === "MANDATORY" ? requirementBadge(l.requirement) : <Badge tone="neutral">Offered</Badge>) },
   { key: "unitPrice", header: "Unit price", align: "end", render: (l) => priceText(undefined, l.unitPrice) },
@@ -196,8 +198,8 @@ export function SupplementaryRulesPage() {
     { key: "quantity", header: "Quantity", render: (r) => `${r.quantityPerBase} ${r.unit} per ${r.baseQuantity}` },
     { key: "requirement", header: "Requirement", render: (r) => requirementBadge(r.requirement) },
     { key: "unitPrice", header: "Price", align: "end", render: (r) => priceText(r.pricing, r.unitPrice) },
-    { key: "customerId", header: "Customer", mono: true, render: (r) => (r.customerId ? shortId(r.customerId) : "Every customer") },
-    { key: "legalEntityId", header: "Legal entity", mono: true, render: (r) => shortId(r.legalEntityId) },
+    { key: "customerId", header: "Customer", render: (r) => (r.customerId ? <EntityName entity="customer" id={r.customerId} /> : "Every customer") },
+    { key: "legalEntityId", header: "Legal entity", render: (r) => <EntityName entity="legalEntity" id={r.legalEntityId} /> },
     {
       key: "actions",
       header: "Action",

@@ -5,11 +5,12 @@ import { signedPct } from "./fundFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const columns: DataTableColumn<Promotion>[] = [
   { key: "name", header: "Promotion" },
   { key: "eventType", header: "Event", render: (row) => [row.eventCategory, row.eventType].filter(Boolean).join(" / ") || "—" },
-  { key: "productId", header: "Product", mono: true },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
   { key: "campaignId", header: "Campaign", mono: true, render: (row) => (row.campaignId ? <Link to={`/pricing/campaigns/${row.campaignId}`}>{row.campaignId}</Link> : "—") },
   { key: "window", header: "Window", mono: true, render: (row) => `${row.startDate} – ${row.endDate}` },
   { key: "baseline", header: "Baseline / week", mono: true, align: "end" },

@@ -5,6 +5,8 @@ import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderLineNo, OrderNumber } from "../sales/OrderNumber";
 
 const dash = (v?: string) => v || "—";
 
@@ -15,9 +17,9 @@ const lineColumns: DataTableColumn<TraceLine>[] = [
   { key: "net", header: "Net", mono: true, align: "end" },
   { key: "packingSlipId", header: "Packing slip", mono: true, render: (l) => dash(l.packingSlipId) },
   { key: "packingSlipLineId", header: "Slip line", mono: true, render: (l) => dash(l.packingSlipLineId) },
-  { key: "orderId", header: "Sales order", mono: true, render: (l) => dash(l.orderId) },
-  { key: "orderLineId", header: "Order line", mono: true, render: (l) => dash(l.orderLineId) },
-  { key: "productId", header: "Product", mono: true, render: (l) => dash(l.productId) },
+  { key: "orderId", header: "Sales order", render: (l) => (l.orderId ? <OrderNumber id={l.orderId} /> : dash()) },
+  { key: "orderLineId", header: "Order line", render: (l) => (l.orderId && l.orderLineId ? <OrderLineNo orderId={l.orderId} lineId={l.orderLineId} /> : dash()) },
+  { key: "productId", header: "Product", render: (l) => (l.productId ? <EntityName entity="product" id={l.productId} /> : dash()) },
   { key: "priceExplainRef", header: "Price explanation", mono: true, render: (l) => dash(l.priceExplainRef) },
 ];
 
@@ -30,7 +32,7 @@ const creditLineColumns: DataTableColumn<TraceLine>[] = [
 const slipColumns: DataTableColumn<InvoiceTrace["packingSlips"][number]>[] = [
   { key: "id", header: "Packing slip", mono: true },
   { key: "date", header: "Slip date", mono: true },
-  { key: "orderId", header: "Sales order", mono: true },
+  { key: "orderId", header: "Sales order", render: (s) => <OrderNumber id={s.orderId} /> },
 ];
 
 /** Invoice trace (FR-29.12, §5.29.14): each invoice line back to its packing slip, order line and price explanation. */

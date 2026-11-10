@@ -423,3 +423,32 @@ func TestVendorGroupCode_StoredFilledOnReplayAndReadForARun(t *testing.T) {
 		t.Fatalf("aging rows carry codes %v", codes)
 	}
 }
+
+func TestList_FiltersBySourceInvoicesAndNamesReservedProposals(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	var itemIDs []string
+	for _, src := range []string{src1, src2, "00000000-0000-0000-0000-0000000000f3"} {
+		item, _, err := s.CreateFromInvoice(ctx, invoice(leA, vendor1, src, "2027-03-31"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		itemIDs = append(itemIDs, item.ID)
+	}
+	got, err := s.List(ctx, Filter{SourceInvoiceIDs: []string{src2, "00000000-0000-0000-0000-0000000000f9"}}, 10)
+	if err != nil || len(got) != 1 || got[0].SourceInvoiceID != src2 {
+		t.Fatalf("by source = %+v err=%v", got, err)
+	}
+	if got, _ = s.List(ctx, Filter{}, 10); len(got) != 3 {
+		t.Fatalf("no source filter = %d, want 3", len(got))
+	}
+	if other, _ := s.List(ctxFor(2, leA), Filter{SourceInvoiceIDs: []string{src2}}, 10); len(other) != 0 {
+		t.Fatalf("another tenant sees %d items", len(other))
+	}
+	if none, err := s.ProposalsOfItems(ctx, itemIDs); err != nil || len(none) != 0 {
+		t.Fatalf("no proposal yet: %v err=%v", none, err)
+	}
+	if none, err := s.ProposalsOfItems(ctx, nil); err != nil || len(none) != 0 {
+		t.Fatalf("empty ids: %v err=%v", none, err)
+	}
+}

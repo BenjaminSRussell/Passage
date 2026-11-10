@@ -5,11 +5,13 @@ import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { ResourceName } from "../mfg-shared/resources";
 
 const columns: DataTableColumn<Machine>[] = [
   { key: "machineId", header: "Machine", mono: true },
-  { key: "resourceId", header: "Resource", mono: true },
-  { key: "siteId", header: "Site", mono: true, render: (row) => row.siteId ?? dash },
+  { key: "resourceId", header: "Resource", render: (row) => <ResourceName id={row.resourceId} /> },
+  { key: "siteId", header: "Site", render: (row) => (row.siteId ? <EntityName entity="site" id={row.siteId} fallback={row.siteId} /> : dash) },
   { key: "idealCycleSeconds", header: "Ideal cycle", align: "end", render: (row) => `${row.idealCycleSeconds} s` },
   { key: "idleThresholdSeconds", header: "Idle after", align: "end", render: (row) => `${row.idleThresholdSeconds} s` },
   { key: "lastSeq", header: "Last sequence", align: "end", render: (row) => (row.lastSeq > 0 ? String(row.lastSeq) : dash) },

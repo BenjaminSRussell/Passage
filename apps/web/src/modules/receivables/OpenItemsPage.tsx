@@ -3,17 +3,18 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { listOpenItems, type OpenItem } from "./api/client";
-import { money, shortId, UUID } from "./format";
+import { money, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 
 const columns: DataTableColumn<OpenItem>[] = [
   { key: "documentNumber", header: "Document", mono: true },
   { key: "sourceType", header: "Type" },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "dueDate", header: "Due", mono: true },
   { key: "amount", header: "Amount", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
   { key: "openAmount", header: "Open", mono: true, align: "end", render: (row) => money(row.openAmount, row.currency) },

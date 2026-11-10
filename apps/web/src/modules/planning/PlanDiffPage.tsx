@@ -6,6 +6,7 @@ import { useLoad, usePlanCode, type LoadError } from "./hooks";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const dash = "—";
 
@@ -22,13 +23,13 @@ function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
 
 const orderColumns: DataTableColumn<DiffOrder>[] = [
   { key: "number", header: "Number", mono: true },
-  { key: "itemId", header: "Item", mono: true, render: (o) => o.itemId.slice(0, 8) },
-  { key: "warehouseId", header: "Scope", mono: true, render: (o) => (o.warehouseId ? `Warehouse ${o.warehouseId.slice(0, 8)}` : "Site") },
+  { key: "itemId", header: "Item", mono: true, render: (o) => <EntityName entity="product" id={o.itemId} fallback={o.itemId} /> },
+  { key: "warehouseId", header: "Scope", mono: true, render: (o) => (o.warehouseId ? <EntityName entity="warehouse" id={o.warehouseId} fallback={o.warehouseId} /> : "Site") },
   { key: "orderType", header: "Type" },
   { key: "qty", header: "Quantity", align: "end", render: (o) => trimQty(o.qty) },
   { key: "orderDate", header: "Order date" },
   { key: "deliveryDate", header: "Delivery date" },
-  { key: "vendorId", header: "Vendor", mono: true, render: (o) => o.vendorId?.slice(0, 8) ?? dash },
+  { key: "vendorId", header: "Vendor", mono: true, render: (o) => (o.vendorId ? <EntityName entity="vendor" id={o.vendorId} fallback={o.vendorId} /> : dash) },
 ];
 
 /** "a → b" when the value moved between the versions, otherwise the value. */
@@ -37,13 +38,26 @@ const moved = (from: string, to: string) => (from === to ? to : `${from} → ${t
 type ChangedRow = VersionDiff["changed"][number] & { key: string };
 
 const changedColumns: DataTableColumn<ChangedRow>[] = [
-  { key: "item", header: "Item", mono: true, render: (c) => c.to.itemId.slice(0, 8) },
+  { key: "item", header: "Item", mono: true, render: (c) => <EntityName entity="product" id={c.to.itemId} fallback={c.to.itemId} /> },
   { key: "type", header: "Type", render: (c) => c.to.orderType },
   { key: "delivery", header: "Delivery date", render: (c) => c.to.deliveryDate },
   { key: "qty", header: "Quantity", align: "end", render: (c) => `${trimQty(c.from.qty)} → ${trimQty(c.to.qty)}` },
   { key: "delta", header: "Change", align: "end", render: (c) => (trimQty(c.qtyDelta) === "0" ? dash : signed(c.qtyDelta)) },
   { key: "orderDate", header: "Order date", render: (c) => moved(c.from.orderDate, c.to.orderDate) },
-  { key: "vendor", header: "Vendor", mono: true, render: (c) => moved(c.from.vendorId?.slice(0, 8) ?? dash, c.to.vendorId?.slice(0, 8) ?? dash) },
+  {
+    key: "vendor",
+    header: "Vendor",
+    render: (c) => {
+      const vendor = (id?: string | null) => (id ? <EntityName entity="vendor" id={id} fallback={id} /> : dash);
+      return c.from.vendorId === c.to.vendorId ? (
+        vendor(c.to.vendorId)
+      ) : (
+        <>
+          {vendor(c.from.vendorId)} → {vendor(c.to.vendorId)}
+        </>
+      );
+    },
+  },
 ];
 
 /** "+20" or "-10" from a decimal string, without going through a float. */

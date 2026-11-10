@@ -40,7 +40,7 @@ describe("SSCC register", () => {
     const table = await findTable({ name: "SSCC register" });
     const first = (await within(table).findByText("006141410123456789")).closest("tr");
     const cells = Array.from(first?.querySelectorAll("td, th") ?? []).map((cell) => cell.textContent);
-    expect(cells).toEqual(["006141410123456789", "Shipped", "CARTON-C12", "SH-0000007", "0195f0a0", "2026-10-21 14:05 UTC", "2027-10-21"]);
+    expect(cells).toEqual(["006141410123456789", "Shipped", "CARTON-C12", "SH-0000007", "Not available⋯Copy id", "2026-10-21 14:05 UTC", "2027-10-21"]);
     expect(within(table).getByText("Closed")).toBeInTheDocument();
     expect(within(table).getByText("Unpacked")).toBeInTheDocument();
     expect(within(first as HTMLElement).getByRole("link", { name: "SH-0000007" })).toHaveAttribute("href", `/fulfillment/shipments/${SHIPMENT}`);

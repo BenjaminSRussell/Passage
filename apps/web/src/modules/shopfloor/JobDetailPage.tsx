@@ -23,6 +23,7 @@ import { JobStatusBadge, qty } from "./JobsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceName } from "../mfg-shared/resources";
 
 const KIND_LABELS: Record<JobCheck["kind"], string> = { numeric: "Numeric", "pass-fail": "Pass or fail", text: "Text" };
 
@@ -158,7 +159,9 @@ export function JobDetailPage() {
               </div>
               <div className={styles.entry}>
                 <dt className={styles.term}>Resource</dt>
-                <dd className={`${styles.value} ${styles.mono}`}>{job.resourceId}</dd>
+                <dd className={styles.value}>
+                  <ResourceName id={job.resourceId} />
+                </dd>
               </div>
               <div className={styles.entry}>
                 <dt className={styles.term}>Start</dt>

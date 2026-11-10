@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Typed client for the projects service (services/projects/api/openapi.yaml).
 // Browser paths are /api/v1/projects/...; the BFF rewrites them to /v1/projects/...
 // No token ever reaches the browser: the session cookie travels with same-origin requests.
@@ -109,7 +110,7 @@ async function call<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${BASE}${path}`, { ...init, headers, signal, credentials: "same-origin" });
+  const res = await apiFetch(`${BASE}${path}`, { ...init, headers, signal, credentials: "same-origin" });
   if (!res.ok) throw await failure(res);
   return (await res.json()) as T;
 }
