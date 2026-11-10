@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,8 +16,6 @@ const (
 	pollActor            = "system:treasury-ebics-poll"
 	defaultPollInterval  = time.Hour
 	minPollInterval      = time.Minute
-	defaultPollLookback  = 3
-	maxPollLookbackDays  = 31
 	pollSubscriberBudget = 10 * time.Minute
 )
 
@@ -33,23 +30,20 @@ type PollableLister interface {
 
 // PollConfig is the statement polling setup read from the environment.
 type PollConfig struct {
-	Tenants      []string
-	Interval     time.Duration
-	OrderType    string
-	LookbackDays int
+	Tenants   []string
+	Interval  time.Duration
+	OrderType string
 }
 
 // LoadPollConfig reads TREASURY_EBICS_POLL_WORKERS (polling runs only when it is
 // "true"), TREASURY_EBICS_POLL_TENANT_IDS (comma separated tenant UUIDs),
 // TREASURY_EBICS_POLL_INTERVAL (default 1h, at least 1m), TREASURY_EBICS_POLL_ORDER
-// (C53 or STA, default C53) and TREASURY_EBICS_POLL_LOOKBACK_DAYS (1 to 31,
-// default 3: files the bank delivers again inside the window replay on import).
-// It returns false when polling is off.
+// (C53 or STA, default C53). It returns false when polling is off.
 func LoadPollConfig(getenv func(string) string) (PollConfig, bool, error) {
 	if getenv("TREASURY_EBICS_POLL_WORKERS") != "true" {
 		return PollConfig{}, false, nil
 	}
-	cfg := PollConfig{Interval: defaultPollInterval, OrderType: "C53", LookbackDays: defaultPollLookback}
+	cfg := PollConfig{Interval: defaultPollInterval, OrderType: "C53"}
 	seen := map[string]bool{}
 	for _, part := range strings.Split(getenv("TREASURY_EBICS_POLL_TENANT_IDS"), ",") {
 		if strings.TrimSpace(part) == "" {
@@ -80,18 +74,14 @@ func LoadPollConfig(getenv func(string) string) (PollConfig, bool, error) {
 		}
 		cfg.OrderType = v
 	}
-	if v := getenv("TREASURY_EBICS_POLL_LOOKBACK_DAYS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > maxPollLookbackDays {
-			return PollConfig{}, false, fmt.Errorf("TREASURY_EBICS_POLL_LOOKBACK_DAYS must be 1 to %d, got %s", maxPollLookbackDays, v)
-		}
-		cfg.LookbackDays = n
-	}
 	return cfg, true, nil
 }
 
 // Poller downloads end-of-day statements for every pollable subscriber on an
-// interval and hands them to the statement import. A subscriber the bank parked
+// interval and hands them to the statement import. It asks without a date range,
+// so the bank delivers everything it has not yet had a receipt for, however long
+// a subscriber was parked or the service was down; a fixed window would skip the
+// days before it. Client.FetchStatements with a range is the explicit backfill. A subscriber the bank parked
 // is not polled until a person unparks it; a back-off answer is retried by the
 // client with growing delays and, when the retries run out, again at the next tick.
 type Poller struct {
@@ -165,9 +155,7 @@ func (p *Poller) pollOne(ctx context.Context, tenantID string, sub Subscriber) (
 	defer unlock()
 	runCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{TenantID: tenantID, LegalEntityID: sub.LegalEntityID, UserID: pollActor}), pollSubscriberBudget)
 	defer cancel()
-	now := p.Client.now().UTC()
-	from := now.AddDate(0, 0, -p.Config.LookbackDays).Format("2006-01-02")
-	n, err := p.Client.FetchStatements(runCtx, sub.ID, p.Config.OrderType, from, now.Format("2006-01-02"), p.Sink)
+	n, err := p.Client.FetchStatements(runCtx, sub.ID, p.Config.OrderType, "", "", p.Sink)
 	switch {
 	case errors.Is(err, ErrNoData):
 		return n, nil

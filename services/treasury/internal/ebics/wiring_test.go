@@ -72,7 +72,7 @@ func (s *sinkLog) take(ctx context.Context, account, name string, _ []byte) erro
 
 func newPoller(e *env, sink *sinkLog) *Poller {
 	return &Poller{Client: e.client, Lister: e.store, Sink: sink.take,
-		Config: PollConfig{Tenants: []string{pollTenant}, Interval: time.Hour, OrderType: "C53", LookbackDays: 3}}
+		Config: PollConfig{Tenants: []string{pollTenant}, Interval: time.Hour, OrderType: "C53"}}
 }
 
 func twoStatements(t *testing.T) []byte {
@@ -162,6 +162,41 @@ func TestPoller_SkipsNewAndParkedSubscribersAndNeverContactsTheBank(t *testing.T
 	}
 }
 
+func TestPoller_ParkedForLongerThanAnyWindow_NothingIsSkippedAfterUnpark(t *testing.T) {
+	e := newEnv(t, false)
+	e.onboard()
+	today := e.client.now().UTC()
+	for _, ago := range []int{40, 20, 9, 1} {
+		day := today.AddDate(0, 0, -ago).Format("2006-01-02")
+		e.bank.dated = append(e.bank.dated, datedStatement{day: day, name: "stmt-" + day + ".xml"})
+	}
+	sink := &sinkLog{}
+	p := newPoller(e, sink)
+	e.bank.failNext("init:C53", "091301", 1)
+	if _, err := p.Once(context.Background()); err == nil || e.sub().ParkedCode == "" {
+		t.Fatalf("the refusal must park the subscriber: err=%v parked=%q", err, e.sub().ParkedCode)
+	}
+	for range 3 {
+		if n, err := p.Once(context.Background()); err != nil || n != 0 {
+			t.Fatalf("parked: n=%d err=%v", n, err)
+		}
+	}
+	if _, err := e.client.Unpark(context.Background(), "sub-1", "treasurer"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := p.Once(context.Background()); err != nil || n != 4 || len(sink.files) != 4 {
+		t.Fatalf("after unpark the bank's whole backlog must arrive: n=%d err=%v files=%v", n, err, sink.files)
+	}
+	for _, r := range e.bank.ranges {
+		if r != ".." {
+			t.Fatalf("a steady-state poll sent the date range %q", r)
+		}
+	}
+	if n, err := p.Once(context.Background()); err != nil || n != 0 {
+		t.Fatalf("receipted files must not come again: n=%d err=%v", n, err)
+	}
+}
+
 func TestPoller_BackOffCodesWaitThenSucceed_ExhaustionIsRetriedNextTick(t *testing.T) {
 	e := newEnv(t, false)
 	e.onboard()
@@ -196,8 +231,8 @@ func TestLoadPollConfig(t *testing.T) {
 		t.Fatalf("polling must be off by default: %v %v", on, err)
 	}
 	cfg, on, err := LoadPollConfig(env(map[string]string{"TREASURY_EBICS_POLL_WORKERS": "true", "TREASURY_EBICS_POLL_TENANT_IDS": pollTenant + "," + pollTenant,
-		"TREASURY_EBICS_POLL_INTERVAL": "15m", "TREASURY_EBICS_POLL_ORDER": "STA", "TREASURY_EBICS_POLL_LOOKBACK_DAYS": "7"}))
-	if err != nil || !on || len(cfg.Tenants) != 1 || cfg.Interval != 15*time.Minute || cfg.OrderType != "STA" || cfg.LookbackDays != 7 {
+		"TREASURY_EBICS_POLL_INTERVAL": "15m", "TREASURY_EBICS_POLL_ORDER": "STA"}))
+	if err != nil || !on || len(cfg.Tenants) != 1 || cfg.Interval != 15*time.Minute || cfg.OrderType != "STA" {
 		t.Fatalf("%+v %v %v", cfg, on, err)
 	}
 	for name, m := range map[string]map[string]string{
@@ -205,7 +240,6 @@ func TestLoadPollConfig(t *testing.T) {
 		"bad tenant":     {"TREASURY_EBICS_POLL_WORKERS": "true", "TREASURY_EBICS_POLL_TENANT_IDS": "nope"},
 		"short interval": {"TREASURY_EBICS_POLL_WORKERS": "true", "TREASURY_EBICS_POLL_TENANT_IDS": pollTenant, "TREASURY_EBICS_POLL_INTERVAL": "5s"},
 		"bad order":      {"TREASURY_EBICS_POLL_WORKERS": "true", "TREASURY_EBICS_POLL_TENANT_IDS": pollTenant, "TREASURY_EBICS_POLL_ORDER": "C52"},
-		"bad lookback":   {"TREASURY_EBICS_POLL_WORKERS": "true", "TREASURY_EBICS_POLL_TENANT_IDS": pollTenant, "TREASURY_EBICS_POLL_LOOKBACK_DAYS": "90"},
 	} {
 		if _, _, err := LoadPollConfig(env(m)); err == nil {
 			t.Errorf("%s accepted", name)

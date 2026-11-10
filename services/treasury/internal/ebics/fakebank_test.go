@@ -1,6 +1,7 @@
 package ebics
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto"
@@ -118,6 +119,12 @@ type bankTxn struct {
 	numSegments int
 	got         []string
 	served      []string
+	offered     []int
+}
+
+type datedStatement struct {
+	day, name string
+	receipted bool
 }
 
 type receivedOrder struct {
@@ -152,6 +159,8 @@ type fakeBank struct {
 	verifiedRequests int
 	receipts         []string
 	tamper           func([]byte) []byte
+	dated            []datedStatement
+	ranges           []string
 }
 
 func newFakeBank(t *testing.T, keys []*rsa.PrivateKey) *fakeBank {
@@ -304,7 +313,13 @@ func (b *fakeBank) standard(root *xnode) []byte {
 		if code := b.fault("receipt"); code != "" {
 			return b.refuse(code)
 		}
-		b.receipts = append(b.receipts, root.path("body", "TransferReceipt", "ReceiptCode").content())
+		code := root.path("body", "TransferReceipt", "ReceiptCode").content()
+		b.receipts = append(b.receipts, code)
+		if code == "0" {
+			for _, i := range tx.offered {
+				b.dated[i].receipted = true
+			}
+		}
 		return b.signed("000000", "011000", "", "<TransactionPhase>Receipt</TransactionPhase>", "")
 	}
 	return b.refuse("091010")
@@ -344,6 +359,9 @@ func (b *fakeBank) initPhase(root, header *xnode) []byte {
 		return b.signed("000000", "000000", "<TransactionID>"+tx.id+"</TransactionID>", "<TransactionPhase>Initialisation</TransactionPhase>", "")
 	}
 	data, ok := b.served[order]
+	if b.dated != nil {
+		data, ok = b.datedDownload(tx, header)
+	}
 	if !ok {
 		return b.signed("000000", "090005", "", "", "")
 	}
@@ -353,6 +371,27 @@ func (b *fakeBank) initPhase(root, header *xnode) []byte {
 	}
 	tx.served = segments(b64(enc), b.segChars)
 	return b.downloadReply(tx, 1, wrapped)
+}
+
+func (b *fakeBank) datedDownload(tx *bankTxn, header *xnode) ([]byte, bool) {
+	rng := header.path("static", "OrderDetails", "OrderParams", "DateRange")
+	if rng == nil {
+		rng = header.path("static", "OrderDetails", "StandardOrderParams", "DateRange")
+	}
+	from, to := rng.child("Start").content(), rng.child("End").content()
+	b.ranges = append(b.ranges, from+".."+to)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i, st := range b.dated {
+		inRange := from != "" && st.day >= from && st.day <= to
+		if (from == "" && !st.receipted) || inRange {
+			w, _ := zw.Create(st.name)
+			_, _ = w.Write([]byte("<s/>"))
+			tx.offered = append(tx.offered, i)
+		}
+	}
+	_ = zw.Close()
+	return buf.Bytes(), len(tx.offered) > 0
 }
 
 func (b *fakeBank) downloadReply(tx *bankTxn, n int, wrapped []byte) []byte {
