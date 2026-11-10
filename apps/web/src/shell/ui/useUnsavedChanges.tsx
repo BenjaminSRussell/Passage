@@ -31,18 +31,28 @@ function NavigationPrompt({ shouldBlock, dialog }: { shouldBlock: () => boolean;
   );
 }
 
-const USER_EVENTS = ["keydown", "pointerdown", "click", "input", "change"] as const;
+const FORM_EDIT_EVENTS = ["input", "change", "click"] as const;
+
+function isEditInsideForm(event: Event): boolean {
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest("form")) {
+    return false;
+  }
+  return event.type !== "click" || target.closest("[role='option']") !== null;
+}
 
 export function useFormBaseline(values: unknown): boolean {
   const snapshot = JSON.stringify(values);
   const baseline = useRef(snapshot);
   const touched = useRef(false);
   useEffect(() => {
-    const mark = () => {
-      touched.current = true;
+    const mark = (event: Event) => {
+      if (isEditInsideForm(event)) {
+        touched.current = true;
+      }
     };
-    USER_EVENTS.forEach((type) => document.addEventListener(type, mark, true));
-    return () => USER_EVENTS.forEach((type) => document.removeEventListener(type, mark, true));
+    FORM_EDIT_EVENTS.forEach((type) => document.addEventListener(type, mark, true));
+    return () => FORM_EDIT_EVENTS.forEach((type) => document.removeEventListener(type, mark, true));
   }, []);
   if (!touched.current) {
     baseline.current = snapshot;
