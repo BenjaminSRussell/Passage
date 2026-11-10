@@ -22,15 +22,18 @@ var servicePrincipals = map[string][]string{
 	// The reporter of posted invoices to sales (#29): it signs :record-progress calls, and its token holds only the one duty of
 	// billing's grant on sales that reports invoices (sales.order.record-invoice).
 	"billing-sales-report": {"sales.order.record-invoice"},
-	"finreport-ledger":     {"ledger.entry.lookup"},
-	"purchasing-inbound":   {"purchasing.inbound.apply"},
-	"fulfillment-order":    {"fulfillment.order.sync"},
+	// The reporter of booked invoices and credit notes to the tax service (#29): it signs POST /v1/tax/transactions only.
+	"billing-tax-report": {"tax.transaction.record"},
+	"finreport-ledger":   {"ledger.entry.lookup"},
+	"purchasing-inbound": {"purchasing.inbound.apply"},
+	"fulfillment-order":  {"fulfillment.order.sync"},
 	// The reporter of posted packing slips to sales (#496): it signs :record-progress calls, and its token holds only
 	// fulfillment's grant on sales (sales.order.record-delivery).
 	"fulfillment-sales-report": {"sales.order.record-delivery"},
 	"integration-hub":          {"migration.outbound.render", "migration.xref.record"},
 	"inventory-postings":       {"inventory.transaction.apply"},
 	"pricing-cache":            {"pricing.cache.invalidate"},
+	"search-index":             {"search.index.write"},
 	"migration-loader":         {"party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"},
 	"production-planning":      {"production.planned.intake"},
 	"production-shopfloor":     {"production.jobcard.shopfloor"},
@@ -49,6 +52,7 @@ var servicePrincipals = map[string][]string{
 // "service:migration-loader"), borrowing duties its own grant lacks.
 var servicePrincipalIssuers = map[string][]string{
 	"billing-sales-report":     {"billing"},
+	"billing-tax-report":       {"billing"},
 	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},
 	"purchasing-inbound":       {"purchasing"},
@@ -57,6 +61,7 @@ var servicePrincipalIssuers = map[string][]string{
 	"integration-hub":          {"integration-hub"},
 	"inventory-postings":       {"inventory"},
 	"pricing-cache":            {"pricing"},
+	"search-index":             {"search"},
 	// party forwards the loader as act on the one onward call a party create makes: the party number from numbering.
 	// Its token holds only party's own grant (numbering.sequence.allocate), so nothing is borrowed (#475).
 	"migration-loader":        {"migration", "migration-factory", "party"},

@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/billing/internal/revrec"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/salesreport"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/taxreport"
 	"github.com/BenjaminSRussell/passage/services/billing/migrations"
 )
 
@@ -80,7 +81,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	st := store.New(pool)
-	a := api.New(st, tax, maxLines).WithSubscriptions(st).WithSalesReports(st)
+	a := api.New(st, tax, maxLines).WithSubscriptions(st).WithSalesReports(st).WithTaxReports(st)
 	var glProfiles map[string]store.GLProfile
 	ledger, err := ledgerclient.FromEnv(getenv, "billing")
 	if err != nil {
@@ -120,6 +121,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return errors.New("BILLING_SALES_REPORT_INTERVAL must be a duration of at least 1s")
 		}
 	}
+	taxClient, err := taxreport.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("tax client: %w", err)
+	}
+	taxInterval := salesreport.DefaultInterval
+	if raw := getenv("BILLING_TAX_REPORT_INTERVAL"); raw != "" {
+		if taxInterval, err = time.ParseDuration(raw); err != nil || taxInterval < salesreport.MinInterval {
+			return errors.New("BILLING_TAX_REPORT_INTERVAL must be a duration of at least 1s")
+		}
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -127,10 +138,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if sales != nil {
 		reporter = &salesreport.Reporter{Store: st, Sales: sales}
 	}
+	var taxReporter *taxreport.Reporter
+	if taxClient != nil {
+		taxReporter = &taxreport.Reporter{Store: st, Tax: taxClient}
+	}
 	admin.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		a.Metrics().ServeHTTP(w, r)
 		if reporter != nil {
 			reporter.WriteMetrics(w)
+		}
+		if taxReporter != nil {
+			taxReporter.WriteMetrics(w)
 		}
 	})
 
@@ -144,6 +162,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Info("sales invoice reporter running", "interval", salesInterval)
 	} else {
 		slog.Warn("SALES_URL is unset: posted invoices are queued for sales but not reported")
+	}
+	if taxReporter != nil {
+		go salesreport.Run(ctx, taxInterval, taxReporter.RunOnce)
+		slog.Info("tax transaction reporter running", "interval", taxInterval)
+	} else {
+		slog.Warn("TAX_URL is unset: booked invoices and credit notes are queued for the tax service but not reported")
 	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()

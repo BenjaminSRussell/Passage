@@ -1,0 +1,6 @@
+apiVersion: v2
+name: search
+description: Passage global record search (party, product and purchase order index)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

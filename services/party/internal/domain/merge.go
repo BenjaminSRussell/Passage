@@ -97,6 +97,15 @@ type PartyMerged struct {
 	MergedPartyIDs  []string        `json:"mergedPartyIds"`
 	RoleIDMap       []RoleIDMapping `json:"roleIdMap"`
 	MergedAt        time.Time       `json:"mergedAt"`
+	Survivor        PartySnapshot   `json:"survivor"`
+}
+
+type PartySnapshot struct {
+	PartyNumber string `json:"partyNumber"`
+	PartyType   string `json:"partyType"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Version     int    `json:"version"`
 }
 
 const (
