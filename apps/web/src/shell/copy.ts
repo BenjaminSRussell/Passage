@@ -160,6 +160,8 @@ export const copy = {
     title: "This page isn't available to you",
     description: "Your account doesn't have the duty this page needs. Ask an administrator if you should have access.",
     pageTitle: "Page not available",
+    featureOffTitle: "This isn't turned on for your company",
+    featureOffDescription: "Your company doesn't use this feature. An administrator can turn it on under Company setup, then Features.",
   },
   errorBoundary: {
     title: "This page couldn't load",
