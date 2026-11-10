@@ -57,7 +57,7 @@ export function validateAction(v: ActionValues): { errors: Errors; input?: NewPe
   const details: ActionPayload = {};
   const position = v.positionId.trim();
   if (v.actionType === "TRANSFER" || position !== "") {
-    if (!UUID.test(position)) errors.positionId = "Enter the position's id.";
+    if (!UUID.test(position)) errors.positionId = "Choose the position.";
     else details.positionId = position;
   }
   const share = v.fteShare.trim();
@@ -79,7 +79,7 @@ export function validateAction(v: ActionValues): { errors: Errors; input?: NewPe
   const paying = v.actionType === "COMP_CHANGE" || v.compPlanId.trim() !== "" || v.amount.trim() !== "" || v.currency.trim() !== "";
   if (paying) {
     const currency = v.currency.trim().toUpperCase();
-    if (!UUID.test(v.compPlanId.trim())) errors.compPlanId = "Enter the compensation plan's id.";
+    if (!UUID.test(v.compPlanId.trim())) errors.compPlanId = "Choose the compensation plan.";
     if (!/^[A-Z]{3}$/.test(currency)) errors.currency = "Use a three-letter currency code, for example USD.";
     else if (!validRate(v.amount, currency)) errors.amount = "Enter an amount within the currency's decimals.";
     details.compPlanId = v.compPlanId.trim();
@@ -165,7 +165,16 @@ export function NewPersonnelActionPage() {
           ) : null}
           {actionType === "HIRE" || actionType === "TRANSFER" ? (
             <>
-              {text("positionId", "Position id", { optional: actionType === "HIRE" })}
+              <LookupField
+                entity="position"
+                id="action-positionId"
+                label="Position"
+                optional={actionType === "HIRE"}
+                scope={{ legalEntityId: values.legalEntityId }}
+                value={values.positionId}
+                error={form.errors.positionId ?? form.errors["details.positionId"]}
+                onChange={(positionId) => update({ positionId })}
+              />
               {text("fteShare", "FTE share", { optional: true, hint: "For example 1.00 or 0.50." })}
             </>
           ) : null}
@@ -175,7 +184,14 @@ export function NewPersonnelActionPage() {
               <legend className={styles.legend}>{actionType === "HIRE" ? "Pay (optional)" : "New pay"}</legend>
               <p className={styles.note}>Setting pay needs the compensation administrator duty.</p>
               <div className={styles.optionRow}>
-                {text("compPlanId", "Compensation plan id")}
+                <LookupField
+                  entity="compensationPlan"
+                  id="action-compPlanId"
+                  label="Compensation plan"
+                  value={values.compPlanId}
+                  error={form.errors.compPlanId ?? form.errors["details.compPlanId"]}
+                  onChange={(compPlanId, plan) => update(plan?.currency && values.currency.trim() === "" ? { compPlanId, currency: plan.currency } : { compPlanId })}
+                />
                 {text("amount", "Amount")}
                 {text("currency", "Currency", { maxLength: 3 })}
               </div>

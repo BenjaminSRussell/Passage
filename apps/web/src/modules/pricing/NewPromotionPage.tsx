@@ -61,8 +61,8 @@ export function validatePromotion(v: PromotionDraft): Errors {
   const errors: Errors = {};
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
-  if (v.fundId.trim() !== "" && !UUID.test(v.fundId.trim())) errors.fundId = "Enter the fund id (a UUID) or leave it empty.";
-  if (v.campaignId.trim() !== "" && !UUID.test(v.campaignId.trim())) errors.campaignId = "Enter the campaign id (a UUID) or leave it empty.";
+  if (v.fundId.trim() !== "" && !UUID.test(v.fundId.trim())) errors.fundId = "Choose a fund, or clear it.";
+  if (v.campaignId.trim() !== "" && !UUID.test(v.campaignId.trim())) errors.campaignId = "Choose a campaign, or clear it.";
   if (v.productId.trim() === "" || v.productId.trim().length > 64) errors.productId = "Enter the product id (up to 64 characters).";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!DAY.test(v.startDate)) errors.startDate = "Enter the first day of the promotion.";
@@ -177,8 +177,28 @@ export function NewPromotionPage() {
           {text("pp-category", "eventCategory", "Event category", { optional: true, hint: "For example FEATURE or DISPLAY." })}
           {text("pp-type", "eventType", "Event type", { optional: true, hint: "For example TPR (temporary price reduction)." })}
           {text("pp-scope", "customerScope", "Customer or customer group", { optional: true, hint: "Leave empty for all customers.", mono: true })}
-          {text("pp-fund", "fundId", "Fund id", { optional: true, hint: "An open fund in the same legal entity and currency.", mono: true })}
-          {text("pp-campaign", "campaignId", "Campaign id", { optional: true, hint: "A campaign that is not killed, in the same legal entity and currency, running over the whole window.", mono: true })}
+          <LookupFormField
+            id="pp-fund"
+            label="Fund"
+            entity="fund"
+            optional
+            hint="An open fund in the same legal entity and currency."
+            scope={{ legalEntityId: values.legalEntityId }}
+            value={values.fundId}
+            error={errors.fundId}
+            onChange={(fundId) => update({ fundId })}
+          />
+          <LookupFormField
+            id="pp-campaign"
+            label="Campaign"
+            entity="campaign"
+            optional
+            hint="A campaign that is not killed, in the same legal entity and currency, running over the whole window."
+            scope={{ legalEntityId: values.legalEntityId }}
+            value={values.campaignId}
+            error={errors.campaignId}
+            onChange={(campaignId) => update({ campaignId })}
+          />
           {text("pp-product", "productId", "Product id", { mono: true })}
           {text("pp-currency", "currency", "Currency", { mono: true })}
           {text("pp-start", "startDate", "First day", { type: "date" })}

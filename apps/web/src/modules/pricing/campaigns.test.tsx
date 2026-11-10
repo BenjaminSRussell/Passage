@@ -271,7 +271,7 @@ describe("Trade agreement in a campaign", () => {
       return undefined;
     };
     renderAt(`/pricing/agreements/new?campaign=${CMP}`);
-    expect(screen.getByLabelText(/^Campaign id/)).toHaveValue(CMP);
+    expect(screen.getByLabelText(/^Campaign/)).toHaveAttribute("data-value", CMP);
     fill("Legal entity", LE);
     fill("Customer", "C1");
     fill("Product", "BOLT");
@@ -287,7 +287,7 @@ describe("Trade agreement in a campaign", () => {
   it("refuses a malformed campaign id before calling the service", async () => {
     renderAt("/pricing/agreements/new?campaign=not-a-uuid");
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(await screen.findByText("Enter the campaign id (a UUID) or leave it empty.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a campaign, or clear it.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 });

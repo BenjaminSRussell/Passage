@@ -104,7 +104,7 @@ describe("data-quality rule form", () => {
     fireEvent.change(screen.getByLabelText("Rule id"), { target: { value: "vendor_tax_id" } });
     fireEvent.change(screen.getByLabelText("Asset"), { target: { value: "core.vendor" } });
     fireEvent.change(screen.getByLabelText("Expression"), { target: { value: "tax_id" } });
-    fireEvent.change(screen.getByLabelText("Owner user id"), { target: { value: OWNER } });
+    fireEvent.change(screen.getByLabelText("Owner"), { target: { value: OWNER } });
     fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
     await waitFor(() => expect(location()).toBe("/analytics/data-quality/vendor_tax_id"));
     const put = server.calls.find((c) => c.method === "PUT");

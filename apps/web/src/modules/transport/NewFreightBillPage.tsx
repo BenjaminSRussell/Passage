@@ -6,6 +6,7 @@ import { ChargeLinesEditor, cleanLines, validateLines } from "./ChargeLinesEdito
 import { CURRENCY, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface Values {
   loadId: string;
@@ -17,7 +18,7 @@ interface Values {
 /** Checks that mirror ValidateFreightBill in the service, and the request the form sends. */
 export function validateBill(v: Values): { errors: Record<string, string>; input?: NewFreightBill } {
   const errors = validateLines(v.lines, "expectedLines");
-  if (!UUID.test(v.loadId.trim())) errors.loadId = "Enter the load id as a lower-case UUID.";
+  if (!UUID.test(v.loadId.trim())) errors.loadId = "Choose the load.";
   if (!UUID.test(v.carrierId.trim())) errors.carrierId = "Enter the carrier id as a lower-case UUID.";
   if (!CURRENCY.test(v.currency)) errors.currency = "Enter a three-letter currency code such as USD.";
   if (Object.keys(errors).length > 0) return { errors };
@@ -58,7 +59,7 @@ export function NewFreightBillPage() {
     }
   }
 
-  const text = (id: "loadId" | "carrierId" | "currency", label: string, hint?: string) => (
+  const text = (id: "carrierId" | "currency", label: string, hint?: string) => (
     <FormField id={`bill-${id}`} label={label} hint={hint} error={errors[id]}>
       {(control) => (
         <Input
@@ -77,7 +78,7 @@ export function NewFreightBillPage() {
       <PageHeader title="New freight bill" description="The charges you expect the carrier to invoice for one load, usually taken from the chosen rate shop option." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("loadId", "Load id", "The shipped load (UUID).")}
+          <LookupFormField id="bill-loadId" label="Load" entity="load" hint="The shipped load." value={values.loadId} error={errors.loadId} onChange={(loadId) => update({ loadId })} />
           {text("carrierId", "Carrier id", "The carrier that hauls the load (UUID).")}
           {text("currency", "Currency")}
           <ChargeLinesEditor field="expectedLines" legend="Expected charges" lines={values.lines} errors={errors} onChange={(lines) => update({ lines })} />

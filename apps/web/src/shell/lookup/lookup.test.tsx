@@ -289,6 +289,42 @@ describe("lookup adapters", () => {
     expect((await lookupDefs.currency.search("dollar", {})).map((c) => c.id)).toEqual(["USD"]);
   });
 
+  it("reads every legal entity's bank accounts when no legal entity is in scope, and only one when it is", async () => {
+    handler = (url) => {
+      if (url.pathname === "/api/v1/org/legal-entities") return json({ items: [{ id: "le-1", name: "Germany", code: "DE01" }, { id: "le-2", name: "France", code: "FR01" }] });
+      if (url.pathname === "/api/v1/treasury/bank-accounts") {
+        const le = url.searchParams.get("legalEntityId");
+        return json({ items: [{ id: `ba-${le}`, legalEntityId: le, accountCode: `OPS-${le}`, ibanMasked: "DE** 3000", currency: "EUR" }] });
+      }
+      return json({ items: [] });
+    };
+    expect((await lookupDefs.bankAccount.search("", {})).map(formatOption)).toEqual(["OPS-le-1 (DE** 3000 · EUR · DE01)", "OPS-le-2 (DE** 3000 · EUR · FR01)"]);
+    calls = [];
+    expect((await lookupDefs.bankAccount.search("ops", { legalEntityId: "le-2" })).map((entry) => entry.id)).toEqual(["ba-le-2"]);
+    expect(calls).toEqual(["/api/v1/treasury/bank-accounts?legalEntityId=le-2"]);
+  });
+
+  it("filters lists the service cannot search, following the cursor", async () => {
+    handler = (url) =>
+      url.searchParams.get("cursor") === "c2"
+        ? json({ items: [{ id: "pos-2", positionNumber: "POS-200", jobCode: "ENG", legalEntityId: "le-1" }] })
+        : json({ items: [{ id: "pos-1", positionNumber: "POS-100", jobCode: "OPS", legalEntityId: "le-2" }], nextCursor: "c2" });
+    expect((await lookupDefs.position.search("pos", {})).map(formatOption)).toEqual(["POS-100 (OPS)", "POS-200 (ENG)"]);
+    expect((await lookupDefs.position.search("", { legalEntityId: "le-1" })).map((entry) => entry.id)).toEqual(["pos-2"]);
+    expect(calls).toContain("/api/v1/hr/positions?limit=100&cursor=c2");
+  });
+
+  it("names a load by where and when it goes, and a user by display name", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/transport/loads"
+        ? json({ items: [{ id: "l-1", mode: "TL", status: "IN_TRANSIT", shipFromSiteId: "s-1", shipToRegion: "Dallas TX", pickupDate: "2026-11-02" }] })
+        : json({ items: [{ userId: "u-1", displayName: "Ada Lovelace", email: "ada@example.com", status: "active" }] });
+    expect((await lookupDefs.load.search("dallas", {})).map(formatOption)).toEqual(["Dallas TX, pickup 2026-11-02 (TL · in transit)"]);
+    expect(await lookupDefs.load.search("", { siteId: "s-2" })).toEqual([]);
+    expect((await lookupDefs.user.search("ada", {})).map(formatOption)).toEqual(["Ada Lovelace (ada@example.com)"]);
+    expect(calls).toContain("/api/v1/identity/users?q=ada&status=active&limit=20");
+  });
+
   it("resolves a customer through its party for the display name", async () => {
     handler = (url) =>
       url.pathname.endsWith("/customers/c-1") ? json({ id: "c-1", partyId: "p1", accountNumber: "C-9" }) : json({ id: "p1", name: "Contoso Ltd", partyNumber: "P-1" });

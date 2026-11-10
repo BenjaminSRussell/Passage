@@ -65,7 +65,7 @@ export function validateAgreement(v: Values): Errors {
   }
   if (v.type !== "PRICE" && v.amount === "" && v.discPct1 === "" && v.discPct2 === "") errors.amount = "Enter an amount, a percentage or both.";
   if (v.type === "SURCHARGE" && v.discPct2 !== "" && Number(v.discPct2) !== 0) errors.discPct2 = "A surcharge takes one percentage; leave percentage 2 empty.";
-  if ((v.campaignId ?? "").trim() !== "" && !UUID.test((v.campaignId ?? "").trim())) errors.campaignId = "Enter the campaign id (a UUID) or leave it empty.";
+  if ((v.campaignId ?? "").trim() !== "" && !UUID.test((v.campaignId ?? "").trim())) errors.campaignId = "Choose a campaign, or clear it.";
   if (!DAY.test(v.validFrom)) errors.validFrom = "Enter the first valid day.";
   if (!DAY.test(v.validTo)) errors.validTo = "Enter the last valid day.";
   else if (DAY.test(v.validFrom) && v.validTo < v.validFrom) errors.validTo = "The last day must be on or after the first day.";
@@ -245,11 +245,17 @@ export function NewAgreementPage() {
           {text("ta-pct2", "discPct2", "Percentage 2", { optional: true, hint: "Applied after percentage 1.", mono: true })}
           {text("ta-valid-from", "validFrom", "Valid from", { type: "date" })}
           {text("ta-valid-to", "validTo", "Valid to", { type: "date", hint: "Inclusive." })}
-          {text("ta-campaign", "campaignId", "Campaign id", {
-            optional: true,
-            mono: true,
-            hint: "The agreement then prices only while the campaign is live and for its customer group.",
-          })}
+          <LookupFormField
+            id="ta-campaign"
+            label="Campaign"
+            entity="campaign"
+            optional
+            hint="The agreement then prices only while the campaign is live and for its customer group."
+            scope={{ legalEntityId: values.legalEntityId }}
+            value={values.campaignId ?? ""}
+            error={errors.campaignId}
+            onChange={(campaignId) => update({ campaignId })}
+          />
           <div className={styles.formActions}>
             <span className={styles.check}>
               <Input id="ta-search-next" type="checkbox" checked={values.searchNext} onChange={(e) => update({ searchNext: e.target.checked })} />
