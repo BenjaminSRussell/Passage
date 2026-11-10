@@ -19,6 +19,11 @@ release may change public APIs.
 
 ### Added
 
+- RMA credit notes reverse the original invoice tax (#30): sales derives the reversal per tax code from the stored invoice
+  line tax (pro rata, half-even to the cent, net of billing credits and earlier returns; history in `return_order_tax`),
+  receivables debits the pinned tax accounts, credits 1200 net plus tax, records negative output transactions with the tax
+  service and bounds the credit with its tax against the invoice and checks every tax code against the billing invoice (read-only `billing.invoice.read`, `BILLING_URL`): unbilled codes and over-claims are refused; billing exposes `creditedTax` per invoice line. The
+  receivables service gains the `tax.transaction.record` grant and `RECEIVABLES_RMA_TAX_ACCOUNTS` / `TAX_URL` settings.
 - SAF-T structural validation for the tax extract (#13): `saft.Build` accepts Customers, Suppliers and
   GeneralLedgerEntries and checks them in Go (required elements, balanced transactions, control totals, party
   references) because the official OECD XSD cannot be fetched automatically; the test XSD subset covers the sections.

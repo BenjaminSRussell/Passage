@@ -4790,6 +4790,7 @@ components:
         gross: {$ref: "#/components/schemas/Money"}
         restocking: {$ref: "#/components/schemas/Money"}
         net: {$ref: "#/components/schemas/Money"}
+        tax: {$ref: "#/components/schemas/Money"}
         creditNoteId: {type: string}
         journalPostingId: {type: string}
         createdBy: {type: string}
