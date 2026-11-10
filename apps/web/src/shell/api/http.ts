@@ -37,14 +37,19 @@ export function newKey(): string {
   return crypto.randomUUID();
 }
 
-export async function request<T>(method: string, path: string, schema: z.ZodType<T>, fetchImpl: FetchLike, headers: Record<string, string> = {}, body?: unknown): Promise<T> {
-  const res = await fetchImpl(`${BASE}${path}`, {
+export async function requestUrl<T>(method: string, url: string, schema: z.ZodType<T>, fetchImpl: FetchLike, headers: Record<string, string> = {}, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetchImpl(url, {
     method,
     headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   if (!res.ok) throw await readProblem(res);
   return schema.parse(await res.json());
+}
+
+export function request<T>(method: string, path: string, schema: z.ZodType<T>, fetchImpl: FetchLike, headers: Record<string, string> = {}, body?: unknown): Promise<T> {
+  return requestUrl(method, `${BASE}${path}`, schema, fetchImpl, headers, body);
 }
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

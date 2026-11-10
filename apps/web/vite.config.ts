@@ -29,7 +29,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       port: 5173,
       proxy: devProxy(env),
-      fs: { allow: ["../warehouse-mobile/public", ...(mode === "test" ? ["../../policies/authz", "../../services"] : []), "."] },
+      fs: { allow: ["../warehouse-mobile/public", ...(mode === "test" ? ["../../policies/authz", "../../services", "../../docs/user"] : []), "."] },
     },
     test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
   };

@@ -52,8 +52,9 @@ type parked struct {
 }
 
 type fakeDLQ struct {
-	sent []parked
-	err  error
+	sent    []parked
+	details []string
+	err     error
 }
 
 func (d *fakeDLQ) Send(_ context.Context, topic string, r eventing.Record, reason string) error {
@@ -61,6 +62,7 @@ func (d *fakeDLQ) Send(_ context.Context, topic string, r eventing.Record, reaso
 		return d.err
 	}
 	d.sent = append(d.sent, parked{topic, reason, r.Offset})
+	d.details = append(d.details, r.Headers[eventing.HeaderDeadLetterDetail])
 	return nil
 }
 
@@ -211,6 +213,39 @@ func TestConsumerDeadLettersPermanentFailureWithoutRetry(t *testing.T) {
 	}
 	if len(h.ran) != 1 || len(h.dlq.sent) != 1 || h.dlq.sent[0].reason != "permanent" {
 		t.Fatalf("attempts %d, parked %v", len(h.ran), h.dlq.sent)
+	}
+}
+
+func TestConsumerRetriesTransientFailureBeyondTheAttemptLimit(t *testing.T) {
+	h, c, ctx := newHarness(t, func(_ *harness, attempt int) error {
+		if attempt < 8 {
+			return eventing.Transient(errors.New("connection refused"))
+		}
+		return nil
+	})
+	h.src.queue = []eventing.Record{record(t, 7, "e1", eventType, tenantA)}
+	if err := run(t, c, ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.ran) != 8 || len(h.dlq.sent) != 0 || len(h.src.committed) != 1 {
+		t.Fatalf("attempts %d, parked %v, committed %v; a transient failure must outlast MaxAttempts 3", len(h.ran), h.dlq.sent, h.src.committed)
+	}
+}
+
+func TestConsumerDeadLetterCarriesTheErrorTextBounded(t *testing.T) {
+	h, c, ctx := newHarness(t, func(*harness, int) error {
+		return eventing.Permanent(errors.New("invoice INV-1: " + strings.Repeat("x", 2000)))
+	})
+	rec := record(t, 3, "e1", eventType, tenantA)
+	h.src.queue = []eventing.Record{rec}
+	if err := run(t, c, ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.dlq.details) != 1 || !strings.HasPrefix(h.dlq.details[0], "invoice INV-1: ") || len(h.dlq.details[0]) != 512 {
+		t.Fatalf("detail %q (%d bytes), want the error text cut to 512 bytes", h.dlq.details, len(h.dlq.details[0]))
+	}
+	if _, leaked := rec.Headers[eventing.HeaderDeadLetterDetail]; leaked {
+		t.Fatal("the detail header was written onto the source record")
 	}
 }
 

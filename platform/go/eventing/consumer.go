@@ -23,6 +23,9 @@ const (
 	reasonDecode    = "decode"
 	reasonPermanent = "permanent"
 	reasonExhausted = "retries_exhausted"
+
+	HeaderDeadLetterDetail = "x-dlq-detail"
+	maxDetail              = 512
 )
 
 type Source interface {
@@ -52,6 +55,25 @@ func (e permanentError) Unwrap() error { return e.err }
 func IsPermanent(err error) bool {
 	var permanent permanentError
 	return errors.As(err, &permanent)
+}
+
+type transientError struct{ err error }
+
+func (e transientError) Error() string { return e.err.Error() }
+func (e transientError) Unwrap() error { return e.err }
+
+func IsTransient(err error) bool {
+	var transient transientError
+	return errors.As(err, &transient)
+}
+
+// Transient marks a failure that heals by itself (a database or network outage): the consumer retries it with back-off
+// without the MaxAttempts limit instead of dead-lettering the event.
+func Transient(err error) error {
+	if err == nil {
+		return nil
+	}
+	return transientError{err}
 }
 
 func Permanent(err error) error {
@@ -130,7 +152,7 @@ func (c *Consumer) process(ctx context.Context, rec Record) error {
 	evt, err := Decode(rec)
 	if err != nil {
 		log.ErrorContext(ctx, "undecodable record dead-lettered", "err", err)
-		return c.park(ctx, rec, reasonDecode)
+		return c.park(ctx, rec, reasonDecode, err)
 	}
 	log = log.With("eventId", evt.ID, "eventType", evt.Type, "tenantId", evt.TenantID, "correlationId", evt.CorrelationID)
 	handler, ok := c.cfg.Handlers[evt.Type]
@@ -141,7 +163,7 @@ func (c *Consumer) process(ctx context.Context, rec Record) error {
 	actor, err := tenant.ServicePrincipal(c.cfg.Name, evt.TenantID, "")
 	if err != nil {
 		log.ErrorContext(ctx, "service principal refused; event dead-lettered", "err", err)
-		return c.park(ctx, rec, reasonPermanent)
+		return c.park(ctx, rec, reasonPermanent, err)
 	}
 	actorCtx := tenant.With(ctx, actor)
 	for attempt := 1; ; attempt++ {
@@ -156,11 +178,11 @@ func (c *Consumer) process(ctx context.Context, rec Record) error {
 		}
 		if IsPermanent(err) {
 			log.ErrorContext(ctx, "event failed permanently; dead-lettered", "err", err)
-			return c.park(ctx, rec, reasonPermanent)
+			return c.park(ctx, rec, reasonPermanent, err)
 		}
-		if attempt >= c.cfg.MaxAttempts {
+		if attempt >= c.cfg.MaxAttempts && !IsTransient(err) {
 			log.ErrorContext(ctx, "event failed after retries; dead-lettered", "err", err, "attempts", attempt)
-			return c.park(ctx, rec, reasonExhausted)
+			return c.park(ctx, rec, reasonExhausted, err)
 		}
 		c.metrics.retries.Add(1)
 		log.WarnContext(ctx, "event failed; retrying", "err", err, "attempt", attempt)
@@ -193,7 +215,13 @@ func (c *Consumer) count(applied bool) {
 	c.metrics.duplicates.Add(1)
 }
 
-func (c *Consumer) park(ctx context.Context, rec Record, reason string) error {
+func (c *Consumer) park(ctx context.Context, rec Record, reason string, cause error) error {
+	headers := make(map[string]string, len(rec.Headers)+1)
+	for k, v := range rec.Headers {
+		headers[k] = v
+	}
+	headers[HeaderDeadLetterDetail] = cause.Error()[:min(len(cause.Error()), maxDetail)]
+	rec.Headers = headers
 	if err := c.dlq.Send(ctx, c.cfg.DeadLetterTopic, rec, reason); err != nil {
 		c.metrics.deadLetterFailures.Add(1)
 		c.log.ErrorContext(ctx, "dead-letter send failed; stopping so the record is redelivered", "err", err, "topic", rec.Topic, "partition", rec.Partition, "offset", rec.Offset)
