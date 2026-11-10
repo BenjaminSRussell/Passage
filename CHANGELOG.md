@@ -10,6 +10,17 @@ release may change public APIs.
 
 ### Added
 
+- Receivables opens an item for every invoice and credit note billing posts (#30): a new consumer (`receivables consume`, group
+  and service principal `receivables-billing`, flag duty `receivables.openitem.from-billing`, dead-letter topic
+  `passage.receivables.invoices.dlq`, `deploy/kafka/receivables-consumer.yaml`, off by default in the chart) reads
+  `invoice.posted` and `creditnote.posted` from `passage.billing.invoice` and opens one INVOICE item per installment (the whole
+  gross when there is no plan) or one negative CREDIT_NOTE item linked to the credited invoice. A document is keyed by (type,
+  billing id, installment), so a replay changes nothing; an event it cannot apply (installments that do not add up, a document
+  number already taken, a credit note for another customer or currency) is dead-lettered with its reason in the
+  `x-dlq-detail` header; a lost database is retried without limit (`eventing.Transient`), a credit note waits for its invoice.
+  An RMA credit finds an installment invoice by its billing id and is bounded by the sum of the installments, and cash
+  application matches `INV-1` to `INV-1/1..n`. The platform consumer gained `eventing.Transient` and the `x-dlq-detail` header.
+
 - Web: five task-based user guides in `docs/user/` (vendor invoice and payment, purchase order, customer payment, order to invoice, company set-up) and a route help map (`shell/help/routeHelp.ts`, `helpForRoute`) with an entry for each procure-to-pay and order-to-cash page. Tests fail on a page without its own help entry, a broken guide link or a spec id, wave reference or problem code in the text (#507). The help side panel is not part of this change.
 - Web: "My work" is a real inbox (#499). It lists what waits for you from `GET /v1/inbox` in your working legal entity, filterable by type, with the reason, age, due date and an Open link; customer changes can be approved or rejected in place (with confirmation) by users who hold the approve duty. It names sources that could not be loaded, notes truncated sources, pages with "Load more" and asks you to reload from the start when the sources changed. Home shows a My work summary (count and the top five) and marks the current workspace. The sample inbox rows are gone, and the Inbox menu entry now needs `inbox.read`. In production, assign the `inbox.read` duty to the roles of everyone who should see My work; until then My work and the Home summary do not appear.
 - Web: plain-language messages for the vendor PO acknowledgement problems (`PRC-ACK-001` to `PRC-ACK-005`) and the sales report problems (`BIL-0110` to `BIL-0112`), which the catalog test requires for every code the services return.
