@@ -145,6 +145,27 @@ paths:
               schema: { $ref: '#/components/schemas/PrintJob' }
         '400': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /print/v1/documents:render:
+    post:
+      operationId: renderBusinessDocument
+      summary: Render a purchase order, customer invoice or packing slip as a PDF (issue #530)
+      description: The caller sends the document as data (legal entity name and address, document number, counterparty, header fields, a table and totals). The answer is an A4 PDF. The output is deterministic, so the same request returns the same bytes. Text is limited to Latin-1. Nothing is stored and no printer is used. A document that cannot be rendered is refused with PRN-0008 and a detail that names the field.
+      x-passage-duty: print.document.render
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentRequest' }
+      responses:
+        '200':
+          description: The PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /print/v1/jobs:purge:
     post:
       operationId: purgePrintJobs
@@ -223,6 +244,41 @@ components:
         code: { type: string }
         traceId: { type: string }
         errors: { type: object, additionalProperties: { type: string } }
+    DocumentParty:
+      type: object
+      required: [name]
+      properties:
+        label: { type: string, description: 'For example Vendor, Bill to, Ship to.' }
+        name: { type: string }
+        address: { type: array, items: { type: string } }
+    DocumentField:
+      type: object
+      required: [label, value]
+      properties:
+        label: { type: string }
+        value: { type: string }
+    DocumentRequest:
+      type: object
+      required: [documentType, number, legalEntity, columns, lines]
+      properties:
+        documentType: { type: string, enum: [PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP] }
+        number: { type: string }
+        legalEntity: { $ref: '#/components/schemas/DocumentParty' }
+        counterparty: { $ref: '#/components/schemas/DocumentParty' }
+        fields: { type: array, items: { $ref: '#/components/schemas/DocumentField' } }
+        columns:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            required: [header]
+            properties:
+              header: { type: string }
+              align: { type: string, enum: [L, R] }
+        lines: { type: array, maxItems: 500, items: { type: array, items: { type: string } } }
+        totals: { type: array, items: { $ref: '#/components/schemas/DocumentField' } }
+        notes: { type: string }
     PrinterRequest:
       type: object
       required: [code, name, deviceType, dpi, host, queueCode, failoverRank]

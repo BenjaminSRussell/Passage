@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createArrival, fetchOpenPurchaseOrders, fetchPurchaseOrderLines, newKey, type ArrivalInput, type PurchaseOrderLine } from "./api/client";
@@ -113,7 +113,8 @@ export function NewArrivalPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const key = useRef(newKey());
-  const [values, setValues] = useState<ArrivalDraft>(() => ({ ...emptyArrival, receiptDate: new Date().toLocaleDateString("en-CA") }));
+  const carried = useSearchParams()[0];
+  const [values, setValues] = useState<ArrivalDraft>(() => ({ ...emptyArrival, receiptDate: new Date().toLocaleDateString("en-CA"), purchaseOrderId: carried.get("purchaseOrderId") ?? "", vendorId: carried.get("vendorId") ?? "" }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);

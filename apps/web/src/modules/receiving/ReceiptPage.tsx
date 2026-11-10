@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { PurchaseFlowPanel } from "./documentFlow";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
   cancelReceipt,
@@ -385,6 +386,7 @@ export function ReceiptPage() {
           </Link>
         }
       />
+      {result.data ? <PurchaseFlowPanel anchor={{ kind: "receipt", id: result.data.id }} refreshKey={`${result.data.state}:${result.data.version}`} /> : null}
       {result.isError ? (
         <Alert tone="danger" title="Could not load the receipt" live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
           {(result.error as Error).message}

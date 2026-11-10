@@ -1,5 +1,8 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { DownloadPdfButton } from "../../shell/documents/pdfDocument";
+import { purchaseOrderDocument } from "./purchaseOrderDocument";
+import { PurchaseFlowPanel } from "../receiving/documentFlow";
 import { pickProductPatch } from "../../shell/lookup/entities";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -1176,8 +1179,9 @@ export function PurchaseOrderDetailPage() {
         title={`Purchase order ${po.number}`}
         meta={<StatusBadge status={po.approvalStatus} />}
         actions={
-          actions.length > 0 || editable ? (
+          (
             <div className={styles.actions}>
+              <DownloadPdfButton build={() => purchaseOrderDocument(po)} filename={`purchase-order-${po.number}.pdf`} />
               {editable ? (
                 <Link className={buttonClassName("secondary")} to={`/purchasing/purchase-orders/${po.id}/edit`}>
                   {po.versionNo > 0 ? "Change order" : "Edit"}
@@ -1205,9 +1209,10 @@ export function PurchaseOrderDetailPage() {
                 </Button>
               ))}
             </div>
-          ) : undefined
+          )
         }
       />
+      <PurchaseFlowPanel anchor={{ kind: "po", id: po.id }} refreshKey={`${po.approvalStatus}:${po.rowVersion}`} />
       {confirmCancel ? (
         <Alert
           tone="warning"

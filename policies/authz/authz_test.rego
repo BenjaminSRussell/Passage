@@ -2157,3 +2157,17 @@ test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
 }
+
+test_print_document_render_is_its_own_duty if {
+	allowed("print.document.render", "POST", "/print/v1/documents:render")
+	not allowed("print.document.render", "POST", "/print/v1/jobs")
+	not allowed("print.job.submit", "POST", "/print/v1/documents:render")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
+test_receiving_document_flow_is_read_only_and_separate if {
+	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
+	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
+}

@@ -1,5 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { DownloadPdfButton } from "../../shell/documents/pdfDocument";
+import { invoiceDocument } from "./invoiceDocument";
+import { OrderFlowPanel } from "../sales/documentFlow";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -178,6 +181,7 @@ export function InvoiceDetailPage() {
         meta={<StatusPill status={STATUS_LABELS[invoice.status] ?? invoice.status} />}
         actions={
           <div className={styles.actions}>
+            {invoice.status !== "PROPOSAL" ? <DownloadPdfButton build={() => invoiceDocument(invoice)} filename={`invoice-${invoice.number ?? invoice.id}.pdf`} /> : null}
             {invoice.status === "PROPOSAL" ? (
               <Button variant="primary" loading={posting} onClick={() => post(invoice)}>
                 {creditNote ? "Post credit note" : "Post invoice"}
@@ -217,6 +221,7 @@ export function InvoiceDetailPage() {
             : "Posting re-quotes the tax, assigns the next gap-free invoice number and publishes the invoice to receivables and the ledger. A tax change of more than 0.01 stops the post for review."}
         </p>
       ) : null}
+      {invoice.type !== "CREDIT_NOTE" ? <OrderFlowPanel anchor={{ kind: "invoice", id: invoice.id }} refreshKey={`${invoice.status}:${invoice.version}`} /> : null}
       <Card title="Totals">
         <dl className={styles.details}>
           <Detail term="Net" mono>{`${invoice.totals.net} ${currency}`}</Detail>

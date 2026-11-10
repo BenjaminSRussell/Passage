@@ -45,6 +45,10 @@ To change or cancel, select **Change or cancel**. Use **Cancel the remainder** t
 
 After a sale, record what the customer pays in [Record a customer payment](ar-clerk.md).
 
+## Follow an order to payment
+
+Open **Order to cash** in the Sales menu to see the five steps with how many orders, shipments, invoices and receivables wait at each. Every order, packing slip, invoice and payment page also shows a **Document flow** panel: the documents before and after it with their status, and a **Next** button for what to do now.
+
 ## What the statuses mean
 
 | Order status | Meaning |

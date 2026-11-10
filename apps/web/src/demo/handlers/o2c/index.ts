@@ -4,3 +4,4 @@ import "./fulfillment";
 import "./billing";
 import "./pricing";
 import "./quotations";
+import "./receivables";

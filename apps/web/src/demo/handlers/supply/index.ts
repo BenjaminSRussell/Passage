@@ -5,3 +5,4 @@ import "./rfqs";
 import "./warehouse";
 import "./inventory";
 import "./receiving";
+import "./payables";

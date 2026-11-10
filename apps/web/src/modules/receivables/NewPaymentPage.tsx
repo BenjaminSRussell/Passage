@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormErrorSummary, FormField, FormSection, Input, PageHeader, Select, summaryItems, useFormBaseline, useUnsavedChanges, type FormFieldTarget } from "../../shell/ui";
 import { copy } from "../../shell/copy";
 import { createPayment, describeProblem, newKey, PAYMENT_MODES, ReceivablesApiError, type PaymentInput, type PaymentMode, type Problem } from "./api/client";
@@ -113,7 +113,8 @@ export function toPaymentInput(v: PaymentDraft): PaymentInput {
 /** Record a manual payment (FR-30.2): check, ACH, wire, card or cash, with the payer's remittance references. */
 export function NewPaymentPage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<PaymentDraft>(() => emptyPayment());
+  const carried = useSearchParams()[0].get("customerId") ?? "";
+  const [values, setValues] = useState<PaymentDraft>(() => ({ ...emptyPayment(), customerId: carried }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);

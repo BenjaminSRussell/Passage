@@ -15,5 +15,8 @@ export const TOUR: TourStop[] = [
   { area: "Supply chain", label: "Warehouse work", to: "/warehouse/work", blurb: "Put-away, production picks and replenishment for the raw materials store; assign the next task to yourself." },
   { area: "Supply chain", label: "Products", to: "/product/items", blurb: "The catalog of finished pumps, subassemblies, purchased components and raw materials. Search by number or name and open any product." },
   { area: "Supply chain", label: "Customers and vendors", to: "/party", blurb: "Browse every customer and vendor, filter by name or account number, and open a party record." },
+  { area: "Supply chain", label: "Procure to pay", to: "/purchasing/procure-to-pay", blurb: "The five steps from purchase order to vendor payment with what waits at each; open a purchase order to see its document flow and next step." },
+  { area: "Supply chain", label: "Pay vendors", to: "/payables", blurb: "Payment proposals: approve a draft, start its payment run and step through the bank file, ledger posting and settlement." },
+  { area: "Supply chain", label: "Vendor open items", to: "/payables/open-items", blurb: "What is owed to each vendor, with payment holds and their reasons." },
   { area: "Supply chain", label: "Vendor record", to: `/party/${VENDORS[0].id}`, blurb: "Ironbridge Foundry's party record with its vendor role in Cedar Ridge Pumps." },
 ];

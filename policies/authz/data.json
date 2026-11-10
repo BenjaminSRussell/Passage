@@ -732,6 +732,9 @@
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
     ]},
+    "receiving.document-flow.read": {"permissions": [
+      {"resource": "/v1/receiving/related-documents", "methods": ["GET"]}
+    ]},
     "receiving.ap.inquire": {"permissions": [
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
@@ -1859,6 +1862,9 @@
       {"resource": "/print/v1/printers", "methods": ["GET"]},
       {"resource": "/print/v1/printers/status", "methods": ["GET"]},
       {"resource": "/print/v1/routing-rules", "methods": ["GET"]}
+    ]},
+    "print.document.render": {"permissions": [
+      {"resource": "/print/v1/documents:render", "methods": ["POST"]}
     ]},
     "print.admin": {"permissions": [
       {"resource": "/print/v1/jobs:purge", "methods": ["POST"]},

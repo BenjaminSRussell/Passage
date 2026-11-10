@@ -423,11 +423,11 @@ describe("one request per action", () => {
 
   it("explains a refused approval plainly and reloads the proposal", async () => {
     const user = userEvent.setup();
-    api((url, init) => (url.pathname.endsWith(":approve") ? json(409, { code: "AP-PRP-002", detail: "items changed" }) : init.method === "POST" ? undefined : url.pathname === `/api/v1/payables/payment-proposals/${PROPOSAL}` ? json(200, proposal()) : undefined));
+    api((url, init) => (url.pathname.endsWith(":approve") ? json(409, { code: "AP-PRP-001", detail: "items changed" }) : init.method === "POST" ? undefined : url.pathname === `/api/v1/payables/payment-proposals/${PROPOSAL}` ? json(200, proposal()) : undefined));
     renderAt(`/payables/proposals/${PROPOSAL}`, [...READ, "payment-proposal.approve"]);
     await user.click(await screen.findByRole("button", { name: "Approve proposal" }));
     await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve proposal" }));
-    expect(await screen.findByText(/Only a draft payment proposal can be changed/)).toBeInTheDocument();
+    expect(await screen.findByText(/The proposal changed: an invoice was paid/)).toBeInTheDocument();
     await waitFor(() => expect(calls("GET", `/api/v1/payables/payment-proposals/${PROPOSAL}`).length).toBeGreaterThan(1));
   });
 
@@ -486,5 +486,82 @@ describe("one request per action", () => {
     expect(await screen.findByText("No open items match these filters")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(await screen.findByText("INV-1001")).toBeInTheDocument();
+  });
+});
+
+describe("payment runs", () => {
+  const RUN = "77777777-7777-4777-8777-777777777777";
+  const run = (patch: Record<string, unknown> = {}) => ({
+    id: RUN,
+    legalEntityId: LE,
+    proposalId: PROPOSAL,
+    status: "RUNNING",
+    requestedBy: "marcus",
+    createdAt: "2026-11-11T09:00:00Z",
+    payments: [{ groupId: "g1", vendorId: V1, currency: "USD", paymentMethod: "TRANSFER", endToEndId: "E2E-1", amount: "968.10", valuedAmount: "968.10" }],
+    ...patch,
+  });
+
+  it("guards formatAmount against empty or malformed input", () => {
+    expect(formatAmount("", "USD")).toBe("Not available");
+    expect(formatAmount("abc", "USD")).toBe("Not available");
+    expect(formatAmount("12.5", "USD")).toBe("12.50 USD");
+  });
+
+  it("starts a run from an approved proposal and opens it", async () => {
+    const user = userEvent.setup();
+    api((url, init) => {
+      if (url.pathname === "/api/v1/payables/payment-runs" && init.method === "POST") return json(201, run());
+      if (url.pathname === `/api/v1/payables/payment-runs/${RUN}`) return json(200, run());
+      if (url.pathname === `/api/v1/payables/payment-proposals/${PROPOSAL}`) return json(200, proposal({ status: "APPROVED" }));
+      return undefined;
+    });
+    renderAt(`/payables/proposals/${PROPOSAL}`, [...READ, "payment-run.execute"]);
+    await user.click(await screen.findByRole("button", { name: "Start payment run" }));
+    expect(await screen.findByRole("button", { name: "Generate the bank file" })).toBeInTheDocument();
+    expect(calls("POST", "/api/v1/payables/payment-runs")).toHaveLength(1);
+  });
+
+  it("offers each step in order and shows the next one after a step succeeds", async () => {
+    const user = userEvent.setup();
+    let state = run();
+    api((url, init) => {
+      if (url.pathname === `/api/v1/payables/payment-runs/${RUN}:generate-file` && init.method === "POST") {
+        state = run({ fileGeneratedAt: "2026-11-11T09:01:00Z", fileNumber: "PF-1", paymentCount: 1 });
+        return json(200, state);
+      }
+      if (url.pathname === `/api/v1/payables/payment-runs/${RUN}`) return json(200, state);
+      return undefined;
+    });
+    renderAt(`/payables/runs/${RUN}`, [...READ, "payment-run.execute"]);
+    await user.click(await screen.findByRole("button", { name: "Generate the bank file" }));
+    expect(await screen.findByRole("button", { name: "Post to the ledger" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download bank file" })).toBeInTheDocument();
+  });
+
+  it("fails a run with a reason", async () => {
+    const user = userEvent.setup();
+    let state = run();
+    api((url, init) => {
+      if (url.pathname.endsWith(":fail") && init.method === "POST") {
+        state = run({ status: "FAILED", failureReason: JSON.parse(String(init.body)).reason });
+        return json(200, state);
+      }
+      if (url.pathname === `/api/v1/payables/payment-runs/${RUN}`) return json(200, state);
+      return undefined;
+    });
+    renderAt(`/payables/runs/${RUN}`, [...READ, "payment-run.execute"]);
+    await user.click(await screen.findByRole("button", { name: "Mark run as failed" }));
+    await user.type(screen.getByLabelText(/Why is this run failing/), "Bank rejected the file");
+    await user.click(screen.getByRole("button", { name: "Mark run as failed" }));
+    expect(await screen.findByText(/Bank rejected the file/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Post to the ledger" })).not.toBeInTheDocument();
+  });
+
+  it("hides run actions without the execute duty", async () => {
+    api((url) => (url.pathname === `/api/v1/payables/payment-runs/${RUN}` ? json(200, run()) : undefined));
+    renderAt(`/payables/runs/${RUN}`, [...READ, "payment-run.read"]);
+    expect(await screen.findByText(/You don't have rights to run payments/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate the bank file" })).not.toBeInTheDocument();
   });
 });

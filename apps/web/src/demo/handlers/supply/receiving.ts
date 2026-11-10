@@ -169,3 +169,49 @@ route("POST", `${BASE}/receipts/{id}:cancel`, ({ params }) => {
   const next = receipts.update(r.id, { state: "CANCELLED", version: r.version + 1 });
   return next ? reply.versioned(next, next.version) : reply.problem(404, "RCV-0404", "Receipt not found");
 });
+
+// The document flow query: every receipt of the purchase order that the asked-about document belongs to.
+// The demo has no vendor invoices in receiving, so the invoice list is empty.
+route("GET", `${BASE}/related-documents`, ({ query }) => {
+  const receiptId = query.get("receiptId");
+  const poId = query.get("purchaseOrderId") ?? receipts.get(receiptId ?? "")?.purchaseOrderId;
+  if (!poId) return reply.problem(400, "COM-0001", "give exactly one of purchaseOrderId, receiptId or invoiceId");
+  const list = receipts
+    .all()
+    .filter((r) => r.purchaseOrderId === poId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((r) => ({ id: r.id, receiptNumber: r.receiptNumber, state: r.state, receiptDate: r.receiptDate }));
+  return { purchaseOrderId: poId, receipts: list, invoices: [], truncated: false };
+});
+
+// Goods received, not invoiced: every posted receipt line waits for its vendor invoice, since the demo has none yet.
+route("GET", `${BASE}/grir`, ({ query }) => {
+  const status = query.get("status");
+  const items = receipts
+    .all()
+    .filter((r) => r.state === "POSTED")
+    .flatMap((r) =>
+      r.lines.map((l) => ({
+        id: `${r.id}-${l.lineNo}`,
+        receiptId: r.id,
+        receiptNumber: r.receiptNumber,
+        lineNo: l.lineNo,
+        vendorId: r.vendorId,
+        poLineId: l.poLineId,
+        unitPrice: l.unitPrice,
+        receivedQty: l.qty,
+        invoicedQty: "0",
+        receivedAmount: l.amount ?? "0.00",
+        clearedAmount: "0.00",
+        openAmount: l.amount ?? "0.00",
+        currency: r.currency,
+        status: "OPEN" as const,
+        ageDays: Math.max(0, Math.round((Date.parse(day(0)) - Date.parse(r.postingDate ?? r.receiptDate)) / 86_400_000)),
+        createdAt: r.createdAt,
+      })),
+    )
+    .filter((g) => !status || g.status === status)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const open = items.reduce((sum, g) => sum + Number(g.openAmount), 0);
+  return { items, totals: { count: items.length, openAmount: [{ amount: dec(open), currency: "USD" }] } };
+});

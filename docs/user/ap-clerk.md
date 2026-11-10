@@ -60,7 +60,14 @@ Payment is a two-person job: one person proposes, a different person approves.
 
 You cannot approve a proposal you created. Ask another approver.
 
-Not available yet: starting the payment run that sends the money after approval. See below.
+### Run the payment
+
+A different person from the one who created the proposal does this.
+
+1. Open the approved proposal and select **Start payment run**.
+2. Work down the steps in order, selecting the button for the next one: **Generate the bank file**, **Post to the ledger**, **Settle the invoices**, then **Complete the run**.
+3. Select **Download bank file** once it is generated, and send it to your bank.
+4. If the bank refuses the file, select **Mark run as failed** and give the reason. Create a new proposal to pay those invoices.
 
 ## What the statuses mean
 
@@ -119,7 +126,7 @@ Open items on the goods-received list:
 
 ## Not available yet
 
-- **Starting the payment run.** After a proposal is approved, the app has no button that sends the payments. A proposal's status shows Running or Paid when that happens elsewhere.
+- **Blocking a vendor and remittance advice.** Neither has a screen yet.
 - **Pick-lists on receiving and invoice forms.** Vendor, purchase order, legal entity, ledger and location are the code or number you type in.
 
 ## Glossary

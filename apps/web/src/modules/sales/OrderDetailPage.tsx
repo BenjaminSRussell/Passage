@@ -24,6 +24,7 @@ import { OrderHistory } from "./OrderHistory";
 import { CancelRemainderCard, OrderProgressCard } from "./OrderProgressPages";
 import { OrderSchedule } from "./OrderSchedule";
 import styles from "./pages.module.css";
+import { OrderFlowPanel } from "./documentFlow";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
@@ -282,6 +283,7 @@ export function OrderDetailPage() {
         </Alert>
       ) : null}
       {confirmable && blocked ? <p className={styles.note}>An active credit or fraud hold blocks confirmation until it is released.</p> : null}
+      <OrderFlowPanel anchor={{ kind: "order", id: order.id }} refreshKey={`${order.status}:${order.version}`} />
       <Card>
         <dl className={styles.details}>
           {facts.map(([term, value]) => (
