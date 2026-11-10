@@ -16,6 +16,7 @@ import { COMMISSION_BASIS_LABELS, groupLabel, ruleLevel } from "./commissionForm
 import { DECIMAL } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RuleDraft {
   customerGroup: string;
@@ -99,7 +100,7 @@ export function SalesGroupDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Sales group" />
         <Alert tone="danger" title="Could not load the sales group" live="alert" action={<Button size="sm" onClick={group.reload}>Try again</Button>}>
-          {group.error.message} ({group.error.code})
+          <ProblemMessage problem={group.error} />
         </Alert>
       </div>
     );
@@ -140,7 +141,7 @@ export function SalesGroupDetailPage() {
         <div className={styles.stack}>
           {rules.error ? (
             <Alert tone="danger" title="Could not load the rules" live="alert" action={<Button size="sm" onClick={rules.reload}>Try again</Button>}>
-              {rules.error.message} ({rules.error.code})
+              <ProblemMessage problem={rules.error} />
             </Alert>
           ) : (
             <DataTable
@@ -182,7 +183,7 @@ export function SalesGroupDetailPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not add the rule" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -13,6 +13,7 @@ import { DispositionBadge } from "./BatchRecordPages";
 import { dash, QUANTITY, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const EXCLUSION_LABELS: Record<string, string> = {
   "PMF-0003": "Expired",
@@ -143,7 +144,7 @@ export function StoredPickingPage({ propose = defaultPropose, list = defaultList
           <Card title="Batches of the item">
             {batches.error ? (
               <Alert tone="danger" title="Could not load batches" live="alert" action={<Button size="sm" onClick={batches.reload}>Try again</Button>}>
-                {batches.error.message} ({batches.error.code})
+                <ProblemMessage problem={batches.error} />
               </Alert>
             ) : (
               <DataTable

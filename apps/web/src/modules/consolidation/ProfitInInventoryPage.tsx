@@ -6,6 +6,7 @@ import { amount, isCurrency, isDecimal } from "./format";
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type HeadKey = "currency" | "sellerMarginPct";
 type LayerKey = "id" | "quantity" | "legalUnitCost" | "groupUnitCost";
@@ -105,7 +106,7 @@ export function ProfitInInventoryPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The unrealized profit was not computed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -137,7 +138,7 @@ export function ProfitInInventoryPage() {
             icon="box"
             headingLevel={3}
             title="No unrealized profit yet"
-            description="The form holds acceptance example AC-40.12. Compute it, or enter the layers your entity still holds."
+            description="The form is filled in with an example. Compute it, or enter the layers your entity still holds."
           />
         </Card>
       )}

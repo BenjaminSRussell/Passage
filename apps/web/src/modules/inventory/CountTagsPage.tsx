@@ -20,6 +20,7 @@ import { dash, DECIMAL, describeDimensions, sentence, shortId, UUID } from "./fo
 import { ALL_DIMENSIONS, emptyDimensions, FORM_DIMENSIONS, ProblemAlert, RowAction, type FormDimension } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const tagTones: Record<TagStatus, BadgeTone> = { OPEN: "info", USED: "success", VOID: "neutral", MISSING: "warning" };
 
@@ -91,7 +92,7 @@ function TagCountForm({ tag, plan, onSaved, onCancel }: { tag: CountTag; plan: C
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="The count was not saved" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -157,7 +158,7 @@ function GenerateTagsForm({ planId, onGenerated }: { planId: string; onGenerated
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="No tags were generated" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -209,7 +210,7 @@ function TransferCard({ planId, tags }: { planId: string; tags: CountTag[] }) {
         ) : null}
         {failure ? (
           <Alert tone="danger" title={failure.code === "INV-TAG-006" ? "Supervisor approval required" : "The tags were not transferred"} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div>
@@ -303,7 +304,7 @@ export function CountTagsPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="The tag was not changed" live="alert" action={failure.code === "conflict_version" ? <Button size="sm" onClick={reload}>Reload tags</Button> : undefined}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {counting && plan ? (

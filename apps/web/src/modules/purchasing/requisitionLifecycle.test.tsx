@@ -85,7 +85,7 @@ describe("editing a draft requisition", () => {
     stubFetch((_url, init) => (init.method === "PATCH" ? problem(409, "PRC-REQ-STATE", "requisition is IN_REVIEW; only a DRAFT can be edited") : json(requisition())));
     renderAt(`/purchasing/requisitions/${REQ_ID}/edit`);
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText(/only a DRAFT can be edited \(PRC-REQ-STATE\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/only a DRAFT can be edited/)).toBeInTheDocument();
   });
 
   it("does not offer the form for a requisition that is not a draft, and shows the load error", async () => {
@@ -144,7 +144,7 @@ describe("withdrawing a requisition from review", () => {
     renderAt(`/purchasing/requisitions/${REQ_ID}`);
     const buttons = await screen.findAllByRole("button", { name: "Withdraw" });
     fireEvent.click(buttons[buttons.length - 1]);
-    expect(await screen.findByText(/level 1 has already approved \(PRC-REQ-STATE\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/level 1 has already approved/)).toBeInTheDocument();
   });
 });
 
@@ -206,7 +206,7 @@ describe("cancelling one line of an approved requisition", () => {
     const lines = await findTable({ name: "Requisition lines" });
     fireEvent.click(within(lines).getByRole("button", { name: "Cancel line 1" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancel line 1" }));
-    expect(await screen.findByText(/being sourced on RFQ-1 \(PRC-REQ-006\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/being sourced on RFQ-1/)).toBeInTheDocument();
   });
 });
 

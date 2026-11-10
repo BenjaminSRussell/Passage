@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { actOnRealignment, fetchRealignment, newKey, type RealignmentRow, type RealignmentRun } from "./api/client";
@@ -30,7 +30,7 @@ function Actions({ run, ledgerId }: { run: RealignmentRun; ledgerId: string }) {
   const [comment, setComment] = useState("");
   const [postingDate, setPostingDate] = useState("");
   const [error, setError] = useState<string | undefined>();
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [keys] = useState(() => ({ post: newKey(), reverse: newKey(), cancel: newKey() }));
   if (run.status === "reversed" || run.status === "cancelled") return null;

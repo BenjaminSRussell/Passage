@@ -34,6 +34,7 @@ import { txnTypeLabel } from "./labels";
 import plan from "./plans.module.css";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One editable forecast line; amounts stay strings (decimal on the service, never float here). */
 export interface ForecastRowValues {
@@ -231,7 +232,7 @@ function FailureAlert({ failure, errors, title }: { failure: Problem; errors: Re
   const list = Object.entries(errors);
   return (
     <Alert tone="danger" title={failure.code === "PROJ-FC-001" ? "That name is taken" : title} live="alert">
-      {failure.message} ({failure.code})
+      <ProblemMessage problem={failure} />
       {list.length > 0 ? (
         <ul className={plan.errorList}>
           {list.map(([k, v]) => (
@@ -304,7 +305,7 @@ export function ForecastsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the forecast models" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -401,7 +402,7 @@ export function ForecastDetailPage() {
         <div className={styles.stack}>
           <PageHeader title="Forecast model" />
           <Alert tone="danger" title="Could not load the forecast model" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         </div>
       );

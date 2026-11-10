@@ -13,6 +13,7 @@ import {
 import { Fields, type FieldSpec } from "./Fields";
 import { isCount, isDecimal } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const pricingLabels: Record<PricingPolicy, string> = {
   PriceList: "Agreed price list",
@@ -217,7 +218,7 @@ export function PartnerFormPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The pairing was not saved" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

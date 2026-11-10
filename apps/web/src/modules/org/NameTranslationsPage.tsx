@@ -14,6 +14,7 @@ import {
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { FilterSelect, useRows } from "./referenceParts";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const languagePattern = /^[a-z]{2}(-[A-Z]{2})?$/;
 const maxNameLength = 120;
@@ -23,7 +24,8 @@ const messages: Record<string, string> = {
   "ORG-TRANSLATION-NOT-FOUND": "That translation no longer exists.",
 };
 
-const formatProblem = (problem: Problem) => `${messages[problem.code] ?? problem.message} (${problem.code})`;
+/** Plain wording for a problem; `ProblemMessage` keeps its code under Details. */
+const formatProblem = (problem: Problem) => messages[problem.code] ?? problemSummary(problem);
 
 export function validateTranslation(language: string, name: string): { language?: string; name?: string } {
   const errors: { language?: string; name?: string } = {};
@@ -96,9 +98,9 @@ function RemoveTranslation({ row, collection, scope, onRemoved }: { row: NameTra
         </Button>
       )}
       {failure ? (
-        <span role="alert" className={styles.rowError}>
-          {formatProblem(failure)}
-        </span>
+        <div role="alert" className={styles.rowError}>
+          <ProblemMessage problem={failure} message={formatProblem(failure)} />
+        </div>
       ) : null}
     </div>
   );
@@ -154,7 +156,7 @@ function PreviewPanel({ collection, ownerId, scope }: Omit<EditorProps, "canWrit
       </div>
       {failure ? (
         <Alert tone="danger" title="Could not resolve the name" live="alert">
-          {formatProblem(failure)}
+          <ProblemMessage problem={failure} message={formatProblem(failure)} />
         </Alert>
       ) : null}
     </Card>
@@ -237,7 +239,7 @@ function TranslationEditor({ collection, ownerId, scope, canWrite }: EditorProps
             </FormField>
             {failure ? (
               <Alert tone="danger" title="Could not save the translation" live="alert">
-                {formatProblem(failure)}
+                <ProblemMessage problem={failure} message={formatProblem(failure)} />
               </Alert>
             ) : null}
             <div>
@@ -250,7 +252,7 @@ function TranslationEditor({ collection, ownerId, scope, canWrite }: EditorProps
       ) : null}
       {rows.error ? (
         <Alert tone="danger" title="Could not load translations" live="alert">
-          {formatProblem(rows.error)}
+          <ProblemMessage problem={rows.error} message={formatProblem(rows.error)} />
         </Alert>
       ) : null}
       <DataTable
@@ -300,7 +302,7 @@ export function NameTranslationsPage() {
       </div>
       {owners.error ? (
         <Alert tone="danger" title="Could not load records" live="alert">
-          {formatProblem(owners.error)}
+          <ProblemMessage problem={owners.error} message={formatProblem(owners.error)} />
         </Alert>
       ) : null}
       {dutyHeld && scope === ALL ? (

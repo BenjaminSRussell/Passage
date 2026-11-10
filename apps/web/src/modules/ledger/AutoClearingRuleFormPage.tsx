@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Skeleton, Textarea } from "../../shell/ui";
 import {
@@ -62,7 +62,7 @@ function RuleForm({ ledgerId, id, initial, existing }: { ledgerId: string; id: s
   const queryClient = useQueryClient();
   const [values, setValues] = useState(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState(false);
   const groups = useQuery({ queryKey: ["ledger", "tolerance-groups", ledgerId], queryFn: () => fetchToleranceGroups(ledgerId) });
   const update = (patch: Partial<AutoRuleDraft>) => setValues((prev) => ({ ...prev, ...patch }));

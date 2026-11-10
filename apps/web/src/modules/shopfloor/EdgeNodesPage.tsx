@@ -7,6 +7,7 @@ import { DUTY_EDGE_CONFIGURE, listEdgeNodes, type EdgeNode, type EdgeRing, type 
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const EDGE_STATUS: Record<EdgeStatusValue, { label: string; tone: BadgeTone }> = {
   pending: { label: "Waiting for first heartbeat", tone: "neutral" },
@@ -85,7 +86,7 @@ export function EdgeNodesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load edge nodes" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

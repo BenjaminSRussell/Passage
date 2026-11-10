@@ -4,6 +4,7 @@ import { exportPackage, importPackage, PackageError, type ImportReport } from ".
 import { describeProblem } from "./api/client";
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Failure {
   title: string;
@@ -154,7 +155,7 @@ export function ModelPackagePage() {
       )}
       {failure ? (
         <Alert tone="danger" title={failure.title} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
           {Object.keys(failure.fields).length > 0 ? (
             <ul className={styles.problemList}>
               {Object.entries(failure.fields).map(([path, message]) => (

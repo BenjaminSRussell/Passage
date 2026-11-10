@@ -17,6 +17,7 @@ import { listMetrics, type Metric } from "./api/client";
 import { dimensionLabel, grainLabel, reconciledAgainst } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Metric>[] = [
   { key: "metricId", header: "Metric", mono: true },
@@ -45,7 +46,7 @@ export function MetricsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the metric catalog" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -99,7 +100,7 @@ export function MetricDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Metric" />
         <Alert tone="danger" title="Could not load the metric" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

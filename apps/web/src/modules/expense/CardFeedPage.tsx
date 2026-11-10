@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { describeProblem, parseCardFeed, type CardFeedResult, type CardTransaction, type FeedFormat, type Problem, type RejectedRow } from "./api/client";
 import { splitProblem } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -94,7 +95,7 @@ export function CardFeedPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not read the statement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

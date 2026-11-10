@@ -46,6 +46,7 @@ import { AddressAction } from "./AddressAction";
 import { EditAction } from "./RowEdit";
 import { FilterSelect, StatusAction, useRows } from "./referenceParts";
 import { parentCell, useUnitParents } from "./unitParents";
+import { ProblemMessage } from "../../shell/errors";
 
 const dash = "—";
 const ouCode = /^[A-Za-z0-9][A-Za-z0-9_-]{1,19}$/;
@@ -205,7 +206,7 @@ function CreateForm<V, K extends string>({ title, subject, initial, validate, se
         {fields({ values, errors, text, set: setValues })}
         {failure ? (
           <Alert tone="danger" title={`Could not add the ${subject}`} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div>
@@ -439,12 +440,12 @@ function ParentPicker({
       />
       {typesError ? (
         <Alert tone="danger" title="Could not load hierarchy types" live="alert">
-          {typesError.message} ({typesError.code})
+          <ProblemMessage problem={typesError} />
         </Alert>
       ) : null}
       {parents.status === "error" ? (
         <Alert tone="danger" title="Could not load the hierarchy" live="alert">
-          {parents.error.message} ({parents.error.code})
+          <ProblemMessage problem={parents.error} />
         </Alert>
       ) : null}
       {parents.status === "ready" && parents.versionNo === null ? (
@@ -719,7 +720,7 @@ export function WarehousesPage() {
           <>
             {sites.error ? (
               <Alert tone="danger" title="Could not load the sites" live="alert">
-                {sites.error.message} ({sites.error.code})
+                <ProblemMessage problem={sites.error} />
               </Alert>
             ) : null}
             <CreateForm<WarehouseValues, "siteId" | "code" | "name">
@@ -846,7 +847,7 @@ export function LocationsPage() {
           <>
             {warehouses.error ? (
               <Alert tone="danger" title="Could not load the warehouses" live="alert">
-                {warehouses.error.message} ({warehouses.error.code})
+                <ProblemMessage problem={warehouses.error} />
               </Alert>
             ) : null}
             <CreateForm<LocationValues, "warehouseId" | "code" | "name">

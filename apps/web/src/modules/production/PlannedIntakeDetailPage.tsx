@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, FormField, PageHeader, Skeleton, Textarea }
 import { describeProblem, dismissPlannedIntake, getPlannedIntake, type PlannedIntake, type Problem } from "./api/client";
 import { dash, intakeStatusLabel, intakeStatusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PlannedIntakeDetailPageProps {
   intakeId: string;
@@ -123,7 +124,7 @@ export function PlannedIntakeDetailPage({ intakeId, onBack, onConvert, onOpenOrd
       </Alert>
       {failure ? (
         <Alert tone="danger" live="alert" title="The planned order was not saved">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Planned order">

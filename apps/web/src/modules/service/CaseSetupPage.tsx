@@ -22,6 +22,7 @@ import {
 import { dash, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad, type LoadState } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Category and process codes, as the service checks them (domain.ValidCode). */
 export const CODE = /^[A-Z0-9_-]{2,40}$/;
@@ -51,7 +52,7 @@ const processColumns: DataTableColumn<CaseProcess>[] = [
 function LoadFailed({ what, state }: { what: string; state: LoadState<unknown> }) {
   return state.error ? (
     <Alert tone="danger" title={`Could not load ${what}`} live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-      {state.error.message} ({state.error.code})
+      <ProblemMessage problem={state.error} />
     </Alert>
   ) : null;
 }
@@ -210,7 +211,7 @@ export function NewCaseProcessPage() {
           {action.failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the process" live="alert">
-                {action.failure.message} ({action.failure.code})
+                <ProblemMessage problem={action.failure} />
               </Alert>
             </div>
           ) : null}
@@ -397,7 +398,7 @@ export function NewCaseCategoryPage() {
           {action.failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the category" live="alert">
-                {action.failure.message} ({action.failure.code})
+                <ProblemMessage problem={action.failure} />
               </Alert>
             </div>
           ) : null}

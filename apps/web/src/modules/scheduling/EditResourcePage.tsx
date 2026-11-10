@@ -5,6 +5,7 @@ import { describeProblem, getResource, newKey, updateResource, type AffectedJob,
 import { clock, formatDateTime, parseClock, shortId, WEEK_ORDER, WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ShiftRow {
   weekday: number;
@@ -200,7 +201,7 @@ function Form({ initial, onReload }: { initial: Resource; onReload: () => void }
               </Alert>
             ) : (
               <Alert tone="danger" title="Could not save the resource" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             )}
           </div>
@@ -254,7 +255,7 @@ export function EditResourcePage() {
       <PageHeader title="Edit resource" description="Shifts replace the whole weekly calendar. Booked jobs the new calendar no longer covers are listed after saving." />
       {state.error ? (
         <Alert tone="danger" title="Could not load the resource" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.data ? (
         <div aria-busy="true">

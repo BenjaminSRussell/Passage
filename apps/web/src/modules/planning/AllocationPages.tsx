@@ -15,6 +15,7 @@ import {
 } from "./api/client";
 import { describeError, PLAN_CODE, useLoad, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIST = "/planning/allocation-keys";
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -129,7 +130,7 @@ export function AllocationKeysPage() {
         }
       />
       <Alert tone="danger" title={state.error ? "Could not load allocation keys" : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       {state.error ? null : (
         <DataTable
@@ -213,7 +214,7 @@ function AllocationKeyForm({ allocationKey, onSaved, onReload }: FormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
       </div>
       {creating ? (
@@ -372,7 +373,7 @@ function AllocateCard({ allocationKey, onDone }: { allocationKey: AllocationKey;
       </p>
       <div className={styles.stack}>
         <Alert tone="danger" title={title} live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Allocate a forecast">
           <FormField id="al-model" label="Forecast model" hint="Created when it does not exist yet." error={errors.modelCode}>
@@ -427,7 +428,7 @@ export function AllocationKeyPage() {
         }
       />
       <Alert tone="danger" title={state.error ? `Could not load allocation key ${code}` : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {saved ? `Saved. Version ${saved.version}.` : allocated}

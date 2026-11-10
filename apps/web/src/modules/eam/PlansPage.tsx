@@ -24,6 +24,7 @@ import { CODE, CURRENCY, dash, dayOf, kindLabel, PLAN_CODE, sentence } from "./f
 import { Failure, PagedTable } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad, usePaged } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function interval(line: PlanLine): string {
   const parts: string[] = [];
@@ -413,7 +414,7 @@ export function NewPlanPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not create the plan" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

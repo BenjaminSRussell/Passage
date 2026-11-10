@@ -5,6 +5,7 @@ import { codeDowntime, describeProblem, listDowntimeReasons, listDowntimes, newK
 import { dash, durationMinutes, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const REASON = /^\S.{0,31}$/;
 
@@ -87,7 +88,7 @@ export function DowntimesPage() {
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load downtimes" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -155,7 +156,7 @@ function CodeReasonForm({ downtime, onDone, onCancel }: CodeReasonFormProps) {
           <Skeleton />
         ) : reasons.error ? (
           <Alert tone="danger" title="Could not load the downtime reasons" live="alert" action={<Button size="sm" onClick={reasons.reload}>Try again</Button>}>
-            {reasons.error.message} ({reasons.error.code})
+            <ProblemMessage problem={reasons.error} />
           </Alert>
         ) : useMaster ? (
           <FormField id="downtime-reason" label="Reason code" hint="The downtime takes the category of the reason." error={error ?? undefined}>
@@ -214,7 +215,7 @@ function CodeReasonForm({ downtime, onDone, onCancel }: CodeReasonFormProps) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the reason" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

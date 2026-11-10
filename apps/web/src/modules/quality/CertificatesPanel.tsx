@@ -17,6 +17,7 @@ import {
 import { CERT_LABELS, CERT_STATUS_LABELS, dash, formatDateTime, shortId, SIGNED_DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const OTHER = "__other__";
 const CERT_TYPES: CertType[] = ["COA", "COC", "EN10204_31"];
@@ -114,7 +115,7 @@ export function CertificatesPanel({ order, onChanged }: { order: OrderView; onCh
         ) : null}
         {state.error ? (
           <Alert tone="danger" title="Could not load the certificates" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable
@@ -254,7 +255,7 @@ function RecordCertificateForm({ order, onRecorded }: { order: OrderView; onReco
         <div className={styles.formActions}>
           {failure ? (
             <Alert tone="danger" title="Could not record the certificate" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           {notice ? (
@@ -321,7 +322,7 @@ function WaiverForm({ order, onWaived }: { order: OrderView; onWaived(): void })
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not waive the certificate" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}

@@ -28,6 +28,7 @@ import { DUTY_RUN } from "./RunPages";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 const FILTERS = { all: "All schedules", failing: "Failing", paused: "Paused" } as const;
 type FilterKey = keyof typeof FILTERS;
@@ -115,7 +116,7 @@ export function SyncPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the sync status" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -159,7 +160,7 @@ export function SyncDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Delta sync" />
         <Alert tone="danger" title="Could not load this binding's sync" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/sync">
           Back to delta sync
@@ -213,7 +214,7 @@ export function SyncDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the sync" live="alert" action={<Button size="sm" onClick={state.reload}>Reload</Button>}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {sync.consecutiveFailures > 0 ? (
@@ -408,7 +409,7 @@ function DeletedRowsCard({ sync, canEdit, busy, onChange }: { sync: SyncStatus; 
         </FormField>
         {state.error ? (
           <Alert tone="danger" title="Could not load the missing keys" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable
@@ -444,7 +445,7 @@ function RecentRunsCard({ sync }: { sync: SyncStatus }) {
     <Card title="Recent runs">
       {state.error ? (
         <Alert tone="danger" title="Could not load the recent runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -471,7 +472,7 @@ function LastRunRejectsCard({ runId }: { runId: string }) {
     <Card title="Rejects of the last run">
       {state.error ? (
         <Alert tone="danger" title="Could not load the last run" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <div className={styles.stack}>
@@ -561,12 +562,12 @@ function ConflictsCard({ sync, canResolve, onResolved }: { sync: SyncStatus; can
       <div className={styles.stack}>
         {failure ? (
           <Alert tone="danger" title="Could not resolve the conflict" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {state.error ? (
           <Alert tone="danger" title="Could not load the conflicts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable

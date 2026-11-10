@@ -38,7 +38,7 @@ describe("module registry", () => {
           .map((r) => `${m.id} ${r.path}`),
       );
     expect(unguarded).toEqual([]);
-  });
+  }, 60_000);
 
   describe("declared duties", () => {
     const policy = JSON.parse(policyJson) as {

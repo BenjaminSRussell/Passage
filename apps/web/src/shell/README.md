@@ -4,6 +4,8 @@ Keyboard-first host at `apps/web/src/shell`. Workspaces come from `modules/*/mod
 
 Design system, tokens, primitives and accessibility rules: see `apps/web/docs/design-system.md`.
 
+User-facing text follows `apps/web/docs/ux-writing.md`. Server failures render through `ProblemMessage` (`src/shell/errors`), which maps problem codes to plain messages from `src/shell/errors/catalog.ts` and keeps the code and request id under "Details".
+
 ## Needs
 
 - `@module-federation/vite` and the OTel web SDK are still pending. Federation remotes are declared in `vite.config.ts` as `federationRemotes`.

@@ -131,7 +131,7 @@ describe("production parameters (PRD 4.21.13)", () => {
     await userEvent.clear(within(form).getByLabelText(/RAF tolerance/));
     await userEvent.type(within(form).getByLabelText(/RAF tolerance/), "5");
     await userEvent.click(within(form).getByRole("button", { name: "Save parameters" }));
-    expect(await screen.findByText("the parameters were changed by another user (conflict_version)")).toBeInTheDocument();
+    expect(await screen.findByText("the parameters were changed by another user")).toBeInTheDocument();
     await waitFor(() => expect(calls(fetchMock).filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
   });
 

@@ -21,6 +21,7 @@ import { LinesPanel } from "./LinesPanel";
 import { RunTreeCard } from "./TreeRevisions";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Statement {
   run: RunSummary;
@@ -63,7 +64,7 @@ export function RunPage() {
       <div className={styles.stack}>
         <PageHeader title="Statement run" />
         <Alert tone="danger" title="This statement could not be loaded" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -210,7 +211,7 @@ export function DrillPanel({ runId, row, column, title }: { runId: string; row: 
   if (drill.error) {
     body = (
       <Alert tone="danger" title="Balances are unavailable" live="alert" action={<Button size="sm" onClick={drill.reload}>Try again</Button>}>
-        {drill.error.message} ({drill.error.code})
+        <ProblemMessage problem={drill.error} />
       </Alert>
     );
   } else if (!drill.data || drill.loading) {

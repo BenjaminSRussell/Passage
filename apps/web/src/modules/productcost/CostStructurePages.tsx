@@ -17,6 +17,7 @@ import {
 import { ProblemAlert } from "./shared";
 import { structureCode, useIdempotencyKey, useLoad } from "./stored";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** FR-39.1 limits per tenant. */
 export const MAX_COMPONENTS = 20;
@@ -122,7 +123,7 @@ function CodeAndName({
 function LoadFailure({ what, problem }: { what: string; problem: Problem }) {
   return (
     <Alert tone="danger" title={`Could not load ${what}`} live="alert">
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }

@@ -36,6 +36,7 @@ import { dayStart, formatDateTime, formatMinutes, shortId, today } from "./forma
 import { decimalText, positive } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * Turns a proposal and the quantities typed for its orders into the campaign
@@ -172,7 +173,7 @@ function ProposalCard({ proposal, code }: { proposal: ProposedCampaign; code: st
         ) : null}
         {failure ? (
           <Alert tone="danger" title="Could not create the campaign" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
       </form>
@@ -205,7 +206,7 @@ export function CampaignProposalsPage() {
   if (state.error) {
     body = (
       <Alert tone="danger" title="Could not load campaign proposals" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   } else if (state.loading && !state.data) {

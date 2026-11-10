@@ -155,7 +155,7 @@ describe("catalog list", () => {
     renderAt("/integration/catalog");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load the catalog");
-    expect(alert).toHaveTextContent("unexpected error (HUB-0500)");
+    expect(alert).toHaveTextContent("unexpected error");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Sales API")).toBeInTheDocument();
@@ -223,7 +223,7 @@ describe("publish a contract", () => {
 
     handler = () => json(400, { code: "HUB-0400", detail: "spec.paths must list at least one path" });
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
-    expect(await findAlert()).toHaveTextContent("spec.paths must list at least one path (HUB-0400)");
+    expect(await findAlert()).toHaveTextContent("spec.paths must list at least one path");
   });
 
   it("tells a user without the write duty why they cannot publish", () => {
@@ -336,7 +336,7 @@ describe("catalog entry detail", () => {
     handler = (url) => (fail ? json(404, { code: "HUB-0404", detail: "no such catalog entry" }) : url.pathname.endsWith(ENTRY_UUID) ? json(200, detail) : undefined);
     renderAt(`/integration/catalog/${ENTRY_UUID}`);
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("no such catalog entry (HUB-0404)");
+    expect(alert).toHaveTextContent("no such catalog entry");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Sales API" })).toBeInTheDocument();

@@ -150,7 +150,7 @@ describe("governed metrics list", () => {
     handler = () => (++attempt === 1 ? { status: 403, body: { code: "AUTH-0003", detail: "missing duty analytics.view" } } : { status: 200, body: catalog });
     renderAt("/analytics");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty analytics.view (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty analytics.view");
     fireEvent.click(within(alert.closest("div") as HTMLElement).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "revenue" })).toBeInTheDocument();
   });
@@ -158,7 +158,7 @@ describe("governed metrics list", () => {
   it("refuses a response that breaks the contract instead of rendering it", async () => {
     handler = () => ({ status: 200, body: { items: [{ metricId: 1 }] } });
     renderAt("/analytics");
-    expect(await findAlert()).toHaveTextContent("(CONTRACT)");
+    expect(await findAlert()).toHaveTextContent("CONTRACT");
   });
 });
 
@@ -185,7 +185,7 @@ describe("metric detail", () => {
   it("shows an error when the catalog cannot load", async () => {
     handler = () => ({ status: 503, body: {} });
     renderAt("/analytics/metrics/revenue");
-    expect(await findAlert()).toHaveTextContent("(HTTP-503)");
+    expect(await findAlert()).toHaveTextContent("HTTP-503");
   });
 });
 
@@ -272,7 +272,7 @@ describe("explorer", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Revenue" }));
     fireEvent.click(screen.getByRole("button", { name: "Build plan" }));
     expect(await screen.findByText("not mapped")).toBeInTheDocument();
-    expect(screen.getByText(/no security mapping \(ANA-0103\)/)).toBeInTheDocument();
+    expect(screen.getByText(/no security mapping/)).toBeInTheDocument();
   });
 
   it("shows the empty state when no metric is published", async () => {
@@ -328,7 +328,7 @@ describe("metric reconciliation", () => {
   it("shows the problem when the caller lacks analytics.finance.view", async () => {
     handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty analytics.finance.view" } });
     renderAt("/analytics/reconciliation");
-    expect(await findAlert()).toHaveTextContent("missing duty analytics.finance.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.finance.view");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });

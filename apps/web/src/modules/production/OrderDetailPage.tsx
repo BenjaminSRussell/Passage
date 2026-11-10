@@ -71,6 +71,7 @@ import {
   varianceLabel,
 } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 
@@ -344,7 +345,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
           />
         ) : (
           <Alert tone="danger" title="Could not load the production order" live="alert">
-            {order.error?.message} ({order.error?.code})
+            <ProblemMessage problem={order.error} />
           </Alert>
         )}
       </Card>
@@ -411,7 +412,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
         {notice}
       </Alert>
       <Alert tone="danger" live="alert" title={commandError ? "The command was refused" : undefined}>
-        {commandError ? `${commandError.message} (${commandError.code})` : null}
+        {commandError ? <ProblemMessage problem={commandError} /> : null}
       </Alert>
 
       <Card title="Status actions">
@@ -654,7 +655,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       <Card title="Rework orders" padded={false}>
         {reworks.error ? (
           <Alert tone="danger" title="Could not load the rework orders">
-            {reworks.error.message} ({reworks.error.code})
+            <ProblemMessage problem={reworks.error} />
           </Alert>
         ) : (
           <DataTable
@@ -672,7 +673,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       <Card title="Costs">
         {costs.error ? (
           <Alert tone={costs.error.status === 403 ? "info" : "danger"} title="Costs are not available">
-            {costs.error.status === 403 ? "You need the View production costs duty to see costs." : `${costs.error.message} (${costs.error.code})`}
+            {costs.error.status === 403 ? "You need the View production costs duty to see costs." : <ProblemMessage problem={costs.error} />}
           </Alert>
         ) : costs.loading ? (
           <Skeleton height="tile" />
@@ -738,7 +739,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
       <Card title="Status log" padded={false}>
         {log.error ? (
           <Alert tone="danger" title="Could not load the status log">
-            {log.error.message} ({log.error.code})
+            <ProblemMessage problem={log.error} />
           </Alert>
         ) : (
           <DataTable

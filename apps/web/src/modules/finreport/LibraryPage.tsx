@@ -5,6 +5,7 @@ import { describeProblem, listLibrary, OUTPUT_FORMATS, type LibraryEntry, type L
 import { formatBytes, periodLabel, shortHash, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface LibraryValues {
   definition: string;
@@ -138,7 +139,7 @@ export function LibraryPage() {
       </form>
       {first.error ? (
         <Alert tone="danger" title="Could not load the report library" live="alert" action={<Button size="sm" onClick={first.reload}>Try again</Button>}>
-          {first.error.message} ({first.error.code})
+          <ProblemMessage problem={first.error} />
         </Alert>
       ) : (
         <DataTable
@@ -161,7 +162,7 @@ export function LibraryPage() {
       ) : null}
       {moreError ? (
         <Alert tone="danger" live="alert" title="Could not load more files">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
     </div>

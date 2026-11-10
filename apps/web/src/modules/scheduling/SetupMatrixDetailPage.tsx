@@ -4,6 +4,7 @@ import { getSetupMatrix, listResources, type SetupEntry, type SetupMatrix } from
 import { dash, formatDateTime, formatMinutes, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Detail {
   matrix: SetupMatrix;
@@ -23,7 +24,7 @@ export function SetupMatrixDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Setup matrix" />
         <Alert tone="danger" title="Could not load the setup matrix" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

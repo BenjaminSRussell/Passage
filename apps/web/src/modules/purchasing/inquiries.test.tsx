@@ -284,7 +284,7 @@ describe("purchasing inquiries", () => {
   it("explains a load error and pages with the cursor", async () => {
     stubFetch(() => problem(503, "COM-0503", "unavailable"));
     renderAt("/purchasing/inquiries");
-    expect(await screen.findByText(/unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/unavailable/)).toBeInTheDocument();
     vi.unstubAllGlobals();
     const fetchMock = stubFetch((url) =>
       url.includes("cursor=") ? json({ items: [{ ...vendorRow, currency: "EUR" }] }) : json({ items: [vendorRow], nextCursor: `${VENDOR}|USD` }),

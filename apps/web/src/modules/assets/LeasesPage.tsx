@@ -6,6 +6,7 @@ import { StatusBadge } from "./badges";
 import { DATE, DECIMAL, money, percent, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const frequency: Record<number, string> = { 1: "Annual", 2: "Semi-annual", 4: "Quarterly", 12: "Monthly" };
 
@@ -63,7 +64,7 @@ export function LeasesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load leases" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -78,7 +79,7 @@ export function LeasesPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more leases" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (
@@ -305,7 +306,7 @@ export function NewLeasePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0007" ? "That lease number is taken" : "Could not recognize the lease"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

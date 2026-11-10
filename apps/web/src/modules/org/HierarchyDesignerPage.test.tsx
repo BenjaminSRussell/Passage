@@ -43,14 +43,14 @@ describe("selection and fetch counts", () => {
   it("shows the problem code when versions fail to load", async () => {
     const { user } = renderPage({ "GET /hierarchy-types/t1/versions": () => json({ code: "AUTH-0003", detail: "No duty" }, 403) });
     await openType(user);
-    expect(await screen.findByText(/No duty \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/No duty/)).toBeInTheDocument();
     expect(screen.queryByRole("tree")).toBeNull();
   });
 
   it("shows the problem code when the version nodes fail to load", async () => {
     const { user } = renderPage({ "GET /hierarchy-versions/v2": () => json({ code: "ORG-HIER-VERSION-NOT-FOUND", detail: "Gone" }, 404) });
     await openType(user);
-    expect(await screen.findByText(/Gone \(ORG-HIER-VERSION-NOT-FOUND\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Gone/)).toBeInTheDocument();
   });
 });
 

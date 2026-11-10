@@ -5,6 +5,7 @@ import { describeProblem, etagOf, getScheduleRelease, resolveScheduleRelease, ty
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const bucketColumns: DataTableColumn<ReleaseBucket>[] = [
   { key: "date", header: "Date", mono: true },
@@ -37,7 +38,7 @@ export function ScheduleReleaseDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Scheduling release" actions={back} />
         <Alert tone="danger" title="Could not load the release" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -126,7 +127,7 @@ export function ScheduleReleaseDetailPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not resolve the release" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

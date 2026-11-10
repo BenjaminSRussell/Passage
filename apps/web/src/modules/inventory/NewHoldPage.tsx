@@ -5,6 +5,7 @@ import { BLOCK_REASONS, describeProblem, placeHold, type Hold, type HoldResult, 
 import { DECIMAL, describeDimensions, sentence, UUID } from "./format";
 import { ALL_DIMENSIONS, emptyDimensions, fieldErrorsOf, FORM_DIMENSIONS, type FormDimension } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface HoldValues {
   legalEntityId: string;
@@ -175,7 +176,7 @@ export function NewHoldPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not place the hold" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

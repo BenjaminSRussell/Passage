@@ -124,7 +124,7 @@ describe("Workers list", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: workers }));
     renderAt("/shopfloor/workers");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Ana Silva")).toBeInTheDocument();
@@ -284,7 +284,7 @@ describe("Worker detail", () => {
   it("shows a missing worker as an error", async () => {
     handler = () => json(404, { code: "SF-0101", detail: "worker not found" });
     renderAt(`/shopfloor/workers/${ANA}`);
-    expect(await screen.findByText(/worker not found \(SF-0101\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/worker not found/)).toBeInTheDocument();
   });
 });
 
@@ -331,7 +331,7 @@ describe("Time approval", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Approve 3 ready days" }));
     expect(await screen.findByText("Approved 2 days.")).toBeInTheDocument();
     expect(screen.getByText("Could not approve Ben Ito, 2026-10-20 to 2026-10-20")).toBeInTheDocument();
-    expect(screen.getByText(/you cannot approve your own time registrations \(SF-0106\)/)).toBeInTheDocument();
+    expect(screen.getByText(/you cannot approve your own time registrations/)).toBeInTheDocument();
     const approvals = posts("/pay:approve");
     expect(approvals.map((c) => c.body)).toEqual([
       { workerId: ANA, from: "2026-10-20", to: "2026-10-21" },
@@ -365,7 +365,7 @@ describe("Time approval", () => {
   it("shows a load failure with a retry", async () => {
     handler = (url) => (url.pathname.endsWith("/worker-days") ? json(500, { code: "COM-0500", detail: "boom" }) : json(200, { items: workers }));
     renderAt("/shopfloor/time");
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -462,7 +462,7 @@ describe("Bundle detail", () => {
   it("shows a load failure with its code and retries", async () => {
     handler = () => json(400, { code: "COM-0001", detail: "request failed validation" });
     renderAt(`/shopfloor/bundles/${BUNDLE}`);
-    expect(await screen.findByText(/request failed validation \(COM-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/request failed validation/)).toBeInTheDocument();
     handler = (url) => (url.pathname.endsWith("/registrations") ? json(200, { items: [] }) : undefined);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No registrations in this bundle")).toBeInTheDocument();

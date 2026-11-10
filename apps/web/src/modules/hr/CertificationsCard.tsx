@@ -4,6 +4,7 @@ import { describeProblem, issueCertification, listCertifications, newKey, SKILL_
 import { dash, DATE, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export type ExpiryMode = "months" | "date" | "never";
 
@@ -125,7 +126,7 @@ function IssueForm({ workerId, onDone, onCancel }: { workerId: string; onDone(c:
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not record the certificate" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}
@@ -175,7 +176,7 @@ export function CertificationsCard({ workerId }: { workerId: string }) {
         ) : null}
         {state.error ? (
           <Alert tone="danger" title="Could not load certifications" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : state.loading && !state.data ? (
           <Skeleton width="3/4" />

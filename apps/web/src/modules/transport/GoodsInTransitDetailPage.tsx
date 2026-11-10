@@ -6,6 +6,7 @@ import { Details } from "./Details";
 import { fixed, formatDateTime, money, stateTone, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One column per cost type, then the line's estimate: what moves into transit per receipt line. */
 function lineColumns(g: GoodsInTransit): DataTableColumn<GITLine>[] {
@@ -66,7 +67,7 @@ export function GoodsInTransitDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Goods in transit" />
         <Alert tone="danger" title="Could not load the order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/goods-in-transit">Back to goods in transit</Link>
       </div>
@@ -93,7 +94,7 @@ export function GoodsInTransitDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="Could not ship the order" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card>

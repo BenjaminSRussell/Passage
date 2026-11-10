@@ -124,7 +124,7 @@ describe("Bulk status update on the order list (FR-21.12)", () => {
     await userEvent.click(await screen.findByRole("checkbox", { name: "Select PO-000001" }));
     await userEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty production.order.release (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty production.order.release");
     expect(screen.getByRole("checkbox", { name: "Select PO-000001" })).toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
     const [a, b] = posts(fetchMock);
@@ -178,7 +178,7 @@ describe("Merge on the order list (FR-21.15)", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: "Select PO-000002" }));
     await userEvent.click(screen.getByRole("button", { name: "Merge selected" }));
     await userEvent.click(screen.getByRole("button", { name: "Yes, merge them" }));
-    expect(await findAlert()).toHaveTextContent("merge refused: order PO-000001 has posted journals (PRODUCTION_MERGE_REFUSED)");
+    expect(await findAlert()).toHaveTextContent("merge refused: order PO-000001 has posted journals");
   });
 });
 
@@ -247,7 +247,7 @@ describe("Split on the order detail (FR-21.15)", () => {
     const form = await screen.findByRole("form", { name: "Split order" });
     await userEvent.type(within(form).getByLabelText("Split quantity"), "15");
     await userEvent.click(within(form).getByRole("button", { name: "Split off" }));
-    const message = await screen.findByText("split quantity 15 is not a multiple of 10 (PRODUCTION_SPLIT_QUANTITY)");
+    const message = await screen.findByText("split quantity 15 is not a multiple of 10");
     expect(message.closest('[role="alert"]')).toHaveTextContent("The split was refused");
   });
 
@@ -272,7 +272,7 @@ describe("Split on the order detail (FR-21.15)", () => {
     expect(screen.getByText(/stay on this order; the new order starts with nothing posted/)).toBeInTheDocument();
     await userEvent.type(within(form).getByLabelText("Split quantity"), "10");
     await userEvent.click(within(form).getByRole("button", { name: "Split off" }));
-    expect(await screen.findByText(/post or delete them before splitting \(PRODUCTION_SPLIT_REFUSED\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/post or delete them before splitting/)).toBeInTheDocument();
     const [[, init]] = posts(fetchMock);
     expect(JSON.parse(String(init?.body))).toEqual({ splitQty: "10", allocation: "keep-on-original" });
   });

@@ -6,6 +6,7 @@ import { downloadCsv } from "./download";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -118,7 +119,7 @@ export function CommissionStatementPage() {
         <p className={styles.note}>Choose a rep and a month to see what was earned, what was credited and what is owed.</p>
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the statement" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>
@@ -152,7 +153,7 @@ export function CommissionStatementPage() {
           </Alert>
           {exportFailure ? (
             <Alert tone="danger" title="Could not download the statement" live="alert">
-              {exportFailure.message} ({exportFailure.code})
+              <ProblemMessage problem={exportFailure} />
             </Alert>
           ) : null}
         </>

@@ -19,6 +19,7 @@ import {
 import { dash, QUANTITY, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that creates rework orders and receives their output; enforced by the service (FR-24.18). */
 export const REWORK_DUTY = "production.batch-order.write";
@@ -34,7 +35,7 @@ function StatusBadge({ rework }: { rework: ReworkOrder }) {
 function LoadError({ title, error, reload }: { title: string; error: Problem; reload: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }
@@ -233,7 +234,7 @@ export function NewReworkOrderPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the rework order" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -332,7 +333,7 @@ export function ReworkOrderDetailPage() {
       </Card>
       {failure ? (
         <Alert tone="danger" title="Could not receive the output" live="alert" action={failure.code === "PMF-0104" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {rework.status === "planned" && canWrite ? (

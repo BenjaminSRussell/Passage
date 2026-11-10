@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { describeProblem, newKey, startBankRun, type BankRunRequest, type Problem } from "./api/client";
 import { localToUtc, parseBankBalances, SOURCE_LABELS, SOURCE_SYSTEMS, splitList, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BankRunValues {
   sourceSystem: SourceSystem;
@@ -146,7 +147,7 @@ export function NewBankRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not load the balances" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

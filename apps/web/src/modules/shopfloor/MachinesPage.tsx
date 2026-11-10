@@ -4,6 +4,7 @@ import { listMachines, type Machine } from "./api/client";
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Machine>[] = [
   { key: "machineId", header: "Machine", mono: true },
@@ -31,7 +32,7 @@ export function MachinesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load machines" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
