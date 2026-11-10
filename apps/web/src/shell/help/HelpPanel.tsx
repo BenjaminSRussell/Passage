@@ -5,7 +5,6 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
 import styles from "./HelpPanel.module.css";
 import { helpForRoute, type RouteHelp } from "./routeHelp";
 import { isOptedOut, setOptOut } from "../uxEvents";
-import { activeLocale, CHOOSABLE, saveLocale, type Locale } from "../i18n/locale";
 
 /** Where the end-user guides are read. A docs site can replace this at build time. */
 const GUIDE_BASE = import.meta.env.VITE_USER_GUIDE_BASE ?? "https://github.com/BenjaminSRussell/Passage/blob/main/docs/user/";
@@ -66,39 +65,12 @@ export function HelpPanel({ pathname, onClose }: HelpPanelProps) {
           </div>
         )}
         <footer className={styles.foot}>
-          <LanguageChoice />
           <UsageDataChoice />
           <Link to="/whats-new" onClick={onClose}>
             {copy.help.whatsNew}
           </Link>
         </footer>
       </aside>
-    </div>
-  );
-}
-
-const LANGUAGE_NAMES: Record<string, string> = { en: "English", es: "Español" };
-
-/** Changing language saves the choice and reloads, so every string is read again in the new language. */
-function LanguageChoice() {
-  const id = useId();
-  return (
-    <div className={styles.choice}>
-      <label htmlFor={id}>{copy.help.language}</label>
-      <select
-        id={id}
-        value={activeLocale === "en-XA" ? "en" : activeLocale}
-        onChange={(event) => {
-          saveLocale(event.target.value as Locale);
-          window.location.reload();
-        }}
-      >
-        {CHOOSABLE.map((locale) => (
-          <option key={locale} value={locale} lang={locale}>
-            {LANGUAGE_NAMES[locale] ?? locale}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }

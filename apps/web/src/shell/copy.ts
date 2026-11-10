@@ -1,12 +1,8 @@
-import { activeLocale } from "./i18n/locale";
-import { localizeCopy } from "./i18n/localize";
-
 const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform);
 
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
-/** The English source text. Other languages live in shell/i18n and are applied by localizeCopy below. */
-const english = {
+export const copy = {
   nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work", glossary: "Glossary" },
   workspaces: {
     switcherLabel: "Workspace",
@@ -198,7 +194,6 @@ const english = {
     whatsNew: "What's new",
     announceOpened: "Help opened",
     shareUsage: "Share anonymous usage data",
-    language: "Language",
     opensInNewTab: "(opens in a new tab)",
     shareUsageHint: "Which steps people finish and where forms fail, so we can make them easier. It holds no names or record details.",
   },
@@ -224,6 +219,3 @@ const english = {
     body: "Something went wrong while showing this page. Your other workspaces still work.",
   },
 } as const;
-
-export const copyEnglish = english;
-export const copy = localizeCopy(english, activeLocale, { shortcut: shortcutHint });

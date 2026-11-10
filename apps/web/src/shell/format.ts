@@ -1,8 +1,7 @@
 const DAY_MS = 86_400_000;
 import { copy } from "./copy";
-import { formatLocale } from "./i18n/locale";
 
-const dateFormat = new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium" });
+const dateFormat = new Intl.DateTimeFormat("en", { dateStyle: "medium" });
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function parse(value: string): Date {
@@ -40,17 +39,17 @@ const asNumber = (value: number | string): number => (typeof value === "number" 
 
 export function formatNumber(value: number | string, options: Intl.NumberFormatOptions = {}): string {
   const n = asNumber(value);
-  return Number.isFinite(n) ? new Intl.NumberFormat(formatLocale(), options).format(n) : "";
+  return Number.isFinite(n) ? new Intl.NumberFormat("en", options).format(n) : "";
 }
 
 export function formatCurrency(value: number | string, currency: string, options: Intl.NumberFormatOptions = {}): string {
   const n = asNumber(value);
   if (!Number.isFinite(n) || !/^[A-Z]{3}$/.test(currency)) return "";
-  return new Intl.NumberFormat(formatLocale(), { style: "currency", currency, ...options }).format(n);
+  return new Intl.NumberFormat("en", { style: "currency", currency, ...options }).format(n);
 }
 
 export function formatPercent(fraction: number, options: Intl.NumberFormatOptions = {}): string {
-  return Number.isFinite(fraction) ? new Intl.NumberFormat(formatLocale(), { style: "percent", maximumFractionDigits: 1, ...options }).format(fraction) : "";
+  return Number.isFinite(fraction) ? new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 1, ...options }).format(fraction) : "";
 }
 
 /** A quantity with its unit of measure, for example 12 kg. Units use their short symbol. */
@@ -61,5 +60,5 @@ export function formatQuantity(value: number | string, unit: string, options: In
 
 export function formatDateTime(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
