@@ -17,6 +17,7 @@ var (
 	ErrSessionActive = errors.New("store: the device has an active session of another user")
 	ErrSessionEnded  = errors.New("store: the session has ended")
 	ErrNotOwner      = errors.New("store: the session belongs to another user")
+	ErrSessionStale  = errors.New("store: the session was idle past its timeout; send a heartbeat first")
 )
 
 type Device struct {
@@ -105,6 +106,10 @@ func (s Session) View() session.View {
 	return session.View{ID: s.SessionID, DeviceID: s.DeviceID, UserID: s.UserID, CurrentWorkID: s.CurrentWorkID, LastSeenAt: s.LastSeenAt, Status: session.State(s.Status)}
 }
 
+func (s Session) Lapsed(now time.Time, idle time.Duration) bool {
+	return s.Status == string(session.Stale) || session.StateAt(s.View(), now, idle) != session.Active
+}
+
 const sessionColumns = `session_id::text, device_id, user_id, warehouse_id::text, menu_key, current_work_id, state, status, end_reason, version, started_at, last_seen_at, ended_at`
 
 func scanSession(row scanner) (Session, error) {
@@ -141,7 +146,7 @@ func (s *Store) StartSession(ctx context.Context, in StartInput) (Session, bool,
 			out, resumed = cur, true
 			return nil
 		case err == nil:
-			if session.StateAt(cur.View(), in.Now, in.Idle) == session.Active {
+			if !cur.Lapsed(in.Now, in.Idle) {
 				return ErrSessionActive
 			}
 			if err := endSession(ctx, tx, cur, "TAKEOVER", in.Now); err != nil {
@@ -195,11 +200,12 @@ func (s *Store) GetSession(ctx context.Context, sessionID string) (Session, erro
 	return x, err
 }
 
-// Heartbeat records the device's liveness and clock. A STALE session becomes
-// ACTIVE again (wasStale reports it so the caller can decide whether its work
-// lock may be re-taken); an ended session cannot be resumed. Only the
-// session's user may beat it.
-func (s *Store) Heartbeat(ctx context.Context, sessionID string, now time.Time, deviceTime *time.Time) (x Session, wasStale bool, err error) {
+// Heartbeat records the device's liveness and clock. A session that went idle
+// past the timeout (marked STALE by the sweep or not) is ACTIVE again and
+// wasStale reports it, so the caller can decide whether its work lock may be
+// re-taken; an ended session cannot be resumed. Only the session's user may
+// beat it. The version moves only when the status does.
+func (s *Store) Heartbeat(ctx context.Context, sessionID string, now time.Time, deviceTime *time.Time, idle time.Duration) (x Session, wasStale bool, err error) {
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
 		cur, err := scanSession(tx.QueryRow(ctx, `select `+sessionColumns+` from device_session where tenant_id = $1 and session_id = $2 for update`, tenantID(ctx), sessionID))
 		if err != nil {
@@ -211,8 +217,9 @@ func (s *Store) Heartbeat(ctx context.Context, sessionID string, now time.Time, 
 		if cur.Status == string(session.Ended) {
 			return ErrSessionEnded
 		}
-		wasStale = cur.Status == string(session.Stale)
-		x, err = scanSession(tx.QueryRow(ctx, `update device_session set status = 'ACTIVE', last_seen_at = $3
+		wasStale = cur.Lapsed(now, idle)
+		x, err = scanSession(tx.QueryRow(ctx, `update device_session set status = 'ACTIVE', last_seen_at = $3,
+			version = version + case when status = 'ACTIVE' then 0 else 1 end
 			where tenant_id = $1 and session_id = $2 returning `+sessionColumns, tenantID(ctx), sessionID, now))
 		if err != nil {
 			return err
@@ -255,17 +262,24 @@ func (s *Store) EndSession(ctx context.Context, sessionID, reason string, force 
 }
 
 // SaveRun stores the run state and the work the session holds, if version
-// still matches (a concurrent submit on the same session is a conflict).
-func (s *Store) SaveRun(ctx context.Context, sessionID string, version int, state json.RawMessage, workID string, now time.Time) (Session, error) {
+// still matches (a concurrent submit on the same session is a conflict). A
+// session that is not ACTIVE, by status and by the clock, is ErrSessionStale:
+// it must come back through a heartbeat, which re-checks its work lock.
+func (s *Store) SaveRun(ctx context.Context, sessionID string, version int, state json.RawMessage, workID string, now time.Time, idle time.Duration) (Session, error) {
 	var out Session
 	err := s.inTx(ctx, func(tx pgx.Tx) (err error) {
-		out, err = scanSession(tx.QueryRow(ctx, `update device_session set state = $4, current_work_id = $5, last_seen_at = $6, status = 'ACTIVE', version = version + 1
-			where tenant_id = $1 and session_id = $2 and version = $3 and status in ('ACTIVE', 'STALE') and user_id = $7 returning `+sessionColumns,
-			tenantID(ctx), sessionID, version, state, workID, now, userID(ctx)))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrVersionConflict
+		out, err = scanSession(tx.QueryRow(ctx, `update device_session set state = $4, current_work_id = $5, last_seen_at = $6, version = version + 1
+			where tenant_id = $1 and session_id = $2 and version = $3 and status = 'ACTIVE' and last_seen_at >= $8 and user_id = $7 returning `+sessionColumns,
+			tenantID(ctx), sessionID, version, state, workID, now, userID(ctx), now.Add(-idle)))
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
 		}
-		return err
+		cur, err := scanSession(tx.QueryRow(ctx, `select `+sessionColumns+` from device_session where tenant_id = $1 and session_id = $2 and user_id = $3`,
+			tenantID(ctx), sessionID, userID(ctx)))
+		if err == nil && cur.Status != string(session.Ended) && cur.Lapsed(now, idle) {
+			return ErrSessionStale
+		}
+		return ErrVersionConflict
 	})
 	return out, err
 }
@@ -317,7 +331,7 @@ func (s *Store) SessionsForWork(ctx context.Context, workID string) ([]Session, 
 func (s *Store) SweepStale(ctx context.Context, now time.Time, idle time.Duration) (int, error) {
 	var n int
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `update device_session set status = 'STALE'
+		tag, err := tx.Exec(ctx, `update device_session set status = 'STALE', version = version + 1
 			where tenant_id = $1 and status = 'ACTIVE' and last_seen_at < $2`, tenantID(ctx), now.Add(-idle))
 		n = int(tag.RowsAffected())
 		return err

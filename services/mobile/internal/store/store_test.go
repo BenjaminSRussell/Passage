@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -309,10 +310,10 @@ func TestSessionLifecycleResumeTakeoverAndForce(t *testing.T) {
 	if old.Status != "ENDED" || old.EndReason != "TAKEOVER" || old.CurrentWorkID != "" {
 		t.Fatalf("the taken-over session must end and release its lock: %+v", old)
 	}
-	if _, _, err := st.Heartbeat(alice, a.SessionID, now.Add(32*time.Minute), nil); !errors.Is(err, ErrSessionEnded) {
+	if _, _, err := st.Heartbeat(alice, a.SessionID, now.Add(32*time.Minute), nil, 30*time.Minute); !errors.Is(err, ErrSessionEnded) {
 		t.Fatalf("heartbeat of an ended session: %v", err)
 	}
-	if _, _, err := st.Heartbeat(alice, b.SessionID, now.Add(32*time.Minute), nil); !errors.Is(err, ErrNotOwner) {
+	if _, _, err := st.Heartbeat(alice, b.SessionID, now.Add(32*time.Minute), nil, 30*time.Minute); !errors.Is(err, ErrNotOwner) {
 		t.Fatalf("heartbeat by another user: %v", err)
 	}
 	if _, err := st.EndSession(alice, b.SessionID, "SIGN_OUT", false, now); !errors.Is(err, ErrNotOwner) {
@@ -337,7 +338,7 @@ func TestStaleSweepResumeAndSkew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SaveRun(alice, a.SessionID, a.Version, []byte(`{"stepId":"scan_lp"}`), "work-1", now); err != nil {
+	if _, err := st.SaveRun(alice, a.SessionID, a.Version, []byte(`{"stepId":"scan_lp"}`), "work-1", now, 30*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if n, _ := st.SweepStale(ctx, now.Add(29*time.Minute), 30*time.Minute); n != 0 {
@@ -351,14 +352,14 @@ func TestStaleSweepResumeAndSkew(t *testing.T) {
 		t.Fatalf("a stale session keeps its work for resume: %+v", held)
 	}
 	deviceClock := now.Add(32 * time.Minute).Add(-10 * time.Minute)
-	resumed, wasStale, err := st.Heartbeat(alice, a.SessionID, now.Add(32*time.Minute), &deviceClock)
+	resumed, wasStale, err := st.Heartbeat(alice, a.SessionID, now.Add(32*time.Minute), &deviceClock, 30*time.Minute)
 	if err != nil || !wasStale || resumed.Status != "ACTIVE" {
 		t.Fatalf("resume: %+v %v %v", resumed, wasStale, err)
 	}
 	if skew, _ := st.DeviceSkew(ctx, "dev-2"); skew != 10*time.Minute {
 		t.Fatalf("skew = %s, want the 10 minutes the device clock is behind", skew)
 	}
-	if _, err := st.SaveRun(alice, a.SessionID, 1, []byte(`{}`), "", now); !errors.Is(err, ErrVersionConflict) {
+	if _, err := st.SaveRun(alice, a.SessionID, 1, []byte(`{}`), "", now, 30*time.Minute); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("a stale version of the run must conflict: %v", err)
 	}
 }
@@ -466,23 +467,65 @@ func TestResolveReapplyRecordsDecisionForConsumers(t *testing.T) {
 	}
 }
 
-func TestHeartbeatAndSweepLeaveTheRunVersionAlone(t *testing.T) {
+func TestOnlyAStatusChangeMovesTheSessionVersion(t *testing.T) {
 	st, _, ctx := setup(t)
+	const idle = 30 * time.Minute
 	now := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
 	alice := as(ctx, "alice", dutyExecute)
-	a, _, err := st.StartSession(alice, StartInput{DeviceID: "dev-v", WarehouseID: ids.New(), MenuKey: "default", Now: now, Idle: 30 * time.Minute})
+	a, _, err := st.StartSession(alice, StartInput{DeviceID: "dev-v", WarehouseID: ids.New(), MenuKey: "default", Now: now, Idle: idle})
 	if err != nil {
 		t.Fatal(err)
 	}
-	beat, _, err := st.Heartbeat(alice, a.SessionID, now.Add(time.Minute), nil)
-	if err != nil || beat.Version != a.Version {
-		t.Fatalf("a heartbeat between a read and SaveRun must not fail the save: %d -> %d %v", a.Version, beat.Version, err)
+	beat, wasStale, err := st.Heartbeat(alice, a.SessionID, now.Add(time.Minute), nil, idle)
+	if err != nil || wasStale || beat.Version != a.Version {
+		t.Fatalf("a heartbeat between a read and SaveRun must not fail the save: %d -> %d stale=%v %v", a.Version, beat.Version, wasStale, err)
 	}
-	if n, _ := st.SweepStale(ctx, now.Add(time.Hour), 30*time.Minute); n != 1 {
+	if n, _ := st.SweepStale(ctx, now.Add(time.Hour), idle); n != 1 {
 		t.Fatalf("sweep marked %d", n)
 	}
-	if _, err := st.SaveRun(alice, a.SessionID, a.Version, []byte(`{}`), "", now.Add(time.Hour)); err != nil {
-		t.Fatalf("a step read before the sweep still saves: %v", err)
+	swept, _ := st.GetSession(ctx, a.SessionID)
+	if swept.Status != "STALE" || swept.Version != a.Version+1 {
+		t.Fatalf("the sweep is a status change: %+v", swept)
+	}
+	resumed, wasStale, err := st.Heartbeat(alice, a.SessionID, now.Add(time.Hour), nil, idle)
+	if err != nil || !wasStale || resumed.Version != swept.Version+1 {
+		t.Fatalf("coming back from STALE is a status change: %+v stale=%v %v", resumed, wasStale, err)
+	}
+}
+
+func TestSaveRunRefusesASessionThatWentIdleUntilItBeats(t *testing.T) {
+	const idle = 30 * time.Minute
+	for name, swept := range map[string]bool{"swept to STALE": true, "past idle but still ACTIVE": false} {
+		t.Run(name, func(t *testing.T) {
+			st, _, ctx := setup(t)
+			now := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+			alice := as(ctx, "alice", dutyExecute)
+			a, _, err := st.StartSession(alice, StartInput{DeviceID: "dev-s", WarehouseID: ids.New(), MenuKey: "default", Now: now, Idle: idle})
+			if err != nil {
+				t.Fatal(err)
+			}
+			later := now.Add(31 * time.Minute)
+			cur := a
+			if swept {
+				if n, _ := st.SweepStale(ctx, later, idle); n != 1 {
+					t.Fatalf("sweep marked %d", n)
+				}
+				cur, _ = st.GetSession(ctx, a.SessionID)
+			}
+			if _, err := st.SaveRun(alice, a.SessionID, cur.Version, []byte(`{}`), "", later, idle); !errors.Is(err, ErrSessionStale) {
+				t.Fatalf("a session idle past the timeout cannot save a step: %v", err)
+			}
+			beat, wasStale, err := st.Heartbeat(alice, a.SessionID, later, nil, idle)
+			if err != nil || !wasStale {
+				t.Fatalf("heartbeat: %+v %v %v", beat, wasStale, err)
+			}
+			if _, err := st.SaveRun(alice, a.SessionID, beat.Version, []byte(`{}`), "", later, idle); err != nil {
+				t.Fatalf("after the heartbeat the step saves: %v", err)
+			}
+			if _, err := st.SaveRun(alice, a.SessionID, cur.Version, []byte(`{}`), "", later, idle); !errors.Is(err, ErrVersionConflict) {
+				t.Fatalf("the version read before the save is spent: %v", err)
+			}
+		})
 	}
 }
 
@@ -535,5 +578,90 @@ func TestIdempotentRunsOncePerKeyAndKeepsFailuresRetryable(t *testing.T) {
 	}
 	if out, replayed, err := Idempotent(ctx, st, Idem{Key: "idem-2", Hash: "h"}, 200, func() (int, error) { return 7, nil }); err != nil || replayed || out != 7 {
 		t.Fatalf("a failed attempt stores nothing, so the retry runs: %d %v %v", out, replayed, err)
+	}
+}
+
+func smallPool(t *testing.T, admin *pgxpool.Pool, conns int32) *Store {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(os.Getenv(testkit.EnvAppURL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema string
+	if err := admin.QueryRow(context.Background(), "select current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
+	cfg.MaxConns = conns
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return New(pool)
+}
+
+func TestIdempotentHoldsNoConnectionWhileItsFunctionRuns(t *testing.T) {
+	_, admin, ctx := setup(t)
+	st := smallPool(t, admin, 2)
+	done := make(chan error, 4)
+	for i := range 4 {
+		go func() {
+			_, _, err := Idempotent(ctx, st, Idem{Key: fmt.Sprintf("pool-%d", i), Hash: "h"}, 200, func() (int, error) {
+				_, err := st.ListDevices(ctx, 1)
+				return i, err
+			})
+			done <- err
+		}()
+	}
+	for range 4 {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("four commands on a pool of two deadlocked")
+		}
+	}
+}
+
+func TestIdempotentRepeatWhileRunningIsInProgressAndAStaleClaimIsRetaken(t *testing.T) {
+	st, admin, ctx := setup(t)
+	idem := Idem{Key: "same-key", Hash: "h"}
+	started, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		_, _, err := Idempotent(ctx, st, idem, 200, func() (int, error) {
+			close(started)
+			<-release
+			return 1, nil
+		})
+		first <- err
+	}()
+	<-started
+	if _, _, err := Idempotent(ctx, st, idem, 200, func() (int, error) { return 2, nil }); !errors.Is(err, ErrInProgress) {
+		t.Fatalf("a repeat while the first runs: %v", err)
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if out, replayed, err := Idempotent(ctx, st, idem, 200, func() (int, error) { return 3, nil }); err != nil || !replayed || out != 1 {
+		t.Fatalf("after it finishes the repeat replays: %d %v %v", out, replayed, err)
+	}
+
+	crashed := Idem{Key: "crashed", Hash: "h"}
+	if _, err := admin.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status, created_at) values ($1, $2, 'h', 0, now())`, testkit.TenantID(1), crashed.Key); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Idempotent(ctx, st, crashed, 200, func() (int, error) { return 4, nil }); !errors.Is(err, ErrInProgress) {
+		t.Fatalf("a fresh claim blocks: %v", err)
+	}
+	if _, err := admin.Exec(ctx, `update idempotency_keys set created_at = now() - interval '2 minutes' where key = $1`, crashed.Key); err != nil {
+		t.Fatal(err)
+	}
+	if out, replayed, err := Idempotent(ctx, st, crashed, 200, func() (int, error) { return 4, nil }); err != nil || replayed || out != 4 {
+		t.Fatalf("a claim left by a crash is retryable after its time: %d %v %v", out, replayed, err)
 	}
 }

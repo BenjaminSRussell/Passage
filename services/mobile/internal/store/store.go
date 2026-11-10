@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,9 +25,14 @@ import (
 	evts "github.com/BenjaminSRussell/passage/services/mobile/internal/events"
 )
 
-const MaxPageSize = 200
+const (
+	MaxPageSize    = 200
+	claimTTL       = time.Minute
+	releaseTimeout = 5 * time.Second
+)
 
 var (
+	ErrInProgress       = errors.New("store: a request with this Idempotency-Key is still running")
 	ErrNotFound         = errors.New("store: not found")
 	ErrConflict         = errors.New("store: conflict")
 	ErrIdempotencyReuse = errors.New("store: idempotency key was used for another request")
@@ -120,16 +127,99 @@ func once[T any](ctx context.Context, tx pgx.Tx, idem Idem, status int, fn func(
 }
 
 // Idempotent runs fn at most once per Idempotency-Key and stores its result,
-// so a repeat returns the first answer without running fn again. fn may call
-// other services; when it fails nothing is stored and the key can be retried.
+// so a repeat returns the first answer without running fn again. fn may open
+// transactions and call other services, so it runs holding no connection: the
+// key is claimed in a short transaction (an in-progress marker), fn runs, and
+// the result is stored in a second short one. A repeat while fn runs is
+// ErrInProgress; a claim left by a crash is retryable after claimTTL; when fn
+// fails the claim is released and the key can be retried.
 func Idempotent[T any](ctx context.Context, s *Store, idem Idem, status int, fn func() (T, error)) (T, bool, error) {
+	var zero, out T
+	var claimed bool
+	if err := s.inTx(ctx, func(tx pgx.Tx) (err error) {
+		out, claimed, err = claim[T](ctx, tx, idem)
+		return err
+	}); err != nil {
+		return zero, false, err
+	}
+	if !claimed {
+		return out, true, nil
+	}
+	out, err := fn()
+	if err == nil {
+		err = s.storeResult(ctx, idem, status, out)
+	}
+	if err != nil {
+		s.releaseClaim(ctx, idem)
+		return zero, false, err
+	}
+	return out, false, nil
+}
+
+func claim[T any](ctx context.Context, tx pgx.Tx, idem Idem) (T, bool, error) {
+	var zero T
+	tid := tenantID(ctx)
+	if _, err := tx.Exec(ctx, `delete from idempotency_keys where tenant_id = $1 and key = $2 and created_at < now() - interval '24 hours'`, tid, idem.Key); err != nil {
+		return zero, false, err
+	}
+	tag, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status) values ($1, $2, $3, 0)
+		on conflict (tenant_id, key) do nothing`, tid, idem.Key, idem.Hash)
+	if err != nil {
+		return zero, false, err
+	}
+	if tag.RowsAffected() == 1 {
+		return zero, true, nil
+	}
+	var hash string
+	var status int
+	var body []byte
+	if err := tx.QueryRow(ctx, `select request_hash, response_status, response_body from idempotency_keys where tenant_id = $1 and key = $2`,
+		tid, idem.Key).Scan(&hash, &status, &body); err != nil {
+		return zero, false, err
+	}
+	if hash != idem.Hash {
+		return zero, false, ErrIdempotencyReuse
+	}
+	if status == 0 {
+		taken, err := tx.Exec(ctx, `update idempotency_keys set created_at = now()
+			where tenant_id = $1 and key = $2 and response_status = 0 and created_at < now() - $3 * interval '1 second'`, tid, idem.Key, int(claimTTL.Seconds()))
+		if err != nil {
+			return zero, false, err
+		}
+		if taken.RowsAffected() == 0 {
+			return zero, false, ErrInProgress
+		}
+		return zero, true, nil
+	}
 	var out T
-	var replayed bool
-	err := s.inTx(ctx, func(tx pgx.Tx) (err error) {
-		out, replayed, err = once(ctx, tx, idem, status, fn)
+	if err := json.Unmarshal(body, &out); err != nil {
+		return zero, false, fmt.Errorf("decode stored response: %w", err)
+	}
+	return out, false, nil
+}
+
+func (s *Store) storeResult(ctx context.Context, idem Idem, status int, out any) error {
+	body, err := json.Marshal(out)
+	if err != nil {
+		return err
+	}
+	return s.inTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update idempotency_keys set response_status = $3, response_body = $4 where tenant_id = $1 and key = $2`,
+			tenantID(ctx), idem.Key, status, body)
 		return err
 	})
-	return out, replayed, err
+}
+
+func (s *Store) releaseClaim(ctx context.Context, idem Idem) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
+	defer cancel()
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from idempotency_keys where tenant_id = $1 and key = $2 and response_status = 0`, tenantID(ctx), idem.Key)
+		return err
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "idempotency claim not released; it expires on its own", "key", idem.Key, "err", err)
+	}
 }
 
 func enqueue(ctx context.Context, tx pgx.Tx, aggregate, id, typ string, data any) error {

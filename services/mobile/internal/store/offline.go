@@ -70,15 +70,19 @@ type OfflineIn struct {
 
 // Record stores a queued transaction as PENDING, or returns the stored one
 // when its key was already recorded (a repeat changes nothing; a repeat with
-// another body is ErrIdempotencyReuse). A seq that is not the device's next is
+// another body is ErrIdempotencyReuse; one queued by another user is
+// ErrNotOwner). A seq that is not the device's next is
 // a GapError and nothing is stored.
 func (s *Store) Record(ctx context.Context, in OfflineIn) (OfflineTx, error) {
 	var out OfflineTx
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		key := OfflineKey(in.DeviceID, in.Seq)
-		var hash string
-		err := tx.QueryRow(ctx, `select payload_hash from offline_transaction where tenant_id = $1 and idempotency_key = $2`, tenantID(ctx), key).Scan(&hash)
+		var hash, owner string
+		err := tx.QueryRow(ctx, `select payload_hash, user_id from offline_transaction where tenant_id = $1 and idempotency_key = $2`, tenantID(ctx), key).Scan(&hash, &owner)
 		if err == nil {
+			if owner != userID(ctx) {
+				return ErrNotOwner
+			}
 			if hash != in.Hash {
 				return ErrIdempotencyReuse
 			}
