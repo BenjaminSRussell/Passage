@@ -126,7 +126,7 @@ export function NewProposalPage() {
           <div className={styles.formActions}>
             <Button onClick={() => edit({ exceptions: [...draft.exceptions, { vendorId: "", method: "TRANSFER" }] })}>Pay a vendor a different way</Button>
           </div>
-          <p className={styles.note}>Invoices on hold and vendors blocked for payment are left out. Everything else due is included.</p>
+          <p className={styles.note}>Invoices on hold and vendors on payment hold are left out. Everything else due is included.</p>
           {create.isError ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the proposal" live="alert">

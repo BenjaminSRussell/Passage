@@ -9,7 +9,8 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, PageHeader, StatGroup, StatTile, StatusPill, Textarea, type DataTableColumn } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { downloadRunFile, failRun, getRun, runStep, type PaymentRun, type RunPayment, type RunStep } from "./api/client";
-import { formatAmount, METHOD_LABELS, personLabel, RUN_LABELS } from "./format";
+import { formatAmount, METHOD_LABELS, personLabel, RUN_LABELS, saveBlob } from "./format";
+import { RemittanceButton, RemittanceCard } from "./Remittance";
 
 interface StepInfo {
   step: RunStep;
@@ -37,9 +38,11 @@ export function RunPage() {
   const duties = usePrincipalDuties();
   const { identity } = useWorkContext();
   const canExecute = holdsDuty(duties, "payment-run.execute");
+  const canReadAdvice = holdsDuty(duties, "payment-run.read");
   const [failing, setFailing] = useState(false);
   const [reason, setReason] = useState("");
   const [saved, setSaved] = useState("");
+  const [adviceFor, setAdviceFor] = useState<string | null>(null);
 
   const run = useQuery({ queryKey: ["payables", "run", id], queryFn: () => getRun(id) });
 
@@ -62,15 +65,7 @@ export function RunPage() {
     },
   });
   const download = useMutation({
-    mutationFn: async () => {
-      const blob = await downloadRunFile(id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `payment-run-${run.data?.fileNumber ?? id}.xml`;
-      link.click();
-      URL.revokeObjectURL(url);
-    },
+    mutationFn: async () => saveBlob(await downloadRunFile(id), `payment-run-${run.data?.fileNumber ?? id}.xml`),
     onSuccess: () => setSaved("The bank file was downloaded."),
   });
   const busy = step.isPending || fail.isPending;
@@ -93,6 +88,16 @@ export function RunPage() {
     { key: "method", header: "Method", render: (p) => METHOD_LABELS[p.paymentMethod] },
     { key: "ref", header: "Payment reference", mono: true, render: (p) => p.endToEndId },
     { key: "amount", header: "Amount", align: "end", mono: true, render: (p) => formatAmount(p.amount, p.currency) },
+    // A remittance advice exists once the run is complete: only then are the invoices paid.
+    ...(r.status === "COMPLETED" && canReadAdvice
+      ? [
+          {
+            key: "remittance",
+            header: "Remittance advice",
+            render: (p: RunPayment) => <RemittanceButton vendorId={p.vendorId} shown={adviceFor === p.vendorId} onToggle={() => setAdviceFor(adviceFor === p.vendorId ? null : p.vendorId)} />,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -190,6 +195,7 @@ export function RunPage() {
         )
       ) : null}
       <DataTable label="Payments in this run" columns={columns} rows={r.payments} getRowKey={(p) => p.endToEndId} empty={{ title: "No payments", description: "This run has no payments." }} />
+      {adviceFor && r.status === "COMPLETED" ? <RemittanceCard key={adviceFor} runId={r.id} vendorId={adviceFor} onClose={() => setAdviceFor(null)} /> : null}
     </div>
   );
 }
