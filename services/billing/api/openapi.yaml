@@ -931,8 +931,8 @@ paths:
         The quantity is invoiced once, as a usage line of the SUBSCRIPTION invoice of the billing period that is billed next with
         a period end on or after `usageDate`: the usage of a meter at one unit price is added up into one line (quantity times
         unit price, taxed like the plan lines). `externalId` is the meter reading's own id; a repeat with the same values is
-        a replay (200, Idempotent-Replayed) and other values under it are refused (422 BIL-0110). A usage date before the
-        subscription started, after its last service day, or inside an already invoiced period is refused (422 BIL-0111).
+        a replay (200, Idempotent-Replayed) and other values under it are refused (422 BIL-0130). A usage date before the
+        subscription started, after its last service day, or inside an already invoiced period is refused (422 BIL-0131).
       parameters:
         - $ref: "#/components/parameters/InvoiceId"
       requestBody:

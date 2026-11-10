@@ -16,12 +16,12 @@ import (
 )
 
 const (
-	// CodeUsageConflict is BIL-0110: a usage record with this external id exists with other values.
-	CodeUsageConflict = "BIL-0110"
-	// CodeUsageInvalid is BIL-0111: the usage record cannot be taken by this subscription.
-	CodeUsageInvalid = "BIL-0111"
-	// CodeUsageBilled is BIL-0112: a usage record of the bill was invoiced meanwhile by another request.
-	CodeUsageBilled = "BIL-0112"
+	// CodeUsageConflict is BIL-0130: a usage record with this external id exists with other values.
+	CodeUsageConflict = "BIL-0130"
+	// CodeUsageInvalid is BIL-0131: the usage record cannot be taken by this subscription.
+	CodeUsageInvalid = "BIL-0131"
+	// CodeUsageBilled is BIL-0132: a usage record of the bill was invoiced meanwhile by another request.
+	CodeUsageBilled = "BIL-0132"
 )
 
 // Usage is one metered quantity of a subscription: Quantity units of the meter at UnitPrice on UsageDate, invoiced once with
@@ -57,8 +57,8 @@ func scanUsage(row pgx.Row) (Usage, error) {
 }
 
 // RecordUsage stores a usage record of a subscription. A repeat of the same external id with the same values returns the stored
-// record (replayed); other values under the same external id are refused (BIL-0110). A usage date before the subscription
-// started, after its last service day, or inside a period already invoiced is refused (BIL-0111): that invoice is issued
+// record (replayed); other values under the same external id are refused (BIL-0130). A usage date before the subscription
+// started, after its last service day, or inside a period already invoiced is refused (BIL-0131): that invoice is issued
 // and cannot carry it.
 func (s *Postgres) RecordUsage(ctx context.Context, subscriptionID string, in Usage) (Usage, bool, error) {
 	p, _ := tenant.FromContext(ctx)
