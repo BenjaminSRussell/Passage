@@ -82,6 +82,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 			}
 			slog.Info("scheduled job-log purge", "deleted", deleted, "tenants", len(cfg.PurgeTenantIDs))
 		})
+		go jobs.RunSweep(ctx, a, cfg.PurgeTenantIDs, jobs.SweepInterval, func(claimed int, err error) {
+			if err != nil {
+				slog.Error("scheduled queue sweep failed", "err", err, "claimed", claimed)
+				return
+			}
+			slog.Info("scheduled queue sweep", "claimed", claimed)
+		})
 	} else {
 		slog.Info("scheduled job-log purge disabled", "reason", "PRINT_PURGE_TENANT_IDS is empty")
 	}

@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { EditPrinterPage } from "./EditPrinterPage";
 import { NewPrintDocumentPage } from "./NewPrintDocumentPage";
 import { NewPrinterPage } from "./NewPrinterPage";
 import { NewPrintJobPage } from "./NewPrintJobPage";
@@ -21,6 +22,7 @@ const mobileFlows: PassageModule = {
     { path: "/mobile-flows", element: createElement(FlowDesigner), handle: { title: "Flow designer" } },
     { path: "/mobile-flows/printers", element: createElement(PrintersPage), handle: { title: "Printers" } },
     { path: "/mobile-flows/printers/new", element: createElement(NewPrinterPage), handle: { title: "Register printer" } },
+    { path: "/mobile-flows/printers/:id/edit", element: createElement(EditPrinterPage), handle: { title: "Edit printer" } },
     { path: "/mobile-flows/printer-status", element: createElement(PrinterStatusPage), handle: { title: "Printer status" } },
     { path: "/mobile-flows/routing-rules", element: createElement(RoutingRulesPage), handle: { title: "Routing rules" } },
     { path: "/mobile-flows/routing-rules/new", element: createElement(NewRoutingRulePage), handle: { title: "Add routing rule" } },
