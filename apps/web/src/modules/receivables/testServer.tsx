@@ -41,15 +41,19 @@ export function useFakeServer() {
   });
 }
 
+import { WorkContextProvider } from "../../shell/lookup/workContext";
+
 export function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        {receivables.routes.map((route) => (
-          <Route key={route.path} path={route.path} element={route.element} />
-        ))}
-      </Routes>
-    </MemoryRouter>,
+    <WorkContextProvider identity="tester">
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          {receivables.routes.map((route) => (
+            <Route key={route.path} path={route.path} element={route.element} />
+          ))}
+        </Routes>
+      </MemoryRouter>
+    </WorkContextProvider>,
   );
 }
 

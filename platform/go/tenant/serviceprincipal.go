@@ -18,10 +18,13 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // duties listed. policies/authz/data.json "service_principals" mirrors it and a
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
-	"edi-sales":          {"sales.channel.intake"},
-	"finreport-ledger":   {"ledger.entry.lookup"},
-	"purchasing-inbound": {"purchasing.inbound.apply"},
-	"fulfillment-order":  {"fulfillment.order.sync"},
+	"edi-sales": {"sales.channel.intake"},
+	// The reporter of posted invoices to sales (#29): it signs :record-progress calls, and its token holds only the one duty of
+	// billing's grant on sales that reports invoices (sales.order.record-invoice).
+	"billing-sales-report": {"sales.order.record-invoice"},
+	"finreport-ledger":     {"ledger.entry.lookup"},
+	"purchasing-inbound":   {"purchasing.inbound.apply"},
+	"fulfillment-order":    {"fulfillment.order.sync"},
 	// The reporter of posted packing slips to sales (#496): it signs :record-progress calls, and its token holds only
 	// fulfillment's grant on sales (sales.order.record-delivery).
 	"fulfillment-sales-report": {"sales.order.record-delivery"},
@@ -44,6 +47,7 @@ var servicePrincipals = map[string][]string{
 // as any registered principal (iss "integration-hub" with act
 // "service:migration-loader"), borrowing duties its own grant lacks.
 var servicePrincipalIssuers = map[string][]string{
+	"billing-sales-report":     {"billing"},
 	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},
 	"purchasing-inbound":       {"purchasing"},

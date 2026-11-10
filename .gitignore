@@ -1,5 +1,5 @@
 .analysis/
-node_modules/
+node_modules
 dist/
 bin/
 *.log
@@ -13,7 +13,7 @@ __pycache__/
 .terraform/
 *.tfstate*
 docs/PRD-full.html
-node_modules/
+node_modules
 apps/*/dist/
 tools/docs/node_modules/
 docs/PRD-full.pdf

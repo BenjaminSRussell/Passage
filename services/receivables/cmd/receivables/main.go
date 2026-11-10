@@ -116,7 +116,7 @@ func run() error {
 	if bc, err := billingclient.FromEnv(os.Getenv); err != nil {
 		return err
 	} else if bc != nil {
-		s.WithBilling(bc)
+		s.WithBilling(bc).WithReservations(bc)
 	}
 	h := api.New(s)
 	r := httpx.NewRouter()
