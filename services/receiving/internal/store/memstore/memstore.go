@@ -55,6 +55,7 @@ type tenantData struct {
 	payees          map[string]store.OneTimePayee
 	captures        map[string]store.Capture
 	sheets          map[string]store.ServiceSheet
+	asns            map[string]store.Asn
 	selfBills       map[string]store.SelfBill
 	selfBillSeq     map[string]int
 	ersPrices       map[string]store.PriceConfirmation
@@ -97,7 +98,7 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	if t == nil {
 		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
 			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
-			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}, selfBills: map[string]store.SelfBill{}}
+			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}, asns: map[string]store.Asn{}, selfBills: map[string]store.SelfBill{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -218,7 +219,7 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 			if r.Lines[i].LineNo != l.LineNo {
 				continue
 			}
-			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID = l.Qty, l.Batch, l.LocationID
+			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID, r.Lines[i].ExpiryDate = l.Qty, l.Batch, l.LocationID, l.ExpiryDate
 			r.Lines[i].InventoryStatus = cmp.Or(l.InventoryStatus, "AVAILABLE")
 			r.Lines[i].Serials = slices.Sorted(slices.Values(l.Serials))
 			r.Lines[i].CWQty, r.Lines[i].CWNominal, r.Lines[i].CWMin, r.Lines[i].CWMax = l.CWQty, l.CWNominal, l.CWMin, l.CWMax
@@ -845,6 +846,12 @@ func (s *Store) Cancel(ctx context.Context, id string, fn store.AdjustFunc) (out
 		current.State = domain.Cancelled
 		current.Version++
 		t.receipts[id] = current
+		for key, a := range t.asns {
+			if a.ReceiptID == id {
+				a.Status, a.ReceiptID = domain.AsnOpen, ""
+				t.asns[key] = a
+			}
+		}
 		s.emit(adj)
 		out = cloneReceipt(current)
 		return nil
